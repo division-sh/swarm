@@ -1,0 +1,21 @@
+.git
+.gitignore
+.DS_Store
+
+# Local agent auth / editor state should never enter build context.
+.claude
+.codex
+
+# Large or generated artifacts.
+coverage
+**/*.log
+**/*.tmp
+empire
+
+# Dashboard frontend build artifacts.
+internal/dashboard/ui/node_modules
+internal/dashboard/ui/dist
+
+# Local env files.
+.env
+.env.*

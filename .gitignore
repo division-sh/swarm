@@ -1,0 +1,15 @@
+.DS_Store
+
+# Local secrets / environment
+.env
+.env.*
+
+# Local AI tool state
+.claude
+.codex
+
+# Generated artifacts
+coverage
+internal/dashboard/ui/node_modules
+internal/dashboard/ui/dist
+empire

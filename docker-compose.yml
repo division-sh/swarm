@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: empireai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: empireai
+    ports:
+      - "5432:5432"
+    volumes:
+      - empireai_pgdata:/var/lib/postgresql/data
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile.orchestrator
+    container_name: empireai-orchestrator
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      EMPIREAI_INBOUND_ADDR: ":8080"
+      EMPIREAI_TOOL_GATEWAY_ADDR: ":8090"
+      EMPIREAI_TOOL_GATEWAY_TOKEN: ${EMPIREAI_TOOL_GATEWAY_TOKEN:-}
+      EMPIREAI_DASHBOARD_ADDR: ":8070"
+      EMPIREAI_API_KEY: ${EMPIREAI_API_KEY:-local-dev-key}
+      EMPIREAI_ENABLE_DOCKER_WORKSPACES: "true"
+      EMPIREAI_CLAUDE_USE_MCP: ${EMPIREAI_CLAUDE_USE_MCP:-true}
+      EMPIREAI_CLAUDE_PERMISSION_MODE: ${EMPIREAI_CLAUDE_PERMISSION_MODE:-bypassPermissions}
+      EMPIREAI_CLAUDE_BYPASS_PERMISSIONS: ${EMPIREAI_CLAUDE_BYPASS_PERMISSIONS:-true}
+      EMPIREAI_CLAUDE_TIMEOUT_SECONDS: ${EMPIREAI_CLAUDE_TIMEOUT_SECONDS:-900}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      - ./configs:/app/configs
+      - ./migrations:/app/migrations
+      - ./internal:/app/internal
+      - ./cmd:/app/cmd
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8080:8080"
+      - "8090:8090"
+      - "8070:8070"
+    command:
+      - -config
+      - /app/configs/empire.docker.yaml
+      - -store
+      - postgres
+      - -migrate
+      - -migration-file
+      - /app/migrations/001_initial.sql
+      - -self-check=false
+
+  # Per-vertical and privileged workspaces are created dynamically by runtime policy.
+  # This image is the base for those dynamic containers.
+  workspace-base:
+    build:
+      context: .
+      dockerfile: Dockerfile.workspace
+      args:
+        INSTALL_CLAUDE_CLI: "true"
+        INSTALL_CODEX_CLI: "true"
+    image: empireai-workspace:latest
+    profiles:
+      - workspace
+
+volumes:
+  empireai_pgdata:

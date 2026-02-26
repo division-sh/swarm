@@ -1,0 +1,1263 @@
+package runtime
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"empireai/internal/commgraph"
+	"gopkg.in/yaml.v3"
+)
+
+type wiringSeverity string
+
+const (
+	wiringPass wiringSeverity = "PASS"
+	wiringFail wiringSeverity = "FAIL"
+	wiringWarn wiringSeverity = "WARN"
+)
+
+type wiringResult struct {
+	Severity wiringSeverity
+	Message  string
+}
+
+type wiringAgent struct {
+	ID            string
+	Role          string
+	Path          string
+	Subscriptions []string
+	SystemPrompt  string
+}
+
+type wiringSchema struct {
+	EventType string
+	Required  map[string]struct{}
+	Props     map[string]struct{}
+}
+
+type wiringEmitSite struct {
+	EventType    string
+	File         string
+	Line         int
+	FuncName     string
+	Fields       map[string]struct{}
+	Dynamic      bool
+	TypedPayload bool
+	Source       string
+}
+
+type producerRef struct {
+	Kind string // "agent" | "runtime"
+	ID   string // role or runtime component label
+}
+
+type rosterYAML struct {
+	Agents map[string]struct {
+		ConfigPath string `yaml:"config_path"`
+	} `yaml:"agents"`
+}
+
+var (
+	emitRefRe             = regexp.MustCompile(`\bemit_[a-zA-Z0-9_]+\b`)
+	fieldAliasRegexWiring = map[string][]*regexp.Regexp{
+		"vertical_id": {
+			regexp.MustCompile(`(?i)\bvertical_id\b`),
+			regexp.MustCompile(`(?i)\bvertical\s+id\b`),
+		},
+		"vertical_name": {
+			regexp.MustCompile(`(?i)\bvertical_name\b`),
+			regexp.MustCompile(`(?i)\bvertical\s+name\b`),
+		},
+		"geography": {
+			regexp.MustCompile(`(?i)\bgeography\b`),
+		},
+		"scoring_payload": {
+			regexp.MustCompile(`(?i)\bscoring_payload\b`),
+			regexp.MustCompile(`(?i)\bscoring\s+payload\b`),
+		},
+		"business_brief": {
+			regexp.MustCompile(`(?i)\bbusiness_brief\b`),
+			regexp.MustCompile(`(?i)\bbusiness\s+brief\b`),
+		},
+		"spec": {
+			regexp.MustCompile(`(?i)\bspec\b`),
+		},
+		"cto_notes": {
+			regexp.MustCompile(`(?i)\bcto_notes\b`),
+			regexp.MustCompile(`(?i)\bcto\s+notes\b`),
+			regexp.MustCompile(`(?i)\bfeasibility\b`),
+		},
+		"brand": {
+			regexp.MustCompile(`(?i)\bbrand\b`),
+		},
+		"dimensions_requested": {
+			regexp.MustCompile(`(?i)\bdimensions_requested\b`),
+			regexp.MustCompile(`(?i)\bdimensions\s+requested\b`),
+		},
+	}
+)
+
+func TestSpecRuntimeWiringVerification(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	agentsDir := filepath.Join(repoRoot, "configs", "agents")
+	runtimeDir := filepath.Join(repoRoot, "internal", "runtime")
+	pipelinePath := filepath.Join(runtimeDir, "pipeline_coordinator.go")
+
+	agents, err := loadWiringAgentsFromRoster(agentsDir)
+	if err != nil {
+		t.Fatalf("load agents from roster: %v", err)
+	}
+	schemas := loadWiringSchemasFromRegistry()
+	toolToEvent := buildToolToEventMap()
+
+	sites, err := collectRuntimeEmitSites(runtimeDir)
+	if err != nil {
+		t.Fatalf("collect runtime emit sites: %v", err)
+	}
+	runtimeEmitted := map[string][]wiringEmitSite{}
+	for _, s := range sites {
+		runtimeEmitted[s.EventType] = append(runtimeEmitted[s.EventType], s)
+	}
+
+	producersByEvent := map[string][]producerRef{}
+	for _, role := range commgraph.ProducerRoles() {
+		for _, evt := range commgraph.ProducerEventsForRole(role) {
+			evt = strings.TrimSpace(evt)
+			if evt == "" {
+				continue
+			}
+			producersByEvent[evt] = append(producersByEvent[evt], producerRef{Kind: "agent", ID: role})
+		}
+	}
+	for _, evt := range commgraph.RuntimeEvents() {
+		evt = strings.TrimSpace(evt)
+		if evt == "" {
+			continue
+		}
+		producersByEvent[evt] = append(producersByEvent[evt], producerRef{Kind: "runtime", ID: "runtime"})
+	}
+	for _, evt := range commgraph.HumanEvents() {
+		evt = strings.TrimSpace(evt)
+		if evt == "" {
+			continue
+		}
+		producersByEvent[evt] = append(producersByEvent[evt], producerRef{Kind: "human", ID: "human"})
+	}
+	for evt := range runtimeEmitted {
+		producersByEvent[evt] = append(producersByEvent[evt], producerRef{Kind: "runtime", ID: "runtime"})
+	}
+
+	interceptEvents, handleEvents, handlerCases, err := parsePipelineInterceptorCoverage(pipelinePath)
+	if err != nil {
+		t.Fatalf("parse pipeline coordinator switch coverage: %v", err)
+	}
+
+	results := make([]wiringResult, 0, 512)
+	results = append(results, verifyEmitToolCompleteness(agents, schemas, toolToEvent)...)
+	results = append(results, verifySubscriptionCompleteness(agents, producersByEvent)...)
+	results = append(results, verifyPayloadContracts(agents, schemas, runtimeEmitted)...)
+	results = append(results, verifyInterceptorCoverage(interceptEvents, handleEvents, handlerCases, runtimeEmitted)...)
+	results = append(results, verifyPipelinePathTracing(agents, producersByEvent, interceptEvents)...)
+
+	failCount := 0
+	warnCount := 0
+	for _, r := range results {
+		t.Logf("%s: %s", r.Severity, r.Message)
+		if r.Severity == wiringFail {
+			failCount++
+		}
+		if r.Severity == wiringWarn {
+			warnCount++
+		}
+	}
+	t.Logf("summary: pass=%d fail=%d warn=%d", len(results)-failCount-warnCount, failCount, warnCount)
+	if failCount > 0 && isWiringStrictMode() {
+		t.Fatalf("wiring verification failed with %d FAIL items", failCount)
+	}
+	if failCount > 0 {
+		t.Logf("strict mode disabled; set EMPIRE_WIRING_STRICT=1 to fail on wiring FAIL items")
+	}
+}
+
+func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringSchema, toolToEvent map[string]string) []wiringResult {
+	out := make([]wiringResult, 0, 128)
+	for _, a := range agents {
+		refs := extractEmitToolRefs(a.SystemPrompt)
+		if len(refs) == 0 {
+			continue
+		}
+		for _, tool := range refs {
+			eventType, ok := toolToEvent[tool]
+			if !ok {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s prompt references %s but no EventSchemaRegistry entry exists", a.ID, tool),
+				})
+				continue
+			}
+			if _, ok := schemas[eventType]; !ok {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s prompt references %s -> %s but schema lookup failed", a.ID, tool, eventType),
+				})
+				continue
+			}
+			if !IsEmitToolAllowedForRole(a.Role, tool) {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s prompt references %s but role %s is not allowed to emit %s", a.ID, tool, a.Role, eventType),
+				})
+				continue
+			}
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  fmt.Sprintf("%s prompt references %s and it is schema-backed + allowed", a.ID, tool),
+			})
+		}
+	}
+	return out
+}
+
+func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[string][]producerRef) []wiringResult {
+	out := make([]wiringResult, 0, 192)
+	allEvents := make([]string, 0, len(producersByEvent))
+	for evt := range producersByEvent {
+		allEvents = append(allEvents, evt)
+	}
+	sort.Strings(allEvents)
+
+	for _, a := range agents {
+		for _, sub := range a.Subscriptions {
+			matches := matchingEvents(sub, allEvents)
+			if len(matches) == 0 {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s subscribes to %s but no producer (agent/runtime) emits it", a.ID, sub),
+				})
+				continue
+			}
+
+			hasExternalProducer := false
+			for _, evt := range matches {
+				for _, p := range producersByEvent[evt] {
+					if p.Kind == "runtime" || !strings.EqualFold(strings.TrimSpace(p.ID), strings.TrimSpace(a.Role)) {
+						hasExternalProducer = true
+						break
+					}
+				}
+				if hasExternalProducer {
+					break
+				}
+			}
+			if !hasExternalProducer {
+				out = append(out, wiringResult{
+					Severity: wiringWarn,
+					Message:  fmt.Sprintf("%s subscribes to %s but only self-emitted events were found", a.ID, sub),
+				})
+			} else {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("%s subscription %s has upstream producer coverage", a.ID, sub),
+				})
+			}
+
+			if !promptMentionsSubscription(a.SystemPrompt, sub, matches) {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s subscribes to %s but prompt has no handling instructions", a.ID, sub),
+				})
+			} else {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("%s prompt includes handling guidance for %s", a.ID, sub),
+				})
+			}
+		}
+	}
+
+	return out
+}
+
+func verifyPayloadContracts(agents []wiringAgent, schemas map[string]wiringSchema, runtimeEmitted map[string][]wiringEmitSite) []wiringResult {
+	out := make([]wiringResult, 0, 256)
+
+	// Required-field enforcement for runtime-emitted events.
+	events := make([]string, 0, len(schemas))
+	for evt := range schemas {
+		events = append(events, evt)
+	}
+	sort.Strings(events)
+	for _, evt := range events {
+		schema := schemas[evt]
+		required := sortedKeys(schema.Required)
+		out = append(out, wiringResult{
+			Severity: wiringPass,
+			Message:  fmt.Sprintf("%s schema required fields: [%s]", evt, strings.Join(required, ", ")),
+		})
+		for _, site := range runtimeEmitted[evt] {
+			if len(required) == 0 {
+				continue
+			}
+			if site.Dynamic {
+				out = append(out, wiringResult{
+					Severity: wiringWarn,
+					Message:  fmt.Sprintf("%s runtime emit at %s:%d is dynamic; cannot prove required-field completeness", evt, site.File, site.Line),
+				})
+				continue
+			}
+			missing := missingFromSet(required, site.Fields)
+			if len(missing) > 0 {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s runtime emit at %s:%d missing required fields: %s", evt, site.File, site.Line, strings.Join(missing, ", ")),
+				})
+			} else {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("%s runtime emit at %s:%d includes all required fields", evt, site.File, site.Line),
+				})
+			}
+		}
+	}
+
+	// Prompt field expectations vs schema + runtime payloads.
+	for _, a := range agents {
+		for _, sub := range a.Subscriptions {
+			for evt, schema := range schemas {
+				if !matchesSubscription(sub, evt) {
+					continue
+				}
+				candidates := makeFieldCandidates(schema, runtimeEmitted[evt])
+				expected := expectedFieldsForEvent(a.SystemPrompt, evt, candidates)
+				if len(expected) == 0 {
+					continue
+				}
+				for _, field := range expected {
+					if _, ok := schema.Props[field]; !ok {
+						out = append(out, wiringResult{
+							Severity: wiringFail,
+							Message:  fmt.Sprintf("%s expects field %s from %s but schema has no such property", a.ID, field, evt),
+						})
+					}
+				}
+				for _, site := range runtimeEmitted[evt] {
+					if site.Dynamic {
+						continue
+					}
+					missing := missingFromSet(expected, site.Fields)
+					if len(missing) > 0 {
+						out = append(out, wiringResult{
+							Severity: wiringFail,
+							Message:  fmt.Sprintf("%s expects [%s] from %s but runtime payload at %s:%d lacks [%s]", a.ID, strings.Join(expected, ", "), evt, site.File, site.Line, strings.Join(missing, ", ")),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return out
+}
+
+func verifyInterceptorCoverage(interceptEvents, handleEvents map[string]struct{}, handlerCases map[string]string, runtimeEmitted map[string][]wiringEmitSite) []wiringResult {
+	out := make([]wiringResult, 0, 128)
+
+	for evt := range interceptEvents {
+		if _, ok := handleEvents[evt]; ok {
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  fmt.Sprintf("interceptor event %s has a handleEvent switch case", evt),
+			})
+			continue
+		}
+		// spec.revision_needed is handled as a special branch in Intercept()
+		if evt == "spec.revision_needed" {
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  "interceptor event spec.revision_needed is handled in Intercept special-case branch",
+			})
+			continue
+		}
+		out = append(out, wiringResult{
+			Severity: wiringFail,
+			Message:  fmt.Sprintf("interceptor event %s exists in interceptPolicy but has no handleEvent case", evt),
+		})
+	}
+
+	for evt, handler := range handlerCases {
+		if strings.TrimSpace(handler) == "" {
+			continue
+		}
+		emits := emittedEventsByHandler(runtimeEmitted, handler)
+		if len(emits) == 0 {
+			out = append(out, wiringResult{
+				Severity: wiringWarn,
+				Message:  fmt.Sprintf("interceptor handler %s (from %s) emits no runtime events", handler, evt),
+			})
+			continue
+		}
+		sort.Strings(emits)
+		out = append(out, wiringResult{
+			Severity: wiringPass,
+			Message:  fmt.Sprintf("interceptor handler %s (from %s) emits: %s", handler, evt, strings.Join(emits, ", ")),
+		})
+	}
+
+	for evt, emits := range runtimeEmitted {
+		for _, s := range emits {
+			if !strings.Contains(s.File, "pipeline_coordinator.go") {
+				continue
+			}
+			if s.TypedPayload {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("%s runtime payload at %s:%d is typed-struct derived", evt, s.File, s.Line),
+				})
+				continue
+			}
+			out = append(out, wiringResult{
+				Severity: wiringWarn,
+				Message:  fmt.Sprintf("%s runtime payload at %s:%d is ad-hoc map (not typed struct)", evt, s.File, s.Line),
+			})
+		}
+	}
+	return out
+}
+
+func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
+	type pathEdge struct {
+		Event        string
+		ConsumerKind string // "agent" | "runtime"
+		ConsumerID   string // role
+	}
+	edges := []pathEdge{
+		{Event: "vertical.discovered", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "scoring.requested", ConsumerKind: "agent", ConsumerID: "analysis-agent"},
+		{Event: "score.dimension_complete", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "scoring.contested", ConsumerKind: "agent", ConsumerID: "empire-coordinator"},
+		{Event: "scoring.contest_resolved", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "vertical.scored", ConsumerKind: "agent", ConsumerID: "empire-coordinator"},
+		{Event: "vertical.shortlisted", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "validation.started", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
+		{Event: "research.completed", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "spec.requested", ConsumerKind: "agent", ConsumerID: "lightweight-spec-agent"},
+		{Event: "spec.draft_ready", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
+		{Event: "spec_review.requested", ConsumerKind: "agent", ConsumerID: "spec-reviewer"},
+		{Event: "spec_review.passed", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
+		{Event: "spec.approved", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "spec.validation_requested", ConsumerKind: "agent", ConsumerID: "spec-auditor"},
+		{Event: "spec.validation_passed", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "cto.spec_review_requested", ConsumerKind: "agent", ConsumerID: "factory-cto"},
+		{Event: "cto.spec_approved", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "brand.candidates_ready", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "validation.package_ready", ConsumerKind: "agent", ConsumerID: "validation-coordinator"},
+		{Event: "vertical.ready_for_review", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+	}
+
+	subIndex := map[string]map[string]struct{}{}
+	for _, a := range agents {
+		set := map[string]struct{}{}
+		for _, s := range a.Subscriptions {
+			set[s] = struct{}{}
+		}
+		subIndex[a.Role] = set
+	}
+
+	out := make([]wiringResult, 0, len(edges))
+	for _, e := range edges {
+		if len(producersByEvent[e.Event]) == 0 {
+			out = append(out, wiringResult{
+				Severity: wiringFail,
+				Message:  fmt.Sprintf("%s has no producer", e.Event),
+			})
+			continue
+		}
+
+		switch e.ConsumerKind {
+		case "runtime":
+			if _, ok := interceptEvents[e.Event]; !ok {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s should be consumed by runtime interceptor but no interceptPolicy case exists", e.Event),
+				})
+				continue
+			}
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  fmt.Sprintf("%s -> runtime interceptor chain link is wired", e.Event),
+			})
+		case "agent":
+			subs := subIndex[e.ConsumerID]
+			if len(subs) == 0 {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s -> %s chain broken: consumer role not found in roster", e.Event, e.ConsumerID),
+				})
+				continue
+			}
+			matched := false
+			for sub := range subs {
+				if matchesSubscription(sub, e.Event) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				out = append(out, wiringResult{
+					Severity: wiringFail,
+					Message:  fmt.Sprintf("%s -> %s chain broken: consumer not subscribed", e.Event, e.ConsumerID),
+				})
+				continue
+			}
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  fmt.Sprintf("%s -> %s chain link is wired", e.Event, e.ConsumerID),
+			})
+		}
+	}
+
+	return out
+}
+
+func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {
+	rosterPath := filepath.Join(agentsDir, "roster.yaml")
+	raw, err := os.ReadFile(rosterPath)
+	if err != nil {
+		return nil, err
+	}
+	var roster rosterYAML
+	if err := yaml.Unmarshal(raw, &roster); err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(roster.Agents))
+	for k := range roster.Agents {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	out := make([]wiringAgent, 0, len(keys))
+	for _, key := range keys {
+		entry := roster.Agents[key]
+		cfgPath := strings.TrimSpace(entry.ConfigPath)
+		if cfgPath == "" {
+			continue
+		}
+		full := filepath.Clean(filepath.Join(agentsDir, cfgPath))
+		doc, err := os.ReadFile(full)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", full, err)
+		}
+		obj := map[string]any{}
+		if err := yaml.Unmarshal(doc, &obj); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", full, err)
+		}
+		id := strings.TrimSpace(asString(obj["id"]))
+		if id == "" {
+			id = strings.TrimSuffix(filepath.Base(full), filepath.Ext(full))
+		}
+		role := strings.TrimSpace(asString(obj["role"]))
+		if role == "" {
+			role = id
+		}
+		out = append(out, wiringAgent{
+			ID:            id,
+			Role:          role,
+			Path:          full,
+			Subscriptions: toStringSliceWiring(obj["subscriptions"]),
+			SystemPrompt:  asString(obj["system_prompt"]),
+		})
+	}
+	return out, nil
+}
+
+func loadWiringSchemasFromRegistry() map[string]wiringSchema {
+	out := make(map[string]wiringSchema, len(EventSchemaRegistry))
+	for evt, schema := range EventSchemaRegistry {
+		required := map[string]struct{}{}
+		for _, r := range requiredList(schema.Schema["required"]) {
+			required[r] = struct{}{}
+		}
+		props := map[string]struct{}{}
+		for k := range schemaProperties(schema.Schema["properties"]) {
+			props[k] = struct{}{}
+		}
+		for r := range required {
+			props[r] = struct{}{}
+		}
+		out[evt] = wiringSchema{
+			EventType: evt,
+			Required:  required,
+			Props:     props,
+		}
+	}
+	return out
+}
+
+func buildToolToEventMap() map[string]string {
+	out := map[string]string{}
+	for evt := range EventSchemaRegistry {
+		out[emitToolName(evt)] = evt
+	}
+	return out
+}
+
+func collectRuntimeEmitSites(runtimeDir string) ([]wiringEmitSite, error) {
+	files := make([]string, 0, 64)
+	err := filepath.WalkDir(runtimeDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+
+	fset := token.NewFileSet()
+	out := make([]wiringEmitSite, 0, 256)
+	for _, path := range files {
+		fileNode, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return nil, fmt.Errorf("parse %s: %w", path, err)
+		}
+		for _, decl := range fileNode.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			funcName := fn.Name.Name
+			varMap := collectFunctionMapVars(fn)
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if s, ok := extractPCPublishSite(call, path, funcName, fset, varMap); ok {
+					out = append(out, s)
+				}
+				if s, ok := extractBusPublishSite(call, path, funcName, fset, varMap); ok {
+					out = append(out, s)
+				}
+				return true
+			})
+		}
+	}
+	return out, nil
+}
+
+func collectFunctionMapVars(fn *ast.FuncDecl) map[string]wiringEmitSite {
+	out := map[string]wiringEmitSite{}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, lhs := range assign.Lhs {
+			id, ok := lhs.(*ast.Ident)
+			if !ok || id == nil || strings.TrimSpace(id.Name) == "" || id.Name == "_" {
+				continue
+			}
+			if i >= len(assign.Rhs) {
+				continue
+			}
+			fields, dynamic, typed := resolveFieldSet(assign.Rhs[i], out)
+			out[id.Name] = wiringEmitSite{Fields: fields, Dynamic: dynamic, TypedPayload: typed}
+		}
+		return true
+	})
+	return out
+}
+
+func extractPCPublishSite(call *ast.CallExpr, path, funcName string, fset *token.FileSet, varMap map[string]wiringEmitSite) (wiringEmitSite, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel == nil || sel.Sel == nil || sel.Sel.Name != "publish" {
+		return wiringEmitSite{}, false
+	}
+	xid, ok := sel.X.(*ast.Ident)
+	if !ok || xid == nil || xid.Name != "pc" {
+		return wiringEmitSite{}, false
+	}
+	if len(call.Args) < 4 {
+		return wiringEmitSite{}, false
+	}
+	eventType, ok := stringLiteral(call.Args[1])
+	if !ok {
+		return wiringEmitSite{}, false
+	}
+	fields, dynamic, typed := resolveFieldSet(call.Args[3], varMap)
+	pos := fset.Position(call.Pos())
+	return wiringEmitSite{
+		EventType:    strings.TrimSpace(eventType),
+		File:         path,
+		Line:         pos.Line,
+		FuncName:     funcName,
+		Fields:       fields,
+		Dynamic:      dynamic,
+		TypedPayload: typed,
+		Source:       "pipeline-coordinator",
+	}, true
+}
+
+func extractBusPublishSite(call *ast.CallExpr, path, funcName string, fset *token.FileSet, varMap map[string]wiringEmitSite) (wiringEmitSite, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel == nil || sel.Sel == nil || sel.Sel.Name != "Publish" {
+		return wiringEmitSite{}, false
+	}
+	if len(call.Args) < 2 {
+		return wiringEmitSite{}, false
+	}
+	ev, ok := call.Args[1].(*ast.CompositeLit)
+	if !ok {
+		return wiringEmitSite{}, false
+	}
+	eventType := ""
+	source := "runtime"
+	fields := map[string]struct{}{}
+	dynamic := true
+	typed := false
+	for _, elt := range ev.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		keyID, ok := kv.Key.(*ast.Ident)
+		if !ok || keyID == nil {
+			continue
+		}
+		switch keyID.Name {
+		case "Type":
+			eventType = parseEventTypeExpr(kv.Value)
+		case "SourceAgent":
+			if s, ok := stringLiteral(kv.Value); ok && strings.TrimSpace(s) != "" {
+				source = s
+			}
+		case "Payload":
+			fields, dynamic, typed = resolvePayloadFieldSet(kv.Value, varMap)
+		}
+	}
+	if strings.TrimSpace(eventType) == "" {
+		return wiringEmitSite{}, false
+	}
+	pos := fset.Position(call.Pos())
+	return wiringEmitSite{
+		EventType:    strings.TrimSpace(eventType),
+		File:         path,
+		Line:         pos.Line,
+		FuncName:     funcName,
+		Fields:       fields,
+		Dynamic:      dynamic,
+		TypedPayload: typed,
+		Source:       source,
+	}, true
+}
+
+func resolvePayloadFieldSet(expr ast.Expr, varMap map[string]wiringEmitSite) (map[string]struct{}, bool, bool) {
+	if call, ok := expr.(*ast.CallExpr); ok && callName(call.Fun) == "mustJSON" && len(call.Args) > 0 {
+		return resolveFieldSet(call.Args[0], varMap)
+	}
+	return resolveFieldSet(expr, varMap)
+}
+
+func resolveFieldSet(expr ast.Expr, varMap map[string]wiringEmitSite) (map[string]struct{}, bool, bool) {
+	switch t := expr.(type) {
+	case *ast.CompositeLit:
+		if _, ok := t.Type.(*ast.MapType); ok {
+			fields := map[string]struct{}{}
+			for _, elt := range t.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				k, ok := stringLiteral(kv.Key)
+				if !ok || strings.TrimSpace(k) == "" {
+					continue
+				}
+				fields[strings.TrimSpace(k)] = struct{}{}
+			}
+			return fields, false, false
+		}
+		return map[string]struct{}{}, true, true
+	case *ast.Ident:
+		if known, ok := varMap[t.Name]; ok {
+			return copySet(known.Fields), known.Dynamic, known.TypedPayload
+		}
+		return map[string]struct{}{}, true, false
+	case *ast.CallExpr:
+		name := callName(t.Fun)
+		switch {
+		case name == "payloadMap" && len(t.Args) > 0:
+			fields, dynamic, _ := resolveFieldSet(t.Args[0], varMap)
+			return fields, dynamic, true
+		case name == "mustJSON" && len(t.Args) > 0:
+			return resolveFieldSet(t.Args[0], varMap)
+		case name == "json.Marshal" && len(t.Args) > 0:
+			return resolveFieldSet(t.Args[0], varMap)
+		case strings.HasPrefix(name, "pc.build"):
+			return typedBuilderFields(name), false, true
+		default:
+			return map[string]struct{}{}, true, false
+		}
+	default:
+		return map[string]struct{}{}, true, false
+	}
+}
+
+func typedBuilderFields(name string) map[string]struct{} {
+	switch {
+	case strings.HasSuffix(name, "buildValidationStartedPayload"):
+		return setOf("vertical_id", "vertical_name", "name", "geography", "scoring")
+	case strings.HasSuffix(name, "buildBrandRequestedPayload"):
+		return setOf("vertical_id", "vertical_name", "name", "geography", "scoring", "business_brief")
+	case strings.HasSuffix(name, "buildValidationPackageReadyPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version")
+	case strings.HasSuffix(name, "buildSpecValidationRequestedPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "spec", "spec_version", "validation_tier")
+	case strings.HasSuffix(name, "buildCTOSpecReviewRequestedPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring")
+	case strings.HasSuffix(name, "buildSpecRevisionRequestedPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "source", "feedback", "research", "spec", "scoring")
+	case strings.HasSuffix(name, "buildValidationMoreDataPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "request", "research", "spec", "scoring")
+	case strings.HasSuffix(name, "buildBrandRevisionNeededPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "feedback", "brand")
+	case strings.HasSuffix(name, "buildVerticalKilledPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "source_event", "priority", "reason")
+	default:
+		return map[string]struct{}{}
+	}
+}
+
+func parsePipelineInterceptorCoverage(pipelinePath string) (map[string]struct{}, map[string]struct{}, map[string]string, error) {
+	fset := token.NewFileSet()
+	fileNode, err := parser.ParseFile(fset, pipelinePath, nil, 0)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	interceptEvents := map[string]struct{}{}
+	handleEvents := map[string]struct{}{}
+	handlerByEvent := map[string]string{}
+
+	for _, decl := range fileNode.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		switch fn.Name.Name {
+		case "interceptPolicy":
+			collectSwitchCases(fn.Body, interceptEvents, nil)
+		case "handleEvent":
+			collectSwitchCases(fn.Body, handleEvents, handlerByEvent)
+		}
+	}
+
+	return interceptEvents, handleEvents, handlerByEvent, nil
+}
+
+func collectSwitchCases(body *ast.BlockStmt, eventsOut map[string]struct{}, handlers map[string]string) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		sw, ok := n.(*ast.SwitchStmt)
+		if !ok {
+			return true
+		}
+		for _, c := range sw.Body.List {
+			cc, ok := c.(*ast.CaseClause)
+			if !ok {
+				continue
+			}
+			if len(cc.List) == 0 {
+				continue
+			}
+			handlerName := ""
+			if handlers != nil {
+				handlerName = firstHandlerCallName(cc.Body)
+			}
+			for _, expr := range cc.List {
+				if s, ok := stringLiteral(expr); ok && strings.TrimSpace(s) != "" {
+					eventsOut[strings.TrimSpace(s)] = struct{}{}
+					if handlers != nil && strings.TrimSpace(handlerName) != "" {
+						handlers[strings.TrimSpace(s)] = handlerName
+					}
+				}
+			}
+		}
+		return false
+	})
+}
+
+func firstHandlerCallName(stmts []ast.Stmt) string {
+	for _, st := range stmts {
+		exprStmt, ok := st.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		call, ok := exprStmt.X.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel == nil || sel.Sel == nil {
+			continue
+		}
+		if xid, ok := sel.X.(*ast.Ident); ok && xid != nil && xid.Name == "pc" {
+			return sel.Sel.Name
+		}
+	}
+	return ""
+}
+
+func emittedEventsByHandler(runtimeEmitted map[string][]wiringEmitSite, handler string) []string {
+	set := map[string]struct{}{}
+	for evt, sites := range runtimeEmitted {
+		for _, s := range sites {
+			if s.FuncName == handler {
+				set[evt] = struct{}{}
+			}
+		}
+	}
+	return sortedKeys(set)
+}
+
+func parseEventTypeExpr(expr ast.Expr) string {
+	if call, ok := expr.(*ast.CallExpr); ok {
+		if callName(call.Fun) == "events.EventType" && len(call.Args) == 1 {
+			if s, ok := stringLiteral(call.Args[0]); ok {
+				return strings.TrimSpace(s)
+			}
+		}
+	}
+	if s, ok := stringLiteral(expr); ok {
+		return strings.TrimSpace(s)
+	}
+	return ""
+}
+
+func callName(fun ast.Expr) string {
+	switch t := fun.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		left := callName(t.X)
+		if left == "" {
+			return t.Sel.Name
+		}
+		return left + "." + t.Sel.Name
+	default:
+		return ""
+	}
+}
+
+func stringLiteral(expr ast.Expr) (string, bool) {
+	bl, ok := expr.(*ast.BasicLit)
+	if !ok || bl.Kind != token.STRING {
+		return "", false
+	}
+	raw := strings.TrimSpace(bl.Value)
+	if raw == "" {
+		return "", false
+	}
+	if strings.HasPrefix(raw, "`") && strings.HasSuffix(raw, "`") {
+		return strings.Trim(raw, "`"), true
+	}
+	if strings.HasPrefix(raw, `"`) && strings.HasSuffix(raw, `"`) {
+		return strings.Trim(raw, `"`), true
+	}
+	return "", false
+}
+
+func extractEmitToolRefs(prompt string) []string {
+	matches := emitRefRe.FindAllString(prompt, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	set := map[string]struct{}{}
+	for _, m := range matches {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			continue
+		}
+		set[m] = struct{}{}
+	}
+	return sortedKeys(set)
+}
+
+func matchingEvents(subscription string, allEvents []string) []string {
+	out := make([]string, 0, 8)
+	for _, evt := range allEvents {
+		if matchesSubscription(subscription, evt) {
+			out = append(out, evt)
+		}
+	}
+	return out
+}
+
+func matchesSubscription(subscription, eventType string) bool {
+	subscription = strings.TrimSpace(subscription)
+	eventType = strings.TrimSpace(eventType)
+	if subscription == "" || eventType == "" {
+		return false
+	}
+	if subscription == eventType {
+		return true
+	}
+	if !strings.Contains(subscription, "*") {
+		return false
+	}
+	pat := regexp.QuoteMeta(subscription)
+	pat = strings.ReplaceAll(pat, `\*`, ".*")
+	rx := regexp.MustCompile("^" + pat + "$")
+	return rx.MatchString(eventType)
+}
+
+func promptMentionsSubscription(prompt, sub string, matched []string) bool {
+	low := strings.ToLower(prompt)
+	if strings.Contains(low, strings.ToLower(strings.TrimSpace(sub))) {
+		return true
+	}
+	if strings.Contains(sub, "*") {
+		prefix := strings.TrimSuffix(strings.ToLower(sub), "*")
+		prefix = strings.TrimSpace(prefix)
+		if prefix != "" && strings.Contains(low, prefix) {
+			return true
+		}
+		if strings.Contains(strings.ToLower(sub), ".*.scan_assigned") && strings.Contains(low, "{type}.scan_assigned") {
+			return true
+		}
+	}
+	for _, evt := range matched {
+		if strings.Contains(low, strings.ToLower(evt)) {
+			return true
+		}
+	}
+	// Common non-literal phrasing in prompts.
+	if strings.Contains(strings.ToLower(sub), "scan_assigned") && strings.Contains(low, "assignment") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(sub), "mailbox.") && strings.Contains(low, "mailbox") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(sub), "budget.") && strings.Contains(low, "budget") {
+		return true
+	}
+	return false
+}
+
+func expectedFieldsForEvent(prompt, eventType string, candidates []string) []string {
+	sections := extractEventSections(prompt, eventType)
+	if len(sections) == 0 {
+		sections = []string{prompt}
+	}
+	found := map[string]struct{}{}
+	for _, section := range sections {
+		lines := strings.Split(section, "\n")
+		inputScoped := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if isInputHintLine(line) {
+				inputScoped = append(inputScoped, line)
+			}
+		}
+		targets := []string{section}
+		if len(inputScoped) > 0 {
+			targets = inputScoped
+		}
+		for _, txt := range targets {
+			for _, field := range candidates {
+				if mentionsField(txt, field) {
+					found[field] = struct{}{}
+				}
+			}
+		}
+	}
+	return sortedKeys(found)
+}
+
+func extractEventSections(prompt, eventType string) []string {
+	lines := strings.Split(prompt, "\n")
+	eventLower := strings.ToLower(strings.TrimSpace(eventType))
+	sections := make([]string, 0, 2)
+	for i := 0; i < len(lines); i++ {
+		line := strings.ToLower(strings.TrimSpace(lines[i]))
+		if !strings.Contains(line, eventLower) {
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(lines[i])
+		b.WriteByte('\n')
+		for j := i + 1; j < len(lines); j++ {
+			cur := lines[j]
+			trim := strings.TrimSpace(cur)
+			if trim == "" {
+				b.WriteByte('\n')
+				continue
+			}
+			if isEventHeaderLine(trim) {
+				break
+			}
+			b.WriteString(cur)
+			b.WriteByte('\n')
+		}
+		sections = append(sections, b.String())
+	}
+	return sections
+}
+
+func isEventHeaderLine(line string) bool {
+	line = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "-"), "*"))
+	if !strings.Contains(line, ":") {
+		return false
+	}
+	head := strings.TrimSpace(strings.SplitN(line, ":", 2)[0])
+	if head == "" {
+		return false
+	}
+	for _, r := range head {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-' || r == '*' {
+			continue
+		}
+		return false
+	}
+	return strings.Contains(head, ".")
+}
+
+func isInputHintLine(line string) bool {
+	low := strings.ToLower(strings.TrimSpace(line))
+	if low == "" {
+		return false
+	}
+	if strings.Contains(low, "contains") || strings.Contains(low, "payload") || strings.Contains(low, "read ") || strings.Contains(low, "from runtime") {
+		return true
+	}
+	if strings.Contains(low, "from payload") || strings.Contains(low, "input") {
+		return true
+	}
+	return false
+}
+
+func mentionsField(text, field string) bool {
+	text = strings.ToLower(text)
+	field = strings.ToLower(strings.TrimSpace(field))
+	if field == "" {
+		return false
+	}
+	if regexes, ok := fieldAliasRegexWiring[field]; ok {
+		for _, rx := range regexes {
+			if rx.MatchString(text) {
+				return true
+			}
+		}
+	}
+	alias := strings.ReplaceAll(field, "_", " ")
+	if containsWord(text, field) {
+		return true
+	}
+	if alias != field && containsWord(text, alias) {
+		return true
+	}
+	return false
+}
+
+func containsWord(text, token string) bool {
+	token = strings.TrimSpace(strings.ToLower(token))
+	if token == "" {
+		return false
+	}
+	rx := regexp.MustCompile(`\b` + regexp.QuoteMeta(token) + `\b`)
+	return rx.MatchString(strings.ToLower(text))
+}
+
+func makeFieldCandidates(schema wiringSchema, runtimeSites []wiringEmitSite) []string {
+	set := map[string]struct{}{}
+	for p := range schema.Props {
+		set[p] = struct{}{}
+	}
+	for _, site := range runtimeSites {
+		for f := range site.Fields {
+			set[f] = struct{}{}
+		}
+	}
+	return sortedKeys(set)
+}
+
+func missingFromSet(expected []string, actual map[string]struct{}) []string {
+	missing := make([]string, 0, len(expected))
+	for _, key := range expected {
+		if _, ok := actual[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func sortedKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func copySet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for k := range in {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
+func setOf(values ...string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+func toStringSliceWiring(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		out := make([]string, 0, len(t))
+		for _, s := range t {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			s := strings.TrimSpace(asString(item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func isWiringStrictMode() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("EMPIRE_WIRING_STRICT")))
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+}

@@ -1,0 +1,21 @@
+id: devops-agent
+role: devops-agent
+model_tier: haiku
+parent_role: cto-agent
+subscriptions:
+  - deploy_requested
+  - qa.validation_passed
+  - qa.validation_failed
+tools:
+  - agent_message
+  - schedule
+constraints:
+  max_turns_per_task: 20
+  conversation_mode: session
+system_prompt: |
+  You are DevOps for {vertical_name} ({vertical_id}). You report to the CTO.
+
+  Your job:
+  - Execute deploys safely and repeatedly.
+  - Coordinate with Holding DevOps for shared infra actions.
+  - Emit devops.deploy_complete or devops.deploy_failed with actionable detail.

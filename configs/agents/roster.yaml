@@ -1,0 +1,31 @@
+agents:
+  empire_coordinator:
+    config_path: ./empire-coordinator.yaml
+  factory_cto:
+    config_path: ./factory-cto.yaml
+  holding_devops:
+    config_path: ./holding-devops.yaml
+  operations_analyst:
+    config_path: ./operations-analyst.yaml
+  discovery_coordinator:
+    config_path: ./discovery-coordinator.yaml
+  scanner_agent:
+    config_path: ./scanner-agent.yaml
+  analysis_agent:
+    config_path: ./analysis-agent.yaml
+  validation_coordinator:
+    config_path: ./validation-coordinator.yaml
+  pre_brand_agent:
+    config_path: ./pre-brand-agent.yaml
+  business_research_agent:
+    config_path: ./business-research-agent.yaml
+  lightweight_spec_agent:
+    config_path: ./lightweight-spec-agent.yaml
+  spec_reviewer:
+    config_path: ./spec-reviewer.yaml
+  market_research_agent:
+    config_path: ./market-research-agent.yaml
+  trend_research_agent:
+    config_path: ./trend-research-agent.yaml
+  spec_auditor:
+    config_path: ./spec-auditor.yaml

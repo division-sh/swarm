@@ -1,0 +1,24 @@
+.PHONY: test test-cover test-cover-runtime check-runtime-cover
+
+COVER_DIR ?= coverage
+MIN_RUNTIME_COVER ?= 74
+
+test:
+	go test ./...
+
+test-cover:
+	mkdir -p $(COVER_DIR)
+	go test ./... -coverprofile=$(COVER_DIR)/all.out
+	go tool cover -html=$(COVER_DIR)/all.out -o $(COVER_DIR)/all.html
+	go tool cover -func=$(COVER_DIR)/all.out | tail -n 1
+	@echo "Wrote $(COVER_DIR)/all.html"
+
+test-cover-runtime:
+	mkdir -p $(COVER_DIR)
+	go test ./internal/runtime -coverprofile=$(COVER_DIR)/runtime.out
+	go tool cover -html=$(COVER_DIR)/runtime.out -o $(COVER_DIR)/runtime.html
+	go tool cover -func=$(COVER_DIR)/runtime.out | tail -n 1
+	@echo "Wrote $(COVER_DIR)/runtime.html"
+
+check-runtime-cover: test-cover-runtime
+	./scripts/check_coverage.sh $(COVER_DIR)/runtime.out $(MIN_RUNTIME_COVER)

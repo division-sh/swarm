@@ -1,0 +1,20 @@
+FROM golang:1.23-bookworm
+
+ARG INSTALL_CLAUDE_CLI=false
+ARG INSTALL_CODEX_CLI=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates postgresql-client nodejs npm && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN if [ "$INSTALL_CLAUDE_CLI" = "true" ]; then \
+      npm install -g @anthropic-ai/claude-code || npm install -g claude-code || true ; \
+    fi
+
+RUN if [ "$INSTALL_CODEX_CLI" = "true" ]; then \
+      npm install -g @openai/codex || npm install -g codex || true ; \
+    fi
+
+RUN useradd -m -u 10001 agent
+USER agent
+WORKDIR /workspace
