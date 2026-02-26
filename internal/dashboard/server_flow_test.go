@@ -186,3 +186,53 @@ func TestHandlePipelineGraph_DesignAnnotatesEventEdges(t *testing.T) {
 		t.Fatalf("expected at least one producer edge annotated for scan.requested")
 	}
 }
+
+func TestHandlePipelineGraph_DesignIncludesStageAndRubricMetadata(t *testing.T) {
+	s := NewServer(nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pipeline/graph?view=design", nil)
+	w := httptest.NewRecorder()
+
+	s.handlePipelineGraph(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Meta map[string]any `json:"meta"`
+		Edges []struct {
+			EventType string   `json:"event_type"`
+			Stages    []string `json:"stages"`
+			Rubrics   []string `json:"rubrics"`
+		} `json:"edges"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Meta == nil {
+		t.Fatalf("expected non-empty graph meta")
+	}
+	if _, ok := resp.Meta["stages"]; !ok {
+		t.Fatalf("expected stages metadata")
+	}
+	if _, ok := resp.Meta["rubrics"]; !ok {
+		t.Fatalf("expected rubrics metadata")
+	}
+
+	found := false
+	for _, e := range resp.Edges {
+		if strings.TrimSpace(e.EventType) != "scoring.requested" {
+			continue
+		}
+		found = true
+		if len(e.Stages) == 0 || e.Stages[0] != "scoring" {
+			t.Fatalf("expected scoring.requested stage metadata, got %#v", e.Stages)
+		}
+		if len(e.Rubrics) == 0 {
+			t.Fatalf("expected scoring.requested rubric metadata")
+		}
+		break
+	}
+	if !found {
+		t.Fatalf("expected scoring.requested edge in design graph")
+	}
+}

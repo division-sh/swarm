@@ -24,6 +24,10 @@ SUMMARY_RE = re.compile(r"summary:\s+pass=(\d+)\s+fail=(\d+)\s+warn=(\d+)")
 
 
 def classify(msg: str) -> str:
+    if "ORPHAN_EMISSION" in msg:
+        return "ORPHAN_EMISSION"
+    if "SCHEMA_NO_CATALOG" in msg:
+        return "SCHEMA_NO_CATALOG"
     if "has no explicit entry" in msg or "no EventSchemaRegistry entry" in msg:
         return "NO_SCHEMA"
     if "not allowed to emit" in msg:
@@ -111,11 +115,12 @@ def run_verifier(verbose: bool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run wiring verification gate.")
+    parser.add_argument("spec_path", nargs="?", help="Optional spec markdown path (accepted for compatibility).")
     parser.add_argument("--verbose", action="store_true", help="Print raw go test output.")
     args = parser.parse_args()
+    _ = args.spec_path
     return run_verifier(args.verbose)
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

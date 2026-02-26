@@ -185,6 +185,80 @@ function StatusDot({ state }) {
 
 const VALIDATION_GATES = ["researching", "mvp_speccing", "spec_review", "cto_spec_review", "branding"];
 const GATE_LABELS = ["G1 Research", "G2 Spec", "G3 CTO", "G4 Brand"];
+const FLOW_STAGE_OPTIONS = ["all", "discovery", "scoring", "validation", "mailbox", "opco", "system"];
+const FLOW_RUBRIC_OPTIONS = ["all", "automation_micro", "local_services", "saas"];
+
+function flowStageForEvent(eventType) {
+  const t = String(eventType || "").toLowerCase().trim();
+  if (!t) return "system";
+  if (
+    t.startsWith("scan.") ||
+    t.startsWith("market_research.") ||
+    t.startsWith("trend_research.") ||
+    t.startsWith("scanner.") ||
+    t.startsWith("category.") ||
+    t.startsWith("trend.") ||
+    t.startsWith("source.") ||
+    t === "campaign.completed"
+  ) return "discovery";
+  if (
+    t.startsWith("score.") ||
+    t.startsWith("scoring.") ||
+    t === "vertical.discovered" ||
+    t === "vertical.scored" ||
+    t === "vertical.shortlisted" ||
+    t === "vertical.marginal" ||
+    t === "vertical.rejected" ||
+    t === "timer.portfolio_digest"
+  ) return "scoring";
+  if (
+    t.startsWith("validation.") ||
+    t.startsWith("research.") ||
+    t.startsWith("spec.") ||
+    t.startsWith("cto.") ||
+    t.startsWith("brand.") ||
+    t === "vertical.ready_for_review" ||
+    t === "vertical.resumed"
+  ) return "validation";
+  if (
+    t === "vertical.approved" ||
+    t === "vertical.killed" ||
+    t === "vertical.needs_more_data" ||
+    t.startsWith("human_task.") ||
+    t === "mailbox.item_decided"
+  ) return "mailbox";
+  if (
+    t.startsWith("opco.") ||
+    t.startsWith("build.") ||
+    t.startsWith("deploy.") ||
+    t.startsWith("devops.") ||
+    t.startsWith("qa.") ||
+    t.startsWith("product.") ||
+    t.startsWith("growth.") ||
+    t.startsWith("support.") ||
+    t.startsWith("launch.") ||
+    t === "mandate_updated"
+  ) return "opco";
+  return "system";
+}
+
+function flowEventMatchesFilters(eventType, stageFilter, rubricFilter) {
+  const stage = flowStageForEvent(eventType);
+  if (stageFilter && stageFilter !== "all" && stage !== stageFilter) return false;
+  if (rubricFilter && rubricFilter !== "all") {
+    const t = String(eventType || "").toLowerCase().trim();
+    const rubricAware =
+      t.startsWith("score.") ||
+      t.startsWith("scoring.") ||
+      t === "vertical.discovered" ||
+      t === "vertical.scored" ||
+      t === "vertical.shortlisted" ||
+      t === "vertical.marginal" ||
+      t === "vertical.rejected";
+    if (!rubricAware) return false;
+  }
+  return true;
+}
 
 function GateIndicator({ stage }) {
   const idx = VALIDATION_GATES.indexOf(stage);
@@ -1115,6 +1189,29 @@ function deriveGraphForView(graph, opts) {
   let g = graph || { nodes: [], edges: [] };
   const collapseEvents = !!(opts && opts.collapseEvents);
   const hideOrphans = !!(opts && opts.hideOrphans);
+  const stageFilter = (opts && opts.stageFilter) ? String(opts.stageFilter) : "all";
+  const rubricFilter = (opts && opts.rubricFilter) ? String(opts.rubricFilter) : "all";
+
+  if (stageFilter !== "all" || rubricFilter !== "all") {
+    const edgePass = (e) => {
+      const stages = Array.isArray(e && e.stages) ? e.stages : [];
+      const rubrics = Array.isArray(e && e.rubrics) ? e.rubrics : [];
+      if (stageFilter !== "all" && stages.length > 0 && !stages.includes(stageFilter)) return false;
+      if (rubricFilter !== "all" && rubrics.length > 0 && !rubrics.includes(rubricFilter)) return false;
+      return true;
+    };
+    const nextEdges = (g.edges || []).filter(edgePass);
+    const keepNodes = new Set();
+    for (const e of nextEdges) {
+      keepNodes.add(e.from);
+      keepNodes.add(e.to);
+    }
+    const nextNodes = (g.nodes || []).filter((n) => {
+      if (keepNodes.has(n.id)) return true;
+      return n.kind === "human" || n.kind === "mailbox" || n.kind === "system";
+    });
+    g = { ...g, nodes: nextNodes, edges: nextEdges };
+  }
 
   /* --- Hide idle events: NOT(has producer AND has subscriber) --- */
   if (hideOrphans && !collapseEvents) {
@@ -1197,6 +1294,8 @@ function deriveGraphForView(graph, opts) {
           passthrough: !!((prod.edge && prod.edge.passthrough) || (sub.edge && sub.edge.passthrough)),
           producers: [prod.agent],
           consumers: [sub.agent],
+          stages: (prod.edge && prod.edge.stages) || (sub.edge && sub.edge.stages) || [],
+          rubrics: (prod.edge && prod.edge.rubrics) || (sub.edge && sub.edge.rubrics) || [],
           status: "active",
           source: prod.edge.source || sub.edge.source || "",
         });
@@ -1414,14 +1513,14 @@ function GraphLegendPanel() {
   );
 }
 
-function GraphView({ graph, graphKey, selectedNodeID, selectedEdgeID, onSelectNode, onSelectEdge, onDerivedGraph, runtimeAgents, isFullscreen, onToggleFullscreen, activeEdgeKeys }) {
+function GraphView({ graph, graphKey, selectedNodeID, selectedEdgeID, onSelectNode, onSelectEdge, onDerivedGraph, runtimeAgents, isFullscreen, onToggleFullscreen, activeEdgeKeys, stageFilter = "all", rubricFilter = "all" }) {
   const [collapseEvents, setCollapseEvents] = useState(true);
   const [hideOrphans, setHideOrphans] = useState(false);
   const [q, setQ] = useState("");
   const [layoutDir, setLayoutDir] = useState("LR");
   const [hoverNodeID, setHoverNodeID] = useState("");
 
-  const derived = useMemo(() => deriveGraphForView(graph, { collapseEvents, hideOrphans }), [graph, collapseEvents, hideOrphans]);
+  const derived = useMemo(() => deriveGraphForView(graph, { collapseEvents, hideOrphans, stageFilter, rubricFilter }), [graph, collapseEvents, hideOrphans, stageFilter, rubricFilter]);
   const layout = useMemo(() => buildGraphLayout(derived, layoutDir), [derived, layoutDir]);
 
   const agentRuntime = useMemo(() => {
@@ -1740,6 +1839,8 @@ function App() {
   const [flowViewGraph, setFlowViewGraph] = useState(null);
   const [flowStart, setFlowStart] = useState("");
   const [flowEnd, setFlowEnd] = useState("");
+  const [flowStage, setFlowStage] = useState("all");
+  const [flowRubric, setFlowRubric] = useState("all");
   const [flowReplaySpeed, setFlowReplaySpeed] = useState(10);
   const [flowReplayOn, setFlowReplayOn] = useState(false);
   const [flowReplayIndex, setFlowReplayIndex] = useState(0);
@@ -2338,14 +2439,26 @@ function App() {
     [incidentsData, selectedIncidentCode],
   );
 
+  const flowStageOptions = useMemo(() => {
+    const fromMeta = Array.isArray(flowGraphMeta && flowGraphMeta.stages) ? flowGraphMeta.stages : [];
+    const merged = new Set(["all", ...FLOW_STAGE_OPTIONS, ...fromMeta]);
+    return Array.from(merged);
+  }, [flowGraphMeta]);
+
+  const flowRubricOptions = useMemo(() => {
+    const fromMeta = Array.isArray(flowGraphMeta && flowGraphMeta.rubrics) ? flowGraphMeta.rubrics : [];
+    const merged = new Set(["all", ...FLOW_RUBRIC_OPTIONS, ...fromMeta]);
+    return Array.from(merged);
+  }, [flowGraphMeta]);
+
   const visibleFlowEvents = useMemo(() => {
-    const rows = flowEvents || [];
+    const rows = (flowEvents || []).filter((ev) => flowEventMatchesFilters(ev && ev.event_type, flowStage, flowRubric));
     if (flowView === "replay") {
       const n = Math.max(0, Math.min(rows.length, flowReplayIndex));
       return rows.slice(0, n);
     }
     return rows;
-  }, [flowEvents, flowView, flowReplayIndex]);
+  }, [flowEvents, flowView, flowReplayIndex, flowStage, flowRubric]);
 
   const flowActiveEdgeKeys = useMemo(() => {
     const rows = visibleFlowEvents.slice(0, 150);
@@ -3027,6 +3140,12 @@ function App() {
                     <option value="runtime">runtime</option>
                     <option value="replay">replay</option>
                   </select>
+                  <select value={flowStage} onChange={(e) => { setFlowStage(e.target.value); setSelectedFlowEdgeID(""); }}>
+                    {flowStageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <select value={flowRubric} onChange={(e) => { setFlowRubric(e.target.value); setSelectedFlowEdgeID(""); }}>
+                    {flowRubricOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
                   {(flowView === "runtime" || flowView === "replay") ? (
                     <select value={flowVertical} onChange={(e) => { setFlowVertical(e.target.value); setSelectedFlowEdgeID(""); }}>
                       <option value="">all verticals</option>
@@ -3082,6 +3201,8 @@ function App() {
                   isFullscreen={graphFullscreen}
                   onToggleFullscreen={() => setGraphFullscreen((p) => !p)}
                   activeEdgeKeys={flowActiveEdgeKeys}
+                  stageFilter={flowStage}
+                  rubricFilter={flowRubric}
                 />
                 <div className="tiny" style={{ marginTop: 6 }}>
                   Modes: design-time architecture, runtime live overlay, and replay from historical flow events.

@@ -169,6 +169,8 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	results = append(results, verifyPayloadContracts(agents, schemas, runtimeEmitted)...)
 	results = append(results, verifyInterceptorCoverage(interceptEvents, handleEvents, handlerCases, runtimeEmitted)...)
 	results = append(results, verifyPipelinePathTracing(agents, producersByEvent, interceptEvents)...)
+	results = append(results, verifyOrphanEmissions(agents, producersByEvent, interceptEvents)...)
+	results = append(results, verifySchemaCatalogConsistency(agents, schemas, producersByEvent, interceptEvents)...)
 
 	failCount := 0
 	warnCount := 0
@@ -611,6 +613,149 @@ func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string
 	}
 
 	return out
+}
+
+func verifyOrphanEmissions(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
+	out := make([]wiringResult, 0, 64)
+	events := make([]string, 0, len(producersByEvent))
+	for evt := range producersByEvent {
+		evt = strings.TrimSpace(evt)
+		if evt == "" {
+			continue
+		}
+		events = append(events, evt)
+	}
+	sort.Strings(events)
+
+	for _, evt := range events {
+		if !isWiringCriticalEvent(evt) {
+			continue
+		}
+		if eventHasSubscriber(agents, evt) {
+			continue
+		}
+		if _, ok := interceptEvents[evt]; ok {
+			continue
+		}
+		producers := dedupeProducerIDs(producersByEvent[evt])
+		out = append(out, wiringResult{
+			Severity: wiringWarn,
+			Message:  fmt.Sprintf("ORPHAN_EMISSION: %s emitted by [%s] has no subscriber and no runtime interceptor", evt, strings.Join(producers, ", ")),
+		})
+	}
+	return out
+}
+
+func verifySchemaCatalogConsistency(agents []wiringAgent, schemas map[string]wiringSchema, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
+	catalog := map[string]struct{}{}
+	for evt := range producersByEvent {
+		evt = strings.TrimSpace(evt)
+		if evt != "" {
+			catalog[evt] = struct{}{}
+		}
+	}
+	for _, a := range agents {
+		for _, sub := range a.Subscriptions {
+			sub = strings.TrimSpace(sub)
+			if sub == "" || strings.Contains(sub, "*") {
+				continue
+			}
+			catalog[sub] = struct{}{}
+		}
+	}
+	for evt := range interceptEvents {
+		evt = strings.TrimSpace(evt)
+		if evt != "" {
+			catalog[evt] = struct{}{}
+		}
+	}
+
+	out := make([]wiringResult, 0, 32)
+	events := make([]string, 0, len(schemas))
+	for evt := range schemas {
+		evt = strings.TrimSpace(evt)
+		if evt != "" {
+			events = append(events, evt)
+		}
+	}
+	sort.Strings(events)
+	for _, evt := range events {
+		if _, ok := catalog[evt]; ok {
+			continue
+		}
+		out = append(out, wiringResult{
+			Severity: wiringWarn,
+			Message:  fmt.Sprintf("SCHEMA_NO_CATALOG: %s has EventSchemaRegistry entry but no producer/subscriber/interceptor reference", evt),
+		})
+	}
+	return out
+}
+
+func eventHasSubscriber(agents []wiringAgent, eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return false
+	}
+	for _, a := range agents {
+		for _, sub := range a.Subscriptions {
+			if matchesSubscription(sub, eventType) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func dedupeProducerIDs(in []producerRef) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		id := strings.TrimSpace(p.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func isWiringCriticalEvent(eventType string) bool {
+	eventType = strings.ToLower(strings.TrimSpace(eventType))
+	if eventType == "" {
+		return false
+	}
+	criticalPrefixes := []string{
+		"scan.",
+		"market_research.",
+		"trend_research.",
+		"scanner.",
+		"category.",
+		"trend.",
+		"source.",
+		"campaign.",
+		"vertical.",
+		"score.",
+		"scoring.",
+		"validation.",
+		"research.",
+		"spec.",
+		"brand.",
+		"cto.",
+		"dedup.",
+		"synthesis.",
+		"timer.portfolio_digest",
+	}
+	for _, p := range criticalPrefixes {
+		if strings.HasPrefix(eventType, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {
