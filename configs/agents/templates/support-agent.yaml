@@ -6,8 +6,9 @@ subscriptions:
   - customer_message
   - bug_fix_deployed
 tools:
-  - agent_message
-  - schedule
+  - whatsapp_business_api
+  - email_api
+  - human_task_request
   - mailbox_send
 constraints:
   max_turns_per_task: 20

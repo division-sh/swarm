@@ -119,8 +119,10 @@ func TestToolGatewayMCPToolsListHonorsAllowlist(t *testing.T) {
 	for _, v := range requiredAny {
 		required = append(required, strings.TrimSpace(asString(v)))
 	}
-	if !slicesContains(required, "mode") {
-		t.Fatalf("expected emit_scan_requested schema required to contain mode, got %#v", required)
+	for _, field := range []string{"mode", "geography", "campaign_context"} {
+		if !slicesContains(required, field) {
+			t.Fatalf("expected emit_scan_requested schema required to contain %s, got %#v", field, required)
+		}
 	}
 }
 
@@ -158,8 +160,8 @@ func TestToolGatewayMCPToolsListEmitPortfolioDigestSchema(t *testing.T) {
 	for _, v := range requiredAny {
 		required = append(required, strings.TrimSpace(asString(v)))
 	}
-	if !slicesContains(required, "digest_text") {
-		t.Fatalf("expected digest_text required, got %#v", required)
+	if !slicesContains(required, "message") {
+		t.Fatalf("expected message required, got %#v", required)
 	}
 }
 
@@ -230,6 +232,110 @@ func TestToolGatewayMCPToolCallRejectsMissingContextTokenByDefault(t *testing.T)
 	isErr, _ := result["isError"].(bool)
 	if !isErr {
 		t.Fatalf("expected mcp tool error for missing context token, got %#v", result)
+	}
+	content, _ := result["content"].([]any)
+	if len(content) == 0 {
+		t.Fatalf("expected content payload, got %#v", result)
+	}
+	first, _ := content[0].(map[string]any)
+	text := strings.TrimSpace(asString(first["text"]))
+	if !strings.Contains(text, "code="+ErrCodeMCPContextMissing) {
+		t.Fatalf("expected structured mcp missing-context code, got %q", text)
+	}
+}
+
+func TestToolGatewayMCPToolCallUsesQueryContextTokenFallback(t *testing.T) {
+	stub := &toolGatewayExecStub{}
+	gw := NewToolGateway(stub, "")
+	token := "tok-query"
+	globalMCPTurnRegistry.put(token, mcpTurnContext{
+		Actor: models.AgentConfig{
+			ID:         "a-query",
+			Role:       "market-research-agent",
+			Mode:       "factory",
+			VerticalID: "v-query",
+		},
+		Inbound:    events.Event{ID: "evt-q", Type: events.EventType("market_research.scan_assigned")},
+		HasInbound: true,
+		Recorder:   NewEmittedEventsRecorder(),
+		Epoch:      CurrentRuntimeEpoch(),
+	})
+	defer globalMCPTurnRegistry.delete(token)
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp?empire_ctx_token="+token+"&empire_allowed_tools=sql_execute", bytes.NewReader([]byte(`{
+		"jsonrpc":"2.0",
+		"id":4,
+		"method":"tools/call",
+		"params":{"name":"sql_execute","arguments":{"query":"SELECT 1"}}
+	}`)))
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if stub.lastName != "sql_execute" {
+		t.Fatalf("unexpected tool name: %q", stub.lastName)
+	}
+	if stub.lastActor != "a-query" {
+		t.Fatalf("expected actor from query-scoped context token, got %q", stub.lastActor)
+	}
+}
+
+func TestToolGatewayMCPToolsListUsesQueryAllowedToolsFallback(t *testing.T) {
+	stub := &toolGatewayExecStub{}
+	gw := NewToolGateway(stub, "")
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp?empire_allowed_tools=emit_scan_requested", bytes.NewReader([]byte(`{
+		"jsonrpc":"2.0",
+		"id":5,
+		"method":"tools/list"
+	}`)))
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	result, _ := resp["result"].(map[string]any)
+	tools, _ := result["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("expected exactly one tool from query allowlist, got %#v", result)
+	}
+	tool, _ := tools[0].(map[string]any)
+	if strings.TrimSpace(asString(tool["name"])) != "emit_scan_requested" {
+		t.Fatalf("unexpected tool name: %#v", tool)
+	}
+}
+
+func TestToolGatewayMCPToolCallUnknownTokenReportsNotFoundCode(t *testing.T) {
+	stub := &toolGatewayExecStub{}
+	gw := NewToolGateway(stub, "")
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{
+		"jsonrpc":"2.0",
+		"id":6,
+		"method":"tools/call",
+		"params":{"name":"sql_execute","arguments":{"query":"SELECT 1"}}
+	}`)))
+	req.Header.Set("X-Empire-Allowed-Tools", "sql_execute")
+	req.Header.Set("X-Empire-Context-Token", "missing-token")
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 rpc envelope, got %d", rr.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	result, _ := resp["result"].(map[string]any)
+	content, _ := result["content"].([]any)
+	first, _ := content[0].(map[string]any)
+	text := strings.TrimSpace(asString(first["text"]))
+	if !strings.Contains(text, "code="+ErrCodeMCPContextNotFound) {
+		t.Fatalf("expected not-found code in response, got %q", text)
 	}
 }
 

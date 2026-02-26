@@ -87,20 +87,35 @@ var (
 	coreFieldCandidates = []string{
 		"vertical_id",
 		"vertical_name",
-		"name",
 		"geography",
-		"scoring",
-		"business_brief",
-		"research",
-		"spec",
-		"cto_notes",
-		"brand",
-		"spec_version",
 		"mode",
 		"scan_id",
 		"campaign_id",
 		"priority",
 		"taxonomy_categories",
+	}
+	typedPayloadBuilderFields = map[string][]string{
+		"buildValidationStartedPayload":       {"vertical_id", "scoring", "vertical_name", "name", "geography"},
+		"buildBrandRequestedPayload":          {"vertical_id", "vertical_name", "name", "geography", "scoring", "business_brief"},
+		"buildValidationPackageReadyPayload":  {"vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version"},
+		"buildSpecValidationRequestedPayload": {"vertical_id", "vertical_name", "geography", "spec", "spec_version", "validation_tier"},
+		"buildCTOSpecReviewRequestedPayload":  {"vertical_id", "vertical_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring"},
+		"buildSpecRevisionRequestedPayload":   {"vertical_id", "vertical_name", "geography", "source", "feedback", "research", "spec", "scoring"},
+		"buildValidationMoreDataPayload":      {"vertical_id", "vertical_name", "geography", "request", "research", "spec", "scoring"},
+		"buildBrandRevisionNeededPayload":     {"vertical_id", "vertical_name", "geography", "feedback", "brand"},
+		"buildVerticalKilledPayload":          {"vertical_id", "vertical_name", "geography", "source_event", "priority", "reason"},
+		"buildScanAssignedPayload":            {"scan_id", "campaign_id", "mode", "geography", "geography_id", "taxonomy_categories", "priority", "campaign_context", "directive_id", "strategic_context", "requested_at", "planned_shards"},
+		"buildSynthesisNeededPayload":         {"scan_id", "campaign_id", "mode", "geography", "category", "subcategory", "conflict_notes", "raw_report"},
+		"buildDedupAmbiguousPayload":          {"scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_vertical"},
+		"buildVerticalDiscoveredPayload":      {"vertical_id", "name", "geography", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals"},
+		"buildScanCompletedPayload":           {"scan_id", "campaign_id", "mode", "geography", "reports_received", "agents_expected", "agents_complete", "verticals_discovered", "verticals_skipped", "pending_dedup", "timed_out", "shards_total", "shards_completed", "shards_failed"},
+		"buildScoringRequestedPayload":        {"vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested"},
+		"buildScoringContestedPayload":        {"vertical_id", "dimension", "scores", "evidence", "spread", "rubric", "mode"},
+		"buildVerticalScoredPayload":          {"vertical_id", "result", "reason", "composite_score", "viability_score", "market_score", "dimensions", "rubric", "partial", "mode", "vertical_name", "geography"},
+		"buildVerticalShortlistedPayload":     {"vertical_id", "composite_score", "viability_score", "scoring_payload"},
+		"buildVerticalMarginalPayload":        {"vertical_id", "composite_score", "viability_score", "dimensions", "promotion_eligible"},
+		"buildVerticalRejectedPayload":        {"vertical_id", "reason"},
+		"buildPortfolioDigestTimerPayload":    {"source", "timestamp", "recent_rejections", "rejection_count", "scoring_rejections_injected", "scoring_rejections_count", "scoring_rejection_summaries"},
 	}
 )
 
@@ -354,25 +369,12 @@ func resolveFieldSet(expr ast.Expr, varMap map[string]fieldSet) fieldSet {
 			return resolveFieldSet(t.Args[0], varMap)
 		case name == "parsePayloadMap":
 			return fieldSet{guaranteed: map[string]struct{}{}, dynamic: true}
-		case strings.HasSuffix(name, "buildValidationStartedPayload"):
-			return newFieldSet(false, "vertical_id", "scoring", "vertical_name", "name", "geography")
-		case strings.HasSuffix(name, "buildBrandRequestedPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "name", "geography", "scoring", "business_brief")
-		case strings.HasSuffix(name, "buildValidationPackageReadyPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version")
-		case strings.HasSuffix(name, "buildSpecValidationRequestedPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "spec", "spec_version", "validation_tier")
-		case strings.HasSuffix(name, "buildCTOSpecReviewRequestedPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring")
-		case strings.HasSuffix(name, "buildSpecRevisionRequestedPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "source", "feedback", "research", "spec", "scoring")
-		case strings.HasSuffix(name, "buildValidationMoreDataPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "request", "research", "spec", "scoring")
-		case strings.HasSuffix(name, "buildBrandRevisionNeededPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "feedback", "brand")
-		case strings.HasSuffix(name, "buildVerticalKilledPayload"):
-			return newFieldSet(false, "vertical_id", "vertical_name", "geography", "source_event", "priority", "reason")
 		default:
+			for builder, fields := range typedPayloadBuilderFields {
+				if strings.HasSuffix(name, builder) {
+					return newFieldSet(false, fields...)
+				}
+			}
 			// Unknown constructor: dynamic payload.
 			return fieldSet{guaranteed: map[string]struct{}{}, dynamic: true}
 		}
@@ -385,8 +387,28 @@ func parseMapCompositeLiteral(lit *ast.CompositeLit) fieldSet {
 	// Accept map literals: map[string]any{...}
 	_, isMap := lit.Type.(*ast.MapType)
 	if !isMap {
-		// Could still be events.Event{...}; not a payload map.
-		return fieldSet{guaranteed: map[string]struct{}{}, dynamic: true}
+		// Accept typed struct literals and normalize their key names to snake_case
+		// so payload structs can be audited similarly to map payloads.
+		fs := newFieldSet(false)
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			keyID, ok := kv.Key.(*ast.Ident)
+			if !ok || keyID == nil {
+				continue
+			}
+			key := strings.TrimSpace(camelToSnake(keyID.Name))
+			if key == "" {
+				continue
+			}
+			fs.guaranteed[key] = struct{}{}
+		}
+		if len(fs.guaranteed) == 0 {
+			return fieldSet{guaranteed: map[string]struct{}{}, dynamic: true}
+		}
+		return fs
 	}
 	fs := newFieldSet(false)
 	for _, elt := range lit.Elts {
@@ -724,13 +746,48 @@ func isInputHintLine(line string) bool {
 	if low == "" {
 		return false
 	}
-	if strings.Contains(low, "contains") || strings.Contains(low, "payload") || strings.Contains(low, "read ") || strings.HasPrefix(low, "read") || strings.Contains(low, "context") {
+	if strings.HasPrefix(low, "input contract") {
 		return true
 	}
-	if strings.Contains(low, "from runtime") || strings.Contains(low, "from payload") || strings.Contains(low, "input") {
+	if strings.HasPrefix(low, "contains ") || strings.HasPrefix(low, "contains:") {
+		return true
+	}
+	if strings.HasPrefix(low, "you will receive") || strings.HasPrefix(low, "payload contains") || strings.Contains(low, " payload contains ") {
+		return true
+	}
+	if strings.HasPrefix(low, "payload:") || strings.HasPrefix(low, "input:") {
+		return true
+	}
+	if strings.Contains(low, "receive assignment") {
+		return true
+	}
+	if strings.HasPrefix(low, "read payload") || strings.HasPrefix(low, "read the payload") || strings.HasPrefix(low, "read from payload") {
 		return true
 	}
 	return false
+}
+
+func camelToSnake(in string) string {
+	in = strings.TrimSpace(in)
+	if in == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(in) + 4)
+	for i, r := range in {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				prev := rune(in[i-1])
+				if (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
+					b.WriteByte('_')
+				}
+			}
+			b.WriteRune(r + ('a' - 'A'))
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func mentionsField(text, field string) bool {

@@ -124,6 +124,9 @@ func TestValidate_ShardingDefaultsAndClamps(t *testing.T) {
 	if c.Sharding.PerShardTimeout != 30*time.Minute {
 		t.Fatalf("expected default per_shard_timeout=30m, got %s", c.Sharding.PerShardTimeout)
 	}
+	if c.Sharding.StartupGracePeriod != 20*time.Minute {
+		t.Fatalf("expected default startup_grace_period=20m, got %s", c.Sharding.StartupGracePeriod)
+	}
 	if c.Sharding.PerShardBudgetCents != 50 {
 		t.Fatalf("expected default per_shard_budget_cents=50, got %d", c.Sharding.PerShardBudgetCents)
 	}

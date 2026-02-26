@@ -195,6 +195,8 @@ func TestHandleControlRuntime_InvalidAction(t *testing.T) {
 }
 
 func TestHandleControlRuntime_PauseResume(t *testing.T) {
+	runtime.ResumeRuntimeIngress()
+	defer runtime.ResumeRuntimeIngress()
 	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
 	manager := runtime.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
@@ -208,6 +210,9 @@ func TestHandleControlRuntime_PauseResume(t *testing.T) {
 	if !manager.IsRunning() {
 		t.Fatal("expected manager running after resume")
 	}
+	if runtime.RuntimeIngressPaused() {
+		t.Fatal("expected ingress resumed after resume action")
+	}
 
 	pauseReq := httptest.NewRequest(http.MethodPost, "/dashboard/api/control/runtime", bytes.NewReader([]byte(`{"action":"pause"}`)))
 	pauseW := httptest.NewRecorder()
@@ -217,6 +222,9 @@ func TestHandleControlRuntime_PauseResume(t *testing.T) {
 	}
 	if manager.IsRunning() {
 		t.Fatal("expected manager stopped after pause")
+	}
+	if !runtime.RuntimeIngressPaused() {
+		t.Fatal("expected ingress paused after pause action")
 	}
 }
 

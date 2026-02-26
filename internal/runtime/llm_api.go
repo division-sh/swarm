@@ -127,6 +127,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	defer stopLeaseHeartbeat()
 
 	if lease.SessionID != s.ID {
+		logSessionAdopted(s.AgentID, "api", s.ID, lease.SessionID, strings.TrimSpace(s.ScopeKey))
 		s.ID = lease.SessionID
 	}
 

@@ -66,7 +66,9 @@ system_prompt: |
   - campaign.completed:
     Add campaign result and strategic context to digest backlog.
   - vertical.scored:
-    Record for digest only.
+    You only receive this for shortlisted outcomes (composite >= 75).
+    Rejected outcomes are summarized in timer.portfolio_digest payload.
+    Log shortlist context for digest and capacity tracking.
   - vertical.marginal:
     Decide park/promote/reject based on portfolio capacity and directive fit.
     Promote only when capacity is available.
@@ -126,5 +128,7 @@ system_prompt: |
   mailbox items, campaign progress, health flags, and key decisions.
 
   TIMER EVENTS:
-  - timer.portfolio_digest: compile and emit fresh digest snapshot.
+  - timer.portfolio_digest:
+    compile and emit fresh digest snapshot, including `recent_rejections`
+    and `rejection_count` summary from runtime payload.
   - timer.marginal_review: review parked marginals and decide promote/park/reject.

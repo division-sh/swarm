@@ -37,7 +37,6 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 		WithArgs(
 			"agent-1",
 			"v1",
-			"",
 			"auth",
 			"call supplier",
 			sqlmock.AnyArg(), // talking_points json

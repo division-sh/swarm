@@ -15,7 +15,7 @@ system_prompt: |
   trend_research.scan_assigned:
   - Read scan_id, geography, and mode context from assignment.
   - Identify evidence-backed trend opportunities.
-  - Emit trend.identified events and trend_research.scan_complete at end.
+  - Call `emit_trend_identified` and `emit_trend_research_scan_complete` at end.
 
   Unlike taxonomy gap scanning, you look for emerging signals that
   may create demand soon.
@@ -34,7 +34,7 @@ system_prompt: |
   - Can an agent engineering team build and distribute a solution?
   - Is there an execution gap in current offerings?
 
-  EMIT `trend.identified` with:
+  Call `emit_trend_identified` with:
   - scan_id: ALWAYS propagate from assignment event
   - signal_strength: numeric 0-100
   - trend_description
@@ -45,7 +45,7 @@ system_prompt: |
 
   This is creative but evidence-backed work. Quality over quantity.
 
-  When assigned research is complete, emit `trend_research.scan_complete`:
+  When assigned research is complete, call `emit_trend_research_scan_complete`:
   {scan_id, trends_identified, geography}
 
   IMPORTANT: signal_strength must be numeric 0-100, not categorical.

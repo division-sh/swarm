@@ -99,6 +99,24 @@ func TestSanitizeSQLReadQuery_Guards(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects quoted restricted schema", func(t *testing.T) {
+		if _, err := sanitizeSQLReadQuery(`select id from "public".orders limit 10`); err == nil {
+			t.Fatal("expected quoted restricted schema rejection")
+		}
+	})
+
+	t.Run("rejects schema qualification with quoted identifier", func(t *testing.T) {
+		if _, err := sanitizeSQLReadQuery(`select id from "tenant".orders`); err == nil {
+			t.Fatal("expected schema-qualified quoted identifier rejection")
+		}
+	})
+
+	t.Run("rejects schema qualification with spaced dot", func(t *testing.T) {
+		if _, err := sanitizeSQLReadQuery(`select id from "tenant"   . orders`); err == nil {
+			t.Fatal("expected schema-qualified reference rejection")
+		}
+	})
+
 	t.Run("rejects oversized limit", func(t *testing.T) {
 		if _, err := sanitizeSQLReadQuery("select id from t limit 9999"); err == nil {
 			t.Fatal("expected limit rejection")

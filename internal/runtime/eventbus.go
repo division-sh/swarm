@@ -69,6 +69,7 @@ type EventBus struct {
 	subscriptions map[string][]events.EventType
 	routingTable  map[string]*RoutingTable
 	interceptors  []EventInterceptor
+	cycleTracker  *OpCoCycleTracker
 	store         EventStore
 	logger        *RuntimeLogger
 }
@@ -94,6 +95,8 @@ type eventDeliveryPlan struct {
 	PersistedRecipients []string
 	ExtraDetail         map[string]any
 	ContradictionReason string
+	BlockedByCycle      bool
+	CycleEscalation     *events.Event
 }
 
 var eventTypeTokenPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
@@ -177,6 +180,15 @@ func (eb *EventBus) SetInterceptors(interceptors ...EventInterceptor) {
 	eb.mu.Unlock()
 }
 
+func (eb *EventBus) SetCycleTracker(tracker *OpCoCycleTracker) {
+	if eb == nil {
+		return
+	}
+	eb.mu.Lock()
+	eb.cycleTracker = tracker
+	eb.mu.Unlock()
+}
+
 // ResetInMemoryState clears process-local EventBus state (subscriptions,
 // delivery channels, and routing tables) without touching the persistent store.
 // This is used during runtime reset flows where DB state is truncated and
@@ -194,6 +206,9 @@ func (eb *EventBus) ResetInMemoryState() {
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.routingTable = make(map[string]*RoutingTable)
+	if eb.cycleTracker != nil {
+		eb.cycleTracker.ResetAll(context.Background())
+	}
 }
 
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
@@ -213,6 +228,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
+	}
+	if eb.cycleTracker != nil {
+		eb.cycleTracker.HandleResetEvent(ctx, evt)
 	}
 
 	deferredTransitions := make([]deferredPipelineTransition, 0, 8)
@@ -353,6 +371,11 @@ func (eb *EventBus) publishTransactional(
 			eb.deliverToAgents(ctx, evt, inboundPlan.Recipients)
 			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
 		}
+		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
+			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
+				return err
+			}
+		}
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
 			_ = eb.emitContradiction(ctx, evt, inboundPlan.ContradictionReason)
 		}
@@ -366,6 +389,11 @@ func (eb *EventBus) publishTransactional(
 		if len(plan.Recipients) > 0 {
 			eb.deliverToAgents(ctx, plan.Event, plan.Recipients)
 			eb.logDelivery(ctx, plan.Event, plan.Recipients, plan.ExtraDetail)
+		}
+		if plan.BlockedByCycle && plan.CycleEscalation != nil {
+			if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+				return err
+			}
 		}
 		if strings.TrimSpace(plan.ContradictionReason) != "" {
 			_ = eb.emitContradiction(ctx, plan.Event, plan.ContradictionReason)
@@ -489,6 +517,11 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 		eb.deliverToAgents(ctx, evt, plan.Recipients)
 		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
 	}
+	if plan.BlockedByCycle && plan.CycleEscalation != nil {
+		if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(plan.ContradictionReason) != "" {
 		_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
 	}
@@ -497,6 +530,14 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 
 func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
 	plan := eventDeliveryPlan{Event: evt}
+	if tracker := eb.snapshotCycleTracker(); tracker != nil {
+		blocked, escalation := tracker.Check(ctx, evt)
+		if blocked {
+			plan.BlockedByCycle = true
+			plan.CycleEscalation = escalation
+			return plan, nil
+		}
+	}
 	// Budget events are broadcast guardrails. Deliver via delivery manifest so
 	// operating (OpCo) agents also receive them during backlog replay.
 	if strings.HasPrefix(string(evt.Type), "budget.") {
@@ -563,6 +604,15 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 	plan.Recipients = uniqueStrings(eb.resolveSubscribedRecipients(string(evt.Type)))
 	plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
 	return plan, nil
+}
+
+func (eb *EventBus) snapshotCycleTracker() *OpCoCycleTracker {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.cycleTracker
 }
 
 func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, recipients []string) error {

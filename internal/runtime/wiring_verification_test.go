@@ -67,6 +67,8 @@ type rosterYAML struct {
 
 var (
 	emitRefRe             = regexp.MustCompile(`\bemit_[a-zA-Z0-9_]+\b`)
+	legacyEmitEventsRe    = regexp.MustCompile(`(?i)\bemit_events\b`)
+	legacyEmitEventNameRe = regexp.MustCompile("(?i)\\bemit\\s+`[a-z0-9_.-]+`")
 	fieldAliasRegexWiring = map[string][]*regexp.Regexp{
 		"vertical_id": {
 			regexp.MustCompile(`(?i)\bvertical_id\b`),
@@ -106,6 +108,7 @@ var (
 )
 
 func TestSpecRuntimeWiringVerification(t *testing.T) {
+	ensureEventSchemaRegistry()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	agentsDir := filepath.Join(repoRoot, "configs", "agents")
 	runtimeDir := filepath.Join(repoRoot, "internal", "runtime")
@@ -183,13 +186,40 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 		t.Fatalf("wiring verification failed with %d FAIL items", failCount)
 	}
 	if failCount > 0 {
-		t.Logf("strict mode disabled; set EMPIRE_WIRING_STRICT=1 to fail on wiring FAIL items")
+		t.Logf("strict mode disabled; set EMPIRE_WIRING_STRICT=1 to fail on wiring FAIL items (default is strict)")
 	}
 }
 
 func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringSchema, toolToEvent map[string]string) []wiringResult {
 	out := make([]wiringResult, 0, 128)
+	for _, role := range commgraph.ProducerRoles() {
+		for _, eventType := range commgraph.ProducerEventsForRole(role) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			if _, ok := schemas[eventType]; ok {
+				continue
+			}
+			out = append(out, wiringResult{
+				Severity: wiringFail,
+				Message:  fmt.Sprintf("producer role %s emits %s but EventSchemaRegistry has no explicit entry", role, eventType),
+			})
+		}
+	}
 	for _, a := range agents {
+		if legacyEmitEventsRe.MatchString(a.SystemPrompt) {
+			out = append(out, wiringResult{
+				Severity: wiringFail,
+				Message:  fmt.Sprintf("%s prompt references legacy emit_events envelope", a.ID),
+			})
+		}
+		if legacyEmitEventNameRe.MatchString(a.SystemPrompt) {
+			out = append(out, wiringResult{
+				Severity: wiringFail,
+				Message:  fmt.Sprintf("%s prompt uses legacy 'Emit `event.name`' wording instead of emit_* tool calls", a.ID),
+			})
+		}
 		refs := extractEmitToolRefs(a.SystemPrompt)
 		if len(refs) == 0 {
 			continue
@@ -258,6 +288,13 @@ func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[s
 				}
 			}
 			if !hasExternalProducer {
+				if allowSelfSubscription(a.ID, sub) {
+					out = append(out, wiringResult{
+						Severity: wiringPass,
+						Message:  fmt.Sprintf("%s subscription %s is an allowed self-loop by design", a.ID, sub),
+					})
+					continue
+				}
 				out = append(out, wiringResult{
 					Severity: wiringWarn,
 					Message:  fmt.Sprintf("%s subscribes to %s but only self-emitted events were found", a.ID, sub),
@@ -398,6 +435,13 @@ func verifyInterceptorCoverage(interceptEvents, handleEvents map[string]struct{}
 		}
 		emits := emittedEventsByHandler(runtimeEmitted, handler)
 		if len(emits) == 0 {
+			if allowNoEmitHandler(handler, evt) {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("interceptor handler %s (from %s) is state-only by design", handler, evt),
+				})
+				continue
+			}
 			out = append(out, wiringResult{
 				Severity: wiringWarn,
 				Message:  fmt.Sprintf("interceptor handler %s (from %s) emits no runtime events", handler, evt),
@@ -430,6 +474,48 @@ func verifyInterceptorCoverage(interceptEvents, handleEvents map[string]struct{}
 		}
 	}
 	return out
+}
+
+func allowSelfSubscription(agentID, subscription string) bool {
+	agentID = strings.TrimSpace(strings.ToLower(agentID))
+	subscription = strings.TrimSpace(strings.ToLower(subscription))
+	if agentID == "" || subscription == "" {
+		return false
+	}
+	switch agentID {
+	case "empire-coordinator":
+		return subscription == "template.migration_completed" || subscription == "template.migration_failed"
+	case "holding-devops":
+		return subscription == "devops.health_check_failed" || subscription == "devops.rollback_failed"
+	default:
+		return false
+	}
+}
+
+func allowNoEmitHandler(handler, eventType string) bool {
+	handler = strings.TrimSpace(handler)
+	eventType = strings.TrimSpace(eventType)
+	if handler == "" || eventType == "" {
+		return false
+	}
+	switch handler {
+	case "handleScoringContestResolved":
+		return eventType == "scoring.contest_resolved"
+	case "handleValidationPackaged":
+		return eventType == "vertical.ready_for_review"
+	case "resetInMemoryState":
+		return eventType == "runtime.reset"
+	case "handleCTOApproved":
+		return eventType == "cto.spec_approved"
+	case "handleSpecRevisionRequested":
+		return eventType == "spec.revision_requested"
+	case "handleVerticalApproved":
+		return eventType == "vertical.approved"
+	case "handleVerticalKilled":
+		return eventType == "vertical.killed"
+	default:
+		return false
+	}
 }
 
 func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
@@ -579,6 +665,7 @@ func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {
 }
 
 func loadWiringSchemasFromRegistry() map[string]wiringSchema {
+	ensureEventSchemaRegistry()
 	out := make(map[string]wiringSchema, len(EventSchemaRegistry))
 	for evt, schema := range EventSchemaRegistry {
 		required := map[string]struct{}{}
@@ -602,6 +689,7 @@ func loadWiringSchemasFromRegistry() map[string]wiringSchema {
 }
 
 func buildToolToEventMap() map[string]string {
+	ensureEventSchemaRegistry()
 	out := map[string]string{}
 	for evt := range EventSchemaRegistry {
 		out[emitToolName(evt)] = evt
@@ -824,6 +912,28 @@ func typedBuilderFields(name string) map[string]struct{} {
 		return setOf("vertical_id", "vertical_name", "name", "geography", "scoring")
 	case strings.HasSuffix(name, "buildBrandRequestedPayload"):
 		return setOf("vertical_id", "vertical_name", "name", "geography", "scoring", "business_brief")
+	case strings.HasSuffix(name, "buildScanAssignedPayload"):
+		return setOf("scan_id", "campaign_id", "mode", "geography", "geography_id", "taxonomy_categories", "priority", "campaign_context", "directive_id", "strategic_context", "requested_at", "planned_shards")
+	case strings.HasSuffix(name, "buildSynthesisNeededPayload"):
+		return setOf("scan_id", "campaign_id", "mode", "geography", "category", "subcategory", "conflict_notes", "raw_report")
+	case strings.HasSuffix(name, "buildDedupAmbiguousPayload"):
+		return setOf("scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_vertical")
+	case strings.HasSuffix(name, "buildVerticalDiscoveredPayload"):
+		return setOf("vertical_id", "name", "geography", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals")
+	case strings.HasSuffix(name, "buildScanCompletedPayload"):
+		return setOf("scan_id", "campaign_id", "mode", "geography", "reports_received", "agents_expected", "agents_complete", "verticals_discovered", "verticals_skipped", "pending_dedup", "timed_out", "shards_total", "shards_completed", "shards_failed")
+	case strings.HasSuffix(name, "buildScoringRequestedPayload"):
+		return setOf("vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested")
+	case strings.HasSuffix(name, "buildScoringContestedPayload"):
+		return setOf("vertical_id", "dimension", "scores", "evidence", "spread", "rubric", "mode")
+	case strings.HasSuffix(name, "buildVerticalScoredPayload"):
+		return setOf("vertical_id", "result", "reason", "composite_score", "viability_score", "market_score", "dimensions", "rubric", "partial", "mode", "vertical_name", "geography")
+	case strings.HasSuffix(name, "buildVerticalShortlistedPayload"):
+		return setOf("vertical_id", "composite_score", "viability_score", "scoring_payload")
+	case strings.HasSuffix(name, "buildVerticalMarginalPayload"):
+		return setOf("vertical_id", "composite_score", "viability_score", "dimensions", "promotion_eligible")
+	case strings.HasSuffix(name, "buildVerticalRejectedPayload"):
+		return setOf("vertical_id", "reason")
 	case strings.HasSuffix(name, "buildValidationPackageReadyPayload"):
 		return setOf("vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version")
 	case strings.HasSuffix(name, "buildSpecValidationRequestedPayload"):
@@ -1259,5 +1369,11 @@ func toStringSliceWiring(v any) []string {
 
 func isWiringStrictMode() bool {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("EMPIRE_WIRING_STRICT")))
+	if raw == "" {
+		return true
+	}
+	if raw == "0" || raw == "false" || raw == "no" || raw == "off" {
+		return false
+	}
 	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
 }

@@ -62,6 +62,7 @@ var runtimeEmittedEvents = []string{
 	"ops.agent_failed",
 	"spec.contradiction_detected",
 	"budget.threshold_crossed",
+	"cycle_limit_reached",
 }
 
 var humanEmittedEvents = []string{
@@ -208,6 +209,7 @@ var agentProducerEvents = map[string][]string{
 		"feature_deployed",
 		"deploy_requested",
 		"bug_fix_deployed",
+		"cycle_reset",
 		"cto.tech_spec_review_requested",
 		"spec.validation_requested",
 	},

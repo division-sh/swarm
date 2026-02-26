@@ -123,6 +123,7 @@ type ShardingConfig struct {
 	MaxShardsPerScan        int                  `yaml:"max_shards_per_scan"`
 	MaxConcurrentShards     int                  `yaml:"max_concurrent_shards"`
 	PerShardTimeout         time.Duration        `yaml:"per_shard_timeout"`
+	StartupGracePeriod      time.Duration        `yaml:"startup_grace_period"`
 	PerShardBudgetCents     int                  `yaml:"per_shard_budget_cents"`
 	MaxRetriesPerShard      int                  `yaml:"max_retries_per_shard"`
 	CircuitBreakerThreshold float64              `yaml:"circuit_breaker_threshold"`
@@ -201,6 +202,9 @@ func (c *Config) applyShardingDefaults() {
 	}
 	if c.Sharding.PerShardTimeout <= 0 {
 		c.Sharding.PerShardTimeout = 30 * time.Minute
+	}
+	if c.Sharding.StartupGracePeriod <= 0 {
+		c.Sharding.StartupGracePeriod = 20 * time.Minute
 	}
 	if c.Sharding.PerShardBudgetCents <= 0 {
 		c.Sharding.PerShardBudgetCents = 50

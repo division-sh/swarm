@@ -102,7 +102,7 @@ function shardScopeSummary(scope) {
   return "-";
 }
 
-const VALID_TABS = ["agents", "digest", "events", "logs", "convos", "graph", "control", "tasks", "pipeline", "holding", "health"];
+const VALID_TABS = ["agents", "digest", "events", "logs", "incidents", "flow", "convos", "graph", "control", "tasks", "pipeline", "holding", "health"];
 
 function readHashTab() {
   const h = (location.hash || "").replace("#", "").toLowerCase();
@@ -1189,6 +1189,14 @@ function deriveGraphForView(graph, opts) {
           to: sub.agent,
           kind: "routing",
           label: evtLabel,
+          event_type: (prod.edge && prod.edge.event_type) || (sub.edge && sub.edge.event_type) || evtLabel,
+          schema_required: (prod.edge && prod.edge.schema_required) || (sub.edge && sub.edge.schema_required) || [],
+          schema_properties: (prod.edge && prod.edge.schema_properties) || (sub.edge && sub.edge.schema_properties) || [],
+          interceptor_handler: (prod.edge && prod.edge.interceptor_handler) || (sub.edge && sub.edge.interceptor_handler) || "",
+          intercepted: !!((prod.edge && prod.edge.intercepted) || (sub.edge && sub.edge.intercepted)),
+          passthrough: !!((prod.edge && prod.edge.passthrough) || (sub.edge && sub.edge.passthrough)),
+          producers: [prod.agent],
+          consumers: [sub.agent],
           status: "active",
           source: prod.edge.source || sub.edge.source || "",
         });
@@ -1406,11 +1414,12 @@ function GraphLegendPanel() {
   );
 }
 
-function GraphView({ graph, graphKey, selectedNodeID, onSelectNode, onDerivedGraph, runtimeAgents, isFullscreen, onToggleFullscreen }) {
+function GraphView({ graph, graphKey, selectedNodeID, selectedEdgeID, onSelectNode, onSelectEdge, onDerivedGraph, runtimeAgents, isFullscreen, onToggleFullscreen, activeEdgeKeys }) {
   const [collapseEvents, setCollapseEvents] = useState(true);
   const [hideOrphans, setHideOrphans] = useState(false);
   const [q, setQ] = useState("");
   const [layoutDir, setLayoutDir] = useState("LR");
+  const [hoverNodeID, setHoverNodeID] = useState("");
 
   const derived = useMemo(() => deriveGraphForView(graph, { collapseEvents, hideOrphans }), [graph, collapseEvents, hideOrphans]);
   const layout = useMemo(() => buildGraphLayout(derived, layoutDir), [derived, layoutDir]);
@@ -1515,20 +1524,26 @@ function GraphView({ graph, graphKey, selectedNodeID, onSelectNode, onDerivedGra
         const dash = edgeDash(e);
         const color = stroke;
         const fl = layout.forceLayout || false;
+        const edgeID = `${e.kind}:${e.from}->${e.to}:${i}`;
+        const edgeKey = `${e.from}->${e.to}|${e.label || ""}`;
+        const hoverActive = !!hoverNodeID && (e.from === hoverNodeID || e.to === hoverNodeID);
+        const isSelected = selectedEdgeID === edgeID;
+        const isActive = !!(activeEdgeKeys && activeEdgeKeys.has(edgeKey)) || hoverActive || isSelected;
         return {
-          id: `${e.kind}:${e.from}->${e.to}:${i}`,
+          id: edgeID,
           source: e.from,
           target: e.to,
           type: fl ? "straightClipped" : (e.kind === "management" ? "smoothstep" : "default"),
-          animated: false,
+          animated: isActive,
           data: e,
-          style: { stroke, strokeWidth: 1.8, strokeDasharray: dash || undefined },
+          selected: isSelected,
+          style: { stroke, strokeWidth: isActive ? 2.8 : 1.8, strokeDasharray: dash || undefined },
           markerEnd: { type: MarkerType.ArrowClosed, color },
         };
       }),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [derived, storageKey, agentRuntime, subscriberCounts, layoutDir]);
+  }, [derived, storageKey, agentRuntime, subscriberCounts, layoutDir, activeEdgeKeys, selectedEdgeID, hoverNodeID]);
 
   useEffect(() => {
     setNodes((nds) => (nds || []).map((n) => ({ ...n, selected: n.id === selectedNodeID })));
@@ -1579,8 +1594,19 @@ function GraphView({ graph, graphKey, selectedNodeID, onSelectNode, onDerivedGra
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onNodeDragStop={onNodeDragStop}
-          onNodeClick={(_, n) => onSelectNode(n && n.id ? n.id : "")}
-          onPaneClick={() => onSelectNode("")}
+          onNodeClick={(_, n) => {
+            onSelectNode(n && n.id ? n.id : "");
+            if (onSelectEdge) onSelectEdge("");
+          }}
+          onNodeMouseEnter={(_, n) => setHoverNodeID(n && n.id ? n.id : "")}
+          onNodeMouseLeave={() => setHoverNodeID("")}
+          onEdgeClick={(_, e) => {
+            if (onSelectEdge) onSelectEdge(e && e.id ? e.id : "");
+          }}
+          onPaneClick={() => {
+            onSelectNode("");
+            if (onSelectEdge) onSelectEdge("");
+          }}
           fitView
           fitViewOptions={{ padding: 0.18 }}
           proOptions={{ hideAttribution: true }}
@@ -1674,6 +1700,12 @@ function App() {
   const [logsData, setLogsData] = useState([]);
   const [selectedLogID, setSelectedLogID] = useState(null);
   const [logsOrder, setLogsOrder] = useState("desc");
+  const [incidentsFilter, setIncidentsFilter] = useState({ sinceHours: 24, mcpOnly: true, level: "warn", component: "" });
+  const [incidentsData, setIncidentsData] = useState([]);
+  const [selectedIncidentCode, setSelectedIncidentCode] = useState("");
+  const [selectedIncidentAgent, setSelectedIncidentAgent] = useState("");
+  const [incidentLogs, setIncidentLogs] = useState([]);
+  const [incidentArtifacts, setIncidentArtifacts] = useState({ loading: false, error: "", data: null });
 
   const [controlTarget, setControlTarget] = useState("");
   const [directiveMessage, setDirectiveMessage] = useState("");
@@ -1696,7 +1728,21 @@ function App() {
   const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [graphViewGraph, setGraphViewGraph] = useState(null);
   const [selectedGraphNodeID, setSelectedGraphNodeID] = useState("");
+  const [selectedGraphEdgeID, setSelectedGraphEdgeID] = useState("");
   const [graphFullscreen, setGraphFullscreen] = useState(false);
+  const [flowView, setFlowView] = useState("design");
+  const [flowVertical, setFlowVertical] = useState("");
+  const [flowGraph, setFlowGraph] = useState({ nodes: [], edges: [] });
+  const [flowGraphMeta, setFlowGraphMeta] = useState({});
+  const [flowEvents, setFlowEvents] = useState([]);
+  const [selectedFlowNodeID, setSelectedFlowNodeID] = useState("");
+  const [selectedFlowEdgeID, setSelectedFlowEdgeID] = useState("");
+  const [flowViewGraph, setFlowViewGraph] = useState(null);
+  const [flowStart, setFlowStart] = useState("");
+  const [flowEnd, setFlowEnd] = useState("");
+  const [flowReplaySpeed, setFlowReplaySpeed] = useState(10);
+  const [flowReplayOn, setFlowReplayOn] = useState(false);
+  const [flowReplayIndex, setFlowReplayIndex] = useState(0);
 
   const [holdingData, setHoldingData] = useState({ campaigns: [], verticals: [], agent_counts: {}, summary: {} });
   const [holdingDetailModal, setHoldingDetailModal] = useState({
@@ -1791,6 +1837,62 @@ function App() {
     const d = await fetchJSON(`/api/runtime/logs?${p.toString()}`);
     setLogsData(d.runtime_logs || []);
   }, [logsFilter, logsOrder, logsRuntimeErrorsOnly]);
+
+  const loadIncidents = useCallback(async () => {
+    const p = new URLSearchParams();
+    p.set("since_hours", String(Math.max(1, Number(incidentsFilter.sinceHours || 24))));
+    p.set("mcp_only", incidentsFilter.mcpOnly ? "true" : "false");
+    if (incidentsFilter.level) p.set("level", incidentsFilter.level);
+    if (incidentsFilter.component) p.set("component", incidentsFilter.component);
+    p.set("limit", "2000");
+    const d = await fetchJSON(`/api/runtime/incidents?${p.toString()}`);
+    const items = d.incidents || [];
+    setIncidentsData(items);
+    setSelectedIncidentCode((cur) => {
+      if (!cur) return items.length > 0 ? items[0].code : "";
+      const exists = items.some((it) => it.code === cur);
+      return exists ? cur : (items.length > 0 ? items[0].code : "");
+    });
+  }, [incidentsFilter]);
+
+  const loadIncidentLogs = useCallback(async (code) => {
+    const c = (code || "").trim();
+    if (!c) {
+      setIncidentLogs([]);
+      return;
+    }
+    const p = new URLSearchParams();
+    p.set("error_code", c);
+    p.set("order", "desc");
+    p.set("limit", "250");
+    const d = await fetchJSON(`/api/runtime/logs?${p.toString()}`);
+    const rows = d.runtime_logs || [];
+    setIncidentLogs(rows);
+    setSelectedIncidentAgent((cur) => {
+      if (cur && rows.some((r) => r.agent_id === cur)) return cur;
+      const first = rows.find((r) => (r.agent_id || "").trim() !== "");
+      return first ? first.agent_id : "";
+    });
+  }, []);
+
+  const loadIncidentArtifacts = useCallback(async (agentID) => {
+    const id = (agentID || "").trim();
+    if (!id) {
+      setIncidentArtifacts({ loading: false, error: "", data: null });
+      return;
+    }
+    setIncidentArtifacts({ loading: true, error: "", data: null });
+    try {
+      const d = await fetchJSON(`/dashboard/api/conversations/${encodeURIComponent(id)}/artifacts?lines=120`);
+      setIncidentArtifacts({ loading: false, error: "", data: d || null });
+    } catch (err) {
+      setIncidentArtifacts({
+        loading: false,
+        error: (err && err.message) ? err.message : "failed to load artifacts",
+        data: null,
+      });
+    }
+  }, []);
 
   const loadEventDetail = useCallback(async (id) => {
     if (!id) {
@@ -1896,7 +1998,10 @@ function App() {
     if (!graphVertical && items.length > 0) {
       setGraphVertical(items[0].slug || items[0].id);
     }
-  }, [graphVertical]);
+    if (!flowVertical && items.length > 0) {
+      setFlowVertical(items[0].slug || items[0].id);
+    }
+  }, [graphVertical, flowVertical]);
 
   const loadGraph = useCallback(async () => {
     const p = new URLSearchParams();
@@ -1911,7 +2016,38 @@ function App() {
       const exists = (d.nodes || []).some((n) => n.id === selectedGraphNodeID);
       if (!exists) setSelectedGraphNodeID("");
     }
-  }, [graphMode, graphVertical, selectedGraphNodeID]);
+    if (selectedGraphEdgeID) {
+      const exists = (d.edges || []).some((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedGraphEdgeID);
+      if (!exists) setSelectedGraphEdgeID("");
+    }
+  }, [graphMode, graphVertical, selectedGraphNodeID, selectedGraphEdgeID]);
+
+  const loadPipelineFlow = useCallback(async () => {
+    const p = new URLSearchParams();
+    p.set("view", flowView || "design");
+    p.set("limit", "500");
+    if (flowVertical && (flowView === "runtime" || flowView === "replay")) {
+      p.set("vertical", flowVertical);
+    }
+    if (flowView === "replay") {
+      if (flowStart) p.set("start", flowStart);
+      if (flowEnd) p.set("end", flowEnd);
+    }
+    const d = await fetchJSON(`/api/pipeline/graph?${p.toString()}`);
+    setFlowGraph({ nodes: d.nodes || [], edges: d.edges || [] });
+    setFlowGraphMeta(d.meta || {});
+    setFlowEvents(d.flow_events || []);
+    setFlowReplayIndex(0);
+    setFlowReplayOn(false);
+    if (selectedFlowNodeID) {
+      const exists = (d.nodes || []).some((n) => n.id === selectedFlowNodeID);
+      if (!exists) setSelectedFlowNodeID("");
+    }
+    if (selectedFlowEdgeID) {
+      const exists = (d.edges || []).some((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedFlowEdgeID);
+      if (!exists) setSelectedFlowEdgeID("");
+    }
+  }, [flowView, flowVertical, flowStart, flowEnd, selectedFlowNodeID, selectedFlowEdgeID]);
 
   const loadTargets = useCallback(async () => {
     const d = await fetchJSON("/dashboard/api/control/targets");
@@ -1938,8 +2074,9 @@ function App() {
       loadHealth(),
       loadVerticals(),
       loadHolding(),
+      loadIncidents(),
     ]);
-  }, [loadOverview, loadAgents, loadDigest, loadTasks, loadEvents, loadRuntimeLogs, loadConversations, loadTargets, loadFunnel, loadShardScans, loadMailbox, loadHealth, loadVerticals, loadHolding]);
+  }, [loadOverview, loadAgents, loadDigest, loadTasks, loadEvents, loadRuntimeLogs, loadConversations, loadTargets, loadFunnel, loadShardScans, loadMailbox, loadHealth, loadVerticals, loadHolding, loadIncidents]);
 
   /* ---- Escape exits graph fullscreen ---- */
   useEffect(() => {
@@ -1971,9 +2108,29 @@ function App() {
   }, [activeView, loadVerticals, loadGraph]);
 
   useEffect(() => {
+    if (activeView !== "flow") return;
+    Promise.all([loadVerticals(), loadPipelineFlow()]).catch(() => {});
+  }, [activeView, loadVerticals, loadPipelineFlow]);
+
+  useEffect(() => {
     if (activeView !== "logs") return;
     loadLogs().catch(() => {});
   }, [activeView, loadLogs]);
+
+  useEffect(() => {
+    if (activeView !== "incidents") return;
+    loadIncidents().catch(() => {});
+  }, [activeView, loadIncidents]);
+
+  useEffect(() => {
+    if (activeView !== "incidents") return;
+    loadIncidentLogs(selectedIncidentCode).catch(() => {});
+  }, [activeView, selectedIncidentCode, loadIncidentLogs]);
+
+  useEffect(() => {
+    if (activeView !== "incidents") return;
+    loadIncidentArtifacts(selectedIncidentAgent).catch(() => {});
+  }, [activeView, selectedIncidentAgent, loadIncidentArtifacts]);
 
   useEffect(() => {
     if (selectedConv) {
@@ -2036,6 +2193,60 @@ function App() {
     };
   }, [eventsFilter, eventsIncludeRuntime, eventsRuntimeErrorsOnly, loadEvents, loadRuntimeLogs]);
 
+  useEffect(() => {
+    if (activeView !== "flow" || flowView !== "runtime") return undefined;
+    let stream = null;
+    let retryTimer = null;
+    let retryCount = 0;
+    function connect() {
+      const p = new URLSearchParams();
+      p.set("stream", "true");
+      p.set("limit", "200");
+      if (flowVertical) p.set("vertical", flowVertical);
+      const key = getEmpireKey();
+      if (key) p.set("key", key);
+      stream = new EventSource(`/api/events/flow?${p.toString()}`);
+      stream.addEventListener("flow", (ev) => {
+        retryCount = 0;
+        try {
+          const item = JSON.parse(ev.data || "{}");
+          if (!item || !item.event_id) return;
+          setFlowEvents((prev) => {
+            const rows = [item, ...(prev || []).filter((x) => x.event_id !== item.event_id)];
+            return rows.slice(0, 500);
+          });
+        } catch {}
+      });
+      stream.addEventListener("open", () => { retryCount = 0; });
+      stream.onerror = () => {
+        if (stream) stream.close();
+        retryCount++;
+        const delay = Math.min(5000 * retryCount, 30000);
+        retryTimer = setTimeout(connect, delay);
+      };
+    }
+    connect();
+    return () => {
+      if (stream) stream.close();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [activeView, flowView, flowVertical]);
+
+  useEffect(() => {
+    if (flowView !== "replay" || !flowReplayOn) return undefined;
+    const step = flowReplaySpeed >= 100 ? 10 : flowReplaySpeed >= 50 ? 5 : 1;
+    const t = setInterval(() => {
+      setFlowReplayIndex((idx) => {
+        const next = Math.min((flowEvents || []).length, idx + step);
+        if (next >= (flowEvents || []).length) {
+          setFlowReplayOn(false);
+        }
+        return next;
+      });
+    }, 280);
+    return () => clearInterval(t);
+  }, [flowView, flowReplayOn, flowReplaySpeed, flowEvents]);
+
   // Polling — skip when tab is hidden
   useEffect(() => {
     const i1 = setInterval(() => {
@@ -2047,6 +2258,7 @@ function App() {
       loadMailbox().catch(() => {});
       loadHealth().catch(() => {});
       loadRuntimeLogs().catch(() => {});
+      loadIncidents().catch(() => {});
     }, 15000);
     const i2 = setInterval(() => {
       if (document.hidden) return;
@@ -2054,12 +2266,15 @@ function App() {
       loadFunnel().catch(() => {});
       loadVerticals().catch(() => {});
       loadHolding().catch(() => {});
+      if (activeView === "flow" && flowView !== "runtime") {
+        loadPipelineFlow().catch(() => {});
+      }
     }, 22000);
     return () => {
       clearInterval(i1);
       clearInterval(i2);
     };
-  }, [loadOverview, loadAgents, loadTasks, loadMailbox, loadHealth, loadRuntimeLogs, loadTargets, loadFunnel, loadVerticals, loadHolding]);
+  }, [loadOverview, loadAgents, loadTasks, loadMailbox, loadHealth, loadRuntimeLogs, loadTargets, loadFunnel, loadVerticals, loadHolding, loadIncidents, activeView, flowView, loadPipelineFlow]);
 
   /* ---- Derived data ---- */
 
@@ -2117,6 +2332,65 @@ function App() {
     const exists = (filteredLogsData || []).some((l) => l.id === selectedLogID);
     if (!exists) setSelectedLogID(null);
   }, [selectedLogID, filteredLogsData]);
+
+  const selectedIncident = useMemo(
+    () => (incidentsData || []).find((it) => it.code === selectedIncidentCode) || null,
+    [incidentsData, selectedIncidentCode],
+  );
+
+  const visibleFlowEvents = useMemo(() => {
+    const rows = flowEvents || [];
+    if (flowView === "replay") {
+      const n = Math.max(0, Math.min(rows.length, flowReplayIndex));
+      return rows.slice(0, n);
+    }
+    return rows;
+  }, [flowEvents, flowView, flowReplayIndex]);
+
+  const flowActiveEdgeKeys = useMemo(() => {
+    const rows = visibleFlowEvents.slice(0, 150);
+    const out = new Set();
+    for (const ev of rows) {
+      const source = (ev && ev.source_node ? String(ev.source_node) : "").trim();
+      const eventType = (ev && ev.event_type ? String(ev.event_type) : "").trim();
+      const targets = Array.isArray(ev && ev.target_nodes) ? ev.target_nodes : [];
+      if (!source || !eventType) continue;
+      for (const t of targets) {
+        const target = String(t || "").trim();
+        if (!target) continue;
+        out.add(`${source}->${target}|${eventType}`);
+      }
+    }
+    return out;
+  }, [visibleFlowEvents]);
+
+  useEffect(() => {
+    if (!selectedGraphNodeID) return;
+    const g = graphViewGraph || graph;
+    const exists = ((g && g.nodes) || []).some((n) => n.id === selectedGraphNodeID);
+    if (!exists) setSelectedGraphNodeID("");
+  }, [selectedGraphNodeID, graph, graphViewGraph]);
+
+  useEffect(() => {
+    if (!selectedGraphEdgeID) return;
+    const g = graphViewGraph || graph;
+    const exists = ((g && g.edges) || []).some((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedGraphEdgeID);
+    if (!exists) setSelectedGraphEdgeID("");
+  }, [selectedGraphEdgeID, graph, graphViewGraph]);
+
+  useEffect(() => {
+    if (!selectedFlowNodeID) return;
+    const g = flowViewGraph || flowGraph;
+    const exists = ((g && g.nodes) || []).some((n) => n.id === selectedFlowNodeID);
+    if (!exists) setSelectedFlowNodeID("");
+  }, [selectedFlowNodeID, flowGraph, flowViewGraph]);
+
+  useEffect(() => {
+    if (!selectedFlowEdgeID) return;
+    const g = flowViewGraph || flowGraph;
+    const exists = ((g && g.edges) || []).some((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedFlowEdgeID);
+    if (!exists) setSelectedFlowEdgeID("");
+  }, [selectedFlowEdgeID, flowGraph, flowViewGraph]);
 
   function counts(agents) {
     return (agents || []).reduce((acc, a) => {
@@ -2235,6 +2509,8 @@ function App() {
     control: (mailbox.summary.pending || 0) > 0 ? { n: mailbox.summary.pending, type: "warn" } : null,
     pipeline: (funnel.stuck || []).length > 0 ? { n: funnel.stuck.length, type: "warn" } : null,
     holding: (() => { const n = (holdingData.verticals || []).filter((v) => v.stage === "ready_for_review").length; return n > 0 ? { n, type: "warn" } : null; })(),
+    incidents: (incidentsData || []).length > 0 ? { n: (incidentsData || []).length, type: "danger" } : null,
+    flow: (flowEvents || []).length > 0 ? { n: Math.min((flowEvents || []).length, 999), type: "warn" } : null,
   };
 
   const tabs = [
@@ -2242,6 +2518,8 @@ function App() {
     ["digest", "Digest"],
     ["events", "Events"],
     ["logs", "Logs"],
+    ["incidents", "Incidents"],
+    ["flow", "Flow"],
     ["convos", "Convos"],
     ["graph", "Graph"],
     ["control", "Control + Mailbox"],
@@ -2564,6 +2842,333 @@ function App() {
           );
         })() : null}
 
+        {activeView === "incidents" ? (
+          <div className="layout-two">
+            <section>
+              <div className="head">
+                <h2>Incident Response</h2>
+                <div className="stack">
+                  <select
+                    value={String(incidentsFilter.sinceHours)}
+                    onChange={(e) => setIncidentsFilter((p) => ({ ...p, sinceHours: Number(e.target.value || "24") }))}
+                  >
+                    <option value="1">1h</option>
+                    <option value="6">6h</option>
+                    <option value="24">24h</option>
+                    <option value="72">72h</option>
+                    <option value="168">7d</option>
+                  </select>
+                  <select
+                    value={incidentsFilter.level}
+                    onChange={(e) => setIncidentsFilter((p) => ({ ...p, level: e.target.value }))}
+                  >
+                    <option value="warn">warn+</option>
+                    <option value="error">error only</option>
+                    <option value="info">info+</option>
+                  </select>
+                  <input
+                    placeholder="component"
+                    value={incidentsFilter.component}
+                    onChange={(e) => setIncidentsFilter((p) => ({ ...p, component: e.target.value }))}
+                  />
+                  <label className="tiny" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={incidentsFilter.mcpOnly}
+                      onChange={(e) => setIncidentsFilter((p) => ({ ...p, mcpOnly: e.target.checked }))}
+                    />
+                    mcp only
+                  </label>
+                  <button onClick={() => loadIncidents().catch((err) => addToast(err.message, "error"))}>Refresh</button>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setIncidentsFilter({ sinceHours: 24, mcpOnly: true, level: "warn", component: "" });
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+              <div className="body scroll">
+                {(incidentsData || []).length === 0 ? (
+                  <div className="empty-state">No incidents for selected filters</div>
+                ) : (
+                  <table>
+                    <thead><tr><th>Code</th><th>Count</th><th>Last Seen</th><th>Root Cause</th><th>Agents</th></tr></thead>
+                    <tbody>
+                      {(incidentsData || []).map((it) => (
+                        <tr
+                          key={it.code}
+                          className={selectedIncidentCode === it.code ? "selected" : ""}
+                          onClick={() => setSelectedIncidentCode(it.code)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <td className="mono">{it.code}</td>
+                          <td className="mono">{it.count || 0}</td>
+                          <td title={fmtTime(it.last_seen)}>{relTime(it.last_seen)}</td>
+                          <td>{it.root_cause || "-"}</td>
+                          <td>{Array.isArray(it.agents) ? it.agents.length : 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+
+            <section>
+              <div className="head">
+                <h2>Incident Detail</h2>
+                <span className="tiny mono">{selectedIncidentCode || "none"}</span>
+              </div>
+              <div className="body scroll">
+                {!selectedIncident ? (
+                  <div className="empty-state">Select an incident code</div>
+                ) : (
+                  <>
+                    <div className="health-card" style={{ marginBottom: 10 }}>
+                      <div className="health-kv"><span>Code</span><span className="mono">{selectedIncident.code}</span></div>
+                      <div className="health-kv"><span>Count</span><span className="mono">{selectedIncident.count || 0}</span></div>
+                      <div className="health-kv"><span>First</span><span>{fmtTime(selectedIncident.first_seen)}</span></div>
+                      <div className="health-kv"><span>Last</span><span>{fmtTime(selectedIncident.last_seen)}</span></div>
+                      <div className="health-kv"><span>Root Cause</span><span>{selectedIncident.root_cause || "-"}</span></div>
+                      <div className="health-kv"><span>Components</span><span>{(selectedIncident.components || []).join(", ") || "-"}</span></div>
+                      <div className="health-kv"><span>Actions</span><span>{(selectedIncident.actions || []).join(", ") || "-"}</span></div>
+                    </div>
+
+                    <div className="tiny" style={{ marginBottom: 6 }}>Impacted Agents</div>
+                    {(selectedIncident.agents || []).length === 0 ? (
+                      <div className="empty-state" style={{ marginBottom: 10 }}>No agent IDs found in logs</div>
+                    ) : (
+                      <div className="stack" style={{ marginBottom: 10 }}>
+                        {(selectedIncident.agents || []).map((agentID) => (
+                          <button
+                            key={agentID}
+                            className={selectedIncidentAgent === agentID ? "" : "btn-secondary"}
+                            onClick={() => setSelectedIncidentAgent(agentID)}
+                          >
+                            {agentID}
+                          </button>
+                        ))}
+                        {selectedIncidentAgent ? (
+                          <>
+                            <button
+                              className="btn-secondary"
+                              onClick={() => {
+                                setLogsFilter({ type: "", source: selectedIncidentAgent, vertical: "", component: "", level: "", subscriber: "" });
+                                setLogsRuntimeErrorsOnly(false);
+                                setActiveView("logs");
+                              }}
+                            >
+                              Open Logs
+                            </button>
+                            <button
+                              className="btn-secondary"
+                              onClick={() => {
+                                setSelectedConv(selectedIncidentAgent);
+                                setActiveView("convos");
+                              }}
+                            >
+                              Open Convo
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
+                    )}
+
+                    <div className="tiny" style={{ marginBottom: 6 }}>Session Artifacts</div>
+                    {incidentArtifacts.loading ? (
+                      <div className="empty-state">Loading artifacts...</div>
+                    ) : incidentArtifacts.error ? (
+                      <div className="health-bad" style={{ marginBottom: 10 }}>{incidentArtifacts.error}</div>
+                    ) : incidentArtifacts.data ? (
+                      <details className="holding-artifact-card" open>
+                        <summary>{incidentArtifacts.data.agent_id || selectedIncidentAgent || "agent"}</summary>
+                        <JsonBlock data={incidentArtifacts.data} defaultOpen={2} />
+                      </details>
+                    ) : (
+                      <div className="empty-state" style={{ marginBottom: 10 }}>Select an impacted agent</div>
+                    )}
+
+                    <div className="tiny" style={{ margin: "10px 0 6px" }}>Recent Runtime Logs</div>
+                    {(incidentLogs || []).length === 0 ? (
+                      <div className="empty-state">No runtime logs for selected code</div>
+                    ) : (
+                      <table>
+                        <thead><tr><th>When</th><th>Agent</th><th>Component</th><th>Error</th></tr></thead>
+                        <tbody>
+                          {(incidentLogs || []).slice(0, 80).map((rl) => (
+                            <tr key={rl.id} style={{ cursor: "pointer" }} onClick={() => setSelectedIncidentAgent(rl.agent_id || "")}>
+                              <td title={fmtTime(rl.ts)}>{relTime(rl.ts)}</td>
+                              <td className="mono">{rl.agent_id || "-"}</td>
+                              <td>{rl.component || "runtime"}.{rl.action || "-"}</td>
+                              <td className="tiny mono">{rl.error || rl.event_type || "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </>
+                )}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
+        {activeView === "flow" ? (
+          <div className="layout-graph">
+            <section>
+              <div className="head">
+                <h2>Pipeline Flow Visualizer</h2>
+                <div className="stack">
+                  <select value={flowView} onChange={(e) => { setFlowView(e.target.value); setFlowReplayOn(false); setFlowReplayIndex(0); setSelectedFlowEdgeID(""); }}>
+                    <option value="design">design</option>
+                    <option value="runtime">runtime</option>
+                    <option value="replay">replay</option>
+                  </select>
+                  {(flowView === "runtime" || flowView === "replay") ? (
+                    <select value={flowVertical} onChange={(e) => { setFlowVertical(e.target.value); setSelectedFlowEdgeID(""); }}>
+                      <option value="">all verticals</option>
+                      {(verticals || []).map((v) => (
+                        <option key={v.id || v.slug} value={v.slug || v.id}>
+                          {(v.slug || (v.id || "").slice(0, 8))} | {v.stage || "-"} | {v.geography || "-"}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  {flowView === "replay" ? (
+                    <>
+                      <input
+                        type="datetime-local"
+                        value={flowStart}
+                        onChange={(e) => setFlowStart(e.target.value)}
+                        title="start (local time)"
+                      />
+                      <input
+                        type="datetime-local"
+                        value={flowEnd}
+                        onChange={(e) => setFlowEnd(e.target.value)}
+                        title="end (local time)"
+                      />
+                      <select value={String(flowReplaySpeed)} onChange={(e) => setFlowReplaySpeed(Number(e.target.value || "10"))}>
+                        <option value="10">10x</option>
+                        <option value="50">50x</option>
+                        <option value="100">100x</option>
+                      </select>
+                      <button
+                        className="btn-secondary"
+                        onClick={() => setFlowReplayOn((v) => !v)}
+                        disabled={visibleFlowEvents.length >= (flowEvents || []).length && flowReplayOn}
+                      >
+                        {flowReplayOn ? "Pause" : "Play"}
+                      </button>
+                      <button className="btn-secondary" onClick={() => { setFlowReplayOn(false); setFlowReplayIndex(0); }}>Reset</button>
+                    </>
+                  ) : null}
+                  <button onClick={() => loadPipelineFlow().catch((err) => addToast(err.message, "error"))}>Refresh</button>
+                </div>
+              </div>
+              <div className="body">
+                <GraphView
+                  graph={flowGraph}
+                  graphKey={`flow:${flowView}:${flowVertical || "all"}`}
+                  selectedNodeID={selectedFlowNodeID}
+                  selectedEdgeID={selectedFlowEdgeID}
+                  onSelectNode={setSelectedFlowNodeID}
+                  onSelectEdge={setSelectedFlowEdgeID}
+                  onDerivedGraph={setFlowViewGraph}
+                  runtimeAgents={agentsResp.agents}
+                  isFullscreen={graphFullscreen}
+                  onToggleFullscreen={() => setGraphFullscreen((p) => !p)}
+                  activeEdgeKeys={flowActiveEdgeKeys}
+                />
+                <div className="tiny" style={{ marginTop: 6 }}>
+                  Modes: design-time architecture, runtime live overlay, and replay from historical flow events.
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div className="head">
+                <h2>Flow Detail</h2>
+                <span className="tiny mono">
+                  {(flowGraphMeta && flowGraphMeta.node_count) || (flowGraph.nodes || []).length} nodes / {(flowGraphMeta && flowGraphMeta.edge_count) || (flowGraph.edges || []).length} edges
+                </span>
+              </div>
+              <div className="body scroll">
+                {(() => {
+                  const g = flowViewGraph || flowGraph;
+                  const node = (g.nodes || []).find((n) => n.id === selectedFlowNodeID) || null;
+                  const edge = (g.edges || []).find((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedFlowEdgeID) || null;
+                  const nodeEdges = node ? (g.edges || []).filter((e) => e.from === node.id || e.to === node.id) : [];
+                  return (
+                    <>
+                      {edge ? (
+                        <>
+                          <div className="tiny">Selected Edge</div>
+                          <JsonBlock data={edge} defaultOpen={2} />
+                        </>
+                      ) : null}
+                      {!node ? (
+                        !edge ? <div className="empty-state">Click a node or edge to inspect flow details.</div> : null
+                      ) : (
+                        <>
+                          <div className="tiny">Node</div>
+                          <JsonBlock data={node} defaultOpen={2} />
+                          <div className="tiny" style={{ margin: "8px 0 4px" }}>Connected Edges ({nodeEdges.length})</div>
+                          {nodeEdges.length === 0 ? (
+                            <div className="empty-state">No connected edges</div>
+                          ) : (
+                            <table>
+                              <thead><tr><th>Kind</th><th>From</th><th>To</th><th>Label</th></tr></thead>
+                              <tbody>
+                                {nodeEdges.slice(0, 80).map((e, i) => (
+                                  <tr key={`${e.from}-${e.to}-${i}`}>
+                                    <td>{e.kind}</td>
+                                    <td className="mono">{e.from}</td>
+                                    <td className="mono">{e.to}</td>
+                                    <td>{e.label || "-"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
+
+                <div className="tiny" style={{ margin: "12px 0 4px" }}>
+                  Flow Events ({visibleFlowEvents.length}{flowView === "replay" ? `/${(flowEvents || []).length}` : ""})
+                </div>
+                {visibleFlowEvents.length === 0 ? (
+                  <div className="empty-state">No flow events loaded</div>
+                ) : (
+                  <table>
+                    <thead><tr><th>When</th><th>Type</th><th>Source</th><th>Targets</th><th>Flags</th></tr></thead>
+                    <tbody>
+                      {visibleFlowEvents.slice(0, 120).map((ev) => (
+                        <tr key={ev.event_id}>
+                          <td title={fmtTime(ev.timestamp)}>{relTime(ev.timestamp)}</td>
+                          <td className="mono">{ev.event_type}</td>
+                          <td className="mono">{ev.source_node || "-"}</td>
+                          <td className="tiny">{(ev.target_nodes || []).join(", ") || "-"}</td>
+                          <td>
+                            {ev.intercepted ? <span className="tag tag-warn">intercepted</span> : null}
+                            {ev.passthrough ? <span className="tag tag-info" style={{ marginLeft: 4 }}>passthrough</span> : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          </div>
+        ) : null}
+
         {activeView === "convos" ? (
           <section>
             <div className="head">
@@ -2625,13 +3230,13 @@ function App() {
               <div className="head">
                 <h2>Org Graph</h2>
                 <div className="stack">
-                  <select value={graphMode} onChange={(e) => { setSelectedGraphNodeID(""); setGraphMode(e.target.value); }}>
+                  <select value={graphMode} onChange={(e) => { setSelectedGraphNodeID(""); setSelectedGraphEdgeID(""); setGraphMode(e.target.value); }}>
                     <option value="holding">holding</option>
                     <option value="template">default OpCo template</option>
                     <option value="opco">running OpCo</option>
                   </select>
                   {graphMode === "opco" ? (
-                    <select value={graphVertical} onChange={(e) => { setSelectedGraphNodeID(""); setGraphVertical(e.target.value); }}>
+                    <select value={graphVertical} onChange={(e) => { setSelectedGraphNodeID(""); setSelectedGraphEdgeID(""); setGraphVertical(e.target.value); }}>
                       {(verticals || []).map((v) => (
                         <option key={v.id || v.slug} value={v.slug || v.id}>
                           {(v.slug || (v.id || "").slice(0, 8))} | {v.stage || "-"} | {v.geography || "-"}
@@ -2647,7 +3252,9 @@ function App() {
                   graph={graph}
                   graphKey={`${graphMode}:${graphMode === "opco" ? graphVertical : ""}:${(graph && graph.template_version) || ""}`}
                   selectedNodeID={selectedGraphNodeID}
+                  selectedEdgeID={selectedGraphEdgeID}
                   onSelectNode={setSelectedGraphNodeID}
+                  onSelectEdge={setSelectedGraphEdgeID}
                   onDerivedGraph={setGraphViewGraph}
                   runtimeAgents={agentsResp.agents}
                   isFullscreen={graphFullscreen}
@@ -2662,17 +3269,32 @@ function App() {
             <section>
               <div className="head">
                 <h2>Node Details</h2>
-                <div className="tiny mono">{selectedGraphNodeID || "none"}</div>
+                <div className="tiny mono">{selectedGraphEdgeID ? "edge selected" : (selectedGraphNodeID || "none")}</div>
               </div>
               <div className="body scroll">
                 {(() => {
                   const g = graphViewGraph || graph;
+                  const edge = (g.edges || []).find((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedGraphEdgeID) || null;
                   const node = (g.nodes || []).find((n) => n.id === selectedGraphNodeID) || null;
-                  if (!node) return <div className="empty-state">Click a node to inspect its configuration.</div>;
+                  if (!node && !edge) return <div className="empty-state">Click a node or edge to inspect details.</div>;
+                  if (!node && edge) {
+                    return (
+                      <div className="node-detail-card">
+                        <div className="tiny">Selected Edge</div>
+                        <JsonBlock data={edge} defaultOpen={2} />
+                      </div>
+                    );
+                  }
                   const rt = node.kind === "agent" ? (agentsResp.agents || []).find((a) => a.id === node.id) : null;
                   const nodeEdges = (g.edges || []).filter((e) => e.from === node.id || e.to === node.id);
                   return (
                     <>
+                      {edge ? (
+                        <div className="node-detail-card">
+                          <div className="tiny">Selected Edge</div>
+                          <JsonBlock data={edge} defaultOpen={2} />
+                        </div>
+                      ) : null}
                       <div className="node-detail-card">
                         <div className="tiny">Identity</div>
                         <div className="node-detail-grid">

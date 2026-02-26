@@ -743,6 +743,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.Conv
 	if err != nil {
 		return fmt.Errorf("marshal conversation messages: %w", err)
 	}
+	summary := strings.ToValidUTF8(rec.Summary, "\uFFFD")
 	const upsertQuery = `
 		INSERT INTO conversations (
 			agent_id, task_id, scope_key, mode, messages, summary, turn_count, status, created_at, updated_at
@@ -767,7 +768,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.Conv
 		rec.TaskID,
 		scopeKey,
 		string(msgJSON),
-		rec.Summary,
+		summary,
 		rec.TurnCount,
 		status,
 	); err != nil {
@@ -798,7 +799,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.Conv
 				mode,
 				rec.TaskID,
 				string(msgJSON),
-				rec.Summary,
+				summary,
 				rec.TurnCount,
 				status,
 			); legacyErr != nil {
@@ -839,7 +840,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.Conv
 			rec.TaskID,
 			scopeKey,
 			string(msgJSON),
-			rec.Summary,
+			summary,
 			rec.TurnCount,
 			status,
 		); legacyErr != nil {
@@ -1075,10 +1076,11 @@ func redactPayloadValue(key string, v any) any {
 }
 
 func redactText(s string) string {
+	s = strings.ToValidUTF8(s, "\uFFFD")
 	s = emailRegex.ReplaceAllString(s, "[EMAIL]")
 	s = phoneRegex.ReplaceAllString(s, "[PHONE]")
 	s = paymentRefRegex.ReplaceAllString(s, "[PAYMENT_REF]")
-	return s
+	return strings.ToValidUTF8(s, "\uFFFD")
 }
 
 func redactName(name string) string {

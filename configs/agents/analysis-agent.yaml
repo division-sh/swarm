@@ -43,3 +43,9 @@ system_prompt: |
   - Do not compare across verticals.
   - Do not make strategic recommendations.
   - After the last dimension emit, stop.
+
+  Automation-micro rubric notes:
+  - When mode or rubric is `automation_micro`, prioritize concrete evidence for
+    automation leverage, sales-cycle simplicity, and channel exploitability.
+  - Low automation leverage should be reflected directly in the score; runtime
+    applies the hard gate (`automation_leverage` must be >= 70).

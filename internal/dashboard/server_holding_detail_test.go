@@ -124,3 +124,88 @@ func TestDashboard_HoldingVerticalDetail_ReturnsArtifactsAndRelatedRecords(t *te
 		t.Fatalf("expected all_time_cents >= 3200, got %#v", spend["all_time_cents"])
 	}
 }
+
+func TestDashboard_HoldingVerticalDetail_BackfillsArtifactsFromEvents(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	t.Setenv("EMPIREAI_API_KEY", "test-key")
+	ctx := context.Background()
+
+	verticalID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (
+			id, name, slug, geography, stage, mode,
+			raw_signals, scores, business_brief, mvp_spec, spec_review, cto_feasibility, brand, validation_kit, full_spec,
+			created_at, updated_at
+		) VALUES (
+			$1::uuid, 'EU AI Act Compliance', 'eu-ai-act-compliance', 'eu', 'ready_for_review', 'factory',
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+			now(), now()
+		)
+	`, verticalID); err != nil {
+		t.Fatalf("seed vertical: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (id, type, source_agent, vertical_id, payload, created_at) VALUES
+			($1::uuid, 'vertical.scored', 'scoring-coordinator', $2::uuid, '{"composite_score":84.5,"dimensions":{"pain":88}}'::jsonb, now() - interval '30 minutes'),
+			($3::uuid, 'research.completed', 'business-research-agent', $2::uuid, '{"business_brief":{"business_model":"SaaS compliance workflow","opportunity_hypothesis":"AI Act governance cockpit"}}'::jsonb, now() - interval '25 minutes'),
+			($4::uuid, 'spec.draft_ready', 'lightweight-spec-agent', $2::uuid, '{"mvp_spec":{"core_workflow":"policy intake -> risk scoring -> evidence export"}}'::jsonb, now() - interval '20 minutes'),
+			($5::uuid, 'spec_review.passed', 'spec-reviewer', $2::uuid, '{"checklist":{"scope":"pass","feasibility":"pass"}}'::jsonb, now() - interval '15 minutes'),
+			($6::uuid, 'cto.spec_approved', 'factory-cto', $2::uuid, '{"cto_notes":{"decision":"approved","risks":["regulatory drift"]}}'::jsonb, now() - interval '10 minutes'),
+			($7::uuid, 'brand.candidates_ready', 'pre-brand-agent', $2::uuid, '{"brand":{"candidates":[{"name":"LexGuard"}]}}'::jsonb, now() - interval '8 minutes'),
+			($8::uuid, 'validation.package_ready', 'pipeline-coordinator', $2::uuid, '{"research":{"business_brief":{"target":"SMB legal + compliance"}},"spec":{"features":["risk matrix","audit log"]},"cto_notes":{"capacity":"green"},"brand":{"name":"LexGuard"}}'::jsonb, now() - interval '5 minutes')
+	`,
+		uuid.NewString(), verticalID,
+		uuid.NewString(),
+		uuid.NewString(),
+		uuid.NewString(),
+		uuid.NewString(),
+		uuid.NewString(),
+		uuid.NewString(),
+	); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+
+	pg := &store.PostgresStore{DB: db}
+	srv := NewServer(db, &config.Config{}, pg, pg, nil)
+	h := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/api/holding/vertical?id="+verticalID, nil)
+	req.Header.Set("X-Empire-Key", "test-key")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	vertical, _ := out["vertical"].(map[string]any)
+	if vertical == nil {
+		t.Fatalf("missing vertical payload: %s", w.Body.String())
+	}
+
+	if _, ok := vertical["scores"].(map[string]any); !ok {
+		t.Fatalf("expected scores map backfilled from events, got %#v", vertical["scores"])
+	}
+	if brief, ok := vertical["business_brief"].(map[string]any); !ok || brief["business_model"] == nil {
+		t.Fatalf("expected business_brief backfilled, got %#v", vertical["business_brief"])
+	}
+	if _, ok := vertical["mvp_spec"].(map[string]any); !ok {
+		t.Fatalf("expected mvp_spec backfilled, got %#v", vertical["mvp_spec"])
+	}
+	if _, ok := vertical["spec_review"].(map[string]any); !ok {
+		t.Fatalf("expected spec_review backfilled, got %#v", vertical["spec_review"])
+	}
+	if _, ok := vertical["cto_feasibility"].(map[string]any); !ok {
+		t.Fatalf("expected cto_feasibility backfilled, got %#v", vertical["cto_feasibility"])
+	}
+	if _, ok := vertical["brand"].(map[string]any); !ok {
+		t.Fatalf("expected brand backfilled, got %#v", vertical["brand"])
+	}
+	if _, ok := vertical["validation_kit"].(map[string]any); !ok {
+		t.Fatalf("expected validation_kit backfilled, got %#v", vertical["validation_kit"])
+	}
+}

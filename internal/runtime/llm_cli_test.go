@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -94,44 +95,22 @@ func TestParseCLIResponseOpenAIStyleToolCalls(t *testing.T) {
 	}
 }
 
-func TestParseCLIResponseFallback_TaggedEmitCalls(t *testing.T) {
+func TestParseCLIResponse_DoesNotInferTaggedEmitCallsFromText(t *testing.T) {
 	raw := []byte(`I am done.
 <emit_market_research_scan_complete>
 {"scan_id":"s1","categories_assessed":8,"high_signal_count":3,"geography":"argentina"}
 </emit_market_research_scan_complete>`)
 	resp := parseCLIResponse(raw)
-	if len(resp.ToolCalls) != 1 {
-		t.Fatalf("expected 1 fallback emit tool call, got %+v", resp.ToolCalls)
-	}
-	if resp.ToolCalls[0].Name != "emit_market_research_scan_complete" {
-		t.Fatalf("unexpected tool name: %s", resp.ToolCalls[0].Name)
-	}
-	argsRaw, _ := json.Marshal(resp.ToolCalls[0].Arguments)
-	var args map[string]any
-	_ = json.Unmarshal(argsRaw, &args)
-	if args["scan_id"] != "s1" {
-		t.Fatalf("unexpected args: %+v", args)
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected no inferred tool calls from text, got %+v", resp.ToolCalls)
 	}
 }
 
-func TestParseCLIResponseFallback_EmitEnvelopeInCodeFence(t *testing.T) {
+func TestParseCLIResponse_DoesNotInferEmitEnvelopeFromCodeFence(t *testing.T) {
 	raw := []byte("```json\n{\"emit_events\":[{\"type\":\"scan.requested\",\"task_id\":\"t1\",\"vertical_id\":\"v1\",\"payload\":{\"mode\":\"saas_gap\"}}]}\n```")
 	resp := parseCLIResponse(raw)
-	if len(resp.ToolCalls) != 1 {
-		t.Fatalf("expected 1 fallback emit tool call, got %+v", resp.ToolCalls)
-	}
-	if resp.ToolCalls[0].Name != "emit_scan_requested" {
-		t.Fatalf("unexpected tool name: %s", resp.ToolCalls[0].Name)
-	}
-	argsRaw, _ := json.Marshal(resp.ToolCalls[0].Arguments)
-	var args map[string]any
-	_ = json.Unmarshal(argsRaw, &args)
-	if args["task_id"] != "t1" || args["vertical_id"] != "v1" {
-		t.Fatalf("unexpected args: %+v", args)
-	}
-	payload, _ := args["payload"].(map[string]any)
-	if payload["mode"] != "saas_gap" {
-		t.Fatalf("unexpected payload: %+v", payload)
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected no inferred tool calls from text envelope, got %+v", resp.ToolCalls)
 	}
 }
 
@@ -200,8 +179,22 @@ func TestBuildMCPConfigArg_IncludesScopedHeaders(t *testing.T) {
 	if srv["type"] != "http" {
 		t.Fatalf("expected http transport, got %#v", srv["type"])
 	}
-	if srv["url"] != "http://orchestrator:8090/mcp" {
+	rawURL, _ := srv["url"].(string)
+	if !strings.HasPrefix(rawURL, "http://orchestrator:8090/mcp?") {
 		t.Fatalf("unexpected mcp url: %#v", srv["url"])
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatalf("parse mcp url: %v", err)
+	}
+	if got := strings.TrimSpace(u.Query().Get("empire_ctx_token")); got != strings.TrimSpace(token) {
+		t.Fatalf("expected context token in query, got %q", got)
+	}
+	if got := strings.TrimSpace(u.Query().Get("empire_agent_id")); got != "a1" {
+		t.Fatalf("expected agent id query, got %q", got)
+	}
+	if got := strings.TrimSpace(u.Query().Get("empire_allowed_tools")); got == "" || !strings.Contains(got, "emit_category_assessed") {
+		t.Fatalf("expected allowed tools in query, got %q", got)
 	}
 	headers, _ := srv["headers"].(map[string]any)
 	if headers["X-Empire-Agent-Id"] != "a1" {

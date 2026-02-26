@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 type ToolGateway struct {
 	executor  ToolExecutor
 	authToken string
+	logger    *RuntimeLogger
 }
 
 func NewToolGateway(executor ToolExecutor, authToken string) *ToolGateway {
@@ -23,6 +23,10 @@ func NewToolGateway(executor ToolExecutor, authToken string) *ToolGateway {
 		executor:  executor,
 		authToken: strings.TrimSpace(authToken),
 	}
+}
+
+func (g *ToolGateway) SetRuntimeLogger(logger *RuntimeLogger) {
+	g.logger = logger
 }
 
 func (g *ToolGateway) Handler() http.Handler {
@@ -82,7 +86,10 @@ func (g *ToolGateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := g.authorize(r); err != nil {
-		writeToolGatewayJSON(w, http.StatusUnauthorized, toolGatewayResponse{OK: false, Error: err.Error()})
+		g.logMCP(r, "warn", "tool.authorize_failed", err, map[string]any{
+			"path": strings.TrimSpace(r.URL.Path),
+		})
+		writeToolGatewayJSON(w, http.StatusUnauthorized, toolGatewayResponse{OK: false, Error: FormatRuntimeError(err)})
 		return
 	}
 	toolName := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/tools/"))
@@ -147,7 +154,10 @@ func (g *ToolGateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := g.authorize(r); err != nil {
-		g.writeMCPError(w, nil, -32001, err.Error())
+		g.logMCP(r, "warn", "mcp.authorize_failed", err, map[string]any{
+			"method": strings.TrimSpace(reqMethodForLog(r)),
+		})
+		g.writeMCPError(w, nil, -32001, FormatRuntimeError(err))
 		return
 	}
 
@@ -188,17 +198,28 @@ func (g *ToolGateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		toolName := strings.TrimSpace(asString(req.Params["name"]))
 		if toolName == "" {
+			err := newMCPRuntimeError(ErrCodeMCPInvalidRequest, "mcp.tools.call", false, nil, "tool name is required")
+			g.logMCP(r, "warn", "mcp.tools.call.invalid", err, map[string]any{
+				"method":   "tools/call",
+				"trace_id": traceIDFromRequest(r),
+			})
 			g.writeMCPResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": "tool name is required"}},
+				"content": []map[string]any{{"type": "text", "text": FormatRuntimeError(err)}},
 				"isError": true,
 			})
 			return
 		}
-		allowed := parseToolListHeader(r.Header.Get("X-Empire-Allowed-Tools"))
+		allowed := parseAllowedToolsFromRequest(r)
 		if len(allowed) > 0 {
 			if _, ok := allowed[toolName]; !ok {
+				err := newMCPRuntimeError(ErrCodeMCPToolNotAllowed, "mcp.tools.call.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
+				g.logMCP(r, "warn", "mcp.tools.call.denied", err, map[string]any{
+					"method":    "tools/call",
+					"tool_name": toolName,
+					"trace_id":  traceIDFromRequest(r),
+				})
 				g.writeMCPResult(w, req.ID, map[string]any{
-					"content": []map[string]any{{"type": "text", "text": "tool is not allowed for this agent"}},
+					"content": []map[string]any{{"type": "text", "text": FormatRuntimeError(err)}},
 					"isError": true,
 				})
 				return
@@ -207,20 +228,36 @@ func (g *ToolGateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		input := req.Params["arguments"]
 		ctx, err := g.mcpExecutionContext(r)
 		if err != nil {
+			g.logMCP(r, "warn", "mcp.tools.call.context_error", err, map[string]any{
+				"method":    "tools/call",
+				"tool_name": toolName,
+				"trace_id":  traceIDFromRequest(r),
+			})
 			g.writeMCPResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": err.Error()}},
+				"content": []map[string]any{{"type": "text", "text": FormatRuntimeError(err)}},
 				"isError": true,
 			})
 			return
 		}
 		out, execErr := g.executor.Execute(ctx, toolName, input)
 		if execErr != nil {
+			err = newMCPRuntimeError(ErrCodeMCPToolExecFailed, "mcp.tools.call.execute", true, execErr, "tool execution failed: %s", toolName)
+			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
+				"method":    "tools/call",
+				"tool_name": toolName,
+				"trace_id":  traceIDFromRequest(r),
+			})
 			g.writeMCPResult(w, req.ID, map[string]any{
-				"content": []map[string]any{{"type": "text", "text": execErr.Error()}},
+				"content": []map[string]any{{"type": "text", "text": FormatRuntimeError(err)}},
 				"isError": true,
 			})
 			return
 		}
+		g.logMCP(r, "debug", "mcp.tools.call.success", nil, map[string]any{
+			"method":    "tools/call",
+			"tool_name": toolName,
+			"trace_id":  traceIDFromRequest(r),
+		})
 		resultText := toolResultText(out)
 		g.writeMCPResult(w, req.ID, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": resultText}},
@@ -237,10 +274,10 @@ func (g *ToolGateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *ToolGateway) mcpExecutionContext(r *http.Request) (context.Context, error) {
-	if token := strings.TrimSpace(r.Header.Get("X-Empire-Context-Token")); token != "" {
+	if token := contextTokenFromRequest(r); token != "" {
 		if turn, ok := resolveMCPTurnContext(token); ok {
 			if !IsCurrentRuntimeEpoch(turn.Epoch) {
-				return nil, errors.New("stale mcp context token")
+				return nil, newMCPRuntimeError(ErrCodeMCPContextStale, "mcp.context.resolve", true, nil, "stale mcp context token")
 			}
 			ctx := context.Background()
 			ctx = WithActor(ctx, turn.Actor)
@@ -253,18 +290,19 @@ func (g *ToolGateway) mcpExecutionContext(r *http.Request) (context.Context, err
 			}
 			return ctx, nil
 		}
+		return nil, newMCPRuntimeError(ErrCodeMCPContextNotFound, "mcp.context.resolve", true, nil, "missing or invalid mcp context token")
 	}
 	if requireMCPContextToken() {
-		return nil, errors.New("missing or invalid mcp context token")
+		return nil, newMCPRuntimeError(ErrCodeMCPContextMissing, "mcp.context.resolve", true, nil, "missing or invalid mcp context token")
 	}
 	actor := models.AgentConfig{
-		ID:         strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")),
-		Role:       strings.TrimSpace(r.Header.Get("X-Empire-Agent-Role")),
-		VerticalID: strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")),
-		Mode:       strings.TrimSpace(r.Header.Get("X-Empire-Agent-Mode")),
+		ID:         firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")), strings.TrimSpace(r.URL.Query().Get("empire_agent_id"))),
+		Role:       firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Role")), strings.TrimSpace(r.URL.Query().Get("empire_agent_role"))),
+		VerticalID: firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")), strings.TrimSpace(r.URL.Query().Get("empire_vertical_id"))),
+		Mode:       firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Mode")), strings.TrimSpace(r.URL.Query().Get("empire_agent_mode"))),
 	}
 	if actor.ID == "" {
-		return nil, errors.New("missing actor id for mcp tool execution")
+		return nil, newMCPRuntimeError(ErrCodeMCPActorMissing, "mcp.context.resolve", false, nil, "missing actor id for mcp tool execution")
 	}
 	if actor.Mode == "" {
 		actor.Mode = "operating"
@@ -283,7 +321,7 @@ func requireMCPContextToken() bool {
 }
 
 func (g *ToolGateway) mcpToolsForRequest(r *http.Request) []mcpToolDef {
-	allowed := parseToolListHeader(r.Header.Get("X-Empire-Allowed-Tools"))
+	allowed := parseAllowedToolsFromRequest(r)
 	catalog := map[string]ToolDefinition{}
 	if provider, ok := g.executor.(interface{ ToolDefinitions() []ToolDefinition }); ok {
 		for _, def := range provider.ToolDefinitions() {
@@ -406,6 +444,21 @@ func parseToolListHeader(raw string) map[string]struct{} {
 	return out
 }
 
+func parseAllowedToolsFromRequest(r *http.Request) map[string]struct{} {
+	allowed := parseToolListHeader(strings.TrimSpace(r.Header.Get("X-Empire-Allowed-Tools")))
+	if len(allowed) > 0 {
+		return allowed
+	}
+	return parseToolListHeader(strings.TrimSpace(r.URL.Query().Get("empire_allowed_tools")))
+}
+
+func contextTokenFromRequest(r *http.Request) string {
+	if token := strings.TrimSpace(r.Header.Get("X-Empire-Context-Token")); token != "" {
+		return token
+	}
+	return strings.TrimSpace(r.URL.Query().Get("empire_ctx_token"))
+}
+
 func toolResultText(v any) string {
 	switch t := v.(type) {
 	case nil:
@@ -430,17 +483,67 @@ func (g *ToolGateway) authorize(r *http.Request) error {
 	}
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authz == "" {
-		return errors.New("missing authorization bearer token")
+		return newMCPRuntimeError(ErrCodeMCPAuthMissingBearer, "mcp.authorize", false, nil, "missing authorization bearer token")
 	}
 	const prefix = "bearer "
 	if !strings.HasPrefix(strings.ToLower(authz), prefix) {
-		return errors.New("invalid authorization header")
+		return newMCPRuntimeError(ErrCodeMCPAuthInvalidBearer, "mcp.authorize", false, nil, "invalid authorization header")
 	}
 	token := strings.TrimSpace(authz[len(prefix):])
 	if token != g.authToken {
-		return errors.New("invalid token")
+		return newMCPRuntimeError(ErrCodeMCPAuthInvalidBearer, "mcp.authorize", false, nil, "invalid token")
 	}
 	return nil
+}
+
+func reqMethodForLog(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if strings.TrimSpace(r.Method) != http.MethodPost {
+		return strings.TrimSpace(r.Method)
+	}
+	var req mcpRPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return strings.TrimSpace(r.Method)
+	}
+	return strings.TrimSpace(req.Method)
+}
+
+func traceIDFromRequest(r *http.Request) string {
+	return firstNonEmpty(
+		strings.TrimSpace(r.Header.Get("X-Empire-Trace-Id")),
+		strings.TrimSpace(r.URL.Query().Get("empire_trace_id")),
+		strings.TrimSpace(r.URL.Query().Get("empire_ctx_token")),
+	)
+}
+
+func (g *ToolGateway) logMCP(r *http.Request, level, action string, err error, detail map[string]any) {
+	if g == nil || g.logger == nil || r == nil {
+		return
+	}
+	agentID := firstNonEmpty(
+		strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")),
+		strings.TrimSpace(r.URL.Query().Get("empire_agent_id")),
+	)
+	verticalID := firstNonEmpty(
+		strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")),
+		strings.TrimSpace(r.URL.Query().Get("empire_vertical_id")),
+	)
+	entry := RuntimeLogEntry{
+		Level:     strings.ToLower(strings.TrimSpace(level)),
+		Component: "mcp-gateway",
+		Action:    strings.TrimSpace(action),
+		AgentID:   agentID,
+		VerticalID: func() string {
+			return verticalID
+		}(),
+		Detail: detail,
+	}
+	if err != nil {
+		entry.Error = FormatRuntimeError(err)
+	}
+	g.logger.Log(r.Context(), entry)
 }
 
 func writeToolGatewayJSON(w http.ResponseWriter, status int, payload toolGatewayResponse) {

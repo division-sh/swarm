@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -175,6 +176,49 @@ func TestPostgresSessionRegistry_AdoptSessionID(t *testing.T) {
 
 	if err := sr.AdoptSessionID("a1", "cli_test", "owner-1", "claude-session-1", ""); err != nil {
 		t.Fatalf("AdoptSessionID: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestPostgresSessionRegistry_Rotate_FallbackWithoutScopeKeyColumn(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	sr.nowFn = func() time.Time { return fixedNow }
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id::text, session_id, lock_owner, lock_expires_at\\s+FROM agent_sessions").
+		WithArgs("a1", "api", "scope-a").
+		WillReturnError(errors.New(`pq: column "scope_key" does not exist`))
+	mock.ExpectQuery("SELECT id::text, session_id, lock_owner, lock_expires_at\\s+FROM agent_sessions").
+		WithArgs("a1", "api").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id", "lock_owner", "lock_expires_at"}).
+			AddRow("row-1", "sess-1", "owner-1", fixedNow.Add(10*time.Second)))
+	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'rotated'").
+		WithArgs("sum", "row-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("INSERT INTO agent_sessions").
+		WithArgs("a1", "api", "anthropic", sqlmock.AnyArg(), "owner-1", 30).
+		WillReturnRows(sqlmock.NewRows([]string{"lock_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
+	mock.ExpectCommit()
+
+	lease, err := sr.Rotate("a1", "api", "owner-1", "sum", "scope-a")
+	if err != nil {
+		t.Fatalf("Rotate fallback: %v", err)
+	}
+	if lease.ScopeKey != "" {
+		t.Fatalf("expected empty scope key on fallback, got %q", lease.ScopeKey)
+	}
+	if sr.isScopeKeyEnabled() {
+		t.Fatal("expected scope-key mode disabled after fallback")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

@@ -4,10 +4,8 @@ model_tier: haiku
 parent_role: cto-agent
 subscriptions:
   - build_complete
-  - devops.deploy_complete
 tools:
-  - agent_message
-  - schedule
+  - sql_execute
 constraints:
   max_turns_per_task: 20
   conversation_mode: session

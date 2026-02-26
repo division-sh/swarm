@@ -13,9 +13,6 @@ ALTER TABLE spend_ledger
 ALTER TABLE spend_ledger
   ALTER COLUMN source SET DEFAULT 'exact';
 
-ALTER TABLE human_tasks
-  ADD COLUMN IF NOT EXISTS tool_call_id TEXT;
-
 DO $$
 BEGIN
   IF NOT EXISTS (

@@ -87,8 +87,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/dashboard/api/agents/", s.handleAPIAgentPrompt)
 	mux.HandleFunc("/dashboard/api/events", s.handleEvents)
 	mux.HandleFunc("/dashboard/api/events/stream", s.handleEventStream)
+	mux.HandleFunc("/dashboard/api/events/flow", s.handleFlowEvents)
 	mux.HandleFunc("/dashboard/api/events/", s.handleEventDetail)
 	mux.HandleFunc("/dashboard/api/runtime/logs", s.handleRuntimeLogs)
+	mux.HandleFunc("/dashboard/api/runtime/incidents", s.handleRuntimeIncidents)
 	mux.HandleFunc("/dashboard/api/conversations", s.handleConversations)
 	mux.HandleFunc("/dashboard/api/conversations/", s.handleConversationDetail)
 	mux.HandleFunc("/dashboard/api/funnel", s.handleFunnel)
@@ -102,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/dashboard/api/health", s.handleHealth)
 	mux.HandleFunc("/dashboard/api/health/pipeline", s.handlePipelineHealth)
 	mux.HandleFunc("/dashboard/api/graph", s.handleGraph)
+	mux.HandleFunc("/dashboard/api/pipeline/graph", s.handlePipelineGraph)
 	mux.HandleFunc("/dashboard/api/control/targets", s.handleControlTargets)
 	mux.HandleFunc("/dashboard/api/control/seed-org", s.handleControlSeedOrg)
 	mux.HandleFunc("/dashboard/api/control/verticals/create", s.handleControlCreateVertical)
@@ -125,11 +128,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/mailbox", s.handleMailbox)
 	mux.HandleFunc("/api/mailbox/", s.handleAPIMailboxDetail)
 	mux.HandleFunc("/api/events", s.handleAPIEvents)
+	mux.HandleFunc("/api/events/flow", s.handleFlowEvents)
 	mux.HandleFunc("/api/events/", s.handleEventDetail)
 	mux.HandleFunc("/api/runtime/logs", s.handleRuntimeLogs)
+	mux.HandleFunc("/api/runtime/incidents", s.handleRuntimeIncidents)
 	mux.HandleFunc("/api/verticals", s.handleAPIVerticals)
 	mux.HandleFunc("/api/verticals/", s.handleAPIVerticalDetail)
 	mux.HandleFunc("/api/chat/", s.handleAPIChat)
+	mux.HandleFunc("/api/conversations", s.handleConversations)
+	mux.HandleFunc("/api/conversations/", s.handleConversationDetail)
 	mux.HandleFunc("/api/agents/", s.handleAPIAgentPrompt)
 	mux.HandleFunc("/api/templates/publish", s.handleAPITemplatePublish)
 	mux.HandleFunc("/api/templates/", s.handleAPITemplatePrompt)
@@ -140,6 +147,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/health/pipeline", s.handlePipelineHealth)
 	mux.HandleFunc("/api/pipeline/shards", s.handlePipelineShards)
 	mux.HandleFunc("/api/pipeline/shards/", s.handlePipelineShardDetail)
+	mux.HandleFunc("/api/pipeline/graph", s.handlePipelineGraph)
 	mux.HandleFunc("/api/graph", s.handleGraph)
 	mux.HandleFunc("/health/pipeline", s.handlePipelineHealth)
 	return s.authMiddleware(mux)
@@ -1034,13 +1042,33 @@ type graphNode struct {
 }
 
 type graphEdge struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Kind   string `json:"kind"`   // routing | management | subscription | producer | message | mailbox
-	Label  string `json:"label"`  // e.g. event_pattern or "manages"
-	Status string `json:"status"` // active | proposed | deactivated
-	Source string `json:"source"` // bootstrap | seeded | discovered | template
-	Reason string `json:"reason,omitempty"`
+	From              string   `json:"from"`
+	To                string   `json:"to"`
+	Kind              string   `json:"kind"`   // routing | management | subscription | producer | message | mailbox
+	Label             string   `json:"label"`  // e.g. event_pattern or "manages"
+	Status            string   `json:"status"` // active | proposed | deactivated
+	Source            string   `json:"source"` // bootstrap | seeded | discovered | template
+	Reason            string   `json:"reason,omitempty"`
+	EventType         string   `json:"event_type,omitempty"`
+	Producers         []string `json:"producers,omitempty"`
+	Consumers         []string `json:"consumers,omitempty"`
+	SchemaRequired    []string `json:"schema_required,omitempty"`
+	SchemaProperties  []string `json:"schema_properties,omitempty"`
+	InterceptorHandle string   `json:"interceptor_handler,omitempty"`
+	Intercepted       bool     `json:"intercepted,omitempty"`
+	Passthrough       bool     `json:"passthrough,omitempty"`
+}
+
+type flowEventView struct {
+	EventID     string    `json:"event_id"`
+	EventType   string    `json:"event_type"`
+	SourceNode  string    `json:"source_node"`
+	TargetNodes []string  `json:"target_nodes"`
+	Intercepted bool      `json:"intercepted"`
+	Passthrough bool      `json:"passthrough"`
+	Timestamp   time.Time `json:"timestamp"`
+	VerticalID  string    `json:"vertical_id,omitempty"`
+	TaskID      string    `json:"task_id,omitempty"`
 }
 
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
@@ -1105,6 +1133,536 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid mode: %s (expected holding|template|opco)", mode))
 		return
 	}
+}
+
+func (s *Server) handlePipelineGraph(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	view := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("view")))
+	if view == "" {
+		view = "design"
+	}
+	if view != "design" && view != "runtime" && view != "replay" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("invalid view: %s (expected design|runtime|replay)", view))
+		return
+	}
+	vertical := strings.TrimSpace(r.URL.Query().Get("vertical"))
+	limit := clamp(parseInt(r.URL.Query().Get("limit"), 250), 20, 2000)
+	ctx := r.Context()
+
+	nodes, edges, meta, err := s.buildPipelineDesignGraph(ctx, vertical)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	resp := map[string]any{
+		"generated_at": s.now().UTC(),
+		"view":         view,
+		"vertical":     vertical,
+		"nodes":        nodes,
+		"edges":        edges,
+		"meta":         meta,
+	}
+
+	if view == "runtime" || view == "replay" {
+		start, end := parseFlowRange(r.URL.Query().Get("start"), r.URL.Query().Get("end"))
+		if view == "runtime" && start.IsZero() {
+			start = s.now().UTC().Add(-15 * time.Minute)
+		}
+		if view == "replay" && start.IsZero() {
+			start = s.now().UTC().Add(-2 * time.Hour)
+		}
+		flows, qErr := s.queryFlowEvents(ctx, start, end, vertical, limit, true)
+		if qErr != nil {
+			writeErr(w, http.StatusInternalServerError, qErr)
+			return
+		}
+		resp["flow_events"] = flows
+		resp["flow_count"] = len(flows)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) buildPipelineDesignGraph(ctx context.Context, vertical string) ([]graphNode, []graphEdge, map[string]any, error) {
+	nodes := make([]graphNode, 0, 128)
+	edges := make([]graphEdge, 0, 192)
+	seenNodes := map[string]struct{}{}
+	seenEdges := map[string]struct{}{}
+
+	addNode := func(n graphNode) {
+		id := strings.TrimSpace(n.ID)
+		if id == "" {
+			return
+		}
+		if _, ok := seenNodes[id]; ok {
+			return
+		}
+		n.ID = id
+		if strings.TrimSpace(n.Label) == "" {
+			n.Label = id
+		}
+		nodes = append(nodes, n)
+		seenNodes[id] = struct{}{}
+	}
+	addEdge := func(e graphEdge) {
+		e.From = strings.TrimSpace(e.From)
+		e.To = strings.TrimSpace(e.To)
+		if e.From == "" || e.To == "" {
+			return
+		}
+		key := e.From + "->" + e.To + "|" + strings.TrimSpace(e.Kind) + "|" + strings.TrimSpace(e.Label)
+		if _, ok := seenEdges[key]; ok {
+			return
+		}
+		if strings.TrimSpace(e.Status) == "" {
+			e.Status = "active"
+		}
+		edges = append(edges, e)
+		seenEdges[key] = struct{}{}
+	}
+	evtID := func(eventType string) string {
+		return "evt:" + strings.TrimSpace(eventType)
+	}
+	ensureEventNode := func(eventType string) string {
+		id := evtID(eventType)
+		addNode(graphNode{
+			ID:    id,
+			Kind:  "event",
+			Label: eventType,
+			Group: "factory",
+		})
+		return id
+	}
+	linkProducer := func(sourceNode, eventType string) {
+		eventNode := ensureEventNode(eventType)
+		addEdge(graphEdge{
+			From:      sourceNode,
+			To:        eventNode,
+			Kind:      "producer",
+			Label:     eventType,
+			EventType: eventType,
+			Status:    "active",
+			Source:    "pipeline",
+		})
+	}
+	linkConsumer := func(eventType, targetNode, source string) {
+		eventNode := ensureEventNode(eventType)
+		addEdge(graphEdge{
+			From:      eventNode,
+			To:        targetNode,
+			Kind:      "subscription",
+			Label:     eventType,
+			EventType: eventType,
+			Status:    "active",
+			Source:    source,
+		})
+	}
+
+	addNode(graphNode{ID: "sys:human-board", Kind: "human", Label: "Human Board", Group: "human"})
+	addNode(graphNode{ID: "sys:mailbox", Kind: "mailbox", Label: "Mailbox", Group: "human"})
+	addNode(graphNode{ID: "runtime:directive-parser", Kind: "runtime_process", Label: "DirectiveParser", Group: "factory"})
+	addNode(graphNode{ID: "runtime:scan-accumulator", Kind: "state_machine", Label: "ScanAccumulator", Group: "factory"})
+	addNode(graphNode{ID: "runtime:scoring-accumulator", Kind: "state_machine", Label: "ScoringAccumulator", Group: "factory"})
+	addNode(graphNode{ID: "runtime:validation-pipeline", Kind: "state_machine", Label: "ValidationPipeline", Group: "factory"})
+	addNode(graphNode{ID: "runtime:compute-composite", Kind: "runtime_process", Label: "computeComposite()", Group: "factory"})
+	addNode(graphNode{ID: "gate:viability-floor", Kind: "gate", Label: "Viability Floor", Group: "factory"})
+	addNode(graphNode{ID: "gate:hard-gates", Kind: "gate", Label: "Hard Gates", Group: "factory"})
+	addNode(graphNode{ID: "gate:g1", Kind: "gate", Label: "G1 Research", Group: "factory"})
+	addNode(graphNode{ID: "gate:g2", Kind: "gate", Label: "G2 Spec", Group: "factory"})
+	addNode(graphNode{ID: "gate:g3", Kind: "gate", Label: "G3 CTO", Group: "factory"})
+	addNode(graphNode{ID: "gate:g4", Kind: "gate", Label: "G4 Brand", Group: "factory"})
+	addNode(graphNode{ID: "pipeline:vertical-stages", Kind: "state_machine", Label: "Vertical Stage Machine", Group: "factory"})
+
+	addNode(graphNode{ID: "empire-coordinator", Kind: "agent", Label: "empire-coordinator", Role: "empire-coordinator", Group: "factory"})
+	addNode(graphNode{ID: "market-research-agent", Kind: "agent", Label: "market-research-agent", Role: "market-research-agent", Group: "factory"})
+	addNode(graphNode{ID: "trend-research-agent", Kind: "agent", Label: "trend-research-agent", Role: "trend-research-agent", Group: "factory"})
+	addNode(graphNode{ID: "analysis-agent", Kind: "agent", Label: "analysis-agent", Role: "analysis-agent", Group: "factory"})
+	addNode(graphNode{ID: "business-research-agent", Kind: "agent", Label: "business-research-agent", Role: "business-research-agent", Group: "factory"})
+	addNode(graphNode{ID: "lightweight-spec-agent", Kind: "agent", Label: "lightweight-spec-agent", Role: "lightweight-spec-agent", Group: "factory"})
+	addNode(graphNode{ID: "spec-reviewer", Kind: "agent", Label: "spec-reviewer", Role: "spec-reviewer", Group: "factory"})
+	addNode(graphNode{ID: "spec-auditor", Kind: "agent", Label: "spec-auditor", Role: "spec-auditor", Group: "factory"})
+	addNode(graphNode{ID: "factory-cto", Kind: "agent", Label: "factory-cto", Role: "factory-cto", Group: "factory"})
+	addNode(graphNode{ID: "pre-brand-agent", Kind: "agent", Label: "pre-brand-agent", Role: "pre-brand-agent", Group: "factory"})
+	addNode(graphNode{ID: "validation-coordinator", Kind: "agent", Label: "validation-coordinator", Role: "validation-coordinator", Group: "factory"})
+	addNode(graphNode{ID: "opco-ceo", Kind: "agent", Label: "opco-ceo", Role: "opco-ceo", Group: "opco"})
+
+	linkProducer("sys:human-board", "system.directive")
+	linkConsumer("system.directive", "runtime:directive-parser", "pipeline")
+	linkProducer("runtime:directive-parser", "scan.requested")
+	linkConsumer("scan.requested", "runtime:scan-accumulator", "pipeline")
+	linkProducer("runtime:scan-accumulator", "market_research.scan_assigned")
+	linkConsumer("market_research.scan_assigned", "market-research-agent", "pipeline")
+	linkProducer("market-research-agent", "category.assessed")
+	linkConsumer("category.assessed", "runtime:scan-accumulator", "pipeline")
+	linkProducer("runtime:scan-accumulator", "vertical.discovered")
+	linkConsumer("vertical.discovered", "runtime:scoring-accumulator", "pipeline")
+	linkProducer("runtime:scoring-accumulator", "scoring.requested")
+	linkConsumer("scoring.requested", "analysis-agent", "pipeline")
+	linkProducer("analysis-agent", "score.dimension_complete")
+	linkConsumer("score.dimension_complete", "runtime:scoring-accumulator", "pipeline")
+	linkProducer("runtime:scoring-accumulator", "scoring.contested")
+	linkConsumer("scoring.contested", "empire-coordinator", "pipeline")
+	linkProducer("empire-coordinator", "scoring.contest_resolved")
+	linkConsumer("scoring.contest_resolved", "runtime:scoring-accumulator", "pipeline")
+	addEdge(graphEdge{From: "runtime:scoring-accumulator", To: "runtime:compute-composite", Kind: "routing", Label: "bundle + resolve", Source: "pipeline"})
+	addEdge(graphEdge{From: "runtime:compute-composite", To: "gate:hard-gates", Kind: "routing", Label: "automation_micro", Source: "pipeline"})
+	addEdge(graphEdge{From: "runtime:compute-composite", To: "gate:viability-floor", Kind: "routing", Label: "rubric viability", Source: "pipeline"})
+	linkProducer("runtime:compute-composite", "vertical.scored")
+	linkProducer("runtime:compute-composite", "vertical.marginal")
+	linkConsumer("vertical.marginal", "empire-coordinator", "pipeline")
+	linkProducer("runtime:compute-composite", "vertical.shortlisted")
+	linkConsumer("vertical.shortlisted", "runtime:validation-pipeline", "pipeline")
+	linkProducer("runtime:validation-pipeline", "validation.started")
+	linkConsumer("validation.started", "business-research-agent", "pipeline")
+	linkProducer("runtime:validation-pipeline", "brand.requested")
+	linkConsumer("brand.requested", "pre-brand-agent", "pipeline")
+	linkProducer("business-research-agent", "research.completed")
+	linkConsumer("research.completed", "runtime:validation-pipeline", "pipeline")
+	addEdge(graphEdge{From: "runtime:validation-pipeline", To: "gate:g1", Kind: "routing", Label: "set", Source: "pipeline"})
+	linkProducer("business-research-agent", "spec.requested")
+	linkConsumer("spec.requested", "lightweight-spec-agent", "pipeline")
+	linkProducer("lightweight-spec-agent", "spec.draft_ready")
+	linkConsumer("spec.draft_ready", "business-research-agent", "pipeline")
+	linkProducer("business-research-agent", "spec_review.requested")
+	linkConsumer("spec_review.requested", "spec-reviewer", "pipeline")
+	linkProducer("spec-reviewer", "spec_review.passed")
+	linkConsumer("spec_review.passed", "business-research-agent", "pipeline")
+	linkProducer("business-research-agent", "spec.approved")
+	linkConsumer("spec.approved", "runtime:validation-pipeline", "pipeline")
+	addEdge(graphEdge{From: "runtime:validation-pipeline", To: "gate:g2", Kind: "routing", Label: "set", Source: "pipeline"})
+	linkProducer("runtime:validation-pipeline", "spec.validation_requested")
+	linkConsumer("spec.validation_requested", "spec-auditor", "pipeline")
+	linkProducer("spec-auditor", "spec.validation_passed")
+	linkConsumer("spec.validation_passed", "runtime:validation-pipeline", "pipeline")
+	linkProducer("runtime:validation-pipeline", "cto.spec_review_requested")
+	linkConsumer("cto.spec_review_requested", "factory-cto", "pipeline")
+	linkProducer("factory-cto", "cto.spec_approved")
+	linkConsumer("cto.spec_approved", "runtime:validation-pipeline", "pipeline")
+	addEdge(graphEdge{From: "runtime:validation-pipeline", To: "gate:g3", Kind: "routing", Label: "set", Source: "pipeline"})
+	linkProducer("pre-brand-agent", "brand.candidates_ready")
+	linkConsumer("brand.candidates_ready", "runtime:validation-pipeline", "pipeline")
+	addEdge(graphEdge{From: "runtime:validation-pipeline", To: "gate:g4", Kind: "routing", Label: "set", Source: "pipeline"})
+	linkProducer("runtime:validation-pipeline", "validation.package_ready")
+	linkConsumer("validation.package_ready", "validation-coordinator", "pipeline")
+	linkProducer("validation-coordinator", "vertical.ready_for_review")
+	linkConsumer("vertical.ready_for_review", "sys:mailbox", "pipeline")
+	linkProducer("sys:human-board", "vertical.approved")
+	linkConsumer("vertical.approved", "runtime:validation-pipeline", "pipeline")
+	linkConsumer("vertical.approved", "empire-coordinator", "pipeline")
+	linkProducer("empire-coordinator", "opco.spinup_requested")
+	linkConsumer("opco.spinup_requested", "opco-ceo", "pipeline")
+	linkProducer("runtime:compute-composite", "vertical.rejected")
+	linkConsumer("vertical.rejected", "pipeline:vertical-stages", "pipeline")
+	linkProducer("runtime:scan-accumulator", "campaign.completed")
+	linkConsumer("campaign.completed", "empire-coordinator", "pipeline")
+	linkProducer("runtime:scoring-accumulator", "timer.portfolio_digest")
+	linkConsumer("timer.portfolio_digest", "empire-coordinator", "pipeline")
+
+	if strings.TrimSpace(vertical) != "" {
+		addNode(graphNode{ID: "focus:vertical", Kind: "system", Label: "Vertical Focus: " + strings.TrimSpace(vertical), Group: "factory"})
+		addEdge(graphEdge{From: "focus:vertical", To: "pipeline:vertical-stages", Kind: "routing", Label: "filter", Source: "ui"})
+	}
+
+	// Annotate event edges with schema + producer/consumer summaries.
+	producersByEvent := map[string]map[string]struct{}{}
+	consumersByEvent := map[string]map[string]struct{}{}
+	for _, e := range edges {
+		if strings.TrimSpace(e.EventType) == "" {
+			continue
+		}
+		switch e.Kind {
+		case "producer":
+			if _, ok := producersByEvent[e.EventType]; !ok {
+				producersByEvent[e.EventType] = map[string]struct{}{}
+			}
+			producersByEvent[e.EventType][strings.TrimSpace(e.From)] = struct{}{}
+		case "subscription":
+			if _, ok := consumersByEvent[e.EventType]; !ok {
+				consumersByEvent[e.EventType] = map[string]struct{}{}
+			}
+			consumersByEvent[e.EventType][strings.TrimSpace(e.To)] = struct{}{}
+		}
+	}
+	eventSchemas := runtime.EventSchemaSnapshot()
+	for i := range edges {
+		eventType := strings.TrimSpace(edges[i].EventType)
+		if eventType == "" {
+			continue
+		}
+		if producers := producersByEvent[eventType]; len(producers) > 0 {
+			edges[i].Producers = mapKeys(producers)
+		}
+		if consumers := consumersByEvent[eventType]; len(consumers) > 0 {
+			edges[i].Consumers = mapKeys(consumers)
+		}
+		if schema, ok := eventSchemas[eventType]; ok {
+			edges[i].SchemaRequired = eventSchemaRequired(schema.Schema)
+			edges[i].SchemaProperties = eventSchemaProperties(schema.Schema)
+		}
+		intercepted, passthrough := flowInterceptPolicy(eventType, nil)
+		edges[i].Intercepted = intercepted
+		edges[i].Passthrough = passthrough
+		edges[i].InterceptorHandle = pipelineHandlerRef(eventType)
+	}
+
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].Group == nodes[j].Group {
+			return nodes[i].ID < nodes[j].ID
+		}
+		return nodes[i].Group < nodes[j].Group
+	})
+	sort.SliceStable(edges, func(i, j int) bool {
+		if edges[i].From == edges[j].From {
+			if edges[i].To == edges[j].To {
+				return edges[i].Label < edges[j].Label
+			}
+			return edges[i].To < edges[j].To
+		}
+		return edges[i].From < edges[j].From
+	})
+
+	meta := map[string]any{
+		"design_version": "2.0.26",
+		"lanes":          []string{"human", "factory", "opco"},
+		"node_count":     len(nodes),
+		"edge_count":     len(edges),
+	}
+	return nodes, edges, meta, nil
+}
+
+func (s *Server) handleFlowEvents(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	vertical := strings.TrimSpace(r.URL.Query().Get("vertical"))
+	limit := clamp(parseInt(r.URL.Query().Get("limit"), 250), 1, 2000)
+	start, end := parseFlowRange(r.URL.Query().Get("start"), r.URL.Query().Get("end"))
+	stream := parseBoolQuery(r.URL.Query().Get("stream"), false)
+
+	if !stream {
+		items, err := s.queryFlowEvents(r.Context(), start, end, vertical, limit, false)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"generated_at": s.now().UTC(),
+			"count":        len(items),
+			"flow_events":  items,
+		})
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, fmt.Errorf("streaming unsupported"))
+		return
+	}
+	w.Header().Set("content-type", "text/event-stream")
+	w.Header().Set("cache-control", "no-cache")
+	w.Header().Set("connection", "keep-alive")
+
+	since := start
+	if since.IsZero() {
+		since = s.now().UTC().Add(-30 * time.Second)
+	}
+	ctx := r.Context()
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		items, err := s.queryFlowEvents(ctx, since, end, vertical, limit, true)
+		if err == nil {
+			for _, item := range items {
+				raw, _ := json.Marshal(item)
+				_, _ = fmt.Fprintf(w, "event: flow\ndata: %s\n\n", raw)
+				if item.Timestamp.After(since) {
+					since = item.Timestamp
+				}
+			}
+		}
+		flusher.Flush()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func parseFlowRange(startRaw, endRaw string) (time.Time, time.Time) {
+	return parseFlowTime(startRaw), parseFlowTime(endRaw)
+}
+
+func parseFlowTime(raw string) time.Time {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t.UTC()
+	}
+	// datetime-local input from the dashboard (no timezone)
+	if t, err := time.ParseInLocation("2006-01-02T15:04", v, time.Local); err == nil {
+		return t.UTC()
+	}
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", v, time.Local); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
+}
+
+func flowInterceptPolicy(eventType string, payloadRaw []byte) (intercepted bool, passthrough bool) {
+	switch strings.TrimSpace(eventType) {
+	case "timer.portfolio_digest":
+		var payload map[string]any
+		_ = json.Unmarshal(payloadRaw, &payload)
+		if boolFromAny(payload["scoring_rejections_injected"]) {
+			return false, false
+		}
+		return true, true
+	case "vertical.scored":
+		var payload map[string]any
+		_ = json.Unmarshal(payloadRaw, &payload)
+		result := strings.ToLower(strings.TrimSpace(asString(payload["result"])))
+		switch result {
+		case "marginal", "rejected":
+			return true, true
+		default:
+			return false, true
+		}
+	case "scan.requested",
+		"vertical.discovered",
+		"score.dimension_complete",
+		"scoring.contest_resolved",
+		"category.assessed",
+		"trend.identified",
+		"source.scraped",
+		"market_research.scan_complete",
+		"trend_research.scan_complete",
+		"scanner.google_maps.scan_complete",
+		"scanner.instagram.scan_complete",
+		"scanner.reviews.scan_complete",
+		"scanner.directories.scan_complete",
+		"scanner.job_boards.scan_complete",
+		"dedup.resolved",
+		"synthesis.resolved",
+		"vertical.shortlisted",
+		"research.completed",
+		"research.vertical_rejected",
+		"spec.revision_requested",
+		"spec.approved",
+		"cto.spec_approved",
+		"cto.spec_revision_needed",
+		"cto.spec_vetoed",
+		"brand.candidates_ready",
+		"vertical.needs_more_data",
+		"brand.revision_needed",
+		"vertical.resumed":
+		return true, true
+	case "spec.validation_passed", "spec.validation_failed":
+		return true, true
+	case "vertical.approved", "vertical.killed", "vertical.ready_for_review":
+		return false, true
+	case "runtime.reset":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func pipelineHandlerRef(eventType string) string {
+	switch strings.TrimSpace(eventType) {
+	case "scan.requested":
+		return "pipeline_coordinator.go:handleScanRequested"
+	case "category.assessed", "trend.identified", "source.scraped":
+		return "pipeline_coordinator.go:handleDiscoveryReport"
+	case "dedup.resolved":
+		return "pipeline_coordinator.go:handleDedupResolved"
+	case "vertical.discovered":
+		return "pipeline_coordinator.go:handleScoringRequested"
+	case "score.dimension_complete":
+		return "pipeline_coordinator.go:handleScoreDimensionComplete"
+	case "scoring.contest_resolved":
+		return "pipeline_coordinator.go:handleScoringContestResolved"
+	case "vertical.shortlisted":
+		return "pipeline_coordinator.go:handleValidationStarted"
+	case "research.completed", "spec.approved", "brand.candidates_ready":
+		return "pipeline_coordinator.go:handleValidationGate"
+	case "spec.validation_passed":
+		return "pipeline_coordinator.go:handleSpecValidationPassed"
+	case "spec.validation_failed":
+		return "pipeline_coordinator.go:handleSpecValidationFailed"
+	case "cto.spec_approved":
+		return "pipeline_coordinator.go:handleCTOApproved"
+	case "cto.spec_revision_needed":
+		return "pipeline_coordinator.go:handleCTORevisionNeeded"
+	case "research.vertical_rejected", "cto.spec_vetoed":
+		return "pipeline_coordinator.go:handleValidationRejected"
+	case "vertical.needs_more_data":
+		return "pipeline_coordinator.go:handleValidationMoreData"
+	case "brand.revision_needed":
+		return "pipeline_coordinator.go:handleBrandRevision"
+	case "spec.revision_requested":
+		return "pipeline_coordinator.go:handleSpecRevisionRequested"
+	case "vertical.resumed":
+		return "pipeline_coordinator.go:handleVerticalResumed"
+	case "timer.portfolio_digest":
+		return "pipeline_coordinator.go:handlePortfolioDigestTimer"
+	case "runtime.reset":
+		return "pipeline_coordinator.go:resetInMemoryState"
+	default:
+		return ""
+	}
+}
+
+func eventSchemaRequired(raw map[string]any) []string {
+	requiredRaw, ok := raw["required"]
+	if !ok || requiredRaw == nil {
+		return nil
+	}
+	switch t := requiredRaw.(type) {
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			v := strings.TrimSpace(asString(item))
+			if v != "" {
+				out = append(out, v)
+			}
+		}
+		sort.Strings(out)
+		return out
+	case []string:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			v := strings.TrimSpace(item)
+			if v != "" {
+				out = append(out, v)
+			}
+		}
+		sort.Strings(out)
+		return out
+	default:
+		return nil
+	}
+}
+
+func eventSchemaProperties(raw map[string]any) []string {
+	propsRaw, ok := raw["properties"].(map[string]any)
+	if !ok || len(propsRaw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(propsRaw))
+	for k := range propsRaw {
+		v := strings.TrimSpace(k)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func parseAgentRuntimeConfig(raw []byte) (systemPrompt string, tools []string, subs []string, constraints map[string]any) {
@@ -1784,6 +2342,7 @@ func (s *Server) handleRuntimeLogs(w http.ResponseWriter, r *http.Request) {
 		Vertical:  strings.TrimSpace(r.URL.Query().Get("vertical")),
 		Component: strings.TrimSpace(r.URL.Query().Get("component")),
 		Level:     strings.TrimSpace(r.URL.Query().Get("level")),
+		ErrorCode: strings.TrimSpace(r.URL.Query().Get("error_code")),
 	}
 	since := time.Time{}
 	if raw := strings.TrimSpace(r.URL.Query().Get("since")); raw != "" {
@@ -1805,6 +2364,114 @@ func (s *Server) handleRuntimeLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleRuntimeIncidents(w http.ResponseWriter, r *http.Request) {
+	if !allowMethod(w, r, http.MethodGet) {
+		return
+	}
+	hours := clamp(parseInt(r.URL.Query().Get("since_hours"), 24), 1, 24*14)
+	limit := clamp(parseInt(r.URL.Query().Get("limit"), 1200), 100, 5000)
+	mcpOnly := parseBoolQuery(r.URL.Query().Get("mcp_only"), true)
+	level := strings.TrimSpace(r.URL.Query().Get("level"))
+	if level == "" {
+		level = "warn"
+	}
+	filter := eventFilter{
+		Component: strings.TrimSpace(r.URL.Query().Get("component")),
+		Level:     level,
+	}
+	since := s.now().UTC().Add(-time.Duration(hours) * time.Hour)
+	logs, err := s.queryRuntimeLogs(r.Context(), filter, since, limit, false)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	type incidentAgg struct {
+		Code       string
+		Count      int
+		FirstSeen  time.Time
+		LastSeen   time.Time
+		Agents     map[string]struct{}
+		Components map[string]struct{}
+		Actions    map[string]struct{}
+		LastError  string
+	}
+	agg := make(map[string]*incidentAgg)
+	for _, item := range logs {
+		code := strings.TrimSpace(item.ErrorCode)
+		if code == "" {
+			continue
+		}
+		if mcpOnly && !strings.HasPrefix(code, "mcp_") {
+			continue
+		}
+		entry, ok := agg[code]
+		if !ok {
+			entry = &incidentAgg{
+				Code:       code,
+				Count:      0,
+				FirstSeen:  item.TS,
+				LastSeen:   item.TS,
+				Agents:     map[string]struct{}{},
+				Components: map[string]struct{}{},
+				Actions:    map[string]struct{}{},
+				LastError:  item.Error,
+			}
+			agg[code] = entry
+		}
+		entry.Count++
+		if item.TS.Before(entry.FirstSeen) {
+			entry.FirstSeen = item.TS
+		}
+		if item.TS.After(entry.LastSeen) {
+			entry.LastSeen = item.TS
+			entry.LastError = item.Error
+		}
+		if v := strings.TrimSpace(item.AgentID); v != "" {
+			entry.Agents[v] = struct{}{}
+		}
+		if v := strings.TrimSpace(item.Component); v != "" {
+			entry.Components[v] = struct{}{}
+		}
+		if v := strings.TrimSpace(item.Action); v != "" {
+			entry.Actions[v] = struct{}{}
+		}
+	}
+
+	incidents := make([]map[string]any, 0, len(agg))
+	for _, v := range agg {
+		incidents = append(incidents, map[string]any{
+			"code":        v.Code,
+			"count":       v.Count,
+			"first_seen":  v.FirstSeen.UTC(),
+			"last_seen":   v.LastSeen.UTC(),
+			"agents":      mapKeys(v.Agents),
+			"components":  mapKeys(v.Components),
+			"actions":     mapKeys(v.Actions),
+			"last_error":  truncate(v.LastError, 500),
+			"root_cause":  classifyIncidentRootCause(v.Code),
+			"is_mcp_code": strings.HasPrefix(v.Code, "mcp_"),
+		})
+	}
+	sort.SliceStable(incidents, func(i, j int) bool {
+		ci := asInt(incidents[i]["count"])
+		cj := asInt(incidents[j]["count"])
+		if ci == cj {
+			ti, _ := incidents[i]["last_seen"].(time.Time)
+			tj, _ := incidents[j]["last_seen"].(time.Time)
+			return tj.Before(ti)
+		}
+		return ci > cj
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"generated_at": s.now().UTC(),
+		"since_hours":  hours,
+		"mcp_only":     mcpOnly,
+		"count":        len(incidents),
+		"incidents":    incidents,
+	})
+}
+
 type eventFilter struct {
 	EventType  string
 	Source     string
@@ -1812,6 +2479,7 @@ type eventFilter struct {
 	Subscriber string
 	Component  string
 	Level      string
+	ErrorCode  string
 }
 
 func (s *Server) queryEvents(ctx context.Context, filter eventFilter, since time.Time, limit int, asc bool) ([]eventView, error) {
@@ -1914,6 +2582,124 @@ func (s *Server) queryEvents(ctx context.Context, filter eventFilter, since time
 	return items, nil
 }
 
+func (s *Server) queryFlowEvents(ctx context.Context, since, until time.Time, vertical string, limit int, asc bool) ([]flowEventView, error) {
+	where := []string{"1=1"}
+	args := make([]any, 0, 8)
+	add := func(clause string, value any) {
+		args = append(args, value)
+		clause = strings.ReplaceAll(clause, "?", "$"+strconv.Itoa(len(args)))
+		where = append(where, clause)
+	}
+	add2 := func(clause string, v1, v2 any) {
+		args = append(args, v1, v2)
+		first := "$" + strconv.Itoa(len(args)-1)
+		second := "$" + strconv.Itoa(len(args))
+		clause = strings.Replace(clause, "?", first, 1)
+		clause = strings.Replace(clause, "?", second, 1)
+		where = append(where, clause)
+	}
+
+	if !since.IsZero() {
+		add("e.created_at > ?", since)
+	}
+	if !until.IsZero() {
+		add("e.created_at <= ?", until)
+	}
+	if v := strings.TrimSpace(vertical); v != "" {
+		add2("(COALESCE(e.vertical_id::text, '') = ? OR COALESCE(v.slug, '') = ?)", v, v)
+	}
+
+	args = append(args, limit)
+	order := "DESC"
+	if asc {
+		order = "ASC"
+	}
+	q := fmt.Sprintf(`
+		SELECT
+			e.id::text,
+			e.type,
+			COALESCE(e.source_agent, ''),
+			COALESCE(e.task_id::text, ''),
+			COALESCE(e.vertical_id::text, ''),
+			COALESCE(e.created_at, now()),
+			COALESCE(e.payload, '{}'::jsonb),
+			COALESCE((
+				SELECT jsonb_agg(d.agent_id ORDER BY d.agent_id)
+				FROM event_deliveries d
+				WHERE d.event_id = e.id
+			), '[]'::jsonb)
+		FROM events e
+		LEFT JOIN verticals v ON v.id = e.vertical_id
+		WHERE %s
+		ORDER BY e.created_at %s
+		LIMIT $%d
+	`, strings.Join(where, " AND "), order, len(args))
+
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]flowEventView, 0, limit)
+	for rows.Next() {
+		var (
+			id, eventType, sourceAgent, taskID, verticalID string
+			createdAt                                      time.Time
+			payloadRaw                                     []byte
+			targetsRaw                                     []byte
+		)
+		if err := rows.Scan(
+			&id,
+			&eventType,
+			&sourceAgent,
+			&taskID,
+			&verticalID,
+			&createdAt,
+			&payloadRaw,
+			&targetsRaw,
+		); err != nil {
+			return nil, err
+		}
+		targets := make([]string, 0, 8)
+		if len(targetsRaw) > 0 && json.Valid(targetsRaw) {
+			var rawTargets []any
+			if err := json.Unmarshal(targetsRaw, &rawTargets); err == nil {
+				for _, item := range rawTargets {
+					v := strings.TrimSpace(asString(item))
+					if v != "" {
+						targets = append(targets, v)
+					}
+				}
+			}
+		}
+
+		intercepted, passthrough := flowInterceptPolicy(eventType, payloadRaw)
+		if intercepted && len(targets) == 0 {
+			targets = append(targets, "pipeline-coordinator")
+		}
+		sourceNode := strings.TrimSpace(sourceAgent)
+		if sourceNode == "" {
+			sourceNode = "runtime"
+		}
+		items = append(items, flowEventView{
+			EventID:     id,
+			EventType:   eventType,
+			SourceNode:  sourceNode,
+			TargetNodes: targets,
+			Intercepted: intercepted,
+			Passthrough: passthrough,
+			Timestamp:   createdAt.UTC(),
+			VerticalID:  strings.TrimSpace(verticalID),
+			TaskID:      strings.TrimSpace(taskID),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (s *Server) queryRuntimeLogs(ctx context.Context, filter eventFilter, since time.Time, limit int, asc bool) ([]runtimeLogView, error) {
 	where := []string{"1=1"}
 	args := make([]any, 0, 8)
@@ -1952,6 +2738,9 @@ func (s *Server) queryRuntimeLogs(ctx context.Context, filter eventFilter, since
 	}
 	if filter.Level != "" {
 		add("COALESCE(rl.level, '') = ?", strings.ToLower(filter.Level))
+	}
+	if filter.ErrorCode != "" {
+		add("COALESCE(rl.error, '') LIKE ?", "%code="+strings.TrimSpace(filter.ErrorCode)+"%")
 	}
 	args = append(args, limit)
 	order := "DESC"
@@ -2091,8 +2880,16 @@ func (s *Server) handleConversationDetail(w http.ResponseWriter, r *http.Request
 	if !allowMethod(w, r, http.MethodGet) {
 		return
 	}
-	agentID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/dashboard/api/conversations/"))
-	if agentID == "" {
+	agentID, subresource, ok := parseConversationPath(r.URL.Path)
+	if !ok || agentID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if subresource == "artifacts" {
+		s.handleConversationArtifacts(w, r, agentID)
+		return
+	}
+	if subresource != "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -2186,6 +2983,299 @@ func (s *Server) handleConversationDetail(w http.ResponseWriter, r *http.Request
 		"messages":   messages,
 		"turns":      turns,
 	})
+}
+
+func parseConversationPath(path string) (agentID, subresource string, ok bool) {
+	prefix := "/dashboard/api/conversations/"
+	if strings.HasPrefix(path, "/api/conversations/") {
+		prefix = "/api/conversations/"
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	if trimmed == "" {
+		return "", "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	agentID = strings.TrimSpace(parts[0])
+	if agentID == "" {
+		return "", "", false
+	}
+	if len(parts) > 1 {
+		subresource = strings.TrimSpace(parts[1])
+	}
+	return agentID, subresource, true
+}
+
+type sessionArtifactFile struct {
+	Path  string `json:"path,omitempty"`
+	Found bool   `json:"found"`
+	Tail  string `json:"tail,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+func (s *Server) handleConversationArtifacts(w http.ResponseWriter, r *http.Request, agentID string) {
+	ctx := r.Context()
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	lines := clamp(parseInt(r.URL.Query().Get("lines"), 80), 10, 300)
+	sessionID, runtimeMode, provider, sessionStatus, err := s.lookupLatestAgentSession(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	role, verticalID, err := s.lookupAgentRoleAndVertical(ctx, agentID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	container, slug, err := s.resolveWorkspaceContainer(ctx, role, verticalID)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if container == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("no workspace container mapping for agent role=%s", role))
+		return
+	}
+
+	out := map[string]any{
+		"agent_id":    agentID,
+		"role":        role,
+		"vertical_id": verticalID,
+		"vertical_slug": func() string {
+			return slug
+		}(),
+		"session": map[string]any{
+			"session_id":   sessionID,
+			"runtime_mode": runtimeMode,
+			"provider":     provider,
+			"status":       sessionStatus,
+		},
+		"workspace_container": container,
+		"generated_at":        s.now().UTC(),
+	}
+
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(runtimeMode)), "cli") {
+		out["artifacts"] = map[string]any{}
+		out["note"] = "session artifacts are only available for cli runtime modes"
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+
+	projectPath, err := s.findSessionProjectFile(ctx, container, sessionID)
+	projectArtifact := sessionArtifactFile{Path: projectPath}
+	if err != nil {
+		projectArtifact.Error = err.Error()
+	} else if strings.TrimSpace(projectPath) != "" {
+		projectArtifact.Found = true
+		tail, tailErr := s.tailContainerFile(ctx, container, projectPath, lines)
+		if tailErr != nil {
+			projectArtifact.Error = tailErr.Error()
+		} else {
+			projectArtifact.Tail = tail
+		}
+	}
+
+	debugPath := "/home/agent/.claude/debug/" + strings.TrimSpace(sessionID) + ".txt"
+	debugArtifact := sessionArtifactFile{Path: debugPath}
+	if tail, tailErr := s.tailContainerFile(ctx, container, debugPath, lines); tailErr != nil {
+		debugArtifact.Error = tailErr.Error()
+	} else {
+		debugArtifact.Found = true
+		debugArtifact.Tail = tail
+	}
+
+	out["artifacts"] = map[string]any{
+		"project_jsonl": projectArtifact,
+		"debug_log":     debugArtifact,
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) lookupLatestAgentSession(ctx context.Context, agentID string) (sessionID, runtimeMode, provider, status string, err error) {
+	err = s.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(session_id, ''),
+			COALESCE(runtime_mode, ''),
+			COALESCE(provider, ''),
+			COALESCE(status, '')
+		FROM agent_sessions
+		WHERE agent_id = $1
+		ORDER BY (status = 'active') DESC, last_used_at DESC NULLS LAST, created_at DESC
+		LIMIT 1
+	`, strings.TrimSpace(agentID)).Scan(&sessionID, &runtimeMode, &provider, &status)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", "", "", "", sql.ErrNoRows
+	}
+	return sessionID, strings.TrimSpace(runtimeMode), strings.TrimSpace(provider), strings.TrimSpace(status), nil
+}
+
+func (s *Server) lookupAgentRoleAndVertical(ctx context.Context, agentID string) (role, verticalID string, err error) {
+	err = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(role, ''), COALESCE(vertical_id::text, '')
+		FROM agents
+		WHERE id = $1
+	`, strings.TrimSpace(agentID)).Scan(&role, &verticalID)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(role), strings.TrimSpace(verticalID), nil
+}
+
+func (s *Server) resolveWorkspaceContainer(ctx context.Context, role, verticalID string) (container, verticalSlug string, err error) {
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "holding-devops":
+		return envOr("EMPIREAI_INFRA_CONTAINER", "empireai-infra"), "", nil
+	case "factory-cto",
+		"empire-coordinator",
+		"operations-analyst",
+		"scanner-agent",
+		"analysis-agent",
+		"validation-coordinator",
+		"pre-brand-agent",
+		"business-research-agent",
+		"lightweight-spec-agent",
+		"spec-reviewer",
+		"market-research-agent",
+		"trend-research-agent",
+		"spec-auditor",
+		"discovery-coordinator":
+		return envOr("EMPIREAI_FACTORY_CONTAINER", "empireai-factory"), "", nil
+	}
+
+	verticalID = strings.TrimSpace(verticalID)
+	if verticalID == "" {
+		return "", "", nil
+	}
+	slug := ""
+	_ = s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(NULLIF(slug, ''), '')
+		FROM verticals
+		WHERE id = $1::uuid
+	`, verticalID).Scan(&slug)
+	slug = sanitizeContainerSlug(slug)
+	if slug == "" {
+		slug = sanitizeContainerSlug(verticalID)
+	}
+	if slug == "" {
+		return "", "", fmt.Errorf("vertical slug unavailable for %s", verticalID)
+	}
+	return envOr("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-") + slug, slug, nil
+}
+
+func (s *Server) findSessionProjectFile(ctx context.Context, container, sessionID string) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", fmt.Errorf("session_id is required")
+	}
+	if !isSafeSessionID(sessionID) {
+		return "", fmt.Errorf("invalid session_id format")
+	}
+	out, err := runDocker(ctx, "exec", container, "find", "/home/agent/.claude/projects", "-type", "f", "-name", sessionID+".jsonl")
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, line := range lines {
+		path := strings.TrimSpace(line)
+		if path != "" {
+			return path, nil
+		}
+	}
+	return "", nil
+}
+
+func (s *Server) tailContainerFile(ctx context.Context, container, path string, lines int) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if lines <= 0 {
+		lines = 80
+	}
+	out, err := runDocker(ctx, "exec", container, "tail", "-n", strconv.Itoa(lines), path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+func runDocker(ctx context.Context, args ...string) (string, error) {
+	dockerBin := strings.TrimSpace(os.Getenv("EMPIREAI_DOCKER_BIN"))
+	if dockerBin == "" {
+		dockerBin = "docker"
+	}
+	cmd := exec.CommandContext(ctx, dockerBin, args...)
+	raw, err := cmd.CombinedOutput()
+	out := strings.TrimSpace(string(raw))
+	if err != nil {
+		if out == "" {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %s", err, out)
+	}
+	return out, nil
+}
+
+func isSafeSessionID(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func sanitizeContainerSlug(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			lastDash = false
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || r == ' ' || r == '/':
+			if !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func envOr(key, fallback string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func extractTurnArtifacts(respRaw []byte) (string, []map[string]any) {
@@ -4186,6 +5276,7 @@ func (s *Server) handleHoldingVerticalDetail(w http.ResponseWriter, r *http.Requ
 		})
 	}
 	eventRows.Close()
+	enrichHoldingVerticalArtifacts(vertical, recentEvents)
 
 	mailboxItems := make([]map[string]any, 0, 25)
 	mailRows, err := s.db.QueryContext(ctx, `
@@ -4259,6 +5350,148 @@ func (s *Server) handleHoldingVerticalDetail(w http.ResponseWriter, r *http.Requ
 			"last_30d_cents": spendLast30,
 		},
 	})
+}
+
+func enrichHoldingVerticalArtifacts(vertical map[string]any, recentEvents []map[string]any) {
+	if len(vertical) == 0 || len(recentEvents) == 0 {
+		return
+	}
+	setFromPayload := func(key string, value any) {
+		if holdingArtifactEmpty(value) {
+			return
+		}
+		if holdingArtifactEmpty(vertical[key]) {
+			vertical[key] = value
+			return
+		}
+		dst, dstOK := vertical[key].(map[string]any)
+		src, srcOK := value.(map[string]any)
+		if dstOK && srcOK {
+			vertical[key] = holdingMergeMapMissing(dst, src)
+			return
+		}
+		if holdingArtifactEmpty(vertical[key]) {
+			vertical[key] = value
+		}
+	}
+	for _, evt := range recentEvents {
+		typ := strings.TrimSpace(asString(evt["type"]))
+		payload, _ := evt["payload"].(map[string]any)
+		if len(payload) == 0 {
+			continue
+		}
+		switch typ {
+		case "vertical.discovered":
+			setFromPayload("raw_signals", payload)
+		case "vertical.scored":
+			setFromPayload("scores", holdingPickMap(payload, "scores", "scoring", "result"))
+			setFromPayload("scores", payload)
+		case "research.completed":
+			setFromPayload("business_brief", holdingPickNestedMap(payload, []string{"business_brief"}, []string{"brief"}, []string{"research", "business_brief"}, []string{"research"}))
+		case "spec.draft_ready":
+			setFromPayload("mvp_spec", holdingPickNestedMap(payload, []string{"mvp_spec"}, []string{"spec", "mvp_spec"}, []string{"spec"}, []string{"draft"}))
+			setFromPayload("mvp_spec", payload)
+		case "spec.approved":
+			setFromPayload("full_spec", holdingPickNestedMap(payload, []string{"full_spec"}, []string{"spec"}))
+			setFromPayload("mvp_spec", holdingPickNestedMap(payload, []string{"mvp_spec"}, []string{"spec", "mvp_spec"}, []string{"spec"}))
+		case "spec_review.requested", "spec_review.passed", "spec_review.issues_found":
+			setFromPayload("spec_review", payload)
+		case "cto.spec_review_requested", "cto.spec_approved", "cto.spec_revision_needed":
+			setFromPayload("cto_feasibility", holdingPickNestedMap(payload, []string{"cto_feasibility"}, []string{"cto_notes"}, []string{"feasibility"}))
+			setFromPayload("cto_feasibility", payload)
+		case "brand.requested", "brand.candidates_ready", "brand.revision_needed":
+			setFromPayload("brand", holdingPickMap(payload, "brand"))
+			setFromPayload("brand", payload)
+		case "validation.package_ready", "vertical.ready_for_review":
+			setFromPayload("validation_kit", payload)
+			setFromPayload("business_brief", holdingPickNestedMap(payload, []string{"business_brief"}, []string{"research", "business_brief"}, []string{"research"}))
+			setFromPayload("mvp_spec", holdingPickNestedMap(payload, []string{"mvp_spec"}, []string{"spec", "mvp_spec"}, []string{"spec"}))
+			setFromPayload("full_spec", holdingPickNestedMap(payload, []string{"full_spec"}, []string{"spec"}))
+			setFromPayload("cto_feasibility", holdingPickNestedMap(payload, []string{"cto_feasibility"}, []string{"cto_notes"}))
+			setFromPayload("brand", holdingPickMap(payload, "brand"))
+		}
+	}
+}
+
+func holdingPickMap(payload map[string]any, keys ...string) map[string]any {
+	for _, key := range keys {
+		raw, ok := payload[key]
+		if !ok || raw == nil {
+			continue
+		}
+		if m, ok := raw.(map[string]any); ok && len(m) > 0 {
+			return m
+		}
+	}
+	return nil
+}
+
+func holdingPickNestedMap(payload map[string]any, paths ...[]string) map[string]any {
+	for _, path := range paths {
+		if len(path) == 0 {
+			continue
+		}
+		var cursor any = payload
+		ok := true
+		for _, key := range path {
+			m, isMap := cursor.(map[string]any)
+			if !isMap {
+				ok = false
+				break
+			}
+			next, exists := m[key]
+			if !exists || next == nil {
+				ok = false
+				break
+			}
+			cursor = next
+		}
+		if !ok {
+			continue
+		}
+		if out, isMap := cursor.(map[string]any); isMap && len(out) > 0 {
+			return out
+		}
+	}
+	return nil
+}
+
+func holdingArtifactEmpty(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case string:
+		s := strings.TrimSpace(t)
+		return s == "" || s == "{}" || s == "[]"
+	case map[string]any:
+		return len(t) == 0
+	case []any:
+		return len(t) == 0
+	default:
+		return false
+	}
+}
+
+func holdingMergeMapMissing(dst map[string]any, src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return dst
+	}
+	if dst == nil {
+		dst = map[string]any{}
+	}
+	for key, srcVal := range src {
+		cur, exists := dst[key]
+		if !exists || holdingArtifactEmpty(cur) {
+			dst[key] = srcVal
+			continue
+		}
+		curMap, curOK := cur.(map[string]any)
+		srcMap, srcOK := srcVal.(map[string]any)
+		if curOK && srcOK {
+			dst[key] = holdingMergeMapMissing(curMap, srcMap)
+		}
+	}
+	return dst
 }
 
 func compactAge(d time.Duration) string {
@@ -4777,14 +6010,26 @@ func (s *Server) handleControlRuntime(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "pause", "running": s.manager.IsRunning()})
+		runtime.PauseRuntimeIngress()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":             true,
+			"action":         "pause",
+			"running":        s.manager.IsRunning(),
+			"ingress_paused": runtime.RuntimeIngressPaused(),
+		})
 	case "resume":
 		if s.manager == nil {
 			writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("agent manager unavailable"))
 			return
 		}
+		runtime.ResumeRuntimeIngress()
 		s.manager.Run(context.Background())
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "action": "resume", "running": s.manager.IsRunning()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":             true,
+			"action":         "resume",
+			"running":        s.manager.IsRunning(),
+			"ingress_paused": runtime.RuntimeIngressPaused(),
+		})
 	case "reset_state":
 		if strings.TrimSpace(req.Confirm) != "RESET" {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("confirmation required: set confirm=RESET"))
@@ -6195,6 +7440,55 @@ func parseRuntimeErrorMetadata(raw string) runtimeErrorMetadata {
 	return out
 }
 
+func classifyIncidentRootCause(code string) string {
+	code = strings.TrimSpace(strings.ToLower(code))
+	switch code {
+	case "mcp_context_token_missing", "mcp_context_token_not_found", "mcp_context_token_stale_epoch":
+		return "mcp_context_lifecycle"
+	case "mcp_auth_missing_bearer", "mcp_auth_invalid_bearer":
+		return "mcp_gateway_auth"
+	case "mcp_tool_not_allowed":
+		return "mcp_tool_allowlist"
+	case "mcp_tool_execution_failed":
+		return "tool_execution_failure"
+	case "mcp_stall_detected":
+		return "agent_stall_detected"
+	default:
+		if strings.HasPrefix(code, "mcp_") {
+			return "mcp_unknown"
+		}
+		return "runtime_unknown"
+	}
+}
+
+func mapKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func asInt(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	default:
+		return 0
+	}
+}
+
 func truncate(v string, max int) string {
 	if max <= 0 || len(v) <= max {
 		return v
@@ -6236,6 +7530,28 @@ func asFloatAny(v any) float64 {
 		return f
 	default:
 		return 0
+	}
+}
+
+func boolFromAny(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(strings.ToLower(t)))
+		return err == nil && parsed
+	case int:
+		return t != 0
+	case int32:
+		return t != 0
+	case int64:
+		return t != 0
+	case float32:
+		return t != 0
+	case float64:
+		return t != 0
+	default:
+		return false
 	}
 }
 

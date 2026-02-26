@@ -104,15 +104,16 @@ func TestScanCampaignManager_OnDirective_QueuesDeterministicModes(t *testing.T) 
 		CreatedAt: time.Now().UTC(),
 	})
 
-	if len(store.created) != 3 {
-		t.Fatalf("expected 3 queued campaigns, got %d", len(store.created))
+	if len(store.created) != 4 {
+		t.Fatalf("expected 4 queued campaigns, got %d", len(store.created))
 	}
 	gotModes := []string{
 		store.created[0].Mode,
 		store.created[1].Mode,
 		store.created[2].Mode,
+		store.created[3].Mode,
 	}
-	wantModes := []string{"saas_gap", "saas_trend", "local_services"}
+	wantModes := []string{"automation_micro", "saas_gap", "saas_trend", "local_services"}
 	for i := range wantModes {
 		if gotModes[i] != wantModes[i] {
 			t.Fatalf("expected mode[%d]=%s, got %s (all=%v)", i, wantModes[i], gotModes[i], gotModes)
@@ -156,8 +157,8 @@ func TestScanCampaignManager_OnDirective_QueuesDeterministicModes(t *testing.T) 
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate scan campaigns: %v", err)
 	}
-	if count != 3 {
-		t.Fatalf("expected 3 scan campaign rows, got %d", count)
+	if count != 4 {
+		t.Fatalf("expected 4 scan campaign rows, got %d", count)
 	}
 }
 

@@ -140,6 +140,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	defer stopLeaseHeartbeat()
 
 	if lease.SessionID != s.ID {
+		logSessionAdopted(s.AgentID, "cli_test", s.ID, lease.SessionID, strings.TrimSpace(s.ScopeKey))
 		s.ID = lease.SessionID
 	}
 	target, err := r.resolveWorkspace(ctx)
@@ -218,13 +219,28 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		transportFallback.Used = transportFallback.Used || fallback.Used
 	}
 	if err != nil && shouldRotateSessionOnCLIError(err) {
-		rotated, rotateErr := r.sessions.Rotate(s.AgentID, "cli_test", r.lockOwner, rotateSessionRetryReason(err), strings.TrimSpace(s.ScopeKey))
+		rotateReason := rotateSessionRetryReason(err)
+		oldSessionID := s.ID
+		oldTurnCount := s.TurnCount
+		oldParseFailures := s.ParseFailures
+		checkpoint := buildRotationCheckpoint(rotateReason, s)
+		rotated, rotateErr := r.sessions.Rotate(s.AgentID, "cli_test", r.lockOwner, checkpoint, strings.TrimSpace(s.ScopeKey))
 		if rotateErr == nil && rotated != nil {
 			s.ID = rotated.SessionID
 			s.TurnCount = 0
 			if len(s.Messages) > 0 {
 				s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
 			}
+			logSessionRotated(
+				s.AgentID,
+				"cli_test",
+				oldSessionID,
+				rotated.SessionID,
+				strings.TrimSpace(s.ScopeKey),
+				rotateReason,
+				oldTurnCount,
+				oldParseFailures,
+			)
 			args = []string{
 				"-p",
 				"--session-id", s.ID,
@@ -283,11 +299,13 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 
 	s.Messages = append(s.Messages, message, resp.Message)
 	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ID {
+		oldSessionID := s.ID
 		if err := adoptRegistrySessionID(r.sessions, s.AgentID, "cli_test", lease.LockOwner, sid, strings.TrimSpace(s.ScopeKey)); err != nil {
 			log.Printf("failed to adopt claude session id: agent=%s old=%s new=%s err=%v", s.AgentID, s.ID, sid, err)
 		} else {
 			s.ID = sid
 			lease.SessionID = sid
+			logSessionAdopted(s.AgentID, "cli_test", oldSessionID, sid, strings.TrimSpace(s.ScopeKey))
 		}
 	}
 	s.TurnCount++
@@ -423,20 +441,26 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if serverURL == "" {
 		return "", "", false, nil
 	}
+	allowedTools := toolNamesCSV(s.Tools)
 	headers := map[string]string{
 		"X-Empire-Agent-Id":      strings.TrimSpace(actor.ID),
 		"X-Empire-Agent-Role":    strings.TrimSpace(actor.Role),
 		"X-Empire-Agent-Mode":    strings.TrimSpace(actor.Mode),
 		"X-Empire-Vertical-Id":   strings.TrimSpace(actor.VerticalID),
-		"X-Empire-Allowed-Tools": toolNamesCSV(s.Tools),
+		"X-Empire-Allowed-Tools": allowedTools,
 	}
 	if token := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
-	contextToken = registerMCPTurnContext(ctx)
+	contextToken = registerMCPTurnContextWithTTL(ctx, r.mcpContextTokenTTL(ctx))
+	traceID := strings.TrimSpace(contextToken)
 	if contextToken != "" {
 		headers["X-Empire-Context-Token"] = contextToken
 	}
+	if traceID != "" {
+		headers["X-Empire-Trace-Id"] = traceID
+	}
+	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools, traceID)
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"empire-runtime": map[string]any{
@@ -455,6 +479,25 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 		return "", "", false, marshalErr
 	}
 	return string(raw), contextToken, true, nil
+}
+
+func (r *ClaudeCLIRuntime) mcpContextTokenTTL(ctx context.Context) time.Duration {
+	timeout := r.effectiveCLITimeout(ctx)
+	if timeout <= 0 {
+		timeout = 15 * time.Minute
+	}
+	ttl := timeout * 3
+	const (
+		minTTL = 45 * time.Minute
+		maxTTL = 6 * time.Hour
+	)
+	if ttl < minTTL {
+		ttl = minTTL
+	}
+	if ttl > maxTTL {
+		ttl = maxTTL
+	}
+	return ttl
 }
 
 func shouldUseMCPBridge() bool {
@@ -479,6 +522,41 @@ func normalizeMCPServerURL(raw string) string {
 	default:
 		// Respect explicit path when operator already targets a specific endpoint.
 	}
+	return strings.TrimSpace(u.String())
+}
+
+func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, allowedTools, traceID string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return rawURL
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	if v := strings.TrimSpace(contextToken); v != "" {
+		q.Set("empire_ctx_token", v)
+	}
+	if v := strings.TrimSpace(actor.ID); v != "" {
+		q.Set("empire_agent_id", v)
+	}
+	if v := strings.TrimSpace(actor.Role); v != "" {
+		q.Set("empire_agent_role", v)
+	}
+	if v := strings.TrimSpace(actor.Mode); v != "" {
+		q.Set("empire_agent_mode", v)
+	}
+	if v := strings.TrimSpace(actor.VerticalID); v != "" {
+		q.Set("empire_vertical_id", v)
+	}
+	if v := strings.TrimSpace(allowedTools); v != "" {
+		q.Set("empire_allowed_tools", v)
+	}
+	if v := strings.TrimSpace(traceID); v != "" {
+		q.Set("empire_trace_id", v)
+	}
+	u.RawQuery = q.Encode()
 	return strings.TrimSpace(u.String())
 }
 
@@ -756,9 +834,6 @@ func parseCLIResponse(raw []byte) *Response {
 		}
 		if len(texts) > 0 {
 			resp.Message.Content = strings.TrimSpace(strings.Join(texts, "\n"))
-			if len(resp.ToolCalls) == 0 {
-				resp.ToolCalls = append(resp.ToolCalls, fallbackEmitToolCalls(resp.Message.Content)...)
-			}
 			return resp
 		}
 		if len(resp.ToolCalls) > 0 {
@@ -767,205 +842,7 @@ func parseCLIResponse(raw []byte) *Response {
 	}
 
 	resp.Message.Content = strings.TrimSpace(string(raw))
-	if len(resp.ToolCalls) == 0 {
-		resp.ToolCalls = append(resp.ToolCalls, fallbackEmitToolCalls(resp.Message.Content)...)
-	}
 	return resp
-}
-
-func fallbackEmitToolCalls(text string) []ToolCall {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	out := append([]ToolCall{}, parseEmitEventsEnvelope(text)...)
-	out = append(out, parseTaggedEmitCalls(text)...)
-	return dedupeToolCalls(out)
-}
-
-func parseEmitEventsEnvelope(text string) []ToolCall {
-	candidates := []string{strings.TrimSpace(text)}
-	candidates = append(candidates, extractJSONCodeFences(text)...)
-	out := make([]ToolCall, 0, 2)
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		var payload struct {
-			EmitEvents []struct {
-				Type       string         `json:"type"`
-				TaskID     string         `json:"task_id"`
-				VerticalID string         `json:"vertical_id"`
-				Payload    map[string]any `json:"payload"`
-			} `json:"emit_events"`
-		}
-		if err := json.Unmarshal([]byte(candidate), &payload); err != nil || len(payload.EmitEvents) == 0 {
-			continue
-		}
-		for _, evt := range payload.EmitEvents {
-			eventType := strings.TrimSpace(evt.Type)
-			if eventType == "" {
-				continue
-			}
-			args := map[string]any{}
-			if v := strings.TrimSpace(evt.TaskID); v != "" {
-				args["task_id"] = v
-			}
-			if v := strings.TrimSpace(evt.VerticalID); v != "" {
-				args["vertical_id"] = v
-			}
-			if evt.Payload != nil {
-				args["payload"] = evt.Payload
-			}
-			out = append(out, ToolCall{
-				Name:      emitToolName(eventType),
-				Arguments: args,
-			})
-		}
-	}
-	return out
-}
-
-func parseTaggedEmitCalls(text string) []ToolCall {
-	out := make([]ToolCall, 0, 2)
-	idx := 0
-	for {
-		startRel := strings.Index(text[idx:], "<emit_")
-		if startRel < 0 {
-			break
-		}
-		start := idx + startRel
-		nameStart := start + 1
-		gtRel := strings.IndexByte(text[nameStart:], '>')
-		if gtRel < 0 {
-			break
-		}
-		nameEnd := nameStart + gtRel
-		toolName := strings.TrimSpace(text[nameStart:nameEnd])
-		if !isLikelyEmitToolName(toolName) {
-			idx = nameEnd + 1
-			continue
-		}
-		bodyStart := skipInlineWhitespace(text, nameEnd+1)
-		body, end, ok := extractJSONObject(text, bodyStart)
-		if !ok {
-			idx = bodyStart + 1
-			continue
-		}
-		var args any
-		if err := json.Unmarshal([]byte(body), &args); err != nil {
-			idx = end
-			continue
-		}
-		out = append(out, ToolCall{Name: toolName, Arguments: args})
-		idx = end
-	}
-	return out
-}
-
-type sessionIDAdopter interface {
-	AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
-}
-
-func adoptRegistrySessionID(reg SessionRegistry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
-	if reg == nil {
-		return nil
-	}
-	adopter, ok := reg.(sessionIDAdopter)
-	if !ok {
-		return nil
-	}
-	return adopter.AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
-}
-
-func isLikelyEmitToolName(name string) bool {
-	if !strings.HasPrefix(name, "emit_") || len(name) <= len("emit_") {
-		return false
-	}
-	for i := 0; i < len(name); i++ {
-		c := name[i]
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func skipInlineWhitespace(s string, i int) int {
-	for i < len(s) {
-		switch s[i] {
-		case ' ', '\t', '\n', '\r':
-			i++
-		default:
-			return i
-		}
-	}
-	return i
-}
-
-func extractJSONObject(s string, start int) (string, int, bool) {
-	if start < 0 || start >= len(s) || s[start] != '{' {
-		return "", start, false
-	}
-	depth := 0
-	inString := false
-	escaped := false
-	for i := start; i < len(s); i++ {
-		ch := s[i]
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' {
-				escaped = true
-				continue
-			}
-			if ch == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch ch {
-		case '"':
-			inString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return s[start : i+1], i + 1, true
-			}
-		}
-	}
-	return "", start, false
-}
-
-func extractJSONCodeFences(text string) []string {
-	out := make([]string, 0, 2)
-	rest := text
-	for {
-		start := strings.Index(rest, "```")
-		if start < 0 {
-			break
-		}
-		rest = rest[start+3:]
-		end := strings.Index(rest, "```")
-		if end < 0 {
-			break
-		}
-		block := strings.TrimSpace(rest[:end])
-		if strings.HasPrefix(strings.ToLower(block), "json") {
-			block = strings.TrimSpace(block[len("json"):])
-		}
-		if block != "" {
-			out = append(out, block)
-		}
-		rest = rest[end+3:]
-	}
-	return out
 }
 
 func dedupeToolCalls(calls []ToolCall) []ToolCall {
@@ -992,6 +869,21 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 		out = append(out, c)
 	}
 	return out
+}
+
+type sessionIDAdopter interface {
+	AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
+}
+
+func adoptRegistrySessionID(reg SessionRegistry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+	if reg == nil {
+		return nil
+	}
+	adopter, ok := reg.(sessionIDAdopter)
+	if !ok {
+		return nil
+	}
+	return adopter.AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
 }
 
 func claudeToolsArg(tools []ToolDefinition) string {

@@ -11,8 +11,7 @@ subscriptions:
   - deploy_requested
   - qa.validation_passed
   - qa.validation_failed
-  - devops.deploy_complete
-  - devops.deploy_failed
+  - cycle_limit_reached
 tools:
   - agent_hire
   - agent_fire
@@ -30,6 +29,7 @@ system_prompt: |
   - Maintain engineering throughput and quality.
   - Coordinate deploys through DevOps.
   - Escalate architectural blockers to VP Product / CEO as needed.
+  - When you receive cycle_limit_reached, diagnose the loop and emit cycle_reset only after a clear remediation plan.
   - Request Tech Writer translation by emitting cto.tech_spec_review_requested.
 
   Team:

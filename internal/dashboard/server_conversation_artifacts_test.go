@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -147,4 +149,121 @@ func TestDashboardServer_ConversationDetail_DoesNotTruncateAssistantText(t *test
 	if assistant != longText {
 		t.Fatalf("assistant_text was truncated or altered (len=%d)", len(assistant))
 	}
+}
+
+func TestDashboardServer_ConversationArtifacts_ReturnsSessionFiles(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	t.Setenv("EMPIREAI_API_KEY", "test-key")
+
+	agentID := "market-research-agent-shard-0-abc12345"
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO agents (id, type, role, mode, status, config)
+		VALUES ($1, 'stub', 'market-research-agent', 'factory', 'active', '{}'::jsonb)
+		ON CONFLICT (id) DO NOTHING
+	`, agentID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO agent_sessions (id, agent_id, runtime_mode, provider, session_id, status, turn_count, created_at, last_used_at)
+		VALUES ($1::uuid, $2, 'cli_test', 'anthropic', 'sess-123', 'active', 4, now(), now())
+	`, uuid.NewString(), agentID); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	dockerStub := writeDockerStubScript(t)
+	t.Setenv("EMPIREAI_DOCKER_BIN", dockerStub)
+	t.Setenv("EMPIREAI_FACTORY_CONTAINER", "empireai-factory")
+
+	srv := NewServer(db, &config.Config{LLM: config.LLMConfig{RuntimeMode: "cli_test"}}, pg, pg, nil)
+	h := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/api/conversations/"+agentID+"/artifacts?lines=20", nil)
+	req.Header.Set("X-Empire-Key", "test-key")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"workspace_container":"empireai-factory"`) {
+		t.Fatalf("expected workspace container in response: %s", body)
+	}
+	if !strings.Contains(body, `project line`) {
+		t.Fatalf("expected project jsonl tail in response: %s", body)
+	}
+	if !strings.Contains(body, `debug line`) {
+		t.Fatalf("expected debug log tail in response: %s", body)
+	}
+}
+
+func TestDashboardServer_ConversationArtifacts_404WhenNoSession(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	t.Setenv("EMPIREAI_API_KEY", "test-key")
+
+	agentID := "market-research-agent-shard-0-nosession"
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO agents (id, type, role, mode, status, config)
+		VALUES ($1, 'stub', 'market-research-agent', 'factory', 'active', '{}'::jsonb)
+		ON CONFLICT (id) DO NOTHING
+	`, agentID); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+
+	srv := NewServer(db, &config.Config{LLM: config.LLMConfig{RuntimeMode: "cli_test"}}, pg, pg, nil)
+	h := srv.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/api/conversations/"+agentID+"/artifacts", nil)
+	req.Header.Set("X-Empire-Key", "test-key")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func writeDockerStubScript(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "docker-stub.sh")
+	script := `#!/bin/sh
+set -eu
+if [ "$1" != "exec" ]; then
+  echo "unsupported command: $*" >&2
+  exit 1
+fi
+container="$2"
+cmd="$3"
+if [ "$container" != "empireai-factory" ]; then
+  echo "unknown container: $container" >&2
+  exit 1
+fi
+if [ "$cmd" = "find" ]; then
+  echo "/home/agent/.claude/projects/-opt-empireai-scaffold/sess-123.jsonl"
+  exit 0
+fi
+if [ "$cmd" = "tail" ]; then
+  path="${6:-}"
+  case "$path" in
+    */sess-123.jsonl)
+      echo "project line"
+      ;;
+    */sess-123.txt)
+      echo "debug line"
+      ;;
+    *)
+      echo "missing file" >&2
+      exit 1
+      ;;
+  esac
+  exit 0
+fi
+echo "unsupported exec payload: $*" >&2
+exit 1
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	return path
 }

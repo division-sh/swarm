@@ -1,7 +1,7 @@
 id: holding-devops
 role: holding-devops
 mode: holding
-model_tier: sonnet
+model_tier: haiku
 subscriptions:
   - devops.deploy_requested
   - devops.health_check_failed

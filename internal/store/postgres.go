@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"empireai/internal/config"
 	_ "github.com/lib/pq"
@@ -47,6 +48,11 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}
+	// Safe defaults; callers can still override pool settings afterward.
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxIdleTime(5 * time.Minute)
+	db.SetConnMaxLifetime(30 * time.Minute)
 	return &PostgresStore{DB: db}, nil
 }
 

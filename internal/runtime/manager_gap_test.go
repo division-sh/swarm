@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -475,6 +476,8 @@ func TestAgentManager_ReplayBacklog_ReceiptsAndDeadLetterEscalationAndTransient(
 }
 
 func TestAgentManager_ProcessEvent_TripsAuthCircuitBreaker(t *testing.T) {
+	ResumeRuntimeIngress()
+	defer ResumeRuntimeIngress()
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &managerStoreStub{
 		pendingDirect: map[string][]events.Event{},
@@ -521,6 +524,9 @@ func TestAgentManager_ProcessEvent_TripsAuthCircuitBreaker(t *testing.T) {
 	if am.IsRunning() {
 		t.Fatal("expected runtime paused after auth breaker")
 	}
+	if !RuntimeIngressPaused() {
+		t.Fatal("expected runtime ingress paused after auth breaker")
+	}
 
 	select {
 	case evt := <-authCh:
@@ -529,6 +535,72 @@ func TestAgentManager_ProcessEvent_TripsAuthCircuitBreaker(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("expected runtime.auth_required event")
+	}
+}
+
+func TestAgentManager_ProcessEvent_TripsCreditExhaustionPause(t *testing.T) {
+	ResumeRuntimeIngress()
+	defer ResumeRuntimeIngress()
+	bus := NewEventBus(InMemoryEventStore{})
+	store := &managerStoreStub{
+		pendingDirect: map[string][]events.Event{},
+		pendingSub:    map[string][]events.Event{},
+	}
+
+	agents := make(map[string]*stubAgent)
+	factory := func(cfg models.AgentConfig) (Agent, error) {
+		a := &stubAgent{
+			id:  cfg.ID,
+			typ: cfg.Type,
+			onEventFn: func(_ context.Context, _ events.Event) ([]events.Event, error) {
+				return nil, errors.New("claude cli run failed: exit status 1, stderr=You've hit your limit · resets 4am (UTC)")
+			},
+		}
+		agents[cfg.ID] = a
+		return a, nil
+	}
+	am := NewAgentManager(bus, factory, store)
+	if err := am.SpawnAgent(models.AgentConfig{ID: "a1", Type: "worker", Role: "worker", Mode: "holding"}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	pauseCh := bus.Subscribe("observer-pause", events.EventType("runtime.paused"))
+
+	am.Run(context.Background())
+	if !am.IsRunning() {
+		t.Fatal("expected manager running")
+	}
+	err := am.processEvent(context.Background(), agents["a1"], events.Event{
+		ID:        "e-credit",
+		Type:      "x",
+		CreatedAt: time.Now(),
+	})
+	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "hit your limit") {
+		t.Fatalf("expected out-of-credit error, got %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for am.IsRunning() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if am.IsRunning() {
+		t.Fatal("expected runtime paused after credit breaker")
+	}
+	if !RuntimeIngressPaused() {
+		t.Fatal("expected runtime ingress paused after credit breaker")
+	}
+
+	select {
+	case evt := <-pauseCh:
+		if string(evt.Type) != "runtime.paused" {
+			t.Fatalf("unexpected pause event: %s", evt.Type)
+		}
+		var payload map[string]any
+		_ = json.Unmarshal(evt.Payload, &payload)
+		if strings.TrimSpace(asString(payload["reason"])) != "claude_credit_exhausted" {
+			t.Fatalf("unexpected pause payload: %+v", payload)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected runtime.paused event")
 	}
 }
 

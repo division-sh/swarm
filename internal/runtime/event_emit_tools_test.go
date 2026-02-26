@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"strings"
 	"testing"
 
 	"empireai/internal/commgraph"
@@ -22,8 +23,17 @@ func TestGenerateEmitToolsForRole(t *testing.T) {
 			t.Fatalf("expected scan tool schema object, got %#v", tool.Schema)
 		}
 		required, ok := schema["required"].([]string)
-		if !ok || len(required) == 0 || required[0] != "mode" {
-			t.Fatalf("expected schema to require mode, got %#v", schema["required"])
+		if !ok || len(required) == 0 {
+			t.Fatalf("expected required list, got %#v", schema["required"])
+		}
+		requiredSet := make(map[string]struct{}, len(required))
+		for _, field := range required {
+			requiredSet[field] = struct{}{}
+		}
+		for _, field := range []string{"mode", "geography", "campaign_context"} {
+			if _, ok := requiredSet[field]; !ok {
+				t.Fatalf("expected scan schema to require %q, got %#v", field, required)
+			}
 		}
 	}
 	if !foundScan {
@@ -87,6 +97,36 @@ func TestGenerateEmitTools_SchemaPresentForAllProducedEvents(t *testing.T) {
 				t.Fatalf("role %s tool %s expected object schema, got %#v", role, tool.Name, schema["type"])
 			}
 		}
+	}
+}
+
+func TestEventSchemaRegistry_ExplicitForAllProducerEvents(t *testing.T) {
+	ensureEventSchemaRegistry()
+	missing := make([]string, 0, 16)
+	for _, role := range commgraph.ProducerRoles() {
+		for _, eventType := range commgraph.ProducerEventsForRole(role) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			if _, ok := EventSchemaRegistry[eventType]; ok {
+				continue
+			}
+			missing = append(missing, eventType+" (role="+role+")")
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("missing explicit EventSchemaRegistry entries: %v", missing)
+	}
+}
+
+func TestEventSchemaSnapshot_IncludesStrictDefaults(t *testing.T) {
+	snapshot := EventSchemaSnapshot()
+	if len(snapshot) == 0 {
+		t.Fatalf("expected non-empty schema snapshot")
+	}
+	if _, ok := snapshot["spec.approved"]; !ok {
+		t.Fatalf("expected strict default schema for spec.approved in snapshot")
 	}
 }
 
@@ -170,6 +210,31 @@ func TestEventSchemaRegistry_ScoringRequestedAllowsTaskID(t *testing.T) {
 		"task_id":              "task-123",
 	}); err != nil {
 		t.Fatalf("expected scoring.requested to allow task_id, got %v", err)
+	}
+}
+
+func TestEventSchemaRegistry_ScanAndScoringSupportAutomationMicro(t *testing.T) {
+	if err := ValidateEventPayloadAgainstSchema("scan.requested", map[string]any{
+		"mode":      "automation_micro",
+		"geography": "Argentina",
+		"campaign_context": map[string]any{
+			"modes":             []any{"automation_micro", "saas_gap"},
+			"strategic_context": "Automation-first micro opportunities.",
+			"directive_id":      "dir-1",
+		},
+	}); err != nil {
+		t.Fatalf("expected scan.requested automation_micro payload to validate, got %v", err)
+	}
+
+	if err := ValidateEventPayloadAgainstSchema("scoring.requested", map[string]any{
+		"vertical_id":          "v-auto-1",
+		"vertical_name":        "Appointment Recovery",
+		"geography":            "argentina",
+		"mode":                 "automation_micro",
+		"rubric":               "automation_micro",
+		"dimensions_requested": []any{"automation_leverage", "sales_cycle_simplicity"},
+	}); err != nil {
+		t.Fatalf("expected scoring.requested automation_micro payload to validate, got %v", err)
 	}
 }
 
@@ -260,8 +325,8 @@ func TestEventSchemaRegistry_ScoreDimensionCompleteStrictAndBounded(t *testing.T
 		"score":       88,
 		"evidence":    "source says demand is high",
 	}
-	if err := ValidateEventPayloadAgainstSchema("score.dimension_complete", withContext); err != nil {
-		t.Fatalf("expected runtime context fields to be accepted, got %v", err)
+	if err := ValidateEventPayloadAgainstSchema("score.dimension_complete", withContext); err == nil {
+		t.Fatal("expected task_id to be rejected by strict score.dimension_complete schema")
 	}
 	if err := ValidateEventPayloadAgainstSchema("score.dimension_complete", map[string]any{
 		"vertical_id": "v1",

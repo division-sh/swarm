@@ -273,7 +273,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 			"properties": map[string]any{
 				"mode": map[string]any{
 					"type": "string",
-					"enum": []string{"saas_gap", "saas_trend", "local_services"},
+					"enum": []string{"automation_micro", "saas_gap", "saas_trend", "local_services"},
 				},
 				"geography_id": map[string]any{"type": "string"},
 				"geography":    map[string]any{"type": "string"},
@@ -290,7 +290,16 @@ var EventSchemaRegistry = map[string]EventSchema{
 					"enum": []string{"low", "normal", "high", "critical"},
 				},
 				"campaign_context": map[string]any{
-					"type":                 "object",
+					"type": "object",
+					"properties": map[string]any{
+						"modes": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string", "enum": []string{"automation_micro", "saas_gap", "saas_trend", "local_services"}},
+						},
+						"strategic_context": map[string]any{"type": "string"},
+						"directive_id":      map[string]any{"type": "string"},
+					},
+					"required":             []string{"modes", "strategic_context", "directive_id"},
 					"additionalProperties": true,
 				},
 				"directive_id": map[string]any{"type": "string"},
@@ -302,7 +311,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"task_id":      map[string]any{"type": "string"},
 				"vertical_id":  map[string]any{"type": "string"},
 			},
-			"required":             []string{"mode"},
+			"required":             []string{"mode", "geography", "campaign_context"},
 			"additionalProperties": false,
 		},
 	},
@@ -327,6 +336,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"message":               map[string]any{"type": "string"},
 				"digest_text":           map[string]any{"type": "string"},
 				"trigger_reason":        map[string]any{"type": "string"},
 				"trigger_event_id":      map[string]any{"type": "string"},
@@ -336,7 +346,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"task_id":               map[string]any{"type": "string"},
 				"vertical_id":           map[string]any{"type": "string"},
 			},
-			"required":             []string{"digest_text"},
+			"required":             []string{"message"},
 			"additionalProperties": false,
 		},
 	},
@@ -636,13 +646,13 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"geography":     map[string]any{"type": "string"},
 				"mode": map[string]any{
 					"type": "string",
-					"enum": []string{"saas_gap", "saas_trend", "local_services"},
+					"enum": []string{"automation_micro", "saas_gap", "saas_trend", "local_services"},
 				},
 				"signal_strength": map[string]any{"type": "integer"},
 				"campaign_id":     map[string]any{"type": "string"},
 				"rubric": map[string]any{
 					"type": "string",
-					"enum": []string{"saas", "local_services"},
+					"enum": []string{"automation_micro", "saas", "local_services"},
 				},
 				"dimensions_requested": map[string]any{
 					"type":  "array",
@@ -750,6 +760,133 @@ var EventSchemaRegistry = map[string]EventSchema{
 			"additionalProperties": false,
 		},
 	},
+	"devops.deploy_requested": {
+		Description: "OpCo DevOps requests deploy to Holding DevOps.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":      map[string]any{"type": "string"},
+				"vertical_name":    map[string]any{"type": "string"},
+				"requesting_agent": map[string]any{"type": "string"},
+				"environment":      map[string]any{"type": "string", "enum": []string{"staging", "production"}},
+				"version":          map[string]any{"type": "integer"},
+				"manifest":         map[string]any{"type": "object", "additionalProperties": true},
+				"skip_staging":     map[string]any{"type": "boolean"},
+				"task_id":          map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "requesting_agent", "environment", "version", "manifest"},
+			"additionalProperties": false,
+		},
+	},
+	"devops.deploy_complete": {
+		Description: "Deploy succeeded (audit).",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":    map[string]any{"type": "string"},
+				"environment":    map[string]any{"type": "string", "enum": []string{"staging", "production"}},
+				"status":         map[string]any{"type": "string"},
+				"health_check":   map[string]any{"type": "object", "additionalProperties": true},
+				"url":            map[string]any{"type": "string"},
+				"active_version": map[string]any{"type": "integer"},
+				"task_id":        map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "environment", "status"},
+			"additionalProperties": false,
+		},
+	},
+	"devops.deploy_failed": {
+		Description: "Deploy failed (audit).",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":       map[string]any{"type": "string"},
+				"environment":       map[string]any{"type": "string", "enum": []string{"staging", "production"}},
+				"error":             map[string]any{"type": "string"},
+				"rollback_status":   map[string]any{"type": "string"},
+				"requires_approval": map[string]any{"type": "boolean"},
+				"task_id":           map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "environment", "error"},
+			"additionalProperties": false,
+		},
+	},
+	"devops.rollback_requested": {
+		Description: "OpCo DevOps requests rollback to Holding DevOps.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":        map[string]any{"type": "string"},
+				"requesting_agent":   map[string]any{"type": "string"},
+				"target_version":     map[string]any{"type": "integer"},
+				"rollback_migration": map[string]any{"type": "string"},
+				"manifest":           map[string]any{"type": "object", "additionalProperties": true},
+				"task_id":            map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "requesting_agent", "target_version"},
+			"additionalProperties": false,
+		},
+	},
+	"devops.rollback_complete": {
+		Description: "Rollback succeeded (audit).",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":    map[string]any{"type": "string"},
+				"status":         map[string]any{"type": "string"},
+				"health_check":   map[string]any{"type": "object", "additionalProperties": true},
+				"active_version": map[string]any{"type": "integer"},
+				"task_id":        map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "status", "active_version"},
+			"additionalProperties": false,
+		},
+	},
+	"devops.rollback_failed": {
+		Description: "Rollback failed and manual intervention is required.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":                map[string]any{"type": "string"},
+				"error":                      map[string]any{"type": "string"},
+				"manual_intervention_needed": map[string]any{"type": "boolean"},
+				"task_id":                    map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "error"},
+			"additionalProperties": false,
+		},
+	},
+	"cycle_limit_reached": {
+		Description: "Runtime detected a repetitive OpCo event cycle.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":       map[string]any{"type": "string"},
+				"event_pattern":     map[string]any{"type": "string"},
+				"count":             map[string]any{"type": "integer"},
+				"agents_involved":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"window_start":      map[string]any{"type": "string"},
+				"recommendation":    map[string]any{"type": "string"},
+				"escalation_target": map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "event_pattern", "count", "agents_involved", "recommendation"},
+			"additionalProperties": false,
+		},
+	},
+	"cycle_reset": {
+		Description: "OpCo CTO resets a cycle counter after investigation.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":   map[string]any{"type": "string"},
+				"event_pattern": map[string]any{"type": "string"},
+				"reason":        map[string]any{"type": "string"},
+				"task_id":       map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "event_pattern", "reason"},
+			"additionalProperties": false,
+		},
+	},
 	"spec.validation_passed": {
 		Description: "Spec auditor validation passed.",
 		Schema: map[string]any{
@@ -801,30 +938,114 @@ var EventSchemaRegistry = map[string]EventSchema{
 	},
 }
 
+// strictDefaultEventSchemas enumerates produced events that currently use the
+// strict baseline schema contract. Entries here are explicit and deterministic,
+// allowing strict startup checks to pass without runtime-generated schemas.
+var strictDefaultEventSchemas = map[string]EventSchema{
+	"analyst.anti_pattern_advisory":      defaultAgentEventSchema("analyst.anti_pattern_advisory"),
+	"analyst.bootstrap_upgrade_proposal": defaultAgentEventSchema("analyst.bootstrap_upgrade_proposal"),
+	"analyst.prompt_refinement_proposal": defaultAgentEventSchema("analyst.prompt_refinement_proposal"),
+	"brand.candidates_ready":             defaultAgentEventSchema("brand.candidates_ready"),
+	"budget.emergency":                   defaultAgentEventSchema("budget.emergency"),
+	"budget.resumed":                     defaultAgentEventSchema("budget.resumed"),
+	"budget.throttle":                    defaultAgentEventSchema("budget.throttle"),
+	"budget.warning":                     defaultAgentEventSchema("budget.warning"),
+	"bug_fix_deployed":                   defaultAgentEventSchema("bug_fix_deployed"),
+	"bug_reported":                       defaultAgentEventSchema("bug_reported"),
+	"build_blocked":                      defaultAgentEventSchema("build_blocked"),
+	"build_complete":                     defaultAgentEventSchema("build_complete"),
+	"build_progress":                     defaultAgentEventSchema("build_progress"),
+	"channel_blocked":                    defaultAgentEventSchema("channel_blocked"),
+	"channel_update":                     defaultAgentEventSchema("channel_update"),
+	"churn_risk":                         defaultAgentEventSchema("churn_risk"),
+	"cross_domain_report":                defaultAgentEventSchema("cross_domain_report"),
+	"cto.architecture_directive":         defaultAgentEventSchema("cto.architecture_directive"),
+	"cto.extraction_recommended":         defaultAgentEventSchema("cto.extraction_recommended"),
+	"cto.pattern_detected":               defaultAgentEventSchema("cto.pattern_detected"),
+	"cto.spec_approved":                  defaultAgentEventSchema("cto.spec_approved"),
+	"cto.spec_revision_needed":           defaultAgentEventSchema("cto.spec_revision_needed"),
+	"cto.spec_vetoed":                    defaultAgentEventSchema("cto.spec_vetoed"),
+	"cto.tech_spec_feedback":             defaultAgentEventSchema("cto.tech_spec_feedback"),
+	"cto.tech_spec_review_requested":     defaultAgentEventSchema("cto.tech_spec_review_requested"),
+	"dedup.resolved":                     defaultAgentEventSchema("dedup.resolved"),
+	"deploy_requested":                   defaultAgentEventSchema("deploy_requested"),
+	"devops.capacity_warning":            defaultAgentEventSchema("devops.capacity_warning"),
+	"devops.deploy_complete":             defaultAgentEventSchema("devops.deploy_complete"),
+	"devops.deploy_failed":               defaultAgentEventSchema("devops.deploy_failed"),
+	"devops.deploy_requested":            defaultAgentEventSchema("devops.deploy_requested"),
+	"devops.health_check_failed":         defaultAgentEventSchema("devops.health_check_failed"),
+	"devops.infra_change_needed":         defaultAgentEventSchema("devops.infra_change_needed"),
+	"devops.port_allocated":              defaultAgentEventSchema("devops.port_allocated"),
+	"devops.rollback_complete":           defaultAgentEventSchema("devops.rollback_complete"),
+	"devops.rollback_failed":             defaultAgentEventSchema("devops.rollback_failed"),
+	"devops.rollback_requested":          defaultAgentEventSchema("devops.rollback_requested"),
+	"devops.ssl_provisioned":             defaultAgentEventSchema("devops.ssl_provisioned"),
+	"feature_deployed":                   defaultAgentEventSchema("feature_deployed"),
+	"feature_request":                    defaultAgentEventSchema("feature_request"),
+	"growth_escalation":                  defaultAgentEventSchema("growth_escalation"),
+	"growth_report":                      defaultAgentEventSchema("growth_report"),
+	"human_task.approved":                defaultAgentEventSchema("human_task.approved"),
+	"human_task.deferred":                defaultAgentEventSchema("human_task.deferred"),
+	"human_task.rejected":                defaultAgentEventSchema("human_task.rejected"),
+	"launch_ready":                       defaultAgentEventSchema("launch_ready"),
+	"mandate_updated":                    defaultAgentEventSchema("mandate_updated"),
+	"market_feedback":                    defaultAgentEventSchema("market_feedback"),
+	"market_signals":                     defaultAgentEventSchema("market_signals"),
+	"opco.ceo_report":                    defaultAgentEventSchema("opco.ceo_report"),
+	"opco.deploy_review":                 defaultAgentEventSchema("opco.deploy_review"),
+	"opco.escalation":                    defaultAgentEventSchema("opco.escalation"),
+	"opco.founder_input":                 defaultAgentEventSchema("opco.founder_input"),
+	"opco.launched":                      defaultAgentEventSchema("opco.launched"),
+	"opco.product_spec_review":           defaultAgentEventSchema("opco.product_spec_review"),
+	"opco.spend_request":                 defaultAgentEventSchema("opco.spend_request"),
+	"opco.steady_state_reached":          defaultAgentEventSchema("opco.steady_state_reached"),
+	"outreach_digest":                    defaultAgentEventSchema("outreach_digest"),
+	"prelaunch_ready":                    defaultAgentEventSchema("prelaunch_ready"),
+	"product_escalation":                 defaultAgentEventSchema("product_escalation"),
+	"product_report":                     defaultAgentEventSchema("product_report"),
+	"product_spec_ready":                 defaultAgentEventSchema("product_spec_ready"),
+	"qa.validation_failed":               defaultAgentEventSchema("qa.validation_failed"),
+	"qa.validation_passed":               defaultAgentEventSchema("qa.validation_passed"),
+	"research.completed":                 defaultAgentEventSchema("research.completed"),
+	"research.vertical_rejected":         defaultAgentEventSchema("research.vertical_rejected"),
+	"spec.approved":                      defaultAgentEventSchema("spec.approved"),
+	"spec.draft_ready":                   defaultAgentEventSchema("spec.draft_ready"),
+	"spec.requested":                     defaultAgentEventSchema("spec.requested"),
+	"spec.revision_needed":               defaultAgentEventSchema("spec.revision_needed"),
+	"spec.validation_requested":          defaultAgentEventSchema("spec.validation_requested"),
+	"spec_review.issues_found":           defaultAgentEventSchema("spec_review.issues_found"),
+	"spec_review.passed":                 defaultAgentEventSchema("spec_review.passed"),
+	"spec_review.requested":              defaultAgentEventSchema("spec_review.requested"),
+	"spend_needed":                       defaultAgentEventSchema("spend_needed"),
+	"spend_request":                      defaultAgentEventSchema("spend_request"),
+	"support_critical":                   defaultAgentEventSchema("support_critical"),
+	"support_digest":                     defaultAgentEventSchema("support_digest"),
+	"synthesis.resolved":                 defaultAgentEventSchema("synthesis.resolved"),
+	"technical_spec_ready":               defaultAgentEventSchema("technical_spec_ready"),
+	"template.version_published":         defaultAgentEventSchema("template.version_published"),
+	"user_onboarded":                     defaultAgentEventSchema("user_onboarded"),
+}
+
 func ensureEventSchemaRegistry() {
 	emitToolIndexOnce.Do(func() {
 		generatedSchemas = make(map[string]struct{})
-		seedAgentEventSchemaDefaults()
-		generated := make([]string, 0, 16)
-		for eventType := range commgraph.KnownProducedEvents() {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
+		for eventType, schema := range strictDefaultEventSchemas {
+			if _, ok := EventSchemaRegistry[eventType]; ok {
 				continue
 			}
-			if _, ok := EventSchemaRegistry[eventType]; !ok {
-				EventSchemaRegistry[eventType] = defaultAgentEventSchema(eventType)
-				generatedSchemas[eventType] = struct{}{}
-				generated = append(generated, eventType)
-			}
+			EventSchemaRegistry[eventType] = schema
 		}
-		sort.Strings(generated)
-		if len(generated) > 0 {
+		missing := missingAgentEmitSchemas()
+		if len(missing) > 0 {
+			for _, eventType := range missing {
+				generatedSchemas[eventType] = struct{}{}
+			}
 			runtimeWarnOnce(
-				"event-schema-generated-defaults",
+				"event-schema-missing-explicit",
 				"event-schema-registry",
-				"generated strict fallback schemas for %d known produced events: %s",
-				len(generated),
-				summarizeLogList(generated, 20),
+				"missing explicit schemas for %d known produced events: %s",
+				len(missing),
+				summarizeLogList(missing, 20),
 			)
 		}
 		ensureSchemaContextFields()
@@ -833,6 +1054,23 @@ func ensureEventSchemaRegistry() {
 			emitToolToEvent[emitToolName(eventType)] = eventType
 		}
 	})
+}
+
+func missingAgentEmitSchemas() []string {
+	missing := make([]string, 0, 16)
+	for _, role := range commgraph.ProducerRoles() {
+		for _, eventType := range commgraph.ProducerEventsForRole(role) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			if _, ok := EventSchemaRegistry[eventType]; ok {
+				continue
+			}
+			missing = append(missing, eventType)
+		}
+	}
+	return uniqueNonEmpty(missing)
 }
 
 func ensureSchemaContextFields() {
@@ -848,12 +1086,6 @@ func ensureSchemaContextFields() {
 		props, ok := root["properties"].(map[string]any)
 		if !ok || props == nil {
 			props = map[string]any{}
-		}
-		if _, ok := props["task_id"]; !ok {
-			props["task_id"] = map[string]any{"type": "string"}
-		}
-		if _, ok := props["vertical_id"]; !ok {
-			props["vertical_id"] = map[string]any{"type": "string"}
 		}
 		root["properties"] = props
 		entry.Schema = root
@@ -941,10 +1173,11 @@ func defaultAgentEventSchema(eventType string) EventSchema {
 		props["resolution"] = map[string]any{"type": "string"}
 		props["rationale"] = map[string]any{"type": "string"}
 	case "portfolio.digest_compiled":
+		props["message"] = map[string]any{"type": "string"}
 		props["digest_text"] = map[string]any{"type": "string"}
 		props["trigger_reason"] = map[string]any{"type": "string"}
 		props["snapshot"] = map[string]any{"type": "object", "additionalProperties": true}
-		required = append(required, "digest_text")
+		required = append(required, "message")
 	case "template.version_published":
 		props["version"] = map[string]any{"type": "string"}
 		required = append(required, "version")
@@ -1007,6 +1240,15 @@ func GenerateEmitTools(role string) []ToolDefinition {
 		if eventType == "" {
 			continue
 		}
+		if _, ok := EventSchemaRegistry[eventType]; !ok {
+			runtimeWarnOnce(
+				"emit-tool-missing-schema-"+eventType,
+				"event-schema-registry",
+				"skipping emit tool generation for %q because no explicit schema exists",
+				eventType,
+			)
+			continue
+		}
 		schema := schemaForEventType(eventType)
 		tools = append(tools, ToolDefinition{
 			Name:        emitToolName(eventType),
@@ -1063,6 +1305,24 @@ func IsEmitToolAllowedForRole(role, toolName string) bool {
 		}
 	}
 	return false
+}
+
+// EventSchemaSnapshot returns a copy of the current event schema registry.
+// Used by diagnostics and dashboard tooling.
+func EventSchemaSnapshot() map[string]EventSchema {
+	ensureEventSchemaRegistry()
+	out := make(map[string]EventSchema, len(EventSchemaRegistry))
+	for eventType, entry := range EventSchemaRegistry {
+		schemaCopy := map[string]any{}
+		if entry.Schema != nil {
+			schemaCopy = parsePayloadMap(mustJSON(entry.Schema))
+		}
+		out[eventType] = EventSchema{
+			Description: entry.Description,
+			Schema:      schemaCopy,
+		}
+	}
+	return out
 }
 
 func emitToolName(eventType string) string {

@@ -54,9 +54,6 @@ CREATE TABLE IF NOT EXISTS human_tasks (
     completed_at        TIMESTAMPTZ
 );
 
-ALTER TABLE human_tasks
-  ADD COLUMN IF NOT EXISTS tool_call_id TEXT;
-
 DO $$
 BEGIN
   IF NOT EXISTS (

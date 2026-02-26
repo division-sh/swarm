@@ -13,6 +13,7 @@ subscriptions:
   - spend.approved
   - spend.rejected
   - opco.escalation_response
+  - cto.architecture_directive
 tools:
   - agent_hire
   - agent_fire

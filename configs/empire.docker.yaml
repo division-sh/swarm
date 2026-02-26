@@ -84,6 +84,7 @@ sharding:
   max_shards_per_scan: 8
   max_concurrent_shards: 12
   per_shard_timeout: 30m
+  startup_grace_period: 20m
   per_shard_budget_cents: 50
   max_retries_per_shard: 2
   circuit_breaker_threshold: 0.5

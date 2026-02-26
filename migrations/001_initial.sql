@@ -208,7 +208,6 @@ CREATE TABLE IF NOT EXISTS human_tasks (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     requesting_agent  TEXT NOT NULL,
     vertical_id       UUID REFERENCES verticals(id),
-    tool_call_id      TEXT,
     category          TEXT NOT NULL,
     description       TEXT NOT NULL,
     talking_points    JSONB,

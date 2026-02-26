@@ -468,6 +468,124 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 	}
 }
 
+func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ensureShardsTable(t, db)
+
+	cfg := testDispatcherConfig(t)
+	pg := &store.PostgresStore{DB: db}
+	bus := rt.NewEventBus(pg)
+	manager := rt.NewAgentManager(bus, nil, pg)
+
+	cloneID := "market-research-agent-shard-0-livelease"
+	if err := manager.SpawnAgent(models.AgentConfig{
+		ID:            "market-research-agent",
+		Type:          "sonnet",
+		Role:          "market-research-agent",
+		Mode:          "factory",
+		Subscriptions: []string{"market_research.scan_assigned"},
+		Config:        mustJSONRaw(map[string]any{"system_prompt": "x", "subscriptions": []string{"market_research.scan_assigned"}}),
+	}); err != nil {
+		t.Fatalf("spawn base agent: %v", err)
+	}
+	if err := manager.SpawnAgent(models.AgentConfig{
+		ID:            cloneID,
+		Type:          "sonnet",
+		Role:          "market-research-agent",
+		Mode:          "factory",
+		Subscriptions: []string{"market_research.scan_assigned"},
+		Config:        mustJSONRaw(map[string]any{"system_prompt": "x", "subscriptions": []string{"market_research.scan_assigned"}}),
+	}); err != nil {
+		t.Fatalf("spawn synthetic assigned clone: %v", err)
+	}
+	manager.Run(ctx)
+
+	rootTaskID := uuid.NewString()
+	scanID := uuid.NewString()
+	shardID := uuid.NewString()
+	scope := mustJSONRaw(map[string]any{
+		"scan_id":             scanID,
+		"mode":                "saas_gap",
+		"geography":           "Argentina",
+		"taxonomy_categories": []string{"financial_ops", "commerce_payments"},
+	})
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO shards (
+			id, root_task_id, scan_id, stage, shard_index, shard_count, shard_key,
+			scope, agent_id, status, assigned_at, deadline_at, budget_cents, retry_count, created_at
+		)
+		VALUES (
+			$1::uuid, $2::uuid, $3::uuid, 'market_research', 0, 4, 'financial_ops+commerce_payments',
+			$4::jsonb, $5, 'assigned', now() - interval '5 minutes', now() + interval '20 minutes', 50, 0, now()
+		)
+	`, shardID, rootTaskID, scanID, string(scope), cloneID); err != nil {
+		t.Fatalf("insert assigned shard: %v", err)
+	}
+
+	assignEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (id, type, source_agent, payload, created_at)
+		VALUES ($1::uuid, 'market_research.scan_assigned', 'shard-dispatcher', '{}'::jsonb, now() - interval '5 minutes')
+	`, assignEventID); err != nil {
+		t.Fatalf("insert assignment event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (event_id, agent_id, created_at)
+		VALUES ($1::uuid, $2, now() - interval '5 minutes')
+	`, assignEventID, cloneID); err != nil {
+		t.Fatalf("insert assignment delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			id, agent_id, runtime_mode, provider, session_id, status,
+			lock_owner, lock_expires_at, turn_count, created_at, last_used_at
+		)
+		VALUES (
+			$1::uuid, $2, 'cli_test', 'anthropic', 'sess-live', 'active',
+			'lease-owner', now() + interval '10 minutes', 0, now() - interval '5 minutes', now()
+		)
+	`, uuid.NewString(), cloneID); err != nil {
+		t.Fatalf("insert active lease session: %v", err)
+	}
+
+	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher.SetPollInterval(50 * time.Millisecond)
+	dispatcher.SetStartupGracePeriod(250 * time.Millisecond)
+	go dispatcher.Run(ctx)
+
+	time.Sleep(900 * time.Millisecond)
+
+	var (
+		status     string
+		retryCount int
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, retry_count
+		FROM shards
+		WHERE id = $1::uuid
+	`, shardID).Scan(&status, &retryCount); err != nil {
+		t.Fatalf("load shard state: %v", err)
+	}
+	if status != "assigned" || retryCount != 0 {
+		t.Fatalf("expected assigned shard with retry_count=0 while lease is active, got status=%s retry_count=%d", status, retryCount)
+	}
+
+	var receiptCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND agent_id = $2
+	`, assignEventID, cloneID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count receipts: %v", err)
+	}
+	if receiptCount != 0 {
+		t.Fatalf("expected no reconciled receipt while shard lease is active, got %d", receiptCount)
+	}
+}
+
 func ensureShardsTable(t *testing.T, db *sql.DB) {
 	t.Helper()
 	if _, err := db.Exec(`

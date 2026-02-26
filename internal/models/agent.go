@@ -29,16 +29,17 @@ type MandateDocument struct {
 	Infrastructure    json.RawMessage `json:"infrastructure,omitempty"`
 }
 
-// DeployManifest is the deployment contract emitted by build/release paths.
-// Kept intentionally explicit so orchestration and audit consumers can rely on
-// a stable typed payload instead of ad-hoc maps.
+// DeployManifest is the deployment contract exchanged between OpCo DevOps
+// and Holding DevOps.
 type DeployManifest struct {
-	VerticalID      string          `json:"vertical_id"`
-	Environment     string          `json:"environment"`
-	Version         string          `json:"version"`
-	Image           string          `json:"image,omitempty"`
-	URL             string          `json:"url,omitempty"`
-	HealthcheckURL  string          `json:"healthcheck_url,omitempty"`
-	RollbackVersion string          `json:"rollback_version,omitempty"`
-	Config          json.RawMessage `json:"config,omitempty"`
+	VerticalID        string            `json:"vertical_id"`
+	VerticalName      string            `json:"vertical_name,omitempty"`
+	Environment       string            `json:"environment"` // staging | production
+	BinaryPath        string            `json:"binary_path,omitempty"`
+	MigrationSQL      string            `json:"migration_sql,omitempty"`
+	ConfigOverrides   map[string]string `json:"config,omitempty"`
+	HealthEndpoint    string            `json:"health_endpoint,omitempty"`
+	SkipStaging       bool              `json:"skip_staging,omitempty"`
+	Version           int               `json:"version"`
+	RollbackMigration string            `json:"rollback_migration,omitempty"`
 }

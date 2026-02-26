@@ -392,6 +392,10 @@ func filterTools(in []ToolDefinition, allowed map[string]struct{}, constrained b
 	}
 	out := make([]ToolDefinition, 0, len(in))
 	for _, t := range in {
+		if IsUniversalRuntimeTool(t.Name) {
+			out = append(out, t)
+			continue
+		}
 		if _, ok := allowed[t.Name]; ok {
 			out = append(out, t)
 		}
@@ -477,12 +481,15 @@ func canonicalRuntimeRole(role string) string {
 func inferDiscoveryMode(text string) string {
 	t := strings.ToLower(strings.TrimSpace(text))
 	switch {
+	case strings.Contains(t, "automation_micro"),
+		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
+		return "automation_micro"
 	case strings.Contains(t, "local service"), strings.Contains(t, "local_services"):
 		return "local_services"
 	case strings.Contains(t, "trend"), strings.Contains(t, "saas_trend"):
 		return "saas_trend"
 	default:
-		return "saas_gap"
+		return "automation_micro"
 	}
 }
 
@@ -593,7 +600,7 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 
 func normalizeScanMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "local_services", "saas_gap", "saas_trend":
+	case "automation_micro", "local_services", "saas_gap", "saas_trend":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""

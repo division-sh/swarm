@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -123,10 +124,52 @@ func TestManagerTeardownOpCo(t *testing.T) {
 	}
 }
 
+func TestManagerTeardownOpCo_EmitsTypedPayloadWithPriority(t *testing.T) {
+	store := &captureStore{}
+	bus := NewEventBus(store)
+	am := NewAgentManager(bus, nil)
+
+	_ = am.SpawnAgent(models.AgentConfig{
+		ID:            "opco-ceo-v1",
+		Type:          "operating",
+		Role:          "opco-ceo",
+		Mode:          "operating",
+		VerticalID:    "v1",
+		Subscriptions: []string{"x"},
+	})
+
+	if err := am.TeardownOpCo("v1"); err != nil {
+		t.Fatalf("teardown opco: %v", err)
+	}
+	var teardown events.Event
+	for i := len(store.events) - 1; i >= 0; i-- {
+		if store.events[i].Type == events.EventType("opco.teardown_complete") {
+			teardown = store.events[i]
+			break
+		}
+	}
+	if teardown.ID == "" {
+		t.Fatal("expected opco.teardown_complete event")
+	}
+	var payload OpCOTeardownCompletePayload
+	if err := json.Unmarshal(teardown.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal teardown payload: %v", err)
+	}
+	if payload.VerticalID != "v1" {
+		t.Fatalf("expected vertical_id=v1, got %q", payload.VerticalID)
+	}
+	if payload.Priority != "normal" {
+		t.Fatalf("expected priority=normal, got %q", payload.Priority)
+	}
+	if !payload.RoutingCleared {
+		t.Fatalf("expected routing_cleared=true, got false")
+	}
+}
+
 func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 	routes := defaultOpCoRoutes("v1")
 	if len(routes) != 28 {
-		t.Fatalf("expected 28 default routes (20 bootstrap + 8 seeded), got %d", len(routes))
+		t.Fatalf("expected 28 default routes (21 bootstrap + 7 seeded), got %d", len(routes))
 	}
 	bootstrap := 0
 	seeded := 0
@@ -138,11 +181,11 @@ func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 			seeded++
 		}
 	}
-	if bootstrap != 20 {
-		t.Fatalf("expected 20 bootstrap routes, got %d", bootstrap)
+	if bootstrap != 21 {
+		t.Fatalf("expected 21 bootstrap routes, got %d", bootstrap)
 	}
-	if seeded != 8 {
-		t.Fatalf("expected 8 seeded routes, got %d", seeded)
+	if seeded != 7 {
+		t.Fatalf("expected 7 seeded routes, got %d", seeded)
 	}
 }
 

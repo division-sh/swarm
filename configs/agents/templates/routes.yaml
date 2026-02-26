@@ -62,6 +62,9 @@ bootstrap_routes:
   - event_pattern: "*_escalation"
     subscriber_role: "opco-ceo"
     reason: "bootstrap"
+  - event_pattern: "cycle_limit_reached"
+    subscriber_role: "cto-agent"
+    reason: "bootstrap"
 
 seeded_routes:
   - event_pattern: "bug_fix_deployed"
@@ -84,7 +87,4 @@ seeded_routes:
     reason: "seeded"
   - event_pattern: "churn_risk"
     subscriber_role: "chief-of-staff"
-    reason: "seeded"
-  - event_pattern: "devops.deploy_complete"
-    subscriber_role: "qa-agent"
     reason: "seeded"

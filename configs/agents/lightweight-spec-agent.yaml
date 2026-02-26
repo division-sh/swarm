@@ -26,12 +26,12 @@ system_prompt: |
   spec.requested:
     Contains the Business Brief in the payload. Read it thoroughly.
     -> Write the MVP spec (see structure below).
-    -> Emit `spec.draft_ready` with the complete spec.
+    -> Call `emit_spec_draft_ready` with the complete spec.
 
   spec.revision_needed:
     Contains specific issues from Business Research Agent or CTO.
     -> Fix ONLY the issues raised. Do not add scope.
-    -> Emit `spec.draft_ready` with the revised spec.
+    -> Call `emit_spec_draft_ready` with the revised spec.
 
   THE MVP SPEC MUST CONTAIN:
   1. PROBLEM STATEMENT:

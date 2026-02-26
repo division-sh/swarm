@@ -150,8 +150,8 @@ func TestRuntimeToolExecutor_HandleEmitToolCoordinatorLegacyNestedPayload(t *tes
 	if err := json.Unmarshal(last.Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := strings.TrimSpace(asString(payload["mode"])); got != "saas_gap" {
-		t.Fatalf("expected mode alias discovery->saas_gap, got %q", got)
+	if got := strings.TrimSpace(asString(payload["mode"])); got != "automation_micro" {
+		t.Fatalf("expected mode alias discovery->automation_micro, got %q", got)
 	}
 	if got := strings.TrimSpace(asString(payload["priority"])); got != "normal" {
 		t.Fatalf("expected priority alias medium->normal, got %q", got)
@@ -198,8 +198,8 @@ func TestRuntimeToolExecutor_HandleEmitToolCoordinatorInvalidModeCoerced(t *test
 	if err := json.Unmarshal(last.Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := strings.TrimSpace(asString(payload["mode"])); got != "saas_gap" {
-		t.Fatalf("expected invalid mode coerced to saas_gap, got %q", got)
+	if got := strings.TrimSpace(asString(payload["mode"])); got != "automation_micro" {
+		t.Fatalf("expected invalid mode coerced to automation_micro, got %q", got)
 	}
 }
 
@@ -380,7 +380,7 @@ func TestRuntimeToolExecutor_HandleEmitToolFlattensNestedScanCompletePayload(t *
 	}
 }
 
-func TestRuntimeToolExecutor_HandleEmitToolScoreDimensionAcceptsInjectedTaskID(t *testing.T) {
+func TestRuntimeToolExecutor_HandleEmitToolScoreDimensionDoesNotInjectTaskID(t *testing.T) {
 	store := &captureStore{}
 	bus := NewEventBus(store)
 	exec := NewRuntimeToolExecutor(bus, nil, nil)
@@ -407,7 +407,7 @@ func TestRuntimeToolExecutor_HandleEmitToolScoreDimensionAcceptsInjectedTaskID(t
 		"score":     73,
 		"evidence":  "validated demand signal from sources",
 	}); err != nil {
-		t.Fatalf("expected emit_score_dimension_complete to accept injected task_id, got %v", err)
+		t.Fatalf("expected emit_score_dimension_complete to pass without task_id injection, got %v", err)
 	}
 	if len(store.events) == 0 {
 		t.Fatal("expected emitted event")
@@ -428,7 +428,7 @@ func TestRuntimeToolExecutor_HandleEmitToolScoreDimensionAcceptsInjectedTaskID(t
 	if err := json.Unmarshal(last.Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := strings.TrimSpace(asString(payload["task_id"])); got != "task-score-1" {
-		t.Fatalf("expected enriched task_id=task-score-1, got %q payload=%v", got, payload)
+	if _, ok := payload["task_id"]; ok {
+		t.Fatalf("expected strict payload to omit task_id, got payload=%v", payload)
 	}
 }

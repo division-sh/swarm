@@ -29,6 +29,14 @@ type BoardInteractiveAgent interface {
 
 type AgentFactory func(cfg models.AgentConfig) (Agent, error)
 
+type OpCOTeardownCompletePayload struct {
+	VerticalID       string `json:"vertical_id"`
+	AgentsRemoved    int    `json:"agents_removed"`
+	RoutingCleared   bool   `json:"routing_cleared"`
+	WorkspaceStopped bool   `json:"workspace_stopped"`
+	Priority         string `json:"priority"`
+}
+
 type AgentManager struct {
 	mu          sync.RWMutex
 	agents      map[string]Agent
@@ -62,6 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
+	runtimeSpecVersion      = "v2.0.26"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -98,6 +107,19 @@ func (am *AgentManager) SetBudgetTracker(tracker *BudgetTracker) {
 	am.budget = tracker
 }
 
+func (am *AgentManager) runtimeContext() context.Context {
+	if am == nil {
+		return context.Background()
+	}
+	am.runMu.Lock()
+	ctx := am.runCtx
+	am.runMu.Unlock()
+	if ctx != nil && ctx.Err() == nil {
+		return ctx
+	}
+	return context.Background()
+}
+
 func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) error {
 	if am == nil || am.bus == nil {
 		return errors.New("event bus is not configured")
@@ -111,7 +133,7 @@ func (am *AgentManager) SpawnAgent(cfg models.AgentConfig) error {
 		Status:  "active",
 		HiredBy: "runtime",
 	}
-	return am.spawnAgentInternal(context.Background(), rec, true)
+	return am.spawnAgentInternal(am.runtimeContext(), rec, true)
 }
 
 // SpawnEphemeralClone creates a task-scoped clone of a base agent. Ephemeral
@@ -144,7 +166,7 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 		HiredBy:       "shard-dispatcher",
 		StartedAt:     time.Now().UTC(),
 	}
-	if err := am.spawnAgentInternal(context.Background(), rec, true); err != nil {
+	if err := am.spawnAgentInternal(am.runtimeContext(), rec, true); err != nil {
 		if strings.Contains(err.Error(), "agent already exists") {
 			return nil
 		}
@@ -197,7 +219,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			"vertical_id": rec.Config.VerticalID,
 			"hired_by":    rec.HiredBy,
 		})
-		_ = am.bus.Publish(context.Background(), events.Event{
+		_ = am.bus.Publish(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("agent.started"),
 			SourceAgent: rec.Config.ID,
@@ -213,7 +235,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 }
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
-	cfg = am.applyPromptOverride(context.Background(), cfg)
+	cfg = am.applyPromptOverride(am.runtimeContext(), cfg)
 	if am.factory != nil {
 		return am.factory(cfg)
 	}
@@ -250,7 +272,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 	}
 
 	if am.workspaces != nil {
-		if err := am.workspaces.EnsureVerticalWorkspace(context.Background(), verticalID); err != nil {
+		if err := am.workspaces.EnsureVerticalWorkspace(am.runtimeContext(), verticalID); err != nil {
 			return fmt.Errorf("ensure vertical workspace: %w", err)
 		}
 	}
@@ -260,7 +282,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 	if am.store == nil {
 		agents := defaultOpCoRoster(verticalID)
 		for _, rec := range agents {
-			if err := am.spawnAgentInternal(context.Background(), rec, true); err != nil {
+			if err := am.spawnAgentInternal(am.runtimeContext(), rec, true); err != nil {
 				return err
 			}
 		}
@@ -290,7 +312,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 			"priority":         "normal",
 			"mandate":          mandate,
 		})
-		_ = am.bus.Publish(context.Background(), events.Event{
+		_ = am.bus.Publish(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("opco.ceo_ready"),
 			SourceAgent: "agent-manager",
@@ -302,22 +324,22 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 	}
 
 	if am.store != nil {
-		if err := am.store.EnsureVerticalSchema(context.Background(), verticalID); err != nil {
+		if err := am.store.EnsureVerticalSchema(am.runtimeContext(), verticalID); err != nil {
 			return fmt.Errorf("ensure vertical schema: %w", err)
 		}
 	}
-	template, err := am.loadLatestTemplate(context.Background())
+	template, err := am.loadLatestTemplate(am.runtimeContext())
 	if err != nil {
 		return err
 	}
-	bootstrapVersion := am.resolveBootstrapVersion(context.Background(), template.Version)
+	bootstrapVersion := am.resolveBootstrapVersion(am.runtimeContext(), template.Version)
 
 	// Template placeholder context (spec v2.0 uses {vertical_id}, {vertical_name}, etc.).
 	verticalName := ""
 	verticalGeography := ""
 	verticalSlug := ""
 	if reader, ok := am.store.(VerticalInfoReader); ok && reader != nil {
-		if info, found, err := reader.GetVerticalInfo(context.Background(), verticalID); err == nil && found {
+		if info, found, err := reader.GetVerticalInfo(am.runtimeContext(), verticalID); err == nil && found {
 			verticalName = strings.TrimSpace(info.Name)
 			verticalGeography = strings.TrimSpace(info.Geography)
 			verticalSlug = strings.TrimSpace(info.Slug)
@@ -392,7 +414,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		return fmt.Errorf("order opco agents by parent: %w", err)
 	}
 	for _, rec := range agents {
-		if err := am.spawnAgentInternal(context.Background(), rec, true); err != nil {
+		if err := am.spawnAgentInternal(am.runtimeContext(), rec, true); err != nil {
 			return err
 		}
 	}
@@ -430,7 +452,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		}
 		am.setRouteMeta(routeRuleKey(rule.VerticalID, rule.EventPattern, rule.SubscriberID), rule)
 		if am.store != nil {
-			if err := am.store.UpsertRoutingRule(context.Background(), rule); err != nil {
+			if err := am.store.UpsertRoutingRule(am.runtimeContext(), rule); err != nil {
 				return fmt.Errorf("persist routing rule %s -> %s: %w", rule.EventPattern, rule.SubscriberID, err)
 			}
 		}
@@ -451,12 +473,12 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		return err
 	}
 
-	if err := am.installDefaultOpCoHeartbeats(context.Background(), verticalID); err != nil {
+	if err := am.installDefaultOpCoHeartbeats(am.runtimeContext(), verticalID); err != nil {
 		log.Printf("install default opco heartbeats failed vertical=%s err=%v", verticalID, err)
 	}
 
 	if am.store != nil {
-		if err := am.store.SetVerticalTemplateVersion(context.Background(), verticalID, template.Version); err != nil {
+		if err := am.store.SetVerticalTemplateVersion(am.runtimeContext(), verticalID, template.Version); err != nil {
 			return err
 		}
 	}
@@ -469,7 +491,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		"priority":         "normal",
 		"mandate":          mandate,
 	})
-	_ = am.bus.Publish(context.Background(), events.Event{
+	_ = am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("opco.ceo_ready"),
 		SourceAgent: "agent-manager",
@@ -861,7 +883,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 		return err
 	}
 	if am.store != nil {
-		if err := am.store.UpsertAgent(context.Background(), PersistedAgent{
+		if err := am.store.UpsertAgent(am.runtimeContext(), PersistedAgent{
 			Config:  updated,
 			Status:  "active",
 			HiredBy: "reconfigure",
@@ -894,7 +916,11 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	runtimeMode := strings.TrimSpace(am.runtimeMode)
 	am.mu.RUnlock()
 	if sessions != nil && runtimeMode != "" {
-		_, _ = sessions.Rotate(agentID, runtimeMode, "reconfigure", "agent reconfigured", "")
+		if rotated, err := sessions.Rotate(agentID, runtimeMode, "reconfigure", "agent reconfigured", ""); err != nil {
+			log.Printf("agent reconfigure session rotation failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
+		} else if rotated != nil {
+			logSessionRotated(agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
+		}
 	}
 	return nil
 }
@@ -925,7 +951,7 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 		am.bus.Unsubscribe(agentID)
 	}
 	if am.store != nil {
-		if err := am.store.MarkAgentTerminated(context.Background(), agentID); err != nil {
+		if err := am.store.MarkAgentTerminated(am.runtimeContext(), agentID); err != nil {
 			return err
 		}
 	}
@@ -956,12 +982,12 @@ func (am *AgentManager) TeardownOpCo(verticalID string) error {
 		errs = append(errs, fmt.Sprintf("reset routing table: %v", err))
 	}
 	if am.store != nil {
-		if err := am.store.DeactivateRoutingRulesByVertical(context.Background(), verticalID); err != nil {
+		if err := am.store.DeactivateRoutingRulesByVertical(am.runtimeContext(), verticalID); err != nil {
 			errs = append(errs, fmt.Sprintf("deactivate routing: %v", err))
 		}
 	}
 	if am.workspaces != nil {
-		if err := am.workspaces.StopVerticalWorkspace(context.Background(), verticalID); err != nil {
+		if err := am.workspaces.StopVerticalWorkspace(am.runtimeContext(), verticalID); err != nil {
 			errs = append(errs, fmt.Sprintf("stop workspace: %v", err))
 		}
 	}
@@ -969,18 +995,20 @@ func (am *AgentManager) TeardownOpCo(verticalID string) error {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	if am.bus != nil {
-		_ = am.bus.Publish(context.Background(), events.Event{
+		payload := OpCOTeardownCompletePayload{
+			VerticalID:       strings.TrimSpace(verticalID),
+			AgentsRemoved:    len(toRemove),
+			RoutingCleared:   true,
+			WorkspaceStopped: am.workspaces != nil,
+			Priority:         "normal",
+		}
+		_ = am.bus.Publish(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("opco.teardown_complete"),
 			SourceAgent: "agent-manager",
 			VerticalID:  strings.TrimSpace(verticalID),
-			Payload: mustJSON(map[string]any{
-				"vertical_id":       strings.TrimSpace(verticalID),
-				"agents_removed":    len(toRemove),
-				"routing_cleared":   true,
-				"workspace_stopped": am.workspaces != nil,
-			}),
-			CreatedAt: time.Now(),
+			Payload:     mustJSON(payload),
+			CreatedAt:   time.Now(),
 		})
 	}
 	return nil
@@ -1053,7 +1081,7 @@ func (am *AgentManager) configureRouting(rule PersistedRoutingRule, allowBootstr
 		return err
 	}
 	if am.store != nil {
-		if err := am.store.UpsertRoutingRule(context.Background(), rule); err != nil {
+		if err := am.store.UpsertRoutingRule(am.runtimeContext(), rule); err != nil {
 			return err
 		}
 	}
@@ -1166,7 +1194,7 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"panic_count": count,
 		"error":       strings.TrimSpace(panicText),
 	}
-	_ = am.bus.PublishDirect(context.Background(), events.Event{
+	_ = am.bus.PublishDirect(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.poison_event_quarantined"),
 		SourceAgent: "runtime",
@@ -1482,7 +1510,7 @@ func (am *AgentManager) ResetRuntimeState() {
 	for verticalID := range verticals {
 		_ = am.bus.SetRoutingTable(verticalID, &RoutingTable{VerticalID: verticalID})
 		if am.workspaces != nil {
-			_ = am.workspaces.StopVerticalWorkspace(context.Background(), verticalID)
+			_ = am.workspaces.StopVerticalWorkspace(am.runtimeContext(), verticalID)
 		}
 	}
 }
@@ -1590,7 +1618,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		verticalID = strings.TrimSpace(cfg.VerticalID)
 	}
 
-	_ = am.bus.Publish(context.Background(), events.Event{
+	_ = am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
@@ -1626,7 +1654,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		managerID = "empire-coordinator"
 	}
 	if managerID != agent.ID() {
-		_ = am.bus.PublishDirect(context.Background(), events.Event{
+		_ = am.bus.PublishDirect(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("ops.agent_failed"),
 			SourceAgent: "runtime",
@@ -1893,7 +1921,7 @@ func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {
 	if eventID == "" || agentID == "" {
 		return false
 	}
-	receipt, found, err := reader.GetEventReceipt(context.Background(), eventID, agentID)
+	receipt, found, err := reader.GetEventReceipt(am.runtimeContext(), eventID, agentID)
 	if err != nil || !found {
 		return false
 	}
@@ -1930,8 +1958,33 @@ func isClaudeAuthError(err error) bool {
 		(strings.Contains(msg, "claude") && strings.Contains(msg, "auth"))
 }
 
+func isClaudeCreditExhaustedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.Join(strings.Fields(err.Error()), " "))
+	return strings.Contains(msg, "you've hit your limit") ||
+		strings.Contains(msg, "you have hit your limit") ||
+		strings.Contains(msg, "insufficient credit") ||
+		strings.Contains(msg, "insufficient credits") ||
+		strings.Contains(msg, "credit balance") ||
+		strings.Contains(msg, "quota exceeded") ||
+		(strings.Contains(msg, "resets") && strings.Contains(msg, "utc") && strings.Contains(msg, "limit"))
+}
+
 func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err error) {
-	if !isClaudeAuthError(err) {
+	reason := ""
+	eventType := events.EventType("runtime.paused")
+	instruction := ""
+	switch {
+	case isClaudeAuthError(err):
+		reason = "claude_auth_required"
+		eventType = events.EventType("runtime.auth_required")
+		instruction = "Claude authentication is required. Runtime paused to prevent retry storm."
+	case isClaudeCreditExhaustedError(err):
+		reason = "claude_credit_exhausted"
+		instruction = "Claude usage limit reached. Runtime paused globally until credits reset or billing is updated."
+	default:
 		return
 	}
 	am.runMu.Lock()
@@ -1943,20 +1996,21 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 	running := am.running
 	am.runMu.Unlock()
 
-	log.Printf("runtime auth breaker tripped: agent=%s event=%s err=%v", agentID, eventID, err)
+	PauseRuntimeIngress()
+	log.Printf("runtime pause breaker tripped: reason=%s agent=%s event=%s err=%v", reason, agentID, eventID, err)
 	payload, _ := json.Marshal(map[string]any{
 		"agent_id":     strings.TrimSpace(agentID),
 		"event_id":     strings.TrimSpace(eventID),
-		"reason":       "claude_auth_required",
-		"instruction":  "Claude authentication is required. Runtime paused to prevent retry storm.",
-		"spec_version": "v2.0.15",
+		"reason":       reason,
+		"instruction":  instruction,
+		"spec_version": runtimeSpecVersion,
 	})
 	if len(payload) == 0 {
 		payload = []byte("{}")
 	}
-	_ = am.bus.Publish(context.Background(), events.Event{
+	_ = am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
-		Type:        events.EventType("runtime.auth_required"),
+		Type:        eventType,
 		SourceAgent: "runtime",
 		Payload:     payload,
 		CreatedAt:   time.Now(),
@@ -2045,13 +2099,13 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		"retry_count":  receipt.RetryCount,
 		"error":        strings.TrimSpace(receipt.Error),
 		"instruction":  "Event delivery dead-lettered after 3 retries. Decide: retry (requeue), skip, or escalate.",
-		"spec_version": "v2.0.15",
+		"spec_version": runtimeSpecVersion,
 	})
 	if len(payload) == 0 {
 		payload = []byte("{}")
 	}
 
-	_ = am.bus.PublishDirect(context.Background(), events.Event{
+	_ = am.bus.PublishDirect(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.dead_letter_escalation"),
 		SourceAgent: "runtime",
@@ -2166,7 +2220,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.15",
+			TemplateVersion: "2.0.25",
 		}
 	}
 
@@ -2176,18 +2230,18 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 	cto := opCoAgentID("cto-agent", verticalID)
 
 	return []PersistedAgent{
-		mk("opco-ceo", "operating", "", "opco.spinup_requested", "product_report", "growth_report", "product_escalation", "growth_escalation", "spend_request", "spend.approved", "spend.rejected"),
+		mk("opco-ceo", "operating", "", "opco.spinup_requested", "product_report", "growth_report", "product_escalation", "growth_escalation", "spend_request", "spend.approved", "spend.rejected", "cto.architecture_directive"),
 		mk("chief-of-staff", "operating", ceo, "product_report", "growth_report", "support_critical", "build_blocked", "channel_blocked", "build_complete", "prelaunch_ready", "feature_deployed", "market_signals", "churn_risk"),
 		mk("vp-product", "operating", ceo, "build_complete", "build_blocked", "product_escalation", "spend_needed", "support_digest", "support_critical", "build_progress"),
 		mk("vp-growth", "operating", ceo, "outreach_digest", "channel_blocked", "user_onboarded", "prelaunch_ready", "spend_needed"),
-		mk("cto-agent", "operating", vpProduct, "product_spec_ready", "technical_spec_ready", "build_progress", "build_blocked", "bug_reported", "deploy_requested", "qa.validation_passed", "qa.validation_failed", "devops.deploy_complete", "devops.deploy_failed"),
+		mk("cto-agent", "operating", vpProduct, "product_spec_ready", "technical_spec_ready", "build_progress", "build_blocked", "bug_reported", "deploy_requested", "qa.validation_passed", "qa.validation_failed", "cycle_limit_reached"),
 		mk("pm-agent", "operating", vpProduct, "market_feedback", "mandate_updated", "feature_request"),
 		mk("support-agent", "operating", vpProduct, "customer_message", "bug_fix_deployed"),
 		mk("marketing-agent", "operating", vpGrowth, "launch_ready", "feature_deployed", "channel_update"),
 		mk("tech-writer", "operating", cto, "cto.tech_spec_review_requested"),
 		mk("backend-agent", "operating", cto, "technical_spec_ready"),
 		mk("frontend-agent", "operating", cto, "technical_spec_ready"),
-		mk("qa-agent", "operating", cto, "build_complete", "devops.deploy_complete"),
+		mk("qa-agent", "operating", cto, "build_complete"),
 		mk("devops-agent", "operating", cto, "deploy_requested"),
 	}
 }
@@ -2201,7 +2255,6 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 	pm := opCoAgentID("pm-agent", verticalID)
 	backend := opCoAgentID("backend-agent", verticalID)
 	frontend := opCoAgentID("frontend-agent", verticalID)
-	qa := opCoAgentID("qa-agent", verticalID)
 	devops := opCoAgentID("devops-agent", verticalID)
 	marketing := opCoAgentID("marketing-agent", verticalID)
 	support := opCoAgentID("support-agent", verticalID)
@@ -2252,6 +2305,7 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 		bootstrap("spend_needed", vpGrowth),
 		bootstrap("spend_request", ceo),
 		bootstrap("*_escalation", ceo),
+		bootstrap("cycle_limit_reached", cto),
 		seeded("bug_fix_deployed", support),
 		seeded("feature_deployed", cos),
 		seeded("feature_deployed", marketing),
@@ -2259,7 +2313,6 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 		seeded("prelaunch_ready", cos),
 		seeded("market_signals", cos),
 		seeded("churn_risk", cos),
-		seeded("devops.deploy_complete", qa),
 	}
 	return rules
 }

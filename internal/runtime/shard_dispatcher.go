@@ -62,7 +62,7 @@ func NewShardDispatcher(
 		manager:            manager,
 		cfg:                cfg,
 		pollInterval:       2 * time.Second,
-		startupGracePeriod: 90 * time.Second,
+		startupGracePeriod: startupGraceOrDefault(cfg.StartupGracePeriod),
 		receiptGracePeriod: 30 * time.Second,
 	}
 }
@@ -361,7 +361,7 @@ func (d *ShardDispatcher) handleAssignedStartupStalls(ctx context.Context) {
 	}
 	grace := d.startupGracePeriod
 	if grace <= 0 {
-		grace = 90 * time.Second
+		grace = 20 * time.Minute
 	}
 	rows := make([]shardRuntimeRow, 0, 32)
 	dbRows, err := dbQueryContext(ctx, d.db, `
@@ -422,6 +422,11 @@ func (d *ShardDispatcher) handleAssignedStartupStalls(ctx context.Context) {
 			continue
 		}
 		if d.agentHasRecordedTurns(ctx, agentID) {
+			continue
+		}
+		if d.agentSessionLeaseActive(ctx, agentID) {
+			// The shard currently holds a live session lease, so it is still actively
+			// running even if no turn has been persisted yet.
 			continue
 		}
 		_ = d.reconcileAssignmentReceipt(ctx, pendingEventID, agentID)
@@ -594,6 +599,28 @@ func (d *ShardDispatcher) agentHasRecordedTurns(ctx context.Context, agentID str
 		return false
 	}
 	return turns > 0
+}
+
+func (d *ShardDispatcher) agentSessionLeaseActive(ctx context.Context, agentID string) bool {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || d == nil || d.db == nil {
+		return false
+	}
+	var active bool
+	if err := dbQueryRowContext(ctx, d.db, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM agent_sessions
+			WHERE agent_id = $1
+			  AND status = 'active'
+			  AND lock_owner IS NOT NULL
+			  AND lock_expires_at IS NOT NULL
+			  AND lock_expires_at > now()
+		)
+	`, agentID).Scan(&active); err != nil {
+		return false
+	}
+	return active
 }
 
 func (d *ShardDispatcher) markRetryOrTerminal(ctx context.Context, row shardRuntimeRow, agentID, reason string) {
@@ -799,4 +826,11 @@ func truncateForDB(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+func startupGraceOrDefault(v time.Duration) time.Duration {
+	if v <= 0 {
+		return 20 * time.Minute
+	}
+	return v
 }

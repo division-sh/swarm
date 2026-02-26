@@ -12,7 +12,10 @@ func maybeRotateAfterTurn(s *Session, runtimeMode string, sessions SessionRegist
 	if s.TurnCount < rotateAfter {
 		return nil, nil
 	}
-	summary := buildSessionSummary(s)
+	oldSessionID := s.ID
+	oldTurnCount := s.TurnCount
+	oldParseFailures := s.ParseFailures
+	summary := buildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
 	lease, err := sessions.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
@@ -23,6 +26,16 @@ func maybeRotateAfterTurn(s *Session, runtimeMode string, sessions SessionRegist
 	s.Messages = []Message{
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
+	logSessionRotated(
+		s.AgentID,
+		runtimeMode,
+		oldSessionID,
+		lease.SessionID,
+		strings.TrimSpace(s.ScopeKey),
+		fmt.Sprintf("turn_limit_reached:%d", rotateAfter),
+		oldTurnCount,
+		oldParseFailures,
+	)
 	return lease, nil
 }
 
@@ -33,7 +46,10 @@ func maybeRotateAfterParseFailures(s *Session, runtimeMode string, sessions Sess
 	if s.ParseFailures < threshold {
 		return nil, nil
 	}
-	summary := buildSessionSummary(s)
+	oldSessionID := s.ID
+	oldTurnCount := s.TurnCount
+	oldParseFailures := s.ParseFailures
+	summary := buildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
 	lease, err := sessions.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
@@ -44,6 +60,16 @@ func maybeRotateAfterParseFailures(s *Session, runtimeMode string, sessions Sess
 	s.Messages = []Message{
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
+	logSessionRotated(
+		s.AgentID,
+		runtimeMode,
+		oldSessionID,
+		lease.SessionID,
+		strings.TrimSpace(s.ScopeKey),
+		fmt.Sprintf("parse_failures_threshold:%d", threshold),
+		oldTurnCount,
+		oldParseFailures,
+	)
 	return lease, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"regexp"
 	"sort"
@@ -27,6 +28,8 @@ const (
 	// Narrative fields are only last-resort naming fallbacks and should stay concise.
 	maxNarrativeFallbackNameLen   = 72
 	maxNarrativeFallbackNameWords = 8
+
+	localServicesScannerExpected = 5
 )
 
 type pipelineEmitCollectorKey struct{}
@@ -53,6 +56,10 @@ type FactoryPipelineCoordinator struct {
 	shardPlanner       *ShardPlanner
 	shardsTableChecked bool
 	shardsTableEnabled bool
+
+	scoringDigestBufferChecked bool
+	scoringDigestBufferEnabled bool
+	lastScoringDigestReadAt    time.Time
 }
 
 type scanAccumulator struct {
@@ -216,6 +223,151 @@ type VerticalKilledPayload struct {
 	SourceEvent  string         `json:"source_event"`
 	Priority     string         `json:"priority"`
 	Reason       map[string]any `json:"reason"`
+}
+
+type ScanAssignedPayload struct {
+	ScanID             string `json:"scan_id"`
+	CampaignID         string `json:"campaign_id,omitempty"`
+	Mode               string `json:"mode,omitempty"`
+	Geography          string `json:"geography,omitempty"`
+	GeographyID        string `json:"geography_id,omitempty"`
+	TaxonomyCategories any    `json:"taxonomy_categories,omitempty"`
+	Priority           string `json:"priority,omitempty"`
+	CampaignContext    any    `json:"campaign_context,omitempty"`
+	DirectiveID        string `json:"directive_id,omitempty"`
+	StrategicContext   any    `json:"strategic_context,omitempty"`
+	RequestedAt        string `json:"requested_at,omitempty"`
+	PlannedShards      int    `json:"planned_shards,omitempty"`
+}
+
+type SynthesisNeededPayload struct {
+	ScanID        string         `json:"scan_id"`
+	CampaignID    string         `json:"campaign_id,omitempty"`
+	Mode          string         `json:"mode,omitempty"`
+	Geography     string         `json:"geography,omitempty"`
+	Category      string         `json:"category,omitempty"`
+	Subcategory   string         `json:"subcategory,omitempty"`
+	ConflictNotes any            `json:"conflict_notes,omitempty"`
+	RawReport     map[string]any `json:"raw_report,omitempty"`
+}
+
+type DedupCandidatePayload struct {
+	Name           string  `json:"name,omitempty"`
+	Geography      string  `json:"geography,omitempty"`
+	SignalStrength float64 `json:"signal_strength,omitempty"`
+	ID             string  `json:"id,omitempty"`
+}
+
+type DedupAmbiguousPayload struct {
+	ScanID           string                `json:"scan_id"`
+	DedupEventID     string                `json:"dedup_event_id"`
+	Similarity       float64               `json:"similarity"`
+	NewCandidate     DedupCandidatePayload `json:"new_candidate"`
+	ExistingVertical DedupCandidatePayload `json:"existing_vertical"`
+}
+
+type VerticalDiscoveredPayload struct {
+	VerticalID      string         `json:"vertical_id"`
+	Name            string         `json:"name,omitempty"`
+	Geography       string         `json:"geography,omitempty"`
+	Mode            string         `json:"mode,omitempty"`
+	ScanID          string         `json:"scan_id,omitempty"`
+	CampaignID      string         `json:"campaign_id,omitempty"`
+	SignalStrength  float64        `json:"signal_strength,omitempty"`
+	DiscoverySource string         `json:"discovery_source,omitempty"`
+	RawSignals      map[string]any `json:"raw_signals,omitempty"`
+}
+
+type ScanCompletedPayload struct {
+	ScanID              string `json:"scan_id"`
+	CampaignID          string `json:"campaign_id,omitempty"`
+	Mode                string `json:"mode,omitempty"`
+	Geography           string `json:"geography,omitempty"`
+	ReportsReceived     int    `json:"reports_received"`
+	AgentsExpected      int    `json:"agents_expected"`
+	AgentsComplete      int    `json:"agents_complete"`
+	VerticalsDiscovered int    `json:"verticals_discovered"`
+	VerticalsSkipped    int    `json:"verticals_skipped"`
+	PendingDedup        int    `json:"pending_dedup"`
+	TimedOut            bool   `json:"timed_out"`
+	ShardsTotal         int    `json:"shards_total,omitempty"`
+	ShardsCompleted     int    `json:"shards_completed,omitempty"`
+	ShardsFailed        int    `json:"shards_failed,omitempty"`
+}
+
+type ScoringRequestedPayload struct {
+	VerticalID          string   `json:"vertical_id"`
+	VerticalName        string   `json:"vertical_name,omitempty"`
+	Geography           string   `json:"geography,omitempty"`
+	Mode                string   `json:"mode,omitempty"`
+	Rubric              string   `json:"rubric,omitempty"`
+	DimensionsRequested []string `json:"dimensions_requested"`
+}
+
+type ScoringContestedPayload struct {
+	VerticalID string   `json:"vertical_id"`
+	Dimension  string   `json:"dimension"`
+	Scores     []int    `json:"scores"`
+	Evidence   []string `json:"evidence,omitempty"`
+	Spread     int      `json:"spread"`
+	Rubric     string   `json:"rubric,omitempty"`
+	Mode       string   `json:"mode,omitempty"`
+}
+
+type VerticalScoredPayload struct {
+	VerticalID     string                          `json:"vertical_id"`
+	Result         string                          `json:"result,omitempty"`
+	Reason         string                          `json:"reason,omitempty"`
+	CompositeScore float64                         `json:"composite_score"`
+	ViabilityScore float64                         `json:"viability_score"`
+	MarketScore    float64                         `json:"market_score"`
+	Dimensions     map[string]scoreDimensionResult `json:"dimensions"`
+	Rubric         string                          `json:"rubric,omitempty"`
+	Partial        bool                            `json:"partial"`
+	Mode           string                          `json:"mode,omitempty"`
+	VerticalName   string                          `json:"vertical_name,omitempty"`
+	Geography      string                          `json:"geography,omitempty"`
+}
+
+type VerticalShortlistedPayload struct {
+	VerticalID     string         `json:"vertical_id"`
+	CompositeScore float64        `json:"composite_score"`
+	ViabilityScore float64        `json:"viability_score"`
+	ScoringPayload map[string]any `json:"scoring_payload"`
+}
+
+type VerticalMarginalPayload struct {
+	VerticalID        string                          `json:"vertical_id"`
+	CompositeScore    float64                         `json:"composite_score"`
+	ViabilityScore    float64                         `json:"viability_score"`
+	Dimensions        map[string]scoreDimensionResult `json:"dimensions"`
+	PromotionEligible bool                            `json:"promotion_eligible"`
+}
+
+type VerticalRejectedReasonPayload struct {
+	Code           string  `json:"code,omitempty"`
+	CompositeScore float64 `json:"composite_score"`
+	ViabilityScore float64 `json:"viability_score"`
+}
+
+type VerticalRejectedPayload struct {
+	VerticalID string                        `json:"vertical_id"`
+	Reason     VerticalRejectedReasonPayload `json:"reason"`
+}
+
+type PortfolioDigestTimerPayload struct {
+	Message                   string           `json:"message,omitempty"`
+	DigestText                string           `json:"digest_text,omitempty"`
+	TriggerReason             string           `json:"trigger_reason,omitempty"`
+	Snapshot                  map[string]any   `json:"snapshot,omitempty"`
+	Metadata                  map[string]any   `json:"metadata,omitempty"`
+	VerticalID                string           `json:"vertical_id,omitempty"`
+	TaskID                    string           `json:"task_id,omitempty"`
+	RecentRejections          []map[string]any `json:"recent_rejections,omitempty"`
+	RejectionCount            int              `json:"rejection_count,omitempty"`
+	ScoringRejectionsInjected bool             `json:"scoring_rejections_injected"`
+	ScoringRejectionsCount    int              `json:"scoring_rejections_count,omitempty"`
+	ScoringRejectionSummaries []map[string]any `json:"scoring_rejection_summaries,omitempty"`
 }
 
 type validationContextSnapshot struct {
@@ -412,6 +564,23 @@ func (pc *FactoryPipelineCoordinator) interceptStateDropReason(eventType string,
 
 func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt events.Event) (consume bool, handled bool) {
 	switch eventType {
+	case "timer.portfolio_digest":
+		payload := parsePayloadMap(evt.Payload)
+		if boolFromAny(payload["scoring_rejections_injected"]) {
+			return false, false
+		}
+		return true, true
+	case "vertical.scored":
+		payload := parsePayloadMap(evt.Payload)
+		result := strings.ToLower(strings.TrimSpace(asString(payload["result"])))
+		// Keep vertical.scored as an audit event but avoid waking EC for
+		// non-shortlisted outcomes. Marginals route via vertical.marginal.
+		switch result {
+		case "marginal", "rejected":
+			return true, true
+		default:
+			return false, true
+		}
 	case "scan.requested",
 		"vertical.discovered",
 		"score.dimension_complete",
@@ -446,6 +615,12 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 			return false, false
 		}
 		return true, true
+	case "vertical.approved", "vertical.killed":
+		if strings.TrimSpace(evt.VerticalID) == "" {
+			return false, false
+		}
+		// Keep event visible for downstream consumers while updating stage projection.
+		return false, true
 	case "vertical.ready_for_review":
 		if strings.TrimSpace(evt.VerticalID) == "" {
 			return false, false
@@ -461,6 +636,7 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 
 func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
 	return pc.bus.Subscribe("pipeline-coordinator",
+		events.EventType("timer.portfolio_digest"),
 		events.EventType("scan.requested"),
 		events.EventType("vertical.discovered"),
 		events.EventType("score.dimension_complete"),
@@ -484,6 +660,8 @@ func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
 		events.EventType("spec.approved"),
 		events.EventType("spec.validation_passed"),
 		events.EventType("spec.validation_failed"),
+		events.EventType("vertical.approved"),
+		events.EventType("vertical.killed"),
 		events.EventType("cto.spec_approved"),
 		events.EventType("cto.spec_revision_needed"),
 		events.EventType("cto.spec_vetoed"),
@@ -509,10 +687,17 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		pc.resetInMemoryState()
 		pc.clearPersistentState(ctx)
 		return
+	case "timer.portfolio_digest":
+		pc.handlePortfolioDigestTimer(ctx, evt)
+		return
 	case "scan.requested":
 		pc.handleScanRequested(ctx, evt)
 	case "vertical.discovered":
 		pc.handleScoringRequested(ctx, evt)
+	case "vertical.scored":
+		// Delivery filtering for this event type is handled in interceptPolicy.
+		// Keep a no-op case for explicit coverage/traceability in switch audits.
+		return
 	case "score.dimension_complete":
 		pc.handleScoreDimensionComplete(ctx, evt)
 	case "scoring.contest_resolved":
@@ -548,12 +733,16 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		pc.handleSpecValidationPassed(ctx, evt)
 	case "spec.validation_failed":
 		pc.handleSpecValidationFailed(ctx, evt)
+	case "vertical.approved":
+		pc.handleVerticalApproved(ctx, evt)
+	case "vertical.killed":
+		pc.handleVerticalKilled(ctx, evt)
 	case "cto.spec_revision_needed":
 		pc.handleCTORevisionNeeded(ctx, evt)
 	case "research.vertical_rejected", "cto.spec_vetoed":
 		pc.handleValidationRejected(ctx, evt)
 	case "vertical.ready_for_review":
-		pc.handleValidationPackaged(evt)
+		pc.handleValidationPackaged(ctx, evt)
 	case "vertical.needs_more_data":
 		pc.handleValidationMoreData(ctx, evt)
 	case "brand.revision_needed":
@@ -735,8 +924,8 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	}
 
 	pc.mu.Lock()
-	defer pc.mu.Unlock()
 	if pc.stateLoaded {
+		pc.mu.Unlock()
 		return
 	}
 	if len(scans) > 0 {
@@ -755,6 +944,15 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 		pc.processed = processed
 	}
 	pc.stateLoaded = true
+	pc.mu.Unlock()
+
+	// Ensure dashboard-facing stage projection is consistent with recovered validation state.
+	for verticalID, st := range validations {
+		if st == nil {
+			continue
+		}
+		pc.updateVerticalStage(ctx, verticalID, pc.validationStageForState(st), "")
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) markEventProcessed(ctx context.Context, eventID string) bool {
@@ -909,6 +1107,9 @@ func (pc *FactoryPipelineCoordinator) clearPersistentState(ctx context.Context) 
 	if pc == nil || pc.db == nil {
 		return
 	}
+	if pc.isScoringDigestBufferEnabled(ctx) {
+		_, _ = dbExecContext(ctx, pc.db, `DELETE FROM scoring_digest_buffer`)
+	}
 	if !pc.isStatePersistenceEnabled(ctx) {
 		return
 	}
@@ -988,35 +1189,27 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 	pc.scans[scanID] = acc
 	pc.mu.Unlock()
 
-	base := map[string]any{
-		"scan_id":             scanID,
-		"campaign_id":         campaignID,
-		"mode":                mode,
-		"geography":           geography,
-		"geography_id":        strings.TrimSpace(asString(payload["geography_id"])),
-		"taxonomy_categories": payload["taxonomy_categories"],
-		"priority":            strings.TrimSpace(asString(payload["priority"])),
-		"campaign_context":    payload["campaign_context"],
-		"directive_id":        strings.TrimSpace(asString(payload["directive_id"])),
-		"strategic_context":   payload["strategic_context"],
-		"requested_at":        time.Now().UTC().Format(time.RFC3339),
-		"planned_shards":      plannedShardCount,
-	}
+	assigned := pc.buildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
 	if plannedShardCount > 0 && (mode == "saas_gap" || mode == "saas_trend") {
 		// Assignment dispatch is owned by the shard dispatcher loop.
 		return
 	}
 
 	switch mode {
+	case "automation_micro":
+		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	case "saas_gap":
-		pc.publish(ctx, "market_research.scan_assigned", "", base)
+		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	case "saas_trend":
-		pc.publish(ctx, "trend_research.scan_assigned", "", base)
+		pc.publish(ctx, "trend_research.scan_assigned", "", payloadMap(assigned))
 	case "local_services":
-		// Phase 1-3 synthetic adapter: single scanner path.
-		pc.publish(ctx, "scanner.google_maps.scan_assigned", "", base)
+		pc.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(assigned))
+		pc.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
+		pc.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(assigned))
+		pc.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(assigned))
+		pc.publish(ctx, "scanner.job_boards.scan_assigned", "", payloadMap(assigned))
 	default:
-		pc.publish(ctx, "market_research.scan_assigned", "", base)
+		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	}
 }
 
@@ -1191,16 +1384,7 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 	pc.mu.Unlock()
 
 	if payloadIndicatesSynthesisNeeded(payload) {
-		pc.publish(ctx, "synthesis.needed", "", map[string]any{
-			"scan_id":        scanID,
-			"campaign_id":    acc.CampaignID,
-			"mode":           acc.Mode,
-			"geography":      firstNonEmptyString(strings.TrimSpace(asString(payload["geography"])), acc.Geography),
-			"category":       strings.TrimSpace(asString(payload["category"])),
-			"subcategory":    strings.TrimSpace(asString(payload["subcategory"])),
-			"conflict_notes": payload["conflict_notes"],
-			"raw_report":     payload,
-		})
+		pc.publish(ctx, "synthesis.needed", "", payloadMap(pc.buildSynthesisNeededPayload(scanID, acc, payload)))
 		return
 	}
 
@@ -1261,13 +1445,7 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 		pc.mu.Lock()
 		pc.pendingDedup[dedupEventID] = cand
 		pc.mu.Unlock()
-		pc.publish(ctx, "dedup.ambiguous", "", map[string]any{
-			"scan_id":           scanID,
-			"dedup_event_id":    dedupEventID,
-			"similarity":        score,
-			"new_candidate":     map[string]any{"name": name, "geography": geography, "signal_strength": signal},
-			"existing_vertical": map[string]any{"id": best.ID, "name": best.Name, "geography": geography},
-		})
+		pc.publish(ctx, "dedup.ambiguous", "", payloadMap(pc.buildDedupAmbiguousPayload(scanID, dedupEventID, score, name, geography, signal, best.ID, best.Name)))
 		return
 	}
 
@@ -1279,17 +1457,7 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 	pc.mu.Lock()
 	acc.Discovered++
 	pc.mu.Unlock()
-	pc.publish(ctx, "vertical.discovered", verticalID, map[string]any{
-		"vertical_id":      verticalID,
-		"name":             name,
-		"geography":        geography,
-		"mode":             acc.Mode,
-		"scan_id":          scanID,
-		"campaign_id":      acc.CampaignID,
-		"signal_strength":  signal,
-		"discovery_source": evt.SourceAgent,
-		"raw_signals":      payload,
-	})
+	pc.publish(ctx, "vertical.discovered", verticalID, payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, name, geography, acc.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload)))
 }
 
 func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
@@ -1329,17 +1497,7 @@ func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, e
 		acc.Discovered++
 	}
 	pc.mu.Unlock()
-	pc.publish(ctx, "vertical.discovered", verticalID, map[string]any{
-		"vertical_id":      verticalID,
-		"name":             cand.Name,
-		"geography":        cand.Geography,
-		"mode":             cand.Mode,
-		"scan_id":          cand.ScanID,
-		"campaign_id":      cand.CampaignID,
-		"signal_strength":  cand.Signal,
-		"discovery_source": "pipeline-coordinator",
-		"raw_signals":      cand.Payload,
-	})
+	pc.publish(ctx, "vertical.discovered", verticalID, payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "pipeline-coordinator", cand.Payload)))
 }
 
 func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
@@ -1357,6 +1515,12 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	}
 	completionKey := strings.TrimSpace(evt.SourceAgent)
 	if completionKey == "" {
+		completionKey = strings.TrimSpace(string(evt.Type))
+	}
+	// local_services fanout uses one scanner agent role handling multiple scanner
+	// event types; completion accounting must key by scanner completion event type.
+	if strings.HasPrefix(strings.TrimSpace(string(evt.Type)), "scanner.") &&
+		strings.HasSuffix(strings.TrimSpace(string(evt.Type)), ".scan_complete") {
 		completionKey = strings.TrimSpace(string(evt.Type))
 	}
 	if shardID := pc.markShardCompletedByAgent(ctx, strings.TrimSpace(evt.SourceAgent)); shardID != "" {
@@ -1379,26 +1543,26 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	}
 	acc.CompletedBy[completionKey] = struct{}{}
 	done := len(acc.CompletedBy) >= maxInt(acc.Expected, 1)
-	stats := map[string]any{
-		"scan_id":              acc.ScanID,
-		"campaign_id":          acc.CampaignID,
-		"mode":                 acc.Mode,
-		"geography":            acc.Geography,
-		"reports_received":     acc.Reports,
-		"agents_expected":      maxInt(acc.Expected, 1),
-		"agents_complete":      len(acc.CompletedBy),
-		"verticals_discovered": acc.Discovered,
-		"verticals_skipped":    acc.Skipped,
-		"pending_dedup":        pc.pendingDedupCountForScan(acc.ScanID),
-		"timed_out":            false,
-	}
+	stats := pc.buildScanCompletedPayload(scanCompletedBuildInput{
+		ScanID:              acc.ScanID,
+		CampaignID:          acc.CampaignID,
+		Mode:                acc.Mode,
+		Geography:           acc.Geography,
+		ReportsReceived:     acc.Reports,
+		AgentsExpected:      maxInt(acc.Expected, 1),
+		AgentsComplete:      len(acc.CompletedBy),
+		VerticalsDiscovered: acc.Discovered,
+		VerticalsSkipped:    acc.Skipped,
+		PendingDedup:        pc.pendingDedupCountForScan(acc.ScanID),
+		TimedOut:            false,
+	})
 	if hasShardProgress {
 		terminal := shardCompleted + shardFailed
-		stats["agents_expected"] = shardTotal
-		stats["agents_complete"] = terminal
-		stats["shards_total"] = shardTotal
-		stats["shards_completed"] = shardCompleted
-		stats["shards_failed"] = shardFailed
+		stats.AgentsExpected = shardTotal
+		stats.AgentsComplete = terminal
+		stats.ShardsTotal = shardTotal
+		stats.ShardsCompleted = shardCompleted
+		stats.ShardsFailed = shardFailed
 		done = terminal >= shardTotal && shardTotal > 0
 	}
 	if done {
@@ -1407,7 +1571,7 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	pc.mu.Unlock()
 
 	if done {
-		pc.publish(ctx, "scan.completed", "", stats)
+		pc.publish(ctx, "scan.completed", "", payloadMap(stats))
 	}
 }
 
@@ -1433,11 +1597,51 @@ var rubricWeights = map[string]map[string]float64{
 		"market_size":            0.05,
 		"localization_advantage": 0.05,
 	},
+	"automation_micro": {
+		"automation_leverage":     0.20,
+		"sales_cycle_simplicity":  0.15,
+		"channel_exploitability":  0.15,
+		"willingness_to_pay":      0.10,
+		"retention_likelihood":    0.10,
+		"pain_severity":           0.10,
+		"competition_weakness":    0.08,
+		"structural_cloneability": 0.07,
+		"compliance_lightness":    0.05,
+	},
 }
 
 var viabilityDimensions = map[string][]string{
 	"local_services": {"willingness_to_pay", "retention_likelihood", "channel_access", "operational_friction"},
 	"saas":           {"willingness_to_pay", "retention_likelihood", "technical_feasibility", "distribution_access"},
+	"automation_micro": {
+		"automation_leverage",
+		"sales_cycle_simplicity",
+		"channel_exploitability",
+		"willingness_to_pay",
+		"retention_likelihood",
+	},
+}
+
+var viabilityFloor = map[string]float64{
+	"local_services":   65,
+	"saas":             65,
+	"automation_micro": 60,
+}
+
+type scoringHardGate struct {
+	Dimension string
+	MinScore  int
+	Reason    string
+}
+
+var rubricGates = map[string][]scoringHardGate{
+	"automation_micro": {
+		{
+			Dimension: "automation_leverage",
+			MinScore:  70,
+			Reason:    "gate_automation_leverage",
+		},
+	},
 }
 
 func expectedScoringDimensions(rubric string) []string {
@@ -1457,6 +1661,8 @@ func selectScoringRubric(mode string) string {
 	switch normalizeScanMode(mode) {
 	case "local_services":
 		return "local_services"
+	case "automation_micro":
+		return "automation_micro"
 	default:
 		return "saas"
 	}
@@ -1495,6 +1701,36 @@ func intFromAny(v any) int {
 		num := json.Number(s)
 		n, _ := num.Int64()
 		return int(n)
+	}
+}
+
+func boolFromAny(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case int:
+		return t != 0
+	case int32:
+		return t != 0
+	case int64:
+		return t != 0
+	case float32:
+		return t != 0
+	case float64:
+		return t != 0
+	case json.Number:
+		if n, err := t.Int64(); err == nil {
+			return n != 0
+		}
+		return false
+	default:
+		s := strings.ToLower(strings.TrimSpace(asString(v)))
+		switch s {
+		case "1", "true", "yes", "y", "on":
+			return true
+		default:
+			return false
+		}
 	}
 }
 
@@ -1601,14 +1837,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
-	pc.publish(ctx, "scoring.requested", verticalID, map[string]any{
-		"vertical_id":          verticalID,
-		"vertical_name":        acc.VerticalName,
-		"geography":            acc.Geography,
-		"mode":                 acc.Mode,
-		"rubric":               acc.Rubric,
-		"dimensions_requested": acc.Expected,
-	})
+	pc.publish(ctx, "scoring.requested", verticalID, payloadMap(pc.buildScoringRequestedPayload(verticalID, acc)))
 }
 
 func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
@@ -1679,15 +1908,7 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 			acc.ContestNotified[dim] = true
 			acc.LastUpdatedAt = time.Now().UTC()
 			pc.mu.Unlock()
-			pc.publish(ctx, "scoring.contested", verticalID, map[string]any{
-				"vertical_id": verticalID,
-				"dimension":   dim,
-				"scores":      contest.Scores,
-				"evidence":    contest.Evidence,
-				"spread":      contest.Spread,
-				"rubric":      acc.Rubric,
-				"mode":        acc.Mode,
-			})
+			pc.publish(ctx, "scoring.contested", verticalID, payloadMap(pc.buildScoringContestedPayload(verticalID, dim, contest, acc)))
 			return
 		}
 		pc.mu.Unlock()
@@ -1799,6 +2020,27 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 		}
 	}
 
+	if gates, ok := rubricGates[acc.Rubric]; ok {
+		for _, gate := range gates {
+			res, exists := dimensions[gate.Dimension]
+			if !exists {
+				continue
+			}
+			if res.Score < gate.MinScore {
+				return scoringComposite{
+					Result:         "rejected",
+					Reason:         gate.Reason,
+					CompositeScore: 0,
+					ViabilityScore: 0,
+					MarketScore:    0,
+					Dimensions:     dimensions,
+					Rubric:         acc.Rubric,
+					Partial:        partial,
+				}
+			}
+		}
+	}
+
 	viability := 0.0
 	market := 0.0
 	if viabilityWeight > 0 {
@@ -1807,7 +2049,13 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 	if marketWeight > 0 {
 		market = marketSum / marketWeight
 	}
-	composite := viability*0.60 + market*0.40
+	viabilitySplit := 0.60
+	marketSplit := 0.40
+	if acc.Rubric == "automation_micro" {
+		viabilitySplit = 0.70
+		marketSplit = 0.30
+	}
+	composite := viability*viabilitySplit + market*marketSplit
 
 	out := scoringComposite{
 		Result:         "marginal",
@@ -1818,8 +2066,12 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 		Rubric:         acc.Rubric,
 		Partial:        partial,
 	}
+	floor, ok := viabilityFloor[acc.Rubric]
+	if !ok {
+		floor = viabilityFloor["saas"]
+	}
 	switch {
-	case viability < 65:
+	case viability < floor:
 		out.Result = "rejected"
 		out.Reason = "viability_floor"
 	case composite >= 75:
@@ -1852,32 +2104,15 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 	delete(pc.scoring, verticalID)
 	pc.mu.Unlock()
 
-	scoredPayload := map[string]any{
-		"vertical_id":     verticalID,
-		"result":          result.Result,
-		"reason":          result.Reason,
-		"composite_score": result.CompositeScore,
-		"viability_score": result.ViabilityScore,
-		"market_score":    result.MarketScore,
-		"dimensions":      result.Dimensions,
-		"rubric":          result.Rubric,
-		"partial":         result.Partial,
-		"mode":            acc.Mode,
-		"vertical_name":   acc.VerticalName,
-		"geography":       acc.Geography,
-	}
-	pc.publish(ctx, "vertical.scored", verticalID, scoredPayload)
+	scoredPayload := pc.buildVerticalScoredPayload(verticalID, result, acc)
+	scoredPayloadMap := payloadMap(scoredPayload)
+	pc.publish(ctx, "vertical.scored", verticalID, scoredPayloadMap)
 
 	stage := "marginal_review"
 	switch result.Result {
 	case "shortlisted":
 		stage = "shortlisted"
-		pc.publish(ctx, "vertical.shortlisted", verticalID, map[string]any{
-			"vertical_id":     verticalID,
-			"composite_score": result.CompositeScore,
-			"viability_score": result.ViabilityScore,
-			"scoring_payload": scoredPayload,
-		})
+		pc.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(pc.buildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayloadMap)))
 		// Runtime-emitted shortlist must also start validation immediately,
 		// because deferred events bypass interceptor re-entry.
 		pc.handleValidationStarted(ctx, events.Event{
@@ -1885,27 +2120,15 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 			Type:        events.EventType("vertical.shortlisted"),
 			SourceAgent: "pipeline-coordinator",
 			VerticalID:  verticalID,
-			Payload:     mustJSON(map[string]any{"scoring_payload": scoredPayload}),
+			Payload:     mustJSON(map[string]any{"scoring_payload": scoredPayloadMap}),
 			CreatedAt:   time.Now().UTC(),
 		})
 	case "marginal":
-		pc.publish(ctx, "vertical.marginal", verticalID, map[string]any{
-			"vertical_id":        verticalID,
-			"composite_score":    result.CompositeScore,
-			"viability_score":    result.ViabilityScore,
-			"dimensions":         result.Dimensions,
-			"promotion_eligible": result.ViabilityScore >= 65,
-		})
+		pc.publish(ctx, "vertical.marginal", verticalID, payloadMap(pc.buildVerticalMarginalPayload(verticalID, result)))
 	case "rejected":
 		stage = "killed"
-		pc.publish(ctx, "vertical.rejected", verticalID, map[string]any{
-			"vertical_id": verticalID,
-			"reason": map[string]any{
-				"code":            result.Reason,
-				"composite_score": result.CompositeScore,
-				"viability_score": result.ViabilityScore,
-			},
-		})
+		pc.appendScoringDigestBuffer(ctx, scoredPayload)
+		pc.publish(ctx, "vertical.rejected", verticalID, payloadMap(pc.buildVerticalRejectedPayload(verticalID, result)))
 	}
 	if pc.db != nil {
 		if _, err := dbExecContext(ctx, pc.db, `
@@ -1919,10 +2142,212 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 			    kill_reason = CASE WHEN $2 = 'killed' THEN NULLIF($4,'') ELSE kill_reason END,
 			    updated_at = now()
 			WHERE id = $1::uuid
-		`, verticalID, stage, string(mustJSON(scoredPayload)), strings.TrimSpace(result.Reason)); err != nil {
+			`, verticalID, stage, string(mustJSON(scoredPayloadMap)), strings.TrimSpace(result.Reason)); err != nil {
 			log.Printf("pipeline: update vertical score state failed vertical=%s err=%v", verticalID, err)
 		}
 	}
+}
+
+func (pc *FactoryPipelineCoordinator) handlePortfolioDigestTimer(ctx context.Context, evt events.Event) {
+	raw := parsePayloadMap(evt.Payload)
+	pc.mu.Lock()
+	since := pc.lastScoringDigestReadAt
+	pc.mu.Unlock()
+	entries, newest := pc.consumeScoringDigestEntries(ctx, 100, since)
+	now := time.Now().UTC()
+	if !newest.IsZero() {
+		now = newest
+	}
+	pc.mu.Lock()
+	pc.lastScoringDigestReadAt = now
+	pc.mu.Unlock()
+
+	snapshot, _ := raw["snapshot"].(map[string]any)
+	metadata, _ := raw["metadata"].(map[string]any)
+	payload := PortfolioDigestTimerPayload{
+		Message:                   strings.TrimSpace(asString(raw["message"])),
+		DigestText:                strings.TrimSpace(asString(raw["digest_text"])),
+		TriggerReason:             strings.TrimSpace(asString(raw["trigger_reason"])),
+		Snapshot:                  snapshot,
+		Metadata:                  metadata,
+		VerticalID:                strings.TrimSpace(asString(raw["vertical_id"])),
+		TaskID:                    strings.TrimSpace(asString(raw["task_id"])),
+		RecentRejections:          entries,
+		RejectionCount:            len(entries),
+		ScoringRejectionsInjected: true,
+		ScoringRejectionsCount:    len(entries),
+		ScoringRejectionSummaries: entries,
+	}
+	pc.publish(ctx, "timer.portfolio_digest", strings.TrimSpace(evt.VerticalID), payloadMap(payload))
+}
+
+type scoringDigestEntry struct {
+	ID           string
+	VerticalID   string
+	VerticalName string
+	Geography    string
+	Result       string
+	Reason       string
+	Composite    float64
+	Viability    float64
+	ScoredAt     time.Time
+}
+
+func (pc *FactoryPipelineCoordinator) appendScoringDigestBuffer(ctx context.Context, scored VerticalScoredPayload) {
+	if pc == nil || pc.db == nil {
+		return
+	}
+	if !pc.isScoringDigestBufferEnabled(ctx) {
+		return
+	}
+	summary := strings.TrimSpace(buildScoringRejectionSummary(scored))
+	if summary == "" {
+		summary = "Scoring rejected due to low viability/composite score."
+	}
+	if _, err := dbExecContext(ctx, pc.db, `
+		INSERT INTO scoring_digest_buffer (
+			id, vertical_id, vertical_name, geography, composite, viability, result, reason, scored_at
+		)
+		VALUES (
+			$1::uuid, NULLIF($2,'')::uuid, $3, $4, $5, $6, $7, $8, now()
+		)
+	`,
+		uuid.NewString(),
+		strings.TrimSpace(scored.VerticalID),
+		strings.TrimSpace(coalesce(strings.TrimSpace(scored.VerticalName), strings.TrimSpace(scored.VerticalID))),
+		strings.TrimSpace(coalesce(strings.TrimSpace(scored.Geography), "unspecified")),
+		scored.CompositeScore,
+		scored.ViabilityScore,
+		strings.TrimSpace(coalesce(strings.TrimSpace(scored.Result), "rejected")),
+		strings.TrimSpace(coalesce(strings.TrimSpace(scored.Reason), summary)),
+	); err != nil {
+		log.Printf("pipeline: append scoring digest buffer failed vertical=%s err=%v", strings.TrimSpace(scored.VerticalID), err)
+	}
+}
+
+func buildScoringRejectionSummary(scored VerticalScoredPayload) string {
+	name := strings.TrimSpace(scored.VerticalName)
+	if name == "" {
+		name = strings.TrimSpace(scored.VerticalID)
+	}
+	geography := strings.TrimSpace(scored.Geography)
+	if geography == "" {
+		geography = "unspecified"
+	}
+	reason := strings.TrimSpace(scored.Reason)
+	if reason == "" {
+		reason = "rejected"
+	}
+	return fmt.Sprintf(
+		"%s (%s) rejected in scoring: reason=%s composite=%.2f viability=%.2f",
+		name,
+		geography,
+		reason,
+		scored.CompositeScore,
+		scored.ViabilityScore,
+	)
+}
+
+func (pc *FactoryPipelineCoordinator) consumeScoringDigestEntries(ctx context.Context, limit int, since time.Time) ([]map[string]any, time.Time) {
+	if pc == nil || pc.db == nil || limit <= 0 {
+		return nil, time.Time{}
+	}
+	if !pc.isScoringDigestBufferEnabled(ctx) {
+		return nil, time.Time{}
+	}
+	rows, err := dbQueryContext(ctx, pc.db, `
+		SELECT
+		    b.id::text AS id,
+		    b.vertical_id::text AS vertical_id,
+		    COALESCE(b.vertical_name,'') AS vertical_name,
+		    COALESCE(b.geography,'') AS geography,
+		    COALESCE(b.result,'rejected') AS result,
+		    COALESCE(b.reason,'') AS reason,
+		    COALESCE(b.composite,0)::double precision AS composite,
+		    COALESCE(b.viability,0)::double precision AS viability,
+		    COALESCE(b.scored_at, now()) AS scored_at
+		FROM scoring_digest_buffer b
+		WHERE b.scored_at > $1
+		ORDER BY b.scored_at ASC
+		LIMIT $2
+	`, since.UTC(), limit)
+	if err != nil {
+		log.Printf("pipeline: consume scoring digest buffer query failed err=%v", err)
+		return nil, time.Time{}
+	}
+	defer rows.Close()
+
+	out := make([]map[string]any, 0, limit)
+	var newest time.Time
+	for rows.Next() {
+		var rec scoringDigestEntry
+		if scanErr := rows.Scan(
+			&rec.ID,
+			&rec.VerticalID,
+			&rec.VerticalName,
+			&rec.Geography,
+			&rec.Result,
+			&rec.Reason,
+			&rec.Composite,
+			&rec.Viability,
+			&rec.ScoredAt,
+		); scanErr != nil {
+			continue
+		}
+		if rec.ScoredAt.After(newest) {
+			newest = rec.ScoredAt
+		}
+		summary := fmt.Sprintf(
+			"%s (%s) rejected in scoring: reason=%s composite=%.2f viability=%.2f",
+			coalesce(strings.TrimSpace(rec.VerticalName), strings.TrimSpace(rec.VerticalID)),
+			coalesce(strings.TrimSpace(rec.Geography), "unspecified"),
+			coalesce(strings.TrimSpace(rec.Reason), "rejected"),
+			rec.Composite,
+			rec.Viability,
+		)
+		out = append(out, map[string]any{
+			"id":              rec.ID,
+			"vertical_id":     rec.VerticalID,
+			"vertical_name":   rec.VerticalName,
+			"geography":       rec.Geography,
+			"result":          rec.Result,
+			"reason":          rec.Reason,
+			"summary":         summary,
+			"composite_score": rec.Composite,
+			"viability_score": rec.Viability,
+			"occurred_at":     rec.ScoredAt.UTC().Format(time.RFC3339),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("pipeline: consume scoring digest buffer iteration failed err=%v", err)
+	}
+	return out, newest
+}
+
+func (pc *FactoryPipelineCoordinator) isScoringDigestBufferEnabled(ctx context.Context) bool {
+	if pc == nil || pc.db == nil {
+		return false
+	}
+	pc.mu.Lock()
+	if pc.scoringDigestBufferChecked {
+		enabled := pc.scoringDigestBufferEnabled
+		pc.mu.Unlock()
+		return enabled
+	}
+	pc.mu.Unlock()
+
+	var ok bool
+	if err := dbQueryRowContext(ctx, pc.db, `SELECT to_regclass('public.scoring_digest_buffer') IS NOT NULL`).Scan(&ok); err != nil {
+		ok = false
+	}
+	pc.mu.Lock()
+	if !pc.scoringDigestBufferChecked {
+		pc.scoringDigestBufferEnabled = ok
+		pc.scoringDigestBufferChecked = true
+	}
+	enabled := pc.scoringDigestBufferEnabled
+	pc.mu.Unlock()
+	return enabled
 }
 
 func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, now time.Time) {
@@ -2020,6 +2445,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationStarted(ctx context.Contex
 	st.PackagingRetries = 0
 	pc.mu.Unlock()
 
+	pc.updateVerticalStage(ctx, verticalID, "researching", "")
 	validationPayload := pc.buildValidationStartedPayload(ctx, verticalID, scoringPayload, nil)
 	pc.publish(ctx, "validation.started", verticalID, payloadMap(validationPayload))
 	brandPayload := pc.buildBrandRequestedPayload(ctx, verticalID, scoringPayload, nil)
@@ -2061,6 +2487,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 	}
 	st.Status = "active"
 	shouldPackage := st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand && !st.PackagingRequested
+	stage := pc.validationStageForState(st)
 	specVersion := st.SpecVersion
 	var bundle ValidationPackageReadyPayload
 	hasBundle := false
@@ -2081,6 +2508,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 	}
 	pc.mu.Unlock()
 
+	pc.updateVerticalStage(ctx, verticalID, stage, "")
 	if gate == "g2" {
 		pc.publish(ctx, "spec.validation_requested", verticalID, payloadMap(pc.buildSpecValidationRequestedPayload(ctx, verticalID, payload, specVersion)))
 	}
@@ -2132,6 +2560,7 @@ func (pc *FactoryPipelineCoordinator) handleSpecValidationFailed(ctx context.Con
 		escalate = true
 	}
 	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
 	if escalate {
 		pc.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated spec-auditor blockers.", payload)
 		return
@@ -2160,6 +2589,7 @@ func (pc *FactoryPipelineCoordinator) handleCTORevisionNeeded(ctx context.Contex
 		escalate = true
 	}
 	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
 	if escalate {
 		pc.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated CTO revisions.", parsePayloadMap(evt.Payload))
 		return
@@ -2179,21 +2609,23 @@ func (pc *FactoryPipelineCoordinator) handleValidationRejected(ctx context.Conte
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
 	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
 	pc.publish(ctx, "vertical.killed", verticalID, payloadMap(pc.buildVerticalKilledPayload(ctx, verticalID, string(evt.Type), parsePayloadMap(evt.Payload))))
 }
 
-func (pc *FactoryPipelineCoordinator) handleValidationPackaged(evt events.Event) {
+func (pc *FactoryPipelineCoordinator) handleValidationPackaged(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	pc.mu.Lock()
-	defer pc.mu.Unlock()
 	st := pc.getValidationStateLocked(verticalID)
 	st.Status = "packaged"
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
+	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
 }
 
 func (pc *FactoryPipelineCoordinator) handleValidationMoreData(ctx context.Context, evt events.Event) {
@@ -2215,6 +2647,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationMoreData(ctx context.Conte
 		Scoring:  parsePayloadMap(st.ScoringPayload),
 	}
 	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "researching", "")
 	pc.publish(ctx, "validation.more_data_needed", verticalID, payloadMap(pc.buildValidationMoreDataPayload(ctx, verticalID, parsePayloadMap(evt.Payload), snap)))
 }
 
@@ -2237,6 +2670,7 @@ func (pc *FactoryPipelineCoordinator) handleBrandRevision(ctx context.Context, e
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
 	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "branding", "")
 	pc.publish(ctx, "brand.revision_needed", verticalID, payloadMap(pc.buildBrandRevisionNeededPayload(ctx, verticalID, feedback, brand)))
 }
 
@@ -2257,6 +2691,7 @@ func (pc *FactoryPipelineCoordinator) handleVerticalResumed(ctx context.Context,
 	missingG3 := !st.G3CTO
 	missingG4 := !st.G4Brand
 	all := st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand
+	stage := pc.validationStageForState(st)
 	scoringRaw := cloneRaw(st.ScoringPayload)
 	var bundle ValidationPackageReadyPayload
 	hasBundle := false
@@ -2275,6 +2710,7 @@ func (pc *FactoryPipelineCoordinator) handleVerticalResumed(ctx context.Context,
 		st.PackagingRequestedAt = &now
 	}
 	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, stage, "")
 
 	resumePayload := parsePayloadMap(evt.Payload)
 	snap := pc.validationContext(verticalID)
@@ -2309,6 +2745,36 @@ func (pc *FactoryPipelineCoordinator) handleCTOApproved(ctx context.Context, evt
 		return
 	}
 	pc.handleValidationGate(ctx, evt, "g3")
+}
+
+func (pc *FactoryPipelineCoordinator) handleVerticalApproved(ctx context.Context, evt events.Event) {
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		return
+	}
+	pc.mu.Lock()
+	st := pc.getValidationStateLocked(verticalID)
+	st.Status = "approved"
+	st.PackagingRequested = false
+	st.PackagingRequestedAt = nil
+	st.PackagingRetries = 0
+	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "approved", "")
+}
+
+func (pc *FactoryPipelineCoordinator) handleVerticalKilled(ctx context.Context, evt events.Event) {
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		return
+	}
+	pc.mu.Lock()
+	st := pc.getValidationStateLocked(verticalID)
+	st.Status = "rejected"
+	st.PackagingRequested = false
+	st.PackagingRequestedAt = nil
+	st.PackagingRetries = 0
+	pc.mu.Unlock()
+	pc.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
 }
 
 func (pc *FactoryPipelineCoordinator) handleInnerSpecRevision(ctx context.Context, evt events.Event) bool {
@@ -2376,6 +2842,7 @@ func (pc *FactoryPipelineCoordinator) parkVerticalWithMailbox(ctx context.Contex
 		INSERT INTO mailbox (event_id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
 		VALUES (NULL, NULLIF($1,'')::uuid, 'pipeline-coordinator', 'vertical_approval', 'high', 'pending', $2::jsonb, $3, now())
 	`, strings.TrimSpace(verticalID), string(mustJSON(contextPayload)), strings.TrimSpace(summary))
+	pc.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
 }
 
 func (pc *FactoryPipelineCoordinator) checkPackagingTimeouts(ctx context.Context, now time.Time) {
@@ -2484,29 +2951,29 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 	pc.mu.Unlock()
 
 	for _, scan := range expired {
-		stats := map[string]any{
-			"scan_id":              scan.scanID,
-			"campaign_id":          scan.campaignID,
-			"mode":                 scan.mode,
-			"geography":            scan.geography,
-			"reports_received":     scan.reports,
-			"agents_expected":      scan.expected,
-			"agents_complete":      scan.completed,
-			"verticals_discovered": scan.discovered,
-			"verticals_skipped":    scan.skipped,
-			"pending_dedup":        scan.pendingDedup,
-			"timed_out":            true,
-		}
+		stats := pc.buildScanCompletedPayload(scanCompletedBuildInput{
+			ScanID:              scan.scanID,
+			CampaignID:          scan.campaignID,
+			Mode:                scan.mode,
+			Geography:           scan.geography,
+			ReportsReceived:     scan.reports,
+			AgentsExpected:      scan.expected,
+			AgentsComplete:      scan.completed,
+			VerticalsDiscovered: scan.discovered,
+			VerticalsSkipped:    scan.skipped,
+			PendingDedup:        scan.pendingDedup,
+			TimedOut:            true,
+		})
 		shardTotal, shardCompleted, shardFailed, hasShardProgress := pc.shardTerminalProgress(ctx, scan.shardScanID)
 		if hasShardProgress {
 			terminal := shardCompleted + shardFailed
-			stats["agents_expected"] = shardTotal
-			stats["agents_complete"] = terminal
-			stats["shards_total"] = shardTotal
-			stats["shards_completed"] = shardCompleted
-			stats["shards_failed"] = shardFailed
+			stats.AgentsExpected = shardTotal
+			stats.AgentsComplete = terminal
+			stats.ShardsTotal = shardTotal
+			stats.ShardsCompleted = shardCompleted
+			stats.ShardsFailed = shardFailed
 		}
-		pc.publish(ctx, "scan.completed", "", stats)
+		pc.publish(ctx, "scan.completed", "", payloadMap(stats))
 	}
 }
 
@@ -2560,6 +3027,94 @@ func (pc *FactoryPipelineCoordinator) getValidationStateLocked(verticalID string
 		st.Status = "active"
 	}
 	return st
+}
+
+func (pc *FactoryPipelineCoordinator) validationStageForState(st *validationPipelineState) string {
+	if st == nil {
+		return "researching"
+	}
+	switch strings.TrimSpace(st.Status) {
+	case "packaged":
+		return "ready_for_review"
+	case "parked":
+		return "ready_for_review"
+	case "approved":
+		return "approved"
+	case "rejected":
+		return "killed"
+	}
+	if !st.G1Research {
+		return "researching"
+	}
+	if !st.G2Spec {
+		if st.InnerRevisionCount > 0 {
+			return "spec_review"
+		}
+		return "mvp_speccing"
+	}
+	if !st.G3CTO {
+		return "cto_spec_review"
+	}
+	if !st.G4Brand {
+		return "branding"
+	}
+	return "branding"
+}
+
+func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, verticalID, stage, sourceEvent string) {
+	if pc == nil || pc.db == nil {
+		return
+	}
+	verticalID = strings.TrimSpace(verticalID)
+	stage = strings.TrimSpace(stage)
+	sourceEvent = strings.TrimSpace(sourceEvent)
+	if verticalID == "" || stage == "" {
+		return
+	}
+	if stage == "ready_for_review" {
+		_, _ = dbExecContext(ctx, pc.db, `
+			UPDATE verticals
+			SET stage = $2,
+			    parked_at = COALESCE(parked_at, now()),
+			    updated_at = now()
+			WHERE id = $1::uuid
+		`, verticalID, stage)
+		return
+	}
+	if stage == "approved" {
+		_, _ = dbExecContext(ctx, pc.db, `
+			UPDATE verticals
+			SET stage = $2,
+			    approved_at = COALESCE(approved_at, now()),
+			    parked_at = NULL,
+			    updated_at = now()
+			WHERE id = $1::uuid
+		`, verticalID, stage)
+		return
+	}
+	if stage == "killed" {
+		_, _ = dbExecContext(ctx, pc.db, `
+			UPDATE verticals
+			SET stage = $2,
+			    kill_reason = CASE
+					WHEN COALESCE(kill_reason,'') = '' THEN NULLIF($3,'')
+					ELSE kill_reason
+				END,
+			    killed_at_stage = CASE
+					WHEN COALESCE(killed_at_stage,'') = '' THEN NULLIF($3,'')
+					ELSE killed_at_stage
+				END,
+			    updated_at = now()
+			WHERE id = $1::uuid
+		`, verticalID, stage, sourceEvent)
+		return
+	}
+	_, _ = dbExecContext(ctx, pc.db, `
+		UPDATE verticals
+		SET stage = $2,
+		    updated_at = now()
+		WHERE id = $1::uuid
+	`, verticalID, stage)
 }
 
 func (pc *FactoryPipelineCoordinator) pendingDedupCountForScan(scanID string) int {
@@ -2655,6 +3210,220 @@ func (pc *FactoryPipelineCoordinator) identityForPayload(ctx context.Context, ve
 		return "", ""
 	}
 	return strings.TrimSpace(name), strings.TrimSpace(geography)
+}
+
+func (pc *FactoryPipelineCoordinator) buildScanAssignedPayload(
+	scanID, campaignID, mode, geography string,
+	source map[string]any,
+	plannedShards int,
+) ScanAssignedPayload {
+	if source == nil {
+		source = map[string]any{}
+	}
+	return ScanAssignedPayload{
+		ScanID:             strings.TrimSpace(scanID),
+		CampaignID:         strings.TrimSpace(campaignID),
+		Mode:               strings.TrimSpace(mode),
+		Geography:          strings.TrimSpace(geography),
+		GeographyID:        strings.TrimSpace(asString(source["geography_id"])),
+		TaxonomyCategories: source["taxonomy_categories"],
+		Priority:           strings.TrimSpace(asString(source["priority"])),
+		CampaignContext:    source["campaign_context"],
+		DirectiveID:        strings.TrimSpace(asString(source["directive_id"])),
+		StrategicContext:   source["strategic_context"],
+		RequestedAt:        time.Now().UTC().Format(time.RFC3339),
+		PlannedShards:      plannedShards,
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) buildSynthesisNeededPayload(scanID string, acc *scanAccumulator, raw map[string]any) SynthesisNeededPayload {
+	if raw == nil {
+		raw = map[string]any{}
+	}
+	out := SynthesisNeededPayload{
+		ScanID:        strings.TrimSpace(scanID),
+		Geography:     firstNonEmptyString(strings.TrimSpace(asString(raw["geography"])), strings.TrimSpace(asString(raw["geography_label"]))),
+		Category:      strings.TrimSpace(asString(raw["category"])),
+		Subcategory:   strings.TrimSpace(asString(raw["subcategory"])),
+		ConflictNotes: raw["conflict_notes"],
+		RawReport:     raw,
+	}
+	if acc != nil {
+		out.CampaignID = strings.TrimSpace(acc.CampaignID)
+		out.Mode = strings.TrimSpace(acc.Mode)
+		out.Geography = firstNonEmptyString(strings.TrimSpace(out.Geography), strings.TrimSpace(acc.Geography))
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) buildDedupAmbiguousPayload(
+	scanID, dedupEventID string,
+	similarity float64,
+	candidateName, geography string,
+	signal float64,
+	existingID, existingName string,
+) DedupAmbiguousPayload {
+	return DedupAmbiguousPayload{
+		ScanID:       strings.TrimSpace(scanID),
+		DedupEventID: strings.TrimSpace(dedupEventID),
+		Similarity:   similarity,
+		NewCandidate: DedupCandidatePayload{
+			Name:           strings.TrimSpace(candidateName),
+			Geography:      strings.TrimSpace(geography),
+			SignalStrength: signal,
+		},
+		ExistingVertical: DedupCandidatePayload{
+			ID:        strings.TrimSpace(existingID),
+			Name:      strings.TrimSpace(existingName),
+			Geography: strings.TrimSpace(geography),
+		},
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) buildVerticalDiscoveredPayload(
+	verticalID, name, geography, mode, scanID, campaignID string,
+	signal float64,
+	discoverySource string,
+	rawSignals map[string]any,
+) VerticalDiscoveredPayload {
+	if rawSignals == nil {
+		rawSignals = map[string]any{}
+	}
+	return VerticalDiscoveredPayload{
+		VerticalID:      strings.TrimSpace(verticalID),
+		Name:            strings.TrimSpace(name),
+		Geography:       strings.TrimSpace(geography),
+		Mode:            strings.TrimSpace(mode),
+		ScanID:          strings.TrimSpace(scanID),
+		CampaignID:      strings.TrimSpace(campaignID),
+		SignalStrength:  signal,
+		DiscoverySource: strings.TrimSpace(discoverySource),
+		RawSignals:      rawSignals,
+	}
+}
+
+type scanCompletedBuildInput struct {
+	ScanID              string
+	CampaignID          string
+	Mode                string
+	Geography           string
+	ReportsReceived     int
+	AgentsExpected      int
+	AgentsComplete      int
+	VerticalsDiscovered int
+	VerticalsSkipped    int
+	PendingDedup        int
+	TimedOut            bool
+}
+
+func (pc *FactoryPipelineCoordinator) buildScanCompletedPayload(in scanCompletedBuildInput) ScanCompletedPayload {
+	return ScanCompletedPayload{
+		ScanID:              strings.TrimSpace(in.ScanID),
+		CampaignID:          strings.TrimSpace(in.CampaignID),
+		Mode:                strings.TrimSpace(in.Mode),
+		Geography:           strings.TrimSpace(in.Geography),
+		ReportsReceived:     in.ReportsReceived,
+		AgentsExpected:      in.AgentsExpected,
+		AgentsComplete:      in.AgentsComplete,
+		VerticalsDiscovered: in.VerticalsDiscovered,
+		VerticalsSkipped:    in.VerticalsSkipped,
+		PendingDedup:        in.PendingDedup,
+		TimedOut:            in.TimedOut,
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) buildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) ScoringRequestedPayload {
+	out := ScoringRequestedPayload{
+		VerticalID: strings.TrimSpace(verticalID),
+	}
+	if acc == nil {
+		return out
+	}
+	out.VerticalName = strings.TrimSpace(acc.VerticalName)
+	out.Geography = strings.TrimSpace(acc.Geography)
+	out.Mode = strings.TrimSpace(acc.Mode)
+	out.Rubric = strings.TrimSpace(acc.Rubric)
+	if len(acc.Expected) > 0 {
+		out.DimensionsRequested = append([]string{}, acc.Expected...)
+	} else {
+		out.DimensionsRequested = []string{}
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) buildScoringContestedPayload(verticalID, dimension string, contest contestedDimension, acc *scoringAccumulator) ScoringContestedPayload {
+	out := ScoringContestedPayload{
+		VerticalID: strings.TrimSpace(verticalID),
+		Dimension:  strings.TrimSpace(dimension),
+		Scores:     append([]int{}, contest.Scores...),
+		Evidence:   append([]string{}, contest.Evidence...),
+		Spread:     contest.Spread,
+	}
+	if acc != nil {
+		out.Rubric = strings.TrimSpace(acc.Rubric)
+		out.Mode = strings.TrimSpace(acc.Mode)
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) buildVerticalScoredPayload(verticalID string, result scoringComposite, acc *scoringAccumulator) VerticalScoredPayload {
+	out := VerticalScoredPayload{
+		VerticalID:     strings.TrimSpace(verticalID),
+		Result:         strings.TrimSpace(result.Result),
+		Reason:         strings.TrimSpace(result.Reason),
+		CompositeScore: result.CompositeScore,
+		ViabilityScore: result.ViabilityScore,
+		MarketScore:    result.MarketScore,
+		Dimensions:     result.Dimensions,
+		Rubric:         strings.TrimSpace(result.Rubric),
+		Partial:        result.Partial,
+	}
+	if out.Dimensions == nil {
+		out.Dimensions = map[string]scoreDimensionResult{}
+	}
+	if acc != nil {
+		out.Mode = strings.TrimSpace(acc.Mode)
+		out.VerticalName = strings.TrimSpace(acc.VerticalName)
+		out.Geography = strings.TrimSpace(acc.Geography)
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) buildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload {
+	if scoringPayload == nil {
+		scoringPayload = map[string]any{}
+	}
+	return VerticalShortlistedPayload{
+		VerticalID:     strings.TrimSpace(verticalID),
+		CompositeScore: composite,
+		ViabilityScore: viability,
+		ScoringPayload: scoringPayload,
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) buildVerticalMarginalPayload(verticalID string, result scoringComposite) VerticalMarginalPayload {
+	dim := result.Dimensions
+	if dim == nil {
+		dim = map[string]scoreDimensionResult{}
+	}
+	return VerticalMarginalPayload{
+		VerticalID:        strings.TrimSpace(verticalID),
+		CompositeScore:    result.CompositeScore,
+		ViabilityScore:    result.ViabilityScore,
+		Dimensions:        dim,
+		PromotionEligible: result.ViabilityScore >= 65,
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) buildVerticalRejectedPayload(verticalID string, result scoringComposite) VerticalRejectedPayload {
+	return VerticalRejectedPayload{
+		VerticalID: strings.TrimSpace(verticalID),
+		Reason: VerticalRejectedReasonPayload{
+			Code:           strings.TrimSpace(result.Reason),
+			CompositeScore: result.CompositeScore,
+			ViabilityScore: result.ViabilityScore,
+		},
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) buildBrandRequestedPayload(ctx context.Context, verticalID string, scoring map[string]any, brief map[string]any) BrandRequestedPayload {
@@ -2878,11 +3647,10 @@ func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Conte
 
 func expectedAgents(mode string) int {
 	switch normalizeScanMode(mode) {
-	case "saas_gap", "saas_trend":
+	case "automation_micro", "saas_gap", "saas_trend":
 		return 1
 	case "local_services":
-		// Phase 1-3 synthetic adapter mode runs through one scanner adapter.
-		return 1
+		return localServicesScannerExpected
 	default:
 		return 1
 	}

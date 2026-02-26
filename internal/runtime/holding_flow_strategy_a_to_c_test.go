@@ -182,8 +182,8 @@ func TestHoldingFlow_A1_DirectiveToCampaignCreation(t *testing.T) {
 	if strings.TrimSpace(asString(payload["campaign_id"])) == "" {
 		t.Fatal("expected scan.requested payload to include campaign_id")
 	}
-	if strings.TrimSpace(asString(payload["mode"])) != "saas_gap" {
-		t.Fatalf("expected first mode saas_gap, got %v", payload["mode"])
+	if strings.TrimSpace(asString(payload["mode"])) != "automation_micro" {
+		t.Fatalf("expected first mode automation_micro, got %v", payload["mode"])
 	}
 	if strings.TrimSpace(asString(payload["geography"])) != "Argentina" {
 		t.Fatalf("expected geography Argentina, got %v", payload["geography"])
@@ -193,8 +193,8 @@ func TestHoldingFlow_A1_DirectiveToCampaignCreation(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scan_campaigns`).Scan(&campaigns); err != nil {
 		t.Fatalf("count campaigns: %v", err)
 	}
-	if campaigns != 3 {
-		t.Fatalf("expected 3 queued campaigns, got %d", campaigns)
+	if campaigns != 4 {
+		t.Fatalf("expected 4 queued campaigns, got %d", campaigns)
 	}
 }
 

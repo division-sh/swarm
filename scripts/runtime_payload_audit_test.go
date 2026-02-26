@@ -63,6 +63,13 @@ func TestParseAndResolveHelpers(t *testing.T) {
 		if _, ok := fs.guaranteed["vertical_id"]; !ok {
 			t.Fatalf("missing expected key: %+v", fs.guaranteed)
 		}
+		structFS := parseMapCompositeLiteral(parseExpr(t, `OpCOTeardownCompletePayload{VerticalID:"v1",Priority:"normal"}`).(*ast.CompositeLit))
+		if structFS.dynamic {
+			t.Fatalf("expected typed struct literal to be static: %+v", structFS)
+		}
+		if _, ok := structFS.guaranteed["vertical_id"]; !ok {
+			t.Fatalf("expected snake-case field from struct literal: %+v", structFS.guaranteed)
+		}
 	})
 
 	t.Run("resolveFieldSet", func(t *testing.T) {
@@ -83,6 +90,10 @@ func TestParseAndResolveHelpers(t *testing.T) {
 		typed := resolveFieldSet(parseExpr(t, "pc.buildValidationStartedPayload(\"v\", nil, nil)"), vars)
 		if _, ok := typed.guaranteed["vertical_name"]; !ok {
 			t.Fatalf("expected typed constructor fields: %+v", typed.guaranteed)
+		}
+		typedScan := resolveFieldSet(parseExpr(t, "pc.buildScanAssignedPayload(\"s\", \"c\", \"saas_gap\", \"argentina\", nil, 0)"), vars)
+		if _, ok := typedScan.guaranteed["scan_id"]; !ok {
+			t.Fatalf("expected scan assigned payload fields: %+v", typedScan.guaranteed)
 		}
 		dynamic := resolveFieldSet(parseExpr(t, "unknownPayloadBuilder()"), vars)
 		if !dynamic.dynamic {
@@ -142,11 +153,17 @@ func TestContractAndPromptMatchingHelpers(t *testing.T) {
 	if !isInputHintLine("payload contains vertical_id") || isInputHintLine("just text") {
 		t.Fatal("input hint detection mismatch")
 	}
+	if isInputHintLine("call emit_spec_requested with payload") {
+		t.Fatal("action lines mentioning payload should not be treated as input hints")
+	}
 	if !mentionsField("read vertical id", "vertical_id") {
 		t.Fatal("field alias detection failed")
 	}
 	if !containsWord("scan_id available", "scan_id") {
 		t.Fatal("containsWord should match token boundary")
+	}
+	if got := camelToSnake("VerticalID"); got != "vertical_id" {
+		t.Fatalf("camelToSnake mismatch, got %q", got)
 	}
 	if !matchesSubscription("scan.*", "scan.requested") || matchesSubscription("scan.requested", "scan.completed") {
 		t.Fatal("subscription matcher mismatch")

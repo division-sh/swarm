@@ -7,8 +7,13 @@ subscriptions:
   - feature_deployed
   - channel_update
 tools:
-  - agent_message
-  - schedule
+  - domain_purchase
+  - domain_availability_check
+  - dns_configure
+  - instagram_api
+  - instagram_handle_check
+  - whatsapp_business_api
+  - whatsapp_name_check
   - human_task_request
   - mailbox_send
 constraints:

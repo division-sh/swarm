@@ -209,6 +209,9 @@ func toolExecErrorText(err error) string {
 }
 
 func (e *RuntimeToolExecutor) authorizeToolUsage(ctx context.Context, actor models.AgentConfig, toolName string) error {
+	if IsUniversalRuntimeTool(toolName) {
+		return nil
+	}
 	if IsEmitToolAllowedForRole(actor.Role, toolName) {
 		return nil
 	}
@@ -826,7 +829,6 @@ func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor mo
 
 	var in struct {
 		VerticalID      string `json:"vertical_id"`
-		ToolCallID      string `json:"tool_call_id"`
 		Category        string `json:"category"`
 		Description     string `json:"description"`
 		TalkingPoints   any    `json:"talking_points"`
@@ -841,7 +843,6 @@ func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor mo
 	}
 
 	in.VerticalID = strings.TrimSpace(coalesce(in.VerticalID, actor.VerticalID))
-	in.ToolCallID = strings.TrimSpace(in.ToolCallID)
 	in.Category = strings.TrimSpace(in.Category)
 	in.Description = strings.TrimSpace(in.Description)
 	in.ExpectedValue = strings.TrimSpace(in.ExpectedValue)
@@ -892,18 +893,17 @@ func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor mo
 	var taskID string
 	const q = `
 		INSERT INTO human_tasks (
-			requesting_agent, vertical_id, tool_call_id, category, description,
+			requesting_agent, vertical_id, category, description,
 			talking_points, expected_value, priority, deadline, status
 		) VALUES (
-			$1, NULLIF($2,'')::uuid, NULLIF($3,''), $4, $5,
-			$6::jsonb, NULLIF($7,''), $8, $9, 'pending_review'
+			$1, NULLIF($2,'')::uuid, $3, $4,
+			$5::jsonb, NULLIF($6,''), $7, $8, 'pending_review'
 		)
 		RETURNING id::text
 	`
 	if err := db.QueryRowContext(ctx, q,
 		actor.ID,
 		in.VerticalID,
-		in.ToolCallID,
 		in.Category,
 		in.Description,
 		talkingJSON,
@@ -923,9 +923,6 @@ func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor mo
 		"talking_points":   json.RawMessage(talkingJSON),
 		"expected_value":   in.ExpectedValue,
 		"priority":         in.Priority,
-	}
-	if in.ToolCallID != "" {
-		payload["tool_call_id"] = in.ToolCallID
 	}
 	if deadline.Valid {
 		payload["deadline"] = deadline.Time.UTC().Format(time.RFC3339)
@@ -1185,7 +1182,7 @@ func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.A
 		)
 	}
 
-	payloadMap = e.enrichEmitPayloadContext(actor, inbound, payloadMap)
+	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
 	payloadMap = e.preNormalizeEmitPayload(actor, inbound, eventType, payloadMap)
 	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
@@ -1207,6 +1204,9 @@ func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.A
 			err,
 			"emit payload schema validation failed",
 		)
+	}
+	if err := e.enforceMigrationGuardrail(ctx, actor, eventType, payloadMap); err != nil {
+		return nil, err
 	}
 
 	emitted := events.Event{
@@ -1275,7 +1275,7 @@ func (e *RuntimeToolExecutor) preNormalizeEmitPayload(actor models.AgentConfig, 
 	return payload
 }
 
-func (e *RuntimeToolExecutor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, payload map[string]any) map[string]any {
+func (e *RuntimeToolExecutor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -1283,10 +1283,10 @@ func (e *RuntimeToolExecutor) enrichEmitPayloadContext(actor models.AgentConfig,
 	for k, v := range payload {
 		out[k] = v
 	}
-	if strings.TrimSpace(asString(out["task_id"])) == "" {
+	if emitSchemaAllowsProperty(eventType, "task_id") && strings.TrimSpace(asString(out["task_id"])) == "" {
 		out["task_id"] = strings.TrimSpace(inbound.TaskID)
 	}
-	if strings.TrimSpace(asString(out["vertical_id"])) == "" {
+	if emitSchemaAllowsProperty(eventType, "vertical_id") && strings.TrimSpace(asString(out["vertical_id"])) == "" {
 		verticalID := strings.TrimSpace(actor.VerticalID)
 		if verticalID == "" {
 			verticalID = strings.TrimSpace(inbound.VerticalID)
@@ -1308,6 +1308,16 @@ func (e *RuntimeToolExecutor) normalizeEmitPayload(actor models.AgentConfig, inb
 		payload["event_type"] = eventType
 		if _, ok := payload["threshold_event_id"]; !ok {
 			payload["threshold_event_id"] = strings.TrimSpace(inbound.ID)
+		}
+	}
+	if eventType == "portfolio.digest_compiled" {
+		msg := strings.TrimSpace(asString(payload["message"]))
+		legacy := strings.TrimSpace(asString(payload["digest_text"]))
+		switch {
+		case msg == "" && legacy != "":
+			payload["message"] = legacy
+		case msg != "" && legacy == "":
+			payload["digest_text"] = msg
 		}
 	}
 	return payload
@@ -1345,6 +1355,8 @@ func normalizeCoordinatorScanRequestedPayload(inbound events.Event, current map[
 	if strings.TrimSpace(asString(out["geography"])) == "" && strings.TrimSpace(asString(out["geography_id"])) == "" {
 		if geo := inferGeographyHint(directiveText); geo != "" {
 			out["geography"] = geo
+		} else {
+			out["geography"] = "unspecified"
 		}
 	}
 	if _, ok := out["taxonomy_categories"]; !ok {
@@ -1354,6 +1366,25 @@ func normalizeCoordinatorScanRequestedPayload(inbound events.Event, current map[
 			out["taxonomy_categories"] = []string{}
 		}
 	}
+	if _, ok := out["campaign_context"]; !ok {
+		modes := []string{strings.TrimSpace(asString(out["mode"]))}
+		if modes[0] == "" {
+			modes[0] = "saas_gap"
+		}
+		strategicContext := strings.TrimSpace(asString(out["strategic_context"]))
+		if strategicContext == "" {
+			strategicContext = directiveText
+		}
+		directiveID := strings.TrimSpace(asString(out["directive_id"]))
+		if directiveID == "" {
+			directiveID = strings.TrimSpace(inbound.ID)
+		}
+		out["campaign_context"] = map[string]any{
+			"modes":             modes,
+			"strategic_context": strategicContext,
+			"directive_id":      directiveID,
+		}
+	}
 	delete(out, "vertical")
 	delete(out, "focus")
 	delete(out, "criteria")
@@ -1361,10 +1392,99 @@ func normalizeCoordinatorScanRequestedPayload(inbound events.Event, current map[
 	return out
 }
 
+func emitSchemaAllowsProperty(eventType, property string) bool {
+	eventType = strings.TrimSpace(eventType)
+	property = strings.TrimSpace(property)
+	if eventType == "" || property == "" {
+		return false
+	}
+	schema := schemaForEventType(eventType).Schema
+	props, ok := schema["properties"].(map[string]any)
+	if !ok || len(props) == 0 {
+		return false
+	}
+	_, ok = props[property]
+	return ok
+}
+
+func (e *RuntimeToolExecutor) enforceMigrationGuardrail(ctx context.Context, actor models.AgentConfig, eventType string, payload map[string]any) error {
+	eventType = strings.TrimSpace(eventType)
+	if eventType != "devops.deploy_requested" && eventType != "devops.rollback_requested" {
+		return nil
+	}
+	migrationSQL := strings.TrimSpace(extractMigrationSQL(eventType, payload))
+	if migrationSQL == "" {
+		return nil
+	}
+	classification := ClassifyMigration(migrationSQL)
+	if !classification.RequiresApproval {
+		return nil
+	}
+	if e.mailboxStore != nil {
+		contextPayload := map[string]any{
+			"event_type":          eventType,
+			"vertical_id":         strings.TrimSpace(asString(payload["vertical_id"])),
+			"requesting_agent":    strings.TrimSpace(asString(payload["requesting_agent"])),
+			"destructive_ops":     classification.DestructiveOps,
+			"requires_approval":   classification.RequiresApproval,
+			"migration_statement": migrationSQL,
+		}
+		if _, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
+			VerticalID: strings.TrimSpace(asString(payload["vertical_id"])),
+			FromAgent:  actor.ID,
+			Type:       "deploy_migration_review",
+			Priority:   "critical",
+			Status:     "pending",
+			Context:    mustJSON(contextPayload),
+			Summary:    "Destructive migration requires human approval before deploy",
+		}); err != nil {
+			runtimeWarn("tool-executor", "failed to insert deploy_migration_review mailbox item: %v", err)
+		}
+	}
+	return NewRuntimeError(
+		"migration_requires_approval",
+		"tool-executor",
+		"handle_emit_tool.migration_guardrail",
+		false,
+		"migration contains destructive operations and requires approval: %s",
+		strings.Join(classification.DestructiveOps, "; "),
+	)
+}
+
+func extractMigrationSQL(eventType string, payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	switch strings.TrimSpace(eventType) {
+	case "devops.deploy_requested":
+		if raw := strings.TrimSpace(asString(payload["migration_sql"])); raw != "" {
+			return raw
+		}
+		if manifest, ok := payload["manifest"].(map[string]any); ok {
+			return strings.TrimSpace(asString(manifest["migration_sql"]))
+		}
+	case "devops.rollback_requested":
+		if raw := strings.TrimSpace(asString(payload["rollback_migration"])); raw != "" {
+			return raw
+		}
+		if manifest, ok := payload["manifest"].(map[string]any); ok {
+			return strings.TrimSpace(asString(manifest["rollback_migration"]))
+		}
+	}
+	return ""
+}
+
 func preNormalizeCoordinatorScanRequestedPayload(inbound events.Event, current map[string]any) map[string]any {
 	out := map[string]any{}
 	for k, v := range current {
 		out[k] = v
+	}
+	directiveText := ""
+	if len(inbound.Payload) > 0 {
+		var payload map[string]any
+		if err := json.Unmarshal(inbound.Payload, &payload); err == nil {
+			directiveText = strings.TrimSpace(asString(payload["directive_text"]))
+		}
 	}
 	originalMode := strings.TrimSpace(asString(out["mode"]))
 	originalPriority := strings.TrimSpace(asString(out["priority"]))
@@ -1409,6 +1529,32 @@ func preNormalizeCoordinatorScanRequestedPayload(inbound events.Event, current m
 	}
 	if priority := normalizeScanPriorityCompat(asString(out["priority"])); priority != "" {
 		out["priority"] = priority
+	}
+	if strings.TrimSpace(asString(out["geography"])) == "" && strings.TrimSpace(asString(out["geography_id"])) == "" {
+		if geo := inferGeographyHint(directiveText); geo != "" {
+			out["geography"] = geo
+		} else {
+			out["geography"] = "unspecified"
+		}
+	}
+	if _, ok := out["campaign_context"]; !ok {
+		modes := []string{strings.TrimSpace(asString(out["mode"]))}
+		if modes[0] == "" {
+			modes[0] = "saas_gap"
+		}
+		strategicContext := strings.TrimSpace(asString(out["strategic_context"]))
+		if strategicContext == "" {
+			strategicContext = directiveText
+		}
+		directiveID := strings.TrimSpace(asString(out["directive_id"]))
+		if directiveID == "" {
+			directiveID = strings.TrimSpace(inbound.ID)
+		}
+		out["campaign_context"] = map[string]any{
+			"modes":             modes,
+			"strategic_context": strategicContext,
+			"directive_id":      directiveID,
+		}
 	}
 	if coercedMode := strings.TrimSpace(asString(out["mode"])); originalMode != "" && coercedMode != "" && !strings.EqualFold(originalMode, coercedMode) {
 		runtimeWarn(
@@ -1480,7 +1626,9 @@ func normalizeScanModeCompat(raw string) string {
 		return mode
 	}
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "discovery", "scan", "default", "saas":
+	case "discovery", "scan", "default", "automation", "micro", "automation-micro", "automation_micro":
+		return "automation_micro"
+	case "saas":
 		return "saas_gap"
 	case "trend", "trend_scan", "saas-trend":
 		return "saas_trend"
@@ -1840,8 +1988,8 @@ const (
 var (
 	sqlForbiddenTokenPattern        = regexp.MustCompile(`(?i)\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|set|reset|call|do|copy|vacuum|analyze|comment)\b`)
 	sqlCommentPattern               = regexp.MustCompile(`--|/\*|\*/`)
-	sqlSchemaQualifiedFromJoinRegex = regexp.MustCompile(`(?i)\b(from|join)\s+([a-z_][a-z0-9_]*\.)`)
-	sqlRestrictedSchemaPattern      = regexp.MustCompile(`(?i)\b(pg_catalog|information_schema|public)\.`)
+	sqlSchemaQualifiedFromJoinRegex = regexp.MustCompile(`(?is)\b(from|join)\s+((\"[^\"]+\"|[a-z_][a-z0-9_]*)\s*\.)`)
+	sqlRestrictedSchemaPattern      = regexp.MustCompile(`(?is)(\"?(pg_catalog|information_schema|public)\"?\s*\.)`)
 	sqlLimitPattern                 = regexp.MustCompile(`(?i)\blimit\s+([0-9]+)\b`)
 )
 
