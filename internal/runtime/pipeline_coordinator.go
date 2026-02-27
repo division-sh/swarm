@@ -33,6 +33,25 @@ const (
 )
 
 type pipelineEmitCollectorKey struct{}
+type pipelineSourceAgentKey struct{}
+
+func withPipelineSourceAgent(ctx context.Context, sourceAgent string) context.Context {
+	sourceAgent = strings.TrimSpace(sourceAgent)
+	if sourceAgent == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, pipelineSourceAgentKey{}, sourceAgent)
+}
+
+func pipelineSourceAgent(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(pipelineSourceAgentKey{}).(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
 
 // FactoryPipelineCoordinator handles deterministic factory state-machine work
 // (scan assignment/aggregation and validation gate orchestration) so LLM agents
@@ -584,9 +603,6 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 			return false, true
 		}
 	case "scan.requested",
-		"vertical.discovered",
-		"score.dimension_complete",
-		"scoring.contest_resolved",
 		"category.assessed",
 		"trend.identified",
 		"source.scraped",
@@ -644,9 +660,6 @@ func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
 	return pc.bus.Subscribe("pipeline-coordinator",
 		events.EventType("timer.portfolio_digest"),
 		events.EventType("scan.requested"),
-		events.EventType("vertical.discovered"),
-		events.EventType("score.dimension_complete"),
-		events.EventType("scoring.contest_resolved"),
 		events.EventType("category.assessed"),
 		events.EventType("trend.identified"),
 		events.EventType("source.scraped"),
@@ -698,16 +711,10 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		return
 	case "scan.requested":
 		pc.handleScanRequested(ctx, evt)
-	case "vertical.discovered":
-		pc.handleScoringRequested(ctx, evt)
 	case "vertical.scored":
 		// Delivery filtering for this event type is handled in interceptPolicy.
 		// Keep a no-op case for explicit coverage/traceability in switch audits.
 		return
-	case "score.dimension_complete":
-		pc.handleScoreDimensionComplete(ctx, evt)
-	case "scoring.contest_resolved":
-		pc.handleScoringContestResolved(ctx, evt)
 	case "category.assessed", "trend.identified", "source.scraped":
 		pc.handleDiscoveryReport(ctx, evt)
 	case "market_research.scan_complete", "trend_research.scan_complete",
@@ -1620,9 +1627,6 @@ func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
 	pc.mu.Unlock()
 	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, name, geography, candidate.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload))
 	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
-	// Deferred events are persisted/delivered without recursive interceptor execution.
-	// Kick off scoring directly from discovery payload in the same interceptor pass.
-	pc.emitScoringRequestedFromDiscovery(ctx, verticalID, discoveredPayload)
 }
 
 func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
@@ -1664,21 +1668,6 @@ func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, e
 	pc.mu.Unlock()
 	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "pipeline-coordinator", cand.Payload))
 	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
-	pc.emitScoringRequestedFromDiscovery(ctx, verticalID, discoveredPayload)
-}
-
-func (pc *FactoryPipelineCoordinator) emitScoringRequestedFromDiscovery(ctx context.Context, verticalID string, discoveredPayload map[string]any) {
-	if pc == nil || len(discoveredPayload) == 0 {
-		return
-	}
-	pc.handleScoringRequested(ctx, events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("vertical.discovered"),
-		SourceAgent: "pipeline-coordinator",
-		VerticalID:  strings.TrimSpace(verticalID),
-		Payload:     mustJSON(discoveredPayload),
-		CreatedAt:   time.Now().UTC(),
-	})
 }
 
 func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
@@ -2294,16 +2283,6 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 	case "shortlisted":
 		stage = "shortlisted"
 		pc.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(pc.buildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayloadMap)))
-		// Runtime-emitted shortlist must also start validation immediately,
-		// because deferred events bypass interceptor re-entry.
-		pc.handleValidationStarted(ctx, events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("vertical.shortlisted"),
-			SourceAgent: "pipeline-coordinator",
-			VerticalID:  verticalID,
-			Payload:     mustJSON(map[string]any{"scoring_payload": scoredPayloadMap}),
-			CreatedAt:   time.Now().UTC(),
-		})
 	case "marginal":
 		pc.publish(ctx, "vertical.marginal", verticalID, payloadMap(pc.buildVerticalMarginalPayload(verticalID, result)))
 	case "rejected":
@@ -3165,10 +3144,14 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, ve
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	sourceAgent := pipelineSourceAgent(ctx)
+	if sourceAgent == "" {
+		sourceAgent = "pipeline-coordinator"
+	}
 	emitted := events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
-		SourceAgent: "pipeline-coordinator",
+		SourceAgent: sourceAgent,
 		VerticalID:  strings.TrimSpace(verticalID),
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),

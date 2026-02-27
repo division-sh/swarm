@@ -14,6 +14,8 @@ import (
 type workspaceLifecycleStub struct {
 	ensureCount int
 	stopCount   int
+	killCount   int
+	killErr     error
 }
 
 func (s *workspaceLifecycleStub) EnsureSystemWorkspaces(context.Context) error { return nil }
@@ -27,6 +29,10 @@ func (s *workspaceLifecycleStub) EnsureVerticalWorkspace(context.Context, string
 func (s *workspaceLifecycleStub) StopVerticalWorkspace(context.Context, string) error {
 	s.stopCount++
 	return nil
+}
+func (s *workspaceLifecycleStub) KillOrphanProcesses(context.Context) error {
+	s.killCount++
+	return s.killErr
 }
 
 func TestManagerReconfigureAgent(t *testing.T) {

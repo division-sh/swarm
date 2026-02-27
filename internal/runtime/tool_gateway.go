@@ -277,7 +277,7 @@ func (g *ToolGateway) mcpExecutionContext(r *http.Request) (context.Context, err
 	if token := contextTokenFromRequest(r); token != "" {
 		if turn, ok := resolveMCPTurnContext(token); ok {
 			if !IsCurrentRuntimeEpoch(turn.Epoch) {
-				return nil, newMCPRuntimeError(ErrCodeMCPContextStale, "mcp.context.resolve", true, nil, "stale mcp context token")
+				return nil, newMCPRuntimeError(ErrCodeMCPContextStale, "mcp.context.resolve", false, nil, "stale mcp context token")
 			}
 			ctx := context.Background()
 			ctx = WithActor(ctx, turn.Actor)
@@ -290,22 +290,21 @@ func (g *ToolGateway) mcpExecutionContext(r *http.Request) (context.Context, err
 			}
 			return ctx, nil
 		}
-		return nil, newMCPRuntimeError(ErrCodeMCPContextNotFound, "mcp.context.resolve", true, nil, "missing or invalid mcp context token")
+		if allowMCPContextFallbackOnMiss() {
+			if actor, ok := mcpActorFromRequest(r); ok {
+				ctx := WithActor(context.Background(), actor)
+				ctx = WithCurrentRuntimeEpoch(ctx)
+				return ctx, nil
+			}
+		}
+		return nil, newMCPRuntimeError(ErrCodeMCPContextNotFound, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
 	}
 	if requireMCPContextToken() {
-		return nil, newMCPRuntimeError(ErrCodeMCPContextMissing, "mcp.context.resolve", true, nil, "missing or invalid mcp context token")
+		return nil, newMCPRuntimeError(ErrCodeMCPContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
 	}
-	actor := models.AgentConfig{
-		ID:         firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")), strings.TrimSpace(r.URL.Query().Get("empire_agent_id"))),
-		Role:       firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Role")), strings.TrimSpace(r.URL.Query().Get("empire_agent_role"))),
-		VerticalID: firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")), strings.TrimSpace(r.URL.Query().Get("empire_vertical_id"))),
-		Mode:       firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Mode")), strings.TrimSpace(r.URL.Query().Get("empire_agent_mode"))),
-	}
-	if actor.ID == "" {
+	actor, ok := mcpActorFromRequest(r)
+	if !ok {
 		return nil, newMCPRuntimeError(ErrCodeMCPActorMissing, "mcp.context.resolve", false, nil, "missing actor id for mcp tool execution")
-	}
-	if actor.Mode == "" {
-		actor.Mode = "operating"
 	}
 	ctx := WithActor(context.Background(), actor)
 	ctx = WithCurrentRuntimeEpoch(ctx)
@@ -318,6 +317,33 @@ func requireMCPContextToken() bool {
 		return true
 	}
 	return v == "1" || v == "true" || v == "yes"
+}
+
+func allowMCPContextFallbackOnMiss() bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("EMPIREAI_MCP_CONTEXT_FALLBACK_ON_MISS")))
+	if v == "" {
+		return true
+	}
+	return v == "1" || v == "true" || v == "yes"
+}
+
+func mcpActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
+	if r == nil {
+		return models.AgentConfig{}, false
+	}
+	actor := models.AgentConfig{
+		ID:         firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")), strings.TrimSpace(r.URL.Query().Get("empire_agent_id"))),
+		Role:       firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Role")), strings.TrimSpace(r.URL.Query().Get("empire_agent_role"))),
+		VerticalID: firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")), strings.TrimSpace(r.URL.Query().Get("empire_vertical_id"))),
+		Mode:       firstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Mode")), strings.TrimSpace(r.URL.Query().Get("empire_agent_mode"))),
+	}
+	if strings.TrimSpace(actor.ID) == "" {
+		return models.AgentConfig{}, false
+	}
+	if strings.TrimSpace(actor.Mode) == "" {
+		actor.Mode = "operating"
+	}
+	return actor, true
 }
 
 func (g *ToolGateway) mcpToolsForRequest(r *http.Request) []mcpToolDef {

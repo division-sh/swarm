@@ -39,6 +39,34 @@ func (m *mailboxStoreStub) DecideMailboxItem(context.Context, string, string, st
 	return nil
 }
 
+func TestRuntimeToolExecutor_ToolDefinitionsHaveSchema(t *testing.T) {
+	exec := NewRuntimeToolExecutor(nil, nil, nil)
+	defs := exec.ToolDefinitions()
+	if len(defs) == 0 {
+		t.Fatal("expected non-empty tool definitions")
+	}
+	for _, def := range defs {
+		if def.Schema == nil {
+			t.Fatalf("tool %s missing schema", def.Name)
+		}
+	}
+}
+
+func TestRuntimeToolExecutor_ToolSchemasAvoidTopLevelCombinators(t *testing.T) {
+	exec := NewRuntimeToolExecutor(nil, nil, nil)
+	for _, def := range exec.ToolDefinitions() {
+		schema, ok := def.Schema.(map[string]any)
+		if !ok || schema == nil {
+			t.Fatalf("tool %s schema should be object map", def.Name)
+		}
+		for _, key := range []string{"oneOf", "anyOf", "allOf"} {
+			if _, exists := schema[key]; exists {
+				t.Fatalf("tool %s schema uses unsupported top-level %s", def.Name, key)
+			}
+		}
+	}
+}
+
 func TestRuntimeToolExecutor_AgentMessage(t *testing.T) {
 	bus := NewEventBus(InMemoryEventStore{})
 	ch := bus.Subscribe("t", events.EventType("agent.message"))

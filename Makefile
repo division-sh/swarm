@@ -1,4 +1,7 @@
-.PHONY: test test-cover test-cover-runtime check-runtime-cover
+.PHONY: test test-cover test-cover-runtime check-runtime-cover \
+	dashboard-build dashboard-redeploy dashboard-logs dashboard-ps
+
+COMPOSE ?= docker compose
 
 COVER_DIR ?= coverage
 MIN_RUNTIME_COVER ?= 74
@@ -22,3 +25,16 @@ test-cover-runtime:
 
 check-runtime-cover: test-cover-runtime
 	./scripts/check_coverage.sh $(COVER_DIR)/runtime.out $(MIN_RUNTIME_COVER)
+
+dashboard-build:
+	$(COMPOSE) build dashboard
+
+dashboard-redeploy:
+	$(COMPOSE) up -d --build dashboard
+	@echo "Dashboard redeployed: http://localhost:8070/dashboard/"
+
+dashboard-logs:
+	$(COMPOSE) logs -f dashboard
+
+dashboard-ps:
+	$(COMPOSE) ps dashboard orchestrator

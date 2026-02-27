@@ -32,11 +32,6 @@ var runtimeEmittedEvents = []string{
 	"timer.marginal_review",
 	"timer.infra_health_check",
 	"campaign.completed",
-	"scoring.requested",
-	"scoring.contested",
-	"vertical.scored",
-	"vertical.marginal",
-	"vertical.rejected",
 	"vertical.discovered",
 	"vertical.shortlisted",
 	"vertical.killed",
@@ -160,6 +155,14 @@ var agentProducerEvents = map[string][]string{
 	},
 	"analysis-agent": {
 		"score.dimension_complete",
+	},
+	"scoring-node": {
+		"scoring.requested",
+		"scoring.contested",
+		"vertical.scored",
+		"vertical.shortlisted",
+		"vertical.marginal",
+		"vertical.rejected",
 	},
 	"validation-coordinator": {
 		"vertical.ready_for_review",

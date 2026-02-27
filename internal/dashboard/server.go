@@ -5795,7 +5795,10 @@ func (s *Server) handleControlRuntime(w http.ResponseWriter, r *http.Request) {
 		defer runtime.ExitRuntimeResetMode()
 		// Match reset_db ordering to avoid writes racing with truncate.
 		if s.manager != nil {
-			s.manager.ResetRuntimeState()
+			if err := s.manager.ResetRuntimeState(); err != nil {
+				writeErr(w, http.StatusInternalServerError, fmt.Errorf("reset runtime state: %w", err))
+				return
+			}
 		}
 		if err := s.resetState(r.Context()); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)
@@ -5826,7 +5829,10 @@ func (s *Server) handleControlRuntime(w http.ResponseWriter, r *http.Request) {
 		defer runtime.ExitRuntimeResetMode()
 
 		// Stop agent loops and clear in-memory state before we truncate the DB.
-		s.manager.ResetRuntimeState()
+		if err := s.manager.ResetRuntimeState(); err != nil {
+			writeErr(w, http.StatusInternalServerError, fmt.Errorf("reset runtime state: %w", err))
+			return
+		}
 
 		if err := s.resetState(r.Context()); err != nil {
 			writeErr(w, http.StatusInternalServerError, err)

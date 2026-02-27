@@ -122,6 +122,10 @@ func TestFactoryPipelineCoordinator_LocalServicesDiscoveryEmitsScoringRequested(
 	bus := NewEventBus(InMemoryEventStore{})
 	pc := NewFactoryPipelineCoordinator(bus, nil)
 	bus.SetInterceptors(pc)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scoringNode := NewScoringNode(bus, pc, nil)
+	go scoringNode.Run(ctx)
 
 	scoringCh := bus.Subscribe("analysis-agent", events.EventType("scoring.requested"))
 	scanID := uuid.NewString()

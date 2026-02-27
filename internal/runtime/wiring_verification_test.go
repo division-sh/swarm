@@ -189,7 +189,7 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	results = append(results, verifySubscriptionCompleteness(agents, producersByEvent, contracts)...)
 	results = append(results, verifyPayloadContracts(agents, schemas, runtimeEmitted)...)
 	results = append(results, verifyInterceptorCoverage(interceptEvents, handleEvents, handlerCases, runtimeEmitted)...)
-	results = append(results, verifyPipelinePathTracing(agents, producersByEvent, interceptEvents)...)
+	results = append(results, verifyPipelinePathTracing(agents, producersByEvent, interceptEvents, runtimeManagedEvents)...)
 	results = append(results, verifyOrphanEmissions(agents, producersByEvent, interceptEvents, runtimeManagedEvents, contracts)...)
 	results = append(results, verifySchemaCatalogConsistency(agents, schemas, producersByEvent, interceptEvents, contracts)...)
 
@@ -548,7 +548,7 @@ func allowNoEmitHandler(handler, eventType string) bool {
 	}
 }
 
-func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
+func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}, runtimeManagedEvents map[string]struct{}) []wiringResult {
 	type pathEdge struct {
 		Event        string
 		ConsumerKind string // "agent" | "runtime"
@@ -600,6 +600,13 @@ func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string
 		switch e.ConsumerKind {
 		case "runtime":
 			if _, ok := interceptEvents[e.Event]; !ok {
+				if _, managed := runtimeManagedEvents[e.Event]; managed {
+					out = append(out, wiringResult{
+						Severity: wiringPass,
+						Message:  fmt.Sprintf("%s -> runtime managed chain link is wired", e.Event),
+					})
+					continue
+				}
 				out = append(out, wiringResult{
 					Severity: wiringFail,
 					Message:  fmt.Sprintf("%s should be consumed by runtime interceptor but no interceptPolicy case exists", e.Event),
@@ -1076,6 +1083,7 @@ func loadRuntimeManagedEvents(repoRoot string) map[string]struct{} {
 	out := map[string]struct{}{}
 	paths := []string{
 		filepath.Join(repoRoot, "internal", "runtime", "scan_campaign_manager.go"),
+		filepath.Join(repoRoot, "internal", "runtime", "scoring_node.go"),
 	}
 	for _, p := range paths {
 		raw, err := os.ReadFile(p)

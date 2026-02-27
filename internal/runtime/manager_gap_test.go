@@ -729,7 +729,9 @@ func TestAgentManager_ResetRuntimeState_ClearsAgentsAndStopsWorkspaces(t *testin
 	default:
 	}
 
-	am.ResetRuntimeState()
+	if err := am.ResetRuntimeState(); err != nil {
+		t.Fatalf("reset runtime state: %v", err)
+	}
 
 	if am.Count() != 0 {
 		t.Fatalf("expected 0 agents after reset, got %d", am.Count())
@@ -740,6 +742,9 @@ func TestAgentManager_ResetRuntimeState_ClearsAgentsAndStopsWorkspaces(t *testin
 	}
 	if ws.stopCount != 1 {
 		t.Fatalf("expected workspace stop once, got %d", ws.stopCount)
+	}
+	if ws.killCount != 1 {
+		t.Fatalf("expected orphan killer once, got %d", ws.killCount)
 	}
 	postResetCh := bus.Subscribe("a1", events.EventType("legacy.event"))
 	select {

@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.36"
+	runtimeSpecVersion      = "v2.0.37"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -1473,8 +1473,15 @@ func (am *AgentManager) pendingEventsForAgent(
 	return pending, nil
 }
 
-func (am *AgentManager) ResetRuntimeState() {
-	_ = am.Shutdown()
+func (am *AgentManager) ResetRuntimeState() error {
+	if err := am.Shutdown(); err != nil {
+		return err
+	}
+	if killer, ok := am.workspaces.(WorkspaceOrphanKiller); ok && killer != nil {
+		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
+			return fmt.Errorf("kill workspace orphan processes: %w", err)
+		}
+	}
 	resetMCPTurnContexts()
 	if resetter, ok := am.sessions.(SessionResetter); ok && resetter != nil {
 		if err := resetter.ResetAll(am.runtimeMode); err != nil {
@@ -1513,6 +1520,7 @@ func (am *AgentManager) ResetRuntimeState() {
 			_ = am.workspaces.StopVerticalWorkspace(am.runtimeContext(), verticalID)
 		}
 	}
+	return nil
 }
 
 func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
@@ -2220,7 +2228,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.36",
+			TemplateVersion: "2.0.37",
 		}
 	}
 

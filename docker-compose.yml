@@ -42,7 +42,6 @@ services:
     ports:
       - "8080:8080"
       - "8090:8090"
-      - "8070:8070"
     command:
       - -config
       - /app/configs/empire.docker.yaml
@@ -52,6 +51,17 @@ services:
       - -migration-file
       - /app/contracts/ddl-canonical.sql
       - -self-check=false
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: empireai-dashboard
+    restart: unless-stopped
+    depends_on:
+      - orchestrator
+    ports:
+      - "8070:8070"
 
   # Per-vertical and privileged workspaces are created dynamically by runtime policy.
   # This image is the base for those dynamic containers.

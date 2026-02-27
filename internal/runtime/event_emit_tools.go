@@ -812,6 +812,28 @@ var EventSchemaRegistry = map[string]EventSchema{
 			"additionalProperties": false,
 		},
 	},
+	"scoring.contested": {
+		Description: "Scoring disagreement needs coordinator arbitration.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id": map[string]any{"type": "string"},
+				"dimension":   map[string]any{"type": "string"},
+				"scores": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "integer"},
+				},
+				"evidence": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+				"spread":  map[string]any{"type": "integer"},
+				"task_id": map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "dimension", "scores", "evidence", "spread"},
+			"additionalProperties": false,
+		},
+	},
 	"score.dimension_complete": {
 		Description: "Analysis Agent reports score for one dimension of one vertical.",
 		Schema: map[string]any{
@@ -868,6 +890,43 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"task_id": map[string]any{"type": "string"},
 			},
 			"required":             []string{"vertical_id", "composite_score", "viability_score", "dimensions"},
+			"additionalProperties": false,
+		},
+	},
+	"vertical.scored": {
+		Description: "Final scoring result for a discovered vertical.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":     map[string]any{"type": "string"},
+				"result":          map[string]any{"type": "string", "enum": []string{"shortlisted", "marginal", "rejected"}},
+				"composite_score": map[string]any{"type": "number"},
+				"viability_score": map[string]any{"type": "number"},
+				"market_score":    map[string]any{"type": "number"},
+				"dimensions":      map[string]any{"type": "object", "additionalProperties": true},
+				"rubric":          map[string]any{"type": "string"},
+				"partial":         map[string]any{"type": "boolean"},
+				"reason":          map[string]any{"type": "string"},
+				"vertical_name":   map[string]any{"type": "string"},
+				"geography":       map[string]any{"type": "string"},
+				"signal_strength": map[string]any{"type": "number"},
+				"campaign_id":     map[string]any{"type": "string"},
+				"task_id":         map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "result", "composite_score", "viability_score", "market_score", "dimensions", "rubric"},
+			"additionalProperties": false,
+		},
+	},
+	"vertical.rejected": {
+		Description: "Rejected scoring outcome for audit stream.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id": map[string]any{"type": "string"},
+				"reason":      map[string]any{"type": "string"},
+				"task_id":     map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id", "reason"},
 			"additionalProperties": false,
 		},
 	},

@@ -166,12 +166,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 
 	var args []string
 	transportFallback := promptTransportFallback{}
-	mcpConfig, mcpCtxToken, mcpEnabled, err := r.buildMCPConfigArg(ctx, s)
+	mcpConfig, _, mcpEnabled, err := r.buildMCPConfigArg(ctx, s)
 	if err != nil {
 		return nil, err
-	}
-	if mcpCtxToken != "" {
-		defer unregisterMCPTurnContext(mcpCtxToken)
 	}
 	if s.TurnCount == 0 {
 		args = []string{

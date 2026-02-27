@@ -66,29 +66,334 @@ func (e *RuntimeToolExecutor) SetConfig(cfg *config.Config) {
 	e.cfg = cfg
 }
 
+func toolObjectSchema(properties map[string]any, required ...string) map[string]any {
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"additionalProperties": false,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
 func (e *RuntimeToolExecutor) ToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
-		{Name: "agent_message", Description: "Direct message to another agent (requires target_agent_id)"},
-		{Name: "schedule", Description: "Register timer-based wake-up events"},
-		{Name: "configure_routing", Description: "Install or update routing rule for a vertical"},
-		{Name: "agent_hire", Description: "Hire/spawn an agent with given config"},
-		{Name: "agent_fire", Description: "Terminate an agent"},
-		{Name: "agent_reconfigure", Description: "Reconfigure an existing agent"},
-		{Name: "mailbox_send", Description: "Create a mailbox item for human review/approval"},
-		{Name: "human_task_request", Description: "Request human execution for a physical-world task (creates human_tasks row and emits human_task.requested)"},
-		{Name: "human_task_decide", Description: "Empire Coordinator only: approve/reject/defer a human task request (updates human_tasks + emits human_task.{approved,rejected,deferred})"},
-		{Name: "sql_execute", Description: "Execute read-only SQL (SELECT/CTE) in the actor's scoped vertical schema"},
-		{Name: "nginx_reload", Description: "Reload nginx after config validation (holding-devops only)"},
-		{Name: "systemd_control", Description: "Control empireai-* systemd units (holding-devops only)"},
-		{Name: "certbot_execute", Description: "Issue/renew certbot cert for a domain (holding-devops only)"},
-		{Name: "whatsapp_business_api", Description: "Call WhatsApp Business API with per-vertical credentials"},
-		{Name: "email_api", Description: "Send email via per-vertical credentials"},
-		{Name: "instagram_api", Description: "Call Instagram Graph API with per-vertical credentials"},
-		{Name: "domain_purchase", Description: "Submit domain purchase via registrar integration"},
-		{Name: "domain_availability_check", Description: "Check domain availability via registrar integration"},
-		{Name: "dns_configure", Description: "Configure DNS via provider integration"},
-		{Name: "instagram_handle_check", Description: "Check if an Instagram handle appears available"},
-		{Name: "whatsapp_name_check", Description: "Check WhatsApp display name via provider integration"},
+		{
+			Name:        "agent_message",
+			Description: "Direct message to another agent (requires target_agent_id)",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target_agent_id":  map[string]any{"type": "string"},
+					"target_agent_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"to_agent_id":      map[string]any{"type": "string"},
+					"to_agent_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"event_type":       map[string]any{"type": "string"},
+					"source_agent":     map[string]any{"type": "string"},
+					"vertical_id":      map[string]any{"type": "string"},
+					"task_id":          map[string]any{"type": "string"},
+					"message":          map[string]any{"type": "string"},
+					"payload":          map[string]any{},
+				},
+				"additionalProperties": false,
+			},
+		},
+		{
+			Name:        "schedule",
+			Description: "Register timer-based wake-up events",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"agent_id":    map[string]any{"type": "string"},
+					"event_type":  map[string]any{"type": "string"},
+					"mode":        map[string]any{"type": "string", "enum": []string{"once", "cron"}},
+					"cron":        map[string]any{"type": "string"},
+					"at":          map[string]any{"type": "string"},
+					"vertical_id": map[string]any{"type": "string"},
+					"task_id":     map[string]any{"type": "string"},
+					"payload":     map[string]any{},
+				},
+				"required":             []string{"event_type"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			Name:        "configure_routing",
+			Description: "Install or update routing rule for a vertical",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"vertical_id":        map[string]any{"type": "string"},
+					"event_pattern":      map[string]any{"type": "string"},
+					"subscriber_id":      map[string]any{"type": "string"},
+					"installed_by":       map[string]any{"type": "string"},
+					"reason":             map[string]any{"type": "string"},
+					"status":             map[string]any{"type": "string"},
+					"source":             map[string]any{"type": "string"},
+					"bootstrap_version":  map[string]any{"type": "integer"},
+					"runtime_tool_event": map[string]any{"type": "boolean"},
+				},
+				"event_pattern",
+				"subscriber_id",
+			),
+		},
+		{
+			Name:        "agent_hire",
+			Description: "Hire/spawn an agent with given config",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"vertical_id": map[string]any{"type": "string"},
+					"config": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"id":          map[string]any{"type": "string"},
+							"role":        map[string]any{"type": "string"},
+							"mode":        map[string]any{"type": "string"},
+							"vertical_id": map[string]any{"type": "string"},
+						},
+						"required":             []string{"id"},
+						"additionalProperties": true,
+					},
+				},
+				"config",
+			),
+		},
+		{
+			Name:        "agent_fire",
+			Description: "Terminate an agent",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"agent_id": map[string]any{"type": "string"},
+				},
+				"agent_id",
+			),
+		},
+		{
+			Name:        "agent_reconfigure",
+			Description: "Reconfigure an existing agent",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"agent_id": map[string]any{"type": "string"},
+					"config": map[string]any{
+						"type":                 "object",
+						"additionalProperties": true,
+					},
+				},
+				"agent_id",
+			),
+		},
+		{
+			Name:        "mailbox_send",
+			Description: "Create a mailbox item for human review/approval",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"event_id":    map[string]any{"type": "string"},
+					"vertical_id": map[string]any{"type": "string"},
+					"type":        map[string]any{"type": "string"},
+					"priority":    map[string]any{"type": "string"},
+					"summary":     map[string]any{"type": "string"},
+					"context":     map[string]any{"type": "object"},
+					"timeout_at":  map[string]any{"type": "string"},
+				},
+				"type",
+			),
+		},
+		{
+			Name:        "human_task_request",
+			Description: "Request human execution for a physical-world task (creates human_tasks row and emits human_task.requested)",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"vertical_id":      map[string]any{"type": "string"},
+					"category":         map[string]any{"type": "string"},
+					"description":      map[string]any{"type": "string"},
+					"talking_points":   map[string]any{},
+					"expected_value":   map[string]any{"type": "string"},
+					"priority":         map[string]any{"type": "string"},
+					"deadline":         map[string]any{"type": "string"},
+					"deadline_at":      map[string]any{"type": "string"},
+					"deadline_rfc3339": map[string]any{"type": "string"},
+				},
+				"category",
+				"description",
+			),
+		},
+		{
+			Name:        "human_task_decide",
+			Description: "Empire Coordinator only: approve/reject/defer a human task request (updates human_tasks + emits human_task.{approved,rejected,deferred})",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"task_id":       map[string]any{"type": "string"},
+					"decision":      map[string]any{"type": "string", "enum": []string{"approve", "approved", "reject", "rejected", "defer", "deferred"}},
+					"reason":        map[string]any{"type": "string"},
+					"priority_rank": map[string]any{"type": "integer"},
+					"requeue_date":  map[string]any{"type": "string"},
+				},
+				"task_id",
+				"decision",
+			),
+		},
+		{
+			Name:        "sql_execute",
+			Description: "Execute read-only SQL (SELECT/CTE) in the actor's scoped vertical schema",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"query": map[string]any{"type": "string"},
+				},
+				"query",
+			),
+		},
+		{
+			Name:        "nginx_reload",
+			Description: "Reload nginx after config validation (holding-devops only)",
+			Schema:      toolObjectSchema(map[string]any{}),
+		},
+		{
+			Name:        "systemd_control",
+			Description: "Control empireai-* systemd units (holding-devops only)",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"action": map[string]any{"type": "string", "enum": []string{"start", "stop", "restart", "enable", "disable"}},
+					"unit":   map[string]any{"type": "string"},
+				},
+				"action",
+				"unit",
+			),
+		},
+		{
+			Name:        "certbot_execute",
+			Description: "Issue/renew certbot cert for a domain (holding-devops only)",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"domain": map[string]any{"type": "string"},
+				},
+				"domain",
+			),
+		},
+		{
+			Name:        "whatsapp_business_api",
+			Description: "Call WhatsApp Business API with per-vertical credentials",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"method":          map[string]any{"type": "string"},
+					"url":             map[string]any{"type": "string"},
+					"path":            map[string]any{"type": "string"},
+					"query":           map[string]any{"type": "object"},
+					"headers":         map[string]any{"type": "object"},
+					"body":            map[string]any{},
+					"timeout_seconds": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": true,
+			},
+		},
+		{
+			Name:        "email_api",
+			Description: "Send email via per-vertical credentials",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"to":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1},
+					"subject": map[string]any{"type": "string"},
+					"body":    map[string]any{"type": "string"},
+				},
+				"to",
+			),
+		},
+		{
+			Name:        "instagram_api",
+			Description: "Call Instagram Graph API with per-vertical credentials",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"method":          map[string]any{"type": "string"},
+					"url":             map[string]any{"type": "string"},
+					"path":            map[string]any{"type": "string"},
+					"query":           map[string]any{"type": "object"},
+					"headers":         map[string]any{"type": "object"},
+					"body":            map[string]any{},
+					"timeout_seconds": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": true,
+			},
+		},
+		{
+			Name:        "domain_purchase",
+			Description: "Submit domain purchase via registrar integration",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"method":          map[string]any{"type": "string"},
+					"url":             map[string]any{"type": "string"},
+					"path":            map[string]any{"type": "string"},
+					"query":           map[string]any{"type": "object"},
+					"headers":         map[string]any{"type": "object"},
+					"body":            map[string]any{},
+					"timeout_seconds": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": true,
+			},
+		},
+		{
+			Name:        "domain_availability_check",
+			Description: "Check domain availability via registrar integration",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"method":          map[string]any{"type": "string"},
+					"url":             map[string]any{"type": "string"},
+					"path":            map[string]any{"type": "string"},
+					"query":           map[string]any{"type": "object"},
+					"headers":         map[string]any{"type": "object"},
+					"body":            map[string]any{},
+					"timeout_seconds": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": true,
+			},
+		},
+		{
+			Name:        "dns_configure",
+			Description: "Configure DNS via provider integration",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"method":          map[string]any{"type": "string"},
+					"url":             map[string]any{"type": "string"},
+					"path":            map[string]any{"type": "string"},
+					"query":           map[string]any{"type": "object"},
+					"headers":         map[string]any{"type": "object"},
+					"body":            map[string]any{},
+					"timeout_seconds": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": true,
+			},
+		},
+		{
+			Name:        "instagram_handle_check",
+			Description: "Check if an Instagram handle appears available",
+			Schema: toolObjectSchema(
+				map[string]any{
+					"handle": map[string]any{"type": "string"},
+				},
+				"handle",
+			),
+		},
+		{
+			Name:        "whatsapp_name_check",
+			Description: "Check WhatsApp display name via provider integration",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"method":          map[string]any{"type": "string"},
+					"url":             map[string]any{"type": "string"},
+					"path":            map[string]any{"type": "string"},
+					"query":           map[string]any{"type": "object"},
+					"headers":         map[string]any{"type": "object"},
+					"body":            map[string]any{},
+					"timeout_seconds": map[string]any{"type": "integer"},
+				},
+				"additionalProperties": true,
+			},
+		},
 	}
 }
 

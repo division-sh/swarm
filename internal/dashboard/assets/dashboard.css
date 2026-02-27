@@ -2883,6 +2883,128 @@ section:hover {
 .holding-artifact-card > summary::-webkit-details-marker {
   display: none;
 }
+
+.artifact-generic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifact-kv-list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.artifact-kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.artifact-kv-row span:first-child {
+  color: var(--text-3);
+}
+
+.artifact-kv-row span:last-child {
+  color: var(--text-1);
+  text-align: right;
+  max-width: 68%;
+  word-break: break-word;
+}
+
+.artifact-kv-row:last-child {
+  border-bottom: none;
+}
+
+.artifact-text-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.artifact-text-block {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.artifact-subsection {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.015);
+  padding: 8px;
+}
+
+.artifact-subsection > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.artifact-subsection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.artifact-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: auto;
+  max-height: 280px;
+}
+
+.artifact-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.artifact-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--base);
+  color: var(--text-2);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+}
+
+.artifact-table tbody td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  vertical-align: top;
+}
+
+.artifact-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.artifact-table tbody td:nth-child(2) {
+  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.artifact-table tbody td:nth-child(3) {
+  color: var(--text-2);
+}
+
 .gate-active {
   border-color: var(--accent-border);
   color: var(--accent);

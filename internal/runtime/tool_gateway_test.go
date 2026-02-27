@@ -165,6 +165,102 @@ func TestToolGatewayMCPToolsListEmitPortfolioDigestSchema(t *testing.T) {
 	}
 }
 
+func TestToolGatewayMCPToolsListMailboxSendRequiresType(t *testing.T) {
+	exec := NewRuntimeToolExecutor(nil, nil, nil)
+	gw := NewToolGateway(exec, "")
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":12,"method":"tools/list"}`)))
+	req.Header.Set("X-Empire-Allowed-Tools", "mailbox_send")
+	rr := httptest.NewRecorder()
+
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	result, _ := resp["result"].(map[string]any)
+	tools, _ := result["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %#v", result)
+	}
+	tool, _ := tools[0].(map[string]any)
+	if strings.TrimSpace(asString(tool["name"])) != "mailbox_send" {
+		t.Fatalf("unexpected tool: %#v", tool)
+	}
+	schema, _ := tool["inputSchema"].(map[string]any)
+	if schema == nil {
+		t.Fatalf("missing input schema: %#v", tool)
+	}
+	requiredAny, _ := schema["required"].([]any)
+	required := make([]string, 0, len(requiredAny))
+	for _, v := range requiredAny {
+		required = append(required, strings.TrimSpace(asString(v)))
+	}
+	if !slicesContains(required, "type") {
+		t.Fatalf("expected type required, got %#v", required)
+	}
+	if ap, ok := schema["additionalProperties"].(bool); !ok || ap {
+		t.Fatalf("expected additionalProperties=false, got %#v", schema["additionalProperties"])
+	}
+}
+
+func TestToolGatewayMCPToolsListCoreRuntimeToolsExposeRequiredFields(t *testing.T) {
+	exec := NewRuntimeToolExecutor(nil, nil, nil)
+	gw := NewToolGateway(exec, "")
+	cases := []struct {
+		tool     string
+		required []string
+	}{
+		{tool: "agent_fire", required: []string{"agent_id"}},
+		{tool: "agent_reconfigure", required: []string{"agent_id"}},
+		{tool: "configure_routing", required: []string{"event_pattern", "subscriber_id"}},
+		{tool: "human_task_request", required: []string{"category", "description"}},
+		{tool: "human_task_decide", required: []string{"task_id", "decision"}},
+		{tool: "sql_execute", required: []string{"query"}},
+		{tool: "systemd_control", required: []string{"action", "unit"}},
+		{tool: "certbot_execute", required: []string{"domain"}},
+		{tool: "instagram_handle_check", required: []string{"handle"}},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":13,"method":"tools/list"}`)))
+		req.Header.Set("X-Empire-Allowed-Tools", tc.tool)
+		rr := httptest.NewRecorder()
+		gw.Handler().ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d", tc.tool, rr.Code)
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("%s: decode response: %v", tc.tool, err)
+		}
+		result, _ := resp["result"].(map[string]any)
+		tools, _ := result["tools"].([]any)
+		if len(tools) != 1 {
+			t.Fatalf("%s: expected 1 tool, got %#v", tc.tool, result)
+		}
+		tool, _ := tools[0].(map[string]any)
+		if strings.TrimSpace(asString(tool["name"])) != tc.tool {
+			t.Fatalf("%s: unexpected tool payload %#v", tc.tool, tool)
+		}
+		schema, _ := tool["inputSchema"].(map[string]any)
+		if schema == nil {
+			t.Fatalf("%s: missing input schema", tc.tool)
+		}
+		requiredAny, _ := schema["required"].([]any)
+		required := make([]string, 0, len(requiredAny))
+		for _, v := range requiredAny {
+			required = append(required, strings.TrimSpace(asString(v)))
+		}
+		for _, field := range tc.required {
+			if !slicesContains(required, field) {
+				t.Fatalf("%s: expected required field %s, got %#v", tc.tool, field, required)
+			}
+		}
+	}
+}
+
 func TestToolGatewayMCPToolCallUsesScopedContextToken(t *testing.T) {
 	stub := &toolGatewayExecStub{}
 	gw := NewToolGateway(stub, "")
@@ -242,6 +338,9 @@ func TestToolGatewayMCPToolCallRejectsMissingContextTokenByDefault(t *testing.T)
 	if !strings.Contains(text, "code="+ErrCodeMCPContextMissing) {
 		t.Fatalf("expected structured mcp missing-context code, got %q", text)
 	}
+	if !strings.Contains(text, "retryable=false") {
+		t.Fatalf("expected non-retryable missing-context error, got %q", text)
+	}
 }
 
 func TestToolGatewayMCPToolCallUsesQueryContextTokenFallback(t *testing.T) {
@@ -311,6 +410,7 @@ func TestToolGatewayMCPToolsListUsesQueryAllowedToolsFallback(t *testing.T) {
 }
 
 func TestToolGatewayMCPToolCallUnknownTokenReportsNotFoundCode(t *testing.T) {
+	t.Setenv("EMPIREAI_MCP_CONTEXT_FALLBACK_ON_MISS", "false")
 	stub := &toolGatewayExecStub{}
 	gw := NewToolGateway(stub, "")
 	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{
@@ -336,6 +436,37 @@ func TestToolGatewayMCPToolCallUnknownTokenReportsNotFoundCode(t *testing.T) {
 	text := strings.TrimSpace(asString(first["text"]))
 	if !strings.Contains(text, "code="+ErrCodeMCPContextNotFound) {
 		t.Fatalf("expected not-found code in response, got %q", text)
+	}
+	if !strings.Contains(text, "retryable=false") {
+		t.Fatalf("expected non-retryable context-not-found error, got %q", text)
+	}
+}
+
+func TestToolGatewayMCPToolCallUnknownTokenFallsBackToActorContextByDefault(t *testing.T) {
+	stub := &toolGatewayExecStub{}
+	gw := NewToolGateway(stub, "")
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{
+		"jsonrpc":"2.0",
+		"id":7,
+		"method":"tools/call",
+		"params":{"name":"sql_execute","arguments":{"query":"SELECT 1"}}
+	}`)))
+	req.Header.Set("X-Empire-Allowed-Tools", "sql_execute")
+	req.Header.Set("X-Empire-Context-Token", "missing-token")
+	req.Header.Set("X-Empire-Agent-Id", "analysis-agent")
+	req.Header.Set("X-Empire-Agent-Role", "analysis-agent")
+	req.Header.Set("X-Empire-Agent-Mode", "factory")
+	req.Header.Set("X-Empire-Vertical-Id", "v-test")
+	rr := httptest.NewRecorder()
+	gw.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 rpc envelope, got %d", rr.Code)
+	}
+	if stub.lastName != "sql_execute" {
+		t.Fatalf("unexpected tool name: %q", stub.lastName)
+	}
+	if stub.lastActor != "analysis-agent" {
+		t.Fatalf("expected fallback actor context, got %q", stub.lastActor)
 	}
 }
 

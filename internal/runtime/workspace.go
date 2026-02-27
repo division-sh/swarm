@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"empireai/internal/models"
@@ -30,6 +31,10 @@ type WorkspaceLifecycle interface {
 	EnsureSystemWorkspaces(ctx context.Context) error
 	EnsureVerticalWorkspace(ctx context.Context, verticalID string) error
 	StopVerticalWorkspace(ctx context.Context, verticalID string) error
+}
+
+type WorkspaceOrphanKiller interface {
+	KillOrphanProcesses(ctx context.Context) error
 }
 
 type DockerWorkspaceConfig struct {
@@ -71,6 +76,17 @@ type DockerWorkspaceManager struct {
 	cfg         DockerWorkspaceConfig
 	runDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
 }
+
+const workspaceOrphanKillScript = `if command -v pkill >/dev/null 2>&1; then
+  pkill -KILL -f '(^|/)(claude|codex)( |$)' >/dev/null 2>&1 || true
+else
+  for p in /proc/[0-9]*; do
+    cmd=$(tr '\000' ' ' < "$p/cmdline" 2>/dev/null || true)
+    case "$cmd" in
+      *claude*|*codex*) kill -9 "${p##*/}" >/dev/null 2>&1 || true ;;
+    esac
+  done
+fi`
 
 func NewDockerWorkspaceManager(db *sql.DB) *DockerWorkspaceManager {
 	return &DockerWorkspaceManager{
@@ -135,6 +151,69 @@ func (m *DockerWorkspaceManager) StopVerticalWorkspace(ctx context.Context, vert
 		return fmt.Errorf("stop vertical workspace %s: %w", container, err)
 	}
 	return nil
+}
+
+func (m *DockerWorkspaceManager) KillOrphanProcesses(ctx context.Context) error {
+	containers, err := m.runtimeWorkspaceContainers(ctx)
+	if err != nil {
+		return err
+	}
+	errs := make([]error, 0, len(containers))
+	for _, container := range containers {
+		exists, running, inspectErr := m.inspectContainer(ctx, container)
+		if inspectErr != nil {
+			errs = append(errs, fmt.Errorf("inspect workspace container %s: %w", container, inspectErr))
+			continue
+		}
+		if !exists || !running {
+			continue
+		}
+		if _, execErr := m.runDocker(ctx, "exec", container, "sh", "-lc", workspaceOrphanKillScript); execErr != nil {
+			errs = append(errs, fmt.Errorf("kill workspace orphans in %s: %w", container, execErr))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *DockerWorkspaceManager) runtimeWorkspaceContainers(ctx context.Context) ([]string, error) {
+	set := map[string]struct{}{}
+	for _, name := range []string{
+		strings.TrimSpace(m.cfg.FactoryContainer),
+		strings.TrimSpace(m.cfg.InfraContainer),
+	} {
+		if name != "" {
+			set[name] = struct{}{}
+		}
+	}
+
+	if m.db != nil {
+		rows, err := m.db.QueryContext(ctx, `SELECT COALESCE(NULLIF(slug, ''), '') FROM verticals`)
+		if err != nil {
+			return nil, fmt.Errorf("list vertical slugs: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var slug string
+			if scanErr := rows.Scan(&slug); scanErr != nil {
+				return nil, fmt.Errorf("scan vertical slug: %w", scanErr)
+			}
+			slug = sanitizeWorkspaceSlug(slug)
+			if slug == "" {
+				continue
+			}
+			set[m.verticalContainerName(slug)] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate vertical slugs: %w", err)
+		}
+	}
+
+	out := make([]string, 0, len(set))
+	for c := range set {
+		out = append(out, c)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (m *DockerWorkspaceManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*WorkspaceTarget, error) {

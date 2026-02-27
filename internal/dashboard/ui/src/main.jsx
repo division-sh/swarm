@@ -475,6 +475,240 @@ function Modal({ title, onClose, copyText, children, className = "" }) {
   );
 }
 
+function artifactIsScalar(v) {
+  return v == null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
+}
+
+function prettyArtifactKey(key) {
+  return String(key || "")
+    .replace(/[_\.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatArtifactScalar(v) {
+  if (v == null) return "-";
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v === "number") {
+    if (Number.isInteger(v)) return String(v);
+    return Number(v).toFixed(2);
+  }
+  const s = String(v).trim();
+  return s || "-";
+}
+
+function truncateText(text, max = 280) {
+  const s = String(text || "").trim();
+  if (!s) return "";
+  return s.length > max ? s.slice(0, max) + "\u2026" : s;
+}
+
+function renderArtifactGeneric(payload) {
+  if (!payload) return <div className="empty-state">No data</div>;
+  if (typeof payload === "string") {
+    return <div className="artifact-text-block">{renderMarkdown(payload)}</div>;
+  }
+  if (Array.isArray(payload)) {
+    if (payload.length === 0) return <div className="empty-state">No data</div>;
+    if (payload.every((v) => artifactIsScalar(v))) {
+      return (
+        <div className="artifact-chip-row">
+          {payload.map((v, i) => <span key={i} className="tag">{formatArtifactScalar(v)}</span>)}
+        </div>
+      );
+    }
+    return <JsonBlock data={payload} defaultOpen={2} />;
+  }
+  if (typeof payload !== "object") {
+    return <div className="artifact-text-block">{formatArtifactScalar(payload)}</div>;
+  }
+
+  const entries = Object.entries(payload);
+  if (entries.length === 0) return <div className="empty-state">No data</div>;
+  const scalarEntries = entries.filter(([, v]) => artifactIsScalar(v));
+  const nestedEntries = entries.filter(([, v]) => !artifactIsScalar(v));
+
+  return (
+    <div className="artifact-generic">
+      {scalarEntries.length > 0 ? (
+        <div className="artifact-kv-list">
+          {scalarEntries.map(([k, v]) => (
+            <div key={k} className="artifact-kv-row">
+              <span>{prettyArtifactKey(k)}</span>
+              <span>{formatArtifactScalar(v)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {nestedEntries.map(([k, v]) => (
+        <details key={k} className="artifact-subsection">
+          <summary>{prettyArtifactKey(k)}</summary>
+          {typeof v === "string" ? (
+            <div className="artifact-text-block">{renderMarkdown(v)}</div>
+          ) : (
+            <JsonBlock data={v} defaultOpen={2} />
+          )}
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function normalizeScoreRows(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((item, idx) => {
+        if (!item || typeof item !== "object") return null;
+        const dimension = item.dimension || item.name || item.key || `Dimension ${idx + 1}`;
+        const score = item.score ?? item.resolved_score ?? item.value ?? item.points;
+        const notes = item.evidence || item.reason || item.rationale || item.comment || "";
+        return {
+          dimension: String(dimension),
+          score: score,
+          notes: truncateText(notes, 220),
+        };
+      })
+      .filter(Boolean);
+  }
+  if (typeof raw === "object") {
+    return Object.entries(raw).map(([dimension, value]) => {
+      if (artifactIsScalar(value)) {
+        return { dimension: prettyArtifactKey(dimension), score: value, notes: "" };
+      }
+      if (value && typeof value === "object") {
+        return {
+          dimension: prettyArtifactKey(dimension),
+          score: value.score ?? value.resolved_score ?? value.value ?? "",
+          notes: truncateText(value.evidence || value.reason || value.rationale || value.comment || "", 220),
+        };
+      }
+      return { dimension: prettyArtifactKey(dimension), score: "", notes: "" };
+    });
+  }
+  return [];
+}
+
+function renderScoresArtifact(payload) {
+  if (!payload || typeof payload !== "object") return renderArtifactGeneric(payload);
+  const summaryKeys = [
+    "result",
+    "rubric",
+    "mode",
+    "composite_score",
+    "viability_score",
+    "market_score",
+    "confidence",
+    "confidence_score",
+    "signal_strength",
+  ];
+  const summary = summaryKeys
+    .filter((k) => payload[k] != null && String(payload[k]).trim() !== "")
+    .map((k) => [k, payload[k]]);
+
+  const dimensionRows = normalizeScoreRows(
+    payload.dimensions || payload.dimension_scores || payload.breakdown || payload.scores
+  );
+
+  return (
+    <div className="artifact-generic">
+      {summary.length > 0 ? (
+        <div className="artifact-kv-list">
+          {summary.map(([k, v]) => (
+            <div key={k} className="artifact-kv-row">
+              <span>{prettyArtifactKey(k)}</span>
+              <span>{formatArtifactScalar(v)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {dimensionRows.length > 0 ? (
+        <div className="artifact-table-wrap">
+          <table className="artifact-table">
+            <thead>
+              <tr><th>Dimension</th><th>Score</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              {dimensionRows.map((row, idx) => (
+                <tr key={`${row.dimension}-${idx}`}>
+                  <td>{row.dimension}</td>
+                  <td>{formatArtifactScalar(row.score)}</td>
+                  <td>{row.notes || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      <details className="artifact-subsection">
+        <summary>Raw Score Payload</summary>
+        <JsonBlock data={payload} defaultOpen={2} />
+      </details>
+    </div>
+  );
+}
+
+function renderRawSignalsArtifact(payload) {
+  if (!payload || typeof payload !== "object") return renderArtifactGeneric(payload);
+  const summaryKeys = ["category", "subcategory", "geography", "mode", "signal_strength", "priority"];
+  const summary = summaryKeys
+    .filter((k) => payload[k] != null && String(payload[k]).trim() !== "")
+    .map((k) => [k, payload[k]]);
+  const opportunity = payload.opportunity_hypothesis || payload.opportunity || payload.hypothesis || "";
+  const evidence = payload.evidence || payload.market_evidence || payload.problem_evidence || "";
+  const automationMicro = payload.automation_micro;
+
+  return (
+    <div className="artifact-generic">
+      {summary.length > 0 ? (
+        <div className="artifact-kv-list">
+          {summary.map(([k, v]) => (
+            <div key={k} className="artifact-kv-row">
+              <span>{prettyArtifactKey(k)}</span>
+              <span>{formatArtifactScalar(v)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {opportunity ? (
+        <div className="artifact-text-card">
+          <div className="tiny">Opportunity Hypothesis</div>
+          <div className="holding-detail-text">{opportunity}</div>
+        </div>
+      ) : null}
+
+      {evidence ? (
+        <div className="artifact-text-card">
+          <div className="tiny">Evidence</div>
+          <div className="holding-detail-text">{evidence}</div>
+        </div>
+      ) : null}
+
+      {automationMicro && typeof automationMicro === "object" ? (
+        <details className="artifact-subsection">
+          <summary>Automation-Micro Signal</summary>
+          {renderArtifactGeneric(automationMicro)}
+        </details>
+      ) : null}
+
+      <details className="artifact-subsection">
+        <summary>Raw Signal Payload</summary>
+        <JsonBlock data={payload} defaultOpen={2} />
+      </details>
+    </div>
+  );
+}
+
+function renderArtifactPayload(label, payload) {
+  if (label === "Scores") return renderScoresArtifact(payload);
+  if (label === "Raw Signals") return renderRawSignalsArtifact(payload);
+  return renderArtifactGeneric(payload);
+}
+
 function HoldingVerticalDetail({ detail }) {
   if (!detail || typeof detail !== "object") return <div className="empty-state">No detail available</div>;
   const v = detail.vertical || {};
@@ -569,7 +803,7 @@ function HoldingVerticalDetail({ detail }) {
         {artifacts.map(([label, payload]) => (
           <details key={label} className="holding-artifact-card" open={label === "Business Brief" || label === "Scores"}>
             <summary>{label}</summary>
-            {payload ? <JsonBlock data={payload} defaultOpen={2} /> : <div className="empty-state">No data</div>}
+            {renderArtifactPayload(label, payload)}
           </details>
         ))}
       </div>
