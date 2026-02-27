@@ -525,8 +525,7 @@ func pipelineStagesForEvent(eventType string) []string {
 		strings.HasPrefix(eventType, "product."),
 		strings.HasPrefix(eventType, "growth."),
 		strings.HasPrefix(eventType, "support."),
-		strings.HasPrefix(eventType, "launch."),
-		eventType == "mandate_updated":
+		strings.HasPrefix(eventType, "launch."):
 		return []string{"opco"}
 	default:
 		return []string{"system"}

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestFactoryPipelineCoordinator_LocalServicesDispatchesAllScannerAssignments
 		events.EventType("scanner.instagram.scan_assigned"),
 		events.EventType("scanner.reviews.scan_assigned"),
 		events.EventType("scanner.directories.scan_assigned"),
-		events.EventType("scanner.job_boards.scan_assigned"),
+		events.EventType("scanner.yelp.scan_assigned"),
 	)
 
 	if err := bus.Publish(context.Background(), events.Event{
@@ -78,7 +79,7 @@ func TestFactoryPipelineCoordinator_LocalServicesCompletionRequiresAllScannerTyp
 		events.EventType("scanner.instagram.scan_complete"),
 		events.EventType("scanner.reviews.scan_complete"),
 		events.EventType("scanner.directories.scan_complete"),
-		events.EventType("scanner.job_boards.scan_complete"),
+		events.EventType("scanner.yelp.scan_complete"),
 	}
 
 	for i, evtType := range scannerCompletions {
@@ -114,5 +115,65 @@ func TestFactoryPipelineCoordinator_LocalServicesCompletionRequiresAllScannerTyp
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("expected scan.completed after all local_services scanner completions")
+	}
+}
+
+func TestFactoryPipelineCoordinator_LocalServicesDiscoveryEmitsScoringRequested(t *testing.T) {
+	bus := NewEventBus(InMemoryEventStore{})
+	pc := NewFactoryPipelineCoordinator(bus, nil)
+	bus.SetInterceptors(pc)
+
+	scoringCh := bus.Subscribe("analysis-agent", events.EventType("scoring.requested"))
+	scanID := uuid.NewString()
+	campaignID := uuid.NewString()
+	if err := bus.Publish(context.Background(), events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("scan.requested"),
+		SourceAgent: "empire-coordinator",
+		Payload: mustJSON(map[string]any{
+			"scan_id":     scanID,
+			"mode":        "local_services",
+			"geography":   "paraguay",
+			"campaign_id": campaignID,
+		}),
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("publish scan.requested: %v", err)
+	}
+
+	if err := bus.Publish(context.Background(), events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("source.scraped"),
+		SourceAgent: "scanner-agent",
+		Payload: mustJSON(map[string]any{
+			"scan_id":         scanID,
+			"campaign_id":     campaignID,
+			"mode":            "local_services",
+			"geography":       "paraguay",
+			"vertical_name":   "Salon Booking Management",
+			"signal_strength": 81,
+			"evidence":        "scanner evidence",
+			"source_type":     "google_maps",
+		}),
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("publish source.scraped: %v", err)
+	}
+
+	select {
+	case evt := <-scoringCh:
+		payload := parsePayloadMap(evt.Payload)
+		if got := strings.TrimSpace(asString(payload["vertical_id"])); got == "" {
+			t.Fatalf("expected scoring.requested.vertical_id, payload=%v", payload)
+		}
+		if got := strings.TrimSpace(asString(payload["mode"])); got != "local_services" {
+			t.Fatalf("expected mode=local_services, got %q payload=%v", got, payload)
+		}
+		dims, _ := payload["dimensions_requested"].([]any)
+		if len(dims) == 0 {
+			t.Fatalf("expected scoring dimensions in payload=%v", payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected scoring.requested after local_services discovery")
 	}
 }

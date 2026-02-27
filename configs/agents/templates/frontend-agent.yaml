@@ -2,8 +2,6 @@ id: frontend-agent
 role: frontend-agent
 model_tier: sonnet
 parent_role: cto-agent
-subscriptions:
-  - technical_spec_ready
 tools:
   - agent_message
   - schedule

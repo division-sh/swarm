@@ -2,10 +2,6 @@ id: marketing-agent
 role: marketing-agent
 model_tier: sonnet
 parent_role: vp-growth
-subscriptions:
-  - launch_ready
-  - feature_deployed
-  - channel_update
 tools:
   - domain_purchase
   - domain_availability_check

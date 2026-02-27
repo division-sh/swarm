@@ -69,6 +69,7 @@ type scanAccumulator struct {
 	Geography   string
 	Expected    int
 	CompletedBy map[string]struct{}
+	ReportData  []map[string]any
 	Reports     int
 	Discovered  int
 	Skipped     int
@@ -105,6 +106,7 @@ type scoringAccumulator struct {
 
 type pendingCandidate struct {
 	DedupEventID string
+	ExistingID   string
 	ScanID       string
 	CampaignID   string
 	Mode         string
@@ -279,20 +281,20 @@ type VerticalDiscoveredPayload struct {
 }
 
 type ScanCompletedPayload struct {
-	ScanID              string `json:"scan_id"`
-	CampaignID          string `json:"campaign_id,omitempty"`
-	Mode                string `json:"mode,omitempty"`
-	Geography           string `json:"geography,omitempty"`
-	ReportsReceived     int    `json:"reports_received"`
-	AgentsExpected      int    `json:"agents_expected"`
-	AgentsComplete      int    `json:"agents_complete"`
-	VerticalsDiscovered int    `json:"verticals_discovered"`
-	VerticalsSkipped    int    `json:"verticals_skipped"`
-	PendingDedup        int    `json:"pending_dedup"`
-	TimedOut            bool   `json:"timed_out"`
-	ShardsTotal         int    `json:"shards_total,omitempty"`
-	ShardsCompleted     int    `json:"shards_completed,omitempty"`
-	ShardsFailed        int    `json:"shards_failed,omitempty"`
+	ScanID          string `json:"scan_id"`
+	CampaignID      string `json:"campaign_id,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	Geography       string `json:"geography,omitempty"`
+	ReportsReceived int    `json:"reports_received"`
+	Expected        int    `json:"agents_expected"`
+	Complete        int    `json:"agents_complete"`
+	Discovered      int    `json:"verticals_discovered"`
+	Skipped         int    `json:"verticals_skipped"`
+	PendingDedup    int    `json:"pending_dedup"`
+	TimedOut        bool   `json:"timed_out"`
+	ShardsTotal     int    `json:"shards_total,omitempty"`
+	ShardsCompleted int    `json:"shards_completed,omitempty"`
+	ShardsFailed    int    `json:"shards_failed,omitempty"`
 }
 
 type ScoringRequestedPayload struct {
@@ -594,22 +596,26 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 		"scanner.instagram.scan_complete",
 		"scanner.reviews.scan_complete",
 		"scanner.directories.scan_complete",
-		"scanner.job_boards.scan_complete",
+		"scanner.yelp.scan_complete",
 		"dedup.resolved",
 		"synthesis.resolved",
 		"vertical.shortlisted",
 		"research.completed",
 		"research.vertical_rejected",
-		"spec.revision_requested",
 		"spec.approved",
 		"cto.spec_approved",
 		"cto.spec_revision_needed",
 		"cto.spec_vetoed",
 		"brand.candidates_ready",
 		"vertical.needs_more_data",
-		"brand.revision_needed",
 		"vertical.resumed":
 		return true, true
+	case "spec.revision_requested", "brand.revision_needed":
+		if strings.TrimSpace(evt.VerticalID) == "" {
+			return false, false
+		}
+		// Runtime updates pipeline state, but event must still reach subscribed agents.
+		return false, true
 	case "spec.validation_passed", "spec.validation_failed":
 		if strings.TrimSpace(evt.VerticalID) == "" {
 			return false, false
@@ -650,7 +656,7 @@ func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
 		events.EventType("scanner.instagram.scan_complete"),
 		events.EventType("scanner.reviews.scan_complete"),
 		events.EventType("scanner.directories.scan_complete"),
-		events.EventType("scanner.job_boards.scan_complete"),
+		events.EventType("scanner.yelp.scan_complete"),
 		events.EventType("dedup.resolved"),
 		events.EventType("synthesis.resolved"),
 		events.EventType("vertical.shortlisted"),
@@ -707,7 +713,7 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 	case "market_research.scan_complete", "trend_research.scan_complete",
 		"scanner.google_maps.scan_complete", "scanner.instagram.scan_complete",
 		"scanner.reviews.scan_complete", "scanner.directories.scan_complete",
-		"scanner.job_boards.scan_complete":
+		"scanner.yelp.scan_complete":
 		pc.handleScanCompletion(ctx, evt)
 	case "dedup.resolved":
 		pc.handleDedupResolved(ctx, evt)
@@ -786,8 +792,9 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	processed := make(map[string]struct{})
 
 	scanRows, err := dbQueryContext(ctx, pc.db, `
-		SELECT scan_id::text, COALESCE(campaign_id::text,''), mode, geography,
-		       expected, COALESCE(completed_by, '{}'::jsonb), reports, discovered, skipped, created_at
+		SELECT scan_id, COALESCE(campaign_id,''), mode, geography,
+		       expected, COALESCE(completed_by, '{}'::jsonb), reports,
+		       discovered, skipped, COALESCE(started_at, now())
 		FROM scan_accumulators
 	`)
 	if err == nil {
@@ -802,11 +809,23 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 				continue
 			}
 			completedBy := map[string]struct{}{}
-			var completed map[string]bool
-			_ = json.Unmarshal(completedRaw, &completed)
-			for key, done := range completed {
-				if done {
-					completedBy[key] = struct{}{}
+			var completedObj map[string]any
+			if err := json.Unmarshal(completedRaw, &completedObj); err == nil && len(completedObj) > 0 {
+				for key := range completedObj {
+					key = strings.TrimSpace(key)
+					if key != "" {
+						completedBy[key] = struct{}{}
+					}
+				}
+			} else {
+				// Backward-compatible fallback if old state persisted an array.
+				var completed []string
+				_ = json.Unmarshal(completedRaw, &completed)
+				for _, key := range completed {
+					key = strings.TrimSpace(key)
+					if key != "" {
+						completedBy[key] = struct{}{}
+					}
 				}
 			}
 			scans[scanID] = &scanAccumulator{
@@ -816,6 +835,7 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 				Geography:   geography,
 				Expected:    expected,
 				CompletedBy: completedBy,
+				ReportData:  make([]map[string]any, 0),
 				Reports:     reports,
 				Discovered:  discovered,
 				Skipped:     skipped,
@@ -826,29 +846,53 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	}
 
 	pendingRows, err := dbQueryContext(ctx, pc.db, `
-		SELECT dedup_event_id::text, scan_id::text, COALESCE(campaign_id::text,''), mode,
-		       geography, name, signal_strength, COALESCE(payload, '{}'::jsonb)
+		SELECT
+			dedup_event_id,
+			COALESCE(existing_id, ''),
+			scan_id,
+			COALESCE(campaign_id, ''),
+			COALESCE(mode, ''),
+			signal_strength,
+			geography,
+			discovery_mode,
+			COALESCE(name, ''),
+			COALESCE(payload, '{}'::jsonb)
 		FROM pending_dedup_candidates
+		WHERE status = 'pending'
 	`)
 	if err == nil {
 		for pendingRows.Next() {
 			var (
-				dedupID, scanID, campaignID, mode, geography, name string
-				signal                                             float64
-				payloadRaw                                         []byte
+				dedupID, existingID, scanID, campaignID, mode, geography, discoveryMode, name string
+				signalFloat                                                                   float64
+				payloadRaw                                                                    []byte
 			)
-			if scanErr := pendingRows.Scan(&dedupID, &scanID, &campaignID, &mode, &geography, &name, &signal, &payloadRaw); scanErr != nil {
+			if scanErr := pendingRows.Scan(&dedupID, &existingID, &scanID, &campaignID, &mode, &signalFloat, &geography, &discoveryMode, &name, &payloadRaw); scanErr != nil {
 				continue
+			}
+			payload := parsePayloadMap(payloadRaw)
+			candidateName := strings.TrimSpace(name)
+			if candidateName == "" {
+				candidateName = deriveDiscoveryCandidateName(payload)
+			}
+			resolvedCampaignID := strings.TrimSpace(campaignID)
+			if resolvedCampaignID == "" {
+				resolvedCampaignID = strings.TrimSpace(asString(payload["campaign_id"]))
+			}
+			resolvedMode := normalizeScanMode(firstNonEmpty(mode, discoveryMode))
+			if resolvedMode == "" {
+				resolvedMode = normalizeScanMode(asString(payload["mode"]))
 			}
 			pending[dedupID] = pendingCandidate{
 				DedupEventID: dedupID,
+				ExistingID:   strings.TrimSpace(existingID),
 				ScanID:       scanID,
-				CampaignID:   campaignID,
-				Mode:         mode,
+				CampaignID:   resolvedCampaignID,
+				Mode:         resolvedMode,
 				Geography:    geography,
-				Name:         name,
-				Signal:       signal,
-				Payload:      parsePayloadMap(payloadRaw),
+				Name:         candidateName,
+				Signal:       signalFloat,
+				Payload:      payload,
 			}
 		}
 		_ = pendingRows.Close()
@@ -858,24 +902,26 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 		SELECT vertical_id::text, status, g1_research, g2_spec, g3_cto, g4_brand,
 		       COALESCE(research_payload, '{}'::jsonb), COALESCE(spec_payload, '{}'::jsonb),
 		       COALESCE(cto_payload, '{}'::jsonb), COALESCE(brand_payload, '{}'::jsonb),
-		       COALESCE(scoring_payload, '{}'::jsonb), revision_count, inner_revision_count,
-		       spec_version, packaging_requested, packaging_requested_at, packaging_retries
+		       COALESCE(scoring_payload, '{}'::jsonb),
+		       revision_count, inner_revision_count, spec_version,
+		       packaging_requested, packaging_requested_at, packaging_retries
 		FROM validation_pipelines
 	`)
 	if err == nil {
 		for validationRows.Next() {
 			var (
 				verticalID, status                                                     string
-				g1, g2, g3, g4                                                         bool
+				g1, g2, g3, g4, packagingRequested                                     bool
 				researchPayload, specPayload, ctoPayload, brandPayload, scoringPayload []byte
 				revisionCount, innerRevisionCount, specVersion, packagingRetries       int
-				packagingRequested                                                     bool
 				packagingRequestedAt                                                   sql.NullTime
 			)
 			if scanErr := validationRows.Scan(
 				&verticalID, &status, &g1, &g2, &g3, &g4,
-				&researchPayload, &specPayload, &ctoPayload, &brandPayload, &scoringPayload,
-				&revisionCount, &innerRevisionCount, &specVersion, &packagingRequested, &packagingRequestedAt, &packagingRetries,
+				&researchPayload, &specPayload, &ctoPayload, &brandPayload,
+				&scoringPayload,
+				&revisionCount, &innerRevisionCount, &specVersion,
+				&packagingRequested, &packagingRequestedAt, &packagingRetries,
 			); scanErr != nil {
 				continue
 			}
@@ -899,7 +945,7 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 				RevisionCount:        revisionCount,
 				InnerRevisionCount:   innerRevisionCount,
 				SpecVersion:          specVersion,
-				PackagingRequested:   packagingRequested,
+				PackagingRequested:   packagingRequested || packagingAt != nil,
 				PackagingRequestedAt: packagingAt,
 				PackagingRetries:     packagingRetries,
 			}
@@ -993,6 +1039,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 	if pc == nil || pc.db == nil {
 		return
 	}
+	ctx = withoutSQLTxContext(ctx)
 	if !pc.isStatePersistenceEnabled(ctx) {
 		return
 	}
@@ -1007,49 +1054,82 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 		if acc == nil {
 			continue
 		}
-		completedBy := map[string]bool{}
+		if strings.TrimSpace(acc.CampaignID) == "" {
+			continue
+		}
+		completedBy := make([]string, 0, len(acc.CompletedBy))
+		completedByMap := make(map[string]any, len(acc.CompletedBy))
 		for key := range acc.CompletedBy {
-			completedBy[key] = true
+			key = strings.TrimSpace(key)
+			if key != "" {
+				completedBy = append(completedBy, key)
+				completedByMap[key] = true
+			}
+		}
+		sort.Strings(completedBy)
+		startedAt := acc.CreatedAt
+		if startedAt.IsZero() {
+			startedAt = time.Now()
+		}
+		timeoutAt := startedAt.Add(scanTimeout)
+		pendingCount := 0
+		for _, cand := range pc.pendingDedup {
+			if cand.ScanID == acc.ScanID {
+				pendingCount++
+			}
 		}
 		_, _ = dbExecContext(ctx, pc.db, `
 			INSERT INTO scan_accumulators (
-				scan_id, campaign_id, mode, geography, expected,
-				completed_by, reports, discovered, skipped, created_at, updated_at
+				scan_id, campaign_id, mode, geography, expected, complete,
+				completed_by, reports, discovered, skipped, pending_dedup,
+				timeout_at, started_at, completed_at
 			)
 			VALUES (
-				$1, NULLIF($2,''), $3, $4, $5,
-				$6::jsonb, $7, $8, $9, $10, now()
+				$1, $2, $3, $4, $5,
+				$6, $7::jsonb, $8, $9, $10, $11, $12, $13, NULL
 			)
 			ON CONFLICT (scan_id) DO UPDATE SET
 				campaign_id = EXCLUDED.campaign_id,
 				mode = EXCLUDED.mode,
 				geography = EXCLUDED.geography,
 				expected = EXCLUDED.expected,
+				complete = EXCLUDED.complete,
 				completed_by = EXCLUDED.completed_by,
 				reports = EXCLUDED.reports,
 				discovered = EXCLUDED.discovered,
 				skipped = EXCLUDED.skipped,
-				updated_at = now()
-		`, acc.ScanID, acc.CampaignID, acc.Mode, acc.Geography, acc.Expected, string(mustJSON(completedBy)), acc.Reports, acc.Discovered, acc.Skipped, acc.CreatedAt)
+				pending_dedup = EXCLUDED.pending_dedup,
+				timeout_at = EXCLUDED.timeout_at,
+				started_at = EXCLUDED.started_at
+		`, acc.ScanID, acc.CampaignID, acc.Mode, acc.Geography, acc.Expected, len(acc.CompletedBy), string(mustJSON(completedByMap)), maxInt(acc.Reports, len(completedBy)), acc.Discovered, acc.Skipped, pendingCount, timeoutAt, startedAt)
 	}
 
 	for _, cand := range pc.pendingDedup {
+		dedupEventID := strings.TrimSpace(cand.DedupEventID)
+		if dedupEventID == "" {
+			dedupEventID = stableUUID(cand.ScanID + ":" + cand.Name + ":" + cand.Geography).String()
+		}
+		candidateName := strings.TrimSpace(cand.Name)
+		if candidateName == "" {
+			candidateName = deriveDiscoveryCandidateName(cand.Payload)
+		}
 		_, _ = dbExecContext(ctx, pc.db, `
 			INSERT INTO pending_dedup_candidates (
-				dedup_event_id, scan_id, campaign_id, mode, geography, name, signal_strength, payload, created_at
+				dedup_event_id, scan_id, campaign_id, mode, name, geography, discovery_mode, signal_strength, payload, existing_id, status, created_at, resolved_at
 			)
 			VALUES (
-				$1, $2, NULLIF($3,''), $4, $5, $6, $7, $8::jsonb, now()
+				$1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NULLIF($10,''), 'pending', now(), NULL
 			)
 			ON CONFLICT (dedup_event_id) DO UPDATE SET
-				scan_id = EXCLUDED.scan_id,
 				campaign_id = EXCLUDED.campaign_id,
 				mode = EXCLUDED.mode,
-				geography = EXCLUDED.geography,
 				name = EXCLUDED.name,
+				geography = EXCLUDED.geography,
+				discovery_mode = EXCLUDED.discovery_mode,
 				signal_strength = EXCLUDED.signal_strength,
-				payload = EXCLUDED.payload
-		`, cand.DedupEventID, cand.ScanID, cand.CampaignID, cand.Mode, cand.Geography, cand.Name, cand.Signal, string(mustJSON(cand.Payload)))
+				payload = EXCLUDED.payload,
+				existing_id = EXCLUDED.existing_id
+		`, dedupEventID, cand.ScanID, strings.TrimSpace(cand.CampaignID), strings.TrimSpace(cand.Mode), candidateName, cand.Geography, cand.Mode, cand.Signal, string(mustJSON(cand.Payload)), strings.TrimSpace(cand.ExistingID))
 	}
 
 	for _, st := range pc.validations {
@@ -1063,7 +1143,8 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 		_, _ = dbExecContext(ctx, pc.db, `
 			INSERT INTO validation_pipelines (
 				vertical_id, status, g1_research, g2_spec, g3_cto, g4_brand,
-				research_payload, spec_payload, cto_payload, brand_payload, scoring_payload,
+				research_payload, spec_payload, cto_payload, brand_payload,
+				scoring_payload,
 				revision_count, inner_revision_count, spec_version,
 				packaging_requested, packaging_requested_at, packaging_retries, updated_at
 			)
@@ -1107,6 +1188,7 @@ func (pc *FactoryPipelineCoordinator) clearPersistentState(ctx context.Context) 
 	if pc == nil || pc.db == nil {
 		return
 	}
+	ctx = withoutSQLTxContext(ctx)
 	if pc.isScoringDigestBufferEnabled(ctx) {
 		_, _ = dbExecContext(ctx, pc.db, `DELETE FROM scoring_digest_buffer`)
 	}
@@ -1163,6 +1245,11 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		mode = "saas_gap"
 	}
 	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
+	if campaignID == "" {
+		// v2.0.35 canonical schema requires non-null campaign_id in scan_accumulators.
+		// When legacy events omit campaign_id, use scan_id as a stable surrogate.
+		campaignID = scanID
+	}
 	geography := strings.TrimSpace(asString(payload["geography"]))
 	if geography == "" {
 		geography = strings.TrimSpace(asString(payload["geography_label"]))
@@ -1180,6 +1267,7 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		Geography:   geography,
 		Expected:    expectedAgents(mode),
 		CompletedBy: make(map[string]struct{}),
+		ReportData:  make([]map[string]any, 0),
 		CreatedAt:   time.Now(),
 	}
 	if plannedShardCount > 0 {
@@ -1196,8 +1284,6 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 	}
 
 	switch mode {
-	case "automation_micro":
-		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	case "saas_gap":
 		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	case "saas_trend":
@@ -1207,7 +1293,7 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		pc.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
 		pc.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(assigned))
 		pc.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(assigned))
-		pc.publish(ctx, "scanner.job_boards.scan_assigned", "", payloadMap(assigned))
+		pc.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(assigned))
 	default:
 		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	}
@@ -1373,6 +1459,7 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 			Geography:   strings.TrimSpace(asString(payload["geography"])),
 			Expected:    1,
 			CompletedBy: make(map[string]struct{}),
+			ReportData:  make([]map[string]any, 0),
 			CreatedAt:   time.Now(),
 		}
 		if acc.Mode == "" {
@@ -1380,6 +1467,7 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 		}
 		pc.scans[scanID] = acc
 	}
+	acc.ReportData = append(acc.ReportData, cloneMap(payload))
 	acc.Reports++
 	pc.mu.Unlock()
 
@@ -1388,7 +1476,77 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 		return
 	}
 
-	signal := asFloat(payload["signal_strength"])
+	candidates := buildDiscoveryCandidatesForReport(acc.Mode, payload)
+	for _, cand := range candidates {
+		pc.processDiscoveryCandidate(ctx, evt, scanID, acc, cand)
+	}
+}
+
+type discoveryCandidate struct {
+	Mode    string
+	Signal  float64
+	Payload map[string]any
+}
+
+func buildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []discoveryCandidate {
+	baseMode := normalizeScanMode(firstNonEmptyString(asString(payload["mode"]), scanMode))
+	if baseMode == "" {
+		baseMode = "saas_gap"
+	}
+	basePayload := cloneMap(payload)
+	basePayload["mode"] = baseMode
+	candidates := []discoveryCandidate{{
+		Mode:    baseMode,
+		Signal:  asFloat(basePayload["signal_strength"]),
+		Payload: basePayload,
+	}}
+
+	autoRaw, _ := payload["automation_micro"].(map[string]any)
+	if len(autoRaw) == 0 {
+		return candidates
+	}
+
+	autoPayload := cloneMap(payload)
+	// Let automation-micro propose its own candidate name from its own hypothesis.
+	delete(autoPayload, "vertical_name")
+	delete(autoPayload, "name")
+	delete(autoPayload, "title")
+	autoPayload["mode"] = "automation_micro"
+	autoPayload["automation_micro"] = autoRaw
+	autoPayload["signal_strength"] = autoRaw["signal_strength"]
+	if v := strings.TrimSpace(asString(autoRaw["opportunity_hypothesis"])); v != "" {
+		autoPayload["opportunity_hypothesis"] = v
+	}
+	if v := strings.TrimSpace(asString(autoRaw["evidence"])); v != "" {
+		autoPayload["evidence"] = v
+	}
+	candidates = append(candidates, discoveryCandidate{
+		Mode:    "automation_micro",
+		Signal:  asFloat(autoRaw["signal_strength"]),
+		Payload: autoPayload,
+	})
+	return candidates
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
+	ctx context.Context,
+	evt events.Event,
+	scanID string,
+	acc *scanAccumulator,
+	candidate discoveryCandidate,
+) {
+	signal := candidate.Signal
 	if signal < 50 {
 		pc.mu.Lock()
 		acc.Skipped++
@@ -1396,14 +1554,16 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 		return
 	}
 
+	payload := candidate.Payload
 	name := deriveDiscoveryCandidateName(payload)
 	if name == "" {
 		runtimeWarn(
 			"pipeline-coordinator",
-			"skipping discovery candidate with missing name scan_id=%s event_id=%s source=%s",
+			"skipping discovery candidate with missing name scan_id=%s event_id=%s source=%s mode=%s",
 			scanID,
 			strings.TrimSpace(evt.ID),
 			strings.TrimSpace(evt.SourceAgent),
+			candidate.Mode,
 		)
 		pc.mu.Lock()
 		acc.Skipped++
@@ -1434,9 +1594,10 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 		dedupEventID := uuid.NewString()
 		cand := pendingCandidate{
 			DedupEventID: dedupEventID,
+			ExistingID:   strings.TrimSpace(best.ID),
 			ScanID:       scanID,
 			CampaignID:   acc.CampaignID,
-			Mode:         acc.Mode,
+			Mode:         candidate.Mode,
 			Geography:    geography,
 			Name:         name,
 			Signal:       signal,
@@ -1449,15 +1610,19 @@ func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context,
 		return
 	}
 
-	verticalID, err := pc.ensureVerticalDiscovered(ctx, name, geography, acc.Mode, payload)
+	verticalID, err := pc.ensureVerticalDiscovered(ctx, name, geography, candidate.Mode, payload)
 	if err != nil {
-		log.Printf("pipeline: ensure discovered vertical failed name=%s geo=%s err=%v", name, geography, err)
+		log.Printf("pipeline: ensure discovered vertical failed name=%s geo=%s mode=%s err=%v", name, geography, candidate.Mode, err)
 		return
 	}
 	pc.mu.Lock()
 	acc.Discovered++
 	pc.mu.Unlock()
-	pc.publish(ctx, "vertical.discovered", verticalID, payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, name, geography, acc.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload)))
+	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, name, geography, candidate.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload))
+	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+	// Deferred events are persisted/delivered without recursive interceptor execution.
+	// Kick off scoring directly from discovery payload in the same interceptor pass.
+	pc.emitScoringRequestedFromDiscovery(ctx, verticalID, discoveredPayload)
 }
 
 func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
@@ -1497,7 +1662,23 @@ func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, e
 		acc.Discovered++
 	}
 	pc.mu.Unlock()
-	pc.publish(ctx, "vertical.discovered", verticalID, payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "pipeline-coordinator", cand.Payload)))
+	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "pipeline-coordinator", cand.Payload))
+	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+	pc.emitScoringRequestedFromDiscovery(ctx, verticalID, discoveredPayload)
+}
+
+func (pc *FactoryPipelineCoordinator) emitScoringRequestedFromDiscovery(ctx context.Context, verticalID string, discoveredPayload map[string]any) {
+	if pc == nil || len(discoveredPayload) == 0 {
+		return
+	}
+	pc.handleScoringRequested(ctx, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("vertical.discovered"),
+		SourceAgent: "pipeline-coordinator",
+		VerticalID:  strings.TrimSpace(verticalID),
+		Payload:     mustJSON(discoveredPayload),
+		CreatedAt:   time.Now().UTC(),
+	})
 }
 
 func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
@@ -1544,22 +1725,22 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	acc.CompletedBy[completionKey] = struct{}{}
 	done := len(acc.CompletedBy) >= maxInt(acc.Expected, 1)
 	stats := pc.buildScanCompletedPayload(scanCompletedBuildInput{
-		ScanID:              acc.ScanID,
-		CampaignID:          acc.CampaignID,
-		Mode:                acc.Mode,
-		Geography:           acc.Geography,
-		ReportsReceived:     acc.Reports,
-		AgentsExpected:      maxInt(acc.Expected, 1),
-		AgentsComplete:      len(acc.CompletedBy),
-		VerticalsDiscovered: acc.Discovered,
-		VerticalsSkipped:    acc.Skipped,
-		PendingDedup:        pc.pendingDedupCountForScan(acc.ScanID),
-		TimedOut:            false,
+		ScanID:          acc.ScanID,
+		CampaignID:      acc.CampaignID,
+		Mode:            acc.Mode,
+		Geography:       acc.Geography,
+		ReportsReceived: acc.Reports,
+		Expected:        maxInt(acc.Expected, 1),
+		Complete:        len(acc.CompletedBy),
+		Discovered:      acc.Discovered,
+		Skipped:         acc.Skipped,
+		PendingDedup:    pc.pendingDedupCountForScan(acc.ScanID),
+		TimedOut:        false,
 	})
 	if hasShardProgress {
 		terminal := shardCompleted + shardFailed
-		stats.AgentsExpected = shardTotal
-		stats.AgentsComplete = terminal
+		stats.Expected = shardTotal
+		stats.Complete = terminal
 		stats.ShardsTotal = shardTotal
 		stats.ShardsCompleted = shardCompleted
 		stats.ShardsFailed = shardFailed
@@ -2952,23 +3133,23 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 
 	for _, scan := range expired {
 		stats := pc.buildScanCompletedPayload(scanCompletedBuildInput{
-			ScanID:              scan.scanID,
-			CampaignID:          scan.campaignID,
-			Mode:                scan.mode,
-			Geography:           scan.geography,
-			ReportsReceived:     scan.reports,
-			AgentsExpected:      scan.expected,
-			AgentsComplete:      scan.completed,
-			VerticalsDiscovered: scan.discovered,
-			VerticalsSkipped:    scan.skipped,
-			PendingDedup:        scan.pendingDedup,
-			TimedOut:            true,
+			ScanID:          scan.scanID,
+			CampaignID:      scan.campaignID,
+			Mode:            scan.mode,
+			Geography:       scan.geography,
+			ReportsReceived: scan.reports,
+			Expected:        scan.expected,
+			Complete:        scan.completed,
+			Discovered:      scan.discovered,
+			Skipped:         scan.skipped,
+			PendingDedup:    scan.pendingDedup,
+			TimedOut:        true,
 		})
 		shardTotal, shardCompleted, shardFailed, hasShardProgress := pc.shardTerminalProgress(ctx, scan.shardScanID)
 		if hasShardProgress {
 			terminal := shardCompleted + shardFailed
-			stats.AgentsExpected = shardTotal
-			stats.AgentsComplete = terminal
+			stats.Expected = shardTotal
+			stats.Complete = terminal
 			stats.ShardsTotal = shardTotal
 			stats.ShardsCompleted = shardCompleted
 			stats.ShardsFailed = shardFailed
@@ -3303,32 +3484,32 @@ func (pc *FactoryPipelineCoordinator) buildVerticalDiscoveredPayload(
 }
 
 type scanCompletedBuildInput struct {
-	ScanID              string
-	CampaignID          string
-	Mode                string
-	Geography           string
-	ReportsReceived     int
-	AgentsExpected      int
-	AgentsComplete      int
-	VerticalsDiscovered int
-	VerticalsSkipped    int
-	PendingDedup        int
-	TimedOut            bool
+	ScanID          string
+	CampaignID      string
+	Mode            string
+	Geography       string
+	ReportsReceived int
+	Expected        int
+	Complete        int
+	Discovered      int
+	Skipped         int
+	PendingDedup    int
+	TimedOut        bool
 }
 
 func (pc *FactoryPipelineCoordinator) buildScanCompletedPayload(in scanCompletedBuildInput) ScanCompletedPayload {
 	return ScanCompletedPayload{
-		ScanID:              strings.TrimSpace(in.ScanID),
-		CampaignID:          strings.TrimSpace(in.CampaignID),
-		Mode:                strings.TrimSpace(in.Mode),
-		Geography:           strings.TrimSpace(in.Geography),
-		ReportsReceived:     in.ReportsReceived,
-		AgentsExpected:      in.AgentsExpected,
-		AgentsComplete:      in.AgentsComplete,
-		VerticalsDiscovered: in.VerticalsDiscovered,
-		VerticalsSkipped:    in.VerticalsSkipped,
-		PendingDedup:        in.PendingDedup,
-		TimedOut:            in.TimedOut,
+		ScanID:          strings.TrimSpace(in.ScanID),
+		CampaignID:      strings.TrimSpace(in.CampaignID),
+		Mode:            strings.TrimSpace(in.Mode),
+		Geography:       strings.TrimSpace(in.Geography),
+		ReportsReceived: in.ReportsReceived,
+		Expected:        in.Expected,
+		Complete:        in.Complete,
+		Discovered:      in.Discovered,
+		Skipped:         in.Skipped,
+		PendingDedup:    in.PendingDedup,
+		TimedOut:        in.TimedOut,
 	}
 }
 

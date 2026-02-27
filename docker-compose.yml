@@ -35,6 +35,7 @@ services:
     volumes:
       - ./configs:/app/configs
       - ./migrations:/app/migrations
+      - ./contracts:/app/contracts
       - ./internal:/app/internal
       - ./cmd:/app/cmd
       - /var/run/docker.sock:/var/run/docker.sock
@@ -49,7 +50,7 @@ services:
       - postgres
       - -migrate
       - -migration-file
-      - /app/migrations/001_initial.sql
+      - /app/contracts/ddl-canonical.sql
       - -self-check=false
 
   # Per-vertical and privileged workspaces are created dynamically by runtime policy.

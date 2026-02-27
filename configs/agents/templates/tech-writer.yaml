@@ -2,8 +2,6 @@ id: tech-writer
 role: tech-writer
 model_tier: sonnet
 parent_role: cto-agent
-subscriptions:
-  - cto.tech_spec_review_requested
 tools:
   - agent_message
   - schedule

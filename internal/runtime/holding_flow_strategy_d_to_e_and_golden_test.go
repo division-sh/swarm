@@ -16,7 +16,7 @@ func seedValidationFlowUntilCTORequest(t *testing.T, ctx context.Context, bus *E
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 85}),
 		CreatedAt:   time.Now().UTC(),
@@ -95,7 +95,7 @@ func TestHoldingFlow_C7_BrandCandidatesSetGate4(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 83}),
 		CreatedAt:   time.Now().UTC(),
@@ -134,7 +134,7 @@ func TestHoldingFlow_C8_AllGatesMetEmitValidationPackageReady(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 88}),
 		CreatedAt:   time.Now().UTC(),
@@ -311,7 +311,7 @@ func TestHoldingFlow_D2_MaxCTORevisionsParkPipelineAndEscalateMailbox(t *testing
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 77}),
 		CreatedAt:   time.Now().UTC(),
@@ -373,7 +373,7 @@ func TestHoldingFlow_D3_SpecReviewerIssuesIncrementInnerRevisionCount(t *testing
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 79}),
 		CreatedAt:   time.Now().UTC(),
@@ -408,7 +408,7 @@ func TestHoldingFlow_D4_ResearchRejectedKillsPipeline(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 76}),
 		CreatedAt:   time.Now().UTC(),
@@ -444,7 +444,7 @@ func TestHoldingFlow_E1_StaleSpecApprovedDroppedAfterRejection(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 80}),
 		CreatedAt:   time.Now().UTC(),
@@ -487,7 +487,7 @@ func TestHoldingFlow_E2_DuplicateShortlistedDropped(t *testing.T) {
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.shortlisted"),
-			SourceAgent: "scoring-coordinator",
+			SourceAgent: "pipeline-coordinator",
 			VerticalID:  verticalID,
 			Payload:     mustJSON(map[string]any{"composite_score": 81}),
 			CreatedAt:   time.Now().UTC(),
@@ -518,7 +518,7 @@ func TestHoldingFlow_E3_BrandRevisionResetsG4AndCanBeRegenerated(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 87}),
 		CreatedAt:   time.Now().UTC(),
@@ -596,7 +596,7 @@ func TestHoldingFlow_E4_NeedsMoreDataResetsG1ThenAllowsReseal(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 78}),
 		CreatedAt:   time.Now().UTC(),
@@ -727,14 +727,14 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 		errCh <- nil
 	}()
 
-	scoringCh := bus.Subscribe("scoring-coordinator", events.EventType("vertical.discovered"))
+	scoringCh := bus.Subscribe("pipeline-coordinator", events.EventType("vertical.discovered"))
 	go func() {
 		evt := waitForEventType(t, scoringCh, "vertical.discovered")
 		payload := parsePayloadMap(evt.Payload)
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.scored"),
-			SourceAgent: "scoring-coordinator",
+			SourceAgent: "pipeline-coordinator",
 			VerticalID:  evt.VerticalID,
 			Payload: mustJSON(map[string]any{
 				"vertical_id":       evt.VerticalID,
@@ -750,7 +750,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.shortlisted"),
-			SourceAgent: "scoring-coordinator",
+			SourceAgent: "pipeline-coordinator",
 			VerticalID:  evt.VerticalID,
 			Payload: mustJSON(map[string]any{
 				"vertical_id":       evt.VerticalID,

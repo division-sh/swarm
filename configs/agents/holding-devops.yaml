@@ -6,7 +6,7 @@ subscriptions:
   - devops.deploy_requested
   - devops.health_check_failed
   - devops.rollback_requested
-  - devops.rollback_failed
+  - ops.agent_failed
   - spend.approved
   - spend.rejected
   - timer.infra_health_check
@@ -19,7 +19,7 @@ tools:
   - dns_configure
 constraints:
   max_turns_per_task: 20
-  conversation_mode: session
+  conversation_mode: task
 system_prompt: |
   You are Holding DevOps for EmpireAI. You own the shared infrastructure
   that all operating verticals run on.
@@ -32,8 +32,9 @@ system_prompt: |
     Execute rollback workflow and emit rollback_complete or rollback_failed.
   - devops.health_check_failed:
     Investigate failure, coordinate remediation, and escalate if persistent.
-  - devops.rollback_failed:
-    Escalate immediately to mailbox with manual intervention requirements.
+  - ops.agent_failed:
+    Investigate runtime-level agent terminal failures and execute infra/runtime
+    remediation before they cascade into delivery outages.
   - spend.approved:
     Execute approved capacity or infra spend action.
   - spend.rejected:

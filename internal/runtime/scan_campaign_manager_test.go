@@ -175,8 +175,8 @@ func TestAsInt(t *testing.T) {
 
 func TestParseDirectiveMode(t *testing.T) {
 	mode, explicit := parseDirectiveMode("SaaS in Paraguay")
-	if mode != "automation_micro" || explicit {
-		t.Fatalf("expected default open campaign mode automation_micro, got mode=%s explicit=%v", mode, explicit)
+	if mode != "saas_gap" || explicit {
+		t.Fatalf("expected default open campaign mode saas_gap, got mode=%s explicit=%v", mode, explicit)
 	}
 
 	mode, explicit = parseDirectiveMode("run saas_trend in Paraguay")
@@ -185,8 +185,8 @@ func TestParseDirectiveMode(t *testing.T) {
 	}
 
 	mode, explicit = parseDirectiveMode("run automation micro in Paraguay")
-	if mode != "automation_micro" || !explicit {
-		t.Fatalf("expected explicit automation_micro mode, got mode=%s explicit=%v", mode, explicit)
+	if mode != "saas_gap" || !explicit {
+		t.Fatalf("expected explicit automation_micro alias to saas_gap, got mode=%s explicit=%v", mode, explicit)
 	}
 }
 
@@ -196,8 +196,8 @@ func TestRemainingCampaignModes(t *testing.T) {
 		t.Fatalf("unexpected campaign remainder for saas_gap: %+v", out)
 	}
 	out = remainingCampaignModes("automation_micro")
-	if len(out) != 3 || out[0] != "saas_gap" || out[1] != "saas_trend" || out[2] != "local_services" {
-		t.Fatalf("unexpected campaign remainder for automation_micro: %+v", out)
+	if len(out) != 2 || out[0] != "saas_trend" || out[1] != "local_services" {
+		t.Fatalf("unexpected campaign remainder for automation_micro alias: %+v", out)
 	}
 	out = remainingCampaignModes("local_services")
 	if len(out) != 0 {

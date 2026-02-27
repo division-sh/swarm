@@ -2,8 +2,6 @@ id: qa-agent
 role: qa-agent
 model_tier: haiku
 parent_role: cto-agent
-subscriptions:
-  - build_complete
 tools:
   - sql_execute
 constraints:

@@ -1,0 +1,321 @@
+# EmpireAI verification-gates.yaml
+# Machine-readable test gate manifest. Lists required verification commands
+# and pass criteria per spec version. "Compliance" is binary: all must_pass
+# gates green = compliant; any red = non-compliant.
+#
+# Gate priorities:
+#   must_pass   — Blocks release. Failure = broken system.
+#   should_pass — Expected green. Failure = tracked debt, not blocker.
+#   informational — Report result, never blocks. Tracks coverage/quality trends.
+#
+# Each gate specifies:
+#   id:           Unique gate identifier
+#   name:         Human-readable gate name
+#   priority:     must_pass | should_pass | informational
+#   category:     ddl | wiring | events | agents | integration
+#   command:      Shell command to run (exit 0 = pass)
+#   pass_criteria: Human-readable description of what "pass" means
+#   introduced:   Spec version that added this gate
+#   notes:        Optional context
+
+spec_version: "2.0.35"
+
+gates:
+
+  # ── DDL Gates ───────────────────────────────────────────────────────
+
+  - id: ddl-fresh-install
+    name: "Canonical DDL creates all tables on fresh DB"
+    priority: must_pass
+    category: ddl
+    layer: integration
+    command: "psql -v ON_ERROR_STOP=1 -f contracts/ddl-canonical.sql"
+    pass_criteria: "Exit 0, 36 tables created, no errors"
+    introduced: "2.0.29"
+    notes: "Validates FK ordering, constraint syntax, type correctness"
+
+  - id: ddl-table-count
+    name: "Canonical DDL has exactly 36 tables"
+    priority: must_pass
+    category: ddl
+    layer: integration
+    command: "grep -c 'CREATE TABLE' contracts/ddl-canonical.sql | grep -q '^36$'"
+    pass_criteria: "Exactly 36 CREATE TABLE statements"
+    introduced: "2.0.32"
+
+  - id: ddl-runtime-tables-match-structs
+    name: "7 runtime tables match Go struct field names (column-level)"
+    priority: must_pass
+    category: ddl
+    layer: integration
+    command: |
+      # validation_pipelines: g2_spec (NOT g2_spec_approved), scoring_payload, packaging_retries
+      psql -c "\d validation_pipelines" | grep -q 'g2_spec ' &&
+      psql -c "\d validation_pipelines" | grep -q scoring_payload &&
+      psql -c "\d validation_pipelines" | grep -q packaging_retries &&
+      ! psql -c "\d validation_pipelines" | grep -q g2_spec_approved &&
+      # scan_accumulators: TEXT PK, expected (NOT expected_agents), reports INT
+      psql -c "\d scan_accumulators" | grep -q 'scan_id.*text' &&
+      psql -c "\d scan_accumulators" | grep -q 'expected ' &&
+      psql -c "\d scan_accumulators" | grep -q 'reports.*integer' &&
+      ! psql -c "\d scan_accumulators" | grep -q expected_agents &&
+      # pipeline_receipts: status + error (NOT result)
+      psql -c "\d pipeline_receipts" | grep -q 'status.*text' &&
+      psql -c "\d pipeline_receipts" | grep -q 'error' &&
+      ! psql -c "\d pipeline_receipts" | grep -q 'result' &&
+      # pending_dedup: dedup_event_id TEXT PK, name, payload
+      psql -c "\d pending_dedup_candidates" | grep -q 'dedup_event_id.*text' &&
+      psql -c "\d pending_dedup_candidates" | grep -q 'payload.*jsonb' &&
+      # runtime_config: config snapshot
+      psql -c "\d runtime_config" | grep -q config_yaml &&
+      # pipeline_processed_events: event_id PK only
+      psql -c "\d pipeline_processed_events" | grep -v handler | grep -q event_id &&
+      # template_prompt_drafts: has source, notes, created_at
+      psql -c "\d template_prompt_drafts" | grep -q source &&
+      psql -c "\d template_prompt_drafts" | grep -q notes &&
+      # agent_sessions index includes scope_key
+      psql -c "\di idx_sessions_active" | grep -q scope_key
+    pass_criteria: "All 7 runtime tables have exact column names matching Go struct fields, including negative checks for old names"
+    introduced: "2.0.35"
+    notes: "Deepened from v2.0.34 which only checked for presence of key columns, not absence of wrong columns"
+
+  - id: ddl-schema-diff
+    name: "Live DB schema matches canonical DDL"
+    priority: should_pass
+    category: ddl
+    layer: integration
+    command: "empire db diff --canonical contracts/ddl-canonical.sql"
+    pass_criteria: "0 differences (column types, constraints, indexes all match)"
+    introduced: "2.0.34"
+    notes: "Requires `empire db diff` command. Report UNVERIFIED if command not yet implemented."
+
+  # ── Wiring Gates ────────────────────────────────────────────────────
+
+  - id: wiring-verifier-clean
+    name: "Wiring verifier passes with 0 FAIL, 0 WARN"
+    priority: must_pass
+    category: wiring
+    layer: local
+    command: "go test ./internal/runtime -run TestSpecRuntimeWiringVerification -v 2>&1 | tail -1 | grep -q PASS"
+    pass_criteria: "pass=N fail=0 warn=0"
+    introduced: "2.0.29"
+    notes: "Uses Go test harness. Previous versions referenced 'empire verify' CLI which does not exist."
+
+  - id: wiring-no-glob-subs
+    name: "No glob pattern subscriptions in agent configs"
+    priority: must_pass
+    category: wiring
+    command: "grep -r 'opco\\.\\*\\.' configs/ | wc -l | grep -q '^0$'"
+    pass_criteria: "0 glob patterns found"
+    introduced: "2.0.32"
+
+  - id: wiring-no-sc-ghosts
+    name: "No Scoring Coordinator references in active code"
+    priority: must_pass
+    category: wiring
+    command: "grep -ri 'scoring.coordinator\\|scoring-coordinator\\|ScoringCoordinator' internal/ configs/ | grep -v changelog | wc -l | grep -q '^0$'"
+    pass_criteria: "0 references outside changelog entries"
+    introduced: "2.0.27"
+
+  - id: wiring-no-uuid-agents
+    name: "No UUID type references for agents.id (it is TEXT)"
+    priority: must_pass
+    category: wiring
+    command: "grep -r 'UUID.*agents\\|agents.*UUID' internal/ | wc -l | grep -q '^0$'"
+    pass_criteria: "0 UUID references to agents.id"
+    introduced: "2.0.29"
+
+  - id: wiring-delivery-channel-complete
+    name: "Every event in catalog has a delivery_channel value"
+    priority: must_pass
+    category: events
+    command: |
+      python3 -c "
+      import yaml
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      events = catalog.get('events', [])
+      missing = [e['type'] for e in events if not e.get('delivery_channel')]
+      assert len(missing) == 0, f'Missing delivery_channel: {missing}'
+      print(f'{len(events)} events, all have delivery_channel')
+      "
+    pass_criteria: "All events have delivery_channel field"
+    introduced: "2.0.31"
+
+  # ── Cross-validation Gates ──────────────────────────────────────────
+
+  - id: xval-emit-events-in-catalog
+    name: "Every agent emit_event has a catalog entry"
+    priority: must_pass
+    category: wiring
+    command: |
+      python3 -c "
+      import yaml
+      agents = yaml.safe_load(open('contracts/agent-tools.yaml'))
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      catalog_types = {e['type'] for e in catalog.get('events', [])}
+      missing = []
+      for a in agents.get('agents', []):
+        for evt in a.get('emit_events', []):
+          if evt not in catalog_types:
+            missing.append(f\"{a['id']}: {evt}\")
+      assert len(missing) == 0, f'Emit events missing from catalog: {missing}'
+      print('All emit_events have catalog entries')
+      "
+    pass_criteria: "0 orphaned emit_events"
+    introduced: "2.0.29"
+
+  - id: xval-subscriptions-in-catalog
+    name: "Every agent subscription has a catalog entry"
+    priority: must_pass
+    category: wiring
+    command: |
+      python3 -c "
+      import yaml
+      agents = yaml.safe_load(open('contracts/agent-tools.yaml'))
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      catalog_types = {e['type'] for e in catalog.get('events', [])}
+      missing = []
+      for a in agents.get('agents', []):
+        for sub in a.get('subscriptions', []):
+          if sub not in catalog_types:
+            missing.append(f\"{a['id']}: {sub}\")
+      assert len(missing) == 0, f'Subscriptions missing from catalog: {missing}'
+      print('All subscriptions have catalog entries')
+      "
+    pass_criteria: "0 orphaned subscriptions"
+    introduced: "2.0.29"
+
+  - id: xval-catalog-emitters-exist
+    name: "Every catalog emitter is a real agent or system component"
+    priority: should_pass
+    category: events
+    command: |
+      python3 -c "
+      import yaml
+      agents = yaml.safe_load(open('contracts/agent-tools.yaml'))
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      agent_ids = {a['id'] for a in agents.get('agents', [])}
+      system_emitters = {'runtime', 'system', 'human', 'timer', 'eventbus'}
+      valid = agent_ids | system_emitters
+      invalid = []
+      for e in catalog.get('events', []):
+        emitter = e.get('emitter', '')
+        if emitter not in valid and not emitter.startswith('scanner-'):
+          invalid.append(f\"{e['type']}: {emitter}\")
+      assert len(invalid) == 0, f'Unknown emitters: {invalid}'
+      print('All emitters are valid')
+      "
+    pass_criteria: "0 unknown emitters"
+    introduced: "2.0.29"
+
+  # ── Agent Config Gates ──────────────────────────────────────────────
+
+  - id: agents-all-have-prompts
+    name: "Every roster agent has a system_prompt in config"
+    priority: must_pass
+    category: agents
+    layer: local
+    command: |
+      python3 -c "
+      import yaml
+      config_map = yaml.safe_load(open('contracts/agent-config-map.yaml'))
+      errors = []
+      for agent_id, info in config_map.get('agents', {}).items():
+        path = info.get('config_path')
+        if path is None:
+          continue  # ephemeral agents have no config file
+        import os
+        if not os.path.exists(path):
+          errors.append(f'MISSING FILE: {path} for {agent_id}')
+          continue
+        with open(path) as f:
+          content = f.read()
+        if 'system_prompt' not in content and 'prompt:' not in content:
+          errors.append(f'NO PROMPT: {path} for {agent_id}')
+      if errors:
+        print('\\n'.join(errors))
+        exit(1)
+      print(f'{len(config_map[\"agents\"])} agents checked')
+      "
+    pass_criteria: "Every agent with a config file has system_prompt field"
+    introduced: "2.0.20"
+    notes: "Uses agent-config-map.yaml as source. Skips ephemeral agents (config_path: null). Previous version used blind glob on configs/agents/*.yaml which falsely flagged roster.yaml."
+
+  - id: agents-naming-convention
+    name: "Agent config filenames follow convention"
+    priority: should_pass
+    category: agents
+    command: |
+      python3 -c "
+      import yaml, os, re
+      agents = yaml.safe_load(open('contracts/agent-tools.yaml'))
+      holding = [a for a in agents.get('agents', []) if a.get('type') in ('holding', 'factory')]
+      errors = []
+      for a in holding:
+        aid = a['id']
+        expected = f'configs/agents/{aid}.yaml'
+        if not os.path.exists(expected):
+          errors.append(f'Missing: {expected} for agent {aid}')
+      if errors:
+        print('\\n'.join(errors))
+        exit(1)
+      print(f'{len(holding)} agent configs found')
+      "
+    pass_criteria: "Every holding/factory agent ID maps to a config file"
+    introduced: "2.0.34"
+
+  # ── Integration Gates ───────────────────────────────────────────────
+
+  - id: integration-event-roundtrip
+    name: "EventBus publish → subscribe delivers to correct agent"
+    priority: should_pass
+    category: integration
+    layer: integration
+    infra_optional: true
+    command: "go test ./internal/runtime/ -run TestEventRoundtrip -count=1"
+    pass_criteria: "Test passes, event delivered to subscribed agent within 5s"
+    introduced: "2.0.34"
+    notes: "Report UNVERIFIED if test not yet written"
+
+  - id: integration-crash-recovery
+    name: "RecoverFromCrash replays unreceipted events"
+    priority: should_pass
+    category: integration
+    layer: integration
+    infra_optional: true
+    command: "go test ./internal/runtime/ -run TestCrashRecovery -count=1"
+    pass_criteria: "Test passes, unreceipted events replayed through interceptor"
+    introduced: "2.0.34"
+    notes: "Report UNVERIFIED if test not yet written"
+
+  - id: integration-dual-assessment
+    name: "MRA dual assessment emits both saas_gap and automation_micro verticals"
+    priority: should_pass
+    category: integration
+    layer: integration
+    infra_optional: true
+    command: "go test ./internal/runtime/ -run TestDualAssessment -count=1"
+    pass_criteria: "Both vertical.discovered events emitted for qualifying subcategory"
+    introduced: "2.0.34"
+    notes: "Report UNVERIFIED if test not yet written"
+
+# ── Reporting ─────────────────────────────────────────────────────
+#
+# Expected report format per gate:
+#   PASS         — Command exited 0, criteria met
+#   FAIL         — Command exited non-0 or criteria not met
+#   UNVERIFIED   — Gate requires infrastructure not yet available
+#   SKIPPED      — Gate not applicable to current scope
+#
+# UNVERIFIED policy (tightened per implementer feedback v2.0.35):
+#   must_pass gates may be UNVERIFIED only if the gate has infra_optional: true
+#   OR if the tooling dependency is listed in tooling.lock as layer: integration.
+#   must_pass gates that are UNVERIFIED due to missing local dependencies (e.g., PyYAML)
+#   count as FAIL — install the dependency per tooling.lock setup command.
+#
+# Compliance rule:
+#   All must_pass gates = PASS → COMPLIANT
+#   All must_pass gates = PASS or UNVERIFIED (infra_optional only) → COMPLIANT WITH DEBT
+#   Any must_pass gate = FAIL or UNVERIFIED (non-infra) → NON-COMPLIANT
+#   should_pass gates tracked as debt, never block
+#   informational gates reported but never block

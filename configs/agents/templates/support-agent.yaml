@@ -2,9 +2,6 @@ id: support-agent
 role: support-agent
 model_tier: haiku
 parent_role: vp-product
-subscriptions:
-  - customer_message
-  - bug_fix_deployed
 tools:
   - whatsapp_business_api
   - email_api

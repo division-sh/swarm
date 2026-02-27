@@ -246,7 +246,7 @@ func TestEventSchemaRegistry_ScanCompletionRequiresScanID(t *testing.T) {
 		"scanner.instagram.scan_complete",
 		"scanner.reviews.scan_complete",
 		"scanner.directories.scan_complete",
-		"scanner.job_boards.scan_complete",
+		"scanner.yelp.scan_complete",
 	}
 	for _, eventType := range eventTypes {
 		eventType := eventType
@@ -272,11 +272,17 @@ func TestEventSchemaRegistry_ResearchSignalsRequireScanID(t *testing.T) {
 			"opportunity_hypothesis": "Automate no-show prevention and slot optimization.",
 			"evidence":               "Multiple clinics report manual scheduling bottlenecks.",
 			"signal_strength":        74,
+			"automation_micro": map[string]any{
+				"signal_strength":        81,
+				"evidence":               "Strong WhatsApp-first booking pattern in SMBs.",
+				"opportunity_hypothesis": "Ship a lightweight WhatsApp scheduling assistant.",
+			},
 		},
 		"trend.identified": {
 			"scan_id":                "scan-2",
 			"trend_category":         "regulatory",
 			"trend_description":      "Digital invoicing mandates expanding across LATAM.",
+			"market_intersection":    "SMB billing workflows",
 			"opportunity_hypothesis": "Launch compliance-first invoicing workflow SaaS.",
 			"evidence":               "Government policy timeline indicates 12-month adoption window.",
 			"signal_strength":        79,
@@ -301,6 +307,41 @@ func TestEventSchemaRegistry_ResearchSignalsRequireScanID(t *testing.T) {
 				t.Fatalf("expected %s schema to reject payload missing scan_id", eventType)
 			}
 		})
+	}
+}
+
+func TestEventSchemaRegistry_CategoryAssessedAutomationMicroStrict(t *testing.T) {
+	valid := map[string]any{
+		"scan_id":                "scan-99",
+		"category":               "operations",
+		"subcategory":            "clinic_scheduling",
+		"opportunity_hypothesis": "Core SaaS wedge",
+		"evidence":               "Evidence",
+		"signal_strength":        70,
+		"automation_micro": map[string]any{
+			"signal_strength":        66,
+			"evidence":               "Automation evidence",
+			"opportunity_hypothesis": "Automation wedge",
+		},
+	}
+	if err := ValidateEventPayloadAgainstSchema("category.assessed", valid); err != nil {
+		t.Fatalf("expected valid category.assessed with automation_micro, got %v", err)
+	}
+
+	invalid := map[string]any{
+		"scan_id":                "scan-99",
+		"category":               "operations",
+		"subcategory":            "clinic_scheduling",
+		"opportunity_hypothesis": "Core SaaS wedge",
+		"evidence":               "Evidence",
+		"signal_strength":        70,
+		"automation_micro": map[string]any{
+			"signal_strength": 66,
+			"evidence":        "Automation evidence",
+		},
+	}
+	if err := ValidateEventPayloadAgainstSchema("category.assessed", invalid); err == nil {
+		t.Fatal("expected category.assessed to reject incomplete automation_micro payload")
 	}
 }
 

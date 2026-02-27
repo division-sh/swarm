@@ -1,14 +1,18 @@
 package runtime
 
 import (
+	"archive/tar"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -65,10 +69,21 @@ type rosterYAML struct {
 	} `yaml:"agents"`
 }
 
+type wiringEventContract struct {
+	EventType       string
+	Emitter         any    `yaml:"emitter"`
+	Consumer        any    `yaml:"consumer"`
+	Intercepted     bool   `yaml:"intercepted"`
+	Passthrough     any    `yaml:"passthrough"`
+	Routing         string `yaml:"routing"`
+	DeliveryChannel string `yaml:"delivery_channel"`
+}
+
 var (
 	emitRefRe             = regexp.MustCompile(`\bemit_[a-zA-Z0-9_]+\b`)
 	legacyEmitEventsRe    = regexp.MustCompile(`(?i)\bemit_events\b`)
 	legacyEmitEventNameRe = regexp.MustCompile("(?i)\\bemit\\s+`[a-z0-9_.-]+`")
+	eventTypeCallRe       = regexp.MustCompile(`events\.EventType\("([a-zA-Z0-9._*-]+)"\)`)
 	fieldAliasRegexWiring = map[string][]*regexp.Regexp{
 		"vertical_id": {
 			regexp.MustCompile(`(?i)\bvertical_id\b`),
@@ -109,7 +124,11 @@ var (
 
 func TestSpecRuntimeWiringVerification(t *testing.T) {
 	ensureEventSchemaRegistry()
-	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	_, thisFile, _, ok := goruntime.Caller(0)
+	if !ok {
+		t.Fatalf("resolve current file path for repo root")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 	agentsDir := filepath.Join(repoRoot, "configs", "agents")
 	runtimeDir := filepath.Join(repoRoot, "internal", "runtime")
 	pipelinePath := filepath.Join(runtimeDir, "pipeline_coordinator.go")
@@ -120,6 +139,8 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	}
 	schemas := loadWiringSchemasFromRegistry()
 	toolToEvent := buildToolToEventMap()
+	contracts := loadWiringEventContracts(repoRoot)
+	runtimeManagedEvents := loadRuntimeManagedEvents(repoRoot)
 
 	sites, err := collectRuntimeEmitSites(runtimeDir)
 	if err != nil {
@@ -165,12 +186,12 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 
 	results := make([]wiringResult, 0, 512)
 	results = append(results, verifyEmitToolCompleteness(agents, schemas, toolToEvent)...)
-	results = append(results, verifySubscriptionCompleteness(agents, producersByEvent)...)
+	results = append(results, verifySubscriptionCompleteness(agents, producersByEvent, contracts)...)
 	results = append(results, verifyPayloadContracts(agents, schemas, runtimeEmitted)...)
 	results = append(results, verifyInterceptorCoverage(interceptEvents, handleEvents, handlerCases, runtimeEmitted)...)
 	results = append(results, verifyPipelinePathTracing(agents, producersByEvent, interceptEvents)...)
-	results = append(results, verifyOrphanEmissions(agents, producersByEvent, interceptEvents)...)
-	results = append(results, verifySchemaCatalogConsistency(agents, schemas, producersByEvent, interceptEvents)...)
+	results = append(results, verifyOrphanEmissions(agents, producersByEvent, interceptEvents, runtimeManagedEvents, contracts)...)
+	results = append(results, verifySchemaCatalogConsistency(agents, schemas, producersByEvent, interceptEvents, contracts)...)
 
 	failCount := 0
 	warnCount := 0
@@ -258,7 +279,7 @@ func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringS
 	return out
 }
 
-func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[string][]producerRef) []wiringResult {
+func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[string][]producerRef, contracts map[string]wiringEventContract) []wiringResult {
 	out := make([]wiringResult, 0, 192)
 	allEvents := make([]string, 0, len(producersByEvent))
 	for evt := range producersByEvent {
@@ -268,6 +289,13 @@ func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[s
 
 	for _, a := range agents {
 		for _, sub := range a.Subscriptions {
+			if !subscriptionNeedsChecks(sub, contracts) {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("%s subscription %s skipped by delivery_channel policy", a.ID, sub),
+				})
+				continue
+			}
 			matches := matchingEvents(sub, allEvents)
 			if len(matches) == 0 {
 				out = append(out, wiringResult{
@@ -615,7 +643,7 @@ func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string
 	return out
 }
 
-func verifyOrphanEmissions(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
+func verifyOrphanEmissions(agents []wiringAgent, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}, runtimeManagedEvents map[string]struct{}, contracts map[string]wiringEventContract) []wiringResult {
 	out := make([]wiringResult, 0, 64)
 	events := make([]string, 0, len(producersByEvent))
 	for evt := range producersByEvent {
@@ -628,6 +656,48 @@ func verifyOrphanEmissions(agents []wiringAgent, producersByEvent map[string][]p
 	sort.Strings(events)
 
 	for _, evt := range events {
+		if c, ok := contracts[evt]; ok {
+			switch normalizeDeliveryChannel(c.DeliveryChannel) {
+			case "audit", "mailbox", "agent_message":
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("ORPHAN_EMISSION: %s exempt via delivery_channel=%s", evt, normalizeDeliveryChannel(c.DeliveryChannel)),
+				})
+				continue
+			case "eventbus_routing_table":
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("ORPHAN_EMISSION: %s routing-table event (consumer sub check skipped)", evt),
+				})
+				continue
+			case "runtime":
+				if _, ok := interceptEvents[evt]; ok {
+					out = append(out, wiringResult{
+						Severity: wiringPass,
+						Message:  fmt.Sprintf("ORPHAN_EMISSION: %s runtime-channel event is intercepted", evt),
+					})
+				} else if _, ok := runtimeManagedEvents[evt]; ok {
+					out = append(out, wiringResult{
+						Severity: wiringPass,
+						Message:  fmt.Sprintf("ORPHAN_EMISSION: %s runtime-channel event is consumed by runtime manager loop", evt),
+					})
+				} else {
+					out = append(out, wiringResult{
+						Severity: wiringFail,
+						Message:  fmt.Sprintf("ORPHAN_EMISSION: %s delivery_channel=runtime but no interceptor handler exists", evt),
+					})
+				}
+				continue
+			case "eventbus_static":
+				if contractHasConsumer(c) {
+					out = append(out, wiringResult{
+						Severity: wiringPass,
+						Message:  fmt.Sprintf("ORPHAN_EMISSION: %s has static consumer in event-catalog contract", evt),
+					})
+					continue
+				}
+			}
+		}
 		if !isWiringCriticalEvent(evt) {
 			continue
 		}
@@ -646,27 +716,36 @@ func verifyOrphanEmissions(agents []wiringAgent, producersByEvent map[string][]p
 	return out
 }
 
-func verifySchemaCatalogConsistency(agents []wiringAgent, schemas map[string]wiringSchema, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}) []wiringResult {
+func verifySchemaCatalogConsistency(agents []wiringAgent, schemas map[string]wiringSchema, producersByEvent map[string][]producerRef, interceptEvents map[string]struct{}, contracts map[string]wiringEventContract) []wiringResult {
 	catalog := map[string]struct{}{}
-	for evt := range producersByEvent {
-		evt = strings.TrimSpace(evt)
-		if evt != "" {
-			catalog[evt] = struct{}{}
-		}
-	}
-	for _, a := range agents {
-		for _, sub := range a.Subscriptions {
-			sub = strings.TrimSpace(sub)
-			if sub == "" || strings.Contains(sub, "*") {
-				continue
+	if len(contracts) > 0 {
+		for evt := range contracts {
+			evt = strings.TrimSpace(evt)
+			if evt != "" {
+				catalog[evt] = struct{}{}
 			}
-			catalog[sub] = struct{}{}
 		}
-	}
-	for evt := range interceptEvents {
-		evt = strings.TrimSpace(evt)
-		if evt != "" {
-			catalog[evt] = struct{}{}
+	} else {
+		for evt := range producersByEvent {
+			evt = strings.TrimSpace(evt)
+			if evt != "" {
+				catalog[evt] = struct{}{}
+			}
+		}
+		for _, a := range agents {
+			for _, sub := range a.Subscriptions {
+				sub = strings.TrimSpace(sub)
+				if sub == "" || strings.Contains(sub, "*") {
+					continue
+				}
+				catalog[sub] = struct{}{}
+			}
+		}
+		for evt := range interceptEvents {
+			evt = strings.TrimSpace(evt)
+			if evt != "" {
+				catalog[evt] = struct{}{}
+			}
 		}
 	}
 
@@ -756,6 +835,283 @@ func isWiringCriticalEvent(eventType string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeDeliveryChannel(v string) string {
+	v = strings.TrimSpace(strings.ToLower(v))
+	switch v {
+	case "eventbus_static", "eventbus-routing-static":
+		return "eventbus_static"
+	case "eventbus_routing_table", "eventbus-routing-table":
+		return "eventbus_routing_table"
+	case "runtime":
+		return "runtime"
+	case "audit":
+		return "audit"
+	case "mailbox":
+		return "mailbox"
+	case "agent_message":
+		return "agent_message"
+	default:
+		return v
+	}
+}
+
+func subscriptionNeedsChecks(subscription string, contracts map[string]wiringEventContract) bool {
+	subscription = strings.TrimSpace(subscription)
+	if subscription == "" || len(contracts) == 0 {
+		return true
+	}
+	for evt, c := range contracts {
+		if !matchesSubscription(subscription, evt) {
+			continue
+		}
+		switch normalizeDeliveryChannel(c.DeliveryChannel) {
+		case "audit", "mailbox", "agent_message", "eventbus_routing_table":
+			return false
+		}
+	}
+	return true
+}
+
+func contractHasConsumer(c wiringEventContract) bool {
+	switch t := c.Consumer.(type) {
+	case string:
+		trim := strings.TrimSpace(strings.ToLower(t))
+		return trim != "" && trim != "-" && trim != "none"
+	case []any:
+		for _, item := range t {
+			if s := strings.TrimSpace(strings.ToLower(asString(item))); s != "" && s != "-" && s != "none" {
+				return true
+			}
+		}
+	case []string:
+		for _, item := range t {
+			if s := strings.TrimSpace(strings.ToLower(item)); s != "" && s != "-" && s != "none" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func loadWiringEventContracts(repoRoot string) map[string]wiringEventContract {
+	if c, ok := loadWiringEventContractsFromRoot(repoRoot); ok {
+		return c
+	}
+	bestContracts := map[string]wiringEventContract{}
+	bestPatch := -1
+	if c, patch, ok := loadWiringEventContractsFromExtracted(repoRoot); ok {
+		bestContracts = c
+		bestPatch = patch
+	}
+	if c, patch, ok := loadWiringEventContractsFromTar(repoRoot); ok && patch > bestPatch {
+		bestContracts = c
+		bestPatch = patch
+	}
+	if bestPatch < 0 {
+		return map[string]wiringEventContract{}
+	}
+	return bestContracts
+}
+
+func loadWiringEventContractsFromRoot(repoRoot string) (map[string]wiringEventContract, bool) {
+	contractsPath := filepath.Join(repoRoot, "contracts", "event-catalog.yaml")
+	raw, err := os.ReadFile(contractsPath)
+	if err != nil {
+		return nil, false
+	}
+	c := parseWiringEventCatalogYAML(raw)
+	return c, len(c) > 0
+}
+
+func loadWiringEventContractsFromExtracted(repoRoot string) (map[string]wiringEventContract, int, bool) {
+	base := filepath.Join(repoRoot, "docs", "specs")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil, -1, false
+	}
+	bestPatch := -1
+	bestPath := ""
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(e.Name())
+		if !strings.HasPrefix(name, "empireai-v2.0.") {
+			continue
+		}
+		patch, ok := parseWiringPatchVersion(strings.TrimPrefix(name, "empireai-v2.0."))
+		if !ok || patch > 9999 {
+			continue
+		}
+		contractsPath := filepath.Join(base, name, "contracts", "event-catalog.yaml")
+		if _, statErr := os.Stat(contractsPath); statErr != nil {
+			continue
+		}
+		if patch > bestPatch {
+			bestPatch = patch
+			bestPath = contractsPath
+		}
+	}
+	if bestPath == "" {
+		return nil, -1, false
+	}
+	raw, err := os.ReadFile(bestPath)
+	if err != nil {
+		return nil, -1, false
+	}
+	c := parseWiringEventCatalogYAML(raw)
+	return c, bestPatch, len(c) > 0
+}
+
+func loadWiringEventContractsFromTar(repoRoot string) (map[string]wiringEventContract, int, bool) {
+	base := filepath.Join(repoRoot, "docs", "specs")
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return nil, -1, false
+	}
+	bestPatch := -1
+	bestTar := ""
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(e.Name())
+		if !strings.HasPrefix(name, "empireai-v2.0.") || !strings.HasSuffix(name, ".tar") {
+			continue
+		}
+		patchPart := strings.TrimSuffix(strings.TrimPrefix(name, "empireai-v2.0."), ".tar")
+		patch, ok := parseWiringPatchVersion(patchPart)
+		if !ok || patch > 9999 {
+			continue
+		}
+		if patch > bestPatch {
+			bestPatch = patch
+			bestTar = filepath.Join(base, name)
+		}
+	}
+	if bestTar == "" {
+		return nil, -1, false
+	}
+	f, err := os.Open(bestTar)
+	if err != nil {
+		return nil, -1, false
+	}
+	defer f.Close()
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil || hdr == nil {
+			return nil, -1, false
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		if !strings.HasSuffix(hdr.Name, "/contracts/event-catalog.yaml") {
+			continue
+		}
+		raw, readErr := io.ReadAll(tr)
+		if readErr != nil {
+			return nil, -1, false
+		}
+		c := parseWiringEventCatalogYAML(raw)
+		return c, bestPatch, len(c) > 0
+	}
+	return nil, -1, false
+}
+
+func parseWiringPatchVersion(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if strings.Contains(raw, ".") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func parseWiringEventCatalogYAML(raw []byte) map[string]wiringEventContract {
+	obj := map[string]wiringEventContract{}
+	if len(raw) == 0 {
+		return obj
+	}
+
+	root := map[string]any{}
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return map[string]wiringEventContract{}
+	}
+	for evt, node := range root {
+		eventType := strings.TrimSpace(evt)
+		if eventType == "" || strings.HasPrefix(eventType, "_") {
+			continue
+		}
+		fields, ok := node.(map[string]any)
+		if !ok {
+			continue
+		}
+		contract := wiringEventContract{
+			EventType:       eventType,
+			Emitter:         fields["emitter"],
+			Consumer:        fields["consumer"],
+			Intercepted:     toBool(fields["intercepted"]),
+			Passthrough:     fields["passthrough"],
+			Routing:         strings.TrimSpace(asString(fields["routing"])),
+			DeliveryChannel: normalizeDeliveryChannel(asString(fields["delivery_channel"])),
+		}
+		obj[eventType] = contract
+	}
+	return obj
+}
+
+func loadRuntimeManagedEvents(repoRoot string) map[string]struct{} {
+	out := map[string]struct{}{}
+	paths := []string{
+		filepath.Join(repoRoot, "internal", "runtime", "scan_campaign_manager.go"),
+	}
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, m := range eventTypeCallRe.FindAllStringSubmatch(string(raw), -1) {
+			if len(m) < 2 {
+				continue
+			}
+			evt := strings.TrimSpace(m[1])
+			if evt == "" || strings.Contains(evt, "*") {
+				continue
+			}
+			out[evt] = struct{}{}
+		}
+	}
+	return out
+}
+
+func toBool(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		s := strings.TrimSpace(strings.ToLower(t))
+		return s == "1" || s == "true" || s == "yes"
+	case int:
+		return t != 0
+	case int64:
+		return t != 0
+	case float64:
+		return t != 0
+	default:
+		return false
+	}
 }
 
 func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {

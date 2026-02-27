@@ -1,18 +1,16 @@
 id: chief-of-staff
 role: chief-of-staff
 parent_role: opco-ceo
-model_tier: haiku
+model_tier: haiku_or_sonnet
 subscriptions:
   - product_report
   - growth_report
-  - support_critical
-  - build_blocked
-  - channel_blocked
+  - feature_deployed
+  - churn_risk
   - build_complete
   - prelaunch_ready
-  - feature_deployed
-  - market_signals
-  - churn_risk
+  - support_critical
+  - channel_blocked
 tools:
   - agent_message
   - configure_routing

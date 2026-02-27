@@ -1,0 +1,1028 @@
+# EmpireAI Event Catalog — canonical source of truth
+# Generated from spec v2.0.28, audited v2.0.30
+#
+# This file is AUTHORITATIVE. Tests verify:
+#   1. Every event here has a matching EventSchemaRegistry entry
+#   2. Every emitter listed here has the event in its emit_events (agent-tools.yaml)
+#   3. Every consumer listed here has the event in its subscriptions (agent-tools.yaml)
+#   4. Intercepted events are handled in PipelineCoordinator.Intercept()
+#
+# Fields:
+#   emitter:     Who produces this event (agent id, "runtime", or "human")
+#   consumer:    Who receives it (agent id, "runtime", "audit", "mailbox")
+#   intercepted: Whether PipelineCoordinator consumes before/instead of fan-out
+#   passthrough: If intercepted, does it ALSO get delivered to subscribers?
+#   routing:     "static" (subscription-based) or "routing_table" (OpCo internal)
+#   payload:     Key fields in the event payload (matches EventSchemaRegistry)
+
+# ===========================================================================
+# SYSTEM LIFECYCLE
+# ===========================================================================
+
+system.started:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [timestamp, config_version, agent_count, is_cold_start]
+
+system.directive:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: true          # runtime parses simple directives, passes complex to EC
+  passthrough: conditional   # simple → consumed, complex → passthrough to EC
+  routing: static
+  payload: [directive_text, timestamp]
+
+# ===========================================================================
+# SCAN CAMPAIGN
+# ===========================================================================
+
+scan.requested:
+  emitter: empire-coordinator
+  consumer: runtime           # intercepted → handleScanRequested delegates to sub-agents
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [geography, mode, taxonomy_categories, sources, depth, campaign_id]
+
+scan.completed:
+  emitter: runtime            # emitted when ScanAccumulator has all agent completions
+  consumer: runtime           # intercepted → handleScanCompleted cycles to next mode
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [mode, geography, reports_received, agents_expected, agents_complete, verticals_discovered, campaign_id]
+
+scan.started:
+  emitter: runtime            # from handleScanRequested
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [geography, mode, assigned_agents, scan_id]
+
+campaign.completed:
+  emitter: runtime            # all scan modes done for a geography
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [campaign_id, geography, modes_completed, total_discovered, total_shortlisted]
+
+# ===========================================================================
+# DISCOVERY (sub-agent reports)
+# ===========================================================================
+
+category.assessed:
+  emitter: market-research-agent
+  consumer: runtime           # intercepted → handleDiscoveryReport accumulates
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [scan_id, category, subcategory, geography, signal_strength, evidence, opportunity_hypothesis, automation_micro]
+  notes: "Dual assessment — automation_micro object is optional. Runtime may emit 2 vertical.discovered per subcategory."
+
+trend.identified:
+  emitter: trend-research-agent
+  consumer: runtime           # intercepted → handleDiscoveryReport accumulates
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [scan_id, signal_strength, trend_description, market_intersection, opportunity_hypothesis, evidence, urgency]
+
+source.scraped:
+  emitter: scanner-agent      # various scanner types (google_maps, instagram, etc.)
+  consumer: runtime           # intercepted → handleDiscoveryReport accumulates
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [scan_id, source_type, raw_data, geography]
+
+market_research.scan_assigned:
+  emitter: runtime            # from handleScanRequested
+  consumer: market-research-agent
+  intercepted: false
+  routing: static
+  payload: [geography, scan_id, taxonomy_categories, shard]
+
+market_research.scan_complete:
+  emitter: market-research-agent
+  consumer: runtime           # intercepted → handleSubAgentComplete
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [scan_id, categories_assessed, high_signal_count, geography]
+
+trend_research.scan_assigned:
+  emitter: runtime
+  consumer: trend-research-agent
+  intercepted: false
+  routing: static
+  payload: [geography, scan_id]
+
+trend_research.scan_complete:
+  emitter: trend-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [scan_id, trends_identified, geography]
+
+dedup.ambiguous:
+  emitter: runtime            # fuzzy name match >70% similarity
+  consumer: discovery-coordinator
+  intercepted: false
+  routing: static
+  payload: [dedup_id, new_candidate, existing_vertical, similarity]
+
+dedup.resolved:
+  emitter: discovery-coordinator
+  consumer: runtime           # intercepted → handleDedupResolved
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [dedup_id, action, reasoning]  # action: keep_both | merge
+
+synthesis.needed:
+  emitter: runtime
+  consumer: discovery-coordinator
+  intercepted: false
+  routing: static
+  payload: [conflicting_reports, context]
+
+synthesis.resolved:
+  emitter: discovery-coordinator
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [resolved_assessment]
+
+vertical.discovered:
+  emitter: runtime            # from handleDiscoveryReport when signal ≥50
+  consumer: runtime           # intercepted → handleVerticalDiscovered selects rubric
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_name, raw_signals, geography, mode]
+
+# ===========================================================================
+# SCORING PIPELINE (§4.2.2.8 — fully runtime-owned, no SC agent)
+# ===========================================================================
+
+scoring.requested:
+  emitter: runtime            # from handleVerticalDiscovered
+  consumer: analysis-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, vertical_name, geography, mode, rubric, dimensions_requested]
+
+score.dimension_complete:
+  emitter: analysis-agent
+  consumer: runtime           # intercepted → handleScoreDimensionComplete accumulates
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, dimension, score, evidence, confidence]
+
+scoring.contested:
+  emitter: runtime            # rare — sharded Analysis Agents disagree on a dimension
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, dimension, scores, evidence, spread]
+
+scoring.contest_resolved:
+  emitter: empire-coordinator
+  consumer: runtime
+  intercepted: false
+  routing: static
+  payload: [vertical_id, dimension, resolved_score, reasoning]
+
+vertical.scored:
+  emitter: runtime            # from computeComposite()
+  consumer: empire-coordinator  # shortlisted only (rejections → scoring_digest_buffer)
+  intercepted: false
+  routing: static
+  payload: [vertical_id, result, composite_score, viability_score, market_score, dimensions, rubric]
+
+vertical.shortlisted:
+  emitter: runtime            # from computeComposite() when composite ≥75
+  consumer: runtime           # intercepted → handleShortlisted creates ValidationPipeline
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, composite_score, viability_score, scoring_payload]
+
+vertical.marginal:
+  emitter: runtime            # from computeComposite() when composite 50-74
+  consumer: empire-coordinator  # EC decides: promote/park/reject
+  intercepted: false
+  routing: static
+  payload: [vertical_id, composite_score, viability_score, dimensions, promotion_eligible]
+
+vertical.rejected:
+  emitter: runtime
+  consumer: audit             # written to scoring_digest_buffer, NOT delivered to EC
+  intercepted: false
+  routing: static
+  payload: [vertical_id, reason]
+
+# ===========================================================================
+# VALIDATION PIPELINE (§4.2.2.2)
+# ===========================================================================
+
+validation.started:
+  emitter: runtime            # from handleShortlisted
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, vertical_name, geography, scoring_context]
+
+validation.more_data_needed:
+  emitter: runtime            # from human mailbox response
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, questions]
+
+validation.package_ready:
+  emitter: runtime            # from checkGates() when G1-G4 all met
+  consumer: validation-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, research, spec, cto_notes, brand]
+
+research.completed:
+  emitter: business-research-agent
+  consumer: runtime           # intercepted → handleResearchCompleted sets G1
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, business_brief]
+
+research.vertical_rejected:
+  emitter: business-research-agent
+  consumer: runtime           # intercepted → handleResearchRejected
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, rejection_reason, evidence]
+
+spec.requested:
+  emitter: business-research-agent
+  consumer: lightweight-spec-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, business_brief]
+
+spec.draft_ready:
+  emitter: lightweight-spec-agent
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, mvp_spec]
+
+spec.approved:
+  emitter: business-research-agent
+  consumer: runtime           # intercepted → handleSpecApproved sets G2
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, final_spec]
+
+spec.revision_needed:
+  emitter: business-research-agent
+  consumer: lightweight-spec-agent  # or intercepted if from CTO revision flow
+  intercepted: conditional    # intercepted only when vertical_id present (pipeline spec)
+  routing: static
+  payload: [vertical_id, misalignment_details]
+
+spec.revision_requested:
+  emitter: runtime            # from handleCTORevision
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, cto_feedback]
+
+spec_review.requested:
+  emitter: business-research-agent
+  consumer: spec-reviewer
+  intercepted: false
+  routing: static
+  payload: [vertical_id, mvp_spec, business_brief]
+
+spec_review.passed:
+  emitter: spec-reviewer
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, review_notes]
+
+spec_review.issues_found:
+  emitter: spec-reviewer
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, issues]
+
+spec.validation_requested:
+  emitter: factory-cto        # or opco-cto for template specs
+  consumer: spec-auditor
+  intercepted: false
+  routing: static
+  payload: [spec_content, spec_tier, vertical_id]
+
+spec.validation_passed:
+  emitter: spec-auditor
+  consumer: runtime           # intercepted for pipeline specs → handleSpecValidated
+  intercepted: conditional    # pipeline spec (vertical_id present) → consumed; template spec → passthrough to Factory CTO
+  routing: static
+  payload: [vertical_id, validation_notes]
+
+spec.validation_failed:
+  emitter: spec-auditor
+  consumer: runtime           # intercepted for pipeline specs
+  intercepted: conditional
+  routing: static
+  payload: [vertical_id, failures, severity]
+
+spec.contradiction_detected:
+  emitter: runtime
+  consumer: spec-auditor
+  intercepted: false
+  routing: static
+  payload: [agent_id, contradiction_type, detail]
+
+cto.spec_review_requested:
+  emitter: runtime            # from handleSpecValidated when G2 set
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  payload: [vertical_id, mvp_spec, business_brief, vertical_context]
+
+cto.spec_approved:
+  emitter: factory-cto
+  consumer: runtime           # intercepted → handleCTOApproved sets G3
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, cto_notes]
+
+cto.spec_revision_needed:
+  emitter: factory-cto
+  consumer: runtime           # intercepted → handleCTORevision resets G2+G3
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, technical_issues]
+
+cto.spec_vetoed:
+  emitter: factory-cto
+  consumer: runtime           # intercepted → handleCTOVetoed
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, reason]
+
+brand.requested:
+  emitter: runtime            # from handleShortlisted (parallel with validation.started)
+  consumer: pre-brand-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, vertical_name, geography, business_brief]
+
+brand.candidates_ready:
+  emitter: pre-brand-agent
+  consumer: runtime           # intercepted → handleBrandReady sets G4
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, candidates]
+
+brand.revision_needed:
+  emitter: runtime            # from human mailbox
+  consumer: pre-brand-agent
+  intercepted: false
+  routing: static
+  payload: [vertical_id, feedback]
+
+vertical.ready_for_review:
+  emitter: validation-coordinator
+  consumer: mailbox           # human reviews validation kit
+  intercepted: false
+  routing: static
+  payload: [vertical_id, validation_kit]
+
+vertical.needs_more_data:
+  emitter: human              # mailbox decision
+  consumer: runtime           # intercepted → handleMoreData resets G1
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id, questions]
+
+vertical.approved:
+  emitter: human              # mailbox decision
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, brand_choice, founder_directives]
+
+vertical.killed:
+  emitter: runtime            # from various rejection handlers
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, reason, source]
+
+vertical.resumed:
+  emitter: empire-coordinator   # promote parked marginal
+  consumer: runtime           # intercepted → handleResumed reactivates
+  intercepted: true
+  passthrough: false
+  routing: static
+  payload: [vertical_id]
+
+# ===========================================================================
+# TEMPLATE LIFECYCLE
+# ===========================================================================
+
+template.publish_requested:
+  emitter: human              # empire template publish CLI
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  payload: [template_version, changes]
+
+template.version_published:
+  emitter: factory-cto
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [template_version, changelog]
+
+template.migration_approved:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [template_version, verticals]
+
+template.migration_planned:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [template_version, migration_plan, affected_verticals]
+
+template.migration_completed:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [template_version, vertical_id, result]
+
+template.migration_failed:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [template_version, vertical_id, error]
+
+# ===========================================================================
+# OPCO LIFECYCLE
+# ===========================================================================
+
+opco.spinup_requested:
+  emitter: empire-coordinator
+  consumer: runtime           # AgentManager spawns 13 agents
+  intercepted: false
+  routing: static
+  payload: [vertical_id, mandate, brand, founder_directives]
+
+opco.ceo_ready:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, agent_count]
+
+opco.launched:
+  emitter: opco-ceo
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, launch_url, metrics]
+
+opco.ceo_report:
+  emitter: opco-ceo
+  consumer: [empire-coordinator, operations-analyst]  # OA matches via opco.*.ceo_report wildcard
+  intercepted: false
+  routing: static
+  payload: [vertical_id, phase, metrics, decisions]
+
+opco.steady_state_reached:
+  emitter: opco-ceo
+  consumer: [empire-coordinator, factory-cto, operations-analyst]  # FCTO+OA match via opco.*.steady_state_reached wildcard
+  intercepted: false
+  routing: static
+  payload: [vertical_id]
+
+opco.teardown_requested:
+  emitter: human
+  consumer: runtime
+  intercepted: false
+  routing: static
+  payload: [vertical_id, reason]
+
+opco.teardown_complete:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id]
+
+opco.spend_request:
+  emitter: opco-ceo
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  payload: [vertical_id, amount, purpose, vendor]
+
+opco.escalation:
+  emitter: opco-ceo
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [vertical_id, issue, recommendation]
+
+# ===========================================================================
+# BUDGET & HUMAN TASKS
+# ===========================================================================
+
+budget.threshold_crossed:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [level, current_spend, budget_cap, percentage]
+
+budget.warning:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [level, message]
+
+budget.throttle:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [throttle_level, affected_agents]
+
+human_task.requested:
+  emitter: runtime            # from human_task_request tool
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [task_id, requesting_agent, task_type, description]
+
+human_task.completed:
+  emitter: human
+  consumer: requesting-agent  # targeted delivery
+  intercepted: false
+  routing: static
+  payload: [task_id, result]
+
+human_task.expired:
+  emitter: runtime
+  consumer: [empire-coordinator, requesting-agent]
+  intercepted: false
+  routing: static
+  payload: [task_id]
+
+spend.approved:
+  emitter: human
+  consumer: requesting-agent
+  intercepted: false
+  routing: static
+  payload: [amount, purpose]
+
+spend.rejected:
+  emitter: human
+  consumer: requesting-agent
+  intercepted: false
+  routing: static
+  payload: [reason]
+
+# ===========================================================================
+# INFRASTRUCTURE
+# ===========================================================================
+
+devops.deploy_requested:
+  emitter: opco-devops
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  payload: [vertical_id, manifest, environment, requesting_agent]
+
+devops.deploy_complete:
+  emitter: holding-devops
+  consumer: audit             # result sent back via agent_message to requesting OpCo DevOps
+  intercepted: false
+  routing: static
+  payload: [vertical_id, environment, url, version]
+
+devops.deploy_failed:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [vertical_id, environment, error]
+
+devops.rollback_requested:
+  emitter: opco-devops
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  payload: [vertical_id, target_version, requesting_agent]
+
+devops.health_check_failed:
+  emitter: runtime            # from scheduled health checks
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  payload: [vertical_id, endpoint, error]
+
+# ===========================================================================
+# OPCO INTERNAL (routing table, not static subscriptions)
+# ===========================================================================
+
+bug_reported:
+  emitter: opco-support
+  consumer: opco-cto          # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [description, severity, reproduction_steps]
+
+feature_request:
+  emitter: opco-support
+  consumer: opco-pm           # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [description, requester_context]
+
+support_digest:
+  emitter: opco-support
+  consumer: opco-head-of-product  # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [open_tickets, resolved, csat, common_issues, churn_risk_signals]
+
+support_critical:
+  emitter: opco-support
+  consumer: opco-head-of-product
+  intercepted: false
+  routing: routing_table
+  payload: [severity, description, customer_impact]
+
+build_complete:
+  emitter: opco-cto
+  consumer: opco-head-of-product  # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [feature, environment]
+
+qa.validation_passed:
+  emitter: opco-qa
+  consumer: opco-cto          # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [test_summary, coverage_notes, staging_url]
+
+qa.validation_failed:
+  emitter: opco-qa
+  consumer: opco-cto
+  intercepted: false
+  routing: routing_table
+  payload: [failures, expected_vs_actual, severity, reproduction_steps]
+
+product_report:
+  emitter: opco-head-of-product
+  consumer: [opco-ceo, opco-chief-of-staff]  # bootstrap routes
+  intercepted: false
+  routing: routing_table
+  payload: [phase, metrics, decisions]
+
+growth_report:
+  emitter: opco-head-of-growth
+  consumer: [opco-ceo, opco-chief-of-staff]  # bootstrap routes
+  intercepted: false
+  routing: routing_table
+  payload: [phase, metrics, decisions]
+
+cycle_limit_reached:
+  emitter: runtime            # from OpCoCycleTracker (§4.2.2.9)
+  consumer: opco-cto          # or mailbox if CTO is in the loop
+  intercepted: false
+  routing: routing_table
+  payload: [event_pattern, count, window_hours, agents_involved]
+
+cycle_reset:
+  emitter: opco-cto
+  consumer: runtime
+  intercepted: false
+  routing: routing_table
+  payload: [event_pattern, reason]
+
+# ===========================================================================
+# OPERATIONS ANALYST
+# ===========================================================================
+
+analyst.bootstrap_upgrade_proposal:
+  emitter: operations-analyst
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  payload: [proposal_type, affected_routes, evidence, recommendation]
+
+analyst.prompt_refinement_proposal:
+  emitter: operations-analyst
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  payload: [agent_role, current_behavior, proposed_change, evidence]
+
+analyst.anti_pattern_advisory:
+  emitter: operations-analyst
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  payload: [pattern, affected_verticals, severity, recommendation]
+
+# ===========================================================================
+# EVENTS DISCOVERED DURING CONTRACT EXTRACTION (v2.0.29 audit)
+# These existed in agent configs (emit_events / subscriptions) but were
+# missing from the original §5.4/§5.7.1 event catalog in the spec prose.
+# ===========================================================================
+
+# --- Budget (EC) ---
+
+budget.emergency:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [level, message, action_taken]
+
+budget.resumed:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [previous_level, message]
+
+# --- Human tasks (EC decisions) ---
+
+human_task.approved:
+  emitter: empire-coordinator
+  consumer: requesting-agent   # targeted delivery
+  intercepted: false
+  routing: static
+  payload: [task_id, notes]
+
+human_task.rejected:
+  emitter: empire-coordinator
+  consumer: requesting-agent
+  intercepted: false
+  routing: static
+  payload: [task_id, reason]
+
+human_task.deferred:
+  emitter: empire-coordinator
+  consumer: requesting-agent
+  intercepted: false
+  routing: static
+  payload: [task_id, defer_until, reason]
+
+# --- Portfolio (EC) ---
+
+portfolio.digest_compiled:
+  emitter: empire-coordinator
+  consumer: audit              # Telegram delivery
+  intercepted: false
+  routing: static
+  payload: [digest_content, trigger_reason, action_required_count]
+
+vertical.health_warning:
+  emitter: empire-coordinator
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  payload: [vertical_id, warning_type, metrics, recommendation]
+
+# --- Factory CTO ---
+
+cto.architecture_directive:
+  emitter: factory-cto
+  consumer: opco-ceo           # CEO subscribes, delegates to CTO via agent_message
+  intercepted: false
+  routing: static
+  payload: [directive, affected_verticals, rationale]
+
+cto.extraction_recommended:
+  emitter: factory-cto
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [pattern_id, affected_verticals, recommendation]
+
+cto.pattern_detected:
+  emitter: factory-cto
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [pattern_type, verticals, description]
+
+cto.tech_spec_feedback:
+  emitter: factory-cto
+  consumer: opco-cto           # delivered via agent_message, not subscription
+  intercepted: false
+  routing: static
+  payload: [vertical_id, feedback, severity]
+
+# --- Holding DevOps ---
+
+devops.capacity_warning:
+  emitter: holding-devops
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [resource, current_usage, threshold, recommendation]
+
+devops.infra_change_needed:
+  emitter: holding-devops
+  consumer: mailbox            # spend approval for infra changes
+  intercepted: false
+  routing: static
+  payload: [change_type, reason, estimated_cost]
+
+devops.rollback_complete:
+  emitter: holding-devops
+  consumer: audit              # result sent via agent_message to requesting OpCo DevOps
+  intercepted: false
+  routing: static
+  payload: [vertical_id, environment, restored_version]
+
+devops.rollback_failed:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [vertical_id, environment, error]
+
+devops.ssl_provisioned:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  payload: [vertical_id, domain, expiry]
+
+# --- OpCo CEO ---
+
+opco.deploy_review:
+  emitter: opco-ceo
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  payload: [vertical_id, deploy_id, review_type]
+
+opco.founder_input:
+  emitter: opco-ceo
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  payload: [vertical_id, question, context, urgency]
+
+# --- OpCo CTO ---
+
+cto.tech_spec_review_requested:
+  emitter: opco-cto
+  consumer: opco-tech-writer   # via agent_message typically, but cataloged for completeness
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, spec_content]
+
+# --- OpCo VPs ---
+
+product_escalation:
+  emitter: opco-head-of-product
+  consumer: opco-ceo           # bootstrap route
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, issue, recommendation]
+
+growth_escalation:
+  emitter: opco-head-of-growth
+  consumer: opco-ceo           # bootstrap route
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, issue, recommendation]
+
+opco.product_spec_review:
+  emitter: opco-head-of-product
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  payload: [vertical_id, spec_summary, review_request]
+
+# --- OpCo Workers ---
+
+prelaunch_ready:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth  # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, channels_ready, landing_page_url]
+
+market_signals:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth  # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, signal_type, description, evidence]
+
+churn_risk:
+  emitter: opco-support
+  consumer: opco-head-of-product  # via routing table
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, customer_id, risk_level, indicators]
+
+# --- OpCo internal (worker → VP digests) ---
+
+outreach_digest:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth  # seeded route
+  intercepted: false
+  routing: routing_table
+  payload: [messages_sent, responses, response_rate, leads_converted, best_channel, intelligence]
+
+channel_blocked:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth  # seeded route
+  intercepted: false
+  routing: routing_table
+  payload: [channel, reason, severity]
+
+user_onboarded:
+  emitter: runtime               # inbound gateway transforms webhook → event
+  consumer: opco-head-of-growth  # seeded route
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, user_id, channel]
+
+spend_needed:
+  emitter: opco-marketing        # or any agent needing budget
+  consumer: opco-head-of-growth
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, amount, purpose, vendor]
+
+build_blocked:
+  emitter: opco-cto              # or worker agents
+  consumer: opco-head-of-product  # bootstrap route
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, blocker, blocked_task, severity]
+
+build_progress:
+  emitter: opco-cto
+  consumer: opco-head-of-product  # seeded route
+  intercepted: false
+  routing: routing_table
+  payload: [vertical_id, milestone, completion_pct]
+
+# --- Timer events (runtime-emitted on schedule) ---
+
+timer.portfolio_digest:
+  emitter: runtime               # from schedules table
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [trigger_reason]
+
+timer.infra_health_check:
+  emitter: runtime               # from schedules table
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  payload: [check_type]
+
+timer.marginal_review:
+  emitter: runtime               # from schedules table
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  payload: [parked_marginals_summary]

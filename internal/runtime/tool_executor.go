@@ -1593,7 +1593,7 @@ func shouldFlattenLegacyNestedEmitPayload(eventType string) bool {
 		"scanner.instagram.scan_complete",
 		"scanner.reviews.scan_complete",
 		"scanner.directories.scan_complete",
-		"scanner.job_boards.scan_complete":
+		"scanner.yelp.scan_complete":
 		return true
 	default:
 		return false
@@ -1627,7 +1627,7 @@ func normalizeScanModeCompat(raw string) string {
 	}
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "discovery", "scan", "default", "automation", "micro", "automation-micro", "automation_micro":
-		return "automation_micro"
+		return "saas_gap"
 	case "saas":
 		return "saas_gap"
 	case "trend", "trend_scan", "saas-trend":

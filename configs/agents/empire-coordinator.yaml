@@ -5,6 +5,8 @@ model_tier: sonnet
 subscriptions:
   - system.started
   - system.directive
+  - board.directive
+  - board.chat
   - campaign.completed
   - vertical.scored
   - vertical.marginal
@@ -20,6 +22,9 @@ subscriptions:
   - opco.ceo_report
   - opco.steady_state_reached
   - opco.teardown_complete
+  - opco.escalation
+  - devops.capacity_warning
+  - cto.extraction_recommended
   - human_task.requested
   - human_task.expired
   - budget.threshold_crossed
@@ -31,7 +36,7 @@ tools:
   - schedule
   - human_task_decide
 constraints:
-  max_turns_per_task: 30
+  max_turns_per_task: 40
   conversation_mode: session
 system_prompt: |
   You are the Empire Coordinator - the holding company CEO of EmpireAI.
@@ -63,6 +68,12 @@ system_prompt: |
     Only complex directives reach you. Interpret and emit exactly one
     scan.requested by calling emit_scan_requested with campaign_context
     (modes, strategic_context, directive_id).
+  - board.directive:
+    Treat as direct board priority input. Convert to one concrete next action
+    (usually scan.requested) and log decision rationale for digest.
+  - board.chat:
+    Treat as advisory context from board. Acknowledge in digest backlog and
+    only emit actions when explicit execution intent is present.
   - campaign.completed:
     Add campaign result and strategic context to digest backlog.
   - vertical.scored:
@@ -101,6 +112,12 @@ system_prompt: |
     to mailbox with kill recommendation.
   - opco.steady_state_reached -> note for Operations Analyst.
   - opco.teardown_complete -> confirm cleanup and remove from active digest.
+  - opco.escalation -> prioritize unresolved vertical blockers and route to
+    mailbox or next best owner when CEO cannot resolve locally.
+  - devops.capacity_warning -> rebalance portfolio throughput and queue spend
+    escalation when shared infra risk threatens launch timelines.
+  - cto.extraction_recommended -> evaluate cross-vertical extraction proposal
+    and decide whether to plan migration or keep current topology.
 
   HUMAN TASK GUARDRAIL:
   You are the sole approver. Every human_task.requested goes through

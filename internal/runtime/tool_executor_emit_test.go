@@ -150,8 +150,8 @@ func TestRuntimeToolExecutor_HandleEmitToolCoordinatorLegacyNestedPayload(t *tes
 	if err := json.Unmarshal(last.Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := strings.TrimSpace(asString(payload["mode"])); got != "automation_micro" {
-		t.Fatalf("expected mode alias discovery->automation_micro, got %q", got)
+	if got := strings.TrimSpace(asString(payload["mode"])); got != "saas_gap" {
+		t.Fatalf("expected mode alias discovery->saas_gap, got %q", got)
 	}
 	if got := strings.TrimSpace(asString(payload["priority"])); got != "normal" {
 		t.Fatalf("expected priority alias medium->normal, got %q", got)
@@ -198,8 +198,8 @@ func TestRuntimeToolExecutor_HandleEmitToolCoordinatorInvalidModeCoerced(t *test
 	if err := json.Unmarshal(last.Payload, &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if got := strings.TrimSpace(asString(payload["mode"])); got != "automation_micro" {
-		t.Fatalf("expected invalid mode coerced to automation_micro, got %q", got)
+	if got := strings.TrimSpace(asString(payload["mode"])); got != "saas_gap" {
+		t.Fatalf("expected invalid mode coerced to saas_gap, got %q", got)
 	}
 }
 
@@ -394,7 +394,7 @@ func TestRuntimeToolExecutor_HandleEmitToolScoreDimensionDoesNotInjectTaskID(t *
 	ctx = WithInboundEvent(ctx, events.Event{
 		ID:          "score-req-1",
 		Type:        events.EventType("scoring.requested"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		TaskID:      "task-score-1",
 		VerticalID:  "vertical-1",
 		Payload: mustJSON(map[string]any{

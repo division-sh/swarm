@@ -144,6 +144,9 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	if status == "" {
 		status = "processed"
 	}
+	if strings.TrimSpace(errText) != "" && status == "processed" {
+		status = "error"
+	}
 	const q = `
 		INSERT INTO pipeline_receipts (event_id, status, error, processed_at)
 		VALUES ($1::uuid, $2, NULLIF($3,''), now())
@@ -159,6 +162,20 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	if _, err := execFn(ctx, q, eventID, status, strings.TrimSpace(errText)); err != nil {
 		if isMissingPipelineReceiptsTable(err) {
 			return nil
+		}
+		// Backward-compatible fallback for legacy schema versions that still
+		// use pipeline_receipts.result instead of status/error.
+		if isLegacyPipelineReceiptsColumns(err) {
+			const legacyQ = `
+				INSERT INTO pipeline_receipts (event_id, result, processed_at)
+				VALUES ($1::uuid, $2, now())
+				ON CONFLICT (event_id) DO UPDATE SET
+					result = EXCLUDED.result,
+					processed_at = now()
+			`
+			if _, legacyErr := execFn(ctx, legacyQ, eventID, status); legacyErr == nil {
+				return nil
+			}
 		}
 		return fmt.Errorf("upsert pipeline receipt: %w", err)
 	}
@@ -221,6 +238,17 @@ func isMissingPipelineReceiptsTable(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "pipeline_receipts")
+}
+
+func isLegacyPipelineReceiptsColumns(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "pipeline_receipts") {
+		return false
+	}
+	return strings.Contains(msg, "column") && (strings.Contains(msg, "status") || strings.Contains(msg, "error"))
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {

@@ -51,7 +51,7 @@ func TestDashboard_HoldingVerticalDetail_ReturnsArtifactsAndRelatedRecords(t *te
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (id, type, source_agent, vertical_id, payload, created_at)
 		VALUES
-			($1::uuid, 'vertical.shortlisted', 'scoring-coordinator', $2::uuid, '{"composite_score":81.25}'::jsonb, now()),
+			($1::uuid, 'vertical.shortlisted', 'pipeline-coordinator', $2::uuid, '{"composite_score":81.25}'::jsonb, now()),
 			($3::uuid, 'validation.package_ready', 'pipeline-coordinator', $2::uuid, '{"status":"ready"}'::jsonb, now())
 	`, uuid.NewString(), verticalID, uuid.NewString()); err != nil {
 		t.Fatalf("seed events: %v", err)
@@ -147,7 +147,7 @@ func TestDashboard_HoldingVerticalDetail_BackfillsArtifactsFromEvents(t *testing
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (id, type, source_agent, vertical_id, payload, created_at) VALUES
-			($1::uuid, 'vertical.scored', 'scoring-coordinator', $2::uuid, '{"composite_score":84.5,"dimensions":{"pain":88}}'::jsonb, now() - interval '30 minutes'),
+			($1::uuid, 'vertical.scored', 'pipeline-coordinator', $2::uuid, '{"composite_score":84.5,"dimensions":{"pain":88}}'::jsonb, now() - interval '30 minutes'),
 			($3::uuid, 'research.completed', 'business-research-agent', $2::uuid, '{"business_brief":{"business_model":"SaaS compliance workflow","opportunity_hypothesis":"AI Act governance cockpit"}}'::jsonb, now() - interval '25 minutes'),
 			($4::uuid, 'spec.draft_ready', 'lightweight-spec-agent', $2::uuid, '{"mvp_spec":{"core_workflow":"policy intake -> risk scoring -> evidence export"}}'::jsonb, now() - interval '20 minutes'),
 			($5::uuid, 'spec_review.passed', 'spec-reviewer', $2::uuid, '{"checklist":{"scope":"pass","feasibility":"pass"}}'::jsonb, now() - interval '15 minutes'),

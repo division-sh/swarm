@@ -10,15 +10,15 @@ constraints:
 system_prompt: |
   You are the Market Research Agent for EmpireAI's factory pipeline.
   You systematically evaluate the SaaS taxonomy against a target market
-  to find gaps where software solutions are absent, poorly localized,
-  or failing to meet local requirements.
+  using two lenses in one pass:
+  - SaaS Gap: where software is absent, weak, or poorly localized.
+  - Automation-Micro: narrow automation wedges with fast time-to-revenue.
 
   market_research.scan_assigned:
   - Read scan_id, geography, mode, and optional taxonomy_categories.
-  - If mode=automation_micro: focus on automation-friendly micro-verticals
-    (booking, reminders, invoicing, WhatsApp workflows) and score channel
-    exploitability + time-to-revenue potential.
-  - Otherwise execute taxonomy gap evaluation over assigned scope.
+  - For each assessed subcategory, emit standard SaaS Gap signals AND (when present)
+    automation-micro signals inside the `automation_micro` object.
+  - `automation_micro` is optional and should only be emitted when evidence supports it.
   - Call `emit_category_assessed` for each assessed category.
   - Call `emit_market_research_scan_complete` when assignment is complete.
 
@@ -68,9 +68,11 @@ system_prompt: |
   Call `emit_category_assessed` for each subcategory with:
   - scan_id: ALWAYS propagate from your assignment event
   - category, subcategory, geography
-  - signal_strength: numeric 0-100
-  - evidence: concrete data points supporting assessment
-  - opportunity_hypothesis: one sentence on what to build and why
+  - signal_strength / evidence / opportunity_hypothesis for SaaS Gap (numeric 0-100 + supporting evidence)
+  - optional automation_micro object with:
+    - signal_strength (0-100)
+    - evidence
+    - opportunity_hypothesis
 
   PROCESS:
   - If assignment specifies taxonomy_categories filter, only evaluate those.

@@ -1,0 +1,258 @@
+# EmpireAI upgrade-actions.yaml
+# Machine-readable upgrade delta. One file per spec version.
+# Implementer processes actions in order. Each action is independently verifiable.
+#
+# Action types:
+#   add       — Create new file or add new field/entry
+#   edit      — Modify existing file/field/entry
+#   drop      — Remove file/field/entry
+#   rename    — Rename file/field/entry (old_path → new_path)
+#   migrate   — SQL migration (run against live or fresh DB)
+#   grep_kill — Find-and-replace across codebase
+#
+# Fields:
+#   id:              Unique action identifier (version-scoped)
+#   type:            Action type (see above)
+#   priority:        must_pass | should_fix | optional
+#   target_file:     File path relative to repo root
+#   key_path:        Dot-notation path within the file (for YAML/Go edits)
+#   description:     Human-readable what and why
+#   expected_before: What the target looks like before this action (null for adds)
+#   expected_after:  What the target should look like after this action (null for drops)
+#   verify_command:  Shell command that returns 0 on success
+#   depends_on:      List of action IDs that must complete first (null if none)
+
+spec_version: "2.0.36"
+previous_version: "2.0.35"
+generated_at: "2026-02-26"
+
+actions:
+
+  # ── v2.0.35: DDL column-level alignment ─────────────────────────────
+  # These supersede the v2.0.34 DDL actions. Run ddl-canonical.sql fresh.
+
+  - id: "v2035-ddl-fresh"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: null
+    description: >
+      Run canonical DDL on fresh database. All 7 runtime tables now have
+      correct column names matching Go code. Supersedes v2034-ddl-fresh.
+    expected_before: null
+    expected_after: "36 tables created, 0 errors"
+    verify_command: "psql -v ON_ERROR_STOP=1 -f contracts/ddl-canonical.sql 2>&1 | grep -c ERROR | grep -q '^0$'"
+    depends_on: null
+
+  - id: "v2035-ddl-pipeline-receipts-cols"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: pipeline_receipts
+    description: "pipeline_receipts: result column → status + error columns"
+    expected_before: "result TEXT"
+    expected_after: "status TEXT NOT NULL DEFAULT 'processed', error TEXT"
+    verify_command: "psql -c \"\\d pipeline_receipts\" | grep -q 'status.*text' && psql -c \"\\d pipeline_receipts\" | grep -q 'error'"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-ddl-pending-dedup-cols"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: pending_dedup_candidates
+    description: "pending_dedup_candidates: dedup_event_id TEXT PK, name, signal_strength, payload"
+    expected_before: "id UUID PK, candidate JSONB"
+    expected_after: "dedup_event_id TEXT PK, name TEXT, signal_strength INT, payload JSONB"
+    verify_command: "psql -c \"\\d pending_dedup_candidates\" | grep -q 'dedup_event_id.*text'"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-ddl-validation-pipelines-cols"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: validation_pipelines
+    description: "validation_pipelines: g2_spec (not g2_spec_approved), added scoring_payload, packaging_requested, packaging_retries"
+    expected_before: "g2_spec_approved, g3_cto_approved, g4_brand_ready"
+    expected_after: "g2_spec, g3_cto, g4_brand, scoring_payload JSONB, packaging_requested BOOLEAN, packaging_retries INT"
+    verify_command: "psql -c \"\\d validation_pipelines\" | grep -q g2_spec && psql -c \"\\d validation_pipelines\" | grep -q scoring_payload"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-ddl-scan-accumulators-cols"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: scan_accumulators
+    description: "scan_accumulators: TEXT types, expected (not expected_agents), reports INT (not JSONB), completed_by '{}' (not '[]')"
+    expected_before: "scan_id UUID, expected_agents INT, reports JSONB, completed_by '[]'"
+    expected_after: "scan_id TEXT, expected INT, complete INT, reports INT, discovered INT, completed_by '{}'"
+    verify_command: "psql -c \"\\d scan_accumulators\" | grep -q 'scan_id.*text' && psql -c \"\\d scan_accumulators\" | grep -q 'expected '"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-ddl-template-drafts-cols"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: template_prompt_drafts
+    description: "template_prompt_drafts: added source, notes, created_at"
+    expected_before: "role TEXT PK, prompt TEXT, updated_at"
+    expected_after: "role TEXT PK, prompt TEXT, source TEXT, notes TEXT, created_at, updated_at"
+    verify_command: "psql -c \"\\d template_prompt_drafts\" | grep -q source && psql -c \"\\d template_prompt_drafts\" | grep -q notes"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-idx-sessions-scope"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: agent_sessions.idx_sessions_active
+    description: "agent_sessions unique index: add scope_key for session_per_vertical"
+    expected_before: "UNIQUE INDEX ON agent_sessions(agent_id, runtime_mode)"
+    expected_after: "UNIQUE INDEX ON agent_sessions(agent_id, runtime_mode, scope_key)"
+    verify_command: "psql -c \"\\di idx_sessions_active\" | grep -q scope_key"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-idx-conversations-scope"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: conversations.idx_conversations_scope
+    description: "conversations unique index: add mode column and session_per_vertical filter"
+    expected_before: "UNIQUE INDEX ON conversations(agent_id, scope_key) WHERE scope_key IS NOT NULL AND status = 'active'"
+    expected_after: "UNIQUE INDEX ON conversations(agent_id, scope_key, mode) WHERE scope_key IS NOT NULL AND status = 'active' AND mode = 'session_per_vertical'"
+    verify_command: "psql -c \"\\di idx_conversations_scope\" | grep -q mode"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2035-go-struct-renames"
+    type: grep_kill
+    priority: must_pass
+    target_file: "internal/**/*.go"
+    key_path: null
+    description: >
+      Rename Go struct fields to match DDL column names:
+      G2_SpecApproved→G2_Spec, G3_CTOApproved→G3_CTO, G4_BrandReady→G4_Brand,
+      ExpectedAgents→Expected, AgentsComplete→Complete,
+      VerticalsDiscovered→Discovered, VerticalsSkipped→Skipped
+    expected_before: "G2_SpecApproved, G3_CTOApproved, G4_BrandReady, ExpectedAgents, AgentsComplete"
+    expected_after: "G2_Spec, G3_CTO, G4_Brand, Expected, Complete"
+    verify_command: "grep -r 'G2_SpecApproved\\|G3_CTOApproved\\|G4_BrandReady\\|ExpectedAgents\\|AgentsComplete' internal/ | wc -l | tr -d ' ' | grep -q '^0$'"
+    depends_on: null
+
+  # ── DDL: Column/constraint fixes ────────────────────────────────────
+
+  - id: "v2034-ddl-strategic-context-jsonb"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: scan_campaigns.strategic_context
+    description: "scan_campaigns.strategic_context: TEXT → JSONB"
+    expected_before: "strategic_context text"
+    expected_after: "strategic_context jsonb"
+    verify_command: "psql -c \"SELECT data_type FROM information_schema.columns WHERE table_name='scan_campaigns' AND column_name='strategic_context'\" | grep -q jsonb"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2034-ddl-shards-check"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: shards.status
+    description: "Add CHECK constraint on shards.status"
+    expected_before: "status TEXT NOT NULL DEFAULT 'pending' (no constraint)"
+    expected_after: "CONSTRAINT valid_shard_status CHECK (status IN ('pending','assigned','completed','failed','timed_out'))"
+    verify_command: "psql -c \"SELECT conname FROM pg_constraint WHERE conrelid='shards'::regclass AND contype='c'\" | grep -q valid_shard_status"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2034-ddl-spend-ledger-fk"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: spend_ledger.agent_id
+    description: "Add FK on spend_ledger.agent_id → agents(id)"
+    expected_before: "agent_id TEXT (no FK)"
+    expected_after: "agent_id TEXT REFERENCES agents(id)"
+    verify_command: "psql -c \"SELECT conname FROM pg_constraint WHERE conrelid='spend_ledger'::regclass AND contype='f'\" | grep -q agent"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2034-ddl-cascade-prompt-overrides"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: prompt_overrides.agent_id
+    description: "Add ON DELETE CASCADE to prompt_overrides FK"
+    expected_before: "REFERENCES agents(id)"
+    expected_after: "REFERENCES agents(id) ON DELETE CASCADE"
+    verify_command: "psql -c \"SELECT confdeltype FROM pg_constraint WHERE conrelid='prompt_overrides'::regclass AND contype='f'\" | grep -q c"
+    depends_on: ["v2035-ddl-fresh"]
+
+  - id: "v2034-ddl-cascade-cycle-counters"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: cycle_counters.vertical_id
+    description: "Add ON DELETE CASCADE to cycle_counters FK"
+    expected_before: "REFERENCES verticals(id)"
+    expected_after: "REFERENCES verticals(id) ON DELETE CASCADE"
+    verify_command: "psql -c \"SELECT confdeltype FROM pg_constraint WHERE conrelid='cycle_counters'::regclass AND contype='f'\" | grep -q c"
+    depends_on: ["v2035-ddl-fresh"]
+
+  # ── Config file edits ───────────────────────────────────────────────
+
+  - id: "v2034-rename-prebrand"
+    type: rename
+    priority: should_fix
+    target_file: configs/agents/prebrand.yaml
+    key_path: null
+    description: "Rename prebrand.yaml → pre-brand-agent.yaml for ID consistency"
+    expected_before: "configs/agents/prebrand.yaml with id: prebrand-agent"
+    expected_after: "configs/agents/pre-brand-agent.yaml with id: pre-brand-agent"
+    verify_command: "test -f configs/agents/pre-brand-agent.yaml && ! test -f configs/agents/prebrand.yaml"
+    depends_on: null
+
+  # ── Codebase grep-and-kill ──────────────────────────────────────────
+
+  - id: "v2034-kill-sc-ghosts"
+    type: grep_kill
+    priority: must_pass
+    target_file: "internal/**/*.go, configs/**/*.yaml"
+    key_path: null
+    description: >
+      Remove any remaining Scoring Coordinator references from active code.
+      SC was absorbed into runtime in v2.0.19. Changelog entries are preserved.
+    expected_before: "References to scoring-coordinator, ScoringCoordinator, scoring.coordinator"
+    expected_after: "0 matches"
+    verify_command: "grep -ri 'scoring.coordinator\\|scoring-coordinator\\|ScoringCoordinator' internal/ configs/ | grep -v changelog | wc -l | tr -d ' ' | grep -q '^0$'"
+    depends_on: null
+
+  - id: "v2034-kill-glob-subs"
+    type: grep_kill
+    priority: must_pass
+    target_file: "configs/**/*.yaml"
+    key_path: null
+    description: "EventBus does not support glob patterns. Replace opco.*.X with opco.X"
+    expected_before: "opco.*.steady_state_reached, opco.*.cto_escalation"
+    expected_after: "opco.steady_state_reached, opco.escalation"
+    verify_command: "grep -r 'opco\\.\\*\\.' configs/ | wc -l | tr -d ' ' | grep -q '^0$'"
+    depends_on: null
+
+# ── Naming conventions (implementer feedback point 2) ─────────────
+#
+# Agent config file naming convention:
+#   Holding/factory agents:  {id}.yaml         (e.g., empire-coordinator.yaml)
+#   OpCo template agents:    opco-{role}.yaml   (e.g., opco-ceo.yaml, opco-cto.yaml)
+#   Ephemeral agents:        Not on disk — spawned from templates at runtime
+#
+# Mapping (contract ID → config filename):
+#   empire-coordinator      → configs/agents/empire-coordinator.yaml
+#   factory-cto             → configs/agents/factory-cto.yaml
+#   holding-devops          → configs/agents/holding-devops.yaml
+#   operations-analyst      → configs/agents/operations-analyst.yaml
+#   spec-auditor            → configs/agents/spec-auditor.yaml
+#   discovery-coordinator   → configs/agents/discovery-coordinator.yaml
+#   analysis-agent          → configs/agents/analysis-agent.yaml
+#   validation-coordinator  → configs/agents/validation-coordinator.yaml
+#   business-research-agent → configs/agents/business-research-agent.yaml
+#   lightweight-spec-agent  → configs/agents/lightweight-spec-agent.yaml
+#   spec-reviewer           → configs/agents/spec-reviewer.yaml
+#   market-research-agent   → configs/agents/market-research-agent.yaml
+#   trend-research-agent    → configs/agents/trend-research-agent.yaml
+#   pre-brand-agent         → configs/agents/pre-brand-agent.yaml
+#   scanner-{type}-{scan_id}→ (ephemeral, template in configs/agents/templates/scanner.yaml)
+#   OpCo agents             → configs/agents/templates/opco-{role}.yaml

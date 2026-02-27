@@ -12,6 +12,7 @@ subscriptions:
   - spend_request
   - spend.approved
   - spend.rejected
+  - founder_input.response
   - opco.escalation_response
   - cto.architecture_directive
 tools:

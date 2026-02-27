@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.26"
+	runtimeSpecVersion      = "v2.0.36"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -2220,7 +2220,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.25",
+			TemplateVersion: "2.0.36",
 		}
 	}
 
@@ -2230,27 +2230,24 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 	cto := opCoAgentID("cto-agent", verticalID)
 
 	return []PersistedAgent{
-		mk("opco-ceo", "operating", "", "opco.spinup_requested", "product_report", "growth_report", "product_escalation", "growth_escalation", "spend_request", "spend.approved", "spend.rejected", "cto.architecture_directive"),
-		mk("chief-of-staff", "operating", ceo, "product_report", "growth_report", "support_critical", "build_blocked", "channel_blocked", "build_complete", "prelaunch_ready", "feature_deployed", "market_signals", "churn_risk"),
-		mk("vp-product", "operating", ceo, "build_complete", "build_blocked", "product_escalation", "spend_needed", "support_digest", "support_critical", "build_progress"),
+		mk("opco-ceo", "operating", "", "opco.spinup_requested", "product_report", "growth_report", "cross_domain_report", "product_escalation", "growth_escalation", "spend_request", "spend.approved", "spend.rejected", "cto.architecture_directive", "founder_input.response", "opco.escalation_response"),
+		mk("chief-of-staff", "operating", ceo, "product_report", "growth_report", "feature_deployed", "churn_risk", "build_complete", "prelaunch_ready", "support_critical", "channel_blocked"),
+		mk("vp-product", "operating", ceo, "build_complete", "build_blocked", "product_escalation", "support_digest", "support_critical", "build_progress"),
 		mk("vp-growth", "operating", ceo, "outreach_digest", "channel_blocked", "user_onboarded", "prelaunch_ready", "spend_needed"),
-		mk("cto-agent", "operating", vpProduct, "product_spec_ready", "technical_spec_ready", "build_progress", "build_blocked", "bug_reported", "deploy_requested", "qa.validation_passed", "qa.validation_failed", "cycle_limit_reached"),
-		mk("pm-agent", "operating", vpProduct, "market_feedback", "mandate_updated", "feature_request"),
-		mk("support-agent", "operating", vpProduct, "customer_message", "bug_fix_deployed"),
-		mk("marketing-agent", "operating", vpGrowth, "launch_ready", "feature_deployed", "channel_update"),
-		mk("tech-writer", "operating", cto, "cto.tech_spec_review_requested"),
-		mk("backend-agent", "operating", cto, "technical_spec_ready"),
-		mk("frontend-agent", "operating", cto, "technical_spec_ready"),
-		mk("qa-agent", "operating", cto, "build_complete"),
-		mk("devops-agent", "operating", cto, "deploy_requested"),
+		mk("cto-agent", "operating", vpProduct),
+		mk("pm-agent", "operating", vpProduct),
+		mk("support-agent", "operating", vpProduct),
+		mk("marketing-agent", "operating", vpGrowth),
+		mk("tech-writer", "operating", cto),
+		mk("backend-agent", "operating", cto),
+		mk("frontend-agent", "operating", cto),
+		mk("qa-agent", "operating", cto),
+		mk("devops-agent", "operating", cto),
 	}
 }
 
 func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 	ceo := opCoAgentID("opco-ceo", verticalID)
-	cos := opCoAgentID("chief-of-staff", verticalID)
-	vpProduct := opCoAgentID("vp-product", verticalID)
-	vpGrowth := opCoAgentID("vp-growth", verticalID)
 	cto := opCoAgentID("cto-agent", verticalID)
 	pm := opCoAgentID("pm-agent", verticalID)
 	backend := opCoAgentID("backend-agent", verticalID)
@@ -2292,27 +2289,18 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 		bootstrap("technical_spec_ready", frontend),
 		bootstrap("build_progress", cto),
 		bootstrap("build_blocked", cto),
+		bootstrap("deploy_requested", cto),
 		bootstrap("deploy_requested", devops),
 		bootstrap("qa.validation_passed", cto),
 		bootstrap("qa.validation_failed", cto),
 		bootstrap("devops.infra_change_needed", "holding-devops"),
 		bootstrap("bug_reported", cto),
 		bootstrap("feature_request", pm),
-		bootstrap("product_report", ceo),
-		bootstrap("growth_report", ceo),
-		bootstrap("cross_domain_report", ceo),
-		bootstrap("spend_needed", vpProduct),
-		bootstrap("spend_needed", vpGrowth),
-		bootstrap("spend_request", ceo),
-		bootstrap("*_escalation", ceo),
+		bootstrap("feature_request", cto),
 		bootstrap("cycle_limit_reached", cto),
+		bootstrap("customer_message", support),
+		bootstrap("feature_deployed", marketing),
 		seeded("bug_fix_deployed", support),
-		seeded("feature_deployed", cos),
-		seeded("feature_deployed", marketing),
-		seeded("build_complete", cos),
-		seeded("prelaunch_ready", cos),
-		seeded("market_signals", cos),
-		seeded("churn_risk", cos),
 	}
 	return rules
 }

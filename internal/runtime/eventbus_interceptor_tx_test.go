@@ -42,7 +42,7 @@ func TestEventBusTransactionalPublish_RollsBackWhenDeferredPersistFails(t *testi
 	err := bus.Publish(context.Background(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		Payload:     []byte(`{"vertical_id":"v-temp"}`),
 		CreatedAt:   time.Now(),
 	})

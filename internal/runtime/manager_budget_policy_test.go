@@ -75,7 +75,7 @@ func TestAgentManager_BudgetSuppressionPolicy(t *testing.T) {
 		am, agent := makeMgr("vertical|v1", "throttle", "vp-growth")
 		err := am.processEvent(context.Background(), agent, events.Event{
 			ID:   "e3",
-			Type: events.EventType("channel_update"),
+			Type: events.EventType("outreach_digest"),
 		})
 		if err != nil {
 			t.Fatalf("processEvent: %v", err)

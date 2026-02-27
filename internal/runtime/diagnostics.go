@@ -64,7 +64,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
-	_, err := l.db.ExecContext(ctx, `
+	_, err := l.db.ExecContext(withoutSQLTxContext(ctx), `
 		INSERT INTO runtime_log (
 			level, component, action,
 			event_id, event_type, agent_id, vertical_id, campaign_id, scan_id, session_id,
@@ -116,6 +116,7 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 	if db == nil {
 		return nil
 	}
+	ctx = withoutSQLTxContext(ctx)
 	eventID := strings.TrimSpace(in.EventID)
 	pipelineID := strings.TrimSpace(in.PipelineID)
 	if _, err := uuid.Parse(eventID); err != nil {
@@ -145,7 +146,19 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 		durationUS = 0
 	}
 
-	_, err := dbExecContext(ctx, db, `
+	var eventExists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id = $1::uuid)`, eventID).Scan(&eventExists); err != nil {
+		if isMissingDiagnosticsTable(err) {
+			return nil
+		}
+		return err
+	}
+	if !eventExists {
+		// Best effort only; skip when events persistence is disabled in tests.
+		return nil
+	}
+
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO pipeline_transitions (
 			event_id, event_type, handler, pipeline_type, pipeline_id, action,
 			state_before, state_after, events_emitted, drop_reason, error, duration_us

@@ -610,7 +610,7 @@ func (s *Service) executeOperationTX(
 				$1::uuid, $2, $3, $4, NULLIF($5,''),
 				'active', $6, NULL, now(), NULL
 			)
-			ON CONFLICT (vertical_id, event_pattern, subscriber_id) DO UPDATE SET
+			ON CONFLICT (vertical_id, event_pattern, subscriber_id) WHERE status = 'active' DO UPDATE SET
 				installed_by = EXCLUDED.installed_by,
 				reason = EXCLUDED.reason,
 				status = 'active',

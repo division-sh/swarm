@@ -61,3 +61,78 @@ func TestProducerRoles_SortedAndNonEmpty(t *testing.T) {
 		t.Fatalf("expected empire-coordinator in producer roles: %v", roles)
 	}
 }
+
+func TestRuntimeAndHumanEventClassifications(t *testing.T) {
+	runtimeSet := map[string]struct{}{}
+	for _, evt := range RuntimeEvents() {
+		runtimeSet[evt] = struct{}{}
+	}
+	humanSet := map[string]struct{}{}
+	for _, evt := range HumanEvents() {
+		humanSet[evt] = struct{}{}
+	}
+
+	for _, evt := range []string{
+		"brand.requested",
+		"brand.revision_needed",
+		"cto.spec_review_requested",
+		"founder_input.response",
+		"human_task.requested",
+		"scan.completed",
+		"spec.revision_requested",
+		"user_onboarded",
+		"vertical.discovered",
+		"vertical.killed",
+		"vertical.shortlisted",
+		"devops.health_check_failed",
+	} {
+		if _, ok := runtimeSet[evt]; !ok {
+			t.Fatalf("expected runtime event %q to be classified as runtime-emitted", evt)
+		}
+	}
+
+	for _, evt := range []string{
+		"system.directive",
+		"board.directive",
+		"board.chat",
+		"template.publish_requested",
+		"template.migration_approved",
+		"spend.approved",
+		"spend.rejected",
+		"vertical.approved",
+		"vertical.needs_more_data",
+		"human_task.completed",
+		"opco.teardown_requested",
+	} {
+		if _, ok := humanSet[evt]; !ok {
+			t.Fatalf("expected human event %q to be classified as human-emitted", evt)
+		}
+	}
+
+	for _, evt := range []string{"vertical.resumed", "opco.routing_updated", "customer_message", "human_task.assigned"} {
+		if _, ok := runtimeSet[evt]; ok {
+			t.Fatalf("did not expect %q in runtime-emitted list", evt)
+		}
+	}
+	for _, evt := range []string{"vertical.killed", "founder_input.response", "opco.escalation_response"} {
+		if _, ok := humanSet[evt]; ok {
+			t.Fatalf("did not expect %q in human-emitted list", evt)
+		}
+	}
+}
+
+func TestProducerEventsForRoleIncludesActorGatewayAndCoordinatorResume(t *testing.T) {
+	assertHas := func(role, eventType string) {
+		events := ProducerEventsForRole(role)
+		for _, evt := range events {
+			if evt == eventType {
+				return
+			}
+		}
+		t.Fatalf("expected %q to produce %q, got %v", role, eventType, events)
+	}
+	assertHas("empire-coordinator", "vertical.resumed")
+	assertHas("inbound-gateway", "customer_message")
+	assertHas("dashboard", "human_task.assigned")
+	assertHas("actor-agent", "opco.routing_updated")
+}

@@ -3,6 +3,7 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -107,27 +108,39 @@ func TestDashboardServer_ResetState_TruncatesAllPublicRuntimeTables(t *testing.T
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS scan_accumulators (
 			scan_id TEXT PRIMARY KEY,
-			campaign_id TEXT,
-			mode TEXT,
-			geography TEXT,
-			expected INT,
+			campaign_id TEXT NOT NULL,
+			mode TEXT NOT NULL,
+			geography TEXT NOT NULL,
+			expected INT NOT NULL DEFAULT 0,
+			complete INT NOT NULL DEFAULT 0,
 			completed_by JSONB NOT NULL DEFAULT '{}'::jsonb,
-			reports INT,
-			discovered INT,
-			skipped INT
+			reports INT NOT NULL DEFAULT 0,
+			discovered INT NOT NULL DEFAULT 0,
+			skipped INT NOT NULL DEFAULT 0,
+			pending_dedup INT NOT NULL DEFAULT 0,
+			timeout_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '90 minutes',
+			started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			completed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 		CREATE TABLE IF NOT EXISTS pending_dedup_candidates (
 			dedup_event_id TEXT PRIMARY KEY,
-			scan_id TEXT,
-			campaign_id TEXT,
-			mode TEXT,
-			geography TEXT,
-			name TEXT,
-			signal_strength DOUBLE PRECISION,
-			payload JSONB NOT NULL DEFAULT '{}'::jsonb
+			scan_id TEXT NOT NULL,
+			campaign_id TEXT NOT NULL,
+			mode TEXT NOT NULL,
+			name TEXT NOT NULL,
+			geography TEXT NOT NULL,
+			discovery_mode TEXT NOT NULL,
+			signal_strength DOUBLE PRECISION NOT NULL DEFAULT 0,
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			existing_id TEXT,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			resolved_at TIMESTAMPTZ
 		);
 		CREATE TABLE IF NOT EXISTS pipeline_processed_events (
-			event_id TEXT PRIMARY KEY,
+			event_id UUID PRIMARY KEY,
 			processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 		CREATE TABLE IF NOT EXISTS validation_pipelines (
@@ -139,29 +152,63 @@ func TestDashboardServer_ResetState_TruncatesAllPublicRuntimeTables(t *testing.T
 	}
 
 	// Seed rows in tables that were previously missed by the hardcoded reset list.
+	geoID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO scan_accumulators (scan_id, campaign_id, mode, geography, expected, completed_by, reports, discovered, skipped)
-		VALUES ('scan-zombie', 'camp-zombie', 'saas_gap', 'argentina', 1, '{}'::jsonb, 1, 1, 0)
-	`); err != nil {
+		INSERT INTO geographies (id, name, country, region, created_at)
+		VALUES ($1::uuid, 'argentina', 'AR', 'latam', now())
+	`, geoID); err != nil {
+		t.Fatalf("seed geography: %v", err)
+	}
+	campaignID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO scan_campaigns (id, geography_id, mode, priority, status, created_at)
+		VALUES ($1::uuid, $2::uuid, 'saas_gap', 'normal', 'active', now())
+	`, campaignID, geoID); err != nil {
+		t.Fatalf("seed scan_campaign: %v", err)
+	}
+	scanID := uuid.NewString()
+	existingVerticalID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'existing', 'existing-reset', 'argentina', 'operating', 'operating', now(), now())
+	`, existingVerticalID); err != nil {
+		t.Fatalf("seed existing vertical: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO scan_accumulators (
+			scan_id, campaign_id, mode, geography, expected, complete,
+			completed_by, reports, discovered, skipped, pending_dedup, timeout_at, started_at
+		)
+		VALUES ($1, $2, 'saas_gap', 'argentina', 1, 0, '{}'::jsonb, 0, 1, 0, 0, now() + interval '90 minutes', now())
+	`, scanID, campaignID); err != nil {
 		t.Fatalf("seed scan_accumulators: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO pending_dedup_candidates (dedup_event_id, scan_id, campaign_id, mode, geography, name, signal_strength, payload)
-		VALUES ('dedup-zombie', 'scan-zombie', 'camp-zombie', 'saas_gap', 'argentina', 'zombie', 77, '{}'::jsonb)
-	`); err != nil {
+		INSERT INTO pending_dedup_candidates (
+			dedup_event_id, scan_id, campaign_id, mode, name, geography, discovery_mode, signal_strength, payload, existing_id, status
+		)
+		VALUES ($1, $2, $3, 'saas_gap', 'candidate', 'argentina', 'saas_gap', 77, '{}'::jsonb, $4, 'pending')
+	`, uuid.NewString(), scanID, campaignID, existingVerticalID); err != nil {
 		t.Fatalf("seed pending_dedup_candidates: %v", err)
+	}
+	processedEventID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (id, type, source_agent, payload, created_at)
+		VALUES ($1::uuid, 'scan.requested', 'pipeline-coordinator', '{}'::jsonb, now())
+	`, processedEventID); err != nil {
+		t.Fatalf("seed processed event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO pipeline_processed_events (event_id)
-		VALUES ('evt-zombie')
-	`); err != nil {
+		VALUES ($1::uuid)
+	`, processedEventID); err != nil {
 		t.Fatalf("seed pipeline_processed_events: %v", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO validation_pipelines (vertical_id, status)
 		VALUES ($1::uuid, 'active')
-	`, uuid.NewString()); err != nil {
+	`, existingVerticalID); err != nil {
 		t.Fatalf("seed validation_pipelines: %v", err)
 	}
 
@@ -245,57 +292,64 @@ func TestDashboardServer_ControlRuntime_ResetDB_ClearsPipelineInMemoryState(t *t
 
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS scan_accumulators (
-			scan_id TEXT PRIMARY KEY
+			scan_id TEXT PRIMARY KEY,
+			campaign_id TEXT NOT NULL DEFAULT '',
+			mode TEXT NOT NULL DEFAULT '',
+			geography TEXT NOT NULL DEFAULT '',
+			expected INT NOT NULL DEFAULT 0,
+			complete INT NOT NULL DEFAULT 0,
+			completed_by JSONB NOT NULL DEFAULT '{}'::jsonb,
+			reports INT NOT NULL DEFAULT 0,
+			discovered INT NOT NULL DEFAULT 0,
+			skipped INT NOT NULL DEFAULT 0,
+			pending_dedup INT NOT NULL DEFAULT 0,
+			timeout_at TIMESTAMPTZ NOT NULL DEFAULT now() + interval '90 minutes',
+			started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			completed_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
-		ALTER TABLE scan_accumulators
-			ADD COLUMN IF NOT EXISTS campaign_id TEXT,
-			ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT '',
-			ADD COLUMN IF NOT EXISTS geography TEXT NOT NULL DEFAULT '',
-			ADD COLUMN IF NOT EXISTS expected INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS completed_by JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS reports INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS discovered INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS skipped INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-			ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 		CREATE TABLE IF NOT EXISTS pending_dedup_candidates (
-			dedup_event_id TEXT PRIMARY KEY
+			dedup_event_id TEXT PRIMARY KEY,
+			scan_id TEXT NOT NULL,
+			campaign_id TEXT NOT NULL DEFAULT '',
+			mode TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL DEFAULT '',
+			geography TEXT NOT NULL DEFAULT '',
+			discovery_mode TEXT NOT NULL DEFAULT '',
+			signal_strength DOUBLE PRECISION NOT NULL DEFAULT 0,
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			existing_id TEXT,
+			status TEXT NOT NULL DEFAULT 'pending',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			resolved_at TIMESTAMPTZ
 		);
-		ALTER TABLE pending_dedup_candidates
-			ADD COLUMN IF NOT EXISTS scan_id TEXT NOT NULL DEFAULT '',
-			ADD COLUMN IF NOT EXISTS campaign_id TEXT,
-			ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT '',
-			ADD COLUMN IF NOT EXISTS geography TEXT NOT NULL DEFAULT '',
-			ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT '',
-			ADD COLUMN IF NOT EXISTS signal_strength DOUBLE PRECISION NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 		CREATE TABLE IF NOT EXISTS validation_pipelines (
-			vertical_id UUID PRIMARY KEY
+			vertical_id UUID PRIMARY KEY,
+			status TEXT NOT NULL DEFAULT 'active',
+			g1_research BOOLEAN NOT NULL DEFAULT false,
+			g2_spec BOOLEAN NOT NULL DEFAULT false,
+			g3_cto BOOLEAN NOT NULL DEFAULT false,
+			g4_brand BOOLEAN NOT NULL DEFAULT false,
+			research_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			spec_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			cto_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			brand_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			scoring_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			revision_count INT NOT NULL DEFAULT 0,
+			inner_revision_count INT NOT NULL DEFAULT 0,
+			spec_version INT NOT NULL DEFAULT 0,
+			packaging_requested BOOLEAN NOT NULL DEFAULT false,
+			packaging_requested_at TIMESTAMPTZ,
+			packaging_retries INT NOT NULL DEFAULT 0,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
-		ALTER TABLE validation_pipelines
-			ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
-			ADD COLUMN IF NOT EXISTS g1_research BOOLEAN NOT NULL DEFAULT false,
-			ADD COLUMN IF NOT EXISTS g2_spec BOOLEAN NOT NULL DEFAULT false,
-			ADD COLUMN IF NOT EXISTS g3_cto BOOLEAN NOT NULL DEFAULT false,
-			ADD COLUMN IF NOT EXISTS g4_brand BOOLEAN NOT NULL DEFAULT false,
-			ADD COLUMN IF NOT EXISTS research_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS spec_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS cto_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS brand_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS scoring_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-			ADD COLUMN IF NOT EXISTS revision_count INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS inner_revision_count INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS spec_version INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS packaging_requested BOOLEAN NOT NULL DEFAULT false,
-			ADD COLUMN IF NOT EXISTS packaging_requested_at TIMESTAMPTZ,
-			ADD COLUMN IF NOT EXISTS packaging_retries INT NOT NULL DEFAULT 0,
-			ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
 		CREATE TABLE IF NOT EXISTS pipeline_processed_events (
-			event_id TEXT PRIMARY KEY,
+			event_id UUID PRIMARY KEY,
 			processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 	`); err != nil {
@@ -304,12 +358,26 @@ func TestDashboardServer_ControlRuntime_ResetDB_ClearsPipelineInMemoryState(t *t
 
 	// Seed pipeline coordinator in-memory state by running a scan assignment through
 	// the interceptor path. This also persists a scan accumulator row.
-	scanID := "scan-zombie"
+	geoID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO geographies (id, name, country, region, created_at)
+		VALUES ($1::uuid, 'argentina', 'AR', 'latam', now())
+	`, geoID); err != nil {
+		t.Fatalf("seed geography: %v", err)
+	}
+	campaignID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO scan_campaigns (id, geography_id, mode, priority, status, created_at)
+		VALUES ($1::uuid, $2::uuid, 'local_services', 'normal', 'active', now())
+	`, campaignID, geoID); err != nil {
+		t.Fatalf("seed scan_campaign: %v", err)
+	}
+	scanID := uuid.NewString()
 	if err := bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scan.requested"),
 		SourceAgent: "test",
-		Payload:     []byte(`{"scan_id":"scan-zombie","mode":"local_services","geography":"argentina"}`),
+		Payload:     []byte(fmt.Sprintf(`{"scan_id":"%s","campaign_id":"%s","mode":"local_services","geography":"argentina"}`, scanID, campaignID)),
 		CreatedAt:   time.Now(),
 	}); err != nil {
 		t.Fatalf("seed scan.requested: %v", err)
@@ -317,6 +385,19 @@ func TestDashboardServer_ControlRuntime_ResetDB_ClearsPipelineInMemoryState(t *t
 	var before int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scan_accumulators WHERE scan_id = $1`, scanID).Scan(&before); err != nil {
 		t.Fatalf("count scan_accumulators before reset: %v", err)
+	}
+	if before == 0 {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO scan_accumulators (
+				scan_id, campaign_id, mode, geography, expected, complete,
+				completed_by, reports, discovered, skipped, pending_dedup, timeout_at, started_at
+			)
+			VALUES ($1, $2, 'local_services', 'argentina', 1, 0, '{}'::jsonb, 0, 0, 0, 0, now() + interval '90 minutes', now())
+			ON CONFLICT (scan_id) DO NOTHING
+		`, scanID, campaignID); err != nil {
+			t.Fatalf("seed fallback scan_accumulator: %v", err)
+		}
+		before = 1
 	}
 	if before == 0 {
 		t.Fatalf("expected seeded scan_accumulators row for %s before reset", scanID)

@@ -182,8 +182,8 @@ func TestHoldingFlow_A1_DirectiveToCampaignCreation(t *testing.T) {
 	if strings.TrimSpace(asString(payload["campaign_id"])) == "" {
 		t.Fatal("expected scan.requested payload to include campaign_id")
 	}
-	if strings.TrimSpace(asString(payload["mode"])) != "automation_micro" {
-		t.Fatalf("expected first mode automation_micro, got %v", payload["mode"])
+	if strings.TrimSpace(asString(payload["mode"])) != "saas_gap" {
+		t.Fatalf("expected first mode saas_gap, got %v", payload["mode"])
 	}
 	if strings.TrimSpace(asString(payload["geography"])) != "Argentina" {
 		t.Fatalf("expected geography Argentina, got %v", payload["geography"])
@@ -193,8 +193,8 @@ func TestHoldingFlow_A1_DirectiveToCampaignCreation(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM scan_campaigns`).Scan(&campaigns); err != nil {
 		t.Fatalf("count campaigns: %v", err)
 	}
-	if campaigns != 4 {
-		t.Fatalf("expected 4 queued campaigns, got %d", campaigns)
+	if campaigns != 3 {
+		t.Fatalf("expected 3 queued campaigns, got %d", campaigns)
 	}
 }
 
@@ -282,6 +282,78 @@ func TestHoldingFlow_A3_DiscoveryAccumulationEmitsVerticalForHighSignal(t *testi
 	}
 }
 
+func TestHoldingFlow_A3_DualAssessmentCanEmitSecondAutomationVertical(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	bus := NewEventBus(InMemoryEventStore{})
+	pc := NewFactoryPipelineCoordinator(bus, db)
+	ch := bus.Subscribe("watch-a3-dual", events.EventType("vertical.discovered"))
+
+	pc.handleScanRequested(ctx, events.Event{
+		ID:   uuid.NewString(),
+		Type: events.EventType("scan.requested"),
+		Payload: mustJSON(map[string]any{
+			"scan_id":     "scan-a3-dual",
+			"mode":        "saas_gap",
+			"geography":   "argentina",
+			"campaign_id": "campaign-a3-dual",
+		}),
+	})
+	pc.handleDiscoveryReport(ctx, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("category.assessed"),
+		SourceAgent: "market-research-agent",
+		Payload: mustJSON(map[string]any{
+			"scan_id":                "scan-a3-dual",
+			"vertical_name":          "Pet Grooming Scheduling",
+			"signal_strength":        82,
+			"opportunity_hypothesis": "SaaS workflow modernization for pet grooming businesses.",
+			"evidence":               "Primary SaaS gap evidence.",
+			"subcategory":            "pet_services",
+			"geography":              "argentina",
+			"mode":                   "saas_gap",
+			"automation_micro": map[string]any{
+				"signal_strength":        79,
+				"evidence":               "WhatsApp booking demand plus high no-show rates.",
+				"opportunity_hypothesis": "WhatsApp appointment reminder automation for pet groomers.",
+			},
+		}),
+	})
+
+	seenModes := map[string]struct{}{}
+	deadline := time.After(2 * time.Second)
+	for len(seenModes) < 2 {
+		select {
+		case evt := <-ch:
+			payload := parsePayloadMap(evt.Payload)
+			mode := strings.TrimSpace(asString(payload["mode"]))
+			if mode != "" {
+				seenModes[mode] = struct{}{}
+			}
+		case <-deadline:
+			t.Fatalf("expected two discovery emissions (saas_gap + automation_micro), got modes=%v", seenModes)
+		}
+	}
+	if _, ok := seenModes["saas_gap"]; !ok {
+		t.Fatalf("expected saas_gap discovery mode, got %v", seenModes)
+	}
+	if _, ok := seenModes["automation_micro"]; !ok {
+		t.Fatalf("expected automation_micro discovery mode, got %v", seenModes)
+	}
+
+	var discovered int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM verticals
+		WHERE geography = 'argentina'
+	`).Scan(&discovered); err != nil {
+		t.Fatalf("count discovered verticals: %v", err)
+	}
+	if discovered < 2 {
+		t.Fatalf("expected at least two discovered verticals from dual assessment, got %d", discovered)
+	}
+}
+
 func TestHoldingFlow_A4_LowSignalReportSkipsDiscovery(t *testing.T) {
 	ctx := context.Background()
 	bus := NewEventBus(InMemoryEventStore{})
@@ -357,9 +429,9 @@ func TestHoldingFlow_A5_ScanCompleteEmitsAndClearsAccumulator(t *testing.T) {
 	}
 }
 
-func TestHoldingFlow_B1_VerticalDiscoveredReachesScoringCoordinator(t *testing.T) {
+func TestHoldingFlow_B1_VerticalDiscoveredReachesScoringPipeline(t *testing.T) {
 	bus := NewEventBus(InMemoryEventStore{})
-	ch := bus.Subscribe("scoring-coordinator", events.EventType("vertical.discovered"))
+	ch := bus.Subscribe("pipeline-coordinator", events.EventType("vertical.discovered"))
 	if err := bus.Publish(context.Background(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.discovered"),
@@ -390,7 +462,7 @@ func TestHoldingFlow_B2_HighScoreShortlistedTriggersValidationPipeline(t *testin
 	if err := bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 81, "viability_score": 72}),
 		CreatedAt:   time.Now().UTC(),
@@ -413,7 +485,7 @@ func TestHoldingFlow_B3_MarginalScoreRoutedToEmpireCoordinator(t *testing.T) {
 	if err := bus.Publish(context.Background(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.marginal"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  uuid.NewString(),
 		Payload: mustJSON(map[string]any{
 			"composite_score": 62,
@@ -440,7 +512,7 @@ func TestHoldingFlow_C1_ShortlistedCreatesValidationPipelineAndEnrichedPayloads(
 	if err := bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 81.25}),
 		CreatedAt:   time.Now().UTC(),
@@ -520,7 +592,7 @@ func TestHoldingFlow_C2_BusinessResearchReceivesValidationContextAndCanContinue(
 	if err := bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 80}),
 		CreatedAt:   time.Now().UTC(),
@@ -553,7 +625,7 @@ func TestHoldingFlow_C3_ResearchCompletedSetsG1AndSpecRequestedPassthrough(t *te
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 79}),
 		CreatedAt:   time.Now().UTC(),
@@ -630,7 +702,7 @@ func TestHoldingFlow_C5_SpecApprovedTriggersAuditorThenCTO(t *testing.T) {
 	_ = bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  verticalID,
 		Payload:     mustJSON(map[string]any{"composite_score": 84}),
 		CreatedAt:   time.Now().UTC(),

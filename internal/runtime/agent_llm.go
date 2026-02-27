@@ -483,13 +483,13 @@ func inferDiscoveryMode(text string) string {
 	switch {
 	case strings.Contains(t, "automation_micro"),
 		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
-		return "automation_micro"
+		return "saas_gap"
 	case strings.Contains(t, "local service"), strings.Contains(t, "local_services"):
 		return "local_services"
 	case strings.Contains(t, "trend"), strings.Contains(t, "saas_trend"):
 		return "saas_trend"
 	default:
-		return "automation_micro"
+		return "saas_gap"
 	}
 }
 

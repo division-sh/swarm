@@ -429,10 +429,10 @@ func (m *ScanCampaignManager) ensureQueuedCampaign(ctx context.Context, geograph
 }
 
 func remainingCampaignModes(initialMode string) []string {
-	cycle := []string{"automation_micro", "saas_gap", "saas_trend", "local_services"}
+	cycle := []string{"saas_gap", "saas_trend", "local_services"}
 	initialMode = normalizeScanMode(initialMode)
 	if initialMode == "" {
-		initialMode = "automation_micro"
+		initialMode = "saas_gap"
 	}
 	idx := 0
 	for i, mode := range cycle {
@@ -451,7 +451,7 @@ func remainingCampaignModes(initialMode string) []string {
 func campaignModesForDirective(initialMode string, explicit bool) []string {
 	initialMode = normalizeScanMode(initialMode)
 	if initialMode == "" {
-		initialMode = "automation_micro"
+		initialMode = "saas_gap"
 	}
 	if explicit {
 		return []string{initialMode}
@@ -464,12 +464,12 @@ func campaignModesForDirective(initialMode string, explicit bool) []string {
 func parseDirectiveMode(text string) (mode string, explicit bool) {
 	t := strings.ToLower(strings.TrimSpace(text))
 	if t == "" {
-		return "automation_micro", false
+		return "saas_gap", false
 	}
 	switch {
 	case strings.Contains(t, "automation_micro"),
 		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
-		return "automation_micro", true
+		return "saas_gap", true
 	case strings.Contains(t, "local_services"), strings.Contains(t, "local service"):
 		return "local_services", true
 	case strings.Contains(t, "saas_trend"), (strings.Contains(t, "saas") && strings.Contains(t, "trend")):
@@ -477,7 +477,7 @@ func parseDirectiveMode(text string) (mode string, explicit bool) {
 	case strings.Contains(t, "saas_gap"), strings.Contains(t, "gap scan"):
 		return "saas_gap", true
 	default:
-		return "automation_micro", false
+		return "saas_gap", false
 	}
 }
 

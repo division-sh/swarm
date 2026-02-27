@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	_ "github.com/lib/pq"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	_ "github.com/lib/pq"
 )
 
 // StartPostgres spins up a disposable Postgres container via the local docker CLI,
@@ -86,17 +86,32 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 		time.Sleep(150 * time.Millisecond)
 	}
 
-	// Apply migrations.
+	// Apply canonical schema.
 	_, thisFile, _, _ := runtime.Caller(0)
-	migrationPath := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", "migrations", "001_initial.sql"))
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	migrationPath := filepath.Join(repoRoot, "contracts", "ddl-canonical.sql")
+	if _, statErr := os.Stat(migrationPath); statErr != nil {
+		// Fallback for older branches that predate canonical contracts.
+		migrationPath = filepath.Join(repoRoot, "migrations", "001_initial.sql")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	b, err := os.ReadFile(migrationPath)
 	if err != nil {
 		t.Fatalf("read migrations: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`); err != nil {
+		t.Fatalf("enable pgcrypto: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, string(b)); err != nil {
 		t.Fatalf("apply migrations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO schema_version (version, name, applied_at)
+		VALUES (1, 'ddl-canonical', now())
+		ON CONFLICT (version) DO NOTHING
+	`); err != nil {
+		t.Fatalf("seed schema_version: %v", err)
 	}
 
 	cleanup = func() {

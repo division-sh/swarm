@@ -61,7 +61,7 @@ func TestEventBus_Publish_InterceptorConsumeWithDeferred(t *testing.T) {
 	in := events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.shortlisted"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  uuid.NewString(),
 		Payload:     mustJSON(map[string]any{"vertical_id": uuid.NewString()}),
 		CreatedAt:   time.Now(),

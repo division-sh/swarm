@@ -1,0 +1,65 @@
+# EmpireAI tooling.lock — v2.0.35
+# Required toolchain for gate execution. All gates must be reproducible
+# on a clean machine with these dependencies installed.
+#
+# Gates are split into two layers:
+#   local:       No Docker/DB required. Always runnable.
+#   integration: Requires Postgres + Docker. CI/staging only.
+
+required:
+  go:
+    version: ">=1.22"
+    install: "https://go.dev/dl/"
+    used_by:
+      - wiring-verifier-clean
+      - agents-all-have-prompts
+      - integration-event-roundtrip
+      - integration-crash-recovery
+      - integration-dual-assessment
+
+  python3:
+    version: ">=3.10"
+    install: "system package manager"
+    used_by:
+      - wiring-delivery-channel-complete
+      - xval-emit-events-in-catalog
+      - xval-subscriptions-in-catalog
+      - xval-catalog-emitters-exist
+      - agents-naming-convention
+
+  python3_packages:
+    - name: pyyaml
+      version: ">=6.0"
+      install: "pip3 install pyyaml"
+      used_by:
+        - wiring-delivery-channel-complete
+        - xval-emit-events-in-catalog
+        - xval-subscriptions-in-catalog
+        - xval-catalog-emitters-exist
+        - agents-naming-convention
+
+  postgres:
+    version: ">=15"
+    install: "docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:15"
+    used_by:
+      - ddl-fresh-install
+      - ddl-table-count
+      - ddl-runtime-tables-match-structs
+      - ddl-schema-diff
+    layer: integration
+
+  psql:
+    version: ">=15"
+    install: "apt install postgresql-client or brew install libpq"
+    used_by:
+      - ddl-fresh-install
+      - ddl-runtime-tables-match-structs
+    layer: integration
+
+# Setup command (run once before gates)
+setup: |
+  pip3 install pyyaml 2>/dev/null || pip3 install --break-system-packages pyyaml
+  # For integration gates:
+  # docker run -d --name empireai-test-db -p 5433:5432 -e POSTGRES_PASSWORD=test postgres:15
+  # export PGHOST=localhost PGPORT=5433 PGUSER=postgres PGPASSWORD=test PGDATABASE=empireai_test
+  # createdb empireai_test 2>/dev/null

@@ -1,0 +1,256 @@
+# EmpireAI upgrade-actions.yaml
+# Machine-readable upgrade delta. One file per spec version.
+# Implementer processes actions in order. Each action is independently verifiable.
+#
+# Action types:
+#   add       — Create new file or add new field/entry
+#   edit      — Modify existing file/field/entry
+#   drop      — Remove file/field/entry
+#   rename    — Rename file/field/entry (old_path → new_path)
+#   migrate   — SQL migration (run against live or fresh DB)
+#   grep_kill — Find-and-replace across codebase
+#
+# Fields:
+#   id:              Unique action identifier (version-scoped)
+#   type:            Action type (see above)
+#   priority:        must_pass | should_fix | optional
+#   target_file:     File path relative to repo root
+#   key_path:        Dot-notation path within the file (for YAML/Go edits)
+#   description:     Human-readable what and why
+#   expected_before: What the target looks like before this action (null for adds)
+#   expected_after:  What the target should look like after this action (null for drops)
+#   verify_command:  Shell command that returns 0 on success
+#   depends_on:      List of action IDs that must complete first (null if none)
+
+spec_version: "2.0.34"
+previous_version: "2.0.33"
+generated_at: "2026-02-26"
+
+actions:
+
+  # ── DDL: Runtime table rewrites (CRITICAL) ──────────────────────────
+
+  - id: "v2034-ddl-fresh"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: null
+    description: >
+      Run canonical DDL on fresh database. All 7 runtime tables rewritten
+      to match Go structs. If upgrading existing DB, DROP and recreate
+      these 7 tables (no production data to preserve in dev).
+    expected_before: null
+    expected_after: "36 tables created, 0 errors"
+    verify_command: "psql -f contracts/ddl-canonical.sql 2>&1 | grep -c ERROR | grep -q '^0$'"
+    depends_on: null
+
+  - id: "v2034-ddl-validation-pipelines"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: validation_pipelines
+    description: >
+      validation_pipelines rewritten: row-per-stage → row-per-vertical with
+      G1-G4 boolean gates, revision_count, inner_revision_count, spec_version.
+      Matches ValidationPipeline struct §4.2.2.2.
+    expected_before: "stage TEXT, attempts INT, max_attempts INT"
+    expected_after: "g1_research BOOLEAN, g2_spec_approved BOOLEAN, g3_cto_approved BOOLEAN, g4_brand_ready BOOLEAN, revision_count INT, spec_version INT"
+    verify_command: "psql -c \"\\d validation_pipelines\" | grep -q g1_research"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-scan-accumulators"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: scan_accumulators
+    description: >
+      scan_accumulators rewritten: count-based → JSONB-based.
+      completed_by JSONB, reports JSONB. Matches ScanAccumulator struct §4.2.2.3.
+    expected_before: "total_expected INT, total_completed INT, total_failed INT"
+    expected_after: "completed_by JSONB, reports JSONB, pending_dedup INT"
+    verify_command: "psql -c \"\\d scan_accumulators\" | grep -q 'completed_by.*jsonb'"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-pipeline-receipts"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: pipeline_receipts
+    description: >
+      pipeline_receipts simplified: multi-handler → single event_id PK.
+      Matches writePipelineReceipt() and RecoverFromCrash() usage.
+    expected_before: "BIGSERIAL PK, handler TEXT"
+    expected_after: "event_id UUID PRIMARY KEY"
+    verify_command: "psql -c \"\\d pipeline_receipts\" | grep -q 'event_id.*uuid'"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-pending-dedup"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: pending_dedup_candidates
+    description: >
+      pending_dedup_candidates rewritten to match PendingCandidate struct.
+      candidate JSONB, existing_id UUID FK, dedup_event_id UUID.
+    expected_before: "candidate_name TEXT, raw_signals JSONB"
+    expected_after: "candidate JSONB, existing_id UUID REFERENCES verticals(id), dedup_event_id UUID"
+    verify_command: "psql -c \"\\d pending_dedup_candidates\" | grep -q 'candidate.*jsonb'"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-runtime-config"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: runtime_config
+    description: >
+      runtime_config rewritten: key-value store → config snapshot.
+      id UUID PK, config_yaml TEXT, config_hash TEXT. Matches empire init usage.
+    expected_before: "key TEXT PRIMARY KEY, value JSONB"
+    expected_after: "id UUID PRIMARY KEY, config_yaml TEXT, config_hash TEXT"
+    verify_command: "psql -c \"\\d runtime_config\" | grep -q config_yaml"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-pipeline-processed"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: pipeline_processed_events
+    description: >
+      pipeline_processed_events simplified: (event_id, handler) PK → event_id PK only.
+    expected_before: "event_id UUID, handler TEXT, PRIMARY KEY (event_id, handler)"
+    expected_after: "event_id UUID PRIMARY KEY"
+    verify_command: "psql -c \"\\d pipeline_processed_events\" | grep -v handler"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-template-drafts"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: template_prompt_drafts
+    description: >
+      template_prompt_drafts simplified: versioned workflow → role PK + prompt.
+    expected_before: "id UUID PK, template_version, agent_role, status, feedback, author_id"
+    expected_after: "role TEXT PRIMARY KEY, prompt TEXT"
+    verify_command: "psql -c \"\\d template_prompt_drafts\" | grep -q 'role.*text'"
+    depends_on: ["v2034-ddl-fresh"]
+
+  # ── DDL: Column/constraint fixes ────────────────────────────────────
+
+  - id: "v2034-ddl-strategic-context-jsonb"
+    type: migrate
+    priority: must_pass
+    target_file: contracts/ddl-canonical.sql
+    key_path: scan_campaigns.strategic_context
+    description: "scan_campaigns.strategic_context: TEXT → JSONB"
+    expected_before: "strategic_context text"
+    expected_after: "strategic_context jsonb"
+    verify_command: "psql -c \"SELECT data_type FROM information_schema.columns WHERE table_name='scan_campaigns' AND column_name='strategic_context'\" | grep -q jsonb"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-shards-check"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: shards.status
+    description: "Add CHECK constraint on shards.status"
+    expected_before: "status TEXT NOT NULL DEFAULT 'pending' (no constraint)"
+    expected_after: "CONSTRAINT valid_shard_status CHECK (status IN ('pending','assigned','completed','failed','timed_out'))"
+    verify_command: "psql -c \"SELECT conname FROM pg_constraint WHERE conrelid='shards'::regclass AND contype='c'\" | grep -q valid_shard_status"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-spend-ledger-fk"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: spend_ledger.agent_id
+    description: "Add FK on spend_ledger.agent_id → agents(id)"
+    expected_before: "agent_id TEXT (no FK)"
+    expected_after: "agent_id TEXT REFERENCES agents(id)"
+    verify_command: "psql -c \"SELECT conname FROM pg_constraint WHERE conrelid='spend_ledger'::regclass AND contype='f'\" | grep -q agent"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-cascade-prompt-overrides"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: prompt_overrides.agent_id
+    description: "Add ON DELETE CASCADE to prompt_overrides FK"
+    expected_before: "REFERENCES agents(id)"
+    expected_after: "REFERENCES agents(id) ON DELETE CASCADE"
+    verify_command: "psql -c \"SELECT confdeltype FROM pg_constraint WHERE conrelid='prompt_overrides'::regclass AND contype='f'\" | grep -q c"
+    depends_on: ["v2034-ddl-fresh"]
+
+  - id: "v2034-ddl-cascade-cycle-counters"
+    type: migrate
+    priority: should_fix
+    target_file: contracts/ddl-canonical.sql
+    key_path: cycle_counters.vertical_id
+    description: "Add ON DELETE CASCADE to cycle_counters FK"
+    expected_before: "REFERENCES verticals(id)"
+    expected_after: "REFERENCES verticals(id) ON DELETE CASCADE"
+    verify_command: "psql -c \"SELECT confdeltype FROM pg_constraint WHERE conrelid='cycle_counters'::regclass AND contype='f'\" | grep -q c"
+    depends_on: ["v2034-ddl-fresh"]
+
+  # ── Config file edits ───────────────────────────────────────────────
+
+  - id: "v2034-rename-prebrand"
+    type: rename
+    priority: should_fix
+    target_file: configs/agents/prebrand.yaml
+    key_path: null
+    description: "Rename prebrand.yaml → pre-brand-agent.yaml for ID consistency"
+    expected_before: "configs/agents/prebrand.yaml with id: prebrand-agent"
+    expected_after: "configs/agents/pre-brand-agent.yaml with id: pre-brand-agent"
+    verify_command: "test -f configs/agents/pre-brand-agent.yaml && ! test -f configs/agents/prebrand.yaml"
+    depends_on: null
+
+  # ── Codebase grep-and-kill ──────────────────────────────────────────
+
+  - id: "v2034-kill-sc-ghosts"
+    type: grep_kill
+    priority: must_pass
+    target_file: "internal/**/*.go, configs/**/*.yaml"
+    key_path: null
+    description: >
+      Remove any remaining Scoring Coordinator references from active code.
+      SC was absorbed into runtime in v2.0.19. Changelog entries are preserved.
+    expected_before: "References to scoring-coordinator, ScoringCoordinator, scoring.coordinator"
+    expected_after: "0 matches"
+    verify_command: "grep -ri 'scoring.coordinator\\|scoring-coordinator\\|ScoringCoordinator' internal/ configs/ | grep -v changelog | wc -l | grep -q '^0$'"
+    depends_on: null
+
+  - id: "v2034-kill-glob-subs"
+    type: grep_kill
+    priority: must_pass
+    target_file: "configs/**/*.yaml"
+    key_path: null
+    description: "EventBus does not support glob patterns. Replace opco.*.X with opco.X"
+    expected_before: "opco.*.steady_state_reached, opco.*.cto_escalation"
+    expected_after: "opco.steady_state_reached, opco.escalation"
+    verify_command: "grep -r 'opco\\.\\*\\.' configs/ | wc -l | grep -q '^0$'"
+    depends_on: null
+
+# ── Naming conventions (implementer feedback point 2) ─────────────
+#
+# Agent config file naming convention:
+#   Holding/factory agents:  {id}.yaml         (e.g., empire-coordinator.yaml)
+#   OpCo template agents:    opco-{role}.yaml   (e.g., opco-ceo.yaml, opco-cto.yaml)
+#   Ephemeral agents:        Not on disk — spawned from templates at runtime
+#
+# Mapping (contract ID → config filename):
+#   empire-coordinator      → configs/agents/empire-coordinator.yaml
+#   factory-cto             → configs/agents/factory-cto.yaml
+#   holding-devops          → configs/agents/holding-devops.yaml
+#   operations-analyst      → configs/agents/operations-analyst.yaml
+#   spec-auditor            → configs/agents/spec-auditor.yaml
+#   discovery-coordinator   → configs/agents/discovery-coordinator.yaml
+#   analysis-agent          → configs/agents/analysis-agent.yaml
+#   validation-coordinator  → configs/agents/validation-coordinator.yaml
+#   business-research-agent → configs/agents/business-research-agent.yaml
+#   lightweight-spec-agent  → configs/agents/lightweight-spec-agent.yaml
+#   spec-reviewer           → configs/agents/spec-reviewer.yaml
+#   market-research-agent   → configs/agents/market-research-agent.yaml
+#   trend-research-agent    → configs/agents/trend-research-agent.yaml
+#   pre-brand-agent         → configs/agents/pre-brand-agent.yaml
+#   scanner-{type}-{scan_id}→ (ephemeral, template in configs/agents/templates/scanner.yaml)
+#   OpCo agents             → configs/agents/templates/opco-{role}.yaml

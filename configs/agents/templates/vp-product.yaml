@@ -1,12 +1,11 @@
 id: vp-product
 role: vp-product
 parent_role: opco-ceo
-model_tier: haiku
+model_tier: haiku_or_sonnet
 subscriptions:
   - build_complete
   - build_blocked
   - product_escalation
-  - spend_needed
   - support_digest
   - support_critical
   - build_progress

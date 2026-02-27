@@ -2,16 +2,6 @@ id: cto-agent
 role: cto-agent
 parent_role: vp-product
 model_tier: sonnet
-subscriptions:
-  - product_spec_ready
-  - technical_spec_ready
-  - build_progress
-  - build_blocked
-  - bug_reported
-  - deploy_requested
-  - qa.validation_passed
-  - qa.validation_failed
-  - cycle_limit_reached
 tools:
   - agent_hire
   - agent_fire

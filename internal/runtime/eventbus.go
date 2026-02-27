@@ -308,12 +308,10 @@ func (eb *EventBus) publishTransactional(
 	}()
 
 	txCtx := withSQLTxContext(ctx, tx)
-	passthrough, deferred, err := eb.runInterceptors(txCtx, evt)
+	passthrough, deferred, err := eb.runInterceptors(withoutSQLTxContext(txCtx), evt)
 	if err != nil {
 		return err
 	}
-	receiptTableExists := txTableExists(txCtx, tx, "pipeline_receipts")
-
 	var inboundPlan eventDeliveryPlan
 	if passthrough {
 		inboundPlan, err = eb.buildDeliveryPlan(txCtx, evt)
@@ -325,6 +323,7 @@ func (eb *EventBus) publishTransactional(
 	if err := txStore.AppendEventTx(txCtx, tx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
+	receiptTableExists := txTableExists(txCtx, tx, "pipeline_receipts")
 	if passthrough && len(inboundPlan.PersistedRecipients) > 0 {
 		if err := txStore.InsertEventDeliveriesTx(txCtx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
@@ -358,13 +357,13 @@ func (eb *EventBus) publishTransactional(
 		deferredPlans = append(deferredPlans, plan)
 	}
 
-	if deferredTransitions != nil {
-		flushDeferredPipelineTransitions(txCtx, *deferredTransitions)
-	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit publish tx: %w", err)
 	}
 	committed = true
+	if deferredTransitions != nil {
+		flushDeferredPipelineTransitions(ctx, *deferredTransitions)
+	}
 
 	if passthrough {
 		if len(inboundPlan.Recipients) > 0 {

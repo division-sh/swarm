@@ -2,10 +2,6 @@ id: pm-agent
 role: pm-agent
 model_tier: sonnet
 parent_role: vp-product
-subscriptions:
-  - mandate_updated
-  - market_feedback
-  - feature_request
 tools:
   - agent_message
   - schedule

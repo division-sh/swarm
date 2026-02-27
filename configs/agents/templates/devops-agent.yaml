@@ -2,10 +2,6 @@ id: devops-agent
 role: devops-agent
 model_tier: haiku
 parent_role: cto-agent
-subscriptions:
-  - deploy_requested
-  - qa.validation_passed
-  - qa.validation_failed
 tools:
   - agent_message
   - schedule

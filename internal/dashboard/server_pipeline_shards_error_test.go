@@ -44,6 +44,9 @@ func TestDashboard_PipelineShardAction_ErrorBranches(t *testing.T) {
 
 	// shards table unavailable.
 	{
+		if _, err := db.ExecContext(context.Background(), `DROP TABLE IF EXISTS shards`); err != nil {
+			t.Fatalf("drop shards table: %v", err)
+		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, authedReqAny(t, http.MethodPost, "/dashboard/api/pipeline/shards/"+uuid.NewString()+"/retry", map[string]any{}))
 		if w.Code != http.StatusServiceUnavailable {

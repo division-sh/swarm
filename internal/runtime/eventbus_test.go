@@ -94,7 +94,7 @@ func TestEventBusFactoryEventWithVerticalIDUsesSubscriptions(t *testing.T) {
 	evt := events.Event{
 		ID:          "22222222-2222-2222-2222-222222222222",
 		Type:        events.EventType("validation.started"),
-		SourceAgent: "scoring-coordinator",
+		SourceAgent: "pipeline-coordinator",
 		VerticalID:  "vertical-b",
 		Payload:     []byte(`{"vertical_id":"vertical-b"}`),
 		CreatedAt:   time.Now(),

@@ -345,6 +345,58 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtime.Pers
 		bootstrapVersion = rule.BootstrapVersion
 	}
 
+	if status == "deactivated" {
+		const deactivateQ = `
+			UPDATE routing_rules
+			SET installed_by = $4,
+			    reason = NULLIF($5,''),
+			    status = 'deactivated',
+			    source = $6,
+			    bootstrap_version = $7,
+			    deactivated_at = now()
+			WHERE vertical_id = $1::uuid
+			  AND event_pattern = $2
+			  AND subscriber_id = $3
+			  AND status <> 'deactivated'
+		`
+		res, err := s.DB.ExecContext(ctx, deactivateQ,
+			rule.VerticalID,
+			rule.EventPattern,
+			rule.SubscriberID,
+			rule.InstalledBy,
+			rule.Reason,
+			source,
+			bootstrapVersion,
+		)
+		if err != nil {
+			return fmt.Errorf("deactivate routing rule: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			return nil
+		}
+		const insertDeactivatedQ = `
+			INSERT INTO routing_rules (
+				vertical_id, event_pattern, subscriber_id, installed_by, reason,
+				status, source, bootstrap_version, deactivated_at, created_at
+			) VALUES (
+				$1::uuid, $2, $3, $4, NULLIF($5,''),
+				'deactivated', $6, $7, now(), now()
+			)
+		`
+		if _, err := s.DB.ExecContext(ctx, insertDeactivatedQ,
+			rule.VerticalID,
+			rule.EventPattern,
+			rule.SubscriberID,
+			rule.InstalledBy,
+			rule.Reason,
+			source,
+			bootstrapVersion,
+		); err != nil {
+			return fmt.Errorf("insert deactivated routing rule: %w", err)
+		}
+		return nil
+	}
+
 	const q = `
 		INSERT INTO routing_rules (
 			vertical_id, event_pattern, subscriber_id, installed_by, reason,
@@ -353,16 +405,13 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtime.Pers
 			$1::uuid, $2, $3, $4, NULLIF($5,''),
 			$6, $7, $8, now()
 		)
-		ON CONFLICT (vertical_id, event_pattern, subscriber_id) DO UPDATE SET
+		ON CONFLICT (vertical_id, event_pattern, subscriber_id) WHERE status = 'active' DO UPDATE SET
 			installed_by = EXCLUDED.installed_by,
 			reason = EXCLUDED.reason,
 			status = EXCLUDED.status,
 			source = EXCLUDED.source,
 			bootstrap_version = EXCLUDED.bootstrap_version,
-			deactivated_at = CASE
-				WHEN EXCLUDED.status = 'deactivated' THEN now()
-				ELSE NULL
-			END
+			deactivated_at = NULL
 	`
 	if _, err := s.DB.ExecContext(ctx, q,
 		rule.VerticalID,

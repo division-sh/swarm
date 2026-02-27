@@ -285,6 +285,15 @@ var EventSchemaRegistry = map[string]EventSchema{
 					"type":  "array",
 					"items": map[string]any{"type": "string"},
 				},
+				"sources": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+				"depth": map[string]any{
+					"type": "string",
+					"enum": []string{"quick", "standard", "deep"},
+				},
+				"campaign_id": map[string]any{"type": "string"},
 				"priority": map[string]any{
 					"type": "string",
 					"enum": []string{"low", "normal", "high", "critical"},
@@ -324,6 +333,14 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"mandate": map[string]any{
 					"type":                 "object",
 					"additionalProperties": true,
+				},
+				"brand": map[string]any{
+					"type":                 "object",
+					"additionalProperties": true,
+				},
+				"founder_directives": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
 				},
 				"task_id": map[string]any{"type": "string"},
 			},
@@ -372,6 +389,12 @@ var EventSchemaRegistry = map[string]EventSchema{
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"template_version": map[string]any{"type": "string"},
+				"migration_plan":   map[string]any{"type": "object", "additionalProperties": true},
+				"affected_verticals": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
 				"migration_id":  map[string]any{"type": "string"},
 				"from_version":  map[string]any{"type": "string"},
 				"to_version":    map[string]any{"type": "string"},
@@ -424,6 +447,89 @@ var EventSchemaRegistry = map[string]EventSchema{
 			"additionalProperties": false,
 		},
 	},
+	"vertical.resumed": {
+		Description: "Empire Coordinator resumes a paused validation pipeline.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id": map[string]any{"type": "string"},
+				"reason":      map[string]any{"type": "string"},
+				"task_id":     map[string]any{"type": "string"},
+			},
+			"required":             []string{"vertical_id"},
+			"additionalProperties": false,
+		},
+	},
+	"opco.routing_updated": {
+		Description: "Routing rule change was installed for an OpCo.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":       map[string]any{"type": "string"},
+				"event_pattern":     map[string]any{"type": "string"},
+				"subscriber_id":     map[string]any{"type": "string"},
+				"installed_by":      map[string]any{"type": "string"},
+				"reason":            map[string]any{"type": "string"},
+				"status":            map[string]any{"type": "string"},
+				"source":            map[string]any{"type": "string"},
+				"bootstrap_version": map[string]any{"type": "integer"},
+				"runtime_tool_event": map[string]any{
+					"type": "boolean",
+				},
+			},
+			"required":             []string{"vertical_id", "event_pattern", "subscriber_id", "installed_by", "reason", "status", "source"},
+			"additionalProperties": false,
+		},
+	},
+	"customer_message": {
+		Description: "Inbound customer message normalized for Support routing.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":  map[string]any{"type": "string"},
+				"channel":      map[string]any{"type": "string"},
+				"sender":       map[string]any{"type": "string"},
+				"message_body": map[string]any{"type": "string"},
+				"timestamp":    map[string]any{"type": "string"},
+				"provider_event": map[string]any{
+					"type":                 "object",
+					"additionalProperties": true,
+				},
+			},
+			"required":             []string{"channel", "sender", "message_body"},
+			"additionalProperties": false,
+		},
+	},
+	"human_task.assigned": {
+		Description: "Dashboard assigned a human task and notified the requesting agent.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"task_id":          map[string]any{"type": "string"},
+				"requesting_agent": map[string]any{"type": "string"},
+				"vertical_id":      map[string]any{"type": "string"},
+				"assigned_to":      map[string]any{"type": "string"},
+			},
+			"required":             []string{"task_id", "requesting_agent", "assigned_to"},
+			"additionalProperties": false,
+		},
+	},
+	"opco.escalation_response": {
+		Description: "Escalation response directive sent back to OpCo CEO.",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"vertical_id":            map[string]any{"type": "string"},
+				"original_escalation_id": map[string]any{"type": "string"},
+				"directive":              map[string]any{"type": "string"},
+				"directive_text":         map[string]any{"type": "string"},
+				"priority":               map[string]any{"type": "string"},
+				"action_items":           map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
+			},
+			"required":             []string{"vertical_id"},
+			"additionalProperties": false,
+		},
+	},
 	"category.assessed": {
 		Description: "Market Research Agent reports one assessed category for a scan shard.",
 		Schema: map[string]any{
@@ -444,6 +550,20 @@ var EventSchemaRegistry = map[string]EventSchema{
 				},
 				"task_id":     map[string]any{"type": "string"},
 				"vertical_id": map[string]any{"type": "string"},
+				"automation_micro": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"signal_strength": map[string]any{
+							"type":    "integer",
+							"minimum": 0,
+							"maximum": 100,
+						},
+						"evidence":               map[string]any{"type": "string"},
+						"opportunity_hypothesis": map[string]any{"type": "string"},
+					},
+					"required":             []string{"signal_strength", "evidence", "opportunity_hypothesis"},
+					"additionalProperties": false,
+				},
 			},
 			"required":             []string{"scan_id", "category", "subcategory", "opportunity_hypothesis", "evidence", "signal_strength"},
 			"additionalProperties": false,
@@ -460,6 +580,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"geography":              map[string]any{"type": "string"},
 				"trend_category":         map[string]any{"type": "string"},
 				"trend_description":      map[string]any{"type": "string"},
+				"market_intersection":    map[string]any{"type": "string"},
 				"opportunity_hypothesis": map[string]any{"type": "string"},
 				"evidence":               map[string]any{"type": "string"},
 				"signal_strength": map[string]any{
@@ -470,7 +591,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"task_id":     map[string]any{"type": "string"},
 				"vertical_id": map[string]any{"type": "string"},
 			},
-			"required":             []string{"scan_id", "trend_category", "trend_description", "opportunity_hypothesis", "evidence", "signal_strength"},
+			"required":             []string{"scan_id", "trend_category", "trend_description", "market_intersection", "opportunity_hypothesis", "evidence", "signal_strength"},
 			"additionalProperties": false,
 		},
 	},
@@ -508,10 +629,18 @@ var EventSchemaRegistry = map[string]EventSchema{
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"scan_id":      map[string]any{"type": "string"},
-				"campaign_id":  map[string]any{"type": "string"},
-				"mode":         map[string]any{"type": "string"},
-				"geography":    map[string]any{"type": "string"},
+				"scan_id":     map[string]any{"type": "string"},
+				"campaign_id": map[string]any{"type": "string"},
+				"mode":        map[string]any{"type": "string"},
+				"geography":   map[string]any{"type": "string"},
+				"categories_assessed": map[string]any{
+					"type":    "integer",
+					"minimum": 0,
+				},
+				"high_signal_count": map[string]any{
+					"type":    "integer",
+					"minimum": 0,
+				},
 				"task_id":      map[string]any{"type": "string"},
 				"vertical_id":  map[string]any{"type": "string"},
 				"shard":        map[string]any{"type": "object", "additionalProperties": true},
@@ -617,8 +746,8 @@ var EventSchemaRegistry = map[string]EventSchema{
 			"additionalProperties": false,
 		},
 	},
-	"scanner.job_boards.scan_complete": {
-		Description: "Job boards scanner shard is complete.",
+	"scanner.yelp.scan_complete": {
+		Description: "Yelp scanner shard is complete.",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -747,7 +876,11 @@ var EventSchemaRegistry = map[string]EventSchema{
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"vertical_id":  map[string]any{"type": "string"},
+				"vertical_id": map[string]any{"type": "string"},
+				"validation_kit": map[string]any{
+					"type":                 "object",
+					"additionalProperties": true,
+				},
 				"task_id":      map[string]any{"type": "string"},
 				"spec_version": map[string]any{"type": "integer"},
 				"summary":      map[string]any{"type": "string"},
@@ -892,6 +1025,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"validation_notes": map[string]any{"type": "string"},
 				"severity": map[string]any{
 					"type": "string",
 					"enum": []string{"clean", "medium", "high"},
@@ -956,7 +1090,6 @@ var strictDefaultEventSchemas = map[string]EventSchema{
 	"build_complete":                     defaultAgentEventSchema("build_complete"),
 	"build_progress":                     defaultAgentEventSchema("build_progress"),
 	"channel_blocked":                    defaultAgentEventSchema("channel_blocked"),
-	"channel_update":                     defaultAgentEventSchema("channel_update"),
 	"churn_risk":                         defaultAgentEventSchema("churn_risk"),
 	"cross_domain_report":                defaultAgentEventSchema("cross_domain_report"),
 	"cto.architecture_directive":         defaultAgentEventSchema("cto.architecture_directive"),
@@ -975,7 +1108,6 @@ var strictDefaultEventSchemas = map[string]EventSchema{
 	"devops.deploy_requested":            defaultAgentEventSchema("devops.deploy_requested"),
 	"devops.health_check_failed":         defaultAgentEventSchema("devops.health_check_failed"),
 	"devops.infra_change_needed":         defaultAgentEventSchema("devops.infra_change_needed"),
-	"devops.port_allocated":              defaultAgentEventSchema("devops.port_allocated"),
 	"devops.rollback_complete":           defaultAgentEventSchema("devops.rollback_complete"),
 	"devops.rollback_failed":             defaultAgentEventSchema("devops.rollback_failed"),
 	"devops.rollback_requested":          defaultAgentEventSchema("devops.rollback_requested"),
@@ -987,9 +1119,6 @@ var strictDefaultEventSchemas = map[string]EventSchema{
 	"human_task.approved":                defaultAgentEventSchema("human_task.approved"),
 	"human_task.deferred":                defaultAgentEventSchema("human_task.deferred"),
 	"human_task.rejected":                defaultAgentEventSchema("human_task.rejected"),
-	"launch_ready":                       defaultAgentEventSchema("launch_ready"),
-	"mandate_updated":                    defaultAgentEventSchema("mandate_updated"),
-	"market_feedback":                    defaultAgentEventSchema("market_feedback"),
 	"market_signals":                     defaultAgentEventSchema("market_signals"),
 	"opco.ceo_report":                    defaultAgentEventSchema("opco.ceo_report"),
 	"opco.deploy_review":                 defaultAgentEventSchema("opco.deploy_review"),

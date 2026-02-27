@@ -215,9 +215,9 @@ func TestContractRemediationPrompt_EmpireCoordinatorDirective(t *testing.T) {
 
 func TestNewLLMAgent_ConstraintsOverrideConversationDefaults(t *testing.T) {
 	cfg := models.AgentConfig{
-		ID:   "scoring-coordinator",
+		ID:   "pipeline-coordinator",
 		Type: "worker",
-		Role: "scoring-coordinator",
+		Role: "pipeline-coordinator",
 		Mode: "factory",
 		Config: mustJSON(map[string]any{
 			"system_prompt": "score",
@@ -269,9 +269,9 @@ func (r *countingSessionRuntime) ContinueSession(_ context.Context, _ *Session, 
 func TestLLMAgentOnEvent_TaskScopedResetsAcrossVerticalContexts(t *testing.T) {
 	rt := &countingSessionRuntime{}
 	cfg := models.AgentConfig{
-		ID:   "scoring-coordinator",
+		ID:   "pipeline-coordinator",
 		Type: "worker",
-		Role: "scoring-coordinator",
+		Role: "pipeline-coordinator",
 		Mode: "factory",
 		Config: mustJSON(map[string]any{
 			"system_prompt": "score",
@@ -316,9 +316,9 @@ func TestLLMAgentOnEvent_TaskScopedResetsAcrossVerticalContexts(t *testing.T) {
 func TestLLMAgentOnEvent_TaskScopedRetriesAfterMaxTurns(t *testing.T) {
 	rt := &countingSessionRuntime{}
 	cfg := models.AgentConfig{
-		ID:   "scoring-coordinator",
+		ID:   "pipeline-coordinator",
 		Type: "worker",
-		Role: "scoring-coordinator",
+		Role: "pipeline-coordinator",
 		Mode: "factory",
 		Config: mustJSON(map[string]any{
 			"system_prompt": "score",

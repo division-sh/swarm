@@ -431,6 +431,9 @@ func validateTemplateRouteConsumers(routes []templateRoute, roleSubscriptions ma
 		}
 		subs := roleSubscriptions[route.SubscriberRole]
 		if len(subs) == 0 {
+			if routeManagedWorkerRole(route.SubscriberRole) {
+				continue
+			}
 			addIssue(
 				res,
 				"blocker",
@@ -456,6 +459,15 @@ func validateTemplateRouteConsumers(routes []templateRoute, roleSubscriptions ma
 				fmt.Sprintf("route pattern %q targets %q but none of its subscriptions match", route.EventPattern, route.SubscriberRole),
 			)
 		}
+	}
+}
+
+func routeManagedWorkerRole(role string) bool {
+	switch normalizeRole(role) {
+	case "pm-agent", "cto-agent", "tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent", "marketing-agent", "support-agent":
+		return true
+	default:
+		return false
 	}
 }
 

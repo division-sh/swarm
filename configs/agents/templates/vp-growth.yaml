@@ -1,7 +1,7 @@
 id: vp-growth
 role: vp-growth
 parent_role: opco-ceo
-model_tier: haiku
+model_tier: haiku_or_sonnet
 subscriptions:
   - outreach_digest
   - channel_blocked

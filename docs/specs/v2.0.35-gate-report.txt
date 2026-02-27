@@ -1,0 +1,75 @@
+spec_version: 2.0.35
+compliance: NON_COMPLIANT
+summary: total=17 pass=7 fail=10 unverified=0 must_fail=8
+
+[PASS] ddl-fresh-install (must_pass)
+
+[PASS] ddl-table-count (must_pass)
+
+[FAIL] ddl-runtime-tables-match-structs (must_pass)
+(no output)
+
+[FAIL] ddl-schema-diff (should_pass)
+/bin/sh: empire: command not found
+
+[FAIL] wiring-verifier-clean (must_pass)
+(no output)
+
+[FAIL] wiring-no-glob-subs (must_pass)
+(no output)
+
+[FAIL] wiring-no-sc-ghosts (must_pass)
+(no output)
+
+[FAIL] wiring-no-uuid-agents (must_pass)
+(no output)
+
+[FAIL] wiring-delivery-channel-complete (must_pass)
+                         ~~~~~~~~~~^^
+  File "/opt/homebrew/lib/python3.14/site-packages/yaml/parser.py", line 438, in parse_block_mapping_key
+    raise ParserError("while parsing a block mapping", self.marks[-1],
+            "expected <block end>, but found %r" % token.id, token.start_mark)
+yaml.parser.ParserError: while parsing a block mapping
+  in "contracts/event-catalog.yaml", line 542, column 3
+expected <block end>, but found '-'
+  in "contracts/event-catalog.yaml", line 544, column 3
+
+[FAIL] xval-emit-events-in-catalog (must_pass)
+                         ~~~~~~~~~~^^
+  File "/opt/homebrew/lib/python3.14/site-packages/yaml/parser.py", line 438, in parse_block_mapping_key
+    raise ParserError("while parsing a block mapping", self.marks[-1],
+            "expected <block end>, but found %r" % token.id, token.start_mark)
+yaml.parser.ParserError: while parsing a block mapping
+  in "contracts/event-catalog.yaml", line 542, column 3
+expected <block end>, but found '-'
+  in "contracts/event-catalog.yaml", line 544, column 3
+
+[FAIL] xval-subscriptions-in-catalog (must_pass)
+                         ~~~~~~~~~~^^
+  File "/opt/homebrew/lib/python3.14/site-packages/yaml/parser.py", line 438, in parse_block_mapping_key
+    raise ParserError("while parsing a block mapping", self.marks[-1],
+            "expected <block end>, but found %r" % token.id, token.start_mark)
+yaml.parser.ParserError: while parsing a block mapping
+  in "contracts/event-catalog.yaml", line 542, column 3
+expected <block end>, but found '-'
+  in "contracts/event-catalog.yaml", line 544, column 3
+
+[FAIL] xval-catalog-emitters-exist (should_pass)
+                         ~~~~~~~~~~^^
+  File "/opt/homebrew/lib/python3.14/site-packages/yaml/parser.py", line 438, in parse_block_mapping_key
+    raise ParserError("while parsing a block mapping", self.marks[-1],
+            "expected <block end>, but found %r" % token.id, token.start_mark)
+yaml.parser.ParserError: while parsing a block mapping
+  in "contracts/event-catalog.yaml", line 542, column 3
+expected <block end>, but found '-'
+  in "contracts/event-catalog.yaml", line 544, column 3
+
+[PASS] agents-all-have-prompts (must_pass)
+
+[PASS] agents-naming-convention (should_pass)
+
+[PASS] integration-event-roundtrip (should_pass)
+
+[PASS] integration-crash-recovery (should_pass)
+
+[PASS] integration-dual-assessment (should_pass)

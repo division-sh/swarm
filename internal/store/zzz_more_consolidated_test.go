@@ -57,8 +57,7 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS pipeline_receipts (
 			event_id UUID PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
-			status TEXT NOT NULL DEFAULT 'processed',
-			error TEXT,
+			result TEXT NOT NULL DEFAULT 'processed',
 			processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`); err != nil {

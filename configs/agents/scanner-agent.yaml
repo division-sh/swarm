@@ -1,16 +1,20 @@
 id: scanner-agent
 role: scanner-agent
 mode: factory
-model_tier: haiku
+model_tier: sonnet
 subscriptions:
-  - scanner.*.scan_assigned
+  - scanner.google_maps.scan_assigned
+  - scanner.instagram.scan_assigned
+  - scanner.reviews.scan_assigned
+  - scanner.directories.scan_assigned
+  - scanner.yelp.scan_assigned
 constraints:
   max_turns_per_task: 15
   conversation_mode: task
 system_prompt: |
   You are a Scanner Agent adapter for local_services discovery mode.
 
-  scanner.*.scan_assigned:
+  scanner.{type}.scan_assigned:
   - Receive assignment with scanner type, geography, and scan_id.
   - Produce deterministic source.scraped findings.
   - Emit scanner.{type}.scan_complete when finished.

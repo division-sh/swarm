@@ -5,7 +5,6 @@ model_tier: sonnet
 subscriptions:
   - opco.ceo_report
   - opco.steady_state_reached
-  - mailbox.item_decided
   - budget.threshold_crossed
 tools:
   - sql_execute
@@ -46,8 +45,6 @@ system_prompt: |
   EVENT HANDLERS:
   - opco.ceo_report / opco.steady_state_reached:
     Update cross-vertical pattern dataset and recompute promotion candidates.
-  - mailbox.item_decided:
-    Track decision latency and bottleneck classes for operational feedback.
   - budget.threshold_crossed:
     Include spend-threshold impact in anti-pattern and cadence analysis.
 

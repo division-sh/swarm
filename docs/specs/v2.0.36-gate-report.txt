@@ -1,0 +1,76 @@
+spec_version: 2.0.36
+compliance: COMPLIANT
+summary: total=18 pass=15 fail=0 unverified=3 must_fail=0
+
+[PASS] contracts-yaml-parse (must_pass)
+6 contracts parsed successfully
+
+[PASS] ddl-fresh-install (must_pass)
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+
+[PASS] ddl-table-count (must_pass)
+
+[PASS] ddl-runtime-tables-match-structs (must_pass)
+
+[PASS] ddl-schema-diff (should_pass)
+UNVERIFIED: empire CLI not available
+
+[PASS] wiring-verifier-clean (must_pass)
+    wiring_verification_test.go:199: PASS: ORPHAN_EMISSION: vertical.needs_more_data runtime-channel event is intercepted
+    wiring_verification_test.go:199: PASS: ORPHAN_EMISSION: vertical.ready_for_review exempt via delivery_channel=mailbox
+    wiring_verification_test.go:199: PASS: ORPHAN_EMISSION: vertical.rejected exempt via delivery_channel=audit
+    wiring_verification_test.go:199: PASS: ORPHAN_EMISSION: vertical.resumed runtime-channel event is intercepted
+    wiring_verification_test.go:199: PASS: ORPHAN_EMISSION: vertical.scored has static consumer in event-catalog contract
+    wiring_verification_test.go:199: PASS: ORPHAN_EMISSION: vertical.shortlisted runtime-channel event is intercepted
+    wiring_verification_test.go:207: summary: pass=567 fail=0 warn=0
+--- PASS: TestSpecRuntimeWiringVerification (0.05s)
+PASS
+ok  	empireai/internal/runtime	0.410s
+
+[PASS] wiring-no-glob-subs (must_pass)
+
+[PASS] wiring-no-sc-ghosts (must_pass)
+
+[PASS] wiring-no-uuid-agents (must_pass)
+
+[PASS] wiring-delivery-channel-complete (must_pass)
+166 events, all have delivery_channel
+
+[PASS] xval-emit-events-in-catalog (must_pass)
+All emit_events have catalog entries (166 events checked)
+
+[PASS] xval-subscriptions-in-catalog (must_pass)
+All subscriptions have catalog entries (166 events checked)
+
+[PASS] xval-catalog-emitters-exist (should_pass)
+All emitters are valid (28 agent IDs + system emitters)
+
+[PASS] agents-all-have-prompts (must_pass)
+28 agents checked
+
+[PASS] agents-naming-convention (should_pass)
+27 agent configs found
+
+[UNVERIFIED] integration-event-roundtrip (should_pass)
+testing: warning: no tests to run
+PASS
+ok  	empireai/internal/runtime	0.213s [no tests to run]
+
+[UNVERIFIED] integration-crash-recovery (should_pass)
+testing: warning: no tests to run
+PASS
+ok  	empireai/internal/runtime	0.217s [no tests to run]
+
+[UNVERIFIED] integration-dual-assessment (should_pass)
+testing: warning: no tests to run
+PASS
+ok  	empireai/internal/runtime	0.219s [no tests to run]

@@ -448,9 +448,6 @@ func (s *Server) ensureTemplatePromptDraftsTable(ctx context.Context) error {
 		CREATE TABLE IF NOT EXISTS template_prompt_drafts (
 			role        TEXT PRIMARY KEY,
 			prompt      TEXT NOT NULL,
-			source      TEXT NOT NULL DEFAULT 'api',
-			notes       TEXT,
-			created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
 			updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 		)
 	`)
@@ -464,16 +461,18 @@ func (s *Server) loadTemplatePromptDraft(ctx context.Context, role string) (temp
 	role = strings.TrimSpace(role)
 	var d templatePromptDraft
 	err := s.db.QueryRowContext(ctx, `
-		SELECT role, prompt, source, COALESCE(notes, ''), created_at, updated_at
+		SELECT role, prompt, updated_at
 		FROM template_prompt_drafts
 		WHERE role = $1
-	`, role).Scan(&d.Role, &d.Prompt, &d.Source, &d.Notes, &d.CreatedAt, &d.UpdatedAt)
+	`, role).Scan(&d.Role, &d.Prompt, &d.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return templatePromptDraft{}, false, nil
 		}
 		return templatePromptDraft{}, false, err
 	}
+	d.Source = "template_draft"
+	d.CreatedAt = d.UpdatedAt
 	return d, true, nil
 }
 
@@ -482,7 +481,7 @@ func (s *Server) loadAllTemplatePromptDrafts(ctx context.Context) (map[string]te
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT role, prompt, source, COALESCE(notes, ''), created_at, updated_at
+		SELECT role, prompt, updated_at
 		FROM template_prompt_drafts
 	`)
 	if err != nil {
@@ -492,9 +491,11 @@ func (s *Server) loadAllTemplatePromptDrafts(ctx context.Context) (map[string]te
 	out := make(map[string]templatePromptDraft)
 	for rows.Next() {
 		var d templatePromptDraft
-		if err := rows.Scan(&d.Role, &d.Prompt, &d.Source, &d.Notes, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.Role, &d.Prompt, &d.UpdatedAt); err != nil {
 			return nil, err
 		}
+		d.Source = "template_draft"
+		d.CreatedAt = d.UpdatedAt
 		out[strings.TrimSpace(d.Role)] = d
 	}
 	return out, rows.Err()
@@ -506,19 +507,15 @@ func (s *Server) upsertTemplatePromptDraft(ctx context.Context, role, prompt, so
 	}
 	role = strings.TrimSpace(role)
 	prompt = strings.TrimSpace(prompt)
-	source = strings.TrimSpace(source)
-	if source == "" {
-		source = "api"
-	}
+	_ = strings.TrimSpace(source)
+	_ = strings.TrimSpace(notes)
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO template_prompt_drafts (role, prompt, source, notes, created_at, updated_at)
-		VALUES ($1, $2, $3, NULLIF($4,''), now(), now())
+		INSERT INTO template_prompt_drafts (role, prompt, updated_at)
+		VALUES ($1, $2, now())
 		ON CONFLICT (role) DO UPDATE SET
 			prompt = EXCLUDED.prompt,
-			source = EXCLUDED.source,
-			notes = EXCLUDED.notes,
 			updated_at = now()
-	`, role, prompt, source, strings.TrimSpace(notes))
+	`, role, prompt)
 	return err
 }
 
@@ -1305,7 +1302,7 @@ func flowInterceptPolicy(eventType string, payloadRaw []byte) (intercepted bool,
 		"scanner.instagram.scan_complete",
 		"scanner.reviews.scan_complete",
 		"scanner.directories.scan_complete",
-		"scanner.job_boards.scan_complete",
+		"scanner.yelp.scan_complete",
 		"dedup.resolved",
 		"synthesis.resolved",
 		"vertical.shortlisted",
