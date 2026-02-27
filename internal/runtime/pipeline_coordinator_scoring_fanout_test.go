@@ -185,6 +185,70 @@ func TestFactoryPipelineCoordinator_AutomationMicroGateRejectsLowAutomationLever
 	}
 }
 
+func TestFactoryPipelineCoordinator_SaaSGateRejectsLowAutomationCompleteness(t *testing.T) {
+	store := &captureStore{}
+	bus := NewEventBus(store)
+	pc := NewFactoryPipelineCoordinator(bus, nil)
+	bus.SetInterceptors(pc)
+
+	verticalID := uuid.NewString()
+	pc.mu.Lock()
+	pc.scoring[verticalID] = &scoringAccumulator{
+		VerticalID:   verticalID,
+		VerticalName: "Helpdesk Ticketing",
+		Geography:    "paraguay",
+		Mode:         "saas_gap",
+		Rubric:       "saas",
+		Expected: []string{
+			"automation_completeness",
+			"build_complexity",
+			"technical_feasibility",
+			"distribution_access",
+			"willingness_to_pay",
+			"retention_likelihood",
+			"regulatory_moat",
+			"competition_weakness",
+			"pain_severity",
+			"market_size",
+			"localization_advantage",
+		},
+		Received: map[string]scoreDimensionResult{
+			"automation_completeness": {Score: 45, Evidence: "requires manual onboarding and human support"},
+			"build_complexity":        {Score: 72, Evidence: "manageable MVP scope"},
+			"technical_feasibility":   {Score: 80, Evidence: "standard SaaS stack"},
+			"distribution_access":     {Score: 68, Evidence: "reachable SMB communities"},
+			"willingness_to_pay":      {Score: 70, Evidence: "existing spend signals"},
+			"retention_likelihood":    {Score: 66, Evidence: "moderate lock-in"},
+			"regulatory_moat":         {Score: 60, Evidence: "some compliance pressure"},
+			"competition_weakness":    {Score: 65, Evidence: "incumbent gaps"},
+			"pain_severity":           {Score: 75, Evidence: "clear operational pain"},
+			"market_size":             {Score: 58, Evidence: "mid-size market"},
+			"localization_advantage":  {Score: 62, Evidence: "local requirements"},
+		},
+		Contested:       map[string]contestedDimension{},
+		ContestNotified: map[string]bool{},
+	}
+	pc.mu.Unlock()
+
+	pc.finalizeScoringAccumulator(context.Background(), verticalID, false)
+
+	var rejected bool
+	for _, evt := range store.events {
+		if string(evt.Type) != "vertical.scored" {
+			continue
+		}
+		payload := parsePayloadMap(evt.Payload)
+		if strings.TrimSpace(asString(payload["result"])) == "rejected" &&
+			strings.TrimSpace(asString(payload["reason"])) == "gate_automation_completeness" {
+			rejected = true
+			break
+		}
+	}
+	if !rejected {
+		t.Fatalf("expected saas hard gate rejection, events=%+v", store.events)
+	}
+}
+
 func TestFactoryPipelineCoordinator_RejectedScoringBufferedAndInjectedIntoPortfolioDigest(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()

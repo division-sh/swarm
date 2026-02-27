@@ -1,0 +1,1877 @@
+# ============================================================================
+# EmpireAI Event Catalog — v2.0.37
+# ============================================================================
+# Canonical source of truth for all system events. Authoritative over spec prose.
+#
+# Fields per event:
+#   emitter:           Agent or component that produces this event
+#   consumer:          Agent(s) that receive this event (string or list)
+#   intercepted:       Whether PipelineCoordinator intercepts (true/false/conditional)
+#   passthrough:       Whether event continues to subscribers after interception
+#   routing:           static | routing_table
+#   delivery_channel:  How the event reaches its consumer:
+#     eventbus_static         — delivered via EventBus static subscriptions
+#     eventbus_routing_table  — delivered via per-vertical routing_rules table
+#     runtime                 — consumed by PipelineCoordinator interceptor (no fan-out)
+#     agent_message           — delivered point-to-point via agent_message tool
+#     mailbox                 — delivered to mailbox table for human decision
+#     audit                   — written to events table only, no active consumer
+#   runtime_handling:  What the runtime does with this event in the interceptor (v2.0.37):
+#     none                    — runtime does not touch this event, passes straight to fan-out
+#     consuming               — runtime intercepts and fully consumes (passthrough=false, no fan-out)
+#     projection              — runtime intercepts for state update, then passes through to subscribers
+#   payload:           Key fields in the event payload (matches EventSchemaRegistry)
+#
+# Terminal events (verifier skips orphan check):
+#   delivery_channel: audit    — no subscriber; logged to events table
+#   delivery_channel: mailbox  — no subscriber; delivered to mailbox for human decision
+#
+# Changes from v2.0.31:
+#   - Added 30 missing events (scanner per-type, OpCo lifecycle, human workflow, operational)
+#   - Fixed 5 payload field mismatches vs EventSchemaRegistry
+#   - Fixed 3+ consumer listing gaps
+#   - vertical.shortlisted confirmed: emitter=runtime (not EC)
+#   - All events now have delivery_channel field
+# ============================================================================
+
+analyst.anti_pattern_advisory:
+  emitter: operations-analyst
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - pattern
+  - affected_verticals
+  - severity
+  - recommendation
+analyst.bootstrap_upgrade_proposal:
+  emitter: operations-analyst
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - proposal_type
+  - affected_routes
+  - evidence
+  - recommendation
+analyst.prompt_refinement_proposal:
+  emitter: operations-analyst
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - agent_role
+  - current_behavior
+  - proposed_change
+  - evidence
+board.chat:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - message
+  - context
+  - response_requested
+board.directive:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - directive_type
+  - target
+  - parameters
+  - priority
+brand.candidates_ready:
+  emitter: pre-brand-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - candidates
+brand.requested:
+  emitter: runtime
+  consumer: pre-brand-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - vertical_name
+  - geography
+  - business_brief
+brand.revision_needed:
+  emitter: human
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  runtime_handling: consuming  # interceptor resets G4, reopens pipeline, emits to pre-brand-agent
+  payload:
+  - vertical_id
+  - feedback
+budget.emergency:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - level
+  - message
+  - action_taken
+budget.resumed:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - previous_level
+  - message
+budget.threshold_crossed:
+  emitter: runtime
+  consumer:
+  - empire-coordinator
+  - operations-analyst
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection  # runtime calls handleBudgetThreshold(), then delivers to subscribers
+  payload:
+  - level
+  - current_spend
+  - budget_cap
+  - percentage
+budget.throttle:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - throttle_level
+  - affected_agents
+budget.warning:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - level
+  - message
+bug_fix_deployed:
+  emitter: opco-cto
+  consumer: opco-support
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - bug_id
+  - version
+  - resolution
+bug_reported:
+  emitter: opco-support
+  consumer: opco-cto
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - description
+  - severity
+  - reproduction_steps
+build_blocked:
+  emitter: opco-cto
+  consumer: opco-head-of-product
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - blocker
+  - blocked_task
+  - severity
+build_complete:
+  emitter: opco-cto
+  consumer: [opco-head-of-product, opco-chief-of-staff]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - feature
+  - environment
+build_progress:
+  emitter: opco-cto
+  consumer: opco-head-of-product
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - milestone
+  - completion_pct
+campaign.completed:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - campaign_id
+  - geography
+  - modes_completed
+  - total_discovered
+  - total_shortlisted
+category.assessed:
+  emitter: market-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - category
+  - subcategory
+  - geography
+  - signal_strength
+  - evidence
+  - opportunity_hypothesis
+  - automation_micro
+  notes: "Dual assessment \u2014 automation_micro object is optional. Runtime may\
+    \ emit 2 vertical.discovered per subcategory."
+channel_blocked:
+  emitter: opco-marketing
+  consumer: [opco-head-of-growth, opco-chief-of-staff]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - channel
+  - reason
+  - severity
+channel_update:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - channel
+  - metrics
+  - status
+churn_risk:
+  emitter: opco-support
+  consumer: [opco-head-of-product, opco-chief-of-staff]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - customer_id
+  - risk_level
+  - indicators
+cross_domain_report:
+  emitter: opco-chief-of-staff
+  consumer: opco-ceo
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - product_status
+  - growth_status
+  - risks
+  - recommendations
+cto.architecture_directive:
+  emitter: factory-cto
+  consumer: opco-ceo
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - directive
+  - affected_verticals
+  - rationale
+cto.extraction_recommended:
+  emitter: factory-cto
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - pattern_id
+  - affected_verticals
+  - recommendation
+cto.pattern_detected:
+  emitter: factory-cto
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - pattern_type
+  - verticals
+  - description
+cto.spec_approved:
+  emitter: factory-cto
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - cto_notes
+cto.spec_review_requested:
+  emitter: runtime
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mvp_spec
+  - business_brief
+  - vertical_context
+cto.spec_revision_needed:
+  emitter: factory-cto
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - technical_issues
+cto.spec_vetoed:
+  emitter: factory-cto
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - reason
+cto.tech_spec_feedback:
+  emitter: factory-cto
+  consumer: opco-cto
+  intercepted: false
+  routing: static
+  delivery_channel: agent_message
+  payload:
+  - vertical_id
+  - feedback
+  - severity
+cto.tech_spec_review_requested:
+  emitter: opco-cto
+  consumer: opco-tech-writer
+  intercepted: false
+  routing: routing_table
+  delivery_channel: agent_message
+  payload:
+  - vertical_id
+  - spec_content
+cycle_limit_reached:
+  emitter: runtime
+  consumer: opco-cto
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - event_pattern
+  - count
+  - window_hours
+  - agents_involved
+  - recommendation
+cycle_reset:
+  emitter: opco-cto
+  consumer: runtime
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - event_pattern
+  - reason
+dedup.ambiguous:
+  emitter: runtime
+  consumer: discovery-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - dedup_id
+  - new_candidate
+  - existing_vertical
+  - similarity
+dedup.resolved:
+  emitter: discovery-coordinator
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - dedup_id
+  - action
+  - reasoning
+deploy_requested:
+  emitter: opco-cto
+  consumer: opco-devops
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - component
+  - version
+  - deploy_config
+devops.capacity_warning:
+  emitter: holding-devops
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - resource
+  - current_usage
+  - threshold
+  - recommendation
+devops.deploy_complete:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - url
+  - version
+devops.deploy_failed:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - error
+devops.deploy_requested:
+  emitter: opco-devops
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - manifest
+  - environment
+  - requesting_agent
+devops.health_check_failed:
+  emitter: runtime
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - endpoint
+  - error
+devops.infra_change_needed:
+  emitter: holding-devops
+  consumer: [holding-devops, mailbox]
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  _note: "OpCo devops emits this; holding-devops receives via bootstrap route (subscriber_id, not role)"
+  payload:
+  - change_type
+  - reason
+  - estimated_cost
+devops.rollback_complete:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - active_version
+devops.rollback_failed:
+  emitter: holding-devops
+  consumer: [holding-devops, audit]
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - error
+devops.rollback_requested:
+  emitter: opco-devops
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - target_version
+  - requesting_agent
+devops.ssl_provisioned:
+  emitter: holding-devops
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - domain
+  - expiry
+feature_deployed:
+  emitter: opco-cto
+  consumer: [opco-chief-of-staff, opco-marketing, opco-head-of-product]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - feature_id
+  - version
+  - release_notes
+feature_request:
+  emitter: opco-support
+  consumer: opco-pm
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - description
+  - requester_context
+founder_input.response:
+  emitter: runtime
+  consumer: opco-ceo
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - item_id
+  - decision
+  - notes
+growth_escalation:
+  emitter: opco-head-of-growth
+  consumer: opco-ceo
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - issue
+  - recommendation
+growth_report:
+  emitter: opco-head-of-growth
+  consumer:
+  - opco-ceo
+  - opco-chief-of-staff
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - phase
+  - metrics
+  - decisions
+human_task.approved:
+  emitter: empire-coordinator
+  consumer: dynamic  # delivered to whichever agent requested the task/spend
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - notes
+human_task.completed:
+  emitter: human
+  consumer: dynamic  # delivered to whichever agent requested the task/spend
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - result
+human_task.deferred:
+  emitter: empire-coordinator
+  consumer: dynamic  # delivered to whichever agent requested the task/spend
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - defer_until
+  - reason
+human_task.expired:
+  emitter: runtime
+  consumer:
+  - empire-coordinator
+  - requesting-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+human_task.rejected:
+  emitter: empire-coordinator
+  consumer: dynamic  # delivered to whichever agent requested the task/spend
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - reason
+human_task.requested:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - requesting_agent
+  - task_type
+  - description
+inbound.email:
+  emitter: inbound-gateway
+  consumer: opco-support
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - from
+  - subject
+  - body
+  - attachments
+  _note: Event type is inbound.email; vertical_id in payload for routing.
+inbound.whatsapp_message:
+  emitter: inbound-gateway
+  consumer: opco-support
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - from
+  - message
+  - timestamp
+  - media_urls
+  _note: Event type is inbound.whatsapp_message; vertical_id in payload for routing.
+launch_ready:
+  emitter: opco-cto
+  consumer: opco-ceo
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - version
+  - deploy_url
+  - test_results
+mailbox.item_decided:
+  emitter: runtime
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  runtime_handling: projection  # runtime calls handleMailboxDecided(), then delivers to subscribers
+  payload:
+  - item_id
+  - decision
+  - decided_by
+  - vertical_id
+  - original_event_type
+mandate_updated:
+  emitter: opco-ceo
+  consumer:
+  - opco-chief-of-staff
+  - opco-head-of-product
+  - opco-head-of-growth
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - mandate
+  - priorities
+  - budget_allocation
+market_feedback:
+  emitter: opco-support
+  consumer: opco-head-of-product
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - feedback_type
+  - summary
+  - frequency
+  - severity
+market_research.scan_assigned:
+  emitter: runtime
+  consumer: market-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - geography
+  - scan_id
+  - taxonomy_categories
+  - shard
+market_research.scan_complete:
+  emitter: market-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - categories_assessed
+  - high_signal_count
+  - geography
+market_signals:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - signal_type
+  - description
+  - evidence
+opco.ceo_ready:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - agent_count
+opco.ceo_report:
+  emitter: opco-ceo
+  consumer:
+  - empire-coordinator
+  - operations-analyst
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - phase
+  - metrics
+  - decisions
+opco.deploy_review:
+  emitter: opco-ceo
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - deploy_id
+  - review_type
+opco.escalation:
+  emitter: opco-ceo
+  consumer:
+  - empire-coordinator
+  - factory-cto
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - issue
+  - recommendation
+opco.escalation_response:
+  emitter: empire-coordinator
+  consumer: opco-ceo
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - original_escalation_id
+  - directive
+  - priority
+opco.founder_input:
+  emitter: opco-ceo
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - question
+  - context
+  - urgency
+opco.launched:
+  emitter: opco-ceo
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - launch_url
+  - metrics
+opco.product_spec_review:
+  emitter: opco-head-of-product
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - spec_summary
+  - review_request
+opco.spend_request:
+  emitter: opco-ceo
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - amount
+  - purpose
+  - vendor
+opco.spinup_requested:
+  emitter: empire-coordinator
+  consumer: runtime
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mandate
+  - brand
+  - founder_directives
+opco.steady_state_reached:
+  emitter: opco-ceo
+  consumer:
+  - empire-coordinator
+  - factory-cto
+  - operations-analyst
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+opco.teardown_complete:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+opco.teardown_requested:
+  emitter: human
+  consumer: runtime
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - reason
+ops.agent_failed:
+  emitter: runtime
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - agent_id
+  - vertical_id
+  - error
+  - retry_count
+  - last_event_type
+ops.agent_panic:
+  emitter: runtime
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - agent_id
+  - vertical_id
+  - error
+  - stack_trace
+  - conversation_id
+outreach_digest:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - messages_sent
+  - responses
+  - response_rate
+  - leads_converted
+  - best_channel
+  - intelligence
+portfolio.digest_compiled:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - digest_text
+  - trigger_reason
+  - action_required_count
+prelaunch_ready:
+  emitter: opco-marketing
+  consumer: [opco-head-of-growth, opco-chief-of-staff]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - channels_ready
+  - landing_page_url
+product_escalation:
+  emitter: opco-head-of-product
+  consumer: opco-ceo
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - issue
+  - recommendation
+product_report:
+  emitter: opco-head-of-product
+  consumer:
+  - opco-ceo
+  - opco-chief-of-staff
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - phase
+  - metrics
+  - decisions
+product_spec_ready:
+  emitter: opco-pm
+  consumer: opco-cto
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - spec_version
+  - features
+  - acceptance_criteria
+qa.validation_failed:
+  emitter: opco-qa
+  consumer: opco-cto
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - failures
+  - expected_vs_actual
+  - severity
+  - reproduction_steps
+qa.validation_passed:
+  emitter: opco-qa
+  consumer: opco-cto
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - test_summary
+  - coverage_notes
+  - staging_url
+research.completed:
+  emitter: business-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - business_brief
+research.vertical_rejected:
+  emitter: business-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - rejection_reason
+  - evidence
+scan.completed:
+  emitter: runtime
+  consumer: runtime
+  intercepted: false
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - mode
+  - geography
+  - reports_received
+  - agents_expected
+  - agents_complete
+  - verticals_discovered
+  - campaign_id
+scan.requested:
+  emitter: empire-coordinator
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - geography
+  - mode
+  - taxonomy_categories
+  - sources
+  - depth
+  - campaign_id
+  - campaign_context
+scanner.directories.scan_assigned:
+  emitter: runtime
+  consumer: scanner-directories
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+scanner.directories.scan_complete:
+  emitter: scanner-agent  # instance: scanner-directories-{scan_id}
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+scanner.google_maps.scan_assigned:
+  emitter: runtime
+  consumer: scanner-google_maps
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+scanner.google_maps.scan_complete:
+  emitter: scanner-agent  # instance: scanner-google_maps-{scan_id}
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+scanner.instagram.scan_assigned:
+  emitter: runtime
+  consumer: scanner-instagram
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+scanner.instagram.scan_complete:
+  emitter: scanner-agent  # instance: scanner-instagram-{scan_id}
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+scanner.reviews.scan_assigned:
+  emitter: runtime
+  consumer: scanner-reviews
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+scanner.reviews.scan_complete:
+  emitter: scanner-agent  # instance: scanner-reviews-{scan_id}
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+scanner.yelp.scan_assigned:
+  emitter: runtime
+  consumer: scanner-yelp
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+scanner.yelp.scan_complete:
+  emitter: scanner-agent  # instance: scanner-yelp-{scan_id}
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+score.dimension_complete:
+  emitter: analysis-agent
+  consumer: scoring-node  # TARGET (v2.0.37): delivered to ScoringNode. CURRENT: still intercepted by PipelineCoordinator.
+  intercepted: true  # TRANSITIONAL: will change to false when scoring-node replaces interceptor cases
+  passthrough: false
+  routing: static
+  delivery_channel: runtime  # TRANSITIONAL: will change to eventbus_static when scoring-node is implemented
+  runtime_handling: consuming  # TRANSITIONAL: will change to none when scoring-node takes over
+  payload:
+  - vertical_id
+  - dimension
+  - score
+  - evidence
+  - confidence
+scoring.contest_resolved:
+  emitter: empire-coordinator
+  consumer: scoring-node  # TRANSITIONAL: consumed by interceptor now, ScoringNode after migration
+  intercepted: true  # runtime consumes for score resolution
+  routing: static
+  delivery_channel: runtime
+  runtime_handling: consuming  # interceptor substitutes resolved score, runs computeComposite
+  payload:
+  - vertical_id
+  - dimension
+  - resolved_score
+  - reasoning
+scoring.contested:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - dimension
+  - scores
+  - evidence
+  - spread
+scoring.requested:
+  emitter: scoring-node  # v2.0.37: emitted by ScoringNode (was: runtime interceptor)
+  consumer: analysis-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - vertical_name
+  - geography
+  - mode
+  - rubric
+  - dimensions_requested
+source.scraped:
+  emitter: scanner-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - source
+  - evidence
+  - geography
+spec.approved:
+  emitter: business-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - final_spec
+spec.contradiction_detected:
+  emitter: runtime
+  consumer: spec-auditor
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - agent_id
+  - contradiction_type
+  - detail
+spec.draft_ready:
+  emitter: lightweight-spec-agent
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mvp_spec
+spec.requested:
+  emitter: business-research-agent
+  consumer: lightweight-spec-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - business_brief
+spec.revision_needed:
+  emitter: business-research-agent
+  consumer: lightweight-spec-agent
+  intercepted: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - misalignment_details
+spec.revision_requested:
+  emitter: runtime
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - cto_feedback
+spec.validation_failed:
+  emitter: spec-auditor
+  consumer: runtime
+  intercepted: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - issues
+  - severity
+spec.validation_passed:
+  emitter: spec-auditor
+  consumer: runtime
+  intercepted: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - validation_notes
+spec.validation_requested:
+  emitter: factory-cto
+  consumer: spec-auditor
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - spec_content
+  - spec_tier
+  - vertical_id
+spec_review.issues_found:
+  emitter: spec-reviewer
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - issues
+spec_review.passed:
+  emitter: spec-reviewer
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - review_notes
+spec_review.requested:
+  emitter: business-research-agent
+  consumer: spec-reviewer
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mvp_spec
+  - business_brief
+spend.approved:
+  emitter: human
+  consumer:
+  - requesting-agent
+  - holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - amount
+  - purpose
+spend.rejected:
+  emitter: human
+  consumer:
+  - requesting-agent
+  - holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - reason
+spend_needed:
+  emitter: opco-marketing
+  consumer: [opco-head-of-growth, opco-head-of-product]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - amount
+  - purpose
+  - vendor
+spend_request:
+  emitter: opco-marketing
+  consumer: opco-ceo
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - amount
+  - currency
+  - purpose
+  - justification
+support_critical:
+  emitter: opco-support
+  consumer: [opco-head-of-product, opco-chief-of-staff]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - severity
+  - description
+  - customer_impact
+support_digest:
+  emitter: opco-support
+  consumer: opco-head-of-product
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - open_tickets
+  - resolved
+  - csat
+  - common_issues
+  - churn_risk_signals
+synthesis.needed:
+  emitter: runtime
+  consumer: discovery-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - conflicting_reports
+  - context
+synthesis.resolved:
+  emitter: discovery-coordinator
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - resolved_assessment
+system.directive:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: true
+  passthrough: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - directive_text
+  - timestamp
+system.started:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - timestamp
+  - config_version
+  - agent_count
+  - is_cold_start
+technical_spec_ready:
+  emitter: opco-tech-writer
+  consumer: [opco-cto, opco-backend, opco-frontend]
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - spec_version
+  - components
+  - api_contracts
+template.migration_approved:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - template_version
+  - verticals
+template.migration_completed:
+  emitter: empire-coordinator
+  consumer: [empire-coordinator, audit]
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - template_version
+  - vertical_id
+  - result
+template.migration_failed:
+  emitter: empire-coordinator
+  consumer: [empire-coordinator, audit]
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - template_version
+  - vertical_id
+  - error
+template.migration_planned:
+  emitter: empire-coordinator
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - template_version
+  - migration_plan
+  - affected_verticals
+template.publish_requested:
+  emitter: human
+  consumer: factory-cto
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - template_version
+  - changes
+template.version_published:
+  emitter: factory-cto
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - template_version
+  - changelog
+timer.infra_health_check:
+  emitter: runtime
+  consumer: holding-devops
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - check_type
+timer.marginal_review:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - parked_marginals_summary
+timer.portfolio_digest:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection  # runtime compiles digest, then delivers to EC
+  payload:
+  - trigger_reason
+trend.identified:
+  emitter: trend-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - signal_strength
+  - trend_description
+  - opportunity_hypothesis
+  - evidence
+  - geography
+  - urgency
+  - market_intersection
+trend_research.scan_assigned:
+  emitter: runtime
+  consumer: trend-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - geography
+  - scan_id
+trend_research.scan_complete:
+  emitter: trend-research-agent
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - trends_identified
+  - geography
+user_onboarded:
+  emitter: runtime
+  consumer: opco-head-of-growth
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - user_id
+  - channel
+validation.more_data_needed:
+  emitter: runtime
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - questions
+validation.package_ready:
+  emitter: runtime
+  consumer: validation-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - research
+  - spec
+  - cto_notes
+  - brand
+validation.started:
+  emitter: runtime
+  consumer: business-research-agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - vertical_name
+  - geography
+  - scoring_context
+vertical.approved:
+  emitter: human
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection  # runtime calls finalizePipeline(), then delivers to subscribers
+  payload:
+  - vertical_id
+  - brand_choice
+  - founder_directives
+vertical.discovered:
+  emitter: runtime
+  consumer: scoring-node  # TARGET (v2.0.37): delivered to ScoringNode. CURRENT: still intercepted by PipelineCoordinator until scoring-node is implemented.
+  intercepted: true  # TRANSITIONAL: will change to false when scoring-node replaces interceptor cases
+  passthrough: false
+  routing: static
+  delivery_channel: runtime  # TRANSITIONAL: will change to eventbus_static when scoring-node is implemented
+  runtime_handling: consuming  # TRANSITIONAL: will change to none when scoring-node takes over
+  payload:
+  - vertical_name
+  - raw_signals
+  - geography
+  - mode
+vertical.health_warning:
+  emitter: empire-coordinator
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - severity
+  - metrics
+  - recommendation
+vertical.killed:
+  emitter: runtime
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection  # runtime calls cleanupPipeline(), then delivers to subscribers
+  payload:
+  - vertical_id
+  - reason
+  - source
+vertical.marginal:
+  emitter: scoring-node  # v2.0.37: emitted by ScoringNode
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection  # runtime calls trackMarginal(), then delivers to subscribers
+  payload:
+  - vertical_id
+  - composite_score
+  - viability_score
+  - dimensions
+  - promotion_eligible
+vertical.needs_more_data:
+  emitter: human
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - questions
+vertical.ready_for_review:
+  emitter: validation-coordinator
+  consumer: mailbox
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  runtime_handling: projection  # runtime calls setPackaged(), then delivers to subscribers
+  payload:
+  - vertical_id
+  - validation_kit
+vertical.rejected:
+  emitter: scoring-node  # v2.0.37: emitted by ScoringNode
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - reason
+vertical.resumed:
+  emitter: empire-coordinator
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+vertical.scored:
+  emitter: scoring-node  # v2.0.37: emitted by ScoringNode
+  consumer: empire-coordinator
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection  # runtime may suppress delivery for rejected verticals
+  payload:
+  - vertical_id
+  - result
+  - composite_score
+  - viability_score
+  - market_score
+  - dimensions
+  - rubric
+vertical.shortlisted:
+  emitter: runtime
+  consumer: runtime
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - composite_score
+  - viability_score
+  - scoring_payload
+
+# ── v2.0.36: Events added from implementer codebase data ──────────────
+
+opco.routing_updated:
+  emitter: actor-agent
+  consumer: audit
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - event_pattern
+  - subscriber_id
+  - installed_by
+  - reason
+  - status
+  - source
+  - bootstrap_version
+  - runtime_tool_event
+  _note: "Emitted by tool_executor.go when configure_routing tool executes. Actor agent varies."
+
+customer_message:
+  emitter: inbound-gateway
+  consumer: support-agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - channel
+  - sender
+  - message_body
+  - timestamp
+  _note: >
+    NORMALIZATION NEEDED: support-agent config subscribes to customer_message but
+    runtime inbound.go emits inbound.{slug}.whatsapp_message / inbound.{slug}.email.
+    Either inbound.go should translate to customer_message, or support config should
+    subscribe to inbound.* events. Currently misaligned — tracked as open item.
+
+human_task.assigned:
+  emitter: dashboard
+  consumer: requesting-agent
+  intercepted: false
+  routing: targeted
+  delivery_channel: agent_message
+  payload:
+  - task_id
+  - requesting_agent
+  - vertical_id
+  - assigned_to
+  _note: "Emitted by dashboard handleTaskClaim. Delivered to requesting_agent via agent_message."
+
+runtime.reset:
+  emitter: dashboard
+  consumer: [pipeline-coordinator, scan-campaign-manager]
+  intercepted: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - source
+  - timestamp
+  _note: "Emitted by dashboard publishRuntimeReset. Consumed by pipeline-coordinator and scan-campaign-manager."
+
+# Planned events (commgraph declarations only, no runtime emitter yet):
+review.product_spec_feedback:
+  emitter: human
+  consumer: TBD
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - feedback
+  - reviewer
+  _note: "Commgraph declaration only. No runtime emitter exists. Planned for human review workflow."
+  _status: planned
+
+review.deploy_feedback:
+  emitter: human
+  consumer: TBD
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - feedback
+  - reviewer
+  _note: "Commgraph declaration only. No runtime emitter exists. Planned for human review workflow."
+  _status: planned
+
+# ── v2.0.37: System node events ───────────────────────────────────
+
+pipeline.dead_letter:
+  emitter: scoring-node
+  consumer: operations-analyst
+  intercepted: false
+  passthrough: true
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - event_id
+  - node_id
+  - event_type
+  - retry_count
+  - last_error
+  _note: >
+    v2.0.37: Emitted when a system node exhausts its retry budget (5 attempts).
+    Operations Analyst receives for investigation and escalation.
+    Future system nodes will also emit this event type.

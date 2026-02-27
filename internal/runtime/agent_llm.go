@@ -602,6 +602,10 @@ func normalizeScanMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "automation_micro", "local_services", "saas_gap", "saas_trend":
 		return strings.ToLower(strings.TrimSpace(raw))
+	case "local_underserved":
+		return "local_services"
+	case "trend_opportunity", "adjacent_opportunity":
+		return "saas_trend"
 	default:
 		return ""
 	}

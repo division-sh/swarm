@@ -55,6 +55,15 @@ func TestScoringNodeParity(t *testing.T) {
 	if len(dims) == 0 {
 		t.Fatalf("expected non-empty dimensions_requested, got payload=%+v", payload)
 	}
+	seen := map[string]bool{}
+	for _, raw := range dims {
+		seen[strings.TrimSpace(asString(raw))] = true
+	}
+	for _, required := range []string{"automation_completeness", "build_complexity"} {
+		if !seen[required] {
+			t.Fatalf("expected scoring.requested to include %q, got dims=%v", required, dims)
+		}
+	}
 }
 
 func TestScoringNodeIdempotency(t *testing.T) {

@@ -213,6 +213,19 @@ func TestContractRemediationPrompt_EmpireCoordinatorDirective(t *testing.T) {
 	}
 }
 
+func TestNormalizeScanMode_AcceptsV2038Aliases(t *testing.T) {
+	cases := map[string]string{
+		"local_underserved":    "local_services",
+		"trend_opportunity":    "saas_trend",
+		"adjacent_opportunity": "saas_trend",
+	}
+	for in, want := range cases {
+		if got := normalizeScanMode(in); got != want {
+			t.Fatalf("normalizeScanMode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestNewLLMAgent_ConstraintsOverrideConversationDefaults(t *testing.T) {
 	cfg := models.AgentConfig{
 		ID:   "pipeline-coordinator",

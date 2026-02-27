@@ -1757,15 +1757,17 @@ var rubricWeights = map[string]map[string]float64{
 		"revenue_per_business": 0.08,
 	},
 	"saas": {
-		"willingness_to_pay":     0.15,
-		"retention_likelihood":   0.15,
-		"technical_feasibility":  0.15,
-		"distribution_access":    0.15,
-		"regulatory_moat":        0.12,
-		"competition_weakness":   0.10,
-		"pain_severity":          0.08,
-		"market_size":            0.05,
-		"localization_advantage": 0.05,
+		"automation_completeness": 0.18,
+		"build_complexity":        0.12,
+		"technical_feasibility":   0.12,
+		"distribution_access":     0.12,
+		"willingness_to_pay":      0.11,
+		"retention_likelihood":    0.10,
+		"regulatory_moat":         0.08,
+		"competition_weakness":    0.07,
+		"pain_severity":           0.05,
+		"market_size":             0.03,
+		"localization_advantage":  0.02,
 	},
 	"automation_micro": {
 		"automation_leverage":     0.20,
@@ -1782,7 +1784,7 @@ var rubricWeights = map[string]map[string]float64{
 
 var viabilityDimensions = map[string][]string{
 	"local_services": {"willingness_to_pay", "retention_likelihood", "channel_access", "operational_friction"},
-	"saas":           {"willingness_to_pay", "retention_likelihood", "technical_feasibility", "distribution_access"},
+	"saas":           {"automation_completeness", "build_complexity", "technical_feasibility", "distribution_access", "willingness_to_pay"},
 	"automation_micro": {
 		"automation_leverage",
 		"sales_cycle_simplicity",
@@ -1805,6 +1807,13 @@ type scoringHardGate struct {
 }
 
 var rubricGates = map[string][]scoringHardGate{
+	"saas": {
+		{
+			Dimension: "automation_completeness",
+			MinScore:  50,
+			Reason:    "gate_automation_completeness",
+		},
+	},
 	"automation_micro": {
 		{
 			Dimension: "automation_leverage",
@@ -2221,9 +2230,13 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 	}
 	viabilitySplit := 0.60
 	marketSplit := 0.40
-	if acc.Rubric == "automation_micro" {
+	switch strings.TrimSpace(acc.Rubric) {
+	case "automation_micro":
 		viabilitySplit = 0.70
 		marketSplit = 0.30
+	case "saas":
+		viabilitySplit = 0.65
+		marketSplit = 0.35
 	}
 	composite := viability*viabilitySplit + market*marketSplit
 
