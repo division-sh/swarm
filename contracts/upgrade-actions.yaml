@@ -289,7 +289,7 @@ v2037-remove-scoring-interceptor-cases:
   type: code
   priority: must
   action: "Delete handleVerticalDiscovered and handleScoreDimensionComplete interceptor cases; events now pass through to ScoringNode subscriber"
-  verify: "grep -c 'handleVerticalDiscovered\\|handleScoreDimensionComplete' internal/runtime/pipeline_coordinator.go returns 0 for interceptor paths"
+  verify: 'grep -c 'handleVerticalDiscovered\\|handleScoreDimensionComplete' internal/runtime/pipeline_coordinator.go returns 0 for interceptor paths'
   depends_on: v2037-register-scoring-node
 
 v2037-scoring-parity-test:
@@ -706,3 +706,21 @@ v2044-prefilter-evidence-two-urls:
   priority: must
   action: "In evidence completeness check, require >=2 independent source URLs instead of 1"
   verify: "grep -q 'len.*urls.*>= 2\\|independentURLs >= 2' internal/runtime/prefilter.go"
+
+# ── v2.0.44 (addendum): Anti-Bias Fallback + scoring.requested Fields ───
+
+v2044-anti-bias-fallback-logging:
+  description: "Implement best-effort fallback for anti-bias routing when no alternate analyst exists"
+  type: code
+  priority: must
+  target: internal/runtime/scoring_node.go
+  action: "In assignAnalyst(), when len(candidates)==0 && len(pool)>0, log anti_bias_fallback at warn severity with vertical_id, generator_agent_id, reason=no_alternate_analyst_available, then return pickByLoad(pool)"
+  verify: "go test ./internal/runtime/ -run TestScoringNode_DerivedScoringFallsBackWhenNoAlternateAnalysisAgent"
+
+v2044-scoring-requested-anti-bias-fields:
+  description: "Add assigned_analysis_agent_id and excluded_analysis_agent_id to scoring.requested payload"
+  type: code
+  priority: must
+  target: internal/runtime/event_emit_tools.go
+  action: "Add assigned_analysis_agent_id (string) and excluded_analysis_agent_id (string, nullable) to scoring.requested EventSchemaRegistry entry"
+  verify: "go test ./internal/runtime/ -run TestContractCompliance/schema_payload"

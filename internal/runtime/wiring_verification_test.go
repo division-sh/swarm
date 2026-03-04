@@ -1446,7 +1446,7 @@ func typedBuilderFields(name string) map[string]struct{} {
 	case strings.HasSuffix(name, "buildValidationPackageReadyPayload"):
 		return setOf("vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version")
 	case strings.HasSuffix(name, "buildSpecValidationRequestedPayload"):
-		return setOf("vertical_id", "vertical_name", "geography", "spec", "spec_version", "validation_tier")
+		return setOf("vertical_id", "spec_content", "spec_tier")
 	case strings.HasSuffix(name, "buildCTOSpecReviewRequestedPayload"):
 		return setOf("vertical_id", "vertical_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring")
 	case strings.HasSuffix(name, "buildSpecRevisionRequestedPayload"):

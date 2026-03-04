@@ -51,30 +51,51 @@ Also introduces the Platform Capability Registry (defining what EmpireAI can bui
 ### DDL Changes
 - `verticals` table: added `opportunity_pattern TEXT`, `signal_sources JSONB`, `required_capabilities JSONB`
 
+
 ## Touches
 
 contracts:
-  - event-catalog.yaml (category.assessed, market_research.scan_assigned, scan.requested)
-  - ddl-canonical.sql (verticals table — 3 new columns)
-  - verification-gates.yaml (13 new gates)
-  - upgrade-actions.yaml (10 new actions)
-  - agent-tools.yaml (no changes — MRA subscription already correct)
-  - agent-config-map.yaml (no changes needed)
+  - event-catalog.yaml: ADD corpus_path to scan.requested payload; ADD corpus to mode enum; ADD corpus_signals and mode to market_research.scan_assigned; ADD opportunity_pattern, signal_sources, required_capabilities to category.assessed; ADD assigned_analysis_agent_id and excluded_analysis_agent_id to scoring.requested
+  - ddl-canonical.sql: ADD opportunity_pattern TEXT, signal_sources JSONB, required_capabilities JSONB to verticals table
+  - verification-gates.yaml: 13 new v2.0.44 gates + 4 automated gate definitions; `automated` field added to all 50 gates; spec_version bumped to 2.0.44; YAML structure fixed (v2.0.44 gates converted from map syntax to list syntax); v2.0.43 gate path reference fixed (contracts-v2043 → contracts-v2044)
+  - upgrade-actions.yaml: 10 new v2.0.44 actions; header version bumped to 2.0.44/2.0.43; mislabeled v2.0.42 section header corrected
+  - system-nodes.yaml: ADD fallback_policy: best_effort to analyst_assignment; ADD fallback_description with logging requirements; version attribution corrected (v2.0.43 features re-attributed from v2.0.44)
+  - agent-tools.yaml: no changes — MRA subscription already correct
+  - agent-config-map.yaml: no changes needed
+  - spec-writer-guide.md: NEW — spec writer onboarding guide with 3 corrections applied (upgrade-actions format note, additionalProperties policy, automated gates documentation)
+  - CHANGELOG-v2.0.43.md: format standardized (## Contract Changes → ## Touches)
 
-spec:
-  - §1 Design Principles → new Platform Capability Registry subsection
-  - §3.2.2 Opportunity Pattern Classification (new, renumbers Scoring Rubric to §3.2.3)
+spec (prose changes):
+  - §1 Design Principles → new Platform Capability Registry subsection (Tier 1/2/3 capabilities)
+  - §3.2 pre-filter summary → updated to v2.0.44 rules (threshold 55, 9 stages, retention primitive, 5 new blocking flags)
+  - §3.2.2 Opportunity Pattern Classification (new section, 7 archetypes)
+  - §3.2.3 Scoring Rubric → slimmed: per-dimension tables removed, replaced with summary + pointer to system-nodes.yaml
   - §4.2.2.2 handleScanRequested → corpus case added
   - §4.2.2.3 Discovery Accumulation → expectedAgentsPerMode, completionSignals, pre-filter cascade updated
-  - §5.4 Factory Events → category.assessed payload updated
+  - §4.5.1 Event Emission Tools → EventSchemaRegistry Go code block removed (~1,367 lines), replaced with pointer to event_emit_tools.go + event-catalog.yaml + TestContractCompliance
+  - §5.4-5.6 Event tables → consolidated into §5.4 Event Catalog Summary (~486 lines removed), 15-row domain summary table + delivery channel patterns + pointer to event-catalog.yaml
   - §6.1.1 Corpus Discovery Mode (new section)
+  - §8.1 Core Tables → inline DDL removed (~546 lines), replaced with prose table catalog grouped by domain + pointer to ddl-canonical.sql
+  - §4.2.2 runtime tables → 5 embedded DDL blocks replaced with one-line pointers to ddl-canonical.sql
+  - §6.4 runtime_log DDL → replaced with column summary + pointer
+  - Appendix B inline changelog → removed (~1,991 lines), replaced with pointer to standalone CHANGELOG files
+  - §15.0 Event Wiring Verifier → Go test implementation reference added
+  - §17.3 Test Verification Against Contracts → rewritten with 6 automated compliance gates
   - §B.10.1 MRA Corpus Mode Prompt Variant (new appendix entry)
+  - Cross-references fixed: 6 stale §5.5 references, 3 stale §8.1 references, 2 stale §4.2.2.3 EventSchemaRegistry references, verifier Python extract_schemas() updated
+
+spec slimming summary:
+  - Inline changelog: −1,991 lines
+  - Event tables §5.4-5.6: −485 lines
+  - EventSchemaRegistry §4.5.1: −1,367 lines
+  - Inline DDL §8.1 + §4.2.2 + §6.4: −625 lines
+  - Scoring rubric detail tables §3.2.3: −139 lines
+  - Total: 14,558 → ~9,950 lines (−4,600 lines / 32% reduction)
 
 ## Empirical Validation
 
-This version is uniquely grounded in empirical data:
-- **v1 corpus run (228 signals):** 10.5% viable rate, 4 distinct products, 1 scoring 75+ (InvoiceBridge at 76). 89.5% NOT_VIABLE driven by poor input targeting (warehouse workers, receptionists, forklift operators).
-- **v2 corpus run (390 signals):** 29.1% viable rate, 10 distinct products, 3 scoring 75+ (BillBridge Legal 78, BuildBooks 77, BidCraft+PermitPulse 75). 30 industries, 169 cities, no single industry >17%.
-- **Key finding:** "The agents are smart, the inputs were broken." Better targeting (Tier A proven titles + Tier B exploratory) tripled viable rate without any pipeline changes.
-- **Construction vertical dominance:** 22 viable signals (19.5%), highest avg signal strength (66.4), supports 3-4 products selling to same ICP.
-- **Tier 2 messaging impact:** Adding email/SMS would improve 84% of viable opportunities by avg +12 percentage points automation.
+This version is grounded in empirical data from two corpus campaigns:
+- **v1 corpus run (228 signals):** 10.5% viable rate, 4 distinct products. 89.5% NOT_VIABLE driven by poor input targeting.
+- **v2 corpus run (390 signals):** 29.1% viable rate, 10 distinct products, 3 scoring 75+ (BillBridge Legal 78, BuildBooks 77, BidCraft+PermitPulse 75).
+- **Key finding:** Better targeting tripled viable rate without pipeline changes.
+- **Tier 2 messaging impact:** Adding email/SMS would improve 84% of viable opportunities by avg +12pp automation.

@@ -194,12 +194,9 @@ type ValidationPackageReadyPayload struct {
 }
 
 type SpecValidationRequestedPayload struct {
-	VerticalID     string         `json:"vertical_id"`
-	VerticalName   string         `json:"vertical_name,omitempty"`
-	Geography      string         `json:"geography,omitempty"`
-	Spec           map[string]any `json:"spec"`
-	SpecVersion    int            `json:"spec_version"`
-	ValidationTier string         `json:"validation_tier"`
+	VerticalID  string         `json:"vertical_id"`
+	SpecContent map[string]any `json:"spec_content"`
+	SpecTier    string         `json:"spec_tier"`
 }
 
 type CTOSpecReviewRequestedPayload struct {
@@ -3195,7 +3192,6 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 	st.Status = "active"
 	shouldPackage := st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand && !st.PackagingRequested
 	stage := pc.validationStageForState(st)
-	specVersion := st.SpecVersion
 	var bundle ValidationPackageReadyPayload
 	hasBundle := false
 	if shouldPackage {
@@ -3217,7 +3213,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 
 	pc.updateVerticalStage(ctx, verticalID, stage, "")
 	if gate == "g2" {
-		pc.publish(ctx, "spec.validation_requested", verticalID, payloadMap(pc.buildSpecValidationRequestedPayload(ctx, verticalID, payload, specVersion)))
+		pc.publish(ctx, "spec.validation_requested", verticalID, payloadMap(pc.buildSpecValidationRequestedPayload(ctx, verticalID, payload)))
 	}
 	if hasBundle {
 		pc.publish(ctx, "validation.package_ready", verticalID, payloadMap(bundle))
@@ -4398,18 +4394,21 @@ func (pc *FactoryPipelineCoordinator) buildValidationPackageReadyPayload(ctx con
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any, specVersion int) SpecValidationRequestedPayload {
+func (pc *FactoryPipelineCoordinator) buildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any) SpecValidationRequestedPayload {
 	if spec == nil {
 		spec = map[string]any{}
 	}
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	specTier := strings.TrimSpace(asString(spec["spec_tier"]))
+	if specTier == "" {
+		specTier = strings.TrimSpace(asString(spec["spec_type"]))
+	}
+	if specTier == "" {
+		specTier = "vertical_spec"
+	}
 	return SpecValidationRequestedPayload{
-		VerticalID:     strings.TrimSpace(verticalID),
-		VerticalName:   name,
-		Geography:      geography,
-		Spec:           spec,
-		SpecVersion:    specVersion,
-		ValidationTier: "vertical_spec",
+		VerticalID:  strings.TrimSpace(verticalID),
+		SpecContent: spec,
+		SpecTier:    specTier,
 	}
 }
 

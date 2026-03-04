@@ -56,8 +56,8 @@ func TestRuntimeToolExecutor_HandleEmitToolPublishesEvent(t *testing.T) {
 	if strings.TrimSpace(asString(payload["mode"])) != "saas_gap" {
 		t.Fatalf("expected mode preserved, got %+v", payload["mode"])
 	}
-	if strings.TrimSpace(asString(payload["priority"])) != "normal" {
-		t.Fatalf("expected normalized priority=normal, got %+v", payload["priority"])
+	if _, ok := payload["priority"]; ok {
+		t.Fatalf("expected legacy priority field to be trimmed by contract schema, got payload=%+v", payload)
 	}
 }
 
@@ -153,8 +153,8 @@ func TestRuntimeToolExecutor_HandleEmitToolCoordinatorLegacyNestedPayload(t *tes
 	if got := strings.TrimSpace(asString(payload["mode"])); got != "saas_gap" {
 		t.Fatalf("expected mode alias discovery->saas_gap, got %q", got)
 	}
-	if got := strings.TrimSpace(asString(payload["priority"])); got != "normal" {
-		t.Fatalf("expected priority alias medium->normal, got %q", got)
+	if _, ok := payload["priority"]; ok {
+		t.Fatalf("expected legacy priority field removed after normalization, got %+v", payload)
 	}
 	if _, hasNested := payload["payload"]; hasNested {
 		t.Fatalf("expected nested payload key removed after normalization, got %+v", payload)

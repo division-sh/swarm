@@ -1545,6 +1545,7 @@ var strictDefaultEventSchemas = map[string]EventSchema{
 	"qa.validation_passed":               defaultAgentEventSchema("qa.validation_passed"),
 	"research.completed":                 defaultAgentEventSchema("research.completed"),
 	"research.vertical_rejected":         defaultAgentEventSchema("research.vertical_rejected"),
+	"runtime.reset":                      defaultAgentEventSchema("runtime.reset"),
 	"spec.approved":                      defaultAgentEventSchema("spec.approved"),
 	"spec.draft_ready":                   defaultAgentEventSchema("spec.draft_ready"),
 	"spec.requested":                     defaultAgentEventSchema("spec.requested"),
@@ -1586,6 +1587,7 @@ func ensureEventSchemaRegistry() {
 			)
 		}
 		ensureSchemaContextFields()
+		ensureSchemaPayloadParity()
 		emitToolToEvent = make(map[string]string, len(EventSchemaRegistry))
 		for eventType := range EventSchemaRegistry {
 			emitToolToEvent[emitToolName(eventType)] = eventType
@@ -1625,6 +1627,64 @@ func ensureSchemaContextFields() {
 			props = map[string]any{}
 		}
 		root["properties"] = props
+		entry.Schema = root
+		EventSchemaRegistry[eventType] = entry
+	}
+}
+
+// ensureSchemaPayloadParity aligns EventSchemaRegistry properties with the
+// contract event payload field list (exhaustive-exact keys). Existing field
+// schema definitions are preserved; missing fields are added as type any.
+func ensureSchemaPayloadParity() {
+	for eventType, payloadFields := range contractEventPayloadFields {
+		entry, ok := EventSchemaRegistry[eventType]
+		if !ok {
+			continue
+		}
+		root := entry.Schema
+		if root == nil {
+			root = map[string]any{}
+		}
+		if strings.TrimSpace(asString(root["type"])) == "" {
+			root["type"] = "object"
+		}
+		props := schemaProperties(root["properties"])
+		aligned := make(map[string]any, len(payloadFields))
+		allowed := make(map[string]struct{}, len(payloadFields))
+		for _, field := range payloadFields {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			allowed[field] = struct{}{}
+			if existing, ok := props[field]; ok && existing != nil {
+				aligned[field] = existing
+				continue
+			}
+			aligned[field] = map[string]any{"type": "any"}
+		}
+		root["properties"] = aligned
+
+		// Keep existing required semantics only for fields still present in payload.
+		existingRequired := requiredList(root["required"])
+		filteredRequired := make([]string, 0, len(existingRequired))
+		for _, field := range existingRequired {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := allowed[field]; !ok {
+				continue
+			}
+			filteredRequired = append(filteredRequired, field)
+		}
+		filteredRequired = uniqueNonEmpty(filteredRequired)
+		if len(filteredRequired) > 0 {
+			root["required"] = filteredRequired
+		} else {
+			delete(root, "required")
+		}
+
 		entry.Schema = root
 		EventSchemaRegistry[eventType] = entry
 	}

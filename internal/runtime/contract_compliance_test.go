@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -48,8 +47,10 @@ type contractComplianceAgentConfig struct {
 }
 
 type contractComplianceCatalogEvent struct {
-	Emitter string   `yaml:"emitter"`
-	Payload []string `yaml:"payload"`
+	Emitter           string   `yaml:"emitter"`
+	EmitterType       string   `yaml:"emitter_type"`
+	AlternateEmitters []string `yaml:"alternate_emitters"`
+	Payload           []string `yaml:"payload"`
 }
 
 type contractComplianceSystemNode struct {
@@ -221,6 +222,44 @@ func TestContractCompliance(t *testing.T) {
 		if diff := contractComplianceDiffSet(scoringNode.Produces, commgraph.ProducerEventsForRole("scoring-node")); diff != "" {
 			errs = append(errs, fmt.Sprintf("scoring-node produces mismatch vs system-nodes.yaml (%s)", diff))
 		}
+
+		// Validate event-catalog emitter ownership only for Gate 3 scoped emitter types.
+		eventTypes := make([]string, 0, len(eventCatalog))
+		for eventType := range eventCatalog {
+			eventTypes = append(eventTypes, eventType)
+		}
+		sort.Strings(eventTypes)
+		for _, eventType := range eventTypes {
+			cat := eventCatalog[eventType]
+			emitterType := strings.ToLower(strings.TrimSpace(cat.EmitterType))
+			// Gate 3 scope (v2.0.44):
+			// - agent: enforce against commgraph agentProducerEvents.
+			// - system_node: enforce against contracts/system-nodes.yaml produces.
+			// - runtime, human, opco_agent: intentionally skipped here.
+			if emitterType == "runtime" || emitterType == "human" || emitterType == "opco_agent" {
+				continue
+			}
+			if emitterType != "agent" && emitterType != "system_node" {
+				errs = append(errs, fmt.Sprintf("event-catalog emitter_type unsupported for %s (emitter_type=%q)", eventType, cat.EmitterType))
+				continue
+			}
+			emitters := append([]string{cat.Emitter}, cat.AlternateEmitters...)
+			match := false
+			for _, emitter := range emitters {
+				if emitterType == "agent" && contractComplianceAgentEmitterProduces(eventType, emitter) {
+					match = true
+					break
+				}
+				if emitterType == "system_node" && contractComplianceSystemNodeProduces(systemNodes, eventType, emitter) {
+					match = true
+					break
+				}
+			}
+			if !match {
+				errs = append(errs, fmt.Sprintf("event-catalog emitter mismatch for %s (emitter_type=%s emitters=%v)", eventType, emitterType, contractComplianceNormalizeList(emitters)))
+			}
+		}
+
 		if len(errs) > 0 {
 			t.Fatalf("gate3 failures (%d):\n- %s", len(errs), strings.Join(errs, "\n- "))
 		}
@@ -239,9 +278,6 @@ func TestContractCompliance(t *testing.T) {
 			catalog := eventCatalog[evt]
 			schema, ok := schemas[evt]
 			if !ok {
-				continue
-			}
-			if !contractComplianceIsExplicitSchema(evt, schema) {
 				continue
 			}
 			props := schemaProperties(schema.Schema["properties"])
@@ -734,13 +770,6 @@ func contractComplianceNormVersion(v string) string {
 	return strings.TrimSpace(v)
 }
 
-func contractComplianceIsExplicitSchema(eventType string, schema EventSchema) bool {
-	// Default schemas are intentionally broad and do not represent typed
-	// contract-authored payloads. Gate 4 only evaluates explicit schemas.
-	def := defaultAgentEventSchema(eventType)
-	return !reflect.DeepEqual(schema.Schema, def.Schema)
-}
-
 func contractComplianceFormatErrs(errs []string, limit int) string {
 	if len(errs) == 0 {
 		return ""
@@ -751,4 +780,62 @@ func contractComplianceFormatErrs(errs []string, limit int) string {
 	trimmed := append([]string(nil), errs[:limit]...)
 	trimmed = append(trimmed, fmt.Sprintf("... (%d more)", len(errs)-limit))
 	return strings.Join(trimmed, "\n- ")
+}
+
+func contractComplianceAgentEmitterProduces(eventType, emitter string) bool {
+	eventType = strings.TrimSpace(eventType)
+	emitter = strings.TrimSpace(emitter)
+	if eventType == "" || emitter == "" {
+		return false
+	}
+	role := contractComplianceCatalogEmitterToCommgraphRole(emitter)
+	if role == "" {
+		return false
+	}
+	return containsString(commgraph.ProducerEventsForRole(role), eventType)
+}
+
+func contractComplianceSystemNodeProduces(systemNodes map[string]contractComplianceSystemNode, eventType, emitter string) bool {
+	eventType = strings.TrimSpace(eventType)
+	emitter = strings.TrimSpace(emitter)
+	if eventType == "" || emitter == "" {
+		return false
+	}
+	node, ok := systemNodes[emitter]
+	if !ok {
+		return false
+	}
+	return containsString(node.Produces, eventType)
+}
+
+func contractComplianceCatalogEmitterToCommgraphRole(emitter string) string {
+	emitter = strings.TrimSpace(emitter)
+	if emitter == "" {
+		return ""
+	}
+	if v, ok := map[string]string{
+		"opco-head-of-product": "vp-product",
+		"opco-head-of-growth":  "vp-growth",
+		"opco-chief-of-staff":  "chief-of-staff",
+		"opco-support":         "support-agent",
+		"opco-marketing":       "marketing-agent",
+		"opco-cto":             "cto-agent",
+		"opco-pm":              "pm-agent",
+		"opco-qa":              "qa-agent",
+		"opco-tech-writer":     "tech-writer",
+		"opco-devops":          "devops-agent",
+	}[emitter]; ok {
+		return v
+	}
+	return emitter
+}
+
+func containsString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, v := range values {
+		if strings.TrimSpace(v) == target {
+			return true
+		}
+	}
+	return false
 }

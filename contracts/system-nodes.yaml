@@ -13,6 +13,38 @@
 #   subscribes_to:  Events received via normal EventBus subscription
 #   produces:       Events emitted via normal EventBus.Publish
 #   implementation: Go source file
+#
+# ── Contract Conventions (v2.0.44) ──────────────────────────────────
+#
+# EMITTER CONVENTION:
+#   event-catalog.yaml `emitter` should name the component that decides
+#   to emit the event, not the process it runs inside.
+#   - System nodes (scoring-node) own their emissions directly.
+#   - "runtime" means the Go orchestrator (PipelineCoordinator, AgentManager,
+#     pre-filter, timer, etc.) — NOT a system node.
+#   - Multi-emitter events: `emitter` is the primary path. Use
+#     `alternate_emitters` list for secondary paths (e.g. vertical.discovered
+#     is primarily runtime pre-filter, secondarily scoring-node derivation).
+#   - TestContractCompliance/emit_events checks produces vs catalog emitter.
+#
+#   `emitter_type` classifies how the compliance test should handle each event:
+#     agent      — holding/factory agent. Checked against commgraph registry.
+#     system_node — scoring-node etc. Checked against system-nodes.yaml produces.
+#     runtime    — Go orchestrator. Not in commgraph — skip emit_events check.
+#     human      — emitted by human via CLI/Telegram. Skip emit_events check.
+#     opco_agent — OpCo agent via routing table. Only exists when OpCo is live.
+#                  Skip emit_events check until OpCo runtime is implemented.
+#
+# PAYLOAD CONVENTION:
+#   event-catalog.yaml `payload` is EXHAUSTIVE EXACT — the complete field
+#   list for each event, not a "business-core" subset. Every field the Go
+#   code puts into the event must appear in the catalog payload list.
+#   - Infrastructure fields (task_id, vertical_id, campaign_id, scan_id)
+#     are listed per-event, not assumed implicitly.
+#   - When additionalProperties: false, the EventSchemaRegistry properties
+#     must exactly match the catalog payload fields.
+#   - TestContractCompliance/schema_payload enforces this parity.
+#
 #   state_table:    Database table(s) for state persistence
 #   state_machine:  Declarative description of state transitions (contract only)
 #
@@ -50,23 +82,39 @@ scoring-node:
   idempotency_table: system_node_ledger
 
   # v2.0.43: Analyst assignment constraint for derived verticals
+  # v2.0.44: Fallback behavior clarified — best-effort, not strict-blocking
   analyst_assignment:
     description: >
       When assigning an analyst for a derived vertical (generation_depth > 0),
       the scoring-node MUST exclude the generator_agent_id from the candidate pool.
       This is the core anti-bias guarantee: the analyst who proposed the derivation
       cannot score it.
+    fallback_policy: best_effort
+    fallback_description: >
+      If no alternate analyst exists (single-instance environment), log an
+      anti-bias fallback event with severity=warn and proceed with scoring
+      using the available analyst (which may be the generator). This is
+      acceptable in early deployments where only one Analysis Agent instance
+      is running. The anti-bias guarantee is enforced strictly when 2+ analyst
+      instances are available. Operators should monitor anti-bias fallback
+      log events and scale analyst instances to eliminate them.
     logic: |
       func (sn *ScoringNode) assignAnalyst(opp Vertical) AgentID {
           excluded := opp.GeneratorAgentID  // empty string for depth-0 verticals
           pool := sn.availableAnalysts()
           candidates := filter(pool, func(a AgentID) bool { return a != excluded })
+          if len(candidates) == 0 && len(pool) > 0 {
+              // Best-effort fallback: log warning, use any available analyst
+              sn.logEvent("anti_bias_fallback", severity=warn, vertical_id=opp.ID,
+                  generator=excluded, reason="no_alternate_analyst_available")
+              return pickByLoad(pool)
+          }
           if len(candidates) == 0 {
-              return sn.queueForRetry(opp)  // all analysts busy or single instance — retry
+              return sn.queueForRetry(opp)  // all analysts busy — retry
           }
           return pickByLoad(candidates)
       }
-    minimum_pool_size: 2  # at least 2 analyst instances required for derivation to work
+    minimum_pool_size: 2  # at least 2 analyst instances recommended for derivation anti-bias
 
   # v2.0.43: Derivation pre-filter (processes vertical.derived before state machine)
   # This runs at the scoring-node level, NOT per-vertical instance.

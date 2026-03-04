@@ -198,7 +198,7 @@ func TestEventSchemaRegistry_ScoringRequestedExplicit(t *testing.T) {
 	}
 }
 
-func TestEventSchemaRegistry_ScoringRequestedAllowsTaskID(t *testing.T) {
+func TestEventSchemaRegistry_ScoringRequestedRejectsLegacyTaskID(t *testing.T) {
 	if err := ValidateEventPayloadAgainstSchema("scoring.requested", map[string]any{
 		"vertical_id":          "v1",
 		"vertical_name":        "Dental Clinic Scheduling",
@@ -209,10 +209,9 @@ func TestEventSchemaRegistry_ScoringRequestedAllowsTaskID(t *testing.T) {
 		"discovery_context": map[string]any{
 			"opportunity_name": "Clinic scheduling optimization",
 		},
-		"signal_strength": 82,
-		"task_id":         "task-123",
-	}); err != nil {
-		t.Fatalf("expected scoring.requested to allow task_id, got %v", err)
+		"task_id": "task-123",
+	}); err == nil {
+		t.Fatal("expected scoring.requested to reject legacy task_id")
 	}
 }
 
@@ -324,11 +323,10 @@ func TestEventSchemaRegistry_ResearchSignalsRequireScanID(t *testing.T) {
 			"geographic_scope":       "regional",
 		},
 		"source.scraped": {
-			"scan_id":         "scan-3",
-			"source":          "google_maps",
-			"geography":       "united states",
-			"evidence":        "Top local businesses have sparse digital operations stack.",
-			"signal_strength": 68,
+			"scan_id":   "scan-3",
+			"source":    "google_maps",
+			"geography": "united states",
+			"evidence":  "Top local businesses have sparse digital operations stack.",
 		},
 	}
 
@@ -539,36 +537,45 @@ func TestEventSchemaRegistry_ScoreDimensionCompleteStrictAndBounded(t *testing.T
 	}
 }
 
-func TestEventSchemaRegistry_VerticalShortlistedReasoningAllowed(t *testing.T) {
+func TestEventSchemaRegistry_VerticalShortlistedStrictPayload(t *testing.T) {
 	valid := map[string]any{
 		"vertical_id":     "v1",
 		"composite_score": 81.2,
 		"viability_score": 72.5,
 		"scoring_payload": map[string]any{"dims": map[string]any{"market_size": 75}},
-		"reasoning":       "strong evidence across core dimensions",
 	}
 	if err := ValidateEventPayloadAgainstSchema("vertical.shortlisted", valid); err != nil {
 		t.Fatalf("expected valid shortlisted payload, got %v", err)
 	}
 	if err := ValidateEventPayloadAgainstSchema("vertical.shortlisted", map[string]any{
-		"vertical_id":      "v1",
-		"composite_score":  81.2,
-		"scoring_payload":  map[string]any{},
-		"promotion_reason": "legacy field",
+		"vertical_id":     "v1",
+		"composite_score": 81.2,
+		"viability_score": 72.5,
+		"scoring_payload": map[string]any{},
+		"reasoning":       "legacy field",
 	}); err == nil {
-		t.Fatal("expected legacy promotion_reason to be rejected")
+		t.Fatal("expected legacy reasoning to be rejected")
 	}
 }
 
-func TestEventSchemaRegistry_VerticalMarginalPromotionEligibleAllowed(t *testing.T) {
+func TestEventSchemaRegistry_VerticalMarginalStrictPayload(t *testing.T) {
 	if err := ValidateEventPayloadAgainstSchema("vertical.marginal", map[string]any{
 		"vertical_id":        "v1",
 		"composite_score":    63.0,
 		"viability_score":    67.0,
 		"dimensions":         map[string]any{"pain_severity": 70},
 		"promotion_eligible": true,
-		"reasoning":          "strong viability but mixed market data",
 	}); err != nil {
 		t.Fatalf("expected valid marginal payload, got %v", err)
+	}
+	if err := ValidateEventPayloadAgainstSchema("vertical.marginal", map[string]any{
+		"vertical_id":        "v1",
+		"composite_score":    63.0,
+		"viability_score":    67.0,
+		"dimensions":         map[string]any{"pain_severity": 70},
+		"promotion_eligible": true,
+		"reasoning":          "legacy field",
+	}); err == nil {
+		t.Fatal("expected legacy reasoning to be rejected")
 	}
 }

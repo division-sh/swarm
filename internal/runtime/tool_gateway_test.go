@@ -164,8 +164,12 @@ func TestToolGatewayMCPToolsListEmitPortfolioDigestSchema(t *testing.T) {
 	for _, v := range requiredAny {
 		required = append(required, strings.TrimSpace(asString(v)))
 	}
-	if !slicesContains(required, "message") {
-		t.Fatalf("expected message required, got %#v", required)
+	if slicesContains(required, "message") {
+		t.Fatalf("did not expect legacy message required, got %#v", required)
+	}
+	props, _ := schema["properties"].(map[string]any)
+	if _, ok := props["digest_text"]; !ok {
+		t.Fatalf("expected digest_text property in schema, got %#v", props)
 	}
 }
 

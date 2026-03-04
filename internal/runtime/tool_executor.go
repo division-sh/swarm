@@ -1539,6 +1539,7 @@ func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.A
 
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
 	payloadMap = e.preNormalizeEmitPayload(actor, inbound, eventType, payloadMap)
+	payloadMap = trimEmitPayloadToSchema(eventType, payloadMap)
 	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
 			"schema_validation_failed",
@@ -1550,6 +1551,7 @@ func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.A
 		)
 	}
 	payloadMap = e.normalizeEmitPayload(actor, inbound, eventType, payloadMap)
+	payloadMap = trimEmitPayloadToSchema(eventType, payloadMap)
 	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
 			"schema_validation_failed",
@@ -1763,6 +1765,32 @@ func emitSchemaAllowsProperty(eventType, property string) bool {
 	}
 	_, ok = props[property]
 	return ok
+}
+
+func trimEmitPayloadToSchema(eventType string, payload map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return payload
+	}
+	schema := schemaForEventType(eventType).Schema
+	if schemaAdditionalProps(schema["additionalProperties"]) {
+		return payload
+	}
+	props := schemaProperties(schema["properties"])
+	if len(props) == 0 {
+		return payload
+	}
+	out := make(map[string]any, len(payload))
+	for k, v := range payload {
+		if _, ok := props[strings.TrimSpace(k)]; !ok {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 func (e *RuntimeToolExecutor) enforceMigrationGuardrail(ctx context.Context, actor models.AgentConfig, eventType string, payload map[string]any) error {

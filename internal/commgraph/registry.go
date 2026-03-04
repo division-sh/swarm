@@ -160,6 +160,7 @@ var agentProducerEvents = map[string][]string{
 	"scoring-node": {
 		"scoring.requested",
 		"scoring.contested",
+		"vertical.discovered",
 		"vertical.scored",
 		"vertical.shortlisted",
 		"vertical.marginal",
@@ -254,6 +255,7 @@ var agentProducerEvents = map[string][]string{
 	},
 	"dashboard": {
 		"human_task.assigned",
+		"runtime.reset",
 	},
 	"actor-agent": {
 		"opco.routing_updated",

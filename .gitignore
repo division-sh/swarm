@@ -8,6 +8,10 @@
 .claude
 .codex
 
+# Local shared data mount
+data/*
+!data/.gitkeep
+
 # Generated artifacts
 coverage
 internal/dashboard/ui/node_modules

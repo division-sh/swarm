@@ -38,6 +38,7 @@ services:
       - ./contracts:/app/contracts
       - ./internal:/app/internal
       - ./cmd:/app/cmd
+      - ./data:/data:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8080:8080"
