@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"empireai/internal/events"
 )
 
 type inboundStoreStub struct {
@@ -45,12 +47,12 @@ func TestInboundGatewayPublishesEvent(t *testing.T) {
 	store := &inboundStoreStub{}
 	g := NewInboundGateway(bus, store)
 
-	_ = bus.SetRoutingTable("v1", &RoutingTable{
-		VerticalID: "v1",
-		Routes: []Route{
-			{EventPattern: "inbound.v1.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
-		},
-	})
+		_ = bus.SetRoutingTable("v1", &RoutingTable{
+			VerticalID: "v1",
+			Routes: []Route{
+				{EventPattern: "inbound.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
+			},
+		})
 	ch := bus.Subscribe("test-agent")
 	body := `{"id":"evt-1","text":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/v1/whatsapp", strings.NewReader(body))
@@ -67,6 +69,9 @@ func TestInboundGatewayPublishesEvent(t *testing.T) {
 		if evt.VerticalID != "v1" {
 			t.Fatalf("unexpected vertical: %s", evt.VerticalID)
 		}
+		if evt.Type != events.EventType("inbound.whatsapp_message") {
+			t.Fatalf("unexpected event type: %s", evt.Type)
+		}
 	case <-time.After(600 * time.Millisecond):
 		t.Fatal("expected inbound event publish")
 	}
@@ -79,7 +84,7 @@ func TestInboundGatewayDeduplicates(t *testing.T) {
 	_ = bus.SetRoutingTable("v1", &RoutingTable{
 		VerticalID: "v1",
 		Routes: []Route{
-			{EventPattern: "inbound.v1.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
+			{EventPattern: "inbound.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
 		},
 	})
 	ch := bus.Subscribe("test-agent")

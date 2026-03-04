@@ -184,7 +184,7 @@ func TestEventSchemaRegistry_ScoringRequestedExplicit(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected required list, got %#v", s["required"])
 	}
-	for _, field := range []string{"vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested"} {
+	for _, field := range []string{"vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested", "discovery_context"} {
 		found := false
 		for _, got := range required {
 			if got == field {
@@ -204,10 +204,13 @@ func TestEventSchemaRegistry_ScoringRequestedAllowsTaskID(t *testing.T) {
 		"vertical_name":        "Dental Clinic Scheduling",
 		"geography":            "argentina",
 		"mode":                 "saas_gap",
-		"rubric":               "saas",
-		"dimensions_requested": []any{"pain_severity", "willingness_to_pay"},
-		"signal_strength":      82,
-		"task_id":              "task-123",
+		"rubric":               "universal",
+		"dimensions_requested": []any{"build_complexity", "automation_completeness", "icp_crispness"},
+		"discovery_context": map[string]any{
+			"opportunity_name": "Clinic scheduling optimization",
+		},
+		"signal_strength": 82,
+		"task_id":         "task-123",
 	}); err != nil {
 		t.Fatalf("expected scoring.requested to allow task_id, got %v", err)
 	}
@@ -231,10 +234,39 @@ func TestEventSchemaRegistry_ScanAndScoringSupportAutomationMicro(t *testing.T) 
 		"vertical_name":        "Appointment Recovery",
 		"geography":            "argentina",
 		"mode":                 "automation_micro",
-		"rubric":               "automation_micro",
-		"dimensions_requested": []any{"automation_leverage", "sales_cycle_simplicity"},
+		"rubric":               "universal",
+		"dimensions_requested": []any{"build_complexity", "automation_completeness", "distribution_leverage"},
+		"discovery_context": map[string]any{
+			"opportunity_name": "Appointment recovery automation",
+		},
 	}); err != nil {
 		t.Fatalf("expected scoring.requested automation_micro payload to validate, got %v", err)
+	}
+}
+
+func TestEventSchemaRegistry_ScoringRequestedSupportsDerivedAndCorpusModes(t *testing.T) {
+	base := map[string]any{
+		"vertical_id":          "v-1",
+		"vertical_name":        "Roofer Dispatch AI",
+		"geography":            "us",
+		"rubric":               "universal",
+		"dimensions_requested": []any{"build_complexity", "automation_completeness"},
+		"discovery_context": map[string]any{
+			"opportunity_name": "Roofer Dispatch AI",
+		},
+	}
+	derived := cloneMap(base)
+	derived["mode"] = "derived"
+	derived["assigned_analysis_agent_id"] = "analysis-agent-alt"
+	derived["excluded_analysis_agent_id"] = "analysis-agent"
+	if err := ValidateEventPayloadAgainstSchema("scoring.requested", derived); err != nil {
+		t.Fatalf("expected scoring.requested derived payload to validate, got %v", err)
+	}
+
+	corpus := cloneMap(base)
+	corpus["mode"] = "corpus"
+	if err := ValidateEventPayloadAgainstSchema("scoring.requested", corpus); err != nil {
+		t.Fatalf("expected scoring.requested corpus payload to validate, got %v", err)
 	}
 }
 
@@ -269,27 +301,32 @@ func TestEventSchemaRegistry_ResearchSignalsRequireScanID(t *testing.T) {
 			"scan_id":                "scan-1",
 			"category":               "operations",
 			"subcategory":            "clinic_scheduling",
+			"geography":              "argentina",
+			"opportunity_name":       "Clinic Scheduling Automation",
+			"preliminary_icp":        "Clinic operations manager",
+			"build_sketch":           sampleBuildSketch(),
+			"evidence":               sampleEvidence(),
 			"opportunity_hypothesis": "Automate no-show prevention and slot optimization.",
-			"evidence":               "Multiple clinics report manual scheduling bottlenecks.",
+			"geographic_scope":       "local",
 			"signal_strength":        74,
-			"automation_micro": map[string]any{
-				"signal_strength":        81,
-				"evidence":               "Strong WhatsApp-first booking pattern in SMBs.",
-				"opportunity_hypothesis": "Ship a lightweight WhatsApp scheduling assistant.",
-			},
 		},
 		"trend.identified": {
 			"scan_id":                "scan-2",
 			"trend_category":         "regulatory",
-			"trend_description":      "Digital invoicing mandates expanding across LATAM.",
-			"market_intersection":    "SMB billing workflows",
-			"opportunity_hypothesis": "Launch compliance-first invoicing workflow SaaS.",
-			"evidence":               "Government policy timeline indicates 12-month adoption window.",
+			"geography":              "argentina",
 			"signal_strength":        79,
+			"opportunity_name":       "E-invoicing compliance autopilot",
+			"preliminary_icp":        "SMB finance operators",
+			"build_sketch":           sampleBuildSketch(),
+			"evidence":               sampleEvidence(),
+			"trend_description":      "Digital invoicing mandates expanding across LATAM.",
+			"opportunity_hypothesis": "Launch compliance-first invoicing workflow SaaS.",
+			"geographic_scope":       "regional",
 		},
 		"source.scraped": {
 			"scan_id":         "scan-3",
 			"source":          "google_maps",
+			"geography":       "united states",
 			"evidence":        "Top local businesses have sparse digital operations stack.",
 			"signal_strength": 68,
 		},
@@ -310,38 +347,144 @@ func TestEventSchemaRegistry_ResearchSignalsRequireScanID(t *testing.T) {
 	}
 }
 
-func TestEventSchemaRegistry_CategoryAssessedAutomationMicroStrict(t *testing.T) {
+func TestCategoryAssessedSchema(t *testing.T) {
 	valid := map[string]any{
 		"scan_id":                "scan-99",
 		"category":               "operations",
 		"subcategory":            "clinic_scheduling",
+		"geography":              "argentina",
+		"opportunity_name":       "Clinic Scheduling Automation",
+		"preliminary_icp":        "Clinic operations manager",
+		"build_sketch":           sampleBuildSketch(),
+		"evidence":               sampleEvidence(),
 		"opportunity_hypothesis": "Core SaaS wedge",
-		"evidence":               "Evidence",
+		"geographic_scope":       "local",
 		"signal_strength":        70,
-		"automation_micro": map[string]any{
-			"signal_strength":        66,
-			"evidence":               "Automation evidence",
-			"opportunity_hypothesis": "Automation wedge",
-		},
 	}
 	if err := ValidateEventPayloadAgainstSchema("category.assessed", valid); err != nil {
-		t.Fatalf("expected valid category.assessed with automation_micro, got %v", err)
+		t.Fatalf("expected valid structured category.assessed payload, got %v", err)
 	}
 
 	invalid := map[string]any{
 		"scan_id":                "scan-99",
 		"category":               "operations",
 		"subcategory":            "clinic_scheduling",
+		"geography":              "argentina",
+		"opportunity_name":       "Clinic Scheduling Automation",
+		"preliminary_icp":        "Clinic operations manager",
+		"build_sketch":           sampleBuildSketch(),
 		"opportunity_hypothesis": "Core SaaS wedge",
-		"evidence":               "Evidence",
+		"evidence":               sampleEvidence(),
 		"signal_strength":        70,
-		"automation_micro": map[string]any{
-			"signal_strength": 66,
-			"evidence":        "Automation evidence",
-		},
+		// geographic_scope is required.
 	}
 	if err := ValidateEventPayloadAgainstSchema("category.assessed", invalid); err == nil {
-		t.Fatal("expected category.assessed to reject incomplete automation_micro payload")
+		t.Fatal("expected category.assessed to reject payload missing geographic_scope")
+	}
+}
+
+func TestTrendIdentifiedSchema(t *testing.T) {
+	valid := map[string]any{
+		"scan_id":                "scan-2",
+		"trend_category":         "regulatory",
+		"geography":              "argentina",
+		"signal_strength":        79,
+		"opportunity_name":       "E-invoicing compliance autopilot",
+		"preliminary_icp":        "SMB finance operators",
+		"build_sketch":           sampleBuildSketch(),
+		"evidence":               sampleEvidence(),
+		"trend_description":      "Digital invoicing mandates expanding across LATAM.",
+		"opportunity_hypothesis": "Launch compliance-first invoicing workflow SaaS.",
+		"geographic_scope":       "regional",
+	}
+	if err := ValidateEventPayloadAgainstSchema("trend.identified", valid); err != nil {
+		t.Fatalf("expected valid trend.identified payload, got %v", err)
+	}
+	delete(valid, "trend_category")
+	if err := ValidateEventPayloadAgainstSchema("trend.identified", valid); err == nil {
+		t.Fatal("expected trend.identified to reject payload missing trend_category")
+	}
+}
+
+func TestPipelineDeadLetterSchema(t *testing.T) {
+	valid := map[string]any{
+		"event_id":    "evt-1",
+		"node_id":     "scoring-node",
+		"event_type":  "vertical.discovered",
+		"retry_count": 5,
+		"last_error":  "forced failure",
+	}
+	if err := ValidateEventPayloadAgainstSchema("pipeline.dead_letter", valid); err != nil {
+		t.Fatalf("expected valid pipeline.dead_letter payload, got %v", err)
+	}
+	delete(valid, "last_error")
+	if err := ValidateEventPayloadAgainstSchema("pipeline.dead_letter", valid); err == nil {
+		t.Fatal("expected pipeline.dead_letter to reject payload missing last_error")
+	}
+}
+
+func TestScoringRequestedDiscoveryContext(t *testing.T) {
+	valid := map[string]any{
+		"vertical_id":          "v-1",
+		"vertical_name":        "Clinic Scheduling Automation",
+		"geography":            "argentina",
+		"mode":                 "saas_gap",
+		"rubric":               "universal",
+		"dimensions_requested": []any{"build_complexity", "automation_completeness"},
+		"discovery_context": map[string]any{
+			"opportunity_name": "Clinic Scheduling Automation",
+			"preliminary_icp":  "Clinic operations manager",
+		},
+	}
+	if err := ValidateEventPayloadAgainstSchema("scoring.requested", valid); err != nil {
+		t.Fatalf("expected scoring.requested with discovery_context to validate, got %v", err)
+	}
+	delete(valid, "discovery_context")
+	if err := ValidateEventPayloadAgainstSchema("scoring.requested", valid); err == nil {
+		t.Fatal("expected scoring.requested to require discovery_context")
+	}
+}
+
+func sampleBuildSketch() map[string]any {
+	return map[string]any{
+		"core_features":    []any{"calendar sync", "reminder automations"},
+		"key_integrations": []any{"whatsapp", "google calendar"},
+		"red_flags": []any{
+			map[string]any{
+				"type":  "one_time_setup",
+				"notes": "Needs onboarding workflow",
+			},
+		},
+	}
+}
+
+func sampleEvidence() map[string]any {
+	return map[string]any{
+		"competitors": []any{
+			map[string]any{
+				"name":       "ClinicFlow",
+				"pricing":    "$49/mo",
+				"source_url": "https://example.com/clinicflow",
+			},
+		},
+		"pain_signals": []any{
+			map[string]any{
+				"signal":     "No-show rate remains high",
+				"source_url": "https://example.com/pain",
+			},
+		},
+		"regulatory": []any{
+			map[string]any{
+				"detail":     "Appointment reminders must include consent",
+				"source_url": "https://example.com/reg",
+			},
+		},
+		"buyer_communities": []any{
+			map[string]any{
+				"name":       "Clinic Ops LATAM",
+				"source_url": "https://example.com/community",
+			},
+		},
 	}
 }
 

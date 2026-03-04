@@ -901,7 +901,7 @@ func TestDashboard_ControlMailboxDecide_EmitsSideEffects(t *testing.T) {
 	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "operations-analyst",
-		Type:       "escalation_request",
+		Type:       "escalation",
 		Priority:   "normal",
 		Status:     "pending",
 		Context:    []byte(`{"x":1}`),
@@ -977,10 +977,10 @@ func TestDashboard_ControlMailboxDecide_GeographyExpansionQueuesCampaign(t *test
 	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "opco-ceo-" + verticalID,
-		Type:       "geography_expansion",
+		Type:       "domain_approval",
 		Priority:   "normal",
 		Status:     "pending",
-		Context:    []byte(`{"geography":"Asuncion, Paraguay","country":"PY","mode":"saas_gap","categories":["financial_ops"],"priority":"high"}`),
+		Context:    []byte(`{"review_type":"geography_expansion","geography":"Asuncion, Paraguay","country":"PY","mode":"saas_gap","categories":["financial_ops"],"priority":"high"}`),
 		Summary:    "expand to Paraguay",
 	})
 	if err != nil {

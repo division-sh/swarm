@@ -291,15 +291,36 @@ func TestRuntimeToolExecutor_HandleEmitToolFlattensNestedCategoryAssessedPayload
 	})
 	if _, err := exec.Execute(ctx, "emit_category_assessed", map[string]any{
 		"payload": map[string]any{
-			"scan_id":                "scan-123",
-			"campaign_id":            "camp-1",
-			"mode":                   "saas_gap",
-			"geography":              "argentina",
-			"category":               "operations",
-			"subcategory":            "clinic_scheduling",
-			"signal_strength":        76,
+			"scan_id":          "scan-123",
+			"campaign_id":      "camp-1",
+			"mode":             "saas_gap",
+			"geography":        "argentina",
+			"category":         "operations",
+			"subcategory":      "clinic_scheduling",
+			"signal_strength":  76,
+			"opportunity_name": "Clinic Scheduling Automation",
+			"preliminary_icp":  "Clinic operations manager",
+			"build_sketch": map[string]any{
+				"core_features":    []any{"calendar sync"},
+				"key_integrations": []any{"whatsapp"},
+				"red_flags":        []any{},
+			},
 			"opportunity_hypothesis": "Automate patient bookings and reminders.",
-			"evidence":               "Manual follow-up workflows are common in sampled clinics.",
+			"geographic_scope":       "local",
+			"evidence": map[string]any{
+				"competitors": []any{
+					map[string]any{"name": "ClinicFlow", "pricing": "$49/mo", "source_url": "https://example.com/competitor"},
+				},
+				"pain_signals": []any{
+					map[string]any{"signal": "Manual follow-up workflows are common", "source_url": "https://example.com/pain"},
+				},
+				"regulatory": []any{
+					map[string]any{"detail": "Consent requirements apply", "source_url": "https://example.com/reg"},
+				},
+				"buyer_communities": []any{
+					map[string]any{"name": "Clinic Ops LATAM", "source_url": "https://example.com/community"},
+				},
+			},
 		},
 	}); err != nil {
 		t.Fatalf("expected nested payload normalization for category.assessed, got %v", err)
@@ -377,6 +398,142 @@ func TestRuntimeToolExecutor_HandleEmitToolFlattensNestedScanCompletePayload(t *
 	}
 	if _, hasNested := payload["payload"]; hasNested {
 		t.Fatalf("expected nested payload key removed, got payload=%v", payload)
+	}
+}
+
+func TestRuntimeToolExecutor_HandleEmitToolSourceScrapedBackfillsGeographyFromAssignment(t *testing.T) {
+	store := &captureStore{}
+	bus := NewEventBus(store)
+	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	actor := models.AgentConfig{
+		ID:   "scanner-agent-shard-0",
+		Role: "scanner-agent",
+		Mode: "factory",
+	}
+
+	ctx := WithActor(context.Background(), actor)
+	ctx = WithInboundEvent(ctx, events.Event{
+		ID:          "scanner-assigned-1",
+		Type:        events.EventType("scanner.directories.scan_assigned"),
+		SourceAgent: "pipeline-coordinator",
+		Payload: mustJSON(map[string]any{
+			"scan_id":     "scan-geo-1",
+			"campaign_id": "camp-geo-1",
+			"mode":        "local_services",
+			"geography":   "United States",
+		}),
+	})
+	if _, err := exec.Execute(ctx, "emit_source_scraped", map[string]any{
+		"payload": map[string]any{
+			"scan_id":         "scan-geo-1",
+			"source":          "directories",
+			"evidence":        "Signal from directory crawl",
+			"signal_strength": 72,
+		},
+	}); err != nil {
+		t.Fatalf("expected source.scraped payload to backfill geography from assignment, got %v", err)
+	}
+
+	var last events.Event
+	found := false
+	for i := len(store.events) - 1; i >= 0; i-- {
+		if string(store.events[i].Type) == "source.scraped" {
+			last = store.events[i]
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected source.scraped event, got %+v", store.events)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(last.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := strings.TrimSpace(asString(payload["geography"])); got != "United States" {
+		t.Fatalf("expected geography backfilled from assignment, got %q payload=%v", got, payload)
+	}
+}
+
+func TestRuntimeToolExecutor_HandleEmitToolSourceScrapedPlaceholderGeographyReplaced(t *testing.T) {
+	store := &captureStore{}
+	bus := NewEventBus(store)
+	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	actor := models.AgentConfig{
+		ID:   "scanner-agent-shard-1",
+		Role: "scanner-agent",
+		Mode: "factory",
+	}
+
+	ctx := WithActor(context.Background(), actor)
+	ctx = WithInboundEvent(ctx, events.Event{
+		ID:          "scanner-assigned-2",
+		Type:        events.EventType("scanner.google_maps.scan_assigned"),
+		SourceAgent: "pipeline-coordinator",
+		Payload: mustJSON(map[string]any{
+			"scan_id":     "scan-geo-2",
+			"campaign_id": "camp-geo-2",
+			"mode":        "local_services",
+			"geography":   "US",
+		}),
+	})
+	if _, err := exec.Execute(ctx, "emit_source_scraped", map[string]any{
+		"scan_id":         "scan-geo-2",
+		"source":          "google_maps",
+		"evidence":        "Signal from maps crawl",
+		"signal_strength": 68,
+		"geography":       "unspecified, unspecified",
+	}); err != nil {
+		t.Fatalf("expected placeholder geography to be normalized from assignment, got %v", err)
+	}
+
+	var last events.Event
+	found := false
+	for i := len(store.events) - 1; i >= 0; i-- {
+		if string(store.events[i].Type) == "source.scraped" {
+			last = store.events[i]
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected source.scraped event, got %+v", store.events)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(last.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := strings.TrimSpace(asString(payload["geography"])); got != "US" {
+		t.Fatalf("expected geography=US after placeholder replacement, got %q payload=%v", got, payload)
+	}
+}
+
+func TestRuntimeToolExecutor_HandleEmitToolSourceScrapedRejectsMissingGeographyWithoutAssignment(t *testing.T) {
+	store := &captureStore{}
+	bus := NewEventBus(store)
+	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	actor := models.AgentConfig{
+		ID:   "scanner-agent-shard-2",
+		Role: "scanner-agent",
+		Mode: "factory",
+	}
+
+	ctx := WithActor(context.Background(), actor)
+	ctx = WithInboundEvent(ctx, events.Event{
+		ID:          "scanner-assigned-3",
+		Type:        events.EventType("scanner.reviews.scan_assigned"),
+		SourceAgent: "pipeline-coordinator",
+		Payload: mustJSON(map[string]any{
+			"scan_id": "scan-geo-3",
+		}),
+	})
+	if _, err := exec.Execute(ctx, "emit_source_scraped", map[string]any{
+		"scan_id":         "scan-geo-3",
+		"source":          "reviews",
+		"evidence":        "Signal from review crawl",
+		"signal_strength": 65,
+	}); err == nil || !strings.Contains(err.Error(), "geography is required") {
+		t.Fatalf("expected source.scraped to reject missing geography without assignment fallback, got %v", err)
 	}
 }
 

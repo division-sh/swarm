@@ -186,7 +186,7 @@ function StatusDot({ state }) {
 const VALIDATION_GATES = ["researching", "mvp_speccing", "spec_review", "cto_spec_review", "branding"];
 const GATE_LABELS = ["G1 Research", "G2 Spec", "G3 CTO", "G4 Brand"];
 const FLOW_STAGE_OPTIONS = ["all", "discovery", "scoring", "validation", "mailbox", "opco", "system"];
-const FLOW_RUBRIC_OPTIONS = ["all", "automation_micro", "local_services", "saas"];
+const FLOW_RUBRIC_OPTIONS = ["all", "universal"];
 
 function flowStageForEvent(eventType) {
   const t = String(eventType || "").toLowerCase().trim();

@@ -130,7 +130,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		EventID:    evt.ID,
 		VerticalID: verticalID,
 		FromAgent:  "empire-coordinator",
-		Type:       "vertical_decision",
+		Type:       "review",
 		Priority:   "normal",
 		Status:     "pending",
 		Context:    []byte(`{"a":1}`),

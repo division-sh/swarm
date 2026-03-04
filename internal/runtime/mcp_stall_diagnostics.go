@@ -39,6 +39,9 @@ type mcpStallCandidate struct {
 	SessionID     string
 	RuntimeMode   string
 	SessionStatus string
+	LockOwner     string
+	LockExpiresAt sql.NullTime
+	LastUsedAt    sql.NullTime
 }
 
 var mcpStallDiagSeen sync.Map
@@ -83,6 +86,17 @@ func runMCPStallDiagnosticsPass(ctx context.Context, db *sql.DB, logger *Runtime
 	}
 	now := time.Now().UTC()
 	for _, c := range candidates {
+		// Suppress false positives while a session lease is actively heartbeating.
+		if strings.TrimSpace(c.LockOwner) != "" &&
+			c.LockExpiresAt.Valid &&
+			c.LockExpiresAt.Time.After(now.Add(30*time.Second)) {
+			continue
+		}
+		// Also suppress if session heartbeat was refreshed recently.
+		if c.LastUsedAt.Valid && now.Sub(c.LastUsedAt.Time) < cfg.PendingAge {
+			continue
+		}
+
 		key := strings.TrimSpace(c.AgentID) + "|" + strings.TrimSpace(c.SessionID)
 		if key == "|" {
 			continue
@@ -109,7 +123,10 @@ func queryMCPStallCandidates(ctx context.Context, db *sql.DB, cfg MCPStallDiagno
 			MAX(t.created_at) AS last_turn_at,
 			COALESCE(s.session_id, ''),
 			COALESCE(s.runtime_mode, ''),
-			COALESCE(s.status, '')
+			COALESCE(s.status, ''),
+			COALESCE(s.lock_owner, ''),
+			s.lock_expires_at,
+			s.last_used_at
 		FROM agents a
 		JOIN event_deliveries d ON d.agent_id = a.id
 		LEFT JOIN event_receipts r ON r.event_id = d.event_id AND r.agent_id = d.agent_id
@@ -121,15 +138,16 @@ func queryMCPStallCandidates(ctx context.Context, db *sql.DB, cfg MCPStallDiagno
 			LIMIT 1
 		) t ON TRUE
 		LEFT JOIN LATERAL (
-			SELECT session_id, runtime_mode, status
+			SELECT session_id, runtime_mode, status, lock_owner, lock_expires_at, last_used_at
 			FROM agent_sessions
 			WHERE agent_id = a.id
 			ORDER BY (status = 'active') DESC, last_used_at DESC NULLS LAST, created_at DESC
 			LIMIT 1
 		) s ON TRUE
 		WHERE a.status = 'active'
+		  AND COALESCE(s.status, '') = 'active'
 		  AND r.event_id IS NULL
-		GROUP BY a.id, a.role, a.mode, a.vertical_id, s.session_id, s.runtime_mode, s.status
+		GROUP BY a.id, a.role, a.mode, a.vertical_id, s.session_id, s.runtime_mode, s.status, s.lock_owner, s.lock_expires_at, s.last_used_at
 		HAVING COUNT(*) >= $1
 		   AND MIN(d.created_at) <= now() - ($2::text)::interval
 		   AND (MAX(t.created_at) IS NULL OR MAX(t.created_at) <= now() - ($3::text)::interval)
@@ -155,6 +173,9 @@ func queryMCPStallCandidates(ctx context.Context, db *sql.DB, cfg MCPStallDiagno
 			&c.SessionID,
 			&c.RuntimeMode,
 			&c.SessionStatus,
+			&c.LockOwner,
+			&c.LockExpiresAt,
+			&c.LastUsedAt,
 		); scanErr != nil {
 			continue
 		}
@@ -180,6 +201,9 @@ func emitMCPStallDiagnostic(ctx context.Context, db *sql.DB, logger *RuntimeLogg
 		"session_id":           c.SessionID,
 		"session_runtime_mode": c.RuntimeMode,
 		"session_status":       c.SessionStatus,
+		"session_lock_owner":   strings.TrimSpace(c.LockOwner),
+		"session_lock_expires": nullableTimeRFC3339(c.LockExpiresAt),
+		"session_last_used":    nullableTimeRFC3339(c.LastUsedAt),
 		"recent_error_codes":   recentCodes,
 		"suspected_root_cause": classifyMCPStallCause(lastCode),
 	}

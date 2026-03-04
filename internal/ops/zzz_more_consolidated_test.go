@@ -110,9 +110,9 @@ func TestOpsService_Tick_EvaluationsCreateMailboxItems(t *testing.T) {
 
 	// Mailbox should contain at least one of each type we emit.
 	var n int
-	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE type='vertical_decision' AND vertical_id=$1::uuid`, v1).Scan(&n)
+	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE type='vertical_approval' AND vertical_id=$1::uuid`, v1).Scan(&n)
 	if n < 1 {
-		t.Fatalf("expected vertical_decision mailbox item")
+		t.Fatalf("expected vertical_approval mailbox item")
 	}
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE type='budget_increase' AND vertical_id=$1::uuid`, v1).Scan(&n)
 	if n < 1 {

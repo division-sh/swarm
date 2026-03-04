@@ -339,15 +339,17 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	if text == "" {
 		return
 	}
+	parsed := (DirectiveParser{}).Parse(text)
 
 	if isComplexDirectiveText(text) {
 		// Runtime couldn't parse deterministically; forward only this directive
 		// to Empire Coordinator for interpretation.
 		forwardedPayload := map[string]any{
-			"directive_text": text,
-			"timestamp":      time.Now().UTC().Format(time.RFC3339),
-			"forwarded_by":   "scan-campaign-manager",
-			"original_event": evt.ID,
+			"directive_text":   text,
+			"timestamp":        time.Now().UTC().Format(time.RFC3339),
+			"forwarded_by":     "scan-campaign-manager",
+			"original_event":   evt.ID,
+			"parsed_directive": parsed,
 		}
 		if err := m.bus.PublishDirect(ctx, events.Event{
 			ID:          uuid.NewString(),
@@ -366,8 +368,8 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 		return
 	}
 
-	mode, explicitMode := parseDirectiveMode(text)
-	geoName, country, region := parseDirectiveGeography(text)
+	mode, explicitMode := parsed.Mode, parsed.ExplicitMode
+	geoName, country, region := parsed.Geography, parsed.Country, parsed.Region
 	geoID, err := ensureDirectiveGeography(ctx, m.db, geoName, country, region)
 	if err != nil {
 		log.Printf("scan campaign directive geography resolution failed: %v", err)
@@ -376,6 +378,7 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 
 	strategic := map[string]any{
 		"directive_text": text,
+		"parsed":         parsed,
 	}
 	if sentBy := strings.TrimSpace(asString(payload["sent_by"])); sentBy != "" {
 		strategic["sent_by"] = sentBy

@@ -555,11 +555,11 @@ func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string
 		ConsumerID   string // role
 	}
 	edges := []pathEdge{
-		{Event: "vertical.discovered", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "vertical.discovered", ConsumerKind: "runtime", ConsumerID: "scoring-node"},
 		{Event: "scoring.requested", ConsumerKind: "agent", ConsumerID: "analysis-agent"},
-		{Event: "score.dimension_complete", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "score.dimension_complete", ConsumerKind: "runtime", ConsumerID: "scoring-node"},
 		{Event: "scoring.contested", ConsumerKind: "agent", ConsumerID: "empire-coordinator"},
-		{Event: "scoring.contest_resolved", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "scoring.contest_resolved", ConsumerKind: "runtime", ConsumerID: "scoring-node"},
 		{Event: "vertical.scored", ConsumerKind: "agent", ConsumerID: "empire-coordinator"},
 		{Event: "vertical.shortlisted", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
 		{Event: "validation.started", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
@@ -1428,11 +1428,11 @@ func typedBuilderFields(name string) map[string]struct{} {
 	case strings.HasSuffix(name, "buildDedupAmbiguousPayload"):
 		return setOf("scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_vertical")
 	case strings.HasSuffix(name, "buildVerticalDiscoveredPayload"):
-		return setOf("vertical_id", "name", "geography", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals")
+		return setOf("vertical_id", "vertical_name", "name", "geography", "geographic_scope", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals", "discovery_context")
 	case strings.HasSuffix(name, "buildScanCompletedPayload"):
 		return setOf("scan_id", "campaign_id", "mode", "geography", "reports_received", "agents_expected", "agents_complete", "verticals_discovered", "verticals_skipped", "pending_dedup", "timed_out", "shards_total", "shards_completed", "shards_failed")
 	case strings.HasSuffix(name, "buildScoringRequestedPayload"):
-		return setOf("vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested")
+		return setOf("vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested", "discovery_context")
 	case strings.HasSuffix(name, "buildScoringContestedPayload"):
 		return setOf("vertical_id", "dimension", "scores", "evidence", "spread", "rubric", "mode")
 	case strings.HasSuffix(name, "buildVerticalScoredPayload"):

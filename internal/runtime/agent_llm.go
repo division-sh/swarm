@@ -600,7 +600,7 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 
 func normalizeScanMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "automation_micro", "local_services", "saas_gap", "saas_trend":
+	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus", "derived":
 		return strings.ToLower(strings.TrimSpace(raw))
 	case "local_underserved":
 		return "local_services"

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -84,8 +85,6 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		payload = map[string]any{"raw": string(body)}
 	}
-	eventType := resolveProviderEventType(provider, payload)
-
 	providerEventID := firstNonEmpty(
 		r.Header.Get("X-Provider-Event-ID"),
 		r.Header.Get("X-Request-ID"),
@@ -105,25 +104,21 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	envelope := map[string]any{
-		"provider_event_id": providerEventID,
-		"provider":          provider,
-		"received_at":       time.Now().UTC().Format(time.RFC3339),
-		"payload":           payload,
-		"headers": map[string]any{
-			"user_agent": r.UserAgent(),
-		},
+	now := time.Now().UTC()
+	pubType, pubPayload := buildInboundPublishPayload(provider, target.VerticalID, providerEventID, payload, now)
+	pubPayload["headers"] = map[string]any{
+		"user_agent": r.UserAgent(),
 	}
-	envelopeBytes, _ := json.Marshal(envelope)
+	envelopeBytes, _ := json.Marshal(pubPayload)
 	if g.bus != nil {
 		pubCtx := WithCurrentRuntimeEpoch(r.Context())
 		_ = g.bus.Publish(pubCtx, events.Event{
 			ID:          uuid.NewString(),
-			Type:        events.EventType("inbound." + target.VerticalSlug + "." + provider + "_" + eventType),
+			Type:        pubType,
 			SourceAgent: "inbound-gateway",
 			VerticalID:  target.VerticalID,
 			Payload:     envelopeBytes,
-			CreatedAt:   time.Now(),
+			CreatedAt:   now,
 		})
 	}
 
@@ -180,6 +175,109 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func buildInboundPublishPayload(provider, verticalID, providerEventID string, rawPayload any, now time.Time) (events.EventType, map[string]any) {
+	obj, _ := rawPayload.(map[string]any)
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "whatsapp":
+		return events.EventType("inbound.whatsapp_message"), map[string]any{
+			"vertical_id":       strings.TrimSpace(verticalID),
+			"from":              firstStringByKeys(obj, "from", "sender", "wa_id", "phone", "contact"),
+			"message":           firstStringByKeys(obj, "message", "text", "body"),
+			"timestamp":         firstNonEmpty(firstStringByKeys(obj, "timestamp", "time"), now.Format(time.RFC3339)),
+			"media_urls":        firstStringSliceByKeys(obj, "media_urls", "media", "attachments"),
+			"provider_event_id": strings.TrimSpace(providerEventID),
+			"provider":          "whatsapp",
+			"payload":           rawPayload,
+			"received_at":       now.Format(time.RFC3339),
+		}
+	case "email":
+		return events.EventType("inbound.email"), map[string]any{
+			"vertical_id":       strings.TrimSpace(verticalID),
+			"from":              firstStringByKeys(obj, "from", "sender", "email"),
+			"subject":           firstStringByKeys(obj, "subject"),
+			"body":              firstStringByKeys(obj, "body", "text", "message"),
+			"attachments":       firstStringSliceByKeys(obj, "attachments"),
+			"provider_event_id": strings.TrimSpace(providerEventID),
+			"provider":          "email",
+			"payload":           rawPayload,
+			"received_at":       now.Format(time.RFC3339),
+		}
+	default:
+		return events.EventType("inbound." + normalizeEventToken(provider)), map[string]any{
+			"vertical_id":       strings.TrimSpace(verticalID),
+			"provider":          strings.TrimSpace(provider),
+			"event_type":        resolveProviderEventType(provider, rawPayload),
+			"provider_event_id": strings.TrimSpace(providerEventID),
+			"payload":           rawPayload,
+			"received_at":       now.Format(time.RFC3339),
+		}
+	}
+}
+
+func firstStringByKeys(obj map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if obj == nil {
+			break
+		}
+		if v, ok := obj[key]; ok {
+			switch t := v.(type) {
+			case string:
+				if s := strings.TrimSpace(t); s != "" {
+					return s
+				}
+			case json.Number:
+				if s := strings.TrimSpace(t.String()); s != "" {
+					return s
+				}
+			default:
+				if s := strings.TrimSpace(fmt.Sprint(t)); s != "" && s != "<nil>" && s != "map[]" && s != "[]" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func firstStringSliceByKeys(obj map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		if obj == nil {
+			break
+		}
+		v, ok := obj[key]
+		if !ok {
+			continue
+		}
+		switch t := v.(type) {
+		case []string:
+			out := make([]string, 0, len(t))
+			for _, s := range t {
+				if trimmed := strings.TrimSpace(s); trimmed != "" {
+					out = append(out, trimmed)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				if trimmed := strings.TrimSpace(fmt.Sprint(item)); trimmed != "" && trimmed != "<nil>" {
+					out = append(out, trimmed)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		case string:
+			if trimmed := strings.TrimSpace(t); trimmed != "" {
+				return []string{trimmed}
+			}
+		}
+	}
+	return []string{}
 }
 
 func resolveProviderEventType(provider string, payload any) string {

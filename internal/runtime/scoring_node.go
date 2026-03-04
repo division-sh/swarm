@@ -74,6 +74,7 @@ func (n *ScoringNode) subscribe() <-chan events.Event {
 	}
 	return n.bus.Subscribe(scoringNodeID,
 		events.EventType("vertical.discovered"),
+		events.EventType("vertical.derived"),
 		events.EventType("score.dimension_complete"),
 		events.EventType("scoring.contest_resolved"),
 	)
@@ -130,6 +131,9 @@ func (n *ScoringNode) handle(ctx context.Context, evt events.Event) error {
 	case "vertical.discovered":
 		n.pc.handleScoringRequested(ctx, evt)
 		return nil
+	case "vertical.derived":
+		n.pc.handleVerticalDerived(ctx, evt)
+		return nil
 	case "score.dimension_complete":
 		n.pc.handleScoreDimensionComplete(ctx, evt)
 		return nil
@@ -153,11 +157,11 @@ func (n *ScoringNode) emitDeadLetter(ctx context.Context, evt events.Event, caus
 		}
 	}
 	payload := map[string]any{
-		"node_id":    scoringNodeID,
-		"event_id":   strings.TrimSpace(evt.ID),
-		"event_type": strings.TrimSpace(string(evt.Type)),
-		"error":      msg,
-		"retries":    maxInt(1, n.retryLimit),
+		"node_id":     scoringNodeID,
+		"event_id":    strings.TrimSpace(evt.ID),
+		"event_type":  strings.TrimSpace(string(evt.Type)),
+		"last_error":  msg,
+		"retry_count": maxInt(1, n.retryLimit),
 	}
 	if strings.TrimSpace(evt.VerticalID) != "" {
 		payload["vertical_id"] = strings.TrimSpace(evt.VerticalID)

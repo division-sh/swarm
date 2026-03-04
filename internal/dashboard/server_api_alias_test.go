@@ -127,7 +127,7 @@ func TestDashboardServer_APIAliases_Work(t *testing.T) {
 	mbID := uuid.NewString()
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO mailbox (id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-		VALUES ($1::uuid, $2::uuid, 'empire-coordinator', 'vertical_decision', 'critical', 'pending', '{}'::jsonb, 'test', now())
+		VALUES ($1::uuid, $2::uuid, 'empire-coordinator', 'vertical_approval', 'critical', 'pending', '{}'::jsonb, 'test', now())
 	`, mbID, verticalID); err != nil {
 		t.Fatalf("seed mailbox: %v", err)
 	}

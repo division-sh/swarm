@@ -1084,9 +1084,19 @@ func (e *RuntimeToolExecutor) execMailboxSend(actor models.AgentConfig, input an
 	if strings.TrimSpace(in.Type) == "" {
 		return nil, errors.New("mailbox type is required")
 	}
+	normalizedType, err := normalizeMailboxType(in.Type)
+	if err != nil {
+		return nil, err
+	}
+	in.Type = normalizedType
 	if strings.TrimSpace(in.Priority) == "" {
 		in.Priority = "normal"
 	}
+	normalizedPriority, err := normalizeMailboxPriority(in.Priority)
+	if err != nil {
+		return nil, err
+	}
+	in.Priority = normalizedPriority
 	ctxJSON, err := json.Marshal(in.Context)
 	if err != nil {
 		return nil, fmt.Errorf("marshal mailbox context: %w", err)
@@ -1118,6 +1128,46 @@ func (e *RuntimeToolExecutor) execMailboxSend(actor models.AgentConfig, input an
 		return nil, err
 	}
 	return map[string]any{"status": "queued", "mailbox_id": id}, nil
+}
+
+func normalizeMailboxType(raw string) (string, error) {
+	t := strings.ToLower(strings.TrimSpace(raw))
+	switch t {
+	case "vertical_decision":
+		t = "vertical_approval"
+	case "template_migration_review", "template_migration":
+		t = "migration_approval"
+	case "escalation_request", "customer_escalation", "health_warning":
+		t = "escalation"
+	case "geography_expansion", "vertical_geography_expansion", "expansion_recommendation":
+		t = "domain_approval"
+	case "product_spec_review", "deploy_review", "founder_input", "human_task":
+		t = "review"
+	case "capacity_warning":
+		t = "budget_increase"
+	}
+	switch t {
+	case "review", "escalation", "spend_request", "budget_increase", "digest", "vertical_approval", "migration_approval", "domain_approval":
+		return t, nil
+	default:
+		return "", fmt.Errorf("invalid mailbox type %q", raw)
+	}
+}
+
+func normalizeMailboxPriority(raw string) (string, error) {
+	p := strings.ToLower(strings.TrimSpace(raw))
+	switch p {
+	case "", "normal":
+		return "normal", nil
+	case "medium":
+		return "normal", nil
+	case "urgent":
+		return "high", nil
+	case "low", "high", "critical":
+		return p, nil
+	default:
+		return "", fmt.Errorf("invalid mailbox priority %q", raw)
+	}
 }
 
 func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -1570,6 +1620,9 @@ func (e *RuntimeToolExecutor) preNormalizeEmitPayload(actor models.AgentConfig, 
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if eventType == "source.scraped" {
+		return preNormalizeSourceScrapedPayload(inbound, payload)
+	}
 	role := canonicalRuntimeRole(actor.Role)
 	if role == "empire-coordinator" && eventType == "scan.requested" {
 		return preNormalizeCoordinatorScanRequestedPayload(inbound, payload)
@@ -1737,13 +1790,13 @@ func (e *RuntimeToolExecutor) enforceMigrationGuardrail(ctx context.Context, act
 		if _, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
 			VerticalID: strings.TrimSpace(asString(payload["vertical_id"])),
 			FromAgent:  actor.ID,
-			Type:       "deploy_migration_review",
+			Type:       "migration_approval",
 			Priority:   "critical",
 			Status:     "pending",
 			Context:    mustJSON(contextPayload),
 			Summary:    "Destructive migration requires human approval before deploy",
 		}); err != nil {
-			runtimeWarn("tool-executor", "failed to insert deploy_migration_review mailbox item: %v", err)
+			runtimeWarn("tool-executor", "failed to insert migration_approval mailbox item: %v", err)
 		}
 	}
 	return NewRuntimeError(
@@ -1926,6 +1979,80 @@ func preNormalizeLegacyNestedEmitPayload(current map[string]any) map[string]any 
 	return out
 }
 
+func preNormalizeSourceScrapedPayload(inbound events.Event, current map[string]any) map[string]any {
+	out := preNormalizeLegacyNestedEmitPayload(current)
+	currentGeo := strings.TrimSpace(asString(out["geography"]))
+	if !isPlaceholderGeography(currentGeo) {
+		return out
+	}
+	if inferred := extractAssignedGeography(inbound); inferred != "" {
+		out["geography"] = inferred
+	}
+	return out
+}
+
+func extractAssignedGeography(inbound events.Event) string {
+	payload := parsePayloadMap(inbound.Payload)
+	if len(payload) == 0 {
+		return ""
+	}
+	for _, key := range []string{"geography", "geography_label"} {
+		if value := strings.TrimSpace(asString(payload[key])); !isPlaceholderGeography(value) {
+			return value
+		}
+	}
+	if shard, ok := asObject(payload["shard"]); ok {
+		if scope, ok := asObject(shard["scope"]); ok {
+			for _, key := range []string{"geography", "geography_label"} {
+				if value := strings.TrimSpace(asString(scope[key])); !isPlaceholderGeography(value) {
+					return value
+				}
+			}
+			if geoID := strings.TrimSpace(asString(scope["geography_id"])); geoID != "" {
+				return geoID
+			}
+		}
+	}
+	if geoID := strings.TrimSpace(asString(payload["geography_id"])); geoID != "" {
+		return geoID
+	}
+	return ""
+}
+
+func isPlaceholderGeography(value string) bool {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return true
+	}
+	tokens := strings.FieldsFunc(value, func(r rune) bool {
+		switch r {
+		case ',', '/', '|', ';':
+			return true
+		default:
+			return false
+		}
+	})
+	if len(tokens) == 0 {
+		tokens = []string{value}
+	}
+	placeholder := map[string]struct{}{
+		"unspecified": {},
+		"unknown":     {},
+		"n/a":         {},
+		"na":          {},
+		"none":        {},
+		"null":        {},
+		"-":           {},
+	}
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if _, ok := placeholder[token]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeScanModeCompat(raw string) string {
 	if mode := normalizeScanMode(raw); mode != "" {
 		return mode
@@ -1939,6 +2066,10 @@ func normalizeScanModeCompat(raw string) string {
 		return "saas_trend"
 	case "local", "local_service", "local-services", "services":
 		return "local_services"
+	case "corpus_mode", "signal_corpus", "corpus":
+		return "corpus"
+	case "derived":
+		return "derived"
 	default:
 		return ""
 	}
@@ -2677,12 +2808,14 @@ func safeTelemetryText(v any) string {
 	redacted := redactTelemetryValue(v)
 	raw, err := json.Marshal(redacted)
 	if err != nil {
-		return truncateTelemetry(fmt.Sprintf("%v", redacted), 400)
+		return truncateTelemetry(fmt.Sprintf("%v", redacted), maxToolTelemetryChars)
 	}
-	return truncateTelemetry(string(raw), 400)
+	return truncateTelemetry(string(raw), maxToolTelemetryChars)
 }
 
 var telemetryPaymentRefRegex = regexp.MustCompile(`\b(?:pi|pm|ch|cs|txn|tx|tr|pay)_[a-zA-Z0-9]{6,}\b`)
+
+const maxToolTelemetryChars = 1000
 
 func redactTelemetryValue(v any) any {
 	switch t := v.(type) {

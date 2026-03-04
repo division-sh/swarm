@@ -143,7 +143,7 @@ func TestPipeline_ValidationMailboxHasTimeout(t *testing.T) {
 		SELECT timeout_at
 		FROM mailbox
 		WHERE vertical_id = $1::uuid
-		  AND type = 'vertical_decision'
+		  AND type = 'vertical_approval'
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, vID).Scan(&timeoutAt); err != nil {

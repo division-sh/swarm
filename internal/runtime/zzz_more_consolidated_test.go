@@ -2825,14 +2825,14 @@ func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_
 	}
 
 	if _, err := exec.Execute(WithActor(ctx, actor), "mailbox_send", map[string]any{
-		"type":     "founder_review",
+		"type":     "review",
 		"priority": "critical",
 		"summary":  "please review",
 		"context":  map[string]any{"a": 1},
 	}); err != nil {
 		t.Fatalf("mailbox_send: %v", err)
 	}
-	if mailboxCap.last.Type != "founder_review" || mailboxCap.last.Priority != "critical" {
+	if mailboxCap.last.Type != "review" || mailboxCap.last.Priority != "critical" {
 		t.Fatalf("unexpected mailbox item: %+v", mailboxCap.last)
 	}
 
@@ -3064,6 +3064,17 @@ func TestToolExecutor_HelperFunctions_MoreBranches(t *testing.T) {
 	})
 	if !strings.Contains(txt, "[REDACTED]") {
 		t.Fatalf("expected redaction in telemetry, got %q", txt)
+	}
+	largePayload := map[string]any{}
+	for i := 0; i < 80; i++ {
+		largePayload[fmt.Sprintf("k_%d", i)] = strings.Repeat("x", 90)
+	}
+	largeText := safeTelemetryText(largePayload)
+	if len(largeText) <= 400 {
+		t.Fatalf("expected telemetry truncation budget > 400 chars, got len=%d", len(largeText))
+	}
+	if len(largeText) > maxToolTelemetryChars+3 {
+		t.Fatalf("expected telemetry capped at %d (+ellipsis), got len=%d", maxToolTelemetryChars, len(largeText))
 	}
 
 	if got := truncateTelemetry("abc", 0); got != "abc" {

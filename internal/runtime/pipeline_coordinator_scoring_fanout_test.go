@@ -18,21 +18,10 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_RejectedDoesNotPublishVertic
 	bus.SetInterceptors(pc)
 
 	verticalID := uuid.NewString()
+	acc := newUniversalAccumulator(verticalID, "Paraguay Ecommerce", "paraguay", "saas_gap")
+	acc.Received["build_complexity"] = scoreDimensionResult{Score: 40, Evidence: "heavy enterprise integration required"}
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
-		VerticalID:   verticalID,
-		VerticalName: "Paraguay Ecommerce",
-		Geography:    "paraguay",
-		Mode:         "saas_gap",
-		Rubric:       "saas",
-		Expected:     []string{"willingness_to_pay", "market_size"},
-		Received: map[string]scoreDimensionResult{
-			"willingness_to_pay": {Score: 40, Evidence: "low"},
-			"market_size":        {Score: 80, Evidence: "medium"},
-		},
-		Contested:       map[string]contestedDimension{},
-		ContestNotified: map[string]bool{},
-	}
+	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
 	ecCh := bus.Subscribe("empire-coordinator", events.EventType("vertical.scored"), events.EventType("vertical.rejected"))
@@ -40,7 +29,7 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_RejectedDoesNotPublishVertic
 
 	received := collectEventTypes(ecCh, 250*time.Millisecond)
 	if containsEventType(received, "vertical.scored") {
-		t.Fatalf("rejected scoring must not emit vertical.scored, got=%v", received)
+		t.Fatalf("rejected scoring must not emit vertical.scored to EC, got=%v", received)
 	}
 	if !containsEventType(received, "vertical.rejected") {
 		t.Fatalf("expected vertical.rejected for rejected scoring, got=%v", received)
@@ -57,21 +46,22 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_MarginalDoesNotPublishVertic
 	bus.SetInterceptors(pc)
 
 	verticalID := uuid.NewString()
+	acc := newUniversalAccumulator(verticalID, "Dental Ops", "argentina", "saas_gap")
+	setScores(acc, map[string]int{
+		"build_complexity":        80,
+		"automation_completeness": 80,
+		"icp_crispness":           72,
+		"distribution_leverage":   72,
+		"time_to_value":           60,
+		"operational_drag":        60,
+		"pain_severity":           60,
+		"competition_gap":         60,
+		"monetization_clarity":    60,
+		"retention_architecture":  60,
+		"expansion_potential":     60,
+	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
-		VerticalID:   verticalID,
-		VerticalName: "Dental Ops",
-		Geography:    "argentina",
-		Mode:         "saas_gap",
-		Rubric:       "saas",
-		Expected:     []string{"willingness_to_pay", "market_size"},
-		Received: map[string]scoreDimensionResult{
-			"willingness_to_pay": {Score: 70, Evidence: "ok"},
-			"market_size":        {Score: 55, Evidence: "ok"},
-		},
-		Contested:       map[string]contestedDimension{},
-		ContestNotified: map[string]bool{},
-	}
+	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
 	ecCh := bus.Subscribe("empire-coordinator", events.EventType("vertical.scored"), events.EventType("vertical.marginal"))
@@ -79,7 +69,7 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_MarginalDoesNotPublishVertic
 
 	received := collectEventTypes(ecCh, 250*time.Millisecond)
 	if containsEventType(received, "vertical.scored") {
-		t.Fatalf("marginal scoring must not emit vertical.scored, got=%v", received)
+		t.Fatalf("marginal scoring must not emit vertical.scored to EC, got=%v", received)
 	}
 	if !containsEventType(received, "vertical.marginal") {
 		t.Fatalf("expected vertical.marginal for marginal scoring, got=%v", received)
@@ -96,21 +86,22 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_ShortlistedPublishesVertical
 	bus.SetInterceptors(pc)
 
 	verticalID := uuid.NewString()
+	acc := newUniversalAccumulator(verticalID, "Clinic Scheduling", "argentina", "saas_gap")
+	setScores(acc, map[string]int{
+		"build_complexity":        90,
+		"automation_completeness": 90,
+		"icp_crispness":           90,
+		"distribution_leverage":   90,
+		"time_to_value":           90,
+		"operational_drag":        90,
+		"pain_severity":           90,
+		"competition_gap":         90,
+		"monetization_clarity":    90,
+		"retention_architecture":  90,
+		"expansion_potential":     90,
+	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
-		VerticalID:   verticalID,
-		VerticalName: "Clinic Scheduling",
-		Geography:    "argentina",
-		Mode:         "saas_gap",
-		Rubric:       "saas",
-		Expected:     []string{"willingness_to_pay", "market_size"},
-		Received: map[string]scoreDimensionResult{
-			"willingness_to_pay": {Score: 92, Evidence: "high"},
-			"market_size":        {Score: 90, Evidence: "high"},
-		},
-		Contested:       map[string]contestedDimension{},
-		ContestNotified: map[string]bool{},
-	}
+	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
 	ecCh := bus.Subscribe("empire-coordinator", events.EventType("vertical.scored"), events.EventType("vertical.shortlisted"))
@@ -118,135 +109,71 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_ShortlistedPublishesVertical
 
 	received := collectEventTypes(ecCh, 250*time.Millisecond)
 	if !containsEventType(received, "vertical.scored") {
-		t.Fatalf("shortlisted scoring must emit vertical.scored, got=%v", received)
+		t.Fatalf("shortlisted scoring must emit vertical.scored to EC, got=%v", received)
 	}
 	if containsEventType(received, "vertical.shortlisted") {
 		t.Fatalf("vertical.shortlisted should be interceptor-consumed, got=%v", received)
 	}
 }
 
-func TestFactoryPipelineCoordinator_AutomationMicroGateRejectsLowAutomationLeverage(t *testing.T) {
+func TestFactoryPipelineCoordinator_UniversalGateRejectsLowBuildComplexity(t *testing.T) {
 	store := &captureStore{}
 	bus := NewEventBus(store)
 	pc := NewFactoryPipelineCoordinator(bus, nil)
 	bus.SetInterceptors(pc)
 
 	verticalID := uuid.NewString()
+	acc := newUniversalAccumulator(verticalID, "Payment Gateway", "argentina", "saas_gap")
+	setScores(acc, map[string]int{
+		"build_complexity":        35,
+		"automation_completeness": 85,
+		"icp_crispness":           70,
+		"distribution_leverage":   70,
+		"time_to_value":           70,
+		"operational_drag":        70,
+		"pain_severity":           70,
+		"competition_gap":         70,
+		"monetization_clarity":    70,
+		"retention_architecture":  70,
+		"expansion_potential":     70,
+	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
-		VerticalID:   verticalID,
-		VerticalName: "Micro Vertical",
-		Geography:    "argentina",
-		Mode:         "automation_micro",
-		Rubric:       "automation_micro",
-		Expected: []string{
-			"automation_leverage",
-			"sales_cycle_simplicity",
-			"channel_exploitability",
-			"willingness_to_pay",
-			"retention_likelihood",
-			"pain_severity",
-			"competition_weakness",
-			"structural_cloneability",
-			"compliance_lightness",
-		},
-		Received: map[string]scoreDimensionResult{
-			"automation_leverage":     {Score: 65, Evidence: "requires heavy manual onboarding"},
-			"sales_cycle_simplicity":  {Score: 80, Evidence: "single owner decision"},
-			"channel_exploitability":  {Score: 80, Evidence: "clear local directories"},
-			"willingness_to_pay":      {Score: 70, Evidence: "existing SaaS spend"},
-			"retention_likelihood":    {Score: 75, Evidence: "daily usage"},
-			"pain_severity":           {Score: 70, Evidence: "revenue leakage"},
-			"competition_weakness":    {Score: 75, Evidence: "weak incumbents"},
-			"structural_cloneability": {Score: 80, Evidence: "repeatable workflow"},
-			"compliance_lightness":    {Score: 90, Evidence: "low regulation"},
-		},
-		Contested:       map[string]contestedDimension{},
-		ContestNotified: map[string]bool{},
-	}
+	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
 	pc.finalizeScoringAccumulator(context.Background(), verticalID, false)
 
-	var rejected bool
-	for _, evt := range store.events {
-		if string(evt.Type) != "vertical.scored" {
-			continue
-		}
-		payload := parsePayloadMap(evt.Payload)
-		if strings.TrimSpace(asString(payload["result"])) == "rejected" &&
-			strings.TrimSpace(asString(payload["reason"])) == "gate_automation_leverage" {
-			rejected = true
-			break
-		}
-	}
-	if !rejected {
-		t.Fatalf("expected automation_micro hard gate rejection, events=%+v", store.events)
-	}
+	assertScoringReason(t, store.events, "gate_build_complexity")
 }
 
-func TestFactoryPipelineCoordinator_SaaSGateRejectsLowAutomationCompleteness(t *testing.T) {
+func TestFactoryPipelineCoordinator_UniversalGateRejectsLowAutomationCompleteness(t *testing.T) {
 	store := &captureStore{}
 	bus := NewEventBus(store)
 	pc := NewFactoryPipelineCoordinator(bus, nil)
 	bus.SetInterceptors(pc)
 
 	verticalID := uuid.NewString()
+	acc := newUniversalAccumulator(verticalID, "Helpdesk Ticketing", "paraguay", "automation_micro")
+	setScores(acc, map[string]int{
+		"build_complexity":        75,
+		"automation_completeness": 45,
+		"icp_crispness":           70,
+		"distribution_leverage":   70,
+		"time_to_value":           70,
+		"operational_drag":        70,
+		"pain_severity":           70,
+		"competition_gap":         70,
+		"monetization_clarity":    70,
+		"retention_architecture":  70,
+		"expansion_potential":     70,
+	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
-		VerticalID:   verticalID,
-		VerticalName: "Helpdesk Ticketing",
-		Geography:    "paraguay",
-		Mode:         "saas_gap",
-		Rubric:       "saas",
-		Expected: []string{
-			"automation_completeness",
-			"build_complexity",
-			"technical_feasibility",
-			"distribution_access",
-			"willingness_to_pay",
-			"retention_likelihood",
-			"regulatory_moat",
-			"competition_weakness",
-			"pain_severity",
-			"market_size",
-			"localization_advantage",
-		},
-		Received: map[string]scoreDimensionResult{
-			"automation_completeness": {Score: 45, Evidence: "requires manual onboarding and human support"},
-			"build_complexity":        {Score: 72, Evidence: "manageable MVP scope"},
-			"technical_feasibility":   {Score: 80, Evidence: "standard SaaS stack"},
-			"distribution_access":     {Score: 68, Evidence: "reachable SMB communities"},
-			"willingness_to_pay":      {Score: 70, Evidence: "existing spend signals"},
-			"retention_likelihood":    {Score: 66, Evidence: "moderate lock-in"},
-			"regulatory_moat":         {Score: 60, Evidence: "some compliance pressure"},
-			"competition_weakness":    {Score: 65, Evidence: "incumbent gaps"},
-			"pain_severity":           {Score: 75, Evidence: "clear operational pain"},
-			"market_size":             {Score: 58, Evidence: "mid-size market"},
-			"localization_advantage":  {Score: 62, Evidence: "local requirements"},
-		},
-		Contested:       map[string]contestedDimension{},
-		ContestNotified: map[string]bool{},
-	}
+	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
 	pc.finalizeScoringAccumulator(context.Background(), verticalID, false)
 
-	var rejected bool
-	for _, evt := range store.events {
-		if string(evt.Type) != "vertical.scored" {
-			continue
-		}
-		payload := parsePayloadMap(evt.Payload)
-		if strings.TrimSpace(asString(payload["result"])) == "rejected" &&
-			strings.TrimSpace(asString(payload["reason"])) == "gate_automation_completeness" {
-			rejected = true
-			break
-		}
-	}
-	if !rejected {
-		t.Fatalf("expected saas hard gate rejection, events=%+v", store.events)
-	}
+	assertScoringReason(t, store.events, "gate_automation_completeness")
 }
 
 func TestFactoryPipelineCoordinator_RejectedScoringBufferedAndInjectedIntoPortfolioDigest(t *testing.T) {
@@ -279,21 +206,22 @@ func TestFactoryPipelineCoordinator_RejectedScoringBufferedAndInjectedIntoPortfo
 	`, verticalID, "Ecommerce Logistics", "ecommerce-logistics", "paraguay"); err != nil {
 		t.Fatalf("insert vertical: %v", err)
 	}
+	acc := newUniversalAccumulator(verticalID, "Ecommerce Logistics", "paraguay", "saas_gap")
+	setScores(acc, map[string]int{
+		"build_complexity":        80,
+		"automation_completeness": 80,
+		"icp_crispness":           40,
+		"distribution_leverage":   72,
+		"time_to_value":           72,
+		"operational_drag":        72,
+		"pain_severity":           70,
+		"competition_gap":         70,
+		"monetization_clarity":    70,
+		"retention_architecture":  70,
+		"expansion_potential":     70,
+	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
-		VerticalID:   verticalID,
-		VerticalName: "Ecommerce Logistics",
-		Geography:    "paraguay",
-		Mode:         "saas_gap",
-		Rubric:       "saas",
-		Expected:     []string{"willingness_to_pay", "market_size"},
-		Received: map[string]scoreDimensionResult{
-			"willingness_to_pay": {Score: 42, Evidence: "weak"},
-			"market_size":        {Score: 78, Evidence: "ok"},
-		},
-		Contested:       map[string]contestedDimension{},
-		ContestNotified: map[string]bool{},
-	}
+	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 	pc.finalizeScoringAccumulator(ctx, verticalID, false)
 
@@ -358,6 +286,52 @@ func TestFactoryPipelineCoordinator_RejectedScoringBufferedAndInjectedIntoPortfo
 	if asInt(payload["rejection_count"]) != 0 {
 		t.Fatalf("expected rejection_count=0 on next digest tick, payload=%v", payload)
 	}
+}
+
+func newUniversalAccumulator(verticalID, name, geography, mode string) *scoringAccumulator {
+	dims := expectedScoringDimensions("universal")
+	received := make(map[string]scoreDimensionResult, len(dims))
+	for _, dim := range dims {
+		received[dim] = scoreDimensionResult{
+			Score:    75,
+			Evidence: "default",
+		}
+	}
+	return &scoringAccumulator{
+		VerticalID:      verticalID,
+		VerticalName:    name,
+		Geography:       geography,
+		Mode:            mode,
+		Rubric:          "universal",
+		Expected:        dims,
+		Received:        received,
+		Contested:       map[string]contestedDimension{},
+		ContestNotified: map[string]bool{},
+	}
+}
+
+func setScores(acc *scoringAccumulator, scores map[string]int) {
+	for dim, score := range scores {
+		acc.Received[dim] = scoreDimensionResult{
+			Score:    score,
+			Evidence: "test",
+		}
+	}
+}
+
+func assertScoringReason(t *testing.T, eventsList []events.Event, reason string) {
+	t.Helper()
+	for _, evt := range eventsList {
+		if string(evt.Type) != "vertical.scored" {
+			continue
+		}
+		payload := parsePayloadMap(evt.Payload)
+		if strings.TrimSpace(asString(payload["result"])) == "rejected" &&
+			strings.TrimSpace(asString(payload["reason"])) == reason {
+			return
+		}
+	}
+	t.Fatalf("expected rejected vertical.scored reason=%s, events=%+v", reason, eventsList)
 }
 
 func hasPersistedEventType(eventsList []events.Event, eventType string) bool {

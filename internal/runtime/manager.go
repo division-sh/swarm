@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.38"
+	runtimeSpecVersion      = "v2.0.44"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -2228,7 +2228,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.38",
+			TemplateVersion: "2.0.44",
 		}
 	}
 
@@ -2306,7 +2306,8 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 		bootstrap("feature_request", pm),
 		bootstrap("feature_request", cto),
 		bootstrap("cycle_limit_reached", cto),
-		bootstrap("customer_message", support),
+		bootstrap("inbound.whatsapp_message", support),
+		bootstrap("inbound.email", support),
 		bootstrap("feature_deployed", marketing),
 		seeded("bug_fix_deployed", support),
 	}

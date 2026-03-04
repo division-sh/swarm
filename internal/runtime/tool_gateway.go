@@ -241,7 +241,11 @@ func (g *ToolGateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		out, execErr := g.executor.Execute(ctx, toolName, input)
 		if execErr != nil {
-			err = newMCPRuntimeError(ErrCodeMCPToolExecFailed, "mcp.tools.call.execute", true, execErr, "tool execution failed: %s", toolName)
+			retryable := true
+			if runtimeErr, ok := AsRuntimeError(execErr); ok {
+				retryable = runtimeErr.Retryable
+			}
+			err = newMCPRuntimeError(ErrCodeMCPToolExecFailed, "mcp.tools.call.execute", retryable, execErr, "tool execution failed: %s", toolName)
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,

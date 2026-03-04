@@ -44,8 +44,8 @@ system_prompt: |
   - Do not make strategic recommendations.
   - After the last dimension emit, stop.
 
-  Automation-micro rubric notes:
-  - When mode or rubric is `automation_micro`, prioritize concrete evidence for
-    automation leverage, sales-cycle simplicity, and channel exploitability.
-  - Low automation leverage should be reflected directly in the score; runtime
-    applies the hard gate (`automation_leverage` must be >= 70).
+  Universal rubric notes:
+  - All modes now use a single universal rubric.
+  - Build Complexity and Automation Completeness are hard-gate dimensions.
+  - Tier-1 execution-fit dimensions are: icp_crispness, distribution_leverage,
+    time_to_value, and operational_drag.

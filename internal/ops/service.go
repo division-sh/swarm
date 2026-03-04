@@ -152,13 +152,13 @@ func (s *Service) evaluateKillCriteria(ctx context.Context) (int, error) {
 			"users_new":      usersNew,
 			"recommendation": "consider_kill_or_pivot",
 		})
-		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
-			VerticalID: verticalID,
-			FromAgent:  "empire-coordinator",
-			Type:       "vertical_decision",
-			Priority:   "critical",
-			Status:     "pending",
-			Context:    ctxPayload,
+			if _, err := s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
+				VerticalID: verticalID,
+				FromAgent:  "empire-coordinator",
+				Type:       "vertical_approval",
+				Priority:   "critical",
+				Status:     "pending",
+				Context:    ctxPayload,
 			Summary:    fmt.Sprintf("Kill criteria warning: %s (users=%d mrr=%d)", name, users, mrr),
 		}); err != nil {
 			return count, fmt.Errorf("create kill criteria mailbox item: %w", err)

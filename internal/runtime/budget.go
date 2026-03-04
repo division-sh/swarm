@@ -442,7 +442,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			EventID:    evtID,
 			VerticalID: verticalID,
 			FromAgent:  t.mailboxFrom,
-			Type:       "budget_emergency",
+			Type:       "budget_increase",
 			Priority:   "critical",
 			Status:     "pending",
 			Context:    mustJSON(payload),

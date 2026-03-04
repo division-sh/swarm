@@ -379,7 +379,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 		mbID := uuid.NewString()
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO mailbox (id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-			VALUES ($1::uuid, $2::uuid, 'empire-coordinator', 'vertical_decision', 'critical', 'pending', '{}'::jsonb, 'test', now())
+			VALUES ($1::uuid, $2::uuid, 'empire-coordinator', 'vertical_approval', 'critical', 'pending', '{}'::jsonb, 'test', now())
 		`, mbID, verticalID); err != nil {
 			t.Fatalf("seed mailbox: %v", err)
 		}
@@ -443,7 +443,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 		founderInput := uuid.NewString()
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO mailbox (id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-			VALUES ($1::uuid, $2::uuid, $3, 'founder_input', 'normal', 'pending', '{}'::jsonb, 'input', now())
+			VALUES ($1::uuid, $2::uuid, $3, 'review', 'normal', 'pending', '{"review_type":"founder_input"}'::jsonb, 'input', now())
 		`, founderInput, verticalID, opcoCEO); err != nil {
 			t.Fatalf("seed founder input mailbox: %v", err)
 		}
@@ -456,7 +456,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 		escalation := uuid.NewString()
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO mailbox (id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-			VALUES ($1::uuid, $2::uuid, $3, 'customer_escalation', 'normal', 'pending', '{}'::jsonb, 'esc', now())
+			VALUES ($1::uuid, $2::uuid, $3, 'escalation', 'normal', 'pending', '{}'::jsonb, 'esc', now())
 		`, escalation, verticalID, opcoCEO); err != nil {
 			t.Fatalf("seed escalation mailbox: %v", err)
 		}
@@ -469,7 +469,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 		moreData := uuid.NewString()
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO mailbox (id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-			VALUES ($1::uuid, $2::uuid, $3, 'vertical_decision', 'normal', 'pending', '{}'::jsonb, 'more data', now())
+			VALUES ($1::uuid, $2::uuid, $3, 'vertical_approval', 'normal', 'pending', '{}'::jsonb, 'more data', now())
 		`, moreData, verticalID, opcoCEO); err != nil {
 			t.Fatalf("seed more-data mailbox: %v", err)
 		}
@@ -628,7 +628,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 		mbAPI := uuid.NewString()
 		if _, err := db.ExecContext(context.Background(), `
 			INSERT INTO mailbox (id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-			VALUES ($1::uuid, NULL, 'empire-coordinator', 'vertical_decision', 'normal', 'pending', '{}'::jsonb, 'api decide', now())
+			VALUES ($1::uuid, NULL, 'empire-coordinator', 'vertical_approval', 'normal', 'pending', '{}'::jsonb, 'api decide', now())
 		`, mbAPI); err != nil {
 			t.Fatalf("seed api mailbox: %v", err)
 		}

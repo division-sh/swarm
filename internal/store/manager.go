@@ -172,7 +172,7 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 
 	const qSessions = `
 		UPDATE agent_sessions
-		SET status = 'terminated',
+		SET status = 'rotated',
 		    rotated_at = COALESCE(rotated_at, now()),
 		    lock_owner = NULL,
 		    lock_expires_at = NULL,

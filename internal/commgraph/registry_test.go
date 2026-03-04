@@ -109,7 +109,7 @@ func TestRuntimeAndHumanEventClassifications(t *testing.T) {
 		}
 	}
 
-	for _, evt := range []string{"vertical.resumed", "opco.routing_updated", "customer_message", "human_task.assigned"} {
+	for _, evt := range []string{"vertical.resumed", "opco.routing_updated", "inbound.whatsapp_message", "inbound.email", "human_task.assigned"} {
 		if _, ok := runtimeSet[evt]; ok {
 			t.Fatalf("did not expect %q in runtime-emitted list", evt)
 		}
@@ -132,7 +132,8 @@ func TestProducerEventsForRoleIncludesActorGatewayAndCoordinatorResume(t *testin
 		t.Fatalf("expected %q to produce %q, got %v", role, eventType, events)
 	}
 	assertHas("empire-coordinator", "vertical.resumed")
-	assertHas("inbound-gateway", "customer_message")
+	assertHas("inbound-gateway", "inbound.whatsapp_message")
+	assertHas("inbound-gateway", "inbound.email")
 	assertHas("dashboard", "human_task.assigned")
 	assertHas("actor-agent", "opco.routing_updated")
 }

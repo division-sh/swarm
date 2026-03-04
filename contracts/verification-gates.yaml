@@ -18,7 +18,7 @@
 #   introduced:   Spec version that added this gate
 #   notes:        Optional context
 
-spec_version: "2.0.37"
+spec_version: "2.0.44"
 
 gates:
 
@@ -414,6 +414,302 @@ gates:
     pass_criteria: "After 5 failed attempts, pipeline.dead_letter event emitted"
     introduced: "2.0.37"
     notes: "Report UNVERIFIED if test not yet written."
+
+  # ── v2.0.44 Gates: Contract Consistency ──────────────────────────
+
+  - id: xval-system-node-emitter-consistency
+    name: "System node producers match event-catalog emitters"
+    priority: must_pass
+    category: events
+    command: >
+      python3 -c "
+      import yaml
+      nodes = yaml.safe_load(open('contracts/system-nodes.yaml'))
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      errors = []
+      for node_id, node in nodes.items():
+        if not isinstance(node, dict) or 'produces' not in node: continue
+        for event in node['produces']:
+          if event in catalog:
+            emitter = catalog[event].get('emitter', '')
+            if emitter != node_id and emitter != 'runtime':
+              errors.append(f'{event}: system-nodes says {node_id}, catalog says {emitter}')
+      if errors:
+        for e in errors: print(f'MISMATCH: {e}')
+        exit(1)
+      print(f'PASS: all system-node producer events match catalog emitters')
+      "
+    pass_criteria: "Every event in system-nodes.yaml produces list has matching emitter in event-catalog.yaml"
+    introduced: "2.0.41"
+    notes: "Catches the v2.0.37-40 pattern where scoring.contested emitter drifted between runtime and scoring-node."
+
+  - id: xval-consumer-type-resolvable
+    name: "All consumer_type: agent consumers resolve to known agent IDs"
+    priority: must_pass
+    category: events
+    command: >
+      python3 -c "
+      import yaml
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      agents = yaml.safe_load(open('contracts/agent-tools.yaml'))
+      agent_ids = {k for k,v in agents.items() if isinstance(v, dict) and 'type' in v}
+      agent_ids.add('mailbox')  # special sink
+      errors = []
+      for event, spec in catalog.items():
+        if not isinstance(spec, dict): continue
+        if spec.get('consumer_type') != 'agent': continue
+        consumer = spec.get('consumer', '')
+        consumers = [consumer] if isinstance(consumer, str) else consumer
+        for c in consumers:
+          c = c.split('#')[0].strip()
+          if c not in agent_ids:
+            errors.append(f'{event}: consumer {c} not in agent-tools.yaml')
+      if errors:
+        for e in errors: print(f'UNRESOLVABLE: {e}')
+        exit(1)
+      print(f'PASS: all agent consumers resolve to known agent IDs')
+      "
+    pass_criteria: "Every event with consumer_type: agent has a consumer value matching an agent-tools.yaml ID"
+    introduced: "2.0.41"
+    notes: "Catches the old pattern of freeform consumer strings that can't be machine-verified."
+
+  - id: xval-no-transitional-annotations
+    name: "No TRANSITIONAL annotations in canonical contracts"
+    priority: must_pass
+    category: events
+    command: "! grep -ri 'TRANSITIONAL' contracts/*.yaml"
+    pass_criteria: "Zero occurrences of TRANSITIONAL in any contract YAML file"
+    introduced: "2.0.41"
+    notes: "TRANSITIONAL was a v2.0.37 migration marker. All system node migrations are complete."
+
+  - id: xval-consumer-type-present
+    name: "All events have consumer_type field"
+    priority: should_pass
+    category: events
+    command: >
+      python3 -c "
+      import yaml
+      catalog = yaml.safe_load(open('contracts/event-catalog.yaml'))
+      missing = []
+      for event, spec in catalog.items():
+        if not isinstance(spec, dict): continue
+        if 'consumer' in spec and 'consumer_type' not in spec:
+          missing.append(event)
+      if missing:
+        for m in missing: print(f'MISSING consumer_type: {m}')
+        exit(1)
+      print(f'PASS: all events with consumer have consumer_type')
+      "
+    pass_criteria: "Every event with a consumer field also has consumer_type"
+    introduced: "2.0.41"
+
+  # ── v2.0.43: Derivation Loop Gates ──────────────────────────────────
+
+  - id: xval-derived-depth-cap
+    name: "Derived verticals respect generation depth cap"
+    priority: must_pass
+    category: integration
+    command: >
+      psql -c "SELECT COUNT(*) FROM verticals WHERE generation_depth > 2" |
+      awk 'NR==3 {if ($1 == 0) exit 0; else exit 1}'
+    pass_criteria: "Zero verticals with generation_depth > 2"
+    introduced: "2.0.43"
+
+  - id: xval-derived-different-analyst
+    name: "Derived verticals never scored by their generator"
+    priority: must_pass
+    category: integration
+    command: >
+      psql -c "
+        SELECT COUNT(*) FROM verticals v
+        JOIN scoring_sessions s ON v.id = s.vertical_id
+        WHERE v.generator_agent_id IS NOT NULL
+        AND v.generator_agent_id = s.analyst_agent_id
+      " | awk 'NR==3 {if ($1 == 0) exit 0; else exit 1}'
+    pass_criteria: "Zero cases where generator_agent_id matches scoring analyst"
+    introduced: "2.0.43"
+    notes: "Core anti-bias guarantee. If this gate fails, derivation loop is compromised."
+
+  - id: xval-derived-has-parent
+    name: "All derived verticals reference a valid parent"
+    priority: must_pass
+    category: ddl
+    command: >
+      psql -c "
+        SELECT COUNT(*) FROM verticals
+        WHERE generation_depth > 0 AND (parent_id IS NULL OR parent_id NOT IN (SELECT id FROM verticals))
+      " | awk 'NR==3 {if ($1 == 0) exit 0; else exit 1}'
+    pass_criteria: "All depth > 0 verticals have valid parent_id"
+    introduced: "2.0.43"
+
+  - id: xval-derived-rationale-present
+    name: "All derived verticals have derivation rationale"
+    priority: should_pass
+    category: agents
+    command: >
+      psql -c "
+        SELECT COUNT(*) FROM verticals
+        WHERE generation_depth > 0 AND derivation_rationale IS NULL
+      " | awk 'NR==3 {if ($1 == 0) exit 0; else exit 1}'
+    pass_criteria: "All depth > 0 verticals have non-null derivation_rationale"
+    introduced: "2.0.43"
+
+  - id: xval-derived-branching-limit
+    name: "No parent has more than 2 derivations"
+    priority: must_pass
+    category: integration
+    command: >
+      psql -c "
+        SELECT COUNT(*) FROM (
+          SELECT parent_id, COUNT(*) as derivation_count
+          FROM verticals
+          WHERE parent_id IS NOT NULL
+          GROUP BY parent_id
+          HAVING COUNT(*) > 2
+        ) excessive
+      " | awk 'NR==3 {if ($1 == 0) exit 0; else exit 1}'
+    pass_criteria: "No parent vertical has more than 2 derived children"
+    introduced: "2.0.43"
+    notes: "Hard branching factor limit — enforced at tool execution layer, verified here."
+
+  - id: xval-vertical-derived-event-in-catalog
+    name: "vertical.derived event exists in event-catalog with correct wiring"
+    priority: must_pass
+    category: contracts
+    command: >
+      python3 -c "
+      import yaml
+      with open('contracts/event-catalog.yaml') as f:
+        catalog = yaml.safe_load(f)
+      ev = catalog.get('vertical.derived')
+      assert ev, 'vertical.derived not in catalog'
+      assert ev['emitter'] == 'analysis-agent', f'wrong emitter: {ev[\"emitter\"]}'
+      assert ev['consumer'] == 'scoring-node', f'wrong consumer: {ev[\"consumer\"]}'
+      print('PASS: vertical.derived correctly wired')
+      "
+    pass_criteria: "vertical.derived exists with analysis-agent emitter and scoring-node consumer"
+    introduced: "2.0.43"
+
+  # ── v2.0.44 Gates: Corpus Mode + Pre-filter Hardening ────────────
+
+  - id: xval-corpus-mode-in-expected-agents
+    name: "corpus mode exists in expectedAgentsPerMode"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q '"corpus"' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md &&
+      grep -q 'corpus.*1' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "corpus mode present in expectedAgentsPerMode with count 1"
+    introduced: "2.0.44"
+
+  - id: xval-corpus-mode-in-completion-signals
+    name: "corpus mode exists in completionSignals"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q '"corpus".*market_research.scan_complete' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "corpus mode completion signal is market_research.scan_complete"
+    introduced: "2.0.44"
+
+  - id: xval-corpus-mode-in-scan-requested-enum
+    name: "corpus in scan.requested mode enum"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q '"corpus"' contracts/event-catalog.yaml ||
+      grep -q 'corpus' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "corpus is a valid mode in scan.requested schema"
+    introduced: "2.0.44"
+
+  - id: xval-corpus-signals-in-scan-assigned
+    name: "corpus_signals field in market_research.scan_assigned payload"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'corpus_signals' contracts/event-catalog.yaml
+    pass_criteria: "market_research.scan_assigned has corpus_signals payload field"
+    introduced: "2.0.44"
+
+  - id: xval-opportunity-pattern-in-category-assessed
+    name: "opportunity_pattern field in category.assessed payload"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'opportunity_pattern' contracts/event-catalog.yaml
+    pass_criteria: "category.assessed has opportunity_pattern payload field"
+    introduced: "2.0.44"
+
+  - id: xval-signal-sources-in-category-assessed
+    name: "signal_sources field in category.assessed payload"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'signal_sources' contracts/event-catalog.yaml
+    pass_criteria: "category.assessed has signal_sources payload field"
+    introduced: "2.0.44"
+
+  - id: xval-required-capabilities-in-category-assessed
+    name: "required_capabilities field in category.assessed payload"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'required_capabilities' contracts/event-catalog.yaml
+    pass_criteria: "category.assessed has required_capabilities payload field"
+    introduced: "2.0.44"
+
+  - id: xval-prefilter-signal-threshold-55
+    name: "Pre-filter signal threshold is 55 (not 50)"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'signal_strength < 55' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "Pre-filter rejects signals below 55 (raised from 50 in v2.0.44)"
+    introduced: "2.0.44"
+
+  - id: xval-prefilter-retention-primitive-gate
+    name: "Pre-filter includes retention primitive gate"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'retention_primitive\|Retention primitive gate\|no_retention_primitive' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "Pre-filter stage 6 checks for at least 1 retention primitive"
+    introduced: "2.0.44"
+
+  - id: xval-ddl-opportunity-pattern-column
+    name: "opportunity_pattern column in verticals DDL"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'opportunity_pattern' contracts/ddl-canonical.sql
+    pass_criteria: "verticals table has opportunity_pattern TEXT column"
+    introduced: "2.0.44"
+
+  - id: xval-ddl-signal-sources-column
+    name: "signal_sources column in verticals DDL"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'signal_sources' contracts/ddl-canonical.sql
+    pass_criteria: "verticals table has signal_sources JSONB column"
+    introduced: "2.0.44"
+
+  - id: xval-mra-corpus-prompt-exists
+    name: "MRA corpus mode prompt variant exists in spec"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'B.10.1.*Corpus Mode' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "Appendix B.10.1 contains MRA corpus mode prompt variant"
+    introduced: "2.0.44"
+
+  - id: xval-capability-registry-exists
+    name: "Platform Capability Registry section exists"
+    priority: must_pass
+    category: contracts
+    command: >
+      grep -q 'Platform Capability Registry' docs/specs/empireai-v2_0_44/empireai-v2_0_44.md
+    pass_criteria: "Spec contains Platform Capability Registry section with tier definitions"
+    introduced: "2.0.44"
 
 # ── Reporting ─────────────────────────────────────────────────────
 #

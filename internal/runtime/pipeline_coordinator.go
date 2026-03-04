@@ -1,11 +1,13 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,6 +32,7 @@ const (
 	maxNarrativeFallbackNameWords = 8
 
 	localServicesScannerExpected = 5
+	corpusBatchSize              = 25
 )
 
 type pipelineEmitCollectorKey struct{}
@@ -110,17 +113,19 @@ type contestedDimension struct {
 }
 
 type scoringAccumulator struct {
-	VerticalID      string
-	VerticalName    string
-	Geography       string
-	Mode            string
-	Rubric          string
-	Expected        []string
-	Received        map[string]scoreDimensionResult
-	Contested       map[string]contestedDimension
-	RequestedAt     time.Time
-	LastUpdatedAt   time.Time
-	ContestNotified map[string]bool
+	VerticalID       string
+	VerticalName     string
+	Geography        string
+	GeographicScope  string
+	Mode             string
+	Rubric           string
+	DiscoveryContext map[string]any
+	Expected         []string
+	Received         map[string]scoreDimensionResult
+	Contested        map[string]contestedDimension
+	RequestedAt      time.Time
+	LastUpdatedAt    time.Time
+	ContestNotified  map[string]bool
 }
 
 type pendingCandidate struct {
@@ -257,6 +262,8 @@ type ScanAssignedPayload struct {
 	CampaignContext    any    `json:"campaign_context,omitempty"`
 	DirectiveID        string `json:"directive_id,omitempty"`
 	StrategicContext   any    `json:"strategic_context,omitempty"`
+	CorpusPath         string `json:"corpus_path,omitempty"`
+	CorpusSignals      any    `json:"corpus_signals,omitempty"`
 	RequestedAt        string `json:"requested_at,omitempty"`
 	PlannedShards      int    `json:"planned_shards,omitempty"`
 }
@@ -288,15 +295,42 @@ type DedupAmbiguousPayload struct {
 }
 
 type VerticalDiscoveredPayload struct {
-	VerticalID      string         `json:"vertical_id"`
-	Name            string         `json:"name,omitempty"`
-	Geography       string         `json:"geography,omitempty"`
-	Mode            string         `json:"mode,omitempty"`
-	ScanID          string         `json:"scan_id,omitempty"`
-	CampaignID      string         `json:"campaign_id,omitempty"`
-	SignalStrength  float64        `json:"signal_strength,omitempty"`
-	DiscoverySource string         `json:"discovery_source,omitempty"`
-	RawSignals      map[string]any `json:"raw_signals,omitempty"`
+	VerticalID           string         `json:"vertical_id"`
+	VerticalName         string         `json:"vertical_name,omitempty"`
+	Name                 string         `json:"name,omitempty"`
+	Geography            string         `json:"geography,omitempty"`
+	GeographicScope      string         `json:"geographic_scope,omitempty"`
+	Mode                 string         `json:"mode,omitempty"`
+	ScanID               string         `json:"scan_id,omitempty"`
+	CampaignID           string         `json:"campaign_id,omitempty"`
+	SignalStrength       float64        `json:"signal_strength,omitempty"`
+	OpportunityPattern   string         `json:"opportunity_pattern,omitempty"`
+	SignalSources        any            `json:"signal_sources,omitempty"`
+	RequiredCapabilities any            `json:"required_capabilities,omitempty"`
+	DiscoverySource      string         `json:"discovery_source,omitempty"`
+	RawSignals           map[string]any `json:"raw_signals,omitempty"`
+	DiscoveryContext     map[string]any `json:"discovery_context,omitempty"`
+}
+
+type VerticalDerivedPayload struct {
+	OpportunityID         string         `json:"opportunity_id,omitempty"`
+	ParentID              string         `json:"parent_id"`
+	GenerationDepth       int            `json:"generation_depth"`
+	GeneratorAgentID      string         `json:"generator_agent_id"`
+	CampaignID            string         `json:"campaign_id,omitempty"`
+	DerivationRationale   map[string]any `json:"derivation_rationale"`
+	OpportunityName       string         `json:"opportunity_name"`
+	PreliminaryICP        string         `json:"preliminary_icp,omitempty"`
+	BuildSketch           map[string]any `json:"build_sketch,omitempty"`
+	Evidence              map[string]any `json:"evidence,omitempty"`
+	GeographicScope       string         `json:"geographic_scope,omitempty"`
+	SignalStrength        float64        `json:"signal_strength"`
+	DiscoveryContext      map[string]any `json:"discovery_context,omitempty"`
+	OpportunityHypothesis string         `json:"opportunity_hypothesis,omitempty"`
+	Geography             string         `json:"geography,omitempty"`
+	OpportunityPattern    string         `json:"opportunity_pattern,omitempty"`
+	SignalSources         any            `json:"signal_sources,omitempty"`
+	RequiredCapabilities  any            `json:"required_capabilities,omitempty"`
 }
 
 type ScanCompletedPayload struct {
@@ -317,12 +351,15 @@ type ScanCompletedPayload struct {
 }
 
 type ScoringRequestedPayload struct {
-	VerticalID          string   `json:"vertical_id"`
-	VerticalName        string   `json:"vertical_name,omitempty"`
-	Geography           string   `json:"geography,omitempty"`
-	Mode                string   `json:"mode,omitempty"`
-	Rubric              string   `json:"rubric,omitempty"`
-	DimensionsRequested []string `json:"dimensions_requested"`
+	VerticalID              string         `json:"vertical_id"`
+	VerticalName            string         `json:"vertical_name,omitempty"`
+	Geography               string         `json:"geography,omitempty"`
+	Mode                    string         `json:"mode,omitempty"`
+	Rubric                  string         `json:"rubric,omitempty"`
+	DimensionsRequested     []string       `json:"dimensions_requested"`
+	DiscoveryContext        map[string]any `json:"discovery_context,omitempty"`
+	AssignedAnalysisAgentID string         `json:"assigned_analysis_agent_id,omitempty"`
+	ExcludedAnalysisAgentID string         `json:"excluded_analysis_agent_id,omitempty"`
 }
 
 type ScoringContestedPayload struct {
@@ -365,15 +402,9 @@ type VerticalMarginalPayload struct {
 	PromotionEligible bool                            `json:"promotion_eligible"`
 }
 
-type VerticalRejectedReasonPayload struct {
-	Code           string  `json:"code,omitempty"`
-	CompositeScore float64 `json:"composite_score"`
-	ViabilityScore float64 `json:"viability_score"`
-}
-
 type VerticalRejectedPayload struct {
-	VerticalID string                        `json:"vertical_id"`
-	Reason     VerticalRejectedReasonPayload `json:"reason"`
+	VerticalID string `json:"vertical_id"`
+	Reason     string `json:"reason"`
 }
 
 type PortfolioDigestTimerPayload struct {
@@ -1295,6 +1326,26 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	case "saas_trend":
 		pc.publish(ctx, "trend_research.scan_assigned", "", payloadMap(assigned))
+	case "corpus":
+		corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
+		assigned.CorpusPath = corpusPath
+		batches, err := readJSONLFile(corpusPath, corpusBatchSize)
+		if err != nil {
+			runtimeWarn("pipeline-coordinator", "corpus mode read failed path=%q err=%v", corpusPath, err)
+			assigned.CorpusSignals = []map[string]any{}
+			pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+			return
+		}
+		if len(batches) == 0 {
+			assigned.CorpusSignals = []map[string]any{}
+			pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+			return
+		}
+		for _, batch := range batches {
+			perBatch := assigned
+			perBatch.CorpusSignals = batch
+			pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(perBatch))
+		}
 	case "local_services":
 		pc.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(assigned))
 		pc.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
@@ -1443,6 +1494,49 @@ func stableUUID(raw string) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(raw))
 }
 
+func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("corpus_path is required for corpus mode")
+	}
+	if batchSize <= 0 {
+		batchSize = corpusBatchSize
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	out := make([][]map[string]any, 0, 8)
+	current := make([]map[string]any, 0, batchSize)
+	sc := bufio.NewScanner(f)
+	// Allow reasonably large lines for corpus entries.
+	buf := make([]byte, 0, 64*1024)
+	sc.Buffer(buf, 2*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		row := map[string]any{}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			return nil, fmt.Errorf("invalid jsonl row: %w", err)
+		}
+		current = append(current, row)
+		if len(current) >= batchSize {
+			out = append(out, current)
+			current = make([]map[string]any, 0, batchSize)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if len(current) > 0 {
+		out = append(out, current)
+	}
+	return out, nil
+}
+
 func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
 	scanID := strings.TrimSpace(asString(payload["scan_id"]))
@@ -1535,6 +1629,267 @@ func buildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) 
 	return candidates
 }
 
+var (
+	roleTokens = []string{
+		"owner", "operator", "manager", "founder", "director", "admin", "coordinator", "lead",
+	}
+	cohortTokens = []string{
+		"clinic", "dental", "restaurant", "salon", "agency", "smb", "small business", "warehouse", "logistics",
+	}
+	workflowTokens = []string{
+		"schedule", "booking", "invoice", "payroll", "lead", "dispatch", "inventory", "compliance", "reporting",
+	}
+	blockingRedFlagTypes = map[string]struct{}{
+		"regulatory_license":         {},
+		"enterprise_contract":        {},
+		"certification":              {},
+		"two_sided_marketplace":      {},
+		"funds_custody":              {},
+		"requires_human_review":      {},
+		"data_residency_requirement": {},
+		"complex_integration":        {},
+		"high_feature_count":         {},
+		"one_time_setup":             {},
+		"accuracy_liability":         {},
+		"phone_led_sales":            {},
+		"enterprise_procurement":     {},
+		"relationship_networking":    {},
+		"physical_presence_required": {},
+		"support_mode_phone_video":   {},
+	}
+)
+
+func evaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string) {
+	signal := applyRedFlagPenalty(rawSignal, payload)
+	if signal < 55 {
+		return false, signal, "signal_strength_below_threshold"
+	}
+	if hasBlockingRedFlags(payload) {
+		return false, signal, "blocking_red_flags"
+	}
+	// Backwards-compatible fallback for legacy scanner payloads.
+	if !hasStructuredDiscoveryContext(payload) {
+		return true, signal, ""
+	}
+	if !passesICPPositiveCheck(payload) {
+		return false, signal, "icp_positive_check_failed"
+	}
+	if !passesEvidenceCompleteness(payload) {
+		return false, signal, "evidence_completeness_failed"
+	}
+	if !passesRetentionPrimitive(payload) {
+		return false, signal, "no_retention_primitive"
+	}
+	return true, signal, ""
+}
+
+func applyRedFlagPenalty(signal float64, payload map[string]any) float64 {
+	flags := extractRedFlagTypes(payload)
+	if len(flags) == 0 {
+		return signal
+	}
+	penalized := signal - float64(len(flags)*5)
+	if penalized < 0 {
+		return 0
+	}
+	if penalized > 100 {
+		return 100
+	}
+	return penalized
+}
+
+func hasBlockingRedFlags(payload map[string]any) bool {
+	for _, flag := range extractRedFlagTypes(payload) {
+		if _, blocked := blockingRedFlagTypes[flag]; blocked {
+			return true
+		}
+	}
+	return false
+}
+
+func extractRedFlagTypes(payload map[string]any) []string {
+	if len(payload) == 0 {
+		return nil
+	}
+	buildSketch, _ := asObject(payload["build_sketch"])
+	redFlags, _ := asArray(buildSketch["red_flags"])
+	out := make([]string, 0, len(redFlags))
+	for _, item := range redFlags {
+		switch typed := item.(type) {
+		case string:
+			if v := strings.TrimSpace(typed); v != "" {
+				out = append(out, strings.ToLower(v))
+			}
+		case map[string]any:
+			if v := strings.TrimSpace(asString(typed["type"])); v != "" {
+				out = append(out, strings.ToLower(v))
+			}
+		}
+	}
+	return out
+}
+
+func hasStructuredDiscoveryContext(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	if strings.TrimSpace(asString(payload["opportunity_name"])) != "" {
+		return true
+	}
+	if strings.TrimSpace(asString(payload["preliminary_icp"])) != "" {
+		return true
+	}
+	if buildSketch, ok := asObject(payload["build_sketch"]); ok && len(buildSketch) > 0 {
+		return true
+	}
+	if evidence, ok := asObject(payload["evidence"]); ok && len(evidence) > 0 {
+		return true
+	}
+	return false
+}
+
+func passesICPPositiveCheck(payload map[string]any) bool {
+	icp := strings.ToLower(strings.TrimSpace(asString(payload["preliminary_icp"])))
+	hypothesis := strings.ToLower(strings.TrimSpace(asString(payload["opportunity_hypothesis"])))
+	text := strings.TrimSpace(icp + " " + hypothesis)
+	if text == "" {
+		return false
+	}
+	hasRole := containsAnyToken(text, roleTokens)
+	hasCohort := containsAnyToken(text, cohortTokens)
+	hasWorkflow := containsAnyToken(text, workflowTokens)
+	if !(hasRole || hasCohort) || !hasWorkflow {
+		return false
+	}
+	evidence, _ := asObject(payload["evidence"])
+	communities, _ := asArray(evidence["buyer_communities"])
+	for _, item := range communities {
+		obj, _ := asObject(item)
+		if isURLLike(asString(obj["source_url"])) {
+			return true
+		}
+	}
+	return false
+}
+
+func passesEvidenceCompleteness(payload map[string]any) bool {
+	evidence, ok := asObject(payload["evidence"])
+	if !ok || len(evidence) == 0 {
+		return false
+	}
+	competitors, _ := asArray(evidence["competitors"])
+	buyerCommunities, _ := asArray(evidence["buyer_communities"])
+	painSignals, _ := asArray(evidence["pain_signals"])
+	if !hasCompetitorEvidence(competitors) {
+		return false
+	}
+	if !hasSourceURL(buyerCommunities) {
+		return false
+	}
+	if !hasSourceURL(painSignals) {
+		return false
+	}
+	regulatory, _ := asArray(evidence["regulatory"])
+	urls := collectEvidenceURLs(competitors, buyerCommunities, painSignals, regulatory)
+	if len(urls) < 2 {
+		return false
+	}
+	return true
+}
+
+func hasCompetitorEvidence(items []any) bool {
+	for _, item := range items {
+		obj, _ := asObject(item)
+		if strings.TrimSpace(asString(obj["name"])) == "" {
+			continue
+		}
+		if strings.TrimSpace(asString(obj["pricing"])) == "" {
+			continue
+		}
+		if !isURLLike(asString(obj["source_url"])) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func hasSourceURL(items []any) bool {
+	for _, item := range items {
+		obj, _ := asObject(item)
+		if isURLLike(asString(obj["source_url"])) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectEvidenceURLs(parts ...[]any) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, items := range parts {
+		for _, item := range items {
+			obj, _ := asObject(item)
+			raw := strings.TrimSpace(strings.ToLower(asString(obj["source_url"])))
+			if isURLLike(raw) {
+				out[raw] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func passesRetentionPrimitive(payload map[string]any) bool {
+	keys := []string{
+		"recurring_data",
+		"workflow_embedding",
+		"integration_lock_in",
+		"compliance_cadence",
+		"team_collaboration",
+	}
+	for _, key := range keys {
+		if parseBool(payload[key]) {
+			return true
+		}
+	}
+	buildSketch, _ := asObject(payload["build_sketch"])
+	for _, key := range keys {
+		if parseBool(buildSketch[key]) {
+			return true
+		}
+	}
+	checkArray := func(v any) bool {
+		items, _ := asArray(v)
+		for _, item := range items {
+			token := strings.TrimSpace(strings.ToLower(asString(item)))
+			for _, key := range keys {
+				if token == key {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if checkArray(payload["retention_primitives"]) || checkArray(buildSketch["retention_primitives"]) {
+		return true
+	}
+	return false
+}
+
+func containsAnyToken(text string, tokens []string) bool {
+	for _, token := range tokens {
+		tok := strings.TrimSpace(strings.ToLower(token))
+		if tok != "" && strings.Contains(text, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+func isURLLike(raw string) bool {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
 func cloneMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return map[string]any{}
@@ -1554,12 +1909,15 @@ func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
 	candidate discoveryCandidate,
 ) {
 	signal := candidate.Signal
-	if signal < 50 {
+	allowed, adjustedSignal, _ := evaluateDiscoveryPreFilter(candidate.Payload, signal)
+	if !allowed {
 		pc.mu.Lock()
 		acc.Skipped++
 		pc.mu.Unlock()
 		return
 	}
+	signal = adjustedSignal
+	candidate.Payload["signal_strength"] = adjustedSignal
 
 	payload := candidate.Payload
 	name := deriveDiscoveryCandidateName(payload)
@@ -1745,59 +2103,58 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	}
 }
 
+var rubricDimensions = map[string][]string{
+	"universal": {
+		"build_complexity",
+		"automation_completeness",
+		"icp_crispness",
+		"distribution_leverage",
+		"time_to_value",
+		"operational_drag",
+		"pain_severity",
+		"competition_gap",
+		"monetization_clarity",
+		"retention_architecture",
+		"expansion_potential",
+	},
+}
+
 var rubricWeights = map[string]map[string]float64{
-	"local_services": {
-		"willingness_to_pay":   0.20,
-		"retention_likelihood": 0.15,
-		"channel_access":       0.15,
-		"operational_friction": 0.10,
-		"business_density":     0.12,
-		"pain_severity":        0.10,
-		"competition_weakness": 0.10,
-		"revenue_per_business": 0.08,
-	},
-	"saas": {
-		"automation_completeness": 0.18,
-		"build_complexity":        0.12,
-		"technical_feasibility":   0.12,
-		"distribution_access":     0.12,
-		"willingness_to_pay":      0.11,
-		"retention_likelihood":    0.10,
-		"regulatory_moat":         0.08,
-		"competition_weakness":    0.07,
-		"pain_severity":           0.05,
-		"market_size":             0.03,
-		"localization_advantage":  0.02,
-	},
-	"automation_micro": {
-		"automation_leverage":     0.20,
-		"sales_cycle_simplicity":  0.15,
-		"channel_exploitability":  0.15,
-		"willingness_to_pay":      0.10,
-		"retention_likelihood":    0.10,
-		"pain_severity":           0.10,
-		"competition_weakness":    0.08,
-		"structural_cloneability": 0.07,
-		"compliance_lightness":    0.05,
+	"universal": {
+		"icp_crispness":          0.15,
+		"distribution_leverage":  0.15,
+		"time_to_value":          0.15,
+		"operational_drag":       0.15,
+		"pain_severity":          0.10,
+		"competition_gap":        0.10,
+		"monetization_clarity":   0.10,
+		"retention_architecture": 0.05,
+		"expansion_potential":    0.05,
 	},
 }
 
-var viabilityDimensions = map[string][]string{
-	"local_services": {"willingness_to_pay", "retention_likelihood", "channel_access", "operational_friction"},
-	"saas":           {"automation_completeness", "build_complexity", "technical_feasibility", "distribution_access", "willingness_to_pay"},
-	"automation_micro": {
-		"automation_leverage",
-		"sales_cycle_simplicity",
-		"channel_exploitability",
-		"willingness_to_pay",
-		"retention_likelihood",
-	},
+var tier1Dimensions = map[string][]string{
+	"universal": {"icp_crispness", "distribution_leverage", "time_to_value", "operational_drag"},
 }
 
-var viabilityFloor = map[string]float64{
-	"local_services":   65,
-	"saas":             65,
-	"automation_micro": 60,
+var tier1DimensionFloor = map[string]int{
+	"universal": 50,
+}
+
+var tier1SubscoreFloor = map[string]float64{
+	"universal": 60,
+}
+
+type scoringMarginalDrainRule struct {
+	MinHighDims   int
+	HighThreshold int
+}
+
+var marginalDrainRules = map[string]scoringMarginalDrainRule{
+	"universal": {
+		MinHighDims:   2,
+		HighThreshold: 70,
+	},
 }
 
 type scoringHardGate struct {
@@ -1807,43 +2164,40 @@ type scoringHardGate struct {
 }
 
 var rubricGates = map[string][]scoringHardGate{
-	"saas": {
+	"universal": {
+		{
+			Dimension: "build_complexity",
+			MinScore:  50,
+			Reason:    "gate_build_complexity",
+		},
 		{
 			Dimension: "automation_completeness",
 			MinScore:  50,
 			Reason:    "gate_automation_completeness",
 		},
 	},
-	"automation_micro": {
-		{
-			Dimension: "automation_leverage",
-			MinScore:  70,
-			Reason:    "gate_automation_leverage",
-		},
-	},
 }
 
 func expectedScoringDimensions(rubric string) []string {
-	weights := rubricWeights[strings.TrimSpace(rubric)]
-	if len(weights) == 0 {
-		return nil
+	dims := rubricDimensions[strings.TrimSpace(rubric)]
+	if len(dims) == 0 {
+		dims = rubricDimensions["universal"]
 	}
-	out := make([]string, 0, len(weights))
-	for dim := range weights {
-		out = append(out, dim)
-	}
-	sort.Strings(out)
+	out := append([]string{}, dims...)
 	return out
 }
 
 func selectScoringRubric(mode string) string {
+	// v2.0.39: all supported modes map to the universal rubric.
 	switch normalizeScanMode(mode) {
-	case "local_services":
-		return "local_services"
-	case "automation_micro":
-		return "automation_micro"
+	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus":
+		return "universal"
 	default:
-		return "saas"
+		// Derived opportunities are scored by the same universal rubric.
+		if strings.EqualFold(strings.TrimSpace(mode), "derived") {
+			return "universal"
+		}
+		return "universal"
 	}
 }
 
@@ -1981,27 +2335,41 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	}
 
 	now := time.Now().UTC()
+	discoveryContext, _ := asObject(payload["discovery_context"])
+	discoveryContext = cloneMap(discoveryContext)
+	if len(discoveryContext) == 0 {
+		discoveryContext = buildDiscoveryContextPayload(payload)
+	}
+	geographicScope := normalizeGeographicScope(asString(payload["geographic_scope"]))
 	pc.mu.Lock()
 	acc := &scoringAccumulator{
-		VerticalID:      verticalID,
-		VerticalName:    name,
-		Geography:       geography,
-		Mode:            mode,
-		Rubric:          rubric,
-		Expected:        expected,
-		Received:        make(map[string]scoreDimensionResult, len(expected)),
-		Contested:       make(map[string]contestedDimension),
-		RequestedAt:     now,
-		LastUpdatedAt:   now,
-		ContestNotified: make(map[string]bool),
+		VerticalID:       verticalID,
+		VerticalName:     name,
+		Geography:        geography,
+		GeographicScope:  geographicScope,
+		Mode:             mode,
+		Rubric:           rubric,
+		DiscoveryContext: discoveryContext,
+		Expected:         expected,
+		Received:         make(map[string]scoreDimensionResult, len(expected)),
+		Contested:        make(map[string]contestedDimension),
+		RequestedAt:      now,
+		LastUpdatedAt:    now,
+		ContestNotified:  make(map[string]bool),
 	}
 	if existing := pc.scoring[verticalID]; existing != nil {
 		// Keep existing progress but refresh metadata when discovery details improve.
 		acc = existing
 		acc.VerticalName = firstNonEmptyString(name, acc.VerticalName)
 		acc.Geography = firstNonEmptyString(geography, acc.Geography)
+		if strings.TrimSpace(geographicScope) != "" {
+			acc.GeographicScope = geographicScope
+		}
 		acc.Mode = mode
 		acc.Rubric = rubric
+		if len(discoveryContext) > 0 {
+			acc.DiscoveryContext = cloneMap(discoveryContext)
+		}
 		acc.Expected = expected
 		if acc.Received == nil {
 			acc.Received = make(map[string]scoreDimensionResult, len(expected))
@@ -2016,7 +2384,112 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	pc.scoring[verticalID] = acc
 	pc.mu.Unlock()
 
-	pc.publish(ctx, "scoring.requested", verticalID, payloadMap(pc.buildScoringRequestedPayload(verticalID, acc)))
+	scoringPayload := pc.buildScoringRequestedPayload(verticalID, acc)
+	if excluded := pc.derivedScoringGeneratorAgent(ctx, acc); excluded != "" {
+		scoringPayload.ExcludedAnalysisAgentID = excluded
+		if assigned := pc.selectScoringAnalysisRecipient(excluded); assigned != "" {
+			scoringPayload.AssignedAnalysisAgentID = assigned
+			pc.publishDirect(ctx, "scoring.requested", verticalID, payloadMap(scoringPayload), []string{assigned})
+			return
+		}
+		runtimeWarn(
+			"scoring-node",
+			"anti-bias fallback: no alternate analysis recipient available excluded_agent=%s vertical_id=%s",
+			excluded,
+			verticalID,
+		)
+	}
+	pc.publish(ctx, "scoring.requested", verticalID, payloadMap(scoringPayload))
+}
+
+func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context, evt events.Event) {
+	payload := parsePayloadMap(evt.Payload)
+	parentID := strings.TrimSpace(asString(payload["parent_id"]))
+	if parentID == "" {
+		runtimeWarn("scoring-node", "dropping vertical.derived missing parent_id event_id=%s", strings.TrimSpace(evt.ID))
+		return
+	}
+	generationDepth := intFromAny(payload["generation_depth"])
+	if generationDepth < 0 {
+		generationDepth = 0
+	}
+	if generationDepth > 2 {
+		runtimeWarn("scoring-node", "dropping vertical.derived depth cap exceeded parent=%s depth=%d", parentID, generationDepth)
+		return
+	}
+	if children, err := pc.countDerivedChildren(ctx, parentID); err == nil && children >= 2 {
+		runtimeWarn("scoring-node", "dropping vertical.derived branch cap exceeded parent=%s children=%d", parentID, children)
+		return
+	}
+
+	signal := asFloat(payload["signal_strength"])
+	if signal == 0 {
+		// Keep compatibility with emit payloads using integer encoding.
+		signal = float64(intFromAny(payload["signal_strength"]))
+	}
+	allowed, adjustedSignal, reason := evaluateDiscoveryPreFilter(payload, signal)
+	if !allowed {
+		runtimeWarn("scoring-node", "dropping vertical.derived prefilter reject parent=%s reason=%s", parentID, reason)
+		return
+	}
+	payload["signal_strength"] = adjustedSignal
+
+	name := deriveDiscoveryCandidateName(payload)
+	if name == "" {
+		name = strings.TrimSpace(asString(payload["opportunity_name"]))
+	}
+	if name == "" {
+		runtimeWarn("scoring-node", "dropping vertical.derived missing opportunity_name parent=%s", parentID)
+		return
+	}
+	geography := strings.TrimSpace(asString(payload["geography"]))
+	if geography == "" {
+		_, geo, err := pc.loadVerticalIdentity(ctx, parentID)
+		if err == nil {
+			geography = strings.TrimSpace(geo)
+		}
+	}
+	if geography == "" {
+		geography = "unknown"
+	}
+	payload["parent_id"] = parentID
+	payload["generation_depth"] = generationDepth
+	payload["opportunity_name"] = name
+	payload["mode"] = "derived"
+
+	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
+	verticalID, err := pc.ensureVerticalDiscovered(ctx, name, geography, "derived", payload)
+	if err != nil {
+		log.Printf("scoring-node: ensure derived vertical failed parent=%s name=%s err=%v", parentID, name, err)
+		return
+	}
+	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(
+		verticalID,
+		name,
+		geography,
+		"derived",
+		"", // scan_id (not applicable for derivation)
+		campaignID,
+		adjustedSignal,
+		strings.TrimSpace(evt.SourceAgent),
+		payload,
+	))
+	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+}
+
+func (pc *FactoryPipelineCoordinator) countDerivedChildren(ctx context.Context, parentID string) (int, error) {
+	if pc == nil || pc.db == nil || strings.TrimSpace(parentID) == "" {
+		return 0, nil
+	}
+	var count int
+	if err := dbQueryRowContext(ctx, pc.db, `
+		SELECT COUNT(*)
+		FROM verticals
+		WHERE parent_id = $1::uuid
+	`, parentID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
@@ -2038,8 +2511,8 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 	if acc == nil {
 		acc = &scoringAccumulator{
 			VerticalID:      verticalID,
-			Rubric:          "saas",
-			Expected:        expectedScoringDimensions("saas"),
+			Rubric:          "universal",
+			Expected:        expectedScoringDimensions("universal"),
 			Received:        map[string]scoreDimensionResult{},
 			Contested:       map[string]contestedDimension{},
 			ContestNotified: map[string]bool{},
@@ -2168,15 +2641,31 @@ type scoringComposite struct {
 func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
 	weights := rubricWeights[acc.Rubric]
 	if len(weights) == 0 {
-		weights = rubricWeights["saas"]
+		weights = rubricWeights["universal"]
 	}
-	viabilitySet := viabilityDimensions[acc.Rubric]
-	if len(viabilitySet) == 0 {
-		viabilitySet = viabilityDimensions["saas"]
+	tier1Set := tier1Dimensions[acc.Rubric]
+	if len(tier1Set) == 0 {
+		tier1Set = tier1Dimensions["universal"]
 	}
+
+	floor := tier1DimensionFloor[acc.Rubric]
+	if floor <= 0 {
+		floor = tier1DimensionFloor["universal"]
+	}
+	subscoreFloor := tier1SubscoreFloor[acc.Rubric]
+	if subscoreFloor <= 0 {
+		subscoreFloor = tier1SubscoreFloor["universal"]
+	}
+	marginalRule, ok := marginalDrainRules[acc.Rubric]
+	if !ok {
+		marginalRule = marginalDrainRules["universal"]
+	}
+
 	dimensions := make(map[string]scoreDimensionResult, len(acc.Expected))
-	viabilitySum := 0.0
-	viabilityWeight := 0.0
+	composite := 0.0
+	compositeWeight := 0.0
+	tier1Sum := 0.0
+	tier1Weight := 0.0
 	marketSum := 0.0
 	marketWeight := 0.0
 
@@ -2187,16 +2676,33 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 		}
 		dimensions[dim] = res
 		w := weights[dim]
-		if w <= 0 {
+		if w > 0 {
+			composite += float64(res.Score) * w
+			compositeWeight += w
+		}
+		if !dimensionInSet(tier1Set, dim) {
+			if w > 0 {
+				marketSum += float64(res.Score) * w
+				marketWeight += w
+			}
 			continue
 		}
-		if dimensionInSet(viabilitySet, dim) {
-			viabilitySum += float64(res.Score) * w
-			viabilityWeight += w
-		} else {
-			marketSum += float64(res.Score) * w
-			marketWeight += w
+		if w > 0 {
+			tier1Sum += float64(res.Score) * w
+			tier1Weight += w
 		}
+	}
+
+	viability := 0.0
+	if tier1Weight > 0 {
+		viability = tier1Sum / tier1Weight
+	}
+	market := 0.0
+	if marketWeight > 0 {
+		market = marketSum / marketWeight
+	}
+	if compositeWeight > 0 {
+		composite = composite / compositeWeight
 	}
 
 	if gates, ok := rubricGates[acc.Rubric]; ok {
@@ -2209,9 +2715,9 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 				return scoringComposite{
 					Result:         "rejected",
 					Reason:         gate.Reason,
-					CompositeScore: 0,
-					ViabilityScore: 0,
-					MarketScore:    0,
+					CompositeScore: composite,
+					ViabilityScore: viability,
+					MarketScore:    market,
 					Dimensions:     dimensions,
 					Rubric:         acc.Rubric,
 					Partial:        partial,
@@ -2220,25 +2726,50 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 		}
 	}
 
-	viability := 0.0
-	market := 0.0
-	if viabilityWeight > 0 {
-		viability = viabilitySum / viabilityWeight
+	for _, dim := range tier1Set {
+		res, exists := dimensions[dim]
+		if !exists {
+			continue
+		}
+		if res.Score < floor {
+			return scoringComposite{
+				Result:         "rejected",
+				Reason:         fmt.Sprintf("tier1_dimension_floor_%s", strings.TrimSpace(dim)),
+				CompositeScore: composite,
+				ViabilityScore: viability,
+				MarketScore:    market,
+				Dimensions:     dimensions,
+				Rubric:         acc.Rubric,
+				Partial:        partial,
+			}
+		}
 	}
-	if marketWeight > 0 {
-		market = marketSum / marketWeight
+
+	if viability < subscoreFloor {
+		return scoringComposite{
+			Result:         "rejected",
+			Reason:         "viability_floor_execution_fit",
+			CompositeScore: composite,
+			ViabilityScore: viability,
+			MarketScore:    market,
+			Dimensions:     dimensions,
+			Rubric:         acc.Rubric,
+			Partial:        partial,
+		}
 	}
-	viabilitySplit := 0.60
-	marketSplit := 0.40
-	switch strings.TrimSpace(acc.Rubric) {
-	case "automation_micro":
-		viabilitySplit = 0.70
-		marketSplit = 0.30
-	case "saas":
-		viabilitySplit = 0.65
-		marketSplit = 0.35
+
+	if composite < 55 {
+		return scoringComposite{
+			Result:         "rejected",
+			Reason:         "composite_below_threshold",
+			CompositeScore: composite,
+			ViabilityScore: viability,
+			MarketScore:    market,
+			Dimensions:     dimensions,
+			Rubric:         acc.Rubric,
+			Partial:        partial,
+		}
 	}
-	composite := viability*viabilitySplit + market*marketSplit
 
 	out := scoringComposite{
 		Result:         "marginal",
@@ -2249,21 +2780,24 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 		Rubric:         acc.Rubric,
 		Partial:        partial,
 	}
-	floor, ok := viabilityFloor[acc.Rubric]
-	if !ok {
-		floor = viabilityFloor["saas"]
-	}
-	switch {
-	case viability < floor:
-		out.Result = "rejected"
-		out.Reason = "viability_floor"
-	case composite >= 75:
+	if composite >= 75 {
 		out.Result = "shortlisted"
-	case composite >= 50:
-		out.Result = "marginal"
-	default:
+		return out
+	}
+	highCount := 0
+	for _, dim := range tier1Set {
+		res, exists := dimensions[dim]
+		if !exists {
+			continue
+		}
+		if res.Score >= marginalRule.HighThreshold {
+			highCount++
+		}
+	}
+	if highCount < marginalRule.MinHighDims {
 		out.Result = "rejected"
-		out.Reason = "composite_below_50"
+		out.Reason = "marginal_drain"
+		return out
 	}
 	return out
 }
@@ -3194,6 +3728,57 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, ve
 	}
 }
 
+func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventType, verticalID string, payload map[string]any, recipients []string) {
+	if pc == nil {
+		return
+	}
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		pc.publish(ctx, eventType, verticalID, payload)
+		return
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	sourceAgent := pipelineSourceAgent(ctx)
+	if sourceAgent == "" {
+		sourceAgent = "pipeline-coordinator"
+	}
+	emitted := events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType(eventType),
+		SourceAgent: sourceAgent,
+		VerticalID:  strings.TrimSpace(verticalID),
+		Payload:     mustJSON(payload),
+		CreatedAt:   time.Now(),
+	}
+	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
+		*collector = append(*collector, emitted)
+		return
+	}
+	if pc.bus == nil {
+		runtimeWarn(
+			"pipeline-coordinator",
+			"dropping direct emit because event bus is nil event_type=%s vertical_id=%s recipients=%v",
+			strings.TrimSpace(eventType),
+			strings.TrimSpace(verticalID),
+			recipients,
+		)
+		return
+	}
+	if err := pc.bus.PublishDirect(ctx, emitted, recipients); err != nil {
+		runtimeWarn(
+			"pipeline-coordinator",
+			"failed to publish direct runtime event event_type=%s event_id=%s vertical_id=%s recipients=%v: %v",
+			strings.TrimSpace(eventType),
+			strings.TrimSpace(emitted.ID),
+			strings.TrimSpace(verticalID),
+			recipients,
+			err,
+		)
+	}
+}
+
 func (pc *FactoryPipelineCoordinator) getValidationStateLocked(verticalID string) *validationPipelineState {
 	st := pc.validations[verticalID]
 	if st == nil {
@@ -3408,6 +3993,8 @@ func (pc *FactoryPipelineCoordinator) buildScanAssignedPayload(
 		CampaignContext:    source["campaign_context"],
 		DirectiveID:        strings.TrimSpace(asString(source["directive_id"])),
 		StrategicContext:   source["strategic_context"],
+		CorpusPath:         strings.TrimSpace(asString(source["corpus_path"])),
+		CorpusSignals:      source["corpus_signals"],
 		RequestedAt:        time.Now().UTC().Format(time.RFC3339),
 		PlannedShards:      plannedShards,
 	}
@@ -3466,16 +4053,24 @@ func (pc *FactoryPipelineCoordinator) buildVerticalDiscoveredPayload(
 	if rawSignals == nil {
 		rawSignals = map[string]any{}
 	}
+	discoveryContext := buildDiscoveryContextPayload(rawSignals)
+	geographicScope := normalizeGeographicScope(asString(rawSignals["geographic_scope"]))
 	return VerticalDiscoveredPayload{
-		VerticalID:      strings.TrimSpace(verticalID),
-		Name:            strings.TrimSpace(name),
-		Geography:       strings.TrimSpace(geography),
-		Mode:            strings.TrimSpace(mode),
-		ScanID:          strings.TrimSpace(scanID),
-		CampaignID:      strings.TrimSpace(campaignID),
-		SignalStrength:  signal,
-		DiscoverySource: strings.TrimSpace(discoverySource),
-		RawSignals:      rawSignals,
+		VerticalID:           strings.TrimSpace(verticalID),
+		VerticalName:         strings.TrimSpace(name),
+		Name:                 strings.TrimSpace(name),
+		Geography:            strings.TrimSpace(geography),
+		GeographicScope:      geographicScope,
+		Mode:                 strings.TrimSpace(mode),
+		ScanID:               strings.TrimSpace(scanID),
+		CampaignID:           strings.TrimSpace(campaignID),
+		SignalStrength:       signal,
+		OpportunityPattern:   normalizeOpportunityPattern(asString(rawSignals["opportunity_pattern"])),
+		SignalSources:        rawSignals["signal_sources"],
+		RequiredCapabilities: rawSignals["required_capabilities"],
+		DiscoverySource:      strings.TrimSpace(discoverySource),
+		RawSignals:           rawSignals,
+		DiscoveryContext:     discoveryContext,
 	}
 }
 
@@ -3510,22 +4105,178 @@ func (pc *FactoryPipelineCoordinator) buildScanCompletedPayload(in scanCompleted
 }
 
 func (pc *FactoryPipelineCoordinator) buildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) ScoringRequestedPayload {
-	out := ScoringRequestedPayload{
-		VerticalID: strings.TrimSpace(verticalID),
-	}
 	if acc == nil {
-		return out
+		return ScoringRequestedPayload{
+			VerticalID:          strings.TrimSpace(verticalID),
+			DimensionsRequested: []string{},
+			DiscoveryContext:    map[string]any{},
+		}
 	}
-	out.VerticalName = strings.TrimSpace(acc.VerticalName)
-	out.Geography = strings.TrimSpace(acc.Geography)
-	out.Mode = strings.TrimSpace(acc.Mode)
-	out.Rubric = strings.TrimSpace(acc.Rubric)
+	dimensions := []string{}
 	if len(acc.Expected) > 0 {
-		out.DimensionsRequested = append([]string{}, acc.Expected...)
-	} else {
-		out.DimensionsRequested = []string{}
+		dimensions = append([]string{}, acc.Expected...)
+	}
+	discoveryContext := map[string]any{}
+	if len(acc.DiscoveryContext) > 0 {
+		discoveryContext = cloneMap(acc.DiscoveryContext)
+	}
+	return ScoringRequestedPayload{
+		VerticalID:          strings.TrimSpace(verticalID),
+		VerticalName:        strings.TrimSpace(acc.VerticalName),
+		Geography:           strings.TrimSpace(acc.Geography),
+		Mode:                strings.TrimSpace(acc.Mode),
+		Rubric:              strings.TrimSpace(acc.Rubric),
+		DimensionsRequested: dimensions,
+		DiscoveryContext:    discoveryContext,
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) derivedScoringGeneratorAgent(ctx context.Context, acc *scoringAccumulator) string {
+	if acc == nil {
+		return ""
+	}
+	derivedContext := normalizeScanMode(acc.Mode) == "derived"
+	if !derivedContext {
+		if strings.TrimSpace(asString(acc.DiscoveryContext["parent_id"])) != "" {
+			derivedContext = true
+		}
+		if intFromAny(acc.DiscoveryContext["generation_depth"]) > 0 {
+			derivedContext = true
+		}
+	}
+	if !derivedContext {
+		return ""
+	}
+
+	raw := strings.TrimSpace(asString(acc.DiscoveryContext["generator_agent_id"]))
+	if raw == "" {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(raw), "analysis-agent") {
+		return raw
+	}
+	if pc == nil || pc.db == nil {
+		return raw
+	}
+
+	// In derived flows the generator can arrive as session ID; resolve to agent_id when possible.
+	var agentID string
+	_ = dbQueryRowContext(ctx, pc.db, `
+		SELECT COALESCE(agent_id, '')
+		FROM agent_sessions
+		WHERE id = $1
+		ORDER BY started_at DESC
+		LIMIT 1
+	`, raw).Scan(&agentID)
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return raw
+	}
+	return agentID
+}
+
+func (pc *FactoryPipelineCoordinator) selectScoringAnalysisRecipient(excludedAgent string) string {
+	if pc == nil || pc.bus == nil {
+		return ""
+	}
+	excludedAgent = strings.TrimSpace(excludedAgent)
+	recipients := uniqueStrings(pc.bus.resolveSubscribedRecipients("scoring.requested"))
+	if len(recipients) == 0 {
+		return ""
+	}
+	sort.Strings(recipients)
+	for _, recipient := range recipients {
+		candidate := strings.TrimSpace(recipient)
+		if candidate == "" || !strings.Contains(strings.ToLower(candidate), "analysis-agent") {
+			continue
+		}
+		if excludedAgent != "" && strings.EqualFold(candidate, excludedAgent) {
+			continue
+		}
+		return candidate
+	}
+	return ""
+}
+
+func buildDiscoveryContextPayload(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	if v := strings.TrimSpace(asString(raw["opportunity_name"])); v != "" {
+		out["opportunity_name"] = v
+	}
+	if v := strings.TrimSpace(asString(raw["preliminary_icp"])); v != "" {
+		out["preliminary_icp"] = v
+	}
+	if buildSketch, ok := asObject(raw["build_sketch"]); ok && len(buildSketch) > 0 {
+		out["build_sketch"] = cloneMap(buildSketch)
+		if redFlags, ok := asArray(buildSketch["red_flags"]); ok && len(redFlags) > 0 {
+			out["red_flags_passthrough"] = redFlags
+		}
+	}
+	if evidence, ok := asObject(raw["evidence"]); ok && len(evidence) > 0 {
+		out["evidence"] = cloneMap(evidence)
+	}
+	if v := strings.TrimSpace(asString(raw["opportunity_hypothesis"])); v != "" {
+		out["opportunity_hypothesis"] = v
+	}
+	if v := normalizeOpportunityPattern(asString(raw["opportunity_pattern"])); v != "" {
+		out["opportunity_pattern"] = v
+	}
+	if sources := raw["signal_sources"]; sources != nil {
+		out["signal_sources"] = sources
+	}
+	if caps := raw["required_capabilities"]; caps != nil {
+		out["required_capabilities"] = caps
+	}
+	if parentID := strings.TrimSpace(asString(raw["parent_id"])); parentID != "" {
+		out["parent_id"] = parentID
+	}
+	if depth := intFromAny(raw["generation_depth"]); depth > 0 {
+		out["generation_depth"] = depth
+	}
+	if generator := strings.TrimSpace(asString(raw["generator_agent_id"])); generator != "" {
+		out["generator_agent_id"] = generator
+	}
+	if rationale, ok := asObject(raw["derivation_rationale"]); ok && len(rationale) > 0 {
+		out["derivation_rationale"] = cloneMap(rationale)
 	}
 	return out
+}
+
+func normalizeOpportunityPattern(raw string) string {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "" {
+		return ""
+	}
+	allowed := map[string]struct{}{
+		"platform_parasitic":     {},
+		"freelancer_replacement": {},
+		"data_asymmetry":         {},
+		"api_middleware":         {},
+		"compliance_regulatory":  {},
+		"ai_wrapper":             {},
+		"workflow_automation":    {},
+		"unknown":                {},
+	}
+	if _, ok := allowed[v]; ok {
+		return v
+	}
+	return "unknown"
+}
+
+func normalizeGeographicScope(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "global":
+		return "global"
+	case "regional":
+		return "regional"
+	case "local":
+		return "local"
+	default:
+		return "local"
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) buildScoringContestedPayload(verticalID, dimension string, contest contestedDimension, acc *scoringAccumulator) ScoringContestedPayload {
@@ -3588,18 +4339,14 @@ func (pc *FactoryPipelineCoordinator) buildVerticalMarginalPayload(verticalID st
 		CompositeScore:    result.CompositeScore,
 		ViabilityScore:    result.ViabilityScore,
 		Dimensions:        dim,
-		PromotionEligible: result.ViabilityScore >= 65,
+		PromotionEligible: true,
 	}
 }
 
 func (pc *FactoryPipelineCoordinator) buildVerticalRejectedPayload(verticalID string, result scoringComposite) VerticalRejectedPayload {
 	return VerticalRejectedPayload{
 		VerticalID: strings.TrimSpace(verticalID),
-		Reason: VerticalRejectedReasonPayload{
-			Code:           strings.TrimSpace(result.Reason),
-			CompositeScore: result.CompositeScore,
-			ViabilityScore: result.ViabilityScore,
-		},
+		Reason:     strings.TrimSpace(result.Reason),
 	}
 }
 
@@ -3819,12 +4566,76 @@ func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Conte
 	`, verticalID, name, slug, geography, string(mustJSON(payload))); err != nil {
 		return "", err
 	}
+	_ = pc.updateVerticalDiscoveryMetadata(ctx, verticalID, mode, payload)
 	return verticalID, nil
+}
+
+func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx context.Context, verticalID, mode string, payload map[string]any) error {
+	if pc == nil || pc.db == nil || strings.TrimSpace(verticalID) == "" {
+		return nil
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	discoveryMode := normalizeScanMode(mode)
+	if discoveryMode == "" {
+		discoveryMode = strings.ToLower(strings.TrimSpace(mode))
+	}
+	if discoveryMode == "" {
+		discoveryMode = strings.ToLower(strings.TrimSpace(asString(payload["mode"])))
+	}
+	if discoveryMode == "" {
+		discoveryMode = "saas_gap"
+	}
+	opportunityPattern := normalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
+	if opportunityPattern == "" {
+		opportunityPattern = "unknown"
+	}
+	signalSources := payload["signal_sources"]
+	if signalSources == nil {
+		signalSources = []any{}
+	}
+	requiredCapabilities := payload["required_capabilities"]
+	if requiredCapabilities == nil {
+		requiredCapabilities = map[string]any{}
+	}
+	parentID := strings.TrimSpace(asString(payload["parent_id"]))
+	generationDepth := intFromAny(payload["generation_depth"])
+	if generationDepth < 0 {
+		generationDepth = 0
+	}
+	if generationDepth > 2 {
+		generationDepth = 2
+	}
+	generatorAgentID := strings.TrimSpace(asString(payload["generator_agent_id"]))
+	derivationRationale := payload["derivation_rationale"]
+	if derivationRationale == nil {
+		derivationRationale = map[string]any{}
+	}
+	_, err := dbExecContext(ctx, pc.db, `
+		UPDATE verticals
+		SET
+			discovery_mode = $2,
+			opportunity_pattern = COALESCE(NULLIF($3, ''), opportunity_pattern),
+			signal_sources = COALESCE($4::jsonb, signal_sources),
+			required_capabilities = COALESCE($5::jsonb, required_capabilities),
+			parent_id = COALESCE(NULLIF($6, '')::uuid, parent_id),
+			generation_depth = CASE WHEN $7 > 0 THEN $7 ELSE generation_depth END,
+			generator_agent_id = COALESCE(NULLIF($8, ''), generator_agent_id),
+			derivation_rationale = COALESCE($9::jsonb, derivation_rationale),
+			updated_at = now()
+		WHERE id = $1::uuid
+	`, verticalID, discoveryMode, opportunityPattern, string(mustJSON(signalSources)), string(mustJSON(requiredCapabilities)), parentID, generationDepth, generatorAgentID, string(mustJSON(derivationRationale)))
+	if err != nil {
+		// Older test fixtures may not include newer columns; ignore metadata enrichment failures.
+		return err
+	}
+	return nil
 }
 
 func expectedAgents(mode string) int {
 	switch normalizeScanMode(mode) {
-	case "automation_micro", "saas_gap", "saas_trend":
+	case "automation_micro", "saas_gap", "saas_trend", "corpus":
 		return 1
 	case "local_services":
 		return localServicesScannerExpected
@@ -3872,7 +4683,7 @@ func deriveDiscoveryCandidateName(payload map[string]any) string {
 	if len(payload) == 0 {
 		return ""
 	}
-	for _, key := range []string{"vertical_name", "name", "title"} {
+	for _, key := range []string{"opportunity_name", "vertical_name", "name", "title"} {
 		if v := normalizeProvidedVerticalName(asString(payload[key]), false); v != "" {
 			return v
 		}

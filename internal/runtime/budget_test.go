@@ -126,7 +126,7 @@ func TestBudgetTracker_TransitionsAndEmergencyMailbox(t *testing.T) {
 	if mb.calls != 1 {
 		t.Fatalf("expected 1 mailbox insert on emergency, got %d", mb.calls)
 	}
-	if mb.last.Type != "budget_emergency" || mb.last.Priority != "critical" || mb.last.Status != "pending" {
+	if mb.last.Type != "budget_increase" || mb.last.Priority != "critical" || mb.last.Status != "pending" {
 		t.Fatalf("unexpected mailbox item: %+v", mb.last)
 	}
 

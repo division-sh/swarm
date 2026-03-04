@@ -34,6 +34,10 @@ func TestScoringNodeParity(t *testing.T) {
 			"vertical_name": "Payroll Automation",
 			"geography":     "argentina",
 			"mode":          "saas_gap",
+			"discovery_context": map[string]any{
+				"opportunity_name": "Payroll Automation",
+				"preliminary_icp":  "Operations manager",
+			},
 		}),
 		CreatedAt: time.Now().UTC(),
 	}
@@ -48,8 +52,8 @@ func TestScoringNodeParity(t *testing.T) {
 	if got := asString(payload["vertical_id"]); got != verticalID {
 		t.Fatalf("expected vertical_id=%s, got %q", verticalID, got)
 	}
-	if got := asString(payload["rubric"]); got == "" {
-		t.Fatalf("expected rubric in scoring.requested payload, got %+v", payload)
+	if got := asString(payload["rubric"]); got != "universal" {
+		t.Fatalf("expected rubric=universal in scoring.requested payload, got %+v", payload)
 	}
 	dims, _ := payload["dimensions_requested"].([]any)
 	if len(dims) == 0 {
@@ -63,6 +67,10 @@ func TestScoringNodeParity(t *testing.T) {
 		if !seen[required] {
 			t.Fatalf("expected scoring.requested to include %q, got dims=%v", required, dims)
 		}
+	}
+	contextPayload, _ := payload["discovery_context"].(map[string]any)
+	if got := strings.TrimSpace(asString(contextPayload["opportunity_name"])); got != "Payroll Automation" {
+		t.Fatalf("expected discovery_context passthrough, got %v", payload["discovery_context"])
 	}
 }
 
@@ -167,6 +175,99 @@ func TestScoringNodeDeadLetter(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected dead-letter path to mark event as processed once, got %d", count)
+	}
+}
+
+func TestScoringNode_DerivedScoringExcludesGeneratorWhenAlternateAnalysisAgentSubscribed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	bus := NewEventBus(InMemoryEventStore{})
+	pc := NewFactoryPipelineCoordinator(bus, db)
+	node := NewScoringNode(bus, pc, db)
+	if node == nil {
+		t.Fatal("expected scoring node")
+	}
+
+	generatorID := "analysis-agent"
+	alternateID := "analysis-agent-alt"
+	generatorCh := bus.Subscribe(generatorID, events.EventType("scoring.requested"))
+	alternateCh := bus.Subscribe(alternateID, events.EventType("scoring.requested"))
+
+	verticalID := uuid.NewString()
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("vertical.discovered"),
+		SourceAgent: "pipeline-coordinator",
+		VerticalID:  verticalID,
+		Payload: mustJSON(map[string]any{
+			"vertical_id":   verticalID,
+			"vertical_name": "Home Services Dispatch",
+			"geography":     "us",
+			"mode":          "derived",
+			"discovery_context": map[string]any{
+				"parent_id":          uuid.NewString(),
+				"generation_depth":   1,
+				"generator_agent_id": generatorID,
+			},
+		}),
+		CreatedAt: time.Now().UTC(),
+	}
+
+	insertEventForScoringNodeLedger(t, db, evt)
+	node.processEvent(context.Background(), evt)
+
+	out := waitForEventType(t, alternateCh, "scoring.requested")
+	payload := parsePayloadMap(out.Payload)
+	if got := strings.TrimSpace(asString(payload["assigned_analysis_agent_id"])); got != alternateID {
+		t.Fatalf("expected assigned_analysis_agent_id=%q, got %q payload=%v", alternateID, got, payload)
+	}
+	if got := strings.TrimSpace(asString(payload["excluded_analysis_agent_id"])); got != generatorID {
+		t.Fatalf("expected excluded_analysis_agent_id=%q, got %q payload=%v", generatorID, got, payload)
+	}
+	assertNoEventType(t, generatorCh, "scoring.requested", 250*time.Millisecond)
+}
+
+func TestScoringNode_DerivedScoringFallsBackWhenNoAlternateAnalysisAgent(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	bus := NewEventBus(InMemoryEventStore{})
+	pc := NewFactoryPipelineCoordinator(bus, db)
+	node := NewScoringNode(bus, pc, db)
+	if node == nil {
+		t.Fatal("expected scoring node")
+	}
+
+	generatorID := "analysis-agent"
+	generatorCh := bus.Subscribe(generatorID, events.EventType("scoring.requested"))
+
+	verticalID := uuid.NewString()
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("vertical.discovered"),
+		SourceAgent: "pipeline-coordinator",
+		VerticalID:  verticalID,
+		Payload: mustJSON(map[string]any{
+			"vertical_id":   verticalID,
+			"vertical_name": "Clinic Retention Stack",
+			"geography":     "paraguay",
+			"mode":          "derived",
+			"discovery_context": map[string]any{
+				"parent_id":          uuid.NewString(),
+				"generation_depth":   1,
+				"generator_agent_id": generatorID,
+			},
+		}),
+		CreatedAt: time.Now().UTC(),
+	}
+
+	insertEventForScoringNodeLedger(t, db, evt)
+	node.processEvent(context.Background(), evt)
+
+	out := waitForEventType(t, generatorCh, "scoring.requested")
+	payload := parsePayloadMap(out.Payload)
+	if got := strings.TrimSpace(asString(payload["excluded_analysis_agent_id"])); got != generatorID {
+		t.Fatalf("expected excluded_analysis_agent_id=%q, got %q payload=%v", generatorID, got, payload)
+	}
+	if _, ok := payload["assigned_analysis_agent_id"]; ok {
+		t.Fatalf("expected fallback payload without assigned_analysis_agent_id, payload=%v", payload)
 	}
 }
 

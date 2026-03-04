@@ -71,7 +71,7 @@ func TestRuntimeToolExecutor_DeployMigrationGuardrailRejectsDestructiveSQL(t *te
 	if err == nil || !strings.Contains(err.Error(), "migration_requires_approval") {
 		t.Fatalf("expected migration guardrail error, got %v", err)
 	}
-	if strings.TrimSpace(mb.last.Type) != "deploy_migration_review" {
+	if strings.TrimSpace(mb.last.Type) != "migration_approval" {
 		t.Fatalf("expected deploy migration mailbox item, got %+v", mb.last)
 	}
 }

@@ -455,7 +455,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	expID, err := s.InsertMailboxItem(ctx, runtime.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "empire-coordinator",
-		Type:       "founder_review",
+		Type:       "review",
 		Priority:   "critical",
 		Status:     "pending",
 		Context:    []byte(`{"x":1}`),
@@ -1371,8 +1371,8 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	if convStatus != "terminated" {
 		t.Fatalf("expected terminated conversation status, got %q", convStatus)
 	}
-	if sessStatus != "terminated" {
-		t.Fatalf("expected terminated session status, got %q", sessStatus)
+	if sessStatus != "rotated" {
+		t.Fatalf("expected rotated session status, got %q", sessStatus)
 	}
 }
 

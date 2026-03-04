@@ -962,6 +962,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func classifyAgent(a agentView, now time.Time) (string, string) {
+	lastSignalAt := latestAgentSignalAt(a)
 	if strings.EqualFold(a.Status, "terminated") {
 		return "terminated", ""
 	}
@@ -971,16 +972,27 @@ func classifyAgent(a agentView, now time.Time) (string, string) {
 	if a.Failures24h >= 3 {
 		return "stuck", "3+ failed turns in last 24h"
 	}
-	if a.PendingEvents > 0 && now.Sub(a.LastActiveAt) > 10*time.Minute {
+	if a.PendingEvents > 0 && now.Sub(lastSignalAt) > 10*time.Minute {
 		return "stuck", "pending deliveries while inactive for >10m"
 	}
 	if a.NearBreaker && a.Failures24h > 0 {
 		return "stuck", "near turn circuit breaker with failures"
 	}
-	if a.LockOwner != "" || a.PendingEvents > 0 || now.Sub(a.LastActiveAt) < 2*time.Minute {
+	if a.LockOwner != "" || a.PendingEvents > 0 || now.Sub(lastSignalAt) < 2*time.Minute {
 		return "running", ""
 	}
 	return "idle", ""
+}
+
+func latestAgentSignalAt(a agentView) time.Time {
+	latest := a.LastActiveAt
+	if a.LastUsedAt != nil && a.LastUsedAt.After(latest) {
+		latest = *a.LastUsedAt
+	}
+	if a.LastTool.CreatedAt != nil && a.LastTool.CreatedAt.After(latest) {
+		latest = *a.LastTool.CreatedAt
+	}
+	return latest
 }
 
 type eventView struct {
@@ -6453,10 +6465,10 @@ func (s *Server) emitMailboxDecisionSideEffects(
 			}
 		}
 	}
-	if item.Type == "founder_input" && item.VerticalID != "" {
-		if err := s.appendTargetedEvent(ctx, events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("founder_input.response"),
+		if isFounderInputMailbox(item) && item.VerticalID != "" {
+			if err := s.appendTargetedEvent(ctx, events.Event{
+				ID:          uuid.NewString(),
+				Type:        events.EventType("founder_input.response"),
 			SourceAgent: "mailbox",
 			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
@@ -6490,10 +6502,10 @@ func (s *Server) emitMailboxDecisionSideEffects(
 
 	// Spec v2.0 §7.6: approved geography expansion recommendations must queue
 	// a validation scan campaign.
-	if outcome.Status == "approved" && isGeographyExpansionMailboxType(item.Type) {
-		geoID, req, campaignID, err := s.queueGeographyExpansionValidation(ctx, item)
-		if err != nil {
-			return err
+		if outcome.Status == "approved" && isGeographyExpansionMailbox(item) {
+			geoID, req, campaignID, err := s.queueGeographyExpansionValidation(ctx, item)
+			if err != nil {
+				return err
 		}
 		if err := s.appendTargetedEvent(ctx, events.Event{
 			ID:          uuid.NewString(),
@@ -6920,16 +6932,51 @@ type geographyExpansionRequest struct {
 	Priority   string
 }
 
-func isGeographyExpansionMailboxType(itemType string) bool {
-	t := strings.ToLower(strings.TrimSpace(itemType))
+func mailboxReviewType(raw json.RawMessage) string {
+	var obj map[string]any
+	if len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	for _, key := range []string{"review_type", "kind", "mailbox_type", "subtype"} {
+		val := strings.ToLower(strings.TrimSpace(asString(obj[key])))
+		if val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+func isGeographyExpansionMailbox(item runtime.MailboxItem) bool {
+	t := strings.ToLower(strings.TrimSpace(item.Type))
 	if t == "" {
 		return false
 	}
 	switch t {
-	case "geography_expansion", "vertical_geography_expansion", "expansion_recommendation":
+	case "domain_approval", "geography_expansion", "vertical_geography_expansion", "expansion_recommendation":
 		return true
 	}
-	return strings.Contains(t, "geography") && strings.Contains(t, "expansion")
+	if strings.Contains(t, "geography") && strings.Contains(t, "expansion") {
+		return true
+	}
+	if t == "review" {
+		rt := mailboxReviewType(item.Context)
+		switch rt {
+		case "domain_approval", "geography_expansion", "vertical_geography_expansion", "expansion_recommendation":
+			return true
+		}
+	}
+	return false
+}
+
+func isFounderInputMailbox(item runtime.MailboxItem) bool {
+	t := strings.ToLower(strings.TrimSpace(item.Type))
+	if t == "founder_input" {
+		return true
+	}
+	return t == "review" && mailboxReviewType(item.Context) == "founder_input"
 }
 
 func parseGeographyExpansionRequest(raw json.RawMessage) geographyExpansionRequest {

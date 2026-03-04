@@ -674,13 +674,13 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	}, nil)
 
 	if p.Mailbox != nil {
-		_, err := p.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
-			VerticalID: verticalID,
-			FromAgent:  "validation-coordinator",
-			Type:       "vertical_decision",
-			Priority:   "normal",
-			Status:     "pending",
-			Context:    kit,
+			_, err := p.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
+				VerticalID: verticalID,
+				FromAgent:  "validation-coordinator",
+				Type:       "vertical_approval",
+				Priority:   "normal",
+				Status:     "pending",
+				Context:    kit,
 			Summary:    fmt.Sprintf("Factory validation ready: %s (%s)", name, geography),
 			TimeoutAt:  time.Now().UTC().Add(48 * time.Hour),
 		})

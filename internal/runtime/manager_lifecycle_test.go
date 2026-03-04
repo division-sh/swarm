@@ -175,8 +175,8 @@ func TestManagerTeardownOpCo_EmitsTypedPayloadWithPriority(t *testing.T) {
 
 func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 	routes := defaultOpCoRoutes("v1")
-	if len(routes) != 19 {
-		t.Fatalf("expected 19 default routes (18 bootstrap + 1 seeded), got %d", len(routes))
+	if len(routes) != 20 {
+		t.Fatalf("expected 20 default routes (19 bootstrap + 1 seeded), got %d", len(routes))
 	}
 	bootstrap := 0
 	seeded := 0
@@ -196,8 +196,8 @@ func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 			deployToDevOps = true
 		}
 	}
-	if bootstrap != 18 {
-		t.Fatalf("expected 18 bootstrap routes, got %d", bootstrap)
+	if bootstrap != 19 {
+		t.Fatalf("expected 19 bootstrap routes, got %d", bootstrap)
 	}
 	if seeded != 1 {
 		t.Fatalf("expected 1 seeded route, got %d", seeded)

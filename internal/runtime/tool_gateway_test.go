@@ -17,6 +17,7 @@ type toolGatewayExecStub struct {
 	lastName  string
 	lastInput any
 	lastActor string
+	err       error
 }
 
 func (s *toolGatewayExecStub) Execute(ctx context.Context, name string, input any) (any, error) {
@@ -24,6 +25,9 @@ func (s *toolGatewayExecStub) Execute(ctx context.Context, name string, input an
 	s.lastActor = actor.ID
 	s.lastName = name
 	s.lastInput = input
+	if s.err != nil {
+		return nil, s.err
+	}
 	return map[string]any{"ok": true}, nil
 }
 
@@ -467,6 +471,85 @@ func TestToolGatewayMCPToolCallUnknownTokenFallsBackToActorContextByDefault(t *t
 	}
 	if stub.lastActor != "analysis-agent" {
 		t.Fatalf("expected fallback actor context, got %q", stub.lastActor)
+	}
+}
+
+func TestToolGatewayMCPToolCallExecErrorPreservesRetryability(t *testing.T) {
+	cases := []struct {
+		name              string
+		err               error
+		expectRetryable   string
+		expectRuntimeCode string
+	}{
+		{
+			name:              "guardrail_non_retryable",
+			err:               NewRuntimeError("emit_transition_guardrail_violation", "tool-executor", "emit.validate_transition", false, "emit transition rejected"),
+			expectRetryable:   "retryable=false",
+			expectRuntimeCode: "code=" + ErrCodeMCPToolExecFailed,
+		},
+		{
+			name:              "generic_error_defaults_retryable",
+			err:               context.DeadlineExceeded,
+			expectRetryable:   "retryable=true",
+			expectRuntimeCode: "code=" + ErrCodeMCPToolExecFailed,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &toolGatewayExecStub{err: tc.err}
+			gw := NewToolGateway(stub, "")
+			token := "tok-err-" + tc.name
+			globalMCPTurnRegistry.put(token, mcpTurnContext{
+				Actor: models.AgentConfig{
+					ID:         "a-err",
+					Role:       "empire-coordinator",
+					Mode:       "holding",
+					VerticalID: "",
+				},
+				Inbound:    events.Event{ID: "evt-err", Type: events.EventType("system.started")},
+				HasInbound: true,
+				Recorder:   NewEmittedEventsRecorder(),
+				Epoch:      CurrentRuntimeEpoch(),
+			})
+			defer globalMCPTurnRegistry.delete(token)
+
+			req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{
+				"jsonrpc":"2.0",
+				"id":8,
+				"method":"tools/call",
+				"params":{"name":"sql_execute","arguments":{"query":"SELECT 1"}}
+			}`)))
+			req.Header.Set("X-Empire-Allowed-Tools", "sql_execute")
+			req.Header.Set("X-Empire-Context-Token", token)
+			rr := httptest.NewRecorder()
+			gw.Handler().ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200 rpc envelope, got %d body=%s", rr.Code, rr.Body.String())
+			}
+
+			var resp map[string]any
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			result, _ := resp["result"].(map[string]any)
+			isErr, _ := result["isError"].(bool)
+			if !isErr {
+				t.Fatalf("expected tool exec error payload, got %#v", result)
+			}
+			content, _ := result["content"].([]any)
+			if len(content) == 0 {
+				t.Fatalf("expected content payload, got %#v", result)
+			}
+			first, _ := content[0].(map[string]any)
+			text := strings.TrimSpace(asString(first["text"]))
+			if !strings.Contains(text, tc.expectRuntimeCode) {
+				t.Fatalf("expected %q in %q", tc.expectRuntimeCode, text)
+			}
+			if !strings.Contains(text, tc.expectRetryable) {
+				t.Fatalf("expected %q in %q", tc.expectRetryable, text)
+			}
+		})
 	}
 }
 

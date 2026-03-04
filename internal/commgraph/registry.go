@@ -155,6 +155,7 @@ var agentProducerEvents = map[string][]string{
 	},
 	"analysis-agent": {
 		"score.dimension_complete",
+		"vertical.derived",
 	},
 	"scoring-node": {
 		"scoring.requested",
@@ -163,6 +164,7 @@ var agentProducerEvents = map[string][]string{
 		"vertical.shortlisted",
 		"vertical.marginal",
 		"vertical.rejected",
+		"pipeline.dead_letter",
 	},
 	"validation-coordinator": {
 		"vertical.ready_for_review",
@@ -247,7 +249,8 @@ var agentProducerEvents = map[string][]string{
 		"market_signals",
 	},
 	"inbound-gateway": {
-		"customer_message",
+		"inbound.whatsapp_message",
+		"inbound.email",
 	},
 	"dashboard": {
 		"human_task.assigned",
