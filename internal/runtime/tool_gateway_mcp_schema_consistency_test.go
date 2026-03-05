@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,7 +37,9 @@ func TestToolGatewayMCPEmitSchemasMatchRegistryForAllProducerRoles(t *testing.T)
 				continue
 			}
 			allowed = append(allowed, name)
-			expected[name] = normalizeJSONValue(t, def.Schema)
+			normalized := normalizeJSONValue(t, def.Schema)
+			assertDraft202012SchemaTypes(t, "role="+role+" tool="+name, "", normalized)
+			expected[name] = normalized
 		}
 		if len(allowed) == 0 {
 			continue
@@ -68,7 +71,9 @@ func TestToolGatewayMCPEmitSchemasMatchRegistryForAllProducerRoles(t *testing.T)
 			if name == "" {
 				t.Fatalf("role=%s mcp returned unnamed tool: %#v", role, tool)
 			}
-			seen[name] = normalizeJSONValue(t, tool["inputSchema"])
+			normalized := normalizeJSONValue(t, tool["inputSchema"])
+			assertDraft202012SchemaTypes(t, "role="+role+" tool="+name, "", normalized)
+			seen[name] = normalized
 		}
 
 		for _, name := range allowed {
@@ -83,6 +88,70 @@ func TestToolGatewayMCPEmitSchemasMatchRegistryForAllProducerRoles(t *testing.T)
 				t.Fatalf("role=%s tool=%s schema mismatch\nwant=%s\ngot=%s", role, name, string(wantRaw), string(gotRaw))
 			}
 		}
+	}
+}
+
+var validJSONSchemaDraft202012Types = map[string]struct{}{
+	"string":  {},
+	"number":  {},
+	"integer": {},
+	"boolean": {},
+	"array":   {},
+	"object":  {},
+	"null":    {},
+}
+
+func assertDraft202012SchemaTypes(t *testing.T, path string, parentKey string, v any) {
+	t.Helper()
+	switch node := v.(type) {
+	case map[string]any:
+		interpretsTypeKeyword := parentKey != "properties" &&
+			parentKey != "patternProperties" &&
+			parentKey != "$defs" &&
+			parentKey != "definitions"
+		if interpretsTypeKeyword {
+			if rawType, ok := node["type"]; ok {
+				assertAllowedSchemaTypeValue(t, path+".type", rawType)
+			}
+		}
+		for key, child := range node {
+			if key == "type" && interpretsTypeKeyword {
+				continue
+			}
+			assertDraft202012SchemaTypes(t, path+"."+key, key, child)
+		}
+	case []any:
+		for i, child := range node {
+			assertDraft202012SchemaTypes(t, path+"["+strconv.Itoa(i)+"]", parentKey, child)
+		}
+	}
+}
+
+func assertAllowedSchemaTypeValue(t *testing.T, path string, raw any) {
+	t.Helper()
+	validate := func(typeValue string) {
+		typeValue = strings.TrimSpace(typeValue)
+		if _, ok := validJSONSchemaDraft202012Types[typeValue]; !ok {
+			t.Fatalf("invalid JSON Schema Draft 2020-12 type at %s: %q", path, typeValue)
+		}
+	}
+
+	switch tv := raw.(type) {
+	case string:
+		validate(tv)
+	case []any:
+		if len(tv) == 0 {
+			t.Fatalf("invalid JSON Schema type array at %s: empty", path)
+		}
+		for i, entry := range tv {
+			typeStr, ok := entry.(string)
+			if !ok {
+				t.Fatalf("invalid JSON Schema type array entry at %s[%d]: %#v", path, i, entry)
+			}
+			validate(typeStr)
+		}
+	default:
+		t.Fatalf("invalid JSON Schema type encoding at %s: %#v", path, raw)
 	}
 }
 

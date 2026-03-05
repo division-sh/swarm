@@ -379,6 +379,31 @@ func TestCategoryAssessedSchema(t *testing.T) {
 	if err := ValidateEventPayloadAgainstSchema("category.assessed", invalid); err == nil {
 		t.Fatal("expected category.assessed to reject payload missing geographic_scope")
 	}
+
+	validBlockingRedFlag := map[string]any{
+		"scan_id":         "scan-99",
+		"category":        "operations",
+		"subcategory":     "field_services",
+		"geography":       "united states",
+		"opportunity_name": "Route Planning Assistant",
+		"preliminary_icp": "Field operations manager",
+		"build_sketch": map[string]any{
+			"core_features":    []any{"route optimizer"},
+			"key_integrations": []any{"google maps"},
+			"red_flags": []any{
+				map[string]any{
+					"type": "physical_presence_required",
+				},
+			},
+		},
+		"evidence":               sampleEvidence(),
+		"opportunity_hypothesis": "Assist dispatch planning",
+		"geographic_scope":       "regional",
+		"signal_strength":        58,
+	}
+	if err := ValidateEventPayloadAgainstSchema("category.assessed", validBlockingRedFlag); err != nil {
+		t.Fatalf("expected category.assessed to accept calibrated red flag types, got %v", err)
+	}
 }
 
 func TestTrendIdentifiedSchema(t *testing.T) {

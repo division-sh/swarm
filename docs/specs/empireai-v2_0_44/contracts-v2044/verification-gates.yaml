@@ -442,8 +442,8 @@ gates:
   name: vertical.derived event exists in event-catalog with correct wiring
   priority: must_pass
   category: contracts
-  command: "python3 -c \" import yaml with open('contracts-v2044/event-catalog.yaml') as f:\n  catalog = yaml.safe_load(f)\n\
-    ev = catalog.get('vertical.derived') assert ev, 'vertical.derived not in catalog' assert ev['emitter'] == 'analysis-agent',\
+  command: "python3 -c \" import yaml with open('contracts/event-catalog.yaml') as f:\n  catalog = yaml.safe_load(f)\nev =\
+    \ catalog.get('vertical.derived') assert ev, 'vertical.derived not in catalog' assert ev['emitter'] == 'analysis-agent',\
     \ f'wrong emitter: {ev[\\\"emitter\\\"]}' assert ev['consumer'] == 'scoring-node', f'wrong consumer: {ev[\\\"consumer\\\
     \"]}' print('PASS: vertical.derived correctly wired') \"\n"
   pass_criteria: vertical.derived exists with analysis-agent emitter and scoring-node consumer
@@ -473,7 +473,7 @@ gates:
   name: corpus in scan.requested mode enum
   priority: must_pass
   category: contracts
-  command: 'grep -q ''"corpus"'' contracts-v2044/event-catalog.yaml || grep -q ''corpus'' empireai-v2_0_44.md
+  command: 'grep -q ''"corpus"'' contracts/event-catalog.yaml || grep -q ''corpus'' empireai-v2_0_44.md
 
     '
   pass_criteria: corpus is a valid mode in scan.requested schema
@@ -483,7 +483,7 @@ gates:
   name: corpus_signals field in market_research.scan_assigned payload
   priority: must_pass
   category: contracts
-  command: 'grep -q ''corpus_signals'' contracts-v2044/event-catalog.yaml
+  command: 'grep -q ''corpus_signals'' contracts/event-catalog.yaml
 
     '
   pass_criteria: market_research.scan_assigned has corpus_signals payload field
@@ -493,7 +493,7 @@ gates:
   name: opportunity_pattern field in category.assessed payload
   priority: must_pass
   category: contracts
-  command: 'grep -q ''opportunity_pattern'' contracts-v2044/event-catalog.yaml
+  command: 'grep -q ''opportunity_pattern'' contracts/event-catalog.yaml
 
     '
   pass_criteria: category.assessed has opportunity_pattern payload field
@@ -503,7 +503,7 @@ gates:
   name: signal_sources field in category.assessed payload
   priority: must_pass
   category: contracts
-  command: 'grep -q ''signal_sources'' contracts-v2044/event-catalog.yaml
+  command: 'grep -q ''signal_sources'' contracts/event-catalog.yaml
 
     '
   pass_criteria: category.assessed has signal_sources payload field
@@ -513,7 +513,7 @@ gates:
   name: required_capabilities field in category.assessed payload
   priority: must_pass
   category: contracts
-  command: 'grep -q ''required_capabilities'' contracts-v2044/event-catalog.yaml
+  command: 'grep -q ''required_capabilities'' contracts/event-catalog.yaml
 
     '
   pass_criteria: category.assessed has required_capabilities payload field
@@ -543,7 +543,7 @@ gates:
   name: opportunity_pattern column in verticals DDL
   priority: must_pass
   category: contracts
-  command: 'grep -q ''opportunity_pattern'' contracts-v2044/ddl-canonical.sql
+  command: 'grep -q ''opportunity_pattern'' contracts/ddl-canonical.sql
 
     '
   pass_criteria: verticals table has opportunity_pattern TEXT column
@@ -553,7 +553,7 @@ gates:
   name: signal_sources column in verticals DDL
   priority: must_pass
   category: contracts
-  command: 'grep -q ''signal_sources'' contracts-v2044/ddl-canonical.sql
+  command: 'grep -q ''signal_sources'' contracts/ddl-canonical.sql
 
     '
   pass_criteria: verticals table has signal_sources JSONB column

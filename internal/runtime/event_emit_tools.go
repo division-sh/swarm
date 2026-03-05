@@ -609,6 +609,11 @@ var EventSchemaRegistry = map[string]EventSchema{
 											"data_residency_requirement",
 											"complex_integration",
 											"high_feature_count",
+											"phone_led_sales",
+											"enterprise_procurement",
+											"relationship_networking",
+											"physical_presence_required",
+											"support_mode_phone_video",
 											"one_time_setup",
 											"accuracy_liability",
 										},
@@ -848,6 +853,11 @@ var EventSchemaRegistry = map[string]EventSchema{
 											"data_residency_requirement",
 											"complex_integration",
 											"high_feature_count",
+											"phone_led_sales",
+											"enterprise_procurement",
+											"relationship_networking",
+											"physical_presence_required",
+											"support_mode_phone_video",
 											"one_time_setup",
 											"accuracy_liability",
 										},
@@ -1634,7 +1644,7 @@ func ensureSchemaContextFields() {
 
 // ensureSchemaPayloadParity aligns EventSchemaRegistry properties with the
 // contract event payload field list (exhaustive-exact keys). Existing field
-// schema definitions are preserved; missing fields are added as type any.
+// schema definitions are preserved; missing fields are backfilled as strings.
 func ensureSchemaPayloadParity() {
 	for eventType, payloadFields := range contractEventPayloadFields {
 		entry, ok := EventSchemaRegistry[eventType]
@@ -1661,7 +1671,7 @@ func ensureSchemaPayloadParity() {
 				aligned[field] = existing
 				continue
 			}
-			aligned[field] = map[string]any{"type": "any"}
+			aligned[field] = map[string]any{"type": "string"}
 		}
 		root["properties"] = aligned
 

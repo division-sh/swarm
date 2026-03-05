@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.44"
+	runtimeSpecVersion      = "v2.0.45"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -2252,7 +2252,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.44",
+			TemplateVersion: "2.0.45",
 		}
 	}
 

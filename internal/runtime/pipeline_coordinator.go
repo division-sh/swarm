@@ -1637,17 +1637,6 @@ var (
 		"schedule", "booking", "invoice", "payroll", "lead", "dispatch", "inventory", "compliance", "reporting",
 	}
 	blockingRedFlagTypes = map[string]struct{}{
-		"regulatory_license":         {},
-		"enterprise_contract":        {},
-		"certification":              {},
-		"two_sided_marketplace":      {},
-		"funds_custody":              {},
-		"requires_human_review":      {},
-		"data_residency_requirement": {},
-		"complex_integration":        {},
-		"high_feature_count":         {},
-		"one_time_setup":             {},
-		"accuracy_liability":         {},
 		"phone_led_sales":            {},
 		"enterprise_procurement":     {},
 		"relationship_networking":    {},
@@ -1659,10 +1648,10 @@ var (
 func evaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string) {
 	signal := applyRedFlagPenalty(rawSignal, payload)
 	if signal < 55 {
-		return false, signal, "signal_strength_below_threshold"
+		return false, signal, "signal_below_threshold"
 	}
-	if hasBlockingRedFlags(payload) {
-		return false, signal, "blocking_red_flags"
+	if reason := blockingRedFlagReason(payload); reason != "" {
+		return false, signal, reason
 	}
 	// Backwards-compatible fallback for legacy scanner payloads.
 	if !hasStructuredDiscoveryContext(payload) {
@@ -1672,7 +1661,7 @@ func evaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool
 		return false, signal, "icp_positive_check_failed"
 	}
 	if !passesEvidenceCompleteness(payload) {
-		return false, signal, "evidence_completeness_failed"
+		return false, signal, "evidence_insufficient"
 	}
 	if !passesRetentionPrimitive(payload) {
 		return false, signal, "no_retention_primitive"
@@ -1696,12 +1685,25 @@ func applyRedFlagPenalty(signal float64, payload map[string]any) float64 {
 }
 
 func hasBlockingRedFlags(payload map[string]any) bool {
-	for _, flag := range extractRedFlagTypes(payload) {
+	return blockingRedFlagReason(payload) != ""
+}
+
+func blockingRedFlagReason(payload map[string]any) string {
+	flags := extractRedFlagTypes(payload)
+	flagSet := make(map[string]struct{}, len(flags))
+	for _, flag := range flags {
+		flagSet[flag] = struct{}{}
 		if _, blocked := blockingRedFlagTypes[flag]; blocked {
-			return true
+			return "blocking_red_flag"
 		}
 	}
-	return false
+	_, hasComplexIntegration := flagSet["complex_integration"]
+	_, hasHighFeatureCount := flagSet["high_feature_count"]
+	_, hasMultiModule := flagSet["multi_module"]
+	if hasComplexIntegration && (hasHighFeatureCount || hasMultiModule) {
+		return "co_occurrence_block"
+	}
+	return ""
 }
 
 func extractRedFlagTypes(payload map[string]any) []string {
@@ -1836,6 +1838,10 @@ func collectEvidenceURLs(parts ...[]any) map[string]struct{} {
 }
 
 func passesRetentionPrimitive(payload map[string]any) bool {
+	return len(extractRetentionPrimitives(payload)) > 0
+}
+
+func extractRetentionPrimitives(payload map[string]any) []string {
 	keys := []string{
 		"recurring_data",
 		"workflow_embedding",
@@ -1843,33 +1849,154 @@ func passesRetentionPrimitive(payload map[string]any) bool {
 		"compliance_cadence",
 		"team_collaboration",
 	}
+	out := make(map[string]struct{}, len(keys))
+	add := func(key string) {
+		token := strings.TrimSpace(strings.ToLower(key))
+		if token != "" {
+			out[token] = struct{}{}
+		}
+	}
 	for _, key := range keys {
 		if parseBool(payload[key]) {
-			return true
+			add(key)
 		}
 	}
 	buildSketch, _ := asObject(payload["build_sketch"])
 	for _, key := range keys {
 		if parseBool(buildSketch[key]) {
-			return true
+			add(key)
 		}
 	}
-	checkArray := func(v any) bool {
+	checkArray := func(v any) {
 		items, _ := asArray(v)
 		for _, item := range items {
 			token := strings.TrimSpace(strings.ToLower(asString(item)))
 			for _, key := range keys {
 				if token == key {
-					return true
+					add(key)
 				}
 			}
 		}
-		return false
 	}
-	if checkArray(payload["retention_primitives"]) || checkArray(buildSketch["retention_primitives"]) {
-		return true
+	checkArray(payload["retention_primitives"])
+	checkArray(buildSketch["retention_primitives"])
+
+	// v2.0.45 category.assessed schema does not carry explicit retention_primitives.
+	// Infer plausible primitives from structured narrative fields to avoid blind drops.
+	for _, primitive := range inferRetentionPrimitives(payload) {
+		add(primitive)
 	}
-	return false
+
+	result := make([]string, 0, len(out))
+	for _, key := range keys {
+		if _, ok := out[key]; ok {
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+func inferRetentionPrimitives(payload map[string]any) []string {
+	textParts := []string{
+		strings.ToLower(strings.TrimSpace(asString(payload["opportunity_hypothesis"]))),
+		strings.ToLower(strings.TrimSpace(asString(payload["preliminary_icp"]))),
+	}
+	buildSketch, _ := asObject(payload["build_sketch"])
+	if coreFeatures, ok := asArray(buildSketch["core_features"]); ok {
+		for _, item := range coreFeatures {
+			textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(item))))
+		}
+	}
+	if integrations, ok := asArray(buildSketch["key_integrations"]); ok {
+		for _, item := range integrations {
+			textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(item))))
+		}
+	}
+	requiredCaps, _ := asObject(payload["required_capabilities"])
+	if current, ok := asArray(requiredCaps["current"]); ok {
+		for _, item := range current {
+			textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(item))))
+		}
+	}
+	textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(requiredCaps["would_unlock"]))))
+	joined := strings.Join(textParts, " ")
+	if joined == "" {
+		return nil
+	}
+	out := make(map[string]struct{}, 5)
+	add := func(primitive string) { out[primitive] = struct{}{} }
+	if containsAnyToken(joined, []string{"calendar", "history", "ledger", "records", "tracking", "dashboard", "library", "portfolio", "reconciliation", "audit trail"}) {
+		add("recurring_data")
+	}
+	if containsAnyToken(joined, []string{"workflow", "approval", "queue", "submission", "tracker", "daily", "weekly", "coordinator"}) {
+		add("workflow_embedding")
+	}
+	if containsAnyToken(joined, []string{"integration", "sync", "api", "oauth", "quickbooks", "xero", "sage", "procore", "clio", "mri", "yardi", "erp"}) {
+		add("integration_lock_in")
+	}
+	if containsAnyToken(joined, []string{"compliance", "deadline", "regulatory", "renewal", "expiration", "guideline", "ocg", "lien waiver", "coi"}) {
+		add("compliance_cadence")
+	}
+	if containsAnyToken(joined, []string{"team", "partner", "manager", "attorney", "coordinator", "approval routing"}) {
+		add("team_collaboration")
+	}
+	keys := []string{"recurring_data", "workflow_embedding", "integration_lock_in", "compliance_cadence", "team_collaboration"}
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if _, ok := out[key]; ok {
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+func buildPrefilterSkipDetail(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
+	evidence, _ := asObject(payload["evidence"])
+	competitors, _ := asArray(evidence["competitors"])
+	buyerCommunities, _ := asArray(evidence["buyer_communities"])
+	painSignals, _ := asArray(evidence["pain_signals"])
+	regulatory, _ := asArray(evidence["regulatory"])
+	evidenceURLs := collectEvidenceURLs(competitors, buyerCommunities, painSignals, regulatory)
+	urls := make([]string, 0, len(evidenceURLs))
+	for url := range evidenceURLs {
+		urls = append(urls, url)
+	}
+	sort.Strings(urls)
+	retentionPrimitives := extractRetentionPrimitives(payload)
+	detail := map[string]any{
+		"skip_reason":             strings.TrimSpace(reason),
+		"mode":                    strings.TrimSpace(mode),
+		"raw_signal_strength":     rawSignal,
+		"signal_strength":         adjustedSignal,
+		"red_flags":               extractRedFlagTypes(payload),
+		"evidence_urls":           urls,
+		"retention_primitive":     retentionPrimitives,
+		"opportunity_name":        strings.TrimSpace(asString(payload["opportunity_name"])),
+		"opportunity_pattern":     strings.TrimSpace(asString(payload["opportunity_pattern"])),
+		"passes_icp_gate":         passesICPPositiveCheck(payload),
+		"passes_evidence_gate":    passesEvidenceCompleteness(payload),
+		"passes_retention_gate":   len(retentionPrimitives) > 0,
+		"structured_context":      hasStructuredDiscoveryContext(payload),
+		"blocking_red_flags_gate": hasBlockingRedFlags(payload),
+	}
+	return detail
+}
+
+func (pc *FactoryPipelineCoordinator) logPrefilterSkip(ctx context.Context, evt events.Event, scanID, campaignID, reason, mode string, payload map[string]any, rawSignal, adjustedSignal float64) {
+	if pc == nil || pc.bus == nil {
+		return
+	}
+	pc.bus.logRuntime(ctx, RuntimeLogEntry{
+		Level:      "warn",
+		Component:  "prefilter",
+		Action:     "skipped",
+		EventID:    strings.TrimSpace(evt.ID),
+		EventType:  strings.TrimSpace(string(evt.Type)),
+		AgentID:    strings.TrimSpace(evt.SourceAgent),
+		CampaignID: strings.TrimSpace(campaignID),
+		ScanID:     strings.TrimSpace(scanID),
+		Detail:     buildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode),
+	})
 }
 
 func containsAnyToken(text string, tokens []string) bool {
@@ -1906,8 +2033,9 @@ func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
 	candidate discoveryCandidate,
 ) {
 	signal := candidate.Signal
-	allowed, adjustedSignal, _ := evaluateDiscoveryPreFilter(candidate.Payload, signal)
+	allowed, adjustedSignal, reason := evaluateDiscoveryPreFilter(candidate.Payload, signal)
 	if !allowed {
+		pc.logPrefilterSkip(ctx, evt, scanID, acc.CampaignID, reason, candidate.Mode, candidate.Payload, signal, adjustedSignal)
 		pc.mu.Lock()
 		acc.Skipped++
 		pc.mu.Unlock()

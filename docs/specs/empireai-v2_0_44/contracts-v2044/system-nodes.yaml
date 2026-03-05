@@ -45,6 +45,21 @@
 #     must exactly match the catalog payload fields.
 #   - TestContractCompliance/schema_payload enforces this parity.
 #
+# CONSUMER_TYPE CONVENTION:
+#   event-catalog.yaml `consumer_type` classifies the consumer:
+#     agent            — LLM agent (receives event in conversation context)
+#     system_component — Go system node or runtime (processes deterministically)
+#     human            — Human via mailbox/CLI (async decision)
+#   Resolution: if consumer is an agent ID in agent-tools.yaml → agent.
+#   If consumer is scoring-node or runtime → system_component.
+#   If delivery_channel is mailbox → human.
+#
+# TERMINAL EVENT CONVENTION:
+#   Events with no active consumer (consumer: audit or consumer: —) are
+#   terminal events. They are written to the events table for audit trail
+#   but trigger no downstream processing. Examples: ops.agent_panic,
+#   portfolio.snapshot. Terminal events must have delivery_channel: audit.
+#
 #   state_table:    Database table(s) for state persistence
 #   state_machine:  Declarative description of state transitions (contract only)
 #

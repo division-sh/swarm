@@ -1,4 +1,4 @@
-# EmpireAI — System Architecture Specification (v2.0.44)
+# EmpireAI — System Architecture Specification (v2.0.45)
 
 ## 1. Overview
 
@@ -74,7 +74,7 @@ The human operator acts as a board of directors: approving spend, making strateg
 
 ---
 
-### Platform Capability Registry (v2.0.44)
+### Platform Capability Registry (v2.0.45)
 
 The registry defines what EmpireAI can build today and what capabilities are planned. The scoring pipeline evaluates opportunities against current capabilities. Opportunities requiring unavailable capabilities are scored based on what's currently buildable, with annotations about what future capabilities would unlock.
 
@@ -481,13 +481,13 @@ See §14 for full specification.
 - MRA prompt instruction: "For each subcategory, identify ALL distinct narrow opportunities. A narrow opportunity is a specific product for a specific buyer solving a specific problem. Do not report the broad subcategory as the opportunity — find the wedge. If you find multiple wedges, report each one separately with full structured evidence. If you find no buildable wedge, report signal_strength: 0."
 - Processes subcategories systematically, covering the full taxonomy (or assigned shard slice)
 
-**Runtime pre-filter (applied to each `category.assessed` before emitting `vertical.discovered` — v2.0.44):**
+**Runtime pre-filter (applied to each `category.assessed` before emitting `vertical.discovered` — v2.0.45):**
 1. Red flag penalties: `complex_integration` -20, `high_feature_count` -20 (block if co-occurs with complex_integration/multi-module)
-2. signal_strength ≥ 55 after penalties (v2.0.44: raised from 50)
+2. signal_strength ≥ 55 after penalties (v2.0.45: raised from 50)
 3. No blocking red flags: complex_integration+multi-module co-occurrence, phone_led_sales, enterprise_procurement, relationship_networking, physical_presence_required, support_mode_phone_video
 4. ICP positive check: `preliminary_icp` contains (role_token OR cohort_token) AND workflow_anchor, AND ≥1 buyer_community URL in evidence
-5. Evidence completeness: ≥2 independent source URLs — competitor+pricing+URL, community URL, or pain+URL (v2.0.44: raised from 1)
-6. Retention primitive gate (v2.0.44): ≥1 of recurring_data, workflow_embedding, integration_lock_in, compliance_cadence, team_collaboration
+5. Evidence completeness: ≥2 independent source URLs — competitor+pricing+URL, community URL, or pain+URL (v2.0.45: raised from 1)
+6. Retention primitive gate (v2.0.45): ≥1 of recurring_data, workflow_embedding, integration_lock_in, compliance_cadence, team_collaboration
 7. Name-based dedup (exact match → skip)
 8. Fuzzy dedup (>70% similarity → hold for Discovery Coordinator)
 9. All checks pass → emit vertical.discovered
@@ -543,7 +543,7 @@ The taxonomy evolves — Operations Analyst can propose additions based on cross
 - Runtime accumulates dimension scores, computes weighted composite, applies gates
 - Contested dimensions (<5% of cases) escalated to Empire Coordinator
 
-#### 3.2.2 Opportunity Pattern Classification (v2.0.44)
+#### 3.2.2 Opportunity Pattern Classification (v2.0.45)
 
 Every opportunity discovered by the MRA is tagged with one of the following archetypes. Pattern classification informs scoring (different patterns have different competitive dynamics), EC portfolio construction (diversify across patterns), and build prioritization (some patterns are cheaper to build than others).
 
@@ -558,7 +558,7 @@ Every opportunity discovered by the MRA is tagged with one of the following arch
 | `workflow_automation` | Replaces a manual multi-step workflow (checklists, status tracking, deadline management) with a purpose-built tool | Job postings describing 8+ step processes tracked in spreadsheets | 55-72 |
 | `unknown` | Does not clearly fit any pattern — used when MRA cannot confidently classify | — | — |
 
-**Pattern validation (v2.0.44 corpus runs):** ai_wrapper opportunities had the highest average signal strength (64.5) across 390 signals. workflow_automation was most common (40% of viable) but lowest average strength (62.1). compliance_regulatory had highest urgency/pain due to measurable cost of non-compliance. Platform_parasitic and data_asymmetry were underrepresented in job-posting signals — these patterns are better discovered via app store reviews and API changelog signals.
+**Pattern validation (v2.0.45 corpus runs):** ai_wrapper opportunities had the highest average signal strength (64.5) across 390 signals. workflow_automation was most common (40% of viable) but lowest average strength (62.1). compliance_regulatory had highest urgency/pain due to measurable cost of non-compliance. Platform_parasitic and data_asymmetry were underrepresented in job-posting signals — these patterns are better discovered via app store reviews and API changelog signals.
 
 #### 3.2.3 Scoring Rubric (Universal, v2.0.39)
 
@@ -1428,7 +1428,7 @@ func (pc *PipelineCoordinator) handleScanRequested(event Event) (bool, error) {
                 Payload: map[string]interface{}{"geography": geo, "scan_id": event.ID}})
         }
     case "corpus":
-        // v2.0.44: Corpus mode — read JSONL file, batch into 25-record chunks, dispatch to MRA
+        // v2.0.45: Corpus mode — read JSONL file, batch into 25-record chunks, dispatch to MRA
         corpusPath := event.Payload["corpus_path"].(string)
         records := readJSONLFile(corpusPath)  // []json.RawMessage
         batchSize := 25
@@ -1980,17 +1980,17 @@ category.assessed / trend.identified / source.scraped
     → Runtime applies pre-filter cascade:
       1. Apply red_flag penalties: complex_integration → signal -20,
          high_feature_count → signal -20 (or block if co-occurs with complex_integration/multi-module)
-      2. signal_strength < 55 (after penalties) → skip, log as low-signal audit entry (v2.0.44: raised from 50)
+      2. signal_strength < 55 (after penalties) → skip, log as low-signal audit entry (v2.0.45: raised from 50)
       3. Blocking red flags present → skip, log with flag type.
-         Blocking flags (v2.0.44): complex_integration AND multi-module (co-occurrence),
+         Blocking flags (v2.0.45): complex_integration AND multi-module (co-occurrence),
          phone_led_sales (ICP requires phone-based selling),
          enterprise_procurement (buyer requires RFP/committee approval),
          relationship_networking (value prop depends on personal relationships),
          physical_presence_required (duties require on-site human),
          support_mode_phone_video (product requires phone or video support)
       4. ICP positive check fails (no role/cohort token + workflow anchor + buyer community URL) → skip, log
-      5. Evidence completeness fails (requires ≥2 independent source URLs: competitor+pricing+URL, community URL, or pain+URL) → skip, log (v2.0.44: raised from 1 to 2 independent URLs)
-      6. Retention primitive gate (v2.0.44): opportunity must demonstrate ≥1 of:
+      5. Evidence completeness fails (requires ≥2 independent source URLs: competitor+pricing+URL, community URL, or pain+URL) → skip, log (v2.0.45: raised from 1 to 2 independent URLs)
+      6. Retention primitive gate (v2.0.45): opportunity must demonstrate ≥1 of:
          recurring_data (user's data grows over time — invoices, records, history),
          workflow_embedding (tool becomes part of daily/weekly process),
          integration_lock_in (connects to systems user depends on — QuickBooks, MLS, ERP),
@@ -2007,7 +2007,7 @@ category.assessed / trend.identified / source.scraped
     → Null signals (signal_strength: 0) are logged for audit but never emitted
   → For trend.identified: same pre-filter cascade (v2.0.40)
   → For source.scraped: single assessment as before
-    → signal_strength >= 55: emit vertical.discovered (v2.0.44: raised from 50)
+    → signal_strength >= 55: emit vertical.discovered (v2.0.45: raised from 50)
     → signal_strength < 55: skip, log as low-signal
   → Note: a single sub-agent (e.g., Market Research Agent) emits
     MULTIPLE reports (one per opportunity signal found). The accumulator
@@ -3799,7 +3799,7 @@ Complete event definitions (emitter, consumer, consumer_type, delivery_channel, 
 | Domain | Events | Primary Delivery | Key Events |
 |--------|--------|-----------------|------------|
 | System | 2 | eventbus_static | `system.started`, `system.directive` — only events a human can directly emit |
-| Discovery | 25 | runtime, eventbus_static | `scan.requested` → `category.assessed` → `vertical.discovered`. Includes corpus mode (v2.0.44), dedup, synthesis |
+| Discovery | 25 | runtime, eventbus_static | `scan.requested` → `category.assessed` → `vertical.discovered`. Includes corpus mode (v2.0.45), dedup, synthesis |
 | Scoring | 12 | runtime, eventbus_static | `scoring.requested` → `score.dimension_complete` → `vertical.scored` → `vertical.shortlisted`. Includes derivation loop (v2.0.43) |
 | Validation | 22 | runtime, eventbus_static, mailbox | `research.*`, `spec.*`, `brand.*` → 4-gate pipeline → `vertical.ready_for_review` |
 | Human Decision | 6 | mailbox, eventbus_static | `review.requested` → `review.decided`. Board directives, founder input |
@@ -3922,7 +3922,7 @@ scan.requested → Discovery → vertical.discovered → Scoring → vertical.sh
                      (PM → product spec → CTO/Tech Writer → technical spec → Build → Launch)
 ```
 
-### 6.1.1 Corpus Discovery Mode (v2.0.44)
+### 6.1.1 Corpus Discovery Mode (v2.0.45)
 
 Corpus mode feeds pre-collected demand signals into the same discovery pipeline that taxonomy-walking and trend-scanning use. Instead of generating signals from scratch, the MRA interprets raw signals from a JSONL file into `category.assessed` events. Everything downstream (pre-filter, scoring, validation, EC digest) is unchanged.
 
@@ -6379,7 +6379,7 @@ The wiring verifier is the spec integrity contract. It automatically validates t
 
 **The verifier cross-references these four sources and flags any inconsistency.**
 
-**Go test implementation (v2.0.44):** The verifier logic is now implemented as `internal/runtime/contract_compliance_test.go`, which reads contract YAML files at test time rather than parsing spec prose. See §17.3 for the 7 automated compliance gates. Run with `go test ./internal/runtime/ -run TestContractCompliance`.
+**Go test implementation (v2.0.45):** The verifier logic is now implemented as `internal/runtime/contract_compliance_test.go`, which reads contract YAML files at test time rather than parsing spec prose. See §17.3 for the 7 automated compliance gates. Run with `go test ./internal/runtime/ -run TestContractCompliance`.
 
 **Verification logic per event type:**
 
@@ -6511,7 +6511,7 @@ def extract_producer_registry(spec):
 
 def extract_schemas(spec):
     """Extract event schemas from event-catalog.yaml payload fields.
-    Note: EventSchemaRegistry was removed from spec prose in v2.0.44.
+    Note: EventSchemaRegistry was removed from spec prose in v2.0.45.
     Schema definitions live in internal/runtime/event_emit_tools.go.
     Contract compliance is enforced by TestContractCompliance/schema_payload."""
     # Fall back to catalog payload fields as proxy for schema existence
@@ -6621,7 +6621,7 @@ if __name__ == '__main__':
     sys.exit(1 if verify(sys.argv[1] if len(sys.argv)>1 else 'spec.md') > 0 else 0)
 ```
 
-#### 15.0.2 Go Contract Compliance Tests (v2.0.44)
+#### 15.0.2 Go Contract Compliance Tests (v2.0.45)
 
 The contract compliance test file reads YAML/SQL contracts at test time and verifies the Go code matches. Unlike the Python verifier (§15.0.1) which validates spec-internal consistency, these tests validate **code ↔ contract alignment** and run as part of `go test ./internal/runtime/`.
 
@@ -6964,7 +6964,7 @@ Implementation tests load contract YAML/SQL files at test time and cross-referen
 
 **Implementation:** `internal/runtime/contract_compliance_test.go` — runs with `go test ./internal/runtime/ -run TestContractCompliance`. Reads contract files from `contracts/` directory using `os.ReadFile`, unmarshals into simple structs, compares against runtime registries.
 
-**7 automated compliance gates (v2.0.44):**
+**7 automated compliance gates (v2.0.45):**
 
 | Gate | Test Function | What It Validates |
 |------|--------------|-------------------|
@@ -7024,7 +7024,7 @@ After writing any changelog entry, the spec writer runs through these checks bef
 
 6. **Version stamp check:** All contract file headers must show the current spec version.
 
-7. **Payload rename/removal changelog (v2.0.44):** When payload fields are renamed or removed, the changelog must include an explicit "old → new" mapping and list all affected consumers. Example:
+7. **Payload rename/removal changelog (v2.0.45):** When payload fields are renamed or removed, the changelog must include an explicit "old → new" mapping and list all affected consumers. Example:
    ```
    Payload change: spec.validation_requested
      - REMOVED: spec_version (legacy alias)

@@ -109,6 +109,11 @@ func (m *ScanCampaignManager) onEvent(ctx context.Context, evt events.Event) {
 		campaignID, _ := payload["campaign_id"].(string)
 		campaignID = strings.TrimSpace(campaignID)
 		discoveries := asInt(payload["discoveries_count"])
+		if discoveries == 0 {
+			// Backward-compatible fallback for scan.completed payloads that still
+			// use verticals_discovered naming from pipeline coordinator snapshots.
+			discoveries = asInt(payload["verticals_discovered"])
+		}
 		emitted := make([]string, 0, 1)
 		if campaignID != "" {
 			if err := m.store.MarkScanCampaignCompleted(ctx, campaignID, discoveries); err != nil {

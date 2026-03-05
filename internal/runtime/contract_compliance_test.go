@@ -50,7 +50,7 @@ type contractComplianceCatalogEvent struct {
 	Emitter           string   `yaml:"emitter"`
 	EmitterType       string   `yaml:"emitter_type"`
 	AlternateEmitters []string `yaml:"alternate_emitters"`
-	Payload           []string `yaml:"payload"`
+	Payload           any      `yaml:"payload"`
 }
 
 type contractComplianceSystemNode struct {
@@ -232,7 +232,7 @@ func TestContractCompliance(t *testing.T) {
 		for _, eventType := range eventTypes {
 			cat := eventCatalog[eventType]
 			emitterType := strings.ToLower(strings.TrimSpace(cat.EmitterType))
-			// Gate 3 scope (v2.0.44):
+			// Gate 3 scope (v2.0.45):
 			// - agent: enforce against commgraph agentProducerEvents.
 			// - system_node: enforce against contracts/system-nodes.yaml produces.
 			// - runtime, human, opco_agent: intentionally skipped here.
@@ -286,7 +286,7 @@ func TestContractCompliance(t *testing.T) {
 				schemaFields = append(schemaFields, strings.TrimSpace(k))
 			}
 
-			expectedFields := contractComplianceNormalizeList(catalog.Payload)
+			expectedFields := contractComplianceCatalogPayloadFields(catalog.Payload)
 			if diff := contractComplianceMissingFrom(expectedFields, schemaFields); diff != "" {
 				errs = append(errs, fmt.Sprintf("event %s schema missing catalog payload fields (%s)", evt, diff))
 			}
@@ -294,6 +294,30 @@ func TestContractCompliance(t *testing.T) {
 			if !contractComplianceBool(schema.Schema["additionalProperties"], true) {
 				if diff := contractComplianceDiffSet(expectedFields, schemaFields); diff != "" {
 					errs = append(errs, fmt.Sprintf("event %s has additionalProperties=false but payload fields diverge (%s)", evt, diff))
+				}
+			}
+
+			if evt == "trend.identified" {
+				requiredStructured := []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence"}
+				if diff := contractComplianceMissingFrom(requiredStructured, expectedFields); diff != "" {
+					errs = append(errs, fmt.Sprintf("event %s catalog missing required structured fields (%s)", evt, diff))
+				}
+				if diff := contractComplianceMissingFrom(requiredStructured, schemaFields); diff != "" {
+					errs = append(errs, fmt.Sprintf("event %s schema missing required structured fields (%s)", evt, diff))
+				}
+				for _, field := range []string{"build_sketch", "evidence"} {
+					prop, ok := props[field]
+					if !ok {
+						errs = append(errs, fmt.Sprintf("event %s schema missing %s object", evt, field))
+						continue
+					}
+					if got, _ := prop["type"].(string); strings.TrimSpace(got) != "object" {
+						errs = append(errs, fmt.Sprintf("event %s %s must be object, got=%q", evt, field, got))
+						continue
+					}
+					if len(schemaProperties(prop["properties"])) == 0 {
+						errs = append(errs, fmt.Sprintf("event %s %s must define structured nested properties", evt, field))
+					}
 				}
 			}
 		}
@@ -353,40 +377,8 @@ func TestContractCompliance(t *testing.T) {
 		}
 	})
 
-	t.Run("gate7_prompt_contract_files_exist", func(t *testing.T) {
-		errs := make([]string, 0, 8)
-		ids := make([]string, 0, len(contractAgents))
-		for id := range contractAgents {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-
-		for _, id := range ids {
-			ag := contractAgents[id]
-			if !contractComplianceRequiresPromptFile(id, ag) {
-				continue
-			}
-			promptPath := filepath.Join(repoRoot, "contracts", "prompts", id+".md")
-			info, err := os.Stat(promptPath)
-			if err != nil || info.IsDir() {
-				errs = append(errs, fmt.Sprintf("missing prompt file for %s: %s", id, promptPath))
-			}
-		}
-
-		corpusVariant := filepath.Join(repoRoot, "contracts", "prompts", "market-research-agent.corpus.md")
-		if info, err := os.Stat(corpusVariant); err != nil || info.IsDir() {
-			errs = append(errs, fmt.Sprintf("missing corpus mode prompt variant: %s", corpusVariant))
-		}
-
-		// Prompt source-of-truth must be contracts/prompts only.
-		legacyPromptRefs := contractComplianceFindLegacyPromptKeys(t, filepath.Join(repoRoot, "configs", "agents"))
-		for _, path := range legacyPromptRefs {
-			errs = append(errs, fmt.Sprintf("legacy system_prompt found in YAML config: %s", path))
-		}
-
-		if len(errs) > 0 {
-			t.Fatalf("gate7 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
-		}
+	t.Run("gate7_prefilter_contract_vectors", func(t *testing.T) {
+		runPrefilterContractVectorChecks(t, repoRoot)
 	})
 }
 
@@ -505,41 +497,6 @@ func contractComplianceLoadSpecVersion(t *testing.T, repoRoot string) string {
 		t.Fatalf("spec_version missing in %s", path)
 	}
 	return strings.TrimSpace(gates.SpecVersion)
-}
-
-func contractComplianceFindLegacyPromptKeys(t *testing.T, root string) []string {
-	t.Helper()
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return nil
-	}
-	re := regexp.MustCompile(`(?m)^\s*system_prompt\s*:`)
-	matches := make([]string, 0, 4)
-	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".yaml" && ext != ".yml" {
-			return nil
-		}
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		if re.Match(raw) {
-			matches = append(matches, path)
-		}
-		return nil
-	})
-	if walkErr != nil {
-		t.Fatalf("walk %s: %v", root, walkErr)
-	}
-	sort.Strings(matches)
-	return matches
 }
 
 func contractComplianceConfigPathForAgent(id string, cfgMap contractComplianceAgentConfigMap) (string, bool) {
@@ -911,13 +868,27 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func contractComplianceRequiresPromptFile(id string, ag contractComplianceAgent) bool {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return false
+func contractComplianceCatalogPayloadFields(payload any) []string {
+	switch v := payload.(type) {
+	case nil:
+		return nil
+	case []string:
+		return contractComplianceNormalizeList(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return contractComplianceNormalizeList(out)
+	case map[string]any:
+		out := make([]string, 0, len(v))
+		for key := range v {
+			out = append(out, strings.TrimSpace(key))
+		}
+		return contractComplianceNormalizeList(out)
+	default:
+		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(ag.NodeType), "system") {
-		return false
-	}
-	return true
 }
