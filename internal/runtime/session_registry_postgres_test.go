@@ -225,3 +225,44 @@ func TestPostgresSessionRegistry_Rotate_FallbackWithoutScopeKeyColumn(t *testing
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
+
+func TestPostgresSessionRegistry_ResetAll_AllRuntimesUsesRotatedStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'rotated'").
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
+	if err := sr.ResetAll(""); err != nil {
+		t.Fatalf("ResetAll(all runtimes): %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestPostgresSessionRegistry_ResetAll_RuntimeScopedUsesRotatedStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'rotated'").
+		WithArgs("cli_test").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := sr.ResetAll("cli_test"); err != nil {
+		t.Fatalf("ResetAll(cli_test): %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}

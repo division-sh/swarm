@@ -528,7 +528,8 @@ func (sr *PostgresSessionRegistry) ResetAll(runtimeMode string) error {
 	if runtimeMode == "" {
 		_, err := sr.db.Exec(`
 			UPDATE agent_sessions
-			SET status = 'reset',
+			SET status = 'rotated',
+			    rotated_at = COALESCE(rotated_at, now()),
 			    lock_owner = NULL,
 			    lock_expires_at = NULL,
 			    last_used_at = now()
@@ -541,7 +542,8 @@ func (sr *PostgresSessionRegistry) ResetAll(runtimeMode string) error {
 	}
 	_, err := sr.db.Exec(`
 		UPDATE agent_sessions
-		SET status = 'reset',
+		SET status = 'rotated',
+		    rotated_at = COALESCE(rotated_at, now()),
 		    lock_owner = NULL,
 		    lock_expires_at = NULL,
 		    last_used_at = now()

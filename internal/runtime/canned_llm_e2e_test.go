@@ -386,6 +386,26 @@ func waitForEventTypeCount(store *threadSafeEventStore, eventType string, want i
 	return fmt.Errorf("timed out waiting for %s count>=%d", strings.TrimSpace(eventType), want)
 }
 
+func waitForVerticalStageCounts(db *sql.DB, geography string, wantShortlisted, wantMarginal int, timeout time.Duration) (shortlisted int, marginal int, err error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if qErr := db.QueryRow(`
+			SELECT
+				COUNT(*) FILTER (WHERE stage = 'shortlisted') AS shortlisted,
+				COUNT(*) FILTER (WHERE stage = 'marginal_review') AS marginal
+			FROM verticals
+			WHERE lower(COALESCE(geography,'')) = lower($1)
+		`, strings.TrimSpace(geography)).Scan(&shortlisted, &marginal); qErr != nil {
+			return 0, 0, qErr
+		}
+		if shortlisted == wantShortlisted && marginal == wantMarginal {
+			return shortlisted, marginal, nil
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return shortlisted, marginal, fmt.Errorf("timed out waiting for vertical stage counts shortlisted=%d marginal=%d (want shortlisted=%d marginal=%d)", shortlisted, marginal, wantShortlisted, wantMarginal)
+}
+
 var validDraft202012Types = map[string]struct{}{
 	"string":  {},
 	"number":  {},
@@ -730,16 +750,9 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	if err := waitForEventTypeCount(eventStore, "vertical.scored", 2, 8*time.Second); err != nil {
 		t.Fatalf("waiting for vertical.scored fanout: %v", err)
 	}
-
-	var shortlistedCount, marginalCount int
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*) FILTER (WHERE stage = 'shortlisted') AS shortlisted,
-			COUNT(*) FILTER (WHERE stage = 'marginal_review') AS marginal
-		FROM verticals
-		WHERE lower(COALESCE(geography,'')) = 'argentina'
-	`).Scan(&shortlistedCount, &marginalCount); err != nil {
-		t.Fatalf("query vertical stages: %v", err)
+	shortlistedCount, marginalCount, err := waitForVerticalStageCounts(db, "argentina", 1, 1, 8*time.Second)
+	if err != nil {
+		t.Fatalf("waiting for expected vertical stages: %v", err)
 	}
 	if shortlistedCount != 1 || marginalCount != 1 {
 		rows, _ := db.QueryContext(ctx, `

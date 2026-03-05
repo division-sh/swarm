@@ -16,4 +16,5 @@ data/*
 coverage
 internal/dashboard/ui/node_modules
 internal/dashboard/ui/dist
-empire
+/empire
+/empire.exe

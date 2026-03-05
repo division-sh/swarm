@@ -90,16 +90,16 @@ func TestHandleControlSeedOrg_SuccessFromYAML(t *testing.T) {
 		"role: empire-coordinator",
 		"mode: holding",
 		"model_tier: sonnet",
-		"system_prompt: |",
-		"  You are empire coordinator.",
+		"tools: [mailbox_send]",
+		"subscriptions: [system.started]",
 	}, "\n"))
 	a2 := []byte(strings.Join([]string{
 		"id: factory-cto",
 		"role: factory-cto",
 		"mode: factory",
 		"model_tier: sonnet",
-		"system_prompt: |",
-		"  You are factory cto.",
+		"tools: [agent_message]",
+		"subscriptions: [factory.*]",
 	}, "\n"))
 	if err := os.WriteFile(filepath.Join(agentsDir, "empire-coordinator.yaml"), a1, 0o644); err != nil {
 		t.Fatalf("write empire-coordinator: %v", err)
