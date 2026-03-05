@@ -1,0 +1,19 @@
+role: validation-coordinator
+responses:
+  - when_event: validation.package_ready
+    tool_calls:
+      - name: mailbox_send
+        arguments:
+          vertical_id: "{{vertical_id}}"
+          type: vertical_approval
+          priority: normal
+          summary: Validation package ready for human approval.
+          context:
+            source: canned-e2e
+            phase: validation
+      - name: emit_vertical_ready_for_review
+        arguments:
+          vertical_id: "{{vertical_id}}"
+          validation_kit:
+            source: canned-e2e
+            completeness: full

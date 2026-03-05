@@ -30,9 +30,325 @@ type prefilterContractCase struct {
 	} `yaml:"input"`
 }
 
+type scoringCompositeVectors struct {
+	Cases []scoringCompositeCase `yaml:"cases"`
+}
+
+type scoringCompositeCase struct {
+	Name              string         `yaml:"name"`
+	Dimensions        map[string]int `yaml:"dimensions"`
+	ExpectedResult    string         `yaml:"expected_result"`
+	ExpectedReason    string         `yaml:"expected_reason"`
+	ExpectedComposite float64        `yaml:"expected_composite"`
+}
+
+type validationGateVectors struct {
+	Cases []validationGateCase `yaml:"cases"`
+}
+
+type validationGateCase struct {
+	Name     string   `yaml:"name"`
+	Steps    []string `yaml:"steps"`
+	Expected struct {
+		G1                 bool   `yaml:"g1"`
+		G2                 bool   `yaml:"g2"`
+		G3                 bool   `yaml:"g3"`
+		G4                 bool   `yaml:"g4"`
+		PackagingRequested bool   `yaml:"packaging_requested"`
+		Status             string `yaml:"status"`
+		StaleResearchDrop  bool   `yaml:"stale_research_drop"`
+	} `yaml:"expected"`
+}
+
+type campaignCyclingVectors struct {
+	ModeCases           []campaignModeCase           `yaml:"mode_cases"`
+	ScanCompletionCases []campaignScanCompletionCase `yaml:"scan_completion_cases"`
+}
+
+type campaignModeCase struct {
+	Name           string   `yaml:"name"`
+	Mode           string   `yaml:"mode"`
+	RemainingModes []string `yaml:"remaining_modes"`
+	ExpectedAgents int      `yaml:"expected_agents"`
+}
+
+type campaignScanCompletionCase struct {
+	Name                string   `yaml:"name"`
+	Mode                string   `yaml:"mode"`
+	CompletionEvents    []string `yaml:"completion_events"`
+	ExpectScanCompleted bool     `yaml:"expect_scan_completed"`
+}
+
+type derivationConstraintVectors struct {
+	Cases []derivationConstraintCase `yaml:"cases"`
+}
+
+type derivationConstraintCase struct {
+	Name             string `yaml:"name"`
+	GenerationDepth  int    `yaml:"generation_depth"`
+	ExistingChildren int    `yaml:"existing_children"`
+	ExpectDiscovered bool   `yaml:"expect_discovered"`
+}
+
 func TestPipelineCoordinatorContractSemantics_PrefilterVectors(t *testing.T) {
 	repoRoot := contractComplianceRepoRoot(t)
 	runPrefilterContractVectorChecks(t, repoRoot)
+}
+
+func TestPipelineCoordinatorContractSemantics_ScoringCompositeVectors(t *testing.T) {
+	repoRoot := contractComplianceRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "contracts", "test-vectors", "scoring-composite-rejection.yaml"))
+	if err != nil {
+		t.Fatalf("read scoring vectors: %v", err)
+	}
+	var vectors scoringCompositeVectors
+	if err := yaml.Unmarshal(raw, &vectors); err != nil {
+		t.Fatalf("parse scoring vectors: %v", err)
+	}
+	if len(vectors.Cases) == 0 {
+		t.Fatal("scoring vectors empty")
+	}
+
+	for _, tc := range vectors.Cases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
+			acc := newUniversalAccumulator(uuid.NewString(), "Vector Vertical", "argentina", "saas_gap")
+			setScores(acc, tc.Dimensions)
+			result := pc.computeComposite(acc, false)
+
+			if got, want := strings.TrimSpace(result.Result), strings.TrimSpace(tc.ExpectedResult); got != want {
+				t.Fatalf("result mismatch: got=%q want=%q", got, want)
+			}
+			if want := strings.TrimSpace(tc.ExpectedReason); want != "" && strings.TrimSpace(result.Reason) != want {
+				t.Fatalf("reason mismatch: got=%q want=%q", result.Reason, want)
+			}
+			if tc.ExpectedComposite > 0 {
+				if diff := result.CompositeScore - tc.ExpectedComposite; diff > 0.01 || diff < -0.01 {
+					t.Fatalf("composite mismatch: got=%v want=%v", result.CompositeScore, tc.ExpectedComposite)
+				}
+			}
+		})
+	}
+}
+
+func TestPipelineCoordinatorContractSemantics_ValidationGateVectors(t *testing.T) {
+	repoRoot := contractComplianceRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "contracts", "test-vectors", "validation-gates.yaml"))
+	if err != nil {
+		t.Fatalf("read validation gate vectors: %v", err)
+	}
+	var vectors validationGateVectors
+	if err := yaml.Unmarshal(raw, &vectors); err != nil {
+		t.Fatalf("parse validation gate vectors: %v", err)
+	}
+	if len(vectors.Cases) == 0 {
+		t.Fatal("validation gate vectors empty")
+	}
+
+	for _, tc := range vectors.Cases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			ctx := context.Background()
+			bus := NewEventBus(InMemoryEventStore{})
+			pc := NewFactoryPipelineCoordinator(bus, nil)
+			verticalID := uuid.NewString()
+			pc.handleValidationStarted(ctx, events.Event{
+				ID:         uuid.NewString(),
+				Type:       events.EventType("vertical.shortlisted"),
+				VerticalID: verticalID,
+				Payload:    mustJSON(map[string]any{"composite_score": 81}),
+			})
+			for _, step := range tc.Steps {
+				switch strings.ToLower(strings.TrimSpace(step)) {
+				case "g1":
+					pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("research.completed"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"business_brief": map[string]any{"ok": true}})}, "g1")
+				case "g2":
+					pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("spec.approved"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"final_spec": "ok"})}, "g2")
+				case "g3":
+					pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("cto.spec_approved"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"cto_notes": "ok"})}, "g3")
+				case "g4":
+					pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("brand.candidates_ready"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"candidates": []string{"A"}})}, "g4")
+				case "packaged":
+					pc.handleValidationPackaged(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("vertical.ready_for_review"), VerticalID: verticalID})
+				default:
+					t.Fatalf("unsupported step %q", step)
+				}
+			}
+			pc.mu.Lock()
+			st := pc.validations[verticalID]
+			pc.mu.Unlock()
+			if st == nil {
+				t.Fatal("missing validation state")
+			}
+			if st.G1Research != tc.Expected.G1 || st.G2Spec != tc.Expected.G2 || st.G3CTO != tc.Expected.G3 || st.G4Brand != tc.Expected.G4 {
+				t.Fatalf("gate mismatch: got g1=%v g2=%v g3=%v g4=%v want g1=%v g2=%v g3=%v g4=%v", st.G1Research, st.G2Spec, st.G3CTO, st.G4Brand, tc.Expected.G1, tc.Expected.G2, tc.Expected.G3, tc.Expected.G4)
+			}
+			if st.PackagingRequested != tc.Expected.PackagingRequested {
+				t.Fatalf("packaging_requested mismatch: got=%v want=%v", st.PackagingRequested, tc.Expected.PackagingRequested)
+			}
+			if got, want := strings.TrimSpace(st.Status), strings.TrimSpace(tc.Expected.Status); got != want {
+				t.Fatalf("status mismatch: got=%q want=%q", got, want)
+			}
+			dropReason := pc.interceptStateDropReason("research.completed", events.Event{VerticalID: verticalID})
+			if tc.Expected.StaleResearchDrop && strings.TrimSpace(dropReason) == "" {
+				t.Fatalf("expected stale research drop reason, got empty")
+			}
+			if !tc.Expected.StaleResearchDrop && strings.TrimSpace(dropReason) != "" {
+				t.Fatalf("expected no stale research drop reason, got %q", dropReason)
+			}
+		})
+	}
+}
+
+func TestPipelineCoordinatorContractSemantics_CampaignCyclingVectors(t *testing.T) {
+	repoRoot := contractComplianceRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "contracts", "test-vectors", "campaign-cycling.yaml"))
+	if err != nil {
+		t.Fatalf("read campaign vectors: %v", err)
+	}
+	var vectors campaignCyclingVectors
+	if err := yaml.Unmarshal(raw, &vectors); err != nil {
+		t.Fatalf("parse campaign vectors: %v", err)
+	}
+	if len(vectors.ModeCases) == 0 && len(vectors.ScanCompletionCases) == 0 {
+		t.Fatal("campaign vectors empty")
+	}
+
+	for _, tc := range vectors.ModeCases {
+		tc := tc
+		t.Run("mode_"+tc.Name, func(t *testing.T) {
+			gotModes := remainingCampaignModes(tc.Mode)
+			if len(gotModes) != len(tc.RemainingModes) {
+				t.Fatalf("remaining modes len mismatch: got=%v want=%v", gotModes, tc.RemainingModes)
+			}
+			for i := range gotModes {
+				if gotModes[i] != tc.RemainingModes[i] {
+					t.Fatalf("remaining modes mismatch: got=%v want=%v", gotModes, tc.RemainingModes)
+				}
+			}
+			if got, want := expectedAgents(tc.Mode), tc.ExpectedAgents; got != want {
+				t.Fatalf("expectedAgents mismatch for mode=%s got=%d want=%d", tc.Mode, got, want)
+			}
+		})
+	}
+
+	for _, tc := range vectors.ScanCompletionCases {
+		tc := tc
+		t.Run("completion_"+tc.Name, func(t *testing.T) {
+			ctx := context.Background()
+			bus := NewEventBus(InMemoryEventStore{})
+			pc := NewFactoryPipelineCoordinator(bus, nil)
+			scanID := "scan-" + strings.TrimSpace(strings.ReplaceAll(uuid.NewString(), "-", ""))
+			done := bus.Subscribe("scan-done-"+tc.Name, events.EventType("scan.completed"))
+			pc.handleScanRequested(ctx, events.Event{
+				ID:   uuid.NewString(),
+				Type: events.EventType("scan.requested"),
+				Payload: mustJSON(map[string]any{
+					"scan_id":     scanID,
+					"campaign_id": uuid.NewString(),
+					"mode":        tc.Mode,
+					"geography":   "us",
+				}),
+			})
+
+			for _, eventType := range tc.CompletionEvents {
+				pc.handleScanCompletion(ctx, events.Event{
+					ID:          uuid.NewString(),
+					Type:        events.EventType(strings.TrimSpace(eventType)),
+					SourceAgent: "vector-agent",
+					Payload:     mustJSON(map[string]any{"scan_id": scanID}),
+				})
+			}
+			gotCompleted := false
+			select {
+			case <-done:
+				gotCompleted = true
+			case <-time.After(100 * time.Millisecond):
+			}
+			if gotCompleted != tc.ExpectScanCompleted {
+				t.Fatalf("scan completion mismatch: got=%v want=%v", gotCompleted, tc.ExpectScanCompleted)
+			}
+		})
+	}
+}
+
+func TestPipelineCoordinatorContractSemantics_DerivationConstraintVectors(t *testing.T) {
+	repoRoot := contractComplianceRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "contracts", "test-vectors", "derivation-constraints.yaml"))
+	if err != nil {
+		t.Fatalf("read derivation vectors: %v", err)
+	}
+	var vectors derivationConstraintVectors
+	if err := yaml.Unmarshal(raw, &vectors); err != nil {
+		t.Fatalf("parse derivation vectors: %v", err)
+	}
+	if len(vectors.Cases) == 0 {
+		t.Fatal("derivation vectors empty")
+	}
+
+	for _, tc := range vectors.Cases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			ctx := context.Background()
+			bus := NewEventBus(InMemoryEventStore{})
+			pc := NewFactoryPipelineCoordinator(bus, db)
+
+			parentID := uuid.NewString()
+			insertTestVertical(t, db, parentID, "Parent Vertical "+tc.Name, "argentina")
+			for i := 0; i < tc.ExistingChildren; i++ {
+				childID := uuid.NewString()
+				if _, err := db.ExecContext(ctx, `
+					INSERT INTO verticals (id, name, slug, geography, stage, mode, parent_id, created_at, updated_at)
+					VALUES ($1::uuid, $2, $3, 'argentina', 'discovered', 'factory', $4::uuid, now(), now())
+				`, childID, "Child "+tc.Name+" "+uuid.NewString(), "child-"+strings.ToLower(strings.ReplaceAll(uuid.NewString(), "-", "")), parentID); err != nil {
+					t.Fatalf("seed child vertical: %v", err)
+				}
+			}
+
+			discoveredCh := bus.Subscribe("vector-derived-"+tc.Name, events.EventType("vertical.discovered"))
+			pc.handleVerticalDerived(ctx, events.Event{
+				ID:          uuid.NewString(),
+				Type:        events.EventType("vertical.derived"),
+				SourceAgent: "analysis-agent",
+				Payload: mustJSON(map[string]any{
+					"parent_id":              parentID,
+					"generation_depth":       tc.GenerationDepth,
+					"generator_agent_id":     "analysis-agent",
+					"derivation_rationale":   map[string]any{"why": "vector test"},
+					"opportunity_name":       "Derived Opportunity " + tc.Name,
+					"signal_strength":        72,
+					"geography":              "argentina",
+					"discovery_context":      map[string]any{"source": "vector"},
+					"preliminary_icp":        "Billing manager at SMB clinic chains handling invoice reporting",
+					"opportunity_hypothesis": "Automate insurer invoice reconciliation with reporting queue",
+					"retention_primitives":   []any{"workflow_embedding"},
+					"build_sketch": map[string]any{
+						"core_features":    []any{"parser", "exception queue"},
+						"key_integrations": []any{"quickbooks"},
+						"red_flags":        []any{},
+					},
+					"evidence": map[string]any{
+						"competitors":       []any{map[string]any{"name": "Comp", "pricing": "$99", "source_url": "https://example.com/c1"}},
+						"pain_signals":      []any{map[string]any{"signal": "manual denials", "source_url": "https://example.com/p1"}},
+						"buyer_communities": []any{map[string]any{"name": "community", "source_url": "https://example.com/b1"}},
+						"regulatory":        []any{map[string]any{"detail": "billing code checks", "source_url": "https://example.com/r1"}},
+					},
+				}),
+			})
+
+			gotDiscovered := false
+			select {
+			case <-discoveredCh:
+				gotDiscovered = true
+			case <-time.After(120 * time.Millisecond):
+			}
+			if gotDiscovered != tc.ExpectDiscovered {
+				t.Fatalf("derived discovery mismatch: got=%v want=%v", gotDiscovered, tc.ExpectDiscovered)
+			}
+		})
+	}
 }
 
 func runPrefilterContractVectorChecks(t *testing.T, repoRoot string) {

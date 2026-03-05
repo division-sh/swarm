@@ -2172,13 +2172,17 @@ func (e *RuntimeToolExecutor) validateEmitTransition(actor models.AgentConfig, i
 			return fmt.Errorf("guardrail_violation transition_violation: vertical.ready_for_review requires inbound validation.package_ready, got %s", inboundType)
 		}
 		key := transitionContextKey(emitted, inbound)
+		if inboundID := strings.TrimSpace(inbound.ID); inboundID != "" {
+			// Allow one ready_for_review emission per distinct packaging event.
+			key = key + "|" + inboundID
+		}
 		if e.isOneShotEmitted(actor.ID, emittedType, key) {
 			return fmt.Errorf("guardrail_violation duplicate_emission: vertical.ready_for_review already emitted for context=%s", key)
 		}
 		e.markOneShotEmitted(actor.ID, emittedType, key)
 	case role == "business-research-agent" && emittedType == "spec.requested":
-		if inboundType != "validation.started" {
-			return fmt.Errorf("guardrail_violation transition_violation: spec.requested requires inbound validation.started, got %s", inboundType)
+		if inboundType != "validation.started" && inboundType != "spec.revision_requested" {
+			return fmt.Errorf("guardrail_violation transition_violation: spec.requested requires inbound validation.started or spec.revision_requested, got %s", inboundType)
 		}
 	case role == "business-research-agent" && emittedType == "spec_review.requested":
 		if inboundType != "spec.draft_ready" {

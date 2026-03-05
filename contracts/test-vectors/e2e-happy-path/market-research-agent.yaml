@@ -1,0 +1,121 @@
+role: market-research-agent
+responses:
+  - when_event: market_research.scan_assigned
+    tool_calls:
+      - name: emit_category_assessed
+        arguments:
+          scan_id: "{{scan_id}}"
+          campaign_id: "{{campaign_id}}"
+          mode: "{{mode}}"
+          geography: "{{geography}}"
+          category: operations
+          subcategory: dental_billing
+          signal_strength: 68
+          opportunity_name: Dental Insurance Reconciliation Copilot
+          preliminary_icp: Billing manager at multi-dentist clinics handling invoice reconciliation workflow
+          build_sketch:
+            core_features:
+              - remittance parser
+              - claim mismatch queue
+              - exception routing
+            key_integrations:
+              - quickbooks
+              - xero
+            red_flags:
+              - type: accuracy_liability
+              - type: one_time_setup
+          evidence:
+            competitors:
+              - name: Dentalintel
+                pricing: "$500/mo"
+                source_url: https://example.com/dentalintel
+            pain_signals:
+              - signal: claims mismatch delays payouts
+                source_url: https://example.com/pain-claims
+            regulatory:
+              - detail: insurance coding audit cadence
+                source_url: https://example.com/reg-claims
+            buyer_communities:
+              - name: Dental Billing Managers
+                source_url: https://example.com/community-dental
+          opportunity_hypothesis: Workflow automation that reconciles insurer invoice remittance files against practice ledgers.
+          geographic_scope: local
+          opportunity_pattern: workflow_automation
+      - name: emit_category_assessed
+        arguments:
+          scan_id: "{{scan_id}}"
+          campaign_id: "{{campaign_id}}"
+          mode: "{{mode}}"
+          geography: "{{geography}}"
+          category: operations
+          subcategory: ap_ar
+          signal_strength: 62
+          opportunity_name: Trade Contractor AP Packet Validator
+          preliminary_icp: AP manager at construction subcontractors processing invoice workflow
+          build_sketch:
+            core_features:
+              - packet completeness check
+              - approval workflow
+              - pay-app export
+            key_integrations:
+              - procore
+              - quickbooks
+            red_flags: []
+          evidence:
+            competitors:
+              - name: Procore Financials
+                pricing: "$399/mo"
+                source_url: https://example.com/procore-financials
+            pain_signals:
+              - signal: manual packet checks delay payments
+                source_url: https://example.com/pain-packets
+            regulatory:
+              - detail: lien waiver package requirements
+                source_url: https://example.com/reg-lien
+            buyer_communities:
+              - name: Construction AP Leaders
+                source_url: https://example.com/community-ap
+          opportunity_hypothesis: Recurring AP workflow validator that checks compliance packet completeness before pay-application submission.
+          geographic_scope: local
+          opportunity_pattern: workflow_automation
+      - name: emit_category_assessed
+        arguments:
+          scan_id: "{{scan_id}}"
+          campaign_id: "{{campaign_id}}"
+          mode: "{{mode}}"
+          geography: "{{geography}}"
+          category: operations
+          subcategory: consulting
+          signal_strength: 54
+          opportunity_name: General Admin Outsourcing Console
+          preliminary_icp: Owner at small agencies
+          build_sketch:
+            core_features:
+              - task board
+              - outsourcing roster
+              - manual handoff notes
+            key_integrations: []
+            red_flags: []
+          evidence:
+            competitors:
+              - name: Generalist VA Marketplace
+                pricing: "$149/mo"
+                source_url: https://example.com/va-market
+            pain_signals:
+              - signal: owners mention admin overload
+                source_url: https://example.com/pain-admin
+            regulatory: []
+            buyer_communities:
+              - name: Agency Owners Group
+                source_url: https://example.com/community-agency
+          opportunity_hypothesis: A generic task handoff tool for occasional outsourcing.
+          geographic_scope: local
+          opportunity_pattern: unknown
+      - name: emit_market_research_scan_complete
+        arguments:
+          scan_id: "{{scan_id}}"
+          campaign_id: "{{campaign_id}}"
+          mode: "{{mode}}"
+          geography: "{{geography}}"
+          categories_assessed: 3
+          high_signal_count: 2

@@ -504,6 +504,21 @@ function truncateText(text, max = 280) {
   return s.length > max ? s.slice(0, max) + "\u2026" : s;
 }
 
+function hasArtifactValue(v) {
+  if (v == null) return false;
+  if (typeof v === "string") return v.trim() !== "";
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.keys(v).length > 0;
+  return true;
+}
+
+function renderTextOrJsonArtifact(v) {
+  if (artifactIsScalar(v)) {
+    return <div className="holding-detail-text">{formatArtifactScalar(v)}</div>;
+  }
+  return <JsonBlock data={v} defaultOpen={2} />;
+}
+
 function renderArtifactGeneric(payload) {
   if (!payload) return <div className="empty-state">No data</div>;
   if (typeof payload === "string") {
@@ -657,8 +672,8 @@ function renderRawSignalsArtifact(payload) {
   const summary = summaryKeys
     .filter((k) => payload[k] != null && String(payload[k]).trim() !== "")
     .map((k) => [k, payload[k]]);
-  const opportunity = payload.opportunity_hypothesis || payload.opportunity || payload.hypothesis || "";
-  const evidence = payload.evidence || payload.market_evidence || payload.problem_evidence || "";
+  const opportunity = payload.opportunity_hypothesis ?? payload.opportunity ?? payload.hypothesis ?? "";
+  const evidence = payload.evidence ?? payload.market_evidence ?? payload.problem_evidence ?? "";
   const automationMicro = payload.automation_micro;
 
   return (
@@ -674,17 +689,17 @@ function renderRawSignalsArtifact(payload) {
         </div>
       ) : null}
 
-      {opportunity ? (
+      {hasArtifactValue(opportunity) ? (
         <div className="artifact-text-card">
           <div className="tiny">Opportunity Hypothesis</div>
-          <div className="holding-detail-text">{opportunity}</div>
+          {renderTextOrJsonArtifact(opportunity)}
         </div>
       ) : null}
 
-      {evidence ? (
+      {hasArtifactValue(evidence) ? (
         <div className="artifact-text-card">
           <div className="tiny">Evidence</div>
-          <div className="holding-detail-text">{evidence}</div>
+          {renderTextOrJsonArtifact(evidence)}
         </div>
       ) : null}
 

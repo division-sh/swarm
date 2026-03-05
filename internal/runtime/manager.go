@@ -1713,7 +1713,10 @@ func (am *AgentManager) startControlLoop(parent context.Context) {
 	am.controlCancel = cancel
 	am.runMu.Unlock()
 
-	ch := am.bus.Subscribe("agent-manager-controller", events.EventType("opco.spinup_requested"))
+	ch := am.bus.Subscribe("agent-manager-controller",
+		events.EventType("opco.spinup_requested"),
+		events.EventType("opco.teardown_requested"),
+	)
 	am.runWG.Add(1)
 	go func() {
 		defer am.runWG.Done()
@@ -1752,6 +1755,37 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 			payload.Mandate.VerticalID = verticalID
 		}
 		_ = am.SpawnOpCo(verticalID, payload.Mandate)
+	case "opco.teardown_requested":
+		var payload struct {
+			VerticalID string `json:"vertical_id"`
+			Reason     string `json:"reason"`
+		}
+		_ = json.Unmarshal(evt.Payload, &payload)
+		verticalID := strings.TrimSpace(payload.VerticalID)
+		if verticalID == "" {
+			verticalID = strings.TrimSpace(evt.VerticalID)
+		}
+		if verticalID == "" {
+			return
+		}
+		if err := am.TeardownOpCo(verticalID); err != nil {
+			runtimeWarn("agent-manager", "opco teardown failed vertical=%s err=%v", verticalID, err)
+			return
+		}
+		if am.bus != nil {
+			_ = am.bus.Publish(am.runtimeContext(), events.Event{
+				ID:          uuid.NewString(),
+				Type:        events.EventType("vertical.killed"),
+				SourceAgent: "agent-manager",
+				VerticalID:  verticalID,
+				Payload: mustJSON(map[string]any{
+					"vertical_id": verticalID,
+					"reason":      firstNonEmptyString(strings.TrimSpace(payload.Reason), "opco teardown requested"),
+					"source":      "opco.teardown_requested",
+				}),
+				CreatedAt: time.Now(),
+			})
+		}
 	}
 }
 

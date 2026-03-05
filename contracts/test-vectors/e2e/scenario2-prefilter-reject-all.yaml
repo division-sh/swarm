@@ -1,0 +1,127 @@
+id: scenario2-prefilter-reject-all
+agents:
+  - id: market-research-agent
+    role: market-research-agent
+    mode: factory
+    subscriptions: [market_research.scan_assigned]
+    responses:
+      - when_event: market_research.scan_assigned
+        tool_calls:
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: rejection_a
+              signal_strength: 79
+              opportunity_name: Legacy Call-Center Workflow A
+              preliminary_icp: Operations manager at SMB logistics teams handling dispatch workflow
+              build_sketch:
+                core_features: [call scripting]
+                key_integrations: []
+                red_flags:
+                  - type: phone_led_sales
+              evidence:
+                competitors:
+                  - name: Legacy Platform A
+                    pricing: "$199/mo"
+                    source_url: https://example.com/a
+                pain_signals:
+                  - signal: handoff delays
+                    source_url: https://example.com/a1
+                regulatory:
+                  - detail: call-recording policy requirements
+                    source_url: https://example.com/a-reg
+                buyer_communities:
+                  - name: Ops community
+                    source_url: https://example.com/a2
+              opportunity_hypothesis: Phone-heavy workflow orchestration.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: rejection_b
+              signal_strength: 76
+              opportunity_name: Legacy Call-Center Workflow B
+              preliminary_icp: Operations manager at SMB logistics teams handling dispatch workflow
+              build_sketch:
+                core_features: [call scripting]
+                key_integrations: []
+                red_flags:
+                  - type: enterprise_procurement
+              evidence:
+                competitors:
+                  - name: Legacy Platform B
+                    pricing: "$249/mo"
+                    source_url: https://example.com/b
+                pain_signals:
+                  - signal: handoff delays
+                    source_url: https://example.com/b1
+                regulatory:
+                  - detail: procurement review requirements
+                    source_url: https://example.com/b-reg
+                buyer_communities:
+                  - name: Ops community
+                    source_url: https://example.com/b2
+              opportunity_hypothesis: Procurement-bound call-heavy workflow.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: rejection_c
+              signal_strength: 74
+              opportunity_name: Legacy Call-Center Workflow C
+              preliminary_icp: Operations manager at SMB logistics teams handling dispatch workflow
+              build_sketch:
+                core_features: [call scripting]
+                key_integrations: []
+                red_flags:
+                  - type: support_mode_phone_video
+              evidence:
+                competitors:
+                  - name: Legacy Platform C
+                    pricing: "$229/mo"
+                    source_url: https://example.com/c
+                pain_signals:
+                  - signal: handoff delays
+                    source_url: https://example.com/c1
+                regulatory:
+                  - detail: support escalation policy
+                    source_url: https://example.com/c-reg
+                buyer_communities:
+                  - name: Ops community
+                    source_url: https://example.com/c2
+              opportunity_hypothesis: Phone/video support-driven operations workflow.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_market_research_scan_complete
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              categories_assessed: 3
+              high_signal_count: 3
+expected:
+  event_counts:
+    scan.requested: 1
+    market_research.scan_assigned: 1
+    category.assessed: 3
+    market_research.scan_complete: 1
+    scan.completed: 1
+    campaign.completed: 1
+  absent_events:
+    - vertical.discovered
+    - scoring.requested

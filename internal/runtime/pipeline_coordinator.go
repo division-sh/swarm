@@ -603,7 +603,6 @@ func (pc *FactoryPipelineCoordinator) interceptStateDropReason(eventType string,
 		"cto.spec_revision_needed",
 		"spec.revision_requested",
 		"spec.revision_needed",
-		"vertical.needs_more_data",
 		"brand.revision_needed":
 		return "status=" + status + ", expected=active"
 	default:
@@ -671,6 +670,12 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 		}
 		// Keep event visible for downstream consumers while updating stage projection.
 		return false, true
+	case "opco.ceo_ready":
+		if strings.TrimSpace(evt.VerticalID) == "" {
+			return false, false
+		}
+		// Keep event visible for downstream consumers while updating stage projection.
+		return false, true
 	case "vertical.ready_for_review":
 		if strings.TrimSpace(evt.VerticalID) == "" {
 			return false, false
@@ -709,6 +714,7 @@ func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
 		events.EventType("spec.validation_failed"),
 		events.EventType("vertical.approved"),
 		events.EventType("vertical.killed"),
+		events.EventType("opco.ceo_ready"),
 		events.EventType("cto.spec_approved"),
 		events.EventType("cto.spec_revision_needed"),
 		events.EventType("cto.spec_vetoed"),
@@ -778,6 +784,8 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		pc.handleVerticalApproved(ctx, evt)
 	case "vertical.killed":
 		pc.handleVerticalKilled(ctx, evt)
+	case "opco.ceo_ready":
+		pc.handleOpCoCEOReady(ctx, evt)
 	case "cto.spec_revision_needed":
 		pc.handleCTORevisionNeeded(ctx, evt)
 	case "research.vertical_rejected", "cto.spec_vetoed":
@@ -3606,6 +3614,18 @@ func (pc *FactoryPipelineCoordinator) handleVerticalKilled(ctx context.Context, 
 	st.PackagingRetries = 0
 	pc.mu.Unlock()
 	pc.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+}
+
+func (pc *FactoryPipelineCoordinator) handleOpCoCEOReady(ctx context.Context, evt events.Event) {
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		payload := parsePayloadMap(evt.Payload)
+		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
+	}
+	if verticalID == "" {
+		return
+	}
+	pc.updateVerticalStage(ctx, verticalID, "operating", "")
 }
 
 func (pc *FactoryPipelineCoordinator) handleInnerSpecRevision(ctx context.Context, evt events.Event) bool {

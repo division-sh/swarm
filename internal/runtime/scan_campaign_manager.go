@@ -460,6 +460,10 @@ func (m *ScanCampaignManager) ensureQueuedCampaign(ctx context.Context, geograph
 func remainingCampaignModes(initialMode string) []string {
 	cycle := []string{"saas_gap", "saas_trend", "local_services"}
 	initialMode = normalizeScanMode(initialMode)
+	if initialMode == "corpus" {
+		// Corpus directives are self-contained and should not fan into scan cycles.
+		return []string{}
+	}
 	if initialMode == "" {
 		initialMode = "saas_gap"
 	}

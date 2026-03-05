@@ -1,0 +1,8 @@
+role: spec-auditor
+responses:
+  - when_event: spec.validation_requested
+    tool_calls:
+      - name: emit_spec_validation_passed
+        arguments:
+          vertical_id: "{{vertical_id}}"
+          validation_notes: Contract clean. No blocker gaps.

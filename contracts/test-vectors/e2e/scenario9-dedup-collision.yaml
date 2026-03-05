@@ -1,0 +1,87 @@
+id: scenario9-dedup-collision
+agents:
+  - id: market-research-agent
+    role: market-research-agent
+    mode: factory
+    subscriptions: [market_research.scan_assigned]
+    responses:
+      - when_event: market_research.scan_assigned
+        tool_calls:
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: dedup_a
+              signal_strength: 74
+              opportunity_name: Pet Grooming Scheduling
+              preliminary_icp: Owner at SMB salon chains handling booking workflow
+              build_sketch:
+                core_features: [booking workflow]
+                key_integrations: []
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp D9A
+                    pricing: "$89/mo"
+                    source_url: https://example.com/d9a
+                pain_signals:
+                  - signal: manual booking
+                    source_url: https://example.com/d9a1
+                regulatory:
+                  - detail: appointment reminder disclosure requirements
+                    source_url: https://example.com/d9a-reg
+                buyer_communities:
+                  - name: Grooming owners
+                    source_url: https://example.com/d9a2
+              opportunity_hypothesis: Embedded booking workflow platform.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: dedup_b
+              signal_strength: 73
+              opportunity_name: Pet Grooming Scheduling SaaS
+              preliminary_icp: Owner at SMB salon chains handling booking workflow
+              build_sketch:
+                core_features: [booking workflow]
+                key_integrations: []
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp D9B
+                    pricing: "$95/mo"
+                    source_url: https://example.com/d9b
+                pain_signals:
+                  - signal: manual booking
+                    source_url: https://example.com/d9b1
+                regulatory:
+                  - detail: appointment reminder disclosure requirements
+                    source_url: https://example.com/d9b-reg
+                buyer_communities:
+                  - name: Grooming owners
+                    source_url: https://example.com/d9b2
+              opportunity_hypothesis: Embedded booking workflow platform.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_market_research_scan_complete
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              categories_assessed: 2
+              high_signal_count: 2
+expected:
+  event_counts:
+    vertical.discovered: 1
+    dedup.ambiguous: 1
+    scan.completed: 1
+    campaign.completed: 1
