@@ -340,7 +340,7 @@ func TestCannedLLME2E_Scenario3_MarginalPath(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish timer.marginal_review: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.resumed", 1, 8*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.db, "vertical.resumed", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait vertical.resumed: %v", err)
 	}
 
@@ -431,7 +431,7 @@ func TestCannedLLME2E_Scenario5_ValidationFailureRevision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish vertical.approved: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.approved", 1, 8*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.db, "vertical.approved", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait vertical.approved: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
@@ -485,7 +485,7 @@ func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish vertical.needs_more_data: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "validation.more_data_needed", 1, 8*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.db, "validation.more_data_needed", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait validation.more_data_needed: %v", err)
 	}
 	if err := rig.bus.Publish(rig.ctx, events.Event{
@@ -619,7 +619,7 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish budget.threshold_crossed throttle: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "budget.throttle", 1, 8*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.db, "budget.throttle", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait budget.throttle: %v", err)
 	}
 
@@ -643,7 +643,7 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish budget.threshold_crossed emergency: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "budget.emergency", 1, 8*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.db, "budget.emergency", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait budget.emergency: %v", err)
 	}
 

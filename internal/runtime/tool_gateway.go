@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"empireai/internal/models"
 )
@@ -262,6 +263,9 @@ func (g *ToolGateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			"tool_name": toolName,
 			"trace_id":  traceIDFromRequest(r),
 		})
+		if meta, snapshot, ok := recordCorpusEmitFromContext(ctx, toolName, time.Now().UTC()); ok && snapshot.EmitCount == 1 {
+			g.logCorpusFirstEmit(ctx, r, meta, snapshot, toolName)
+		}
 		resultText := toolResultText(out)
 		g.writeMCPResult(w, req.ID, map[string]any{
 			"content": []map[string]any{{"type": "text", "text": resultText}},
@@ -574,6 +578,52 @@ func (g *ToolGateway) logMCP(r *http.Request, level, action string, err error, d
 		entry.Error = FormatRuntimeError(err)
 	}
 	g.logger.Log(r.Context(), entry)
+}
+
+func (g *ToolGateway) logCorpusFirstEmit(
+	ctx context.Context,
+	r *http.Request,
+	meta corpusTurnMeta,
+	snapshot corpusEmitSnapshot,
+	toolName string,
+) {
+	if g == nil || g.logger == nil {
+		return
+	}
+	agentID := strings.TrimSpace(meta.AgentID)
+	if actor, ok := ActorFromContext(ctx); ok && strings.TrimSpace(actor.ID) != "" {
+		agentID = strings.TrimSpace(actor.ID)
+	}
+	verticalID := strings.TrimSpace(meta.VerticalID)
+	if actor, ok := ActorFromContext(ctx); ok && strings.TrimSpace(actor.VerticalID) != "" {
+		verticalID = strings.TrimSpace(actor.VerticalID)
+	}
+	msToFirstEmit := int64(0)
+	if !meta.AssignedAt.IsZero() && !snapshot.FirstEmitAt.IsZero() {
+		msToFirstEmit = snapshot.FirstEmitAt.Sub(meta.AssignedAt).Milliseconds()
+		if msToFirstEmit < 0 {
+			msToFirstEmit = 0
+		}
+	}
+	entry := RuntimeLogEntry{
+		Level:      "debug",
+		Component:  "mcp-gateway",
+		Action:     "corpus.first_emit",
+		EventID:    strings.TrimSpace(meta.EventID),
+		EventType:  strings.TrimSpace(meta.EventType),
+		AgentID:    agentID,
+		VerticalID: verticalID,
+		CampaignID: strings.TrimSpace(meta.CampaignID),
+		ScanID:     strings.TrimSpace(meta.ScanID),
+		Detail: map[string]any{
+			"tool_name":        strings.TrimSpace(toolName),
+			"trace_id":         traceIDFromRequest(r),
+			"batch_size":       meta.BatchSize,
+			"payload_bytes":    meta.PayloadBytes,
+			"ms_to_first_emit": msToFirstEmit,
+		},
+	}
+	g.logger.Log(ctx, entry)
 }
 
 func writeToolGatewayJSON(w http.ResponseWriter, status int, payload toolGatewayResponse) {

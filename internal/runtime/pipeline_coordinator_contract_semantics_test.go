@@ -351,6 +351,110 @@ func TestPipelineCoordinatorContractSemantics_DerivationConstraintVectors(t *tes
 	}
 }
 
+func TestPipelineCoordinatorContractSemantics_DerivedEventMaterializesChildVertical(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
+	bus := NewEventBus(InMemoryEventStore{})
+	pc := NewFactoryPipelineCoordinator(bus, db)
+	bus.SetInterceptors(pc)
+
+	parentID := uuid.NewString()
+	insertTestVertical(t, db, parentID, "Parent Vertical Derived Integration", "argentina")
+
+	discoveredCh := bus.Subscribe("derived-integration-watch", events.EventType("vertical.discovered"))
+	derivedEventID := uuid.NewString()
+	if err := bus.Publish(ctx, events.Event{
+		ID:          derivedEventID,
+		Type:        events.EventType("vertical.derived"),
+		SourceAgent: "analysis-agent",
+		VerticalID:  parentID,
+		Payload: mustJSON(map[string]any{
+			"parent_id":              parentID,
+			"generation_depth":       1,
+			"generator_agent_id":     "analysis-agent",
+			"derivation_rationale":   map[string]any{"summary": "Narrow ICP to micro-firms to remove direct incumbent collision"},
+			"opportunity_name":       "Derived Vertical Integration Test",
+			"signal_strength":        74,
+			"geography":              "argentina",
+			"discovery_context":      map[string]any{"source": "integration-test"},
+			"preliminary_icp":        "Operations manager at small clinic chains handling invoice compliance workflow",
+			"opportunity_hypothesis": "Automate compliance reporting queue for clinic operators with recurring billing workflows",
+			"retention_primitives":   []any{"workflow_embedding"},
+			"build_sketch": map[string]any{
+				"core_features":        []any{"parser", "exception queue"},
+				"key_integrations":     []any{"quickbooks"},
+				"red_flags":            []any{},
+				"retention_primitives": []any{"workflow_embedding"},
+				"workflow_embedding":   true,
+				"integration_lock_in":  true,
+				"compliance_cadence":   true,
+				"team_collaboration":   true,
+				"recurring_data":       true,
+			},
+			"evidence": map[string]any{
+				"competitors": []any{
+					map[string]any{"name": "CompA", "pricing": "$99", "source_url": "https://example.com/compa"},
+				},
+				"pain_signals": []any{
+					map[string]any{"signal": "manual rework", "source_url": "https://example.com/pain"},
+				},
+				"buyer_communities": []any{
+					map[string]any{"name": "Community", "source_url": "https://example.com/community"},
+				},
+				"regulatory": []any{
+					map[string]any{"detail": "compliance cadence", "source_url": "https://example.com/reg"},
+				},
+			},
+		}),
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("publish vertical.derived: %v", err)
+	}
+
+	discovered := waitForEventType(t, discoveredCh, "vertical.discovered")
+	discoveredPayload := parsePayloadMap(discovered.Payload)
+	childID := strings.TrimSpace(discovered.VerticalID)
+	if childID == "" {
+		childID = strings.TrimSpace(asString(discoveredPayload["vertical_id"]))
+	}
+	if childID == "" {
+		t.Fatal("expected vertical.discovered with child vertical_id")
+	}
+	if got := strings.TrimSpace(asString(discoveredPayload["mode"])); got != "derived" {
+		t.Fatalf("expected vertical.discovered mode=derived, got=%q payload=%v", got, discoveredPayload)
+	}
+
+	var (
+		gotParent, gotGenerator, gotStage string
+		gotDepth                          int
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(parent_id::text, ''),
+			COALESCE(generator_agent_id, ''),
+			COALESCE(stage, ''),
+			COALESCE(generation_depth, 0)
+		FROM verticals
+		WHERE id = $1::uuid
+	`, childID).Scan(&gotParent, &gotGenerator, &gotStage, &gotDepth); err != nil {
+		t.Fatalf("load derived child vertical: %v", err)
+	}
+	if gotParent != parentID {
+		t.Fatalf("expected child parent_id=%s got=%s", parentID, gotParent)
+	}
+	if gotGenerator != "analysis-agent" {
+		t.Fatalf("expected child generator_agent_id=analysis-agent got=%q", gotGenerator)
+	}
+	if gotDepth != 1 {
+		t.Fatalf("expected child generation_depth=1 got=%d", gotDepth)
+	}
+	if gotStage != "discovered" {
+		t.Fatalf("expected child stage=discovered got=%q", gotStage)
+	}
+
+}
+
 func runPrefilterContractVectorChecks(t *testing.T, repoRoot string) {
 	t.Helper()
 	path := filepath.Join(repoRoot, "contracts", "test-vectors", "prefilter.yaml")

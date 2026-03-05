@@ -593,7 +593,7 @@ func parseDirectiveGeography(text string) (name, country, region string) {
 	}
 	lower := strings.ToLower(raw)
 	for needle, label := range directiveGeoAlias {
-		if strings.Contains(lower, needle) {
+		if containsDirectiveAlias(lower, needle) {
 			return label, label, ""
 		}
 	}
@@ -608,6 +608,16 @@ func parseDirectiveGeography(text string) (name, country, region string) {
 		}
 	}
 	return "unspecified", "unspecified", ""
+}
+
+func containsDirectiveAlias(haystack, alias string) bool {
+	haystack = strings.ToLower(strings.TrimSpace(haystack))
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if haystack == "" || alias == "" {
+		return false
+	}
+	pattern := `\b` + regexp.QuoteMeta(alias) + `\b`
+	return regexp.MustCompile(pattern).MatchString(haystack)
 }
 
 func canonicalDirectiveGeography(v string) (string, bool) {

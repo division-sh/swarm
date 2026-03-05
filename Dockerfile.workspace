@@ -2,13 +2,17 @@ FROM golang:1.23-bookworm
 
 ARG INSTALL_CLAUDE_CLI=false
 ARG INSTALL_CODEX_CLI=false
+ARG CLAUDE_CODE_VERSION=2.1.69
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates postgresql-client nodejs npm && \
     rm -rf /var/lib/apt/lists/*
 
 RUN if [ "$INSTALL_CLAUDE_CLI" = "true" ]; then \
-      npm install -g @anthropic-ai/claude-code || npm install -g claude-code || true ; \
+      npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" || \
+      npm install -g "claude-code@${CLAUDE_CODE_VERSION}" || \
+      npm install -g @anthropic-ai/claude-code || \
+      npm install -g claude-code || true ; \
     fi
 
 RUN if [ "$INSTALL_CODEX_CLI" = "true" ]; then \

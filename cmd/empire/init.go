@@ -42,7 +42,7 @@ func parseInitOptions(args []string) (initOptions, error) {
 	agentsDir := fs.String("agents-dir", "configs/agents", "Global agents YAML directory (holding + factory)")
 	templateAgentsDir := fs.String("template-agents-dir", "configs/agents/templates", "Template agents YAML directory (OpCo)")
 	templateRoutesYAML := fs.String("template-routes-yaml", "configs/agents/templates/routes.yaml", "Routing template YAML file")
-	templateVersion := fs.String("template-version", "2.0.47", "Initial org template version to publish if none exist")
+	templateVersion := fs.String("template-version", "2.0.48", "Initial org template version to publish if none exist")
 	if err := fs.Parse(args); err != nil {
 		return initOptions{}, err
 	}

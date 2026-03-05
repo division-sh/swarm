@@ -686,35 +686,39 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 }
 
 type agentView struct {
-	ID              string     `json:"id"`
-	Role            string     `json:"role"`
-	Mode            string     `json:"mode"`
-	Status          string     `json:"status"`
-	VerticalID      string     `json:"vertical_id"`
-	VerticalSlug    string     `json:"vertical_slug"`
-	CurrentTaskID   string     `json:"current_task_id"`
-	StartedAt       time.Time  `json:"started_at"`
-	LastActiveAt    time.Time  `json:"last_active_at"`
-	RuntimeMode     string     `json:"runtime_mode"`
-	SessionID       string     `json:"session_id"`
-	TurnCount       int        `json:"turn_count"`
-	Turns24h        int        `json:"turns_24h"`
-	TurnLimit       int        `json:"turn_limit"`
-	NearBreaker     bool       `json:"near_breaker"`
-	LockOwner       string     `json:"lock_owner"`
-	LockExpiresAt   *time.Time `json:"lock_expires_at,omitempty"`
-	LastUsedAt      *time.Time `json:"last_used_at,omitempty"`
-	PendingEvents   int        `json:"pending_events"`
-	DeadLetters24h  int        `json:"dead_letters_24h"`
-	Failures24h     int        `json:"failures_24h"`
-	InputTokens24h  int64      `json:"input_tokens_24h"`
-	OutputTokens24h int64      `json:"output_tokens_24h"`
-	TotalTokens24h  int64      `json:"total_tokens_24h"`
-	State           string     `json:"state"`
-	StuckReason     string     `json:"stuck_reason,omitempty"`
-	SystemPrompt    string     `json:"system_prompt,omitempty"`
-	CreationEvent   eventRef   `json:"creation_event"`
-	LastTool        toolView   `json:"last_tool"`
+	ID                  string     `json:"id"`
+	Role                string     `json:"role"`
+	Mode                string     `json:"mode"`
+	Status              string     `json:"status"`
+	VerticalID          string     `json:"vertical_id"`
+	VerticalSlug        string     `json:"vertical_slug"`
+	CurrentTaskID       string     `json:"current_task_id"`
+	StartedAt           time.Time  `json:"started_at"`
+	LastActiveAt        time.Time  `json:"last_active_at"`
+	RuntimeMode         string     `json:"runtime_mode"`
+	SessionID           string     `json:"session_id"`
+	TurnCount           int        `json:"turn_count"`
+	Turns24h            int        `json:"turns_24h"`
+	TurnLimit           int        `json:"turn_limit"`
+	NearBreaker         bool       `json:"near_breaker"`
+	LockOwner           string     `json:"lock_owner"`
+	LockExpiresAt       *time.Time `json:"lock_expires_at,omitempty"`
+	LastUsedAt          *time.Time `json:"last_used_at,omitempty"`
+	PendingEvents       int        `json:"pending_events"`
+	OldestPendingAt     *time.Time `json:"oldest_pending_at,omitempty"`
+	OldestPendingAgeSec int        `json:"oldest_pending_age_sec,omitempty"`
+	InFlightTurn        bool       `json:"in_flight_turn"`
+	InFlightSeconds     int        `json:"in_flight_seconds,omitempty"`
+	DeadLetters24h      int        `json:"dead_letters_24h"`
+	Failures24h         int        `json:"failures_24h"`
+	InputTokens24h      int64      `json:"input_tokens_24h"`
+	OutputTokens24h     int64      `json:"output_tokens_24h"`
+	TotalTokens24h      int64      `json:"total_tokens_24h"`
+	State               string     `json:"state"`
+	StuckReason         string     `json:"stuck_reason,omitempty"`
+	SystemPrompt        string     `json:"system_prompt,omitempty"`
+	CreationEvent       eventRef   `json:"creation_event"`
+	LastTool            toolView   `json:"last_tool"`
 }
 
 type eventRef struct {
@@ -761,8 +765,9 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			ORDER BY agent_id, last_used_at DESC
 		),
 		pending AS (
-			SELECT d.agent_id, count(*) AS pending_count
+			SELECT d.agent_id, count(*) AS pending_count, min(e.created_at) AS oldest_pending_at
 			FROM event_deliveries d
+			INNER JOIN events e ON e.id = d.event_id
 			LEFT JOIN event_receipts r
 				ON r.event_id = d.event_id
 				AND r.agent_id = d.agent_id
@@ -827,6 +832,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			ls.lock_expires_at,
 			ls.last_used_at,
 			COALESCE(p.pending_count, 0),
+			p.oldest_pending_at,
 			COALESCE(d.dead_count, 0),
 			COALESCE(f.fail_count, 0),
 			COALESCE(ts.input_tokens, tt.input_tokens, 0),
@@ -872,6 +878,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		av.TurnLimit = turnLimit
 		var lockExp sql.NullTime
 		var lastUsed sql.NullTime
+		var oldestPending sql.NullTime
 		var toolOK string
 		var creationAt sql.NullTime
 		var toolAt sql.NullTime
@@ -894,6 +901,7 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 			&lockExp,
 			&lastUsed,
 			&av.PendingEvents,
+			&oldestPending,
 			&av.DeadLetters24h,
 			&av.Failures24h,
 			&av.InputTokens24h,
@@ -916,6 +924,12 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 		}
 		if lastUsed.Valid {
 			av.LastUsedAt = &lastUsed.Time
+		}
+		if oldestPending.Valid {
+			av.OldestPendingAt = &oldestPending.Time
+			if age := int(now.Sub(oldestPending.Time).Seconds()); age > 0 {
+				av.OldestPendingAgeSec = age
+			}
 		}
 		if toolAt.Valid {
 			av.LastTool.CreatedAt = &toolAt.Time
@@ -943,6 +957,17 @@ func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 
 		if turnLimit > 0 {
 			av.NearBreaker = float64(av.TurnCount)/float64(turnLimit) >= 0.9
+		}
+		if av.LockExpiresAt != nil && strings.TrimSpace(av.LockOwner) != "" && av.LockExpiresAt.After(now) {
+			av.InFlightTurn = true
+			switch {
+			case av.OldestPendingAgeSec > 0:
+				av.InFlightSeconds = av.OldestPendingAgeSec
+			case av.LastUsedAt != nil:
+				if sec := int(now.Sub(*av.LastUsedAt).Seconds()); sec > 0 {
+					av.InFlightSeconds = sec
+				}
+			}
 		}
 		av.State, av.StuckReason = classifyAgent(av, now)
 		stateCounts[av.State]++
@@ -6465,10 +6490,10 @@ func (s *Server) emitMailboxDecisionSideEffects(
 			}
 		}
 	}
-		if isFounderInputMailbox(item) && item.VerticalID != "" {
-			if err := s.appendTargetedEvent(ctx, events.Event{
-				ID:          uuid.NewString(),
-				Type:        events.EventType("founder_input.response"),
+	if isFounderInputMailbox(item) && item.VerticalID != "" {
+		if err := s.appendTargetedEvent(ctx, events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("founder_input.response"),
 			SourceAgent: "mailbox",
 			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
@@ -6502,10 +6527,10 @@ func (s *Server) emitMailboxDecisionSideEffects(
 
 	// Spec v2.0 §7.6: approved geography expansion recommendations must queue
 	// a validation scan campaign.
-		if outcome.Status == "approved" && isGeographyExpansionMailbox(item) {
-			geoID, req, campaignID, err := s.queueGeographyExpansionValidation(ctx, item)
-			if err != nil {
-				return err
+	if outcome.Status == "approved" && isGeographyExpansionMailbox(item) {
+		geoID, req, campaignID, err := s.queueGeographyExpansionValidation(ctx, item)
+		if err != nil {
+			return err
 		}
 		if err := s.appendTargetedEvent(ctx, events.Event{
 			ID:          uuid.NewString(),

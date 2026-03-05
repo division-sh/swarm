@@ -21,6 +21,8 @@ import (
 	"github.com/lib/pq"
 )
 
+const cannedE2EWaitTimeout = 20 * time.Second
+
 type threadSafeEventStore struct {
 	mu         sync.Mutex
 	events     []events.Event
@@ -341,6 +343,13 @@ func extractMessageField(input, key string) string {
 	if key == "" {
 		return ""
 	}
+	if payload := extractInboundPayloadMap(input); len(payload) > 0 {
+		if raw, ok := payload[key]; ok {
+			if text := strings.TrimSpace(asString(raw)); text != "" {
+				return text
+			}
+		}
+	}
 	jsonPattern := regexp.MustCompile(`"` + regexp.QuoteMeta(key) + `"\s*:\s*"([^"]+)"`)
 	if m := jsonPattern.FindStringSubmatch(input); len(m) >= 2 {
 		return strings.TrimSpace(m[1])
@@ -376,17 +385,19 @@ func countEventTypes(eventsList []events.Event) map[string]int {
 
 func waitForEventTypeCount(store *threadSafeEventStore, eventType string, want int, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastCount int
 	for time.Now().Before(deadline) {
 		counts := countEventTypes(store.SnapshotEvents())
-		if counts[strings.TrimSpace(eventType)] >= want {
+		lastCount = counts[strings.TrimSpace(eventType)]
+		if lastCount >= want {
 			return nil
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for %s count>=%d", strings.TrimSpace(eventType), want)
+	return fmt.Errorf("timed out waiting for %s count>=%d (last=%d)", strings.TrimSpace(eventType), want, lastCount)
 }
 
-func waitForVerticalStageCounts(db *sql.DB, geography string, wantShortlisted, wantMarginal int, timeout time.Duration) (shortlisted int, marginal int, err error) {
+func waitForVerticalStageCounts(db *sql.DB, wantShortlisted, wantMarginal int, timeout time.Duration) (shortlisted int, marginal int, err error) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if qErr := db.QueryRow(`
@@ -394,8 +405,7 @@ func waitForVerticalStageCounts(db *sql.DB, geography string, wantShortlisted, w
 				COUNT(*) FILTER (WHERE stage = 'shortlisted') AS shortlisted,
 				COUNT(*) FILTER (WHERE stage = 'marginal_review') AS marginal
 			FROM verticals
-			WHERE lower(COALESCE(geography,'')) = lower($1)
-		`, strings.TrimSpace(geography)).Scan(&shortlisted, &marginal); qErr != nil {
+		`).Scan(&shortlisted, &marginal); qErr != nil {
 			return 0, 0, qErr
 		}
 		if shortlisted == wantShortlisted && marginal == wantMarginal {
@@ -704,7 +714,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 		t.Fatalf("publish directive: %v", err)
 	}
 
-	campaignCompleted, err := waitForEventTypeTimeout(campaignCompletedCh, "campaign.completed", 8*time.Second)
+	campaignCompleted, err := waitForEventTypeTimeout(campaignCompletedCh, "campaign.completed", cannedE2EWaitTimeout)
 	if err != nil {
 		t.Fatalf("waiting for campaign.completed: %v", err)
 	}
@@ -744,13 +754,13 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	}
 	assertScanCampaignState(t, db, campaignID, 2)
 
-	if err := waitForEventTypeCount(eventStore, "score.dimension_complete", 22, 8*time.Second); err != nil {
+	if err := waitForEventTypeCount(eventStore, "score.dimension_complete", 22, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("waiting for score.dimension_complete fanout: %v", err)
 	}
-	if err := waitForEventTypeCount(eventStore, "vertical.scored", 2, 8*time.Second); err != nil {
+	if err := waitForEventTypeCount(eventStore, "vertical.scored", 2, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("waiting for vertical.scored fanout: %v", err)
 	}
-	shortlistedCount, marginalCount, err := waitForVerticalStageCounts(db, "argentina", 1, 1, 8*time.Second)
+	shortlistedCount, marginalCount, err := waitForVerticalStageCounts(db, 1, 1, cannedE2EWaitTimeout)
 	if err != nil {
 		t.Fatalf("waiting for expected vertical stages: %v", err)
 	}

@@ -631,6 +631,7 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 		}
 	case "scan.requested",
 		"category.assessed",
+		"vertical.derived",
 		"trend.identified",
 		"source.scraped",
 		"market_research.scan_complete",
@@ -694,6 +695,7 @@ func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
 		events.EventType("timer.portfolio_digest"),
 		events.EventType("scan.requested"),
 		events.EventType("category.assessed"),
+		events.EventType("vertical.derived"),
 		events.EventType("trend.identified"),
 		events.EventType("source.scraped"),
 		events.EventType("market_research.scan_complete"),
@@ -749,6 +751,8 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		// Delivery filtering for this event type is handled in interceptPolicy.
 		// Keep a no-op case for explicit coverage/traceability in switch audits.
 		return
+	case "vertical.derived":
+		pc.handleVerticalDerived(ctx, evt)
 	case "category.assessed", "trend.identified", "source.scraped":
 		pc.handleDiscoveryReport(ctx, evt)
 	case "market_research.scan_complete", "trend_research.scan_complete",

@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.47"
+	runtimeSpecVersion      = "v2.0.48"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -1797,13 +1797,28 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 	if am.shouldSkipEvent(agent.ID(), evt.ID) {
 		return nil
 	}
+	corpusMeta, corpusMode := corpusTurnMetaFromEvent(evt)
+	var corpusStartedAt time.Time
+	if corpusMode {
+		corpusMeta.AgentID = agent.ID()
+		corpusStartedAt = time.Now().UTC()
+		am.logCorpusTurnLifecycle(ctx, "corpus.turn_started", corpusMeta, 0, corpusEmitSnapshot{}, "")
+	}
 	if suppress, reason := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
+		if corpusMode {
+			duration := time.Since(corpusStartedAt)
+			am.logCorpusTurnLifecycle(ctx, "corpus.turn_suppressed", corpusMeta, duration, consumeCorpusEmitSnapshot(evt.ID), reason)
+		}
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", reason)
 		return nil
 	}
 	if strings.TrimSpace(agent.ID()) == "empire-coordinator" &&
 		strings.TrimSpace(string(evt.Type)) == "system.directive" &&
 		!directiveRequiresCoordinator(evt) {
+		if corpusMode {
+			duration := time.Since(corpusStartedAt)
+			am.logCorpusTurnLifecycle(ctx, "corpus.turn_intercepted", corpusMeta, duration, consumeCorpusEmitSnapshot(evt.ID), "intercepted simple directive (runtime-handled)")
+		}
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "intercepted simple directive (runtime-handled)")
 		return nil
 	}
@@ -1825,6 +1840,10 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 			strings.TrimSpace(string(evt.Type)),
 		)
 		am.maybeTripAuthCircuitBreaker(agent.ID(), evt.ID, err)
+		if corpusMode {
+			duration := time.Since(corpusStartedAt)
+			am.logCorpusTurnLifecycle(ctx, "corpus.turn_failed", corpusMeta, duration, consumeCorpusEmitSnapshot(evt.ID), FormatRuntimeError(agentErr))
+		}
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "error", FormatRuntimeError(agentErr))
 		return agentErr
 	}
@@ -1847,12 +1866,69 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 				strings.TrimSpace(string(e.Type)),
 				agent.ID(),
 			)
+			if corpusMode {
+				duration := time.Since(corpusStartedAt)
+				am.logCorpusTurnLifecycle(ctx, "corpus.turn_failed", corpusMeta, duration, consumeCorpusEmitSnapshot(evt.ID), FormatRuntimeError(pubErr))
+			}
 			am.writeReceipt(ctx, evt.ID, agent.ID(), "error", FormatRuntimeError(pubErr))
 			return pubErr
 		}
 	}
+	if corpusMode {
+		duration := time.Since(corpusStartedAt)
+		am.logCorpusTurnLifecycle(ctx, "corpus.turn_completed", corpusMeta, duration, consumeCorpusEmitSnapshot(evt.ID), "")
+	}
 	am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "")
 	return nil
+}
+
+func (am *AgentManager) logCorpusTurnLifecycle(
+	ctx context.Context,
+	action string,
+	meta corpusTurnMeta,
+	duration time.Duration,
+	snapshot corpusEmitSnapshot,
+	errText string,
+) {
+	if am == nil || am.bus == nil {
+		return
+	}
+	if strings.TrimSpace(action) == "" {
+		return
+	}
+	detail := map[string]any{
+		"batch_size":          meta.BatchSize,
+		"payload_bytes":       meta.PayloadBytes,
+		"emit_count":          snapshot.EmitCount,
+		"scan_complete_emits": snapshot.ScanCompleteEmits,
+	}
+	if duration > 0 {
+		detail["duration_ms"] = int(duration / time.Millisecond)
+	}
+	if !snapshot.FirstEmitAt.IsZero() {
+		detail["first_emit_at"] = snapshot.FirstEmitAt.UTC().Format(time.RFC3339Nano)
+		if !meta.AssignedAt.IsZero() {
+			ms := snapshot.FirstEmitAt.Sub(meta.AssignedAt).Milliseconds()
+			if ms < 0 {
+				ms = 0
+			}
+			detail["ms_to_first_emit"] = ms
+		}
+	}
+	am.bus.logRuntime(ctx, RuntimeLogEntry{
+		Level:      "debug",
+		Component:  "agent-manager",
+		Action:     strings.TrimSpace(action),
+		EventID:    strings.TrimSpace(meta.EventID),
+		EventType:  strings.TrimSpace(meta.EventType),
+		AgentID:    firstNonEmptyString(strings.TrimSpace(meta.AgentID), "unknown-agent"),
+		VerticalID: strings.TrimSpace(meta.VerticalID),
+		CampaignID: strings.TrimSpace(meta.CampaignID),
+		ScanID:     strings.TrimSpace(meta.ScanID),
+		Detail:     detail,
+		Error:      strings.TrimSpace(errText),
+		DurationUS: int(duration / time.Microsecond),
+	})
 }
 
 func directiveRequiresCoordinator(evt events.Event) bool {
@@ -2286,7 +2362,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.47",
+			TemplateVersion: "2.0.48",
 		}
 	}
 

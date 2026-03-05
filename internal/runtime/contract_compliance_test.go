@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,8 +27,10 @@ type contractComplianceAgent struct {
 	MaxTurnsPerTask        int      `yaml:"max_turns_per_task"`
 	Subscriptions          []string `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string `yaml:"subscriptions_bootstrap"`
+	SubscribesTo           []string `yaml:"subscribes_to"`
 	ToolsTier2             []string `yaml:"tools_tier2"`
 	EmitEvents             []string `yaml:"emit_events"`
+	Implementation         string   `yaml:"implementation"`
 }
 
 type contractComplianceAgentConfigMap struct {
@@ -54,8 +59,10 @@ type contractComplianceCatalogEvent struct {
 }
 
 type contractComplianceSystemNode struct {
-	ID       string   `yaml:"id"`
-	Produces []string `yaml:"produces"`
+	ID             string   `yaml:"id"`
+	SubscribesTo   []string `yaml:"subscribes_to"`
+	Produces       []string `yaml:"produces"`
+	Implementation string   `yaml:"implementation"`
 }
 
 type contractComplianceRoutes struct {
@@ -380,6 +387,70 @@ func TestContractCompliance(t *testing.T) {
 	t.Run("gate7_prefilter_contract_vectors", func(t *testing.T) {
 		runPrefilterContractVectorChecks(t, repoRoot)
 	})
+
+	t.Run("gate8_subscription_handler_coverage", func(t *testing.T) {
+		errs := make([]string, 0, 16)
+		subscriberEvents, implementationBySubscriber := contractComplianceDeterministicSubscriptions(contractAgents, systemNodes)
+		handledEventsCache := map[string]map[string]struct{}{}
+		handlerTests, testErr := contractComplianceCollectRuntimeTestNames(repoRoot)
+		if testErr != nil {
+			errs = append(errs, fmt.Sprintf("collect runtime test names: %v", testErr))
+		}
+
+		for _, sub := range subscriberEvents {
+			implPath := strings.TrimSpace(implementationBySubscriber[sub.Subscriber])
+			if implPath == "" {
+				errs = append(errs, fmt.Sprintf("subscriber %s missing implementation path for %s", sub.Subscriber, sub.EventType))
+				continue
+			}
+			handledEvents, ok := handledEventsCache[implPath]
+			if !ok {
+				var err error
+				handledEvents, err = contractComplianceParseHandledEventsFromFile(repoRoot, implPath)
+				if err != nil {
+					errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", implPath, err))
+					continue
+				}
+				handledEventsCache[implPath] = handledEvents
+			}
+			if _, ok := handledEvents[sub.EventType]; !ok {
+				errs = append(errs, fmt.Sprintf("subscription has no handler case: subscriber=%s event=%s implementation=%s", sub.Subscriber, sub.EventType, implPath))
+			}
+			expectedTest := contractComplianceExpectedHandlerTestName(sub.Subscriber, sub.EventType)
+			if expectedTest != "" {
+				if _, ok := handlerTests[expectedTest]; !ok {
+					errs = append(errs, fmt.Sprintf("subscription missing handler test: want=%s (subscriber=%s event=%s)", expectedTest, sub.Subscriber, sub.EventType))
+				}
+			}
+		}
+
+		// Interceptor parity check for consumed runtime events:
+		// any event listed in interceptPolicy must have a corresponding handleEvent case
+		// (except spec.revision_needed, handled in Intercept special-case branch).
+		pipelinePath := filepath.Join(repoRoot, "internal", "runtime", "pipeline_coordinator.go")
+		interceptEvents, handleEvents, _, err := parsePipelineInterceptorCoverage(pipelinePath)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("parse interceptor coverage: %v", err))
+		} else {
+			for evt := range interceptEvents {
+				if strings.TrimSpace(evt) == "spec.revision_needed" {
+					continue
+				}
+				if _, ok := handleEvents[evt]; !ok {
+					errs = append(errs, fmt.Sprintf("interceptor event %s has no handleEvent case", evt))
+				}
+			}
+		}
+
+		if len(errs) > 0 {
+			t.Fatalf("gate8 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+}
+
+type contractComplianceSubscription struct {
+	Subscriber string
+	EventType  string
 }
 
 func contractComplianceRepoRoot(t *testing.T) string {
@@ -790,6 +861,184 @@ func contractComplianceSplitSQLTopLevel(in string) []string {
 		parts = append(parts, b.String())
 	}
 	return parts
+}
+
+func contractComplianceDeterministicSubscriptions(
+	contractAgents map[string]contractComplianceAgent,
+	systemNodes map[string]contractComplianceSystemNode,
+) ([]contractComplianceSubscription, map[string]string) {
+	out := make([]contractComplianceSubscription, 0, 16)
+	implementationBySubscriber := map[string]string{}
+	seen := map[string]struct{}{}
+
+	for id, ag := range contractAgents {
+		if !strings.EqualFold(strings.TrimSpace(ag.NodeType), "system") {
+			continue
+		}
+		subscriber := strings.TrimSpace(id)
+		if subscriber == "" {
+			continue
+		}
+		impl := strings.TrimSpace(ag.Implementation)
+		if impl != "" {
+			implementationBySubscriber[subscriber] = impl
+		}
+		for _, evt := range append([]string{}, ag.SubscribesTo...) {
+			eventType := strings.TrimSpace(evt)
+			if eventType == "" {
+				continue
+			}
+			key := subscriber + "|" + eventType
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, contractComplianceSubscription{Subscriber: subscriber, EventType: eventType})
+		}
+	}
+
+	for id, node := range systemNodes {
+		subscriber := strings.TrimSpace(id)
+		if subscriber == "" {
+			continue
+		}
+		impl := strings.TrimSpace(node.Implementation)
+		if impl != "" {
+			implementationBySubscriber[subscriber] = impl
+		}
+		for _, evt := range node.SubscribesTo {
+			eventType := strings.TrimSpace(evt)
+			if eventType == "" {
+				continue
+			}
+			key := subscriber + "|" + eventType
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, contractComplianceSubscription{Subscriber: subscriber, EventType: eventType})
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Subscriber == out[j].Subscriber {
+			return out[i].EventType < out[j].EventType
+		}
+		return out[i].Subscriber < out[j].Subscriber
+	})
+	return out, implementationBySubscriber
+}
+
+func contractComplianceParseHandledEventsFromFile(repoRoot, relPath string) (map[string]struct{}, error) {
+	path := strings.TrimSpace(relPath)
+	if path == "" {
+		return map[string]struct{}{}, nil
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, path)
+	}
+	fset := token.NewFileSet()
+	fileNode, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	events := map[string]struct{}{}
+	ast.Inspect(fileNode, func(n ast.Node) bool {
+		switch typed := n.(type) {
+		case *ast.CaseClause:
+			for _, expr := range typed.List {
+				if lit, ok := contractComplianceStringLiteral(expr); ok {
+					events[strings.TrimSpace(lit)] = struct{}{}
+				}
+			}
+		case *ast.BinaryExpr:
+			if typed.Op != token.EQL {
+				return true
+			}
+			if lit, ok := contractComplianceStringLiteral(typed.X); ok {
+				events[strings.TrimSpace(lit)] = struct{}{}
+			}
+			if lit, ok := contractComplianceStringLiteral(typed.Y); ok {
+				events[strings.TrimSpace(lit)] = struct{}{}
+			}
+		}
+		return true
+	})
+	return events, nil
+}
+
+func contractComplianceStringLiteral(expr ast.Expr) (string, bool) {
+	bl, ok := expr.(*ast.BasicLit)
+	if !ok || bl.Kind != token.STRING {
+		return "", false
+	}
+	v := strings.TrimSpace(bl.Value)
+	if len(v) < 2 {
+		return "", false
+	}
+	if (strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`)) || (strings.HasPrefix(v, "`") && strings.HasSuffix(v, "`")) {
+		return strings.TrimSpace(v[1 : len(v)-1]), true
+	}
+	return "", false
+}
+
+func contractComplianceCollectRuntimeTestNames(repoRoot string) (map[string]struct{}, error) {
+	files, err := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "*_test.go"))
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	out := map[string]struct{}{}
+	for _, path := range files {
+		fileNode, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		for _, decl := range fileNode.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil {
+				continue
+			}
+			name := strings.TrimSpace(fn.Name.Name)
+			if strings.HasPrefix(name, "Test") {
+				out[name] = struct{}{}
+			}
+		}
+	}
+	return out, nil
+}
+
+func contractComplianceExpectedHandlerTestName(subscriber, eventType string) string {
+	sub := contractComplianceSanitizeTestToken(subscriber)
+	evt := contractComplianceSanitizeTestToken(eventType)
+	if sub == "" || evt == "" {
+		return ""
+	}
+	return "TestHandler_" + sub + "_" + evt
+}
+
+func contractComplianceSanitizeTestToken(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	out := strings.TrimSpace(b.String())
+	out = strings.Trim(out, "_")
+	return out
 }
 
 func contractComplianceNormVersion(v string) string {
