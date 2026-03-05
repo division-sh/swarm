@@ -43,16 +43,16 @@ func LoadGlobalAgentsFromYAML(agentsDir string) ([]models.AgentConfig, error) {
 		if id == "" {
 			return nil, fmt.Errorf("agent missing id (file=%s)", f)
 		}
-		systemPrompt := strings.TrimSpace(a.SystemPrompt)
+		if strings.TrimSpace(a.SystemPrompt) != "" {
+			return nil, fmt.Errorf("agent %s uses legacy system_prompt in YAML (file=%s); use contracts/prompts/%s.md", id, f, id)
+		}
 		contractPrompt, foundContractPrompt, err := promptcontracts.Load(id, "")
 		if err != nil {
 			return nil, fmt.Errorf("load contract prompt for %s: %w", id, err)
 		}
-		if foundContractPrompt {
-			systemPrompt = strings.TrimSpace(contractPrompt)
-		}
-		if systemPrompt == "" {
-			return nil, fmt.Errorf("agent %s missing required system_prompt (file=%s)", id, f)
+		systemPrompt := strings.TrimSpace(contractPrompt)
+		if !foundContractPrompt || systemPrompt == "" {
+			return nil, fmt.Errorf("agent %s missing required contract prompt (expected contracts/prompts/%s.md)", id, id)
 		}
 		if _, ok := seen[id]; ok {
 			return nil, fmt.Errorf("duplicate agent id %q (file=%s)", id, f)

@@ -72,8 +72,40 @@ func TestLoadGlobalAgentsFromYAML_UsesContractPromptFile(t *testing.T) {
 	}
 }
 
+func TestLoadGlobalAgentsFromYAML_RejectsLegacyYAMLPrompt(t *testing.T) {
+	dir := t.TempDir()
+	promptsDir := t.TempDir()
+	t.Setenv("EMPIREAI_PROMPTS_DIR", promptsDir)
+
+	if err := os.WriteFile(filepath.Join(promptsDir, "a.md"), []byte("contract prompt"), 0o644); err != nil {
+		t.Fatalf("write contract prompt: %v", err)
+	}
+
+	roster := []byte("agents:\n  a:\n    config_path: ./a.yaml\n")
+	if err := os.WriteFile(filepath.Join(dir, "roster.yaml"), roster, 0o644); err != nil {
+		t.Fatalf("write roster: %v", err)
+	}
+	agentWithLegacyPrompt := []byte(strings.Join([]string{
+		"id: a",
+		"role: a",
+		"mode: holding",
+		"model_tier: sonnet",
+		"system_prompt: |",
+		"  stale prompt",
+	}, "\n"))
+	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), agentWithLegacyPrompt, 0o644); err != nil {
+		t.Fatalf("write agent: %v", err)
+	}
+
+	if _, err := LoadGlobalAgentsFromYAML(dir); err == nil {
+		t.Fatal("expected legacy YAML system_prompt to fail")
+	}
+}
+
 func TestLoadGlobalAgentsFromYAML_LoadsRosterFiles(t *testing.T) {
 	dir := t.TempDir()
+	promptsDir := t.TempDir()
+	t.Setenv("EMPIREAI_PROMPTS_DIR", promptsDir)
 	roster := []byte(strings.Join([]string{
 		"agents:",
 		"  a:",
@@ -89,22 +121,24 @@ func TestLoadGlobalAgentsFromYAML_LoadsRosterFiles(t *testing.T) {
 		"role: a",
 		"mode: holding",
 		"model_tier: sonnet",
-		"system_prompt: |",
-		"  You are a.",
 	}, "\n"))
 	b := []byte(strings.Join([]string{
 		"id: b",
 		"role: b",
 		"mode: factory",
 		"model_tier: haiku",
-		"system_prompt: |",
-		"  You are b.",
 	}, "\n"))
 	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), a, 0o644); err != nil {
 		t.Fatalf("write a: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "b.yaml"), b, 0o644); err != nil {
 		t.Fatalf("write b: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "a.md"), []byte("You are a."), 0o644); err != nil {
+		t.Fatalf("write prompt a: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "b.md"), []byte("You are b."), 0o644); err != nil {
+		t.Fatalf("write prompt b: %v", err)
 	}
 
 	got, err := LoadGlobalAgentsFromYAML(dir)
@@ -162,7 +196,7 @@ func TestLoadGlobalAgentsFromYAML_RejectsInvalidRosterPaths(t *testing.T) {
 	t.Run("path escapes dir", func(t *testing.T) {
 		dir := t.TempDir()
 		outside := filepath.Join(filepath.Dir(dir), "outside.yaml")
-		if err := os.WriteFile(outside, []byte("id: o\nrole: o\nsystem_prompt: |\n  x\n"), 0o644); err != nil {
+		if err := os.WriteFile(outside, []byte("id: o\nrole: o\n"), 0o644); err != nil {
 			t.Fatalf("write outside file: %v", err)
 		}
 		roster := []byte("agents:\n  a:\n    config_path: ../outside.yaml\n")
