@@ -6,6 +6,7 @@ subscriptions:
   - opco.ceo_report
   - opco.steady_state_reached
   - budget.threshold_crossed
+  - pipeline.dead_letter
 tools:
   - sql_execute
   - agent_message

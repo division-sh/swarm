@@ -340,8 +340,7 @@ var EventSchemaRegistry = map[string]EventSchema{
 					"additionalProperties": true,
 				},
 				"founder_directives": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "string"},
+					"type": "string",
 				},
 				"task_id": map[string]any{"type": "string"},
 			},

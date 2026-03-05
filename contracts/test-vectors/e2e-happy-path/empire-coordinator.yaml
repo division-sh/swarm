@@ -11,6 +11,4 @@ responses:
             founder_notes: "Launch operational billing automation OpCo"
           brand:
             name: ReconcileFlow
-          founder_directives:
-            - prioritize claim denial reduction
-            - keep onboarding under 14 days
+          founder_directives: "prioritize claim denial reduction; keep onboarding under 14 days"

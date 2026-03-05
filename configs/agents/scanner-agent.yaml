@@ -1,7 +1,7 @@
 id: scanner-agent
 role: scanner-agent
 mode: factory
-model_tier: sonnet
+model_tier: haiku
 subscriptions:
   - scanner.google_maps.scan_assigned
   - scanner.instagram.scan_assigned

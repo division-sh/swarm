@@ -1025,6 +1025,10 @@ function AgentDropdown({ agent, addToast, onNavigate, onAction }) {
   const [chatMode, setChatMode] = useState("live");
   const [chatMessage, setChatMessage] = useState("");
   const [directiveMessage, setDirectiveMessage] = useState("");
+  const [quickGeography, setQuickGeography] = useState("US");
+  const [quickUseCorpus, setQuickUseCorpus] = useState(true);
+  const [quickMode, setQuickMode] = useState("saas_gap");
+  const [quickCorpusPath, setQuickCorpusPath] = useState("/data/test-signals-25.jsonl");
   const [turns, setTurns] = useState([]);
   const [busy, setBusy] = useState("");
   const [promptState, setPromptState] = useState(null);
@@ -1069,6 +1073,19 @@ function AgentDropdown({ agent, addToast, onNavigate, onAction }) {
   }
 
   const creationID = agent.creation_event && agent.creation_event.id ? agent.creation_event.id : "";
+  const isEmpireCoordinator = (agent.id || "").trim() === "empire-coordinator";
+  const geoDatalistID = `geo-options-${(agent.id || "agent").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const quickGeographyOptions = ["US", "Argentina", "Brazil", "Mexico", "Chile", "Peru", "Paraguay", "Uruguay", "Colombia"];
+
+  function buildQuickDirective() {
+    const geo = (quickGeography || "").trim() || "US";
+    if (quickUseCorpus) {
+      const corpusPath = (quickCorpusPath || "").trim() || "/data/test-signals-25.jsonl";
+      return `run corpus in ${geo}, corpus_path=${corpusPath}`;
+    }
+    const mode = (quickMode || "").trim() || "saas_gap";
+    return `run ${mode} in ${geo}`;
+  }
 
   return (
     <div className="agent-drop">
@@ -1195,6 +1212,61 @@ function AgentDropdown({ agent, addToast, onNavigate, onAction }) {
           </div>
 
           <div className="tiny" style={{ marginTop: 10 }}>Directive</div>
+          {isEmpireCoordinator ? (
+            <div className="control-card" style={{ marginTop: 6, marginBottom: 8, padding: 10 }}>
+              <div className="tiny" style={{ marginBottom: 6 }}>Quick Campaign Builder</div>
+              <div className="tiny" style={{ marginBottom: 4 }}>Geography</div>
+              <input
+                list={geoDatalistID}
+                value={quickGeography}
+                onChange={(e) => setQuickGeography(e.target.value)}
+                placeholder="US"
+              />
+              <datalist id={geoDatalistID}>
+                {quickGeographyOptions.map((geo) => <option key={geo} value={geo} />)}
+              </datalist>
+              <label className="tiny" style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={quickUseCorpus}
+                  onChange={(e) => setQuickUseCorpus(!!e.target.checked)}
+                />
+                Corpus mode
+              </label>
+              {quickUseCorpus ? (
+                <>
+                  <div className="tiny" style={{ marginTop: 6, marginBottom: 4 }}>Corpus path</div>
+                  <input
+                    value={quickCorpusPath}
+                    onChange={(e) => setQuickCorpusPath(e.target.value)}
+                    placeholder="/data/test-signals-25.jsonl"
+                  />
+                </>
+              ) : (
+                <>
+                  <div className="tiny" style={{ marginTop: 6, marginBottom: 4 }}>Mode</div>
+                  <select value={quickMode} onChange={(e) => setQuickMode(e.target.value)}>
+                    <option value="saas_gap">saas_gap</option>
+                    <option value="saas_trend">saas_trend</option>
+                    <option value="automation_micro">automation_micro</option>
+                    <option value="local_services">local_services</option>
+                  </select>
+                </>
+              )}
+              <div className="stack" style={{ marginTop: 8 }}>
+                <button className="btn-secondary" onClick={() => setDirectiveMessage(buildQuickDirective())}>Use Template</button>
+                <button
+                  disabled={!!busy}
+                  onClick={() => {
+                    const msg = buildQuickDirective();
+                    exec("directive", async () => postJSON("/dashboard/api/control/directive", { agent_id: agent.id, message: msg }));
+                  }}
+                >
+                  {busy === "directive" ? "Sending\u2026" : "Send Template"}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <textarea value={directiveMessage} onChange={(e) => setDirectiveMessage(e.target.value)} placeholder="Give this agent a direct directive..." />
           <div className="stack" style={{ marginTop: 6 }}>
             <button disabled={!!busy || !directiveMessage.trim()} onClick={() => {

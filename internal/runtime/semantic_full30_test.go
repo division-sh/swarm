@@ -765,8 +765,8 @@ func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 			seeded++
 		}
 	}
-	if bootstrap == 0 || seeded == 0 {
-		t.Fatalf("expected bootstrap and seeded routes, got bootstrap=%d seeded=%d", bootstrap, seeded)
+	if bootstrap != 20 || seeded != 0 {
+		t.Fatalf("expected bootstrap=20 and seeded=0 routes, got bootstrap=%d seeded=%d", bootstrap, seeded)
 	}
 
 	bus := NewEventBus(InMemoryEventStore{})

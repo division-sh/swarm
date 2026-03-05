@@ -59,8 +59,8 @@ bootstrap_routes:
   - event_pattern: "feature_deployed"
     subscriber_role: "marketing-agent"
     reason: "bootstrap"
-
-seeded_routes:
   - event_pattern: "bug_fix_deployed"
     subscriber_role: "support-agent"
-    reason: "seeded"
+    reason: "bootstrap"
+
+seeded_routes: []

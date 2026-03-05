@@ -333,17 +333,27 @@ func (s *PostgresStore) LookupGeographyLabel(ctx context.Context, geographyID st
 	`, geographyID).Scan(&name, &country, &region); err != nil {
 		return "", err
 	}
+	return joinGeographyLabel(name, region, country), nil
+}
+
+func joinGeographyLabel(name, region, country string) string {
 	parts := make([]string, 0, 3)
-	if strings.TrimSpace(name) != "" {
-		parts = append(parts, strings.TrimSpace(name))
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		for _, existing := range parts {
+			if strings.EqualFold(existing, v) {
+				return
+			}
+		}
+		parts = append(parts, v)
 	}
-	if strings.TrimSpace(region) != "" {
-		parts = append(parts, strings.TrimSpace(region))
-	}
-	if strings.TrimSpace(country) != "" {
-		parts = append(parts, strings.TrimSpace(country))
-	}
-	return strings.Join(parts, ", "), nil
+	add(name)
+	add(region)
+	add(country)
+	return strings.Join(parts, ", ")
 }
 
 func (s *PostgresStore) MarkScanCampaignCompleted(ctx context.Context, campaignID string, discoveries int) error {

@@ -1889,7 +1889,7 @@ func extractRetentionPrimitives(payload map[string]any) []string {
 	checkArray(payload["retention_primitives"])
 	checkArray(buildSketch["retention_primitives"])
 
-	// v2.0.45 category.assessed schema does not carry explicit retention_primitives.
+	// v2.0.47 category.assessed schema does not carry explicit retention_primitives.
 	// Infer plausible primitives from structured narrative fields to avoid blind drops.
 	for _, primitive := range inferRetentionPrimitives(payload) {
 		add(primitive)

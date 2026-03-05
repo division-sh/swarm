@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.45"
+	runtimeSpecVersion      = "v2.0.47"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -2286,7 +2286,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.45",
+			TemplateVersion: "2.0.47",
 		}
 	}
 
@@ -2334,19 +2334,6 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 			BootstrapVersion: 1,
 		}
 	}
-	seeded := func(pattern, sub string) PersistedRoutingRule {
-		return PersistedRoutingRule{
-			VerticalID:       verticalID,
-			EventPattern:     pattern,
-			SubscriberID:     sub,
-			InstalledBy:      ceo,
-			Reason:           "seeded",
-			Status:           "active",
-			Source:           "seeded",
-			BootstrapVersion: 1,
-		}
-	}
-
 	rules := []PersistedRoutingRule{
 		bootstrap("product_spec_ready", cto),
 		bootstrap("cto.tech_spec_review_requested", opCoAgentID("tech-writer", verticalID)),
@@ -2367,7 +2354,7 @@ func defaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 		bootstrap("inbound.whatsapp_message", support),
 		bootstrap("inbound.email", support),
 		bootstrap("feature_deployed", marketing),
-		seeded("bug_fix_deployed", support),
+		bootstrap("bug_fix_deployed", support),
 	}
 	return rules
 }

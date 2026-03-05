@@ -563,25 +563,36 @@ func isComplexDirectiveText(text string) bool {
 	return false
 }
 
-var directiveInPattern = regexp.MustCompile(`(?i)\bin\s+([a-z][a-z\s-]{2,})`)
+var (
+	directiveInPattern = regexp.MustCompile(`(?i)\bin\s+([a-z][a-z\s-]{1,})`)
+	directiveGeoAlias  = map[string]string{
+		"paraguay":                 "Paraguay",
+		"argentina":                "Argentina",
+		"brazil":                   "Brazil",
+		"mexico":                   "Mexico",
+		"chile":                    "Chile",
+		"peru":                     "Peru",
+		"colombia":                 "Colombia",
+		"uruguay":                  "Uruguay",
+		"us":                       "United States",
+		"usa":                      "United States",
+		"united states":            "United States",
+		"united states of america": "United States",
+	}
+)
 
 func parseDirectiveGeography(text string) (name, country, region string) {
 	raw := strings.TrimSpace(text)
 	if raw == "" {
 		return "unspecified", "unspecified", ""
 	}
-	lower := strings.ToLower(raw)
-	known := map[string]string{
-		"paraguay":  "Paraguay",
-		"argentina": "Argentina",
-		"brazil":    "Brazil",
-		"mexico":    "Mexico",
-		"chile":     "Chile",
-		"peru":      "Peru",
-		"colombia":  "Colombia",
-		"uruguay":   "Uruguay",
+	if token := strings.TrimSpace(strings.SplitN(raw, ",", 2)[0]); token != "" {
+		if label, ok := canonicalDirectiveGeography(token); ok {
+			return label, label, ""
+		}
 	}
-	for needle, label := range known {
+	lower := strings.ToLower(raw)
+	for needle, label := range directiveGeoAlias {
 		if strings.Contains(lower, needle) {
 			return label, label, ""
 		}
@@ -590,10 +601,26 @@ func parseDirectiveGeography(text string) (name, country, region string) {
 	if len(m) == 2 {
 		part := sanitizeGeographyPhrase(m[1])
 		if part != "" {
+			if label, ok := canonicalDirectiveGeography(part); ok {
+				return label, label, ""
+			}
 			return part, part, ""
 		}
 	}
 	return "unspecified", "unspecified", ""
+}
+
+func canonicalDirectiveGeography(v string) (string, bool) {
+	norm := strings.ToLower(strings.TrimSpace(v))
+	norm = strings.Trim(norm, `"'`)
+	norm = strings.ReplaceAll(norm, ".", "")
+	norm = strings.ReplaceAll(norm, "_", " ")
+	norm = strings.Join(strings.Fields(norm), " ")
+	if norm == "" {
+		return "", false
+	}
+	label, ok := directiveGeoAlias[norm]
+	return label, ok
 }
 
 func sanitizeGeographyPhrase(v string) string {

@@ -34,3 +34,10 @@ func TestParseDirectiveMode_Corpus(t *testing.T) {
 		t.Fatalf("expected corpus explicit mode, got mode=%q explicit=%v", mode, explicit)
 	}
 }
+
+func TestParseDirectiveGeography_USAbbrev(t *testing.T) {
+	name, country, _ := parseDirectiveGeography("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	if name != "United States" || country != "United States" {
+		t.Fatalf("expected US abbreviation to map to United States, got name=%q country=%q", name, country)
+	}
+}

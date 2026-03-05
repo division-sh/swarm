@@ -836,7 +836,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 		Payload: mustJSON(map[string]any{
 			"vertical_id":         readyVerticalID,
 			"brand_choice":        "ReconcileFlow",
-			"founder_directives":  []string{"prioritize claim denial reduction", "keep onboarding under 14 days"},
+			"founder_directives":  "prioritize claim denial reduction; keep onboarding under 14 days",
 			"mailbox_decision_id": pendingMailboxID,
 		}),
 		CreatedAt: time.Now().UTC(),

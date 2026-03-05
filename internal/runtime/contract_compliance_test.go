@@ -232,7 +232,7 @@ func TestContractCompliance(t *testing.T) {
 		for _, eventType := range eventTypes {
 			cat := eventCatalog[eventType]
 			emitterType := strings.ToLower(strings.TrimSpace(cat.EmitterType))
-			// Gate 3 scope (v2.0.45):
+			// Gate 3 scope (v2.0.47):
 			// - agent: enforce against commgraph agentProducerEvents.
 			// - system_node: enforce against contracts/system-nodes.yaml produces.
 			// - runtime, human, opco_agent: intentionally skipped here.
