@@ -6496,7 +6496,7 @@ The wiring verifier is the spec integrity contract. It automatically validates t
 
 **The verifier cross-references these four sources and flags any inconsistency.**
 
-**Go test implementation (v2.0.44):** The verifier logic is now implemented as `internal/runtime/contract_compliance_test.go`, which reads contract YAML files at test time rather than parsing spec prose. See §17.3 for the 6 automated compliance gates. Run with `go test ./internal/runtime/ -run TestContractCompliance`.
+**Go test implementation (v2.0.44):** The verifier logic is now implemented as `internal/runtime/contract_compliance_test.go`, which reads contract YAML files at test time rather than parsing spec prose. See §17.3 for the 7 automated compliance gates. Run with `go test ./internal/runtime/ -run TestContractCompliance`.
 
 **Verification logic per event type:**
 
@@ -6744,7 +6744,7 @@ The contract compliance test file reads YAML/SQL contracts at test time and veri
 
 **File:** `internal/runtime/contract_compliance_test.go`
 
-**6 gates covering 90% of observed drift:**
+**7 gates covering 90% of observed drift:**
 
 | Gate | What it validates | Drift it catches |
 |------|------------------|-----------------|
@@ -7081,7 +7081,7 @@ Implementation tests load contract YAML/SQL files at test time and cross-referen
 
 **Implementation:** `internal/runtime/contract_compliance_test.go` — runs with `go test ./internal/runtime/ -run TestContractCompliance`. Reads contract files from `contracts/` directory using `os.ReadFile`, unmarshals into simple structs, compares against runtime registries.
 
-**6 automated compliance gates (v2.0.44):**
+**7 automated compliance gates (v2.0.44):**
 
 | Gate | Test Function | What It Validates |
 |------|--------------|-------------------|
@@ -7091,6 +7091,7 @@ Implementation tests load contract YAML/SQL files at test time and cross-referen
 | 4. Schema payload coverage | `TestContractCompliance/schema_payload` | Every event-catalog payload field exists in EventSchemaRegistry. Strict equality when additionalProperties=false |
 | 5. DDL tables + columns | `TestContractCompliance/ddl_tables` | Table count matches DDL (37), 7 runtime table columns match Go struct field tags |
 | 6. Version constants | `TestContractCompliance/version_constants` | runtimeSpecVersion and TemplateVersion match contract spec_version |
+| 7. Agent prompts | `TestContractCompliance/agent_prompts` | SHA-256 of runtime-loaded prompt matches `agent-prompts.yaml` sha256_prefix. Catches stale prompts that cause enum/field confusion |
 
 **What these tests do NOT cover** (remain manual or require integration infrastructure): event roundtrip tests, crash recovery, integration-level multi-agent routing, grep-based one-time cleanup gates. See `verification-gates.yaml` — each gate has an `automated` field indicating whether it has a Go test implementation (`null` = manual).
 
@@ -8292,6 +8293,8 @@ prompt_template: |
 ---
 
 ## Appendix B: Factory & Holding Agent System Prompts
+
+**Canonical source:** `contracts/agent-prompts.yaml` contains the authoritative system prompt for each agent. Runtime loads prompts from this contract file. When Appendix B prose and the contract disagree, the contract wins. `TestContractCompliance/agent_prompts` enforces that runtime-loaded prompts match the contract (SHA-256 comparison). Prompt variants (e.g. corpus mode) use the `agent_id:mode` key convention.
 
 Factory and holding-level agent system prompts are based on v0.3 with the following updates:
 

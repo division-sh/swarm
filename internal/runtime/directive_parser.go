@@ -16,6 +16,7 @@ type ParsedDirective struct {
 	Raw             string      `json:"raw,omitempty"`
 	Mode            string      `json:"mode,omitempty"`
 	ExplicitMode    bool        `json:"explicit_mode,omitempty"`
+	CorpusPath      string      `json:"corpus_path,omitempty"`
 	Geography       string      `json:"geography,omitempty"`
 	Country         string      `json:"country,omitempty"`
 	Region          string      `json:"region,omitempty"`
@@ -42,6 +43,7 @@ func (DirectiveParser) Parse(text string) ParsedDirective {
 		Raw:             raw,
 		Mode:            mode,
 		ExplicitMode:    explicit,
+		CorpusPath:      extractDirectiveCorpusPath(raw),
 		Geography:       geoName,
 		Country:         country,
 		Region:          region,
@@ -100,6 +102,8 @@ func extractListClause(text, keyword string) []string {
 var (
 	budgetNumberPattern = regexp.MustCompile(`(?i)\bbudget[^0-9$]*\$?\s*([0-9][0-9,\.]*)`)
 	priceRangePattern   = regexp.MustCompile(`(?i)\b(?:price|pricing|ticket)\b[^0-9$]*\$?\s*([0-9][0-9,\.]*)\s*(?:-|to)\s*\$?\s*([0-9][0-9,\.]*)`)
+	corpusPathPattern   = regexp.MustCompile(`(?i)\bcorpus_path\s*[:=]\s*([^\s,;]+)`)
+	corpusFilePattern   = regexp.MustCompile(`(?i)\b(?:corpus|jsonl)\s*(?:at|from|path|file)?\s*[:=]?\s*([^\s,;]+\.jsonl)\b`)
 )
 
 func extractBudgetCap(text string) float64 {
@@ -125,6 +129,20 @@ func extractPriceRange(text string) *PriceRange {
 		Max:      max,
 		Currency: "USD",
 	}
+}
+
+func extractDirectiveCorpusPath(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	if m := corpusPathPattern.FindStringSubmatch(text); len(m) >= 2 {
+		return strings.Trim(strings.TrimSpace(m[1]), `"'`)
+	}
+	if m := corpusFilePattern.FindStringSubmatch(text); len(m) >= 2 {
+		return strings.Trim(strings.TrimSpace(m[1]), `"'`)
+	}
+	return ""
 }
 
 func parseNumberToken(raw string) float64 {

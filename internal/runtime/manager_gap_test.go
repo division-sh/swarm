@@ -289,29 +289,33 @@ func TestAgentManager_RunRestartChatIsRunning(t *testing.T) {
 }
 
 func TestAgentManager_SpawnAgent_RejectsMissingSystemPrompt(t *testing.T) {
+	t.Setenv("EMPIREAI_PROMPTS_DIR", t.TempDir())
+
 	bus := NewEventBus(InMemoryEventStore{})
 	factory := NewLLMAgentFactory(&captureRuntime{}, &fakeToolExec{}, nil)
 	am := NewAgentManager(bus, factory)
 
 	err := am.SpawnAgent(models.AgentConfig{
-		ID:   "a1",
-		Role: "pm-agent",
-		Mode: "operating",
+		ID:   "unknown-agent",
+		Role: "unknown-agent",
+		Mode: "factory",
 	})
 	if err == nil {
-		t.Fatal("expected missing system_prompt failure")
+		t.Fatal("expected missing system_prompt failure when no contract prompt exists")
 	}
 }
 
 func TestAgentManager_Recover_RejectsMissingSystemPrompt(t *testing.T) {
+	t.Setenv("EMPIREAI_PROMPTS_DIR", t.TempDir())
+
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &managerStoreStub{
 		agents: []PersistedAgent{
 			{
 				Config: models.AgentConfig{
-					ID:   "a1",
-					Role: "pm-agent",
-					Mode: "operating",
+					ID:   "unknown-agent",
+					Role: "unknown-agent",
+					Mode: "factory",
 				},
 			},
 		},
@@ -321,7 +325,7 @@ func TestAgentManager_Recover_RejectsMissingSystemPrompt(t *testing.T) {
 
 	err := am.Recover(context.Background())
 	if err == nil {
-		t.Fatal("expected recover failure for missing system_prompt")
+		t.Fatal("expected recover failure for missing system_prompt when no contract prompt exists")
 	}
 }
 

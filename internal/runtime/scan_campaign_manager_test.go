@@ -68,6 +68,10 @@ func TestScanCampaignManager_Tick_ClaimsAndEmitsScanRequested(t *testing.T) {
 			Mode:        "default",
 			Categories:  []string{"a", "b"},
 			Priority:    "high",
+			StrategicContext: mustJSON(map[string]any{
+				"directive_text": "US, corpus",
+				"corpus_path":    "/data/test-signals-25.jsonl",
+			}),
 		},
 	}
 	mgr := NewScanCampaignManager(bus, store)
@@ -84,6 +88,9 @@ func TestScanCampaignManager_Tick_ClaimsAndEmitsScanRequested(t *testing.T) {
 		}
 		if payload["campaign_id"] != "c1" {
 			t.Fatalf("expected c1, got %#v", payload["campaign_id"])
+		}
+		if got := asString(payload["corpus_path"]); got != "/data/test-signals-25.jsonl" {
+			t.Fatalf("expected corpus_path propagated, got %q", got)
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("expected scan.requested event")
@@ -187,6 +194,11 @@ func TestParseDirectiveMode(t *testing.T) {
 	mode, explicit = parseDirectiveMode("run automation micro in Paraguay")
 	if mode != "saas_gap" || !explicit {
 		t.Fatalf("expected explicit automation_micro alias to saas_gap, got mode=%s explicit=%v", mode, explicit)
+	}
+
+	mode, explicit = parseDirectiveMode("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	if mode != "corpus" || !explicit {
+		t.Fatalf("expected explicit corpus mode, got mode=%s explicit=%v", mode, explicit)
 	}
 }
 

@@ -203,3 +203,35 @@ func TestScanCampaignManager_OnDirective_ComplexForwardsToCoordinator(t *testing
 		t.Fatalf("expected no queued campaigns for complex directive, got %d", campaigns)
 	}
 }
+
+func TestScanCampaignManager_OnDirective_CorpusQueuesWithPath(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	bus := NewEventBus(InMemoryEventStore{})
+	store := &directiveCampaignStore{db: db}
+	manager := NewScanCampaignManager(bus, store, db)
+
+	manager.onDirective(ctx, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "human",
+		Payload: mustJSON(map[string]any{
+			"directive_text": "US, corpus, corpus_path=/data/test-signals-25.jsonl",
+		}),
+		CreatedAt: time.Now().UTC(),
+	})
+
+	if len(store.created) != 1 {
+		t.Fatalf("expected 1 corpus campaign, got %d", len(store.created))
+	}
+	if store.created[0].Mode != "corpus" {
+		t.Fatalf("expected corpus mode queued, got %q", store.created[0].Mode)
+	}
+	var strategic map[string]any
+	if err := json.Unmarshal(store.created[0].StrategicContext, &strategic); err != nil {
+		t.Fatalf("decode strategic context: %v", err)
+	}
+	if got := strings.TrimSpace(asString(strategic["corpus_path"])); got != "/data/test-signals-25.jsonl" {
+		t.Fatalf("expected corpus_path propagated, got %q", got)
+	}
+}

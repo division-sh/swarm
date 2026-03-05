@@ -235,11 +235,35 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 }
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
+	cfg = am.applyContractPrompt(cfg)
 	cfg = am.applyPromptOverride(am.runtimeContext(), cfg)
 	if am.factory != nil {
 		return am.factory(cfg)
 	}
 	return newGenericAgent(cfg), nil
+}
+
+func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) models.AgentConfig {
+	prompt, found, err := loadContractPromptForAgent(cfg, "")
+	if err != nil {
+		runtimeWarn(
+			"agent-manager",
+			"contract prompt load failed agent_id=%s role=%s err=%v",
+			strings.TrimSpace(cfg.ID),
+			strings.TrimSpace(cfg.Role),
+			err,
+		)
+		return cfg
+	}
+	if !found {
+		return cfg
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return cfg
+	}
+	cfg.Config = withSystemPrompt(cfg.Config, prompt)
+	return cfg
 }
 
 func (am *AgentManager) applyPromptOverride(ctx context.Context, cfg models.AgentConfig) models.AgentConfig {

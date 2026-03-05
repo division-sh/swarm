@@ -1,0 +1,2235 @@
+analyst.anti_pattern_advisory:
+  emitter: operations-analyst
+  consumer: factory-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - pattern
+  - affected_verticals
+  - severity
+  - recommendation
+  emitter_type: agent
+analyst.bootstrap_upgrade_proposal:
+  emitter: operations-analyst
+  consumer: factory-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - proposal_type
+  - affected_routes
+  - evidence
+  - recommendation
+  emitter_type: agent
+analyst.prompt_refinement_proposal:
+  emitter: operations-analyst
+  consumer: factory-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - agent_role
+  - current_behavior
+  - proposed_change
+  - evidence
+  emitter_type: agent
+board.chat:
+  emitter: human
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - message
+  - context
+  - response_requested
+  emitter_type: human
+board.directive:
+  emitter: human
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - directive_type
+  - target
+  - parameters
+  - priority
+  emitter_type: human
+brand.candidates_ready:
+  emitter: pre-brand-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - candidates
+  emitter_type: agent
+brand.requested:
+  emitter: runtime
+  consumer: pre-brand-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - vertical_name
+  - geography
+  - business_brief
+  emitter_type: runtime
+brand.revision_needed:
+  emitter: human
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  runtime_handling: consuming
+  payload:
+  - vertical_id
+  - feedback
+  emitter_type: human
+budget.emergency:
+  emitter: empire-coordinator
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - level
+  - message
+  - action_taken
+  emitter_type: agent
+budget.resumed:
+  emitter: empire-coordinator
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - previous_level
+  - message
+  emitter_type: agent
+budget.threshold_crossed:
+  emitter: runtime
+  consumer:
+  - empire-coordinator
+  - operations-analyst
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - level
+  - current_spend
+  - budget_cap
+  - percentage
+  emitter_type: runtime
+budget.throttle:
+  emitter: empire-coordinator
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - throttle_level
+  - affected_agents
+  emitter_type: agent
+budget.warning:
+  emitter: empire-coordinator
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - level
+  - message
+  emitter_type: agent
+bug_fix_deployed:
+  emitter: opco-cto
+  consumer: opco-support
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - bug_id
+  - version
+  - resolution
+  emitter_type: opco_agent
+bug_reported:
+  emitter: opco-support
+  consumer: opco-cto
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - description
+  - severity
+  - reproduction_steps
+  emitter_type: opco_agent
+build_blocked:
+  emitter: opco-cto
+  consumer: opco-head-of-product
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - blocker
+  - blocked_task
+  - severity
+  emitter_type: opco_agent
+build_complete:
+  emitter: opco-cto
+  consumer:
+  - opco-head-of-product
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - feature
+  - environment
+  emitter_type: opco_agent
+build_progress:
+  emitter: opco-cto
+  consumer: opco-head-of-product
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - milestone
+  - completion_pct
+  emitter_type: opco_agent
+campaign.completed:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - campaign_id
+  - geography
+  - modes_completed
+  - total_discovered
+  - total_shortlisted
+  emitter_type: runtime
+category.assessed:
+  emitter: market-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - category
+  - subcategory
+  - geography
+  - signal_strength
+  - opportunity_name
+  - preliminary_icp
+  - build_sketch
+  - evidence
+  - opportunity_hypothesis
+  - geographic_scope
+  - opportunity_pattern
+  - signal_sources
+  - required_capabilities
+  notes: 'v2.0.40: Multi-signal model — MRA emits 0-N signals per subcategory. Each signal is one opportunity. automation_micro
+    nested field removed. Runtime pre-filter applies ICP positive check, evidence completeness, and red flag filtering before
+    emitting vertical.discovered. geographic_scope indicates if opportunity is geography-locked or global. v2.0.44: opportunity_pattern,
+    signal_sources, and required_capabilities added. In corpus mode, category/subcategory may be null (MRA assigns from signal
+    content). signal_sources tracks provenance for yield analysis.'
+  emitter_type: agent
+channel_blocked:
+  emitter: opco-marketing
+  consumer:
+  - opco-head-of-growth
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - channel
+  - reason
+  - severity
+  emitter_type: opco_agent
+channel_update:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - channel
+  - metrics
+  - status
+  emitter_type: opco_agent
+churn_risk:
+  emitter: opco-support
+  consumer:
+  - opco-head-of-product
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - customer_id
+  - risk_level
+  - indicators
+  emitter_type: opco_agent
+cross_domain_report:
+  emitter: opco-chief-of-staff
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - product_status
+  - growth_status
+  - risks
+  - recommendations
+  emitter_type: opco_agent
+cto.architecture_directive:
+  emitter: factory-cto
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - directive
+  - affected_verticals
+  - rationale
+  emitter_type: agent
+cto.extraction_recommended:
+  emitter: factory-cto
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - pattern_id
+  - affected_verticals
+  - recommendation
+  emitter_type: agent
+cto.pattern_detected:
+  emitter: factory-cto
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - pattern_type
+  - verticals
+  - description
+  emitter_type: agent
+cto.spec_approved:
+  emitter: factory-cto
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - cto_notes
+  emitter_type: agent
+cto.spec_review_requested:
+  emitter: runtime
+  consumer: factory-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mvp_spec
+  - business_brief
+  - vertical_context
+  emitter_type: runtime
+cto.spec_revision_needed:
+  emitter: factory-cto
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - technical_issues
+  emitter_type: agent
+cto.spec_vetoed:
+  emitter: factory-cto
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - reason
+  emitter_type: agent
+cto.tech_spec_feedback:
+  emitter: factory-cto
+  consumer: opco-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: agent_message
+  payload:
+  - vertical_id
+  - feedback
+  - severity
+  emitter_type: agent
+cto.tech_spec_review_requested:
+  emitter: opco-cto
+  consumer: opco-tech-writer
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: agent_message
+  payload:
+  - vertical_id
+  - spec_content
+  emitter_type: agent
+cycle_limit_reached:
+  emitter: runtime
+  consumer: opco-cto
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - event_pattern
+  - count
+  - window_hours
+  - agents_involved
+  - recommendation
+  emitter_type: runtime
+cycle_reset:
+  emitter: opco-cto
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - event_pattern
+  - reason
+  emitter_type: opco_agent
+dedup.ambiguous:
+  emitter: runtime
+  consumer: discovery-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - dedup_id
+  - new_candidate
+  - existing_vertical
+  - similarity
+  emitter_type: runtime
+dedup.resolved:
+  emitter: discovery-coordinator
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - dedup_id
+  - action
+  - reasoning
+  emitter_type: agent
+deploy_requested:
+  emitter: opco-cto
+  consumer: opco-devops
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - component
+  - version
+  - deploy_config
+  emitter_type: opco_agent
+devops.capacity_warning:
+  emitter: holding-devops
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - resource
+  - current_usage
+  - threshold
+  - recommendation
+  emitter_type: agent
+devops.deploy_complete:
+  emitter: holding-devops
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - url
+  - version
+  emitter_type: agent
+devops.deploy_failed:
+  emitter: holding-devops
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - error
+  emitter_type: agent
+devops.deploy_requested:
+  emitter: opco-devops
+  consumer: holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - manifest
+  - environment
+  - requesting_agent
+  emitter_type: agent
+devops.health_check_failed:
+  emitter: runtime
+  consumer: holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - endpoint
+  - error
+  emitter_type: runtime
+devops.infra_change_needed:
+  emitter: holding-devops
+  consumer:
+  - holding-devops
+  - mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  _note: OpCo devops emits this; holding-devops receives via bootstrap route (subscriber_id, not role)
+  payload:
+  - change_type
+  - reason
+  - estimated_cost
+  emitter_type: agent
+devops.rollback_complete:
+  emitter: holding-devops
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - active_version
+  emitter_type: agent
+devops.rollback_failed:
+  emitter: holding-devops
+  consumer:
+  - holding-devops
+  - audit
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - environment
+  - error
+  emitter_type: agent
+devops.rollback_requested:
+  emitter: opco-devops
+  consumer: holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - target_version
+  - requesting_agent
+  emitter_type: agent
+devops.ssl_provisioned:
+  emitter: holding-devops
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - domain
+  - expiry
+  emitter_type: agent
+feature_deployed:
+  emitter: opco-cto
+  consumer:
+  - opco-chief-of-staff
+  - opco-marketing
+  - opco-head-of-product
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - feature_id
+  - version
+  - release_notes
+  emitter_type: opco_agent
+feature_request:
+  emitter: opco-support
+  consumer: opco-pm
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - description
+  - requester_context
+  emitter_type: opco_agent
+founder_input.response:
+  emitter: runtime
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - item_id
+  - decision
+  - notes
+  emitter_type: runtime
+growth_escalation:
+  emitter: opco-head-of-growth
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - issue
+  - recommendation
+  emitter_type: opco_agent
+growth_report:
+  emitter: opco-head-of-growth
+  consumer:
+  - opco-ceo
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - phase
+  - metrics
+  - decisions
+  emitter_type: opco_agent
+human_task.approved:
+  emitter: empire-coordinator
+  consumer: dynamic
+  consumer_type: dynamic
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - notes
+  emitter_type: agent
+human_task.completed:
+  emitter: human
+  consumer: dynamic
+  consumer_type: dynamic
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - result
+  emitter_type: human
+human_task.deferred:
+  emitter: empire-coordinator
+  consumer: dynamic
+  consumer_type: dynamic
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - defer_until
+  - reason
+  emitter_type: agent
+human_task.expired:
+  emitter: runtime
+  consumer:
+  - empire-coordinator
+  - requesting-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  emitter_type: runtime
+human_task.rejected:
+  emitter: empire-coordinator
+  consumer: dynamic
+  consumer_type: dynamic
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - reason
+  emitter_type: agent
+human_task.requested:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - task_id
+  - requesting_agent
+  - task_type
+  - description
+  emitter_type: runtime
+inbound.email:
+  emitter: inbound-gateway
+  consumer: opco-support
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - from
+  - subject
+  - body
+  - attachments
+  _note: Event type is inbound.email; vertical_id in payload for routing.
+  emitter_type: agent
+inbound.whatsapp_message:
+  emitter: inbound-gateway
+  consumer: opco-support
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - from
+  - message
+  - timestamp
+  - media_urls
+  _note: Event type is inbound.whatsapp_message; vertical_id in payload for routing.
+  emitter_type: agent
+launch_ready:
+  emitter: opco-cto
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - version
+  - deploy_url
+  - test_results
+  emitter_type: opco_agent
+mailbox.item_decided:
+  emitter: runtime
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  runtime_handling: projection
+  payload:
+  - item_id
+  - decision
+  - decided_by
+  - vertical_id
+  - original_event_type
+  emitter_type: runtime
+mandate_updated:
+  emitter: opco-ceo
+  consumer:
+  - opco-chief-of-staff
+  - opco-head-of-product
+  - opco-head-of-growth
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - mandate
+  - priorities
+  - budget_allocation
+  emitter_type: opco_agent
+market_feedback:
+  emitter: opco-support
+  consumer: opco-head-of-product
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - feedback_type
+  - summary
+  - frequency
+  - severity
+  emitter_type: opco_agent
+market_research.scan_assigned:
+  emitter: runtime
+  consumer: market-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - geography
+  - scan_id
+  - taxonomy_categories
+  - shard
+  - mode
+  - corpus_signals
+  emitter_type: runtime
+market_research.scan_complete:
+  emitter: market-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - categories_assessed
+  - high_signal_count
+  - geography
+  emitter_type: agent
+market_signals:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - signal_type
+  - description
+  - evidence
+  emitter_type: opco_agent
+opco.ceo_ready:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - agent_count
+  emitter_type: runtime
+opco.ceo_report:
+  emitter: opco-ceo
+  consumer:
+  - empire-coordinator
+  - operations-analyst
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - phase
+  - metrics
+  - decisions
+  emitter_type: agent
+opco.deploy_review:
+  emitter: opco-ceo
+  consumer: mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - deploy_id
+  - review_type
+  emitter_type: agent
+opco.escalation:
+  emitter: opco-ceo
+  consumer:
+  - empire-coordinator
+  - factory-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - issue
+  - recommendation
+  emitter_type: agent
+opco.escalation_response:
+  emitter: empire-coordinator
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - original_escalation_id
+  - directive
+  - priority
+  emitter_type: agent
+opco.founder_input:
+  emitter: opco-ceo
+  consumer: mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - question
+  - context
+  - urgency
+  emitter_type: agent
+opco.launched:
+  emitter: opco-ceo
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - launch_url
+  - metrics
+  emitter_type: agent
+opco.product_spec_review:
+  emitter: opco-head-of-product
+  consumer: mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - spec_summary
+  - review_request
+  emitter_type: agent
+opco.spend_request:
+  emitter: opco-ceo
+  consumer: mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - amount
+  - purpose
+  - vendor
+  emitter_type: agent
+opco.spinup_requested:
+  emitter: empire-coordinator
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mandate
+  - brand
+  - founder_directives
+  emitter_type: agent
+opco.steady_state_reached:
+  emitter: opco-ceo
+  consumer:
+  - empire-coordinator
+  - factory-cto
+  - operations-analyst
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  emitter_type: agent
+opco.teardown_complete:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  emitter_type: runtime
+opco.teardown_requested:
+  emitter: human
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - reason
+  emitter_type: human
+ops.agent_failed:
+  emitter: runtime
+  consumer: holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - agent_id
+  - vertical_id
+  - error
+  - retry_count
+  - last_event_type
+  emitter_type: runtime
+ops.agent_panic:
+  emitter: runtime
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - agent_id
+  - vertical_id
+  - error
+  - stack_trace
+  - conversation_id
+  emitter_type: runtime
+outreach_digest:
+  emitter: opco-marketing
+  consumer: opco-head-of-growth
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - messages_sent
+  - responses
+  - response_rate
+  - leads_converted
+  - best_channel
+  - intelligence
+  emitter_type: opco_agent
+portfolio.digest_compiled:
+  emitter: empire-coordinator
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - digest_text
+  - trigger_reason
+  - action_required_count
+  emitter_type: agent
+prelaunch_ready:
+  emitter: opco-marketing
+  consumer:
+  - opco-head-of-growth
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - channels_ready
+  - landing_page_url
+  emitter_type: opco_agent
+product_escalation:
+  emitter: opco-head-of-product
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - issue
+  - recommendation
+  emitter_type: opco_agent
+product_report:
+  emitter: opco-head-of-product
+  consumer:
+  - opco-ceo
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - phase
+  - metrics
+  - decisions
+  emitter_type: opco_agent
+product_spec_ready:
+  emitter: opco-pm
+  consumer: opco-cto
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - spec_version
+  - features
+  - acceptance_criteria
+  emitter_type: opco_agent
+qa.validation_failed:
+  emitter: opco-qa
+  consumer: opco-cto
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - failures
+  - expected_vs_actual
+  - severity
+  - reproduction_steps
+  emitter_type: opco_agent
+qa.validation_passed:
+  emitter: opco-qa
+  consumer: opco-cto
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - test_summary
+  - coverage_notes
+  - staging_url
+  emitter_type: opco_agent
+research.completed:
+  emitter: business-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - business_brief
+  emitter_type: agent
+research.vertical_rejected:
+  emitter: business-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - rejection_reason
+  - evidence
+  emitter_type: agent
+scan.completed:
+  emitter: runtime
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: false
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - mode
+  - geography
+  - reports_received
+  - agents_expected
+  - agents_complete
+  - verticals_discovered
+  - campaign_id
+  emitter_type: runtime
+scan.requested:
+  emitter: empire-coordinator
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - geography
+  - mode
+  - taxonomy_categories
+  - sources
+  - depth
+  - campaign_id
+  - campaign_context
+  - corpus_path
+  emitter_type: agent
+scanner.directories.scan_assigned:
+  emitter: runtime
+  consumer: scanner-directories
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+  emitter_type: runtime
+scanner.directories.scan_complete:
+  emitter: scanner-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+  emitter_type: agent
+scanner.google_maps.scan_assigned:
+  emitter: runtime
+  consumer: scanner-google_maps
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+  emitter_type: runtime
+scanner.google_maps.scan_complete:
+  emitter: scanner-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+  emitter_type: agent
+scanner.instagram.scan_assigned:
+  emitter: runtime
+  consumer: scanner-instagram
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+  emitter_type: runtime
+scanner.instagram.scan_complete:
+  emitter: scanner-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+  emitter_type: agent
+scanner.reviews.scan_assigned:
+  emitter: runtime
+  consumer: scanner-reviews
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+  emitter_type: runtime
+scanner.reviews.scan_complete:
+  emitter: scanner-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+  emitter_type: agent
+scanner.yelp.scan_assigned:
+  emitter: runtime
+  consumer: scanner-yelp
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - scan_id
+  - vertical_id
+  - geography
+  - subcategory
+  - source_config
+  emitter_type: runtime
+scanner.yelp.scan_complete:
+  emitter: scanner-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - vertical_id
+  - sources_found
+  - sources_scraped
+  - errors
+  emitter_type: agent
+score.dimension_complete:
+  emitter: analysis-agent
+  consumer: scoring-node
+  consumer_type: system_component
+  intercepted: false
+  passthrough: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - dimension
+  - score
+  - evidence
+  - confidence
+  emitter_type: agent
+scoring.contest_resolved:
+  emitter: empire-coordinator
+  consumer: scoring-node
+  consumer_type: system_component
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - dimension
+  - resolved_score
+  - reasoning
+  emitter_type: agent
+scoring.contested:
+  emitter: scoring-node
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - dimension
+  - scores
+  - evidence
+  - spread
+  emitter_type: system_node
+scoring.requested:
+  emitter: scoring-node
+  consumer: analysis-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - vertical_name
+  - geography
+  - mode
+  - rubric
+  - dimensions_requested
+  - discovery_context
+  - assigned_analysis_agent_id
+  - excluded_analysis_agent_id
+  emitter_type: system_node
+source.scraped:
+  emitter: scanner-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - source
+  - evidence
+  - geography
+  emitter_type: agent
+spec.approved:
+  emitter: business-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - final_spec
+  emitter_type: agent
+spec.contradiction_detected:
+  emitter: runtime
+  consumer: spec-auditor
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - agent_id
+  - contradiction_type
+  - detail
+  emitter_type: runtime
+spec.draft_ready:
+  emitter: lightweight-spec-agent
+  consumer: business-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mvp_spec
+  emitter_type: agent
+spec.requested:
+  emitter: business-research-agent
+  consumer: lightweight-spec-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - business_brief
+  emitter_type: agent
+spec.revision_needed:
+  emitter: business-research-agent
+  consumer: lightweight-spec-agent
+  consumer_type: agent
+  intercepted: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - misalignment_details
+  emitter_type: agent
+spec.revision_requested:
+  emitter: runtime
+  consumer: business-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - cto_feedback
+  emitter_type: runtime
+spec.validation_failed:
+  emitter: spec-auditor
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - issues
+  - severity
+  emitter_type: agent
+spec.validation_passed:
+  emitter: spec-auditor
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - validation_notes
+  emitter_type: agent
+spec.validation_requested:
+  emitter: factory-cto
+  consumer: spec-auditor
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - spec_content
+  - spec_tier
+  - vertical_id
+  emitter_type: agent
+spec_review.issues_found:
+  emitter: spec-reviewer
+  consumer: business-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - issues
+  emitter_type: agent
+spec_review.passed:
+  emitter: spec-reviewer
+  consumer: business-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - review_notes
+  emitter_type: agent
+spec_review.requested:
+  emitter: business-research-agent
+  consumer: spec-reviewer
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - mvp_spec
+  - business_brief
+  emitter_type: agent
+spend.approved:
+  emitter: human
+  consumer:
+  - requesting-agent
+  - holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - amount
+  - purpose
+  emitter_type: human
+spend.rejected:
+  emitter: human
+  consumer:
+  - requesting-agent
+  - holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - reason
+  emitter_type: human
+spend_needed:
+  emitter: opco-marketing
+  consumer:
+  - opco-head-of-growth
+  - opco-head-of-product
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - amount
+  - purpose
+  - vendor
+  emitter_type: opco_agent
+spend_request:
+  emitter: opco-marketing
+  consumer: opco-ceo
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - amount
+  - currency
+  - purpose
+  - justification
+  emitter_type: opco_agent
+support_critical:
+  emitter: opco-support
+  consumer:
+  - opco-head-of-product
+  - opco-chief-of-staff
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - severity
+  - description
+  - customer_impact
+  emitter_type: opco_agent
+support_digest:
+  emitter: opco-support
+  consumer: opco-head-of-product
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - open_tickets
+  - resolved
+  - csat
+  - common_issues
+  - churn_risk_signals
+  emitter_type: opco_agent
+synthesis.needed:
+  emitter: runtime
+  consumer: discovery-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - conflicting_reports
+  - context
+  emitter_type: runtime
+synthesis.resolved:
+  emitter: discovery-coordinator
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - resolved_assessment
+  emitter_type: agent
+system.directive:
+  emitter: human
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: true
+  passthrough: conditional
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - directive_text
+  - timestamp
+  emitter_type: human
+system.started:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - timestamp
+  - config_version
+  - agent_count
+  - is_cold_start
+  emitter_type: runtime
+technical_spec_ready:
+  emitter: opco-tech-writer
+  consumer:
+  - opco-cto
+  - opco-backend
+  - opco-frontend
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - spec_version
+  - components
+  - api_contracts
+  emitter_type: opco_agent
+template.migration_approved:
+  emitter: human
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - template_version
+  - verticals
+  emitter_type: human
+template.migration_completed:
+  emitter: empire-coordinator
+  consumer:
+  - empire-coordinator
+  - audit
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - template_version
+  - vertical_id
+  - result
+  emitter_type: agent
+template.migration_failed:
+  emitter: empire-coordinator
+  consumer:
+  - empire-coordinator
+  - audit
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - template_version
+  - vertical_id
+  - error
+  emitter_type: agent
+template.migration_planned:
+  emitter: empire-coordinator
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - template_version
+  - migration_plan
+  - affected_verticals
+  emitter_type: agent
+template.publish_requested:
+  emitter: human
+  consumer: factory-cto
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - template_version
+  - changes
+  emitter_type: human
+template.version_published:
+  emitter: factory-cto
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - template_version
+  - changelog
+  emitter_type: agent
+timer.infra_health_check:
+  emitter: runtime
+  consumer: holding-devops
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - check_type
+  emitter_type: runtime
+timer.marginal_review:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - parked_marginals_summary
+  emitter_type: runtime
+timer.portfolio_digest:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - trigger_reason
+  emitter_type: runtime
+trend.identified:
+  emitter: trend-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - trend_category
+  - geography
+  - signal_strength
+  - opportunity_name
+  - preliminary_icp
+  - build_sketch
+  - evidence
+  - trend_description
+  - opportunity_hypothesis
+  - geographic_scope
+  notes: 'v2.0.41: Aligned with category.assessed structured format. Legacy fields urgency and market_intersection removed.
+    Same runtime pre-filter logic applies as for category.assessed.'
+  emitter_type: agent
+trend_research.scan_assigned:
+  emitter: runtime
+  consumer: trend-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - geography
+  - scan_id
+  emitter_type: runtime
+trend_research.scan_complete:
+  emitter: trend-research-agent
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - scan_id
+  - trends_identified
+  - geography
+  emitter_type: agent
+user_onboarded:
+  emitter: runtime
+  consumer: opco-head-of-growth
+  consumer_type: agent
+  intercepted: false
+  routing: routing_table
+  delivery_channel: eventbus_routing_table
+  payload:
+  - vertical_id
+  - user_id
+  - channel
+  emitter_type: runtime
+validation.more_data_needed:
+  emitter: runtime
+  consumer: business-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - questions
+  emitter_type: runtime
+validation.package_ready:
+  emitter: runtime
+  consumer: validation-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - research
+  - spec
+  - cto_notes
+  - brand
+  emitter_type: runtime
+validation.started:
+  emitter: runtime
+  consumer: business-research-agent
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_id
+  - vertical_name
+  - geography
+  - scoring_context
+  emitter_type: runtime
+vertical.approved:
+  emitter: human
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - vertical_id
+  - brand_choice
+  - founder_directives
+  emitter_type: human
+vertical.discovered:
+  emitter: runtime
+  consumer: scoring-node
+  consumer_type: system_component
+  intercepted: false
+  passthrough: false
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - vertical_name
+  - raw_signals
+  - geography
+  - mode
+  - discovery_context
+  - geographic_scope
+  alternate_emitters:
+  - scoring-node
+  emitter_type: runtime
+vertical.derived:
+  emitter: analysis-agent
+  consumer: scoring-node
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - opportunity_id
+  - parent_id
+  - generation_depth
+  - generator_agent_id
+  - campaign_id
+  - derivation_rationale
+  - opportunity_name
+  - preliminary_icp
+  - build_sketch
+  - evidence
+  - geographic_scope
+  - signal_strength
+  - discovery_context
+  _constraints:
+    generation_depth_max: 2
+    max_derivations_per_parent: 2
+    modification_types:
+    - icp_shift
+    - distribution_pivot
+    - scope_reduction
+    - market_adjacency
+    - feature_reframe
+    anti_bias: generator_agent_id excluded from analyst assignment for this vertical
+  _note: 'v2.0.43: Analyst derivation loop. Analysis Agent may emit 0-2 vertical.derived events per scored vertical (hard
+    max enforced by tool execution layer, not just prompt). Derived verticals enter scoring-node pre-filter, survivors become
+    vertical.discovered with discovery_mode=''derived''. Scored by different analyst instance (anti-bias guarantee). discovery_context.parent_scores
+    is intentionally omitted — scoring analyst must NOT see parent''s actual scores, only which dimensions were weak and why
+    (names + reasons).
+
+    '
+  emitter_type: agent
+vertical.health_warning:
+  emitter: empire-coordinator
+  consumer: mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - severity
+  - metrics
+  - recommendation
+  emitter_type: agent
+vertical.killed:
+  emitter: runtime
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - vertical_id
+  - reason
+  - source
+  emitter_type: runtime
+vertical.marginal:
+  emitter: scoring-node
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - vertical_id
+  - composite_score
+  - viability_score
+  - dimensions
+  - promotion_eligible
+  emitter_type: system_node
+vertical.needs_more_data:
+  emitter: human
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - questions
+  emitter_type: human
+vertical.ready_for_review:
+  emitter: validation-coordinator
+  consumer: mailbox
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  runtime_handling: projection
+  payload:
+  - vertical_id
+  - validation_kit
+  emitter_type: agent
+vertical.rejected:
+  emitter: scoring-node
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - reason
+  emitter_type: system_node
+vertical.resumed:
+  emitter: empire-coordinator
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  emitter_type: agent
+vertical.scored:
+  emitter: scoring-node
+  consumer: empire-coordinator
+  consumer_type: agent
+  intercepted: false
+  routing: static
+  delivery_channel: eventbus_static
+  runtime_handling: projection
+  payload:
+  - vertical_id
+  - result
+  - composite_score
+  - viability_score
+  - market_score
+  - dimensions
+  - rubric
+  emitter_type: system_node
+vertical.shortlisted:
+  emitter: scoring-node
+  consumer: runtime
+  consumer_type: system_component
+  intercepted: true
+  passthrough: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - vertical_id
+  - composite_score
+  - viability_score
+  - scoring_payload
+  alternate_emitters: []
+  emitter_type: system_node
+opco.routing_updated:
+  emitter: actor-agent
+  consumer: audit
+  consumer_type: broadcast
+  intercepted: false
+  routing: static
+  delivery_channel: audit
+  payload:
+  - vertical_id
+  - event_pattern
+  - subscriber_id
+  - installed_by
+  - reason
+  - status
+  - source
+  - bootstrap_version
+  - runtime_tool_event
+  _note: Emitted by tool_executor.go when configure_routing tool executes. Actor agent varies.
+  emitter_type: agent
+human_task.assigned:
+  emitter: dashboard
+  consumer: dynamic
+  consumer_type: dynamic
+  intercepted: false
+  routing: targeted
+  delivery_channel: agent_message
+  payload:
+  - task_id
+  - requesting_agent
+  - vertical_id
+  - assigned_to
+  _note: Emitted by dashboard handleTaskClaim. Delivered to requesting_agent via agent_message.
+  emitter_type: agent
+runtime.reset:
+  emitter: dashboard
+  consumer:
+  - pipeline-coordinator
+  - scan-campaign-manager
+  consumer_type: system_component
+  intercepted: false
+  routing: static
+  delivery_channel: runtime
+  payload:
+  - source
+  - timestamp
+  _note: Emitted by dashboard publishRuntimeReset. Consumed by pipeline-coordinator and scan-campaign-manager.
+  emitter_type: agent
+review.product_spec_feedback:
+  emitter: human
+  consumer: TBD
+  consumer_type: planned
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - feedback
+  - reviewer
+  _note: Commgraph declaration only. No runtime emitter exists. Planned for human review workflow.
+  _status: planned
+  emitter_type: human
+review.deploy_feedback:
+  emitter: human
+  consumer: TBD
+  consumer_type: planned
+  intercepted: false
+  routing: static
+  delivery_channel: mailbox
+  payload:
+  - vertical_id
+  - feedback
+  - reviewer
+  _note: Commgraph declaration only. No runtime emitter exists. Planned for human review workflow.
+  _status: planned
+  emitter_type: human
+pipeline.dead_letter:
+  emitter: scoring-node
+  consumer: operations-analyst
+  consumer_type: agent
+  intercepted: false
+  passthrough: true
+  routing: static
+  delivery_channel: eventbus_static
+  payload:
+  - event_id
+  - node_id
+  - event_type
+  - retry_count
+  - last_error
+  _note: 'v2.0.37: Emitted when a system node exhausts its retry budget (5 attempts). Operations Analyst receives for investigation
+    and escalation. Future system nodes will also emit this event type.
+
+    '
+  emitter_type: system_node

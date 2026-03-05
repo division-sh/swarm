@@ -216,21 +216,20 @@ gates:
   introduced: 2.0.29
   automated: TestContractCompliance/emit_events
 - id: agents-all-have-prompts
-  name: Every roster agent has a system_prompt in config
+  name: Prompt contracts exist for runtime prompt-managed agents
   priority: must_pass
   category: agents
   layer: local
-  command: "python3 -c \"\nimport yaml\nconfig_map = yaml.safe_load(open('contracts/agent-config-map.yaml'))\nerrors = []\n\
-    for agent_id, info in config_map.get('agents', {}).items():\n  path = info.get('config_path')\n  if path is None:\n  \
-    \  continue  # ephemeral agents have no config file\n  import os\n  if not os.path.exists(path):\n    errors.append(f'MISSING\
-    \ FILE: {path} for {agent_id}')\n    continue\n  with open(path) as f:\n    content = f.read()\n  if 'system_prompt' not\
-    \ in content and 'prompt:' not in content:\n    errors.append(f'NO PROMPT: {path} for {agent_id}')\nif errors:\n  print('\\\
-    \\n'.join(errors))\n  exit(1)\nprint(f'{len(config_map[\\\"agents\\\"])} agents checked')\n\"\n"
-  pass_criteria: Every agent with a config file has system_prompt field
+  command: "python3 -c \"\nimport os, yaml\nagents = yaml.safe_load(open('contracts/agent-tools.yaml'))\nrequired = []\nfor\
+    \ aid, a in agents.items():\n  if not isinstance(a, dict):\n    continue\n  if a.get('node_type') == 'system':\n    continue\n\
+    \  required.append(aid)\nmissing = []\nfor aid in sorted(set(required)):\n  p = f'contracts/prompts/{aid}.md'\n  if not\
+    \ os.path.exists(p):\n    missing.append(p)\nif not os.path.exists('contracts/prompts/market-research-agent.corpus.md'):\n\
+    \  missing.append('contracts/prompts/market-research-agent.corpus.md')\nif missing:\n  print('\\\\n'.join(missing))\n\
+    \  raise SystemExit(1)\nprint(f'{len(set(required))} prompt contracts + corpus variant verified')\n\"\n"
+  pass_criteria: Prompt contracts exist for all prompt-managed agents and MRA corpus variant
   introduced: 2.0.20
-  notes: 'Uses agent-config-map.yaml as source. Skips ephemeral agents (config_path: null). Previous version used blind glob
-    on configs/agents/*.yaml which falsely flagged roster.yaml.'
-  automated: TestContractCompliance/agent_config
+  notes: contracts/prompts is the prompt source of truth; YAML config files are wiring-only.
+  automated: TestContractCompliance/gate7_prompt_contract_files_exist
 - id: agents-naming-convention
   name: Agent config filenames follow convention
   priority: should_pass

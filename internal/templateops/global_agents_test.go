@@ -35,6 +35,43 @@ func TestLoadGlobalAgentsFromYAML_RequiresRosterAndPrompt(t *testing.T) {
 	}
 }
 
+func TestLoadGlobalAgentsFromYAML_UsesContractPromptFile(t *testing.T) {
+	dir := t.TempDir()
+	promptsDir := t.TempDir()
+	t.Setenv("EMPIREAI_PROMPTS_DIR", promptsDir)
+
+	if err := os.WriteFile(filepath.Join(promptsDir, "a.md"), []byte("contract prompt"), 0o644); err != nil {
+		t.Fatalf("write contract prompt: %v", err)
+	}
+
+	roster := []byte("agents:\n  a:\n    config_path: ./a.yaml\n")
+	if err := os.WriteFile(filepath.Join(dir, "roster.yaml"), roster, 0o644); err != nil {
+		t.Fatalf("write roster: %v", err)
+	}
+	agentNoPrompt := []byte(strings.Join([]string{
+		"id: a",
+		"role: a",
+		"mode: holding",
+		"model_tier: sonnet",
+		"subscriptions: [system.started]",
+		"tools: [agent_message]",
+	}, "\n"))
+	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), agentNoPrompt, 0o644); err != nil {
+		t.Fatalf("write agent: %v", err)
+	}
+
+	got, err := LoadGlobalAgentsFromYAML(dir)
+	if err != nil {
+		t.Fatalf("load global agents: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected one agent, got %d", len(got))
+	}
+	if !strings.Contains(string(got[0].Config), "contract prompt") {
+		t.Fatalf("expected contract prompt in config, got %s", string(got[0].Config))
+	}
+}
+
 func TestLoadGlobalAgentsFromYAML_LoadsRosterFiles(t *testing.T) {
 	dir := t.TempDir()
 	roster := []byte(strings.Join([]string{

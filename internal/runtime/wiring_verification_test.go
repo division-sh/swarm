@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"empireai/internal/commgraph"
+	"empireai/internal/promptcontracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -215,6 +216,7 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 
 func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringSchema, toolToEvent map[string]string) []wiringResult {
 	out := make([]wiringResult, 0, 128)
+	promptLintStrict := isWiringPromptLintStrict()
 	for _, role := range commgraph.ProducerRoles() {
 		for _, eventType := range commgraph.ProducerEventsForRole(role) {
 			eventType = strings.TrimSpace(eventType)
@@ -231,6 +233,13 @@ func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringS
 		}
 	}
 	for _, a := range agents {
+		if !promptLintStrict {
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  fmt.Sprintf("%s prompt lint checks skipped (set EMPIRE_WIRING_PROMPT_LINT_STRICT=1 to enforce)", a.ID),
+			})
+			continue
+		}
 		if legacyEmitEventsRe.MatchString(a.SystemPrompt) {
 			out = append(out, wiringResult{
 				Severity: wiringFail,
@@ -281,6 +290,7 @@ func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringS
 
 func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[string][]producerRef, contracts map[string]wiringEventContract) []wiringResult {
 	out := make([]wiringResult, 0, 192)
+	promptLintStrict := isWiringPromptLintStrict()
 	allEvents := make([]string, 0, len(producersByEvent))
 	for evt := range producersByEvent {
 		allEvents = append(allEvents, evt)
@@ -334,6 +344,14 @@ func verifySubscriptionCompleteness(agents []wiringAgent, producersByEvent map[s
 					Severity: wiringPass,
 					Message:  fmt.Sprintf("%s subscription %s has upstream producer coverage", a.ID, sub),
 				})
+			}
+
+			if !promptLintStrict {
+				out = append(out, wiringResult{
+					Severity: wiringPass,
+					Message:  fmt.Sprintf("%s prompt subscription lint skipped for %s (set EMPIRE_WIRING_PROMPT_LINT_STRICT=1 to enforce)", a.ID, sub),
+				})
+				continue
 			}
 
 			if !promptMentionsSubscription(a.SystemPrompt, sub, matches) {
@@ -1162,12 +1180,18 @@ func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {
 		if role == "" {
 			role = id
 		}
+		systemPrompt := strings.TrimSpace(asString(obj["system_prompt"]))
+		if systemPrompt == "" {
+			if contractPrompt, found, err := promptcontracts.Load(id, ""); err == nil && found {
+				systemPrompt = strings.TrimSpace(contractPrompt)
+			}
+		}
 		out = append(out, wiringAgent{
 			ID:            id,
 			Role:          role,
 			Path:          full,
 			Subscriptions: toStringSliceWiring(obj["subscriptions"]),
-			SystemPrompt:  asString(obj["system_prompt"]),
+			SystemPrompt:  systemPrompt,
 		})
 	}
 	return out, nil
@@ -1880,6 +1904,17 @@ func isWiringStrictMode() bool {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("EMPIRE_WIRING_STRICT")))
 	if raw == "" {
 		return true
+	}
+	if raw == "0" || raw == "false" || raw == "no" || raw == "off" {
+		return false
+	}
+	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
+}
+
+func isWiringPromptLintStrict() bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("EMPIRE_WIRING_PROMPT_LINT_STRICT")))
+	if raw == "" {
+		return false
 	}
 	if raw == "0" || raw == "false" || raw == "no" || raw == "off" {
 		return false

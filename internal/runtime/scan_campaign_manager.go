@@ -242,6 +242,9 @@ func (m *ScanCampaignManager) tick(ctx context.Context) {
 	if strings.TrimSpace(geoLabel) == "" {
 		geoLabel = "unspecified"
 	}
+	strategicContext := parsePayloadMap(c.StrategicContext)
+	corpusPath := extractCorpusPathFromStrategicContext(strategicContext)
+
 	payload := map[string]any{
 		"campaign_id":         c.ID,
 		"geography_id":        c.GeographyID,
@@ -251,12 +254,15 @@ func (m *ScanCampaignManager) tick(ctx context.Context) {
 		"priority":            c.Priority,
 		"depth":               "full",
 		"directive_id":        strings.TrimSpace(c.DirectiveID),
-		"strategic_context":   parsePayloadMap(c.StrategicContext),
+		"strategic_context":   strategicContext,
 		"campaign_context": map[string]any{
 			"modes":             []string{strings.TrimSpace(c.Mode)},
-			"strategic_context": strings.TrimSpace(asString(parsePayloadMap(c.StrategicContext)["directive_text"])),
+			"strategic_context": strings.TrimSpace(asString(strategicContext["directive_text"])),
 			"directive_id":      strings.TrimSpace(c.DirectiveID),
 		},
+	}
+	if corpusPath != "" {
+		payload["corpus_path"] = corpusPath
 	}
 	if err := m.bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
@@ -370,6 +376,18 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 
 	mode, explicitMode := parsed.Mode, parsed.ExplicitMode
 	geoName, country, region := parsed.Geography, parsed.Country, parsed.Region
+	corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
+	if corpusPath == "" {
+		corpusPath = strings.TrimSpace(parsed.CorpusPath)
+	}
+	if mode == "corpus" && corpusPath == "" {
+		runtimeWarn(
+			"scan-campaign-manager",
+			"directive requested corpus mode without corpus_path event_id=%s",
+			strings.TrimSpace(evt.ID),
+		)
+		return
+	}
 	geoID, err := ensureDirectiveGeography(ctx, m.db, geoName, country, region)
 	if err != nil {
 		log.Printf("scan campaign directive geography resolution failed: %v", err)
@@ -382,6 +400,9 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	}
 	if sentBy := strings.TrimSpace(asString(payload["sent_by"])); sentBy != "" {
 		strategic["sent_by"] = sentBy
+	}
+	if corpusPath != "" {
+		strategic["corpus_path"] = corpusPath
 	}
 	deadline := time.Now().UTC().Add(24 * time.Hour)
 
@@ -470,6 +491,13 @@ func parseDirectiveMode(text string) (mode string, explicit bool) {
 		return "saas_gap", false
 	}
 	switch {
+	case strings.Contains(t, "corpus_path"),
+		strings.Contains(t, " mode corpus"),
+		strings.HasPrefix(t, "corpus"),
+		strings.Contains(t, ".jsonl"),
+		strings.Contains(t, ", corpus"),
+		strings.Contains(t, " corpus "):
+		return "corpus", true
 	case strings.Contains(t, "automation_micro"),
 		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
 		return "saas_gap", true
@@ -482,6 +510,20 @@ func parseDirectiveMode(text string) (mode string, explicit bool) {
 	default:
 		return "saas_gap", false
 	}
+}
+
+func extractCorpusPathFromStrategicContext(strategic map[string]any) string {
+	if len(strategic) == 0 {
+		return ""
+	}
+	if path := strings.TrimSpace(asString(strategic["corpus_path"])); path != "" {
+		return path
+	}
+	parsed, ok := strategic["parsed"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(asString(parsed["corpus_path"]))
 }
 
 func isComplexDirectiveText(text string) bool {

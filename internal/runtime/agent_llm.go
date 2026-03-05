@@ -18,6 +18,7 @@ type LLMAgent struct {
 	subscriptions []events.EventType
 	conversation  *Conversation
 	scopeKey      string
+	promptCache   map[string]string
 	mu            sync.Mutex
 }
 
@@ -50,10 +51,15 @@ func NewLLMAgent(cfg models.AgentConfig, llm LLMRuntime, toolExecutor ToolExecut
 	}
 	c := NewConversation(cfg.ID, "", systemPrompt, tools, mode, maxTurns, llm)
 	c.SetToolExecutor(toolExecutor)
+	promptCache := map[string]string{}
+	if systemPrompt != "" {
+		promptCache[""] = systemPrompt
+	}
 	return &LLMAgent{
 		cfg:           cfg,
 		subscriptions: subs,
 		conversation:  c,
+		promptCache:   promptCache,
 	}
 }
 
@@ -150,6 +156,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	a.applyPromptForEvent(evt)
 	a.resetConversationScopeIfNeeded(evt)
 
 	ctx = WithActor(ctx, a.cfg)
@@ -186,6 +193,80 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 		return nil, err
 	}
 	return nil, nil
+}
+
+func (a *LLMAgent) applyPromptForEvent(evt events.Event) {
+	if a == nil || a.conversation == nil {
+		return
+	}
+	prompt := strings.TrimSpace(a.resolvePromptForMode(promptModeFromEvent(evt)))
+	if prompt == "" {
+		return
+	}
+	if strings.TrimSpace(a.conversation.SystemPrompt) == prompt {
+		return
+	}
+	a.conversation.SystemPrompt = prompt
+	a.conversation.Reset()
+	a.scopeKey = ""
+}
+
+func (a *LLMAgent) resolvePromptForMode(mode string) string {
+	if a == nil || a.conversation == nil {
+		return ""
+	}
+	mode = normalizeScanModeCompat(mode)
+	cacheKey := mode
+	if a.promptCache == nil {
+		a.promptCache = map[string]string{}
+	}
+	if cached, ok := a.promptCache[cacheKey]; ok {
+		return strings.TrimSpace(cached)
+	}
+
+	prompt, found, err := loadContractPromptForAgent(a.cfg, mode)
+	if err != nil {
+		runtimeWarn(
+			"agent-llm",
+			"contract prompt load failed agent_id=%s mode=%s err=%v",
+			strings.TrimSpace(a.cfg.ID),
+			strings.TrimSpace(mode),
+			err,
+		)
+	}
+	if found && strings.TrimSpace(prompt) != "" {
+		prompt = strings.TrimSpace(prompt)
+		a.promptCache[cacheKey] = prompt
+		if cacheKey == "" {
+			a.promptCache[""] = prompt
+		}
+		return prompt
+	}
+
+	if cacheKey != "" {
+		if fallback, ok := a.promptCache[""]; ok && strings.TrimSpace(fallback) != "" {
+			fallback = strings.TrimSpace(fallback)
+			a.promptCache[cacheKey] = fallback
+			return fallback
+		}
+	}
+
+	base := strings.TrimSpace(extractSystemPrompt(a.cfg))
+	if base == "" {
+		base = strings.TrimSpace(a.conversation.SystemPrompt)
+	}
+	if base != "" {
+		a.promptCache[""] = base
+		if cacheKey != "" {
+			a.promptCache[cacheKey] = base
+		}
+	}
+	return base
+}
+
+func promptModeFromEvent(evt events.Event) string {
+	payload := parsePayloadMap(evt.Payload)
+	return strings.TrimSpace(asString(payload["mode"]))
 }
 
 func (a *LLMAgent) resetConversationScopeIfNeeded(evt events.Event) {

@@ -3,18 +3,23 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"empireai/internal/events"
 	"empireai/internal/models"
 )
 
 type captureRuntime struct {
-	started int
-	seen    []Message
+	started      int
+	startPrompts []string
+	seen         []Message
 }
 
-func (c *captureRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
+func (c *captureRuntime) StartSession(_ context.Context, agentID, systemPrompt string, _ []ToolDefinition) (*Session, error) {
 	c.started++
+	c.startPrompts = append(c.startPrompts, systemPrompt)
 	return &Session{ID: "s1", AgentID: agentID, RuntimeMode: "api"}, nil
 }
 
@@ -80,5 +85,44 @@ func TestLLMAgentFactory_RejectsMissingSystemPrompt(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected missing system_prompt to fail")
+	}
+}
+
+func TestLLMAgent_UsesModePromptVariantFromContracts(t *testing.T) {
+	promptsDir := t.TempDir()
+	t.Setenv("EMPIREAI_PROMPTS_DIR", promptsDir)
+	if err := os.WriteFile(filepath.Join(promptsDir, "market-research-agent.md"), []byte("default-prompt"), 0o644); err != nil {
+		t.Fatalf("write default prompt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(promptsDir, "market-research-agent.corpus.md"), []byte("corpus-prompt"), 0o644); err != nil {
+		t.Fatalf("write mode prompt: %v", err)
+	}
+
+	rt := &captureRuntime{}
+	agent := NewLLMAgent(models.AgentConfig{
+		ID:            "market-research-agent-shard-0-abc123",
+		Role:          "market-research-agent",
+		Mode:          "factory",
+		ParentAgent:   "market-research-agent",
+		Subscriptions: []string{"market_research.scan_assigned"},
+		Config: mustJSON(map[string]any{
+			"system_prompt": "stale-default",
+		}),
+	}, rt, &fakeToolExec{}, nil)
+
+	if _, err := agent.OnEvent(context.Background(), events.Event{
+		ID:   "evt-1",
+		Type: events.EventType("market_research.scan_assigned"),
+		Payload: mustJSON(map[string]any{
+			"mode": "corpus",
+		}),
+	}); err != nil {
+		t.Fatalf("on event: %v", err)
+	}
+	if len(rt.startPrompts) == 0 {
+		t.Fatal("expected start prompt to be captured")
+	}
+	if rt.startPrompts[0] != "corpus-prompt" {
+		t.Fatalf("expected corpus mode prompt, got %q", rt.startPrompts[0])
 	}
 }

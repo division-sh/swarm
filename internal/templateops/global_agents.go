@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"empireai/internal/models"
+	"empireai/internal/promptcontracts"
 )
 
 type GlobalAgentRosterYAML struct {
@@ -42,7 +43,15 @@ func LoadGlobalAgentsFromYAML(agentsDir string) ([]models.AgentConfig, error) {
 		if id == "" {
 			return nil, fmt.Errorf("agent missing id (file=%s)", f)
 		}
-		if strings.TrimSpace(a.SystemPrompt) == "" {
+		systemPrompt := strings.TrimSpace(a.SystemPrompt)
+		contractPrompt, foundContractPrompt, err := promptcontracts.Load(id, "")
+		if err != nil {
+			return nil, fmt.Errorf("load contract prompt for %s: %w", id, err)
+		}
+		if foundContractPrompt {
+			systemPrompt = strings.TrimSpace(contractPrompt)
+		}
+		if systemPrompt == "" {
 			return nil, fmt.Errorf("agent %s missing required system_prompt (file=%s)", id, f)
 		}
 		if _, ok := seen[id]; ok {
@@ -61,8 +70,8 @@ func LoadGlobalAgentsFromYAML(agentsDir string) ([]models.AgentConfig, error) {
 		}
 
 		cfgObj := map[string]any{}
-		if strings.TrimSpace(a.SystemPrompt) != "" {
-			cfgObj["system_prompt"] = strings.TrimSpace(a.SystemPrompt)
+		if systemPrompt != "" {
+			cfgObj["system_prompt"] = systemPrompt
 		}
 		if len(a.Tools) > 0 {
 			cfgObj["tools"] = normalizeStringList(a.Tools)

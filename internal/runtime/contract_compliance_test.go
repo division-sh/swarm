@@ -352,6 +352,42 @@ func TestContractCompliance(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("gate7_prompt_contract_files_exist", func(t *testing.T) {
+		errs := make([]string, 0, 8)
+		ids := make([]string, 0, len(contractAgents))
+		for id := range contractAgents {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+
+		for _, id := range ids {
+			ag := contractAgents[id]
+			if !contractComplianceRequiresPromptFile(id, ag) {
+				continue
+			}
+			promptPath := filepath.Join(repoRoot, "contracts", "prompts", id+".md")
+			info, err := os.Stat(promptPath)
+			if err != nil || info.IsDir() {
+				errs = append(errs, fmt.Sprintf("missing prompt file for %s: %s", id, promptPath))
+			}
+		}
+
+		corpusVariant := filepath.Join(repoRoot, "contracts", "prompts", "market-research-agent.corpus.md")
+		if info, err := os.Stat(corpusVariant); err != nil || info.IsDir() {
+			errs = append(errs, fmt.Sprintf("missing corpus mode prompt variant: %s", corpusVariant))
+		}
+
+		// Prompt source-of-truth must be contracts/prompts only.
+		legacyPromptRefs := contractComplianceFindLegacyPromptKeys(t, filepath.Join(repoRoot, "configs", "agents"))
+		for _, path := range legacyPromptRefs {
+			errs = append(errs, fmt.Sprintf("legacy system_prompt found in YAML config: %s", path))
+		}
+
+		if len(errs) > 0 {
+			t.Fatalf("gate7 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
 }
 
 func contractComplianceRepoRoot(t *testing.T) string {
@@ -469,6 +505,41 @@ func contractComplianceLoadSpecVersion(t *testing.T, repoRoot string) string {
 		t.Fatalf("spec_version missing in %s", path)
 	}
 	return strings.TrimSpace(gates.SpecVersion)
+}
+
+func contractComplianceFindLegacyPromptKeys(t *testing.T, root string) []string {
+	t.Helper()
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	re := regexp.MustCompile(`(?m)^\s*system_prompt\s*:`)
+	matches := make([]string, 0, 4)
+	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext != ".yaml" && ext != ".yml" {
+			return nil
+		}
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if re.Match(raw) {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk %s: %v", root, walkErr)
+	}
+	sort.Strings(matches)
+	return matches
 }
 
 func contractComplianceConfigPathForAgent(id string, cfgMap contractComplianceAgentConfigMap) (string, bool) {
@@ -838,4 +909,15 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func contractComplianceRequiresPromptFile(id string, ag contractComplianceAgent) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(ag.NodeType), "system") {
+		return false
+	}
+	return true
 }

@@ -27,3 +27,13 @@ func TestDirectiveParser(t *testing.T) {
 		t.Fatalf("expected intent to be set")
 	}
 }
+
+func TestDirectiveParser_ExtractsCorpusPath(t *testing.T) {
+	parsed := (DirectiveParser{}).Parse("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	if parsed.Mode != "corpus" {
+		t.Fatalf("expected corpus mode, got %q", parsed.Mode)
+	}
+	if parsed.CorpusPath != "/data/test-signals-25.jsonl" {
+		t.Fatalf("expected corpus_path extracted, got %q", parsed.CorpusPath)
+	}
+}
