@@ -233,7 +233,7 @@ func (m *ScanCampaignManager) emitCampaignCompletedIfDone(ctx context.Context, c
 	if remaining > 0 {
 		return false
 	}
-	payload := map[string]any{
+		payload := map[string]any{
 		"campaign_id":       campaignID,
 		"geography_id":      geographyID,
 		"completed_mode":    strings.TrimSpace(mode),
@@ -241,7 +241,7 @@ func (m *ScanCampaignManager) emitCampaignCompletedIfDone(ctx context.Context, c
 		"priority":          strings.TrimSpace(priority),
 		"source_event_id":   strings.TrimSpace(sourceEventID),
 		"directive_id":      strings.TrimSpace(directiveID),
-		"strategic_context": parsePayloadMap(strategic),
+		"strategic_context": parsePayloadMapRaw(strategic),
 	}
 	if err := m.bus.Publish(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("campaign.completed"), SourceAgent: "scan-campaign-manager", Payload: mustJSONBytes(payload), CreatedAt: m.now()}); err != nil {
 		m.warnf("scan-campaign-manager", "failed to publish campaign.completed campaign_id=%s source_event_id=%s: %v", strings.TrimSpace(campaignID), strings.TrimSpace(sourceEventID), err)
@@ -266,7 +266,7 @@ func (m *ScanCampaignManager) tick(ctx context.Context) {
 	if strings.TrimSpace(geoLabel) == "" {
 		geoLabel = "unspecified"
 	}
-	strategicContext := parsePayloadMap(c.StrategicContext)
+	strategicContext := parsePayloadMapRaw(c.StrategicContext)
 	corpusPath := ExtractCorpusPathFromStrategicContext(strategicContext)
 	payload := map[string]any{
 		"campaign_id":         c.ID,
@@ -691,7 +691,7 @@ func (m *ScanCampaignManager) recordTransition(ctx context.Context, in ScanCampa
 	_ = m.hooks.RecordTransition(ctx, m.db, in)
 }
 
-func parsePayloadMap(raw json.RawMessage) map[string]any {
+func parsePayloadMapRaw(raw json.RawMessage) map[string]any {
 	payload := map[string]any{}
 	if len(raw) == 0 {
 		return payload
@@ -706,6 +706,17 @@ func asString(v any) string {
 		return t
 	case []byte:
 		return string(t)
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case int:
+		return strconv.Itoa(t)
+	case int64:
+		return strconv.FormatInt(t, 10)
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
 	default:
 		return ""
 	}

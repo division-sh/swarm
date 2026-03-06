@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -34,8 +35,8 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		eb.cycleTracker.HandleResetEvent(ctx, evt)
 	}
 
-	deferredTransitions := make([]deferredPipelineTransition, 0, 8)
-	ictx := withPipelineTransitionCollector(ctx, &deferredTransitions)
+	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
+	ictx := runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
 		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
 	}
@@ -77,7 +78,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		persisted = true
 	}
 	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
-	flushDeferredPipelineTransitions(ctx, deferredTransitions)
+	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
 	for _, d := range deferred {
 		if err := eb.publishDeferred(ctx, d); err != nil {
 			return err
@@ -90,7 +91,7 @@ func (eb *EventBus) publishTransactional(
 	ctx context.Context,
 	evt events.Event,
 	start time.Time,
-	deferredTransitions *[]deferredPipelineTransition,
+	deferredTransitions *[]runtimepipeline.DeferredPipelineTransition,
 	txStore TransactionalEventStore,
 ) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
@@ -163,7 +164,7 @@ func (eb *EventBus) publishTransactional(
 	}
 	committed = true
 	if deferredTransitions != nil {
-		flushDeferredPipelineTransitions(ctx, *deferredTransitions)
+		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
 	}
 
 	if passthrough {

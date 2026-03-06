@@ -1,4 +1,4 @@
-package runtime
+package pipeline
 
 import (
 	"context"
@@ -216,13 +216,6 @@ func expectedAgents(mode string) int {
 	}
 }
 
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func firstNonEmptyString(vals ...string) string {
 	for _, v := range vals {
 		if strings.TrimSpace(v) != "" {
@@ -280,7 +273,7 @@ func (pc *FactoryPipelineCoordinator) recordTransition(
 		Error:         errText,
 		Duration:      time.Since(startedAt),
 	}
-	if appendDeferredPipelineTransition(ctx, deferredPipelineTransition{
+	if AppendDeferredPipelineTransition(ctx, DeferredPipelineTransition{
 		db:    pc.db,
 		input: input,
 	}) {

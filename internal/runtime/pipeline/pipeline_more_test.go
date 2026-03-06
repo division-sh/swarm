@@ -1,4 +1,4 @@
-package runtime
+package pipeline
 
 import (
 	"context"
@@ -1015,7 +1015,7 @@ func TestScanCampaignManager_EmitCampaignCompletedIfDone(t *testing.T) {
 	ctx := context.Background()
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &scanStoreStub{}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := NewScanCampaignManager(bus, store, ScanCampaignHooks{}, db)
 
 	geoID := uuid.NewString()
 	campaignID := uuid.NewString()
@@ -1073,7 +1073,7 @@ func TestScanCampaignManager_BackpressurePauseResumeAndHelpers(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	store := &scanStoreStub{}
-	manager := NewScanCampaignManager(NewEventBus(InMemoryEventStore{}), store, db)
+	manager := NewScanCampaignManager(NewEventBus(InMemoryEventStore{}), store, ScanCampaignHooks{}, db)
 
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `

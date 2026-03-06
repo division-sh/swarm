@@ -132,7 +132,7 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 	agentsDir := filepath.Join(repoRoot, "configs", "agents")
 	runtimeDir := filepath.Join(repoRoot, "internal", "runtime")
-	pipelinePath := filepath.Join(runtimeDir, "pipeline_coordinator.go")
+	pipelinePath := filepath.Join(runtimeDir, "pipeline", "coordinator.go")
 
 	agents, err := loadWiringAgentsFromRoster(agentsDir)
 	if err != nil {
@@ -505,7 +505,7 @@ func verifyInterceptorCoverage(interceptEvents, handleEvents map[string]struct{}
 
 	for evt, emits := range runtimeEmitted {
 		for _, s := range emits {
-			if !strings.Contains(s.File, "pipeline_coordinator.go") {
+			if !strings.Contains(s.File, "pipeline_coordinator.go") && !strings.Contains(s.File, filepath.Join("pipeline", "coordinator.go")) {
 				continue
 			}
 			if s.TypedPayload {

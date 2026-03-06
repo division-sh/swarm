@@ -1,4 +1,4 @@
-package runtime
+package pipeline
 
 import (
 	"context"
@@ -685,7 +685,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 	pc := NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
 	store := &holdingFlowCampaignStore{db: db}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := NewScanCampaignManager(bus, store, ScanCampaignHooks{}, db)
 
 	errCh := make(chan error, 8)
 

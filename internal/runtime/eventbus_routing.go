@@ -9,6 +9,7 @@ import (
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -158,6 +159,10 @@ func (eb *EventBus) resolveSubscribedRecipients(eventType string) []string {
 	return recipients
 }
 
+func (eb *EventBus) ResolveSubscribedRecipients(eventType string) []string {
+	return eb.resolveSubscribedRecipients(eventType)
+}
+
 func routeMatches(pattern, eventType string) bool {
 	return runtimebus.RouteMatches(pattern, eventType)
 }
@@ -279,4 +284,22 @@ func (eb *EventBus) logRuntime(ctx context.Context, entry RuntimeLogEntry) {
 		return
 	}
 	logger.Log(ctx, entry)
+}
+
+func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) {
+	eb.logRuntime(ctx, RuntimeLogEntry{
+		Level:      entry.Level,
+		Component:  entry.Component,
+		Action:     entry.Action,
+		EventID:    entry.EventID,
+		EventType:  entry.EventType,
+		AgentID:    entry.AgentID,
+		VerticalID: entry.VerticalID,
+		CampaignID: entry.CampaignID,
+		ScanID:     entry.ScanID,
+		SessionID:  entry.SessionID,
+		Detail:     entry.Detail,
+		Error:      entry.Error,
+		DurationUS: entry.DurationUS,
+	})
 }

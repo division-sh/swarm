@@ -1,4 +1,4 @@
-package runtime
+package pipeline
 
 import (
 	"context"
@@ -248,7 +248,7 @@ func (pc *FactoryPipelineCoordinator) selectScoringAnalysisRecipient(excludedAge
 		return ""
 	}
 	excludedAgent = strings.TrimSpace(excludedAgent)
-	recipients := uniqueStrings(pc.bus.resolveSubscribedRecipients("scoring.requested"))
+	recipients := uniqueStrings(pc.bus.ResolveSubscribedRecipients("scoring.requested"))
 	if len(recipients) == 0 {
 		return ""
 	}

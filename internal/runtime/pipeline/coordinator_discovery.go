@@ -1,4 +1,4 @@
-package runtime
+package pipeline
 
 import (
 	"context"
@@ -466,7 +466,7 @@ func (pc *FactoryPipelineCoordinator) logPrefilterSkip(ctx context.Context, evt 
 	if pc == nil || pc.bus == nil {
 		return
 	}
-	pc.bus.logRuntime(ctx, RuntimeLogEntry{
+	pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 		Level:      "warn",
 		Component:  "prefilter",
 		Action:     "skipped",
@@ -503,6 +503,18 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func EvaluateDiscoveryPreFilterForTest(payload map[string]any, rawSignal float64) (bool, float64, string) {
+	return evaluateDiscoveryPreFilter(payload, rawSignal)
+}
+
+func BuildPrefilterSkipDetailForTest(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
+	return buildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
+}
+
+func CloneMapForTest(in map[string]any) map[string]any {
+	return cloneMap(in)
 }
 
 func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(

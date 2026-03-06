@@ -727,12 +727,12 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
 	pc := NewFactoryPipelineCoordinator(bus, db)
 	stageSignals := make(chan string, 8)
-	pc.testVerticalStageHook = func(_ string, stage string) {
+	pc.SetTestVerticalStageHook(func(_ string, stage string) {
 		select {
 		case stageSignals <- strings.TrimSpace(stage):
 		default:
 		}
-	}
+	})
 	bus.SetInterceptors(pc)
 
 	canned := newCannedRoleRuntime()

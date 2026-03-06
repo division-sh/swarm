@@ -1,4 +1,4 @@
-package runtime
+package pipeline
 
 import (
 	"context"
@@ -164,7 +164,7 @@ func TestHoldingFlow_A1_DirectiveToCampaignCreation(t *testing.T) {
 	ctx := context.Background()
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &holdingFlowCampaignStore{db: db}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := NewScanCampaignManager(bus, store, ScanCampaignHooks{}, db)
 	ch := bus.Subscribe("watch-a1", events.EventType("scan.requested"))
 
 	manager.onEvent(ctx, events.Event{

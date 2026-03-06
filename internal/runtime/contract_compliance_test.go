@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -442,7 +443,7 @@ func TestContractCompliance(t *testing.T) {
 		// Interceptor parity check for consumed runtime events:
 		// any event listed in interceptPolicy must have a corresponding handleEvent case
 		// (except spec.revision_needed, handled in Intercept special-case branch).
-		pipelinePath := filepath.Join(repoRoot, "internal", "runtime", "pipeline_coordinator.go")
+		pipelinePath := filepath.Join(repoRoot, "internal", "runtime", "pipeline", "coordinator.go")
 		interceptEvents, handleEvents, _, err := parsePipelineInterceptorCoverage(pipelinePath)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("parse interceptor coverage: %v", err))
@@ -1221,16 +1222,22 @@ func contractComplianceStringLiteral(expr ast.Expr) (string, bool) {
 }
 
 func contractComplianceCollectRuntimeTestNames(repoRoot string) (map[string]struct{}, error) {
-	files, err := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "*_test.go"))
-	if err != nil {
-		return nil, err
-	}
 	fset := token.NewFileSet()
 	out := map[string]struct{}{}
-	for _, path := range files {
+	root := filepath.Join(repoRoot, "internal", "runtime")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
 		fileNode, parseErr := parser.ParseFile(fset, path, nil, 0)
 		if parseErr != nil {
-			return nil, parseErr
+			return parseErr
 		}
 		for _, decl := range fileNode.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -1242,6 +1249,10 @@ func contractComplianceCollectRuntimeTestNames(repoRoot string) (map[string]stru
 				out[name] = struct{}{}
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
