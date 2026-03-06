@@ -1,4 +1,4 @@
-package runtime_test
+package tools_test
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"bytes"
@@ -16,10 +16,9 @@ import (
 	"time"
 
 	"empireai/internal/models"
-	runtimetools "empireai/internal/runtime/tools"
 )
 
-func (e *RuntimeToolExecutor) execInstagramHandleCheck(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execInstagramHandleCheck(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	_ = actor
 	var in struct {
 		Handle string `json:"handle"`
@@ -53,7 +52,7 @@ func (e *RuntimeToolExecutor) execInstagramHandleCheck(ctx context.Context, acto
 	}, nil
 }
 
-func (e *RuntimeToolExecutor) execEmailAPI(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execEmailAPI(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	creds, err := e.loadVerticalCredentials(ctx, actor.VerticalID)
 	if err != nil {
 		return nil, err
@@ -96,12 +95,12 @@ func (e *RuntimeToolExecutor) execEmailAPI(ctx context.Context, actor models.Age
 	return map[string]any{"status": "sent", "to": in.To}, nil
 }
 
-func (e *RuntimeToolExecutor) execExternalProxy(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
+func (e *Executor) execExternalProxy(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
 	creds, err := e.loadExternalCredentials(ctx, actor.VerticalID, toolName)
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range runtimetools.DefaultExternalCredentialEnv(toolName) {
+	for k, v := range DefaultExternalCredentialEnv(toolName) {
 		if strings.TrimSpace(v) == "" {
 			continue
 		}
@@ -150,7 +149,7 @@ func (e *RuntimeToolExecutor) execExternalProxy(ctx context.Context, actor model
 
 	method := strings.ToUpper(strings.TrimSpace(in.Method))
 	if method == "" {
-		method = runtimetools.DefaultExternalMethod(toolName)
+		method = DefaultExternalMethod(toolName)
 	}
 
 	var bodyReader io.Reader
@@ -177,8 +176,8 @@ func (e *RuntimeToolExecutor) execExternalProxy(ctx context.Context, actor model
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	runtimetools.ApplyExternalHeaders(req, in.Headers)
-	runtimetools.ApplyExternalCredentialHeaders(req, creds, toolName)
+	ApplyExternalHeaders(req, in.Headers)
+	ApplyExternalCredentialHeaders(req, creds, toolName)
 	if req.Body != nil && req.Header.Get("content-type") == "" {
 		req.Header.Set("content-type", "application/json")
 	}
@@ -190,7 +189,7 @@ func (e *RuntimeToolExecutor) execExternalProxy(ctx context.Context, actor model
 	defer resp.Body.Close()
 
 	respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	respBody := runtimetools.ParseExternalResponseBody(respBytes)
+	respBody := ParseExternalResponseBody(respBytes)
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("%s returned status=%d body=%v", toolName, resp.StatusCode, respBody)
 	}
@@ -202,7 +201,7 @@ func (e *RuntimeToolExecutor) execExternalProxy(ctx context.Context, actor model
 	}, nil
 }
 
-func (e *RuntimeToolExecutor) loadVerticalCredentials(ctx context.Context, verticalID string) (map[string]any, error) {
+func (e *Executor) loadVerticalCredentials(ctx context.Context, verticalID string) (map[string]any, error) {
 	e.mu.RLock()
 	db := e.sqlDB
 	e.mu.RUnlock()
@@ -230,7 +229,7 @@ func (e *RuntimeToolExecutor) loadVerticalCredentials(ctx context.Context, verti
 	return e.decryptCredentialMap(ctx, out), nil
 }
 
-func (e *RuntimeToolExecutor) loadExternalCredentials(ctx context.Context, verticalID, toolName string) (map[string]any, error) {
+func (e *Executor) loadExternalCredentials(ctx context.Context, verticalID, toolName string) (map[string]any, error) {
 	creds := map[string]any{}
 	if strings.TrimSpace(verticalID) != "" {
 		verticalCreds, err := e.loadVerticalCredentials(ctx, verticalID)
@@ -239,21 +238,21 @@ func (e *RuntimeToolExecutor) loadExternalCredentials(ctx context.Context, verti
 		}
 		switch toolName {
 		case "whatsapp_business_api":
-			runtimetools.MergeCredMap(creds, runtimetools.AsMap(verticalCreds["whatsapp"]))
+			MergeCredMap(creds, AsMap(verticalCreds["whatsapp"]))
 		case "instagram_api":
-			runtimetools.MergeCredMap(creds, runtimetools.AsMap(verticalCreds["instagram"]))
+			MergeCredMap(creds, AsMap(verticalCreds["instagram"]))
 		case "domain_purchase", "domain_availability_check":
-			runtimetools.MergeCredMap(creds, runtimetools.AsMap(verticalCreds["registrar"]))
+			MergeCredMap(creds, AsMap(verticalCreds["registrar"]))
 		case "dns_configure":
-			runtimetools.MergeCredMap(creds, runtimetools.AsMap(verticalCreds["dns"]))
+			MergeCredMap(creds, AsMap(verticalCreds["dns"]))
 		case "whatsapp_name_check":
-			runtimetools.MergeCredMap(creds, runtimetools.AsMap(verticalCreds["whatsapp_name_check"]))
+			MergeCredMap(creds, AsMap(verticalCreds["whatsapp_name_check"]))
 		}
 	}
 	return creds, nil
 }
 
-func (e *RuntimeToolExecutor) decryptCredentialMap(ctx context.Context, in map[string]any) map[string]any {
+func (e *Executor) decryptCredentialMap(ctx context.Context, in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
 	for k, v := range in {
 		out[k] = e.decryptCredentialValue(ctx, v)
@@ -261,7 +260,7 @@ func (e *RuntimeToolExecutor) decryptCredentialMap(ctx context.Context, in map[s
 	return out
 }
 
-func (e *RuntimeToolExecutor) decryptCredentialValue(ctx context.Context, v any) any {
+func (e *Executor) decryptCredentialValue(ctx context.Context, v any) any {
 	switch t := v.(type) {
 	case map[string]any:
 		return e.decryptCredentialMap(ctx, t)

@@ -9,6 +9,35 @@ import (
 	"empireai/internal/models"
 )
 
+type mailboxStoreStub struct {
+	last MailboxItem
+}
+
+func (m *mailboxStoreStub) InsertMailboxItem(_ context.Context, item MailboxItem) (string, error) {
+	m.last = item
+	if item.ID == "" {
+		return "m-1", nil
+	}
+	return item.ID, nil
+}
+func (m *mailboxStoreStub) ListMailboxItems(context.Context, string, int) ([]MailboxItem, error) {
+	return nil, nil
+}
+func (m *mailboxStoreStub) CountMailboxItems(context.Context, string) (int, error) { return 0, nil }
+func (m *mailboxStoreStub) GetMailboxItem(context.Context, string) (MailboxItem, error) {
+	return MailboxItem{}, nil
+}
+func (m *mailboxStoreStub) ExpireMailboxItems(context.Context, int) ([]MailboxItem, error) {
+	return nil, nil
+}
+func (m *mailboxStoreStub) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]MailboxItem, error) {
+	return nil, nil
+}
+func (m *mailboxStoreStub) MarkMailboxItemNotified(context.Context, string) error { return nil }
+func (m *mailboxStoreStub) DecideMailboxItem(context.Context, string, string, string, string) error {
+	return nil
+}
+
 func TestClassifyMigration_AdditiveOnlyIsSafe(t *testing.T) {
 	classification := ClassifyMigration(`
 		CREATE TABLE foo (id uuid primary key);

@@ -323,6 +323,18 @@ category.assessed:
           type: array
           items: string
         would_unlock: string
+  required:
+  - scan_id
+  - category
+  - subcategory
+  - geography
+  - signal_strength
+  - opportunity_name
+  - preliminary_icp
+  - build_sketch
+  - evidence
+  - opportunity_hypothesis
+  - geographic_scope
   notes: 'v2.0.40: Multi-signal model — MRA emits 0-N signals per subcategory. Each signal is one opportunity. automation_micro
     nested field removed. Runtime pre-filter applies ICP positive check, evidence completeness, and red flag filtering before
     emitting vertical.discovered. geographic_scope indicates if opportunity is geography-locked or global. v2.0.49: opportunity_pattern,
@@ -952,6 +964,8 @@ market_research.scan_complete:
     categories_assessed: integer
     high_signal_count: integer
     geography: string
+  required:
+  - scan_id
   emitter_type: agent
 market_signals:
   emitter: opco-marketing
@@ -1095,6 +1109,9 @@ opco.spinup_requested:
     brand:
       type: object
     founder_directives: string
+  required:
+  - vertical_id
+  - mandate
   emitter_type: agent
 opco.steady_state_reached:
   emitter: opco-ceo
@@ -1334,6 +1351,10 @@ scan.requested:
           items: string
         strategic_context: string
     corpus_path: string
+  required:
+  - geography
+  - mode
+  - campaign_context
   emitter_type: agent
 scanner.directories.scan_assigned:
   emitter: runtime
@@ -1363,6 +1384,8 @@ scanner.directories.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+  required:
+  - scan_id
   emitter_type: agent
 scanner.google_maps.scan_assigned:
   emitter: runtime
@@ -1392,6 +1415,8 @@ scanner.google_maps.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+  required:
+  - scan_id
   emitter_type: agent
 scanner.instagram.scan_assigned:
   emitter: runtime
@@ -1421,6 +1446,8 @@ scanner.instagram.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+  required:
+  - scan_id
   emitter_type: agent
 scanner.reviews.scan_assigned:
   emitter: runtime
@@ -1450,6 +1477,8 @@ scanner.reviews.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+  required:
+  - scan_id
   emitter_type: agent
 scanner.yelp.scan_assigned:
   emitter: runtime
@@ -1479,6 +1508,8 @@ scanner.yelp.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+  required:
+  - scan_id
   emitter_type: agent
 score.dimension_complete:
   emitter: analysis-agent
@@ -1491,9 +1522,17 @@ score.dimension_complete:
   payload:
     vertical_id: string
     dimension: string
-    score: integer
+    score:
+      type: integer
+      minimum: 0
+      maximum: 100
     evidence: string
     confidence: string
+  required:
+  - vertical_id
+  - dimension
+  - score
+  - evidence
   emitter_type: agent
 scoring.contest_resolved:
   emitter: empire-coordinator
@@ -1546,6 +1585,14 @@ scoring.requested:
       type: object
     assigned_analysis_agent_id: string
     excluded_analysis_agent_id: string
+  required:
+  - vertical_id
+  - vertical_name
+  - geography
+  - mode
+  - rubric
+  - dimensions_requested
+  - discovery_context
   emitter_type: system_node
 source.scraped:
   emitter: scanner-agent
@@ -1560,6 +1607,11 @@ source.scraped:
     source: string
     evidence: string
     geography: string
+  required:
+  - scan_id
+  - source
+  - evidence
+  - geography
   emitter_type: agent
 spec.approved:
   emitter: business-research-agent
@@ -1572,6 +1624,8 @@ spec.approved:
   payload:
     vertical_id: string
     final_spec: string
+  required:
+  - vertical_id
   emitter_type: agent
 spec.contradiction_detected:
   emitter: runtime
@@ -1606,6 +1660,8 @@ spec.requested:
   payload:
     vertical_id: string
     business_brief: object
+  required:
+  - vertical_id
   emitter_type: agent
 spec.revision_needed:
   emitter: business-research-agent
@@ -2018,6 +2074,18 @@ trend.identified:
     trend_description: string
     opportunity_hypothesis: string
     geographic_scope: string
+  required:
+  - scan_id
+  - trend_category
+  - geography
+  - signal_strength
+  - opportunity_name
+  - preliminary_icp
+  - build_sketch
+  - evidence
+  - trend_description
+  - opportunity_hypothesis
+  - geographic_scope
   notes: 'v2.0.41: Aligned with category.assessed structured format. Legacy fields urgency and market_intersection removed.
     Same runtime pre-filter logic applies as for category.assessed.'
   emitter_type: agent
@@ -2044,6 +2112,8 @@ trend_research.scan_complete:
     scan_id: string
     trends_identified: string
     geography: string
+  required:
+  - scan_id
   emitter_type: agent
 user_onboarded:
   emitter: runtime
@@ -2155,6 +2225,11 @@ vertical.derived:
     signal_strength: number
     discovery_context:
       type: object
+  required:
+  - parent_id
+  - generation_depth
+  - generator_agent_id
+  - derivation_rationale
   _constraints:
     generation_depth_max: 2
     max_derivations_per_parent: 2
@@ -2385,6 +2460,12 @@ pipeline.dead_letter:
     event_type: string
     retry_count: integer
     last_error: string
+  required:
+  - event_id
+  - node_id
+  - event_type
+  - retry_count
+  - last_error
   _note: 'v2.0.37: Emitted when a system node exhausts its retry budget (5 attempts). Operations Analyst receives for investigation
     and escalation. Future system nodes will also emit this event type.
 

@@ -6,12 +6,10 @@ import (
 	"strings"
 
 	llm "empireai/internal/runtime/llm"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
-type EmitSchema struct {
-	Description string
-	Schema      map[string]any
-}
+type EmitSchema = runtimecontracts.EventSchema
 
 func EmitToolName(eventType string) string {
 	return "emit_" + strings.ReplaceAll(strings.TrimSpace(eventType), ".", "_")
@@ -324,6 +322,8 @@ func asString(v any) string {
 	switch t := v.(type) {
 	case string:
 		return t
+	case nil:
+		return ""
 	case fmt.Stringer:
 		return t.String()
 	default:

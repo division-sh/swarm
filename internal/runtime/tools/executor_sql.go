@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"empireai/internal/models"
 )
 
-func (e *RuntimeToolExecutor) execSQLExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execSQLExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	e.mu.RLock()
 	db := e.sqlDB
 	e.mu.RUnlock()
@@ -170,6 +170,10 @@ func sanitizeSQLReadQuery(query string) (string, error) {
 	return query + fmt.Sprintf(" LIMIT %d", maxSQLResultRows), nil
 }
 
+func SanitizeSQLReadQueryForTest(query string) (string, error) {
+	return sanitizeSQLReadQuery(query)
+}
+
 func sanitizeIdentifier(raw string) string {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if raw == "" {
@@ -195,4 +199,8 @@ func normalizeSQLValue(v any) any {
 	default:
 		return t
 	}
+}
+
+func NormalizeSQLValueForTest(v any) any {
+	return normalizeSQLValue(v)
 }

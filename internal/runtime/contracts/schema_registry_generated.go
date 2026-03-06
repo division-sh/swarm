@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-//go:generate go run ../../scripts/generate_event_schema_registry
+//go:generate go run ../../../scripts/generate_event_schema_registry
 var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaRegistry(`
 {
 	"analyst.anti_pattern_advisory": {
@@ -545,6 +545,19 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id",
+				"category",
+				"subcategory",
+				"geography",
+				"signal_strength",
+				"opportunity_name",
+				"preliminary_icp",
+				"build_sketch",
+				"evidence",
+				"opportunity_hypothesis",
+				"geographic_scope"
+			],
 			"type": "object"
 		}
 	},
@@ -1487,6 +1500,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -1738,6 +1754,10 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"vertical_id",
+				"mandate"
+			],
 			"type": "object"
 		}
 	},
@@ -1876,6 +1896,13 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "integer"
 				}
 			},
+			"required": [
+				"event_id",
+				"node_id",
+				"event_type",
+				"retry_count",
+				"last_error"
+			],
 			"type": "object"
 		}
 	},
@@ -2179,6 +2206,11 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "array"
 				}
 			},
+			"required": [
+				"geography",
+				"mode",
+				"campaign_context"
+			],
 			"type": "object"
 		}
 	},
@@ -2227,6 +2259,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -2275,6 +2310,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -2323,6 +2361,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -2371,6 +2412,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -2419,6 +2463,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -2437,12 +2484,20 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				},
 				"score": {
+					"maximum": 100,
+					"minimum": 0,
 					"type": "integer"
 				},
 				"vertical_id": {
 					"type": "string"
 				}
 			},
+			"required": [
+				"vertical_id",
+				"dimension",
+				"score",
+				"evidence"
+			],
 			"type": "object"
 		}
 	},
@@ -2534,6 +2589,15 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"vertical_id",
+				"vertical_name",
+				"geography",
+				"mode",
+				"rubric",
+				"dimensions_requested",
+				"discovery_context"
+			],
 			"type": "object"
 		}
 	},
@@ -2555,6 +2619,12 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id",
+				"source",
+				"evidence",
+				"geography"
+			],
 			"type": "object"
 		}
 	},
@@ -2570,6 +2640,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"vertical_id"
+			],
 			"type": "object"
 		}
 	},
@@ -2618,6 +2691,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"vertical_id"
+			],
 			"type": "object"
 		}
 	},
@@ -3229,6 +3305,19 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id",
+				"trend_category",
+				"geography",
+				"signal_strength",
+				"opportunity_name",
+				"preliminary_icp",
+				"build_sketch",
+				"evidence",
+				"trend_description",
+				"opportunity_hypothesis",
+				"geographic_scope"
+			],
 			"type": "object"
 		}
 	},
@@ -3262,6 +3351,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "string"
 				}
 			},
+			"required": [
+				"scan_id"
+			],
 			"type": "object"
 		}
 	},
@@ -3410,6 +3502,12 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 					"type": "number"
 				}
 			},
+			"required": [
+				"parent_id",
+				"generation_depth",
+				"generator_agent_id",
+				"derivation_rationale"
+			],
 			"type": "object"
 		}
 	},

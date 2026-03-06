@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	e.mu.RLock()
 	db := e.sqlDB
 	cfg := e.cfg
@@ -143,7 +143,7 @@ func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor mo
 	}, nil
 }
 
-func (e *RuntimeToolExecutor) execHumanTaskDecide(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	e.mu.RLock()
 	db := e.sqlDB
 	cfg := e.cfg

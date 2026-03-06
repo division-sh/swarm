@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimemanager "empireai/internal/runtime/manager"
 	"github.com/google/uuid"
 )
 
-func (e *RuntimeToolExecutor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if e.bus == nil {
 		return nil, errors.New("event bus is not configured")
 	}
@@ -111,7 +111,7 @@ func (e *RuntimeToolExecutor) execAgentMessage(ctx context.Context, actor models
 	return map[string]any{"event_id": evt.ID, "status": "sent", "targets": targets}, nil
 }
 
-func authorizeAgentMessage(actor, target models.AgentConfig, manager runtimetools.Manager) error {
+func authorizeAgentMessage(actor, target models.AgentConfig, manager Manager) error {
 	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
 		return errors.New("agent ids are required for message authorization")
 	}
@@ -186,7 +186,7 @@ func normalizeCommRole(role string) string {
 	}
 }
 
-func isManagerAncestor(manager runtimetools.Manager, managerID, targetID string) bool {
+func isManagerAncestor(manager Manager, managerID, targetID string) bool {
 	managerID = strings.TrimSpace(managerID)
 	targetID = strings.TrimSpace(targetID)
 	if manager == nil || managerID == "" || targetID == "" || managerID == targetID {
@@ -234,7 +234,7 @@ func uniqueNonEmptyStrings(in []string) []string {
 	return out
 }
 
-func (e *RuntimeToolExecutor) execSchedule(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execSchedule(actor models.AgentConfig, input any) (any, error) {
 	if e.scheduler == nil {
 		return nil, errors.New("scheduler is not configured")
 	}
@@ -306,7 +306,7 @@ func (e *RuntimeToolExecutor) execSchedule(actor models.AgentConfig, input any) 
 	return map[string]any{"status": "scheduled"}, nil
 }
 
-func (e *RuntimeToolExecutor) execConfigureRouting(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execConfigureRouting(actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -341,7 +341,7 @@ func (e *RuntimeToolExecutor) execConfigureRouting(actor models.AgentConfig, inp
 		return nil, err
 	}
 
-	rule := PersistedRoutingRule{
+	rule := runtimemanager.PersistedRoutingRule{
 		VerticalID:       in.VerticalID,
 		EventPattern:     in.EventPattern,
 		SubscriberID:     in.SubscriberID,
@@ -386,7 +386,7 @@ func (e *RuntimeToolExecutor) execConfigureRouting(actor models.AgentConfig, inp
 	return map[string]any{"status": "updated"}, nil
 }
 
-func (e *RuntimeToolExecutor) execAgentHire(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -416,7 +416,7 @@ func (e *RuntimeToolExecutor) execAgentHire(actor models.AgentConfig, input any)
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
 }
 
-func (e *RuntimeToolExecutor) execAgentFire(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -443,7 +443,7 @@ func (e *RuntimeToolExecutor) execAgentFire(actor models.AgentConfig, input any)
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
 
-func (e *RuntimeToolExecutor) execAgentReconfigure(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")

@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -9,10 +9,9 @@ import (
 	"time"
 
 	"empireai/internal/models"
-	runtimetools "empireai/internal/runtime/tools"
 )
 
-func (e *RuntimeToolExecutor) execMailboxSend(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execMailboxSend(actor models.AgentConfig, input any) (any, error) {
 	if e.mailboxStore == nil {
 		return nil, errors.New("mailbox store is not configured")
 	}
@@ -40,7 +39,7 @@ func (e *RuntimeToolExecutor) execMailboxSend(actor models.AgentConfig, input an
 	if strings.TrimSpace(in.Type) == "" {
 		return nil, errors.New("mailbox type is required")
 	}
-	normalizedType, err := runtimetools.NormalizeMailboxType(in.Type)
+	normalizedType, err := NormalizeMailboxType(in.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +47,7 @@ func (e *RuntimeToolExecutor) execMailboxSend(actor models.AgentConfig, input an
 	if strings.TrimSpace(in.Priority) == "" {
 		in.Priority = "normal"
 	}
-	normalizedPriority, err := runtimetools.NormalizeMailboxPriority(in.Priority)
+	normalizedPriority, err := NormalizeMailboxPriority(in.Priority)
 	if err != nil {
 		return nil, err
 	}

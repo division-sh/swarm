@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
+func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
 	eventType, ok := eventTypeFromEmitToolName(toolName)
 	if !ok {
 		return nil, NewRuntimeError(
@@ -72,8 +72,8 @@ func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.A
 		)
 	}
 
-	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
 	payloadMap = e.preNormalizeEmitPayload(actor, inbound, eventType, payloadMap)
+	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
 	payloadMap = trimEmitPayloadToSchema(eventType, payloadMap)
 	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
@@ -153,7 +153,7 @@ func (e *RuntimeToolExecutor) handleEmitTool(ctx context.Context, actor models.A
 	}, nil
 }
 
-func (e *RuntimeToolExecutor) preNormalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
+func (e *Executor) preNormalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -190,7 +190,7 @@ func preNormalizeVerticalDerivedPayload(payload map[string]any) map[string]any {
 	return out
 }
 
-func (e *RuntimeToolExecutor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
+func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -211,7 +211,7 @@ func (e *RuntimeToolExecutor) enrichEmitPayloadContext(actor models.AgentConfig,
 	return out
 }
 
-func (e *RuntimeToolExecutor) normalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
+func (e *Executor) normalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -348,7 +348,7 @@ func trimEmitPayloadToSchema(eventType string, payload map[string]any) map[strin
 	return out
 }
 
-func (e *RuntimeToolExecutor) enforceMigrationGuardrail(ctx context.Context, actor models.AgentConfig, eventType string, payload map[string]any) error {
+func (e *Executor) enforceMigrationGuardrail(ctx context.Context, actor models.AgentConfig, eventType string, payload map[string]any) error {
 	eventType = strings.TrimSpace(eventType)
 	if eventType != "devops.deploy_requested" && eventType != "devops.rollback_requested" {
 		return nil
@@ -681,7 +681,7 @@ func asObject(v any) (map[string]any, bool) {
 	}
 }
 
-func (e *RuntimeToolExecutor) trackTransitionPrerequisites(actor models.AgentConfig, inbound events.Event) error {
+func (e *Executor) trackTransitionPrerequisites(actor models.AgentConfig, inbound events.Event) error {
 	role := canonicalRuntimeRole(actor.Role)
 	inboundType := strings.TrimSpace(string(inbound.Type))
 	if inboundType == "" {
@@ -700,7 +700,7 @@ func (e *RuntimeToolExecutor) trackTransitionPrerequisites(actor models.AgentCon
 	return nil
 }
 
-func (e *RuntimeToolExecutor) validateEmitTransition(actor models.AgentConfig, inbound events.Event, emitted events.Event) error {
+func (e *Executor) validateEmitTransition(actor models.AgentConfig, inbound events.Event, emitted events.Event) error {
 	role := canonicalRuntimeRole(actor.Role)
 	inboundType := strings.TrimSpace(string(inbound.Type))
 	emittedType := strings.TrimSpace(string(emitted.Type))
@@ -755,11 +755,11 @@ func (e *RuntimeToolExecutor) validateEmitTransition(actor models.AgentConfig, i
 	return nil
 }
 
-func (e *RuntimeToolExecutor) oneShotKey(agentID, eventType, contextKey string) string {
+func (e *Executor) oneShotKey(agentID, eventType, contextKey string) string {
 	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(eventType) + "|" + strings.TrimSpace(contextKey)
 }
 
-func (e *RuntimeToolExecutor) isOneShotEmitted(agentID, eventType, contextKey string) bool {
+func (e *Executor) isOneShotEmitted(agentID, eventType, contextKey string) bool {
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventType) == "" || strings.TrimSpace(contextKey) == "" {
 		return false
 	}
@@ -770,7 +770,7 @@ func (e *RuntimeToolExecutor) isOneShotEmitted(agentID, eventType, contextKey st
 	return ok
 }
 
-func (e *RuntimeToolExecutor) markOneShotEmitted(agentID, eventType, contextKey string) {
+func (e *Executor) markOneShotEmitted(agentID, eventType, contextKey string) {
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventType) == "" || strings.TrimSpace(contextKey) == "" {
 		return
 	}
@@ -780,7 +780,7 @@ func (e *RuntimeToolExecutor) markOneShotEmitted(agentID, eventType, contextKey 
 	e.oneShotMu.Unlock()
 }
 
-func (e *RuntimeToolExecutor) clearOneShot(agentID, eventType, contextKey string) {
+func (e *Executor) clearOneShot(agentID, eventType, contextKey string) {
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventType) == "" || strings.TrimSpace(contextKey) == "" {
 		return
 	}

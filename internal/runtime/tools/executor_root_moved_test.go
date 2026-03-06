@@ -1,4 +1,4 @@
-package runtime
+package tools_test
 
 import (
 	"context"
@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 )
+
+
 
 type mailboxStoreStub struct {
 	last MailboxItem
@@ -1139,7 +1141,7 @@ func TestRuntimeToolExecutor_SQLExecute_ReadOnlySelect(t *testing.T) {
 
 func TestSanitizeSQLReadQuery_Guards(t *testing.T) {
 	t.Run("appends default limit", func(t *testing.T) {
-		q, err := sanitizeSQLReadQuery("select id from t")
+		q, err := runtimetools.SanitizeSQLReadQueryForTest("select id from t")
 		if err != nil {
 			t.Fatalf("sanitize query: %v", err)
 		}
@@ -1149,37 +1151,37 @@ func TestSanitizeSQLReadQuery_Guards(t *testing.T) {
 	})
 
 	t.Run("rejects non-select", func(t *testing.T) {
-		if _, err := sanitizeSQLReadQuery("delete from t"); err == nil {
+		if _, err := runtimetools.SanitizeSQLReadQueryForTest("delete from t"); err == nil {
 			t.Fatal("expected non-select rejection")
 		}
 	})
 
 	t.Run("rejects schema qualified from clause", func(t *testing.T) {
-		if _, err := sanitizeSQLReadQuery("select id from public.orders limit 10"); err == nil {
+		if _, err := runtimetools.SanitizeSQLReadQueryForTest("select id from public.orders limit 10"); err == nil {
 			t.Fatal("expected restricted schema rejection")
 		}
 	})
 
 	t.Run("rejects quoted restricted schema", func(t *testing.T) {
-		if _, err := sanitizeSQLReadQuery(`select id from "public".orders limit 10`); err == nil {
+		if _, err := runtimetools.SanitizeSQLReadQueryForTest(`select id from "public".orders limit 10`); err == nil {
 			t.Fatal("expected quoted restricted schema rejection")
 		}
 	})
 
 	t.Run("rejects schema qualification with quoted identifier", func(t *testing.T) {
-		if _, err := sanitizeSQLReadQuery(`select id from "tenant".orders`); err == nil {
+		if _, err := runtimetools.SanitizeSQLReadQueryForTest(`select id from "tenant".orders`); err == nil {
 			t.Fatal("expected schema-qualified quoted identifier rejection")
 		}
 	})
 
 	t.Run("rejects schema qualification with spaced dot", func(t *testing.T) {
-		if _, err := sanitizeSQLReadQuery(`select id from "tenant"   . orders`); err == nil {
+		if _, err := runtimetools.SanitizeSQLReadQueryForTest(`select id from "tenant"   . orders`); err == nil {
 			t.Fatal("expected schema-qualified reference rejection")
 		}
 	})
 
 	t.Run("rejects oversized limit", func(t *testing.T) {
-		if _, err := sanitizeSQLReadQuery("select id from t limit 9999"); err == nil {
+		if _, err := runtimetools.SanitizeSQLReadQueryForTest("select id from t limit 9999"); err == nil {
 			t.Fatal("expected limit rejection")
 		}
 	})
@@ -1306,10 +1308,10 @@ func TestRuntimeToolExecutor_ExternalProxy_DefaultMethodAndParseBody(t *testing.
 	}
 
 	// Small helpers.
-	if runtimetools.DefaultExternalMethod("whatsapp_name_check") != http.MethodGet {
+	if DefaultExternalMethod("whatsapp_name_check") != http.MethodGet {
 		t.Fatal("expected GET for whatsapp_name_check")
 	}
-	if runtimetools.ParseExternalResponseBody([]byte(`{"x":1}`)) == nil {
+	if ParseExternalResponseBody([]byte(`{"x":1}`)) == nil {
 		t.Fatal("expected parsed json")
 	}
 

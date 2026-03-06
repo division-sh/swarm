@@ -9,6 +9,10 @@ import (
 	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
+type Schedule = runtimepipeline.Schedule
+
+type SchedulePersistence = runtimepipeline.SchedulePersistence
+
 type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error

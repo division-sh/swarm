@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"empireai/internal/models"
 )
 
-func (e *RuntimeToolExecutor) execNginxReload(ctx context.Context, actor models.AgentConfig, _ any) (any, error) {
+func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig, _ any) (any, error) {
 	if actor.Role != "holding-devops" {
 		return nil, errors.New("nginx_reload is restricted to holding-devops")
 	}
@@ -23,7 +23,7 @@ func (e *RuntimeToolExecutor) execNginxReload(ctx context.Context, actor models.
 	return map[string]any{"status": "reloaded"}, nil
 }
 
-func (e *RuntimeToolExecutor) execSystemdControl(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if actor.Role != "holding-devops" {
 		return nil, errors.New("systemd_control is restricted to holding-devops")
 	}
@@ -66,7 +66,7 @@ func (e *RuntimeToolExecutor) execSystemdControl(ctx context.Context, actor mode
 	return map[string]any{"status": "ok", "action": action, "unit": unit}, nil
 }
 
-func (e *RuntimeToolExecutor) execCertbotExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execCertbotExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if actor.Role != "holding-devops" {
 		return nil, errors.New("certbot_execute is restricted to holding-devops")
 	}
