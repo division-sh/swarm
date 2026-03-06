@@ -27,6 +27,17 @@ func portFromDSN(t *testing.T, dsn string) int {
 	return 0
 }
 
+func dbNameFromDSN(t *testing.T, dsn string) string {
+	t.Helper()
+	for _, part := range strings.Fields(dsn) {
+		if strings.HasPrefix(part, "dbname=") {
+			return strings.TrimPrefix(part, "dbname=")
+		}
+	}
+	t.Fatalf("dbname not found in dsn: %q", dsn)
+	return ""
+}
+
 // Small local helper to avoid importing fmt (keeps this file tiny in coverage terms).
 func fmtSscanf(s string, out *int) {
 	n := 0
@@ -43,18 +54,19 @@ func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	port := portFromDSN(t, dsn)
+	dbName := dbNameFromDSN(t, dsn)
 
 	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     port,
-		Name:     "empireai",
+		Name:     dbName,
 		User:     "postgres",
 		Password: "postgres",
 		SSLMode:  "disable",
 		PoolSize: 5,
 	}
 	gotDSN := DSNFromConfig(cfg)
-	if !strings.Contains(gotDSN, "host=127.0.0.1") || !strings.Contains(gotDSN, "dbname=empireai") {
+	if !strings.Contains(gotDSN, "host=127.0.0.1") || !strings.Contains(gotDSN, "dbname="+dbName) {
 		t.Fatalf("unexpected dsn: %q", gotDSN)
 	}
 	pg, err := NewPostgresStore(gotDSN)
@@ -133,10 +145,11 @@ func TestPostgresStore_ApplyManagedMigrations(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	port := portFromDSN(t, dsn)
+	dbName := dbNameFromDSN(t, dsn)
 	cfg := config.DatabaseConfig{
 		Host:     "127.0.0.1",
 		Port:     port,
-		Name:     "empireai",
+		Name:     dbName,
 		User:     "postgres",
 		Password: "postgres",
 		SSLMode:  "disable",

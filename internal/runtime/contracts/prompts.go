@@ -1,4 +1,4 @@
-package runtime
+package contracts
 
 import (
 	"strings"
@@ -7,19 +7,18 @@ import (
 	"empireai/internal/promptcontracts"
 )
 
-func loadContractPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
-	agentID := contractPromptAgentIDForConfig(cfg)
+func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
+	agentID := PromptAgentIDForConfig(cfg)
 	if agentID == "" {
 		return "", false, nil
 	}
 	return promptcontracts.Load(agentID, mode)
 }
 
-func contractPromptAgentIDForConfig(cfg models.AgentConfig) string {
+func PromptAgentIDForConfig(cfg models.AgentConfig) string {
 	agentID := strings.TrimSpace(cfg.ID)
 	parent := strings.TrimSpace(cfg.ParentAgent)
 
-	// Shard clones should resolve prompts from their base parent agent.
 	if parent != "" && strings.Contains(agentID, "-shard-") {
 		agentID = parent
 	}
@@ -46,4 +45,8 @@ func contractPromptAgentIDForConfig(cfg models.AgentConfig) string {
 	}
 
 	return strings.TrimSpace(agentID)
+}
+
+func canonicalRuntimeRole(role string) string {
+	return strings.ToLower(strings.TrimSpace(role))
 }

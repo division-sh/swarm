@@ -2,93 +2,50 @@ package runtime
 
 import (
 	"context"
-	"sync/atomic"
+
+	runtimebus "empireai/internal/runtime/bus"
 )
 
-type runtimeEpochContextKey struct{}
-
-var globalRuntimeEpoch atomic.Int64
-var globalRuntimeIngressPaused atomic.Bool
-
-func init() {
-	globalRuntimeEpoch.Store(1)
-}
-
 func WithRuntimeEpoch(ctx context.Context, epoch int64) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if epoch <= 0 {
-		epoch = CurrentRuntimeEpoch()
-	}
-	return context.WithValue(ctx, runtimeEpochContextKey{}, epoch)
+	return runtimebus.WithRuntimeEpoch(ctx, epoch)
 }
 
 func RuntimeEpochFromContext(ctx context.Context) (int64, bool) {
-	if ctx == nil {
-		return 0, false
-	}
-	v := ctx.Value(runtimeEpochContextKey{})
-	epoch, ok := v.(int64)
-	if !ok || epoch <= 0 {
-		return 0, false
-	}
-	return epoch, true
+	return runtimebus.RuntimeEpochFromContext(ctx)
 }
 
 func WithCurrentRuntimeEpoch(ctx context.Context) context.Context {
-	if epoch, ok := RuntimeEpochFromContext(ctx); ok && epoch > 0 {
-		return ctx
-	}
-	return WithRuntimeEpoch(ctx, CurrentRuntimeEpoch())
+	return runtimebus.WithCurrentRuntimeEpoch(ctx)
 }
 
 func CurrentRuntimeEpoch() int64 {
-	epoch := globalRuntimeEpoch.Load()
-	if epoch <= 0 {
-		globalRuntimeEpoch.CompareAndSwap(0, 1)
-		epoch = globalRuntimeEpoch.Load()
-	}
-	if epoch <= 0 {
-		return 1
-	}
-	return epoch
+	return runtimebus.CurrentRuntimeEpoch()
 }
 
 func BumpRuntimeEpoch() int64 {
-	next := globalRuntimeEpoch.Add(1)
-	if next <= 0 {
-		globalRuntimeEpoch.Store(1)
-		return 1
-	}
-	return next
+	return runtimebus.BumpRuntimeEpoch()
 }
 
 func IsCurrentRuntimeEpoch(epoch int64) bool {
-	if epoch <= 0 {
-		return false
-	}
-	return epoch == CurrentRuntimeEpoch()
+	return runtimebus.IsCurrentRuntimeEpoch(epoch)
 }
 
 func PauseRuntimeIngress() {
-	globalRuntimeIngressPaused.Store(true)
+	runtimebus.PauseRuntimeIngress()
 }
 
 func ResumeRuntimeIngress() {
-	globalRuntimeIngressPaused.Store(false)
+	runtimebus.ResumeRuntimeIngress()
 }
 
 func RuntimeIngressPaused() bool {
-	return globalRuntimeIngressPaused.Load()
+	return runtimebus.RuntimeIngressPaused()
 }
 
 func EnterRuntimeResetMode() int64 {
-	PauseRuntimeIngress()
-	resetMCPTurnContexts()
-	return BumpRuntimeEpoch()
+	return runtimebus.EnterRuntimeResetMode()
 }
 
 func ExitRuntimeResetMode() {
-	ResumeRuntimeIngress()
+	runtimebus.ExitRuntimeResetMode()
 }

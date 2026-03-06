@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -21,19 +22,19 @@ type sharedPostgresState struct {
 	started   bool
 	dockerBin string
 	name      string
-	dsn       string
+	adminDSN  string
+	nextDBID  uint64
 }
 
 var sharedPostgres sharedPostgresState
 
 // StartPostgres provides an isolated database on a shared Postgres container.
-// The container is started once per test process; each call resets the schema
-// before returning and holds an exclusive lease until the test cleanup runs.
+// The container is started once per test process; each call creates a fresh
+// database, applies the canonical schema, and drops that database on cleanup.
 func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	t.Helper()
 
 	sharedPostgres.mu.Lock()
-
 	var err error
 	if !sharedPostgres.started {
 		if err = sharedPostgres.startLocked(); err != nil {
@@ -41,18 +42,30 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 			t.Fatalf("start shared postgres: %v", err)
 		}
 	}
+	adminDSN := sharedPostgres.adminDSN
+	dbName := sharedPostgres.nextDatabaseName()
+	sharedPostgres.mu.Unlock()
 
-	dsn = sharedPostgres.dsn
-	db, err = sql.Open("postgres", dsn)
+	adminDB, err := sql.Open("postgres", adminDSN)
 	if err != nil {
-		sharedPostgres.mu.Unlock()
-		t.Fatalf("open postgres: %v", err)
+		t.Fatalf("open postgres admin: %v", err)
+	}
+	defer adminDB.Close()
+
+	if err := createIsolatedDatabase(adminDB, dbName); err != nil {
+		t.Fatalf("create isolated postgres database %q: %v", dbName, err)
 	}
 
-	if err := sharedPostgres.resetLocked(db); err != nil {
+	dsn = withDBName(adminDSN, dbName)
+	db, err = sql.Open("postgres", dsn)
+	if err != nil {
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		t.Fatalf("open postgres %q: %v", dbName, err)
+	}
+	if err := initializeDatabase(db); err != nil {
 		_ = db.Close()
-		sharedPostgres.mu.Unlock()
-		t.Fatalf("reset postgres schema: %v", err)
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		t.Fatalf("initialize postgres %q: %v", dbName, err)
 	}
 
 	released := false
@@ -62,7 +75,14 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 		}
 		released = true
 		_ = db.Close()
-		sharedPostgres.mu.Unlock()
+		adminCleanupDB, err := sql.Open("postgres", adminDSN)
+		if err != nil {
+			t.Fatalf("reopen postgres admin for cleanup: %v", err)
+		}
+		defer adminCleanupDB.Close()
+		if err := dropIsolatedDatabase(adminCleanupDB, dbName); err != nil {
+			t.Fatalf("drop isolated postgres database %q: %v", dbName, err)
+		}
 	}
 
 	t.Cleanup(release)
@@ -110,8 +130,8 @@ func (s *sharedPostgresState) startLocked() error {
 		return fmt.Errorf("empty host port from docker port: %q", portLine)
 	}
 
-	dsn := fmt.Sprintf("host=127.0.0.1 port=%s user=postgres password=postgres dbname=empireai sslmode=disable", port)
-	db, err := sql.Open("postgres", dsn)
+	adminDSN := fmt.Sprintf("host=127.0.0.1 port=%s user=postgres password=postgres dbname=postgres sslmode=disable", port)
+	db, err := sql.Open("postgres", adminDSN)
 	if err != nil {
 		_ = exec.Command(dockerBin, "stop", name).Run()
 		return fmt.Errorf("open postgres: %w", err)
@@ -141,11 +161,16 @@ func (s *sharedPostgresState) startLocked() error {
 	s.started = true
 	s.dockerBin = dockerBin
 	s.name = name
-	s.dsn = dsn
+	s.adminDSN = adminDSN
 	return nil
 }
 
-func (s *sharedPostgresState) resetLocked(db *sql.DB) error {
+func (s *sharedPostgresState) nextDatabaseName() string {
+	id := atomic.AddUint64(&s.nextDBID, 1)
+	return fmt.Sprintf("empireai_test_%d_%d", os.Getpid(), id)
+}
+
+func initializeDatabase(db *sql.DB) error {
 	migrationPath, err := canonicalMigrationPath()
 	if err != nil {
 		return err
@@ -158,16 +183,15 @@ func (s *sharedPostgresState) resetLocked(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	resetSQL := []string{
-		`DROP SCHEMA IF EXISTS public CASCADE`,
-		`CREATE SCHEMA public`,
+	initSQL := []string{
+		`CREATE SCHEMA IF NOT EXISTS public`,
 		`GRANT ALL ON SCHEMA public TO postgres`,
 		`GRANT ALL ON SCHEMA public TO public`,
 		`CREATE EXTENSION IF NOT EXISTS pgcrypto`,
 	}
-	for _, stmt := range resetSQL {
+	for _, stmt := range initSQL {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("reset stmt %q: %w", stmt, err)
+			return fmt.Errorf("init stmt %q: %w", stmt, err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, string(b)); err != nil {
@@ -181,6 +205,47 @@ func (s *sharedPostgresState) resetLocked(db *sql.DB) error {
 		return fmt.Errorf("seed schema_version: %w", err)
 	}
 	return nil
+}
+
+func createIsolatedDatabase(adminDB *sql.DB, dbName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+quoteIdent(dbName)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func dropIsolatedDatabase(adminDB *sql.DB, dbName string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := adminDB.ExecContext(ctx, `
+		SELECT pg_terminate_backend(pid)
+		FROM pg_stat_activity
+		WHERE datname = $1
+		  AND pid <> pg_backend_pid()
+	`, dbName); err != nil {
+		return fmt.Errorf("terminate lingering sessions for %s: %w", dbName, err)
+	}
+	if _, err := adminDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoteIdent(dbName)); err != nil {
+		return fmt.Errorf("drop database %s: %w", dbName, err)
+	}
+	return nil
+}
+
+func withDBName(dsn, dbName string) string {
+	parts := strings.Fields(dsn)
+	for i, part := range parts {
+		if strings.HasPrefix(part, "dbname=") {
+			parts[i] = "dbname=" + dbName
+			return strings.Join(parts, " ")
+		}
+	}
+	return dsn + " dbname=" + dbName
+}
+
+func quoteIdent(v string) string {
+	return `"` + strings.ReplaceAll(v, `"`, `""`) + `"`
 }
 
 func canonicalMigrationPath() (string, error) {

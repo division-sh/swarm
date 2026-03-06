@@ -276,6 +276,9 @@ func latestVerticalIDByEvent(t *testing.T, db *sql.DB, eventType string) string 
 }
 
 func TestCannedLLME2E_Scenario2_PrefilterRejectsAll(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario2-prefilter-reject-all")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -297,6 +300,9 @@ func TestCannedLLME2E_Scenario2_PrefilterRejectsAll(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario3_MarginalPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario3-marginal-path")
 	rig := startE2EScenarioRig(t, sc, true)
 	defer rig.Close()
@@ -371,6 +377,9 @@ func TestCannedLLME2E_Scenario3_MarginalPath(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario4_DerivationLoop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario4-derivation-loop")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -415,6 +424,9 @@ func TestCannedLLME2E_Scenario4_DerivationLoop(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario5_ValidationFailureRevision(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario5-validation-failure-revision")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -443,12 +455,17 @@ func TestCannedLLME2E_Scenario5_ValidationFailureRevision(t *testing.T) {
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
 
 	var revisionCount int
-	if err := rig.db.QueryRowContext(rig.ctx, `
-		SELECT COALESCE(revision_count,0)
-		FROM validation_pipelines
-		WHERE vertical_id = $1::uuid
-	`, verticalID).Scan(&revisionCount); err != nil {
-		t.Fatalf("load revision_count: %v", err)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		err := rig.db.QueryRowContext(rig.ctx, `
+			SELECT COALESCE(revision_count,0)
+			FROM validation_pipelines
+			WHERE vertical_id = $1::uuid
+		`, verticalID).Scan(&revisionCount)
+		if err == nil && revisionCount >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if revisionCount < 1 {
 		t.Fatalf("expected revision_count>=1 after validation failure, got %d", revisionCount)
@@ -456,6 +473,9 @@ func TestCannedLLME2E_Scenario5_ValidationFailureRevision(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario6-human-rejects-mailbox")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -547,6 +567,9 @@ func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario7_CampaignMultiMode(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario7-campaign-multi-mode")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -601,6 +624,9 @@ func TestCannedLLME2E_Scenario7_CampaignMultiMode(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario8-budget-throttle-emergency")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -676,6 +702,9 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario9_DedupCollision(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario9-dedup-collision")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()
@@ -727,6 +756,9 @@ func TestCannedLLME2E_Scenario9_DedupCollision(t *testing.T) {
 }
 
 func TestCannedLLME2E_Scenario10_OpCoTeardown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e scenarios in -short mode")
+	}
 	sc := loadCannedScenario(t, "scenario10-opco-teardown")
 	rig := startE2EScenarioRig(t, sc, false)
 	defer rig.Close()

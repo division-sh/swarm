@@ -68,8 +68,7 @@ func ensureShardsTableCLI(t *testing.T, ctx context.Context, db *sql.DB) {
 func TestPipelineSubcommand_EndToEnd(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	ensurePipelineTransitionsTable(t, ctx, db)
 
@@ -147,8 +146,7 @@ func TestPipelineSubcommand_EndToEnd(t *testing.T) {
 func TestScanShardsSubcommands_EndToEnd(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	ensureShardsTableCLI(t, ctx, db)
 

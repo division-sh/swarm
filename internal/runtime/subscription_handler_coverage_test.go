@@ -39,7 +39,7 @@ func TestHandler_scoring_node_vertical_discovered(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 	_ = waitForEventType(t, ch, "scoring.requested")
 }
 
@@ -98,7 +98,7 @@ func TestHandler_scoring_node_vertical_derived(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(ctx, evt)
+	node.ProcessEventForTest(ctx, evt)
 	_ = waitForEventType(t, discovered, "vertical.discovered")
 }
 
@@ -127,7 +127,7 @@ func TestHandler_scoring_node_score_dimension_complete(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 
 	pc.mu.Lock()
 	acc := pc.scoring[verticalID]
@@ -186,7 +186,7 @@ func TestHandler_scoring_node_scoring_contest_resolved(t *testing.T) {
 		CreatedAt: time.Now().UTC(),
 	}
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 
 	pc.mu.Lock()
 	acc := pc.scoring[verticalID]

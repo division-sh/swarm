@@ -19,7 +19,6 @@ import (
 func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	ensureShardsTable(t, db)
 
 	cfg := testDispatcherConfig(t)
@@ -59,7 +58,7 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
-	go dispatcher.Run(ctx)
+	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	var shardStatus, agentID string
 	deadline := time.Now().Add(2 * time.Second)
@@ -96,7 +95,6 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
@@ -121,7 +119,7 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
-	go dispatcher.Run(ctx)
+	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	// Allow at least one dispatcher tick while the table is missing.
 	time.Sleep(60 * time.Millisecond)
@@ -174,7 +172,6 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	ensureShardsTable(t, db)
 
 	cfg := testDispatcherConfig(t)
@@ -215,7 +212,7 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
-	go dispatcher.Run(ctx)
+	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	var status string
 	deadline := time.Now().Add(2 * time.Second)
@@ -237,18 +234,23 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 
 	var evtID string
 	var payloadRaw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT id::text, payload::text
-		FROM events
-		WHERE type = 'market_research.scan_complete'
-		  AND source_agent = $1
-		ORDER BY created_at DESC
-		LIMIT 1
-	`, agentID).Scan(&evtID, &payloadRaw); err != nil {
-		t.Fatalf("expected synthetic scan_complete event: %v", err)
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		err := db.QueryRowContext(ctx, `
+			SELECT id::text, payload::text
+			FROM events
+			WHERE type = 'market_research.scan_complete'
+			  AND source_agent = $1
+			ORDER BY created_at DESC
+			LIMIT 1
+		`, agentID).Scan(&evtID, &payloadRaw)
+		if err == nil && evtID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if evtID == "" {
-		t.Fatal("expected synthetic completion event id")
+		t.Fatal("expected synthetic scan_complete event")
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
@@ -263,7 +265,6 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	ensureShardsTable(t, db)
 
 	cfg := testDispatcherConfig(t)
@@ -317,7 +318,7 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
 	dispatcher.SetReceiptGracePeriod(250 * time.Millisecond)
-	go dispatcher.Run(ctx)
+	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	time.Sleep(80 * time.Millisecond)
 
@@ -363,7 +364,6 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	ensureShardsTable(t, db)
 
 	cfg := testDispatcherConfig(t)
@@ -433,7 +433,7 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
 	dispatcher.SetStartupGracePeriod(80 * time.Millisecond)
-	go dispatcher.Run(ctx)
+	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	deadline := time.Now().Add(2 * time.Second)
 	var (
@@ -471,7 +471,6 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	ensureShardsTable(t, db)
 
 	cfg := testDispatcherConfig(t)
@@ -553,7 +552,7 @@ func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T)
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
 	dispatcher.SetStartupGracePeriod(80 * time.Millisecond)
-	go dispatcher.Run(ctx)
+	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	time.Sleep(250 * time.Millisecond)
 
@@ -613,6 +612,26 @@ func ensureShardsTable(t *testing.T, db *sql.DB) {
 	`); err != nil {
 		t.Fatalf("create shards table: %v", err)
 	}
+}
+
+func startManagedDispatcher(t *testing.T, ctx context.Context, cancel context.CancelFunc, manager *rt.AgentManager, dispatcher *rt.ShardDispatcher) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		dispatcher.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for shard dispatcher to stop")
+		}
+		if manager != nil {
+			_ = manager.Shutdown()
+		}
+	})
 }
 
 func testDispatcherConfig(t *testing.T) *config.Config {

@@ -43,7 +43,7 @@ func TestScoringNodeParity(t *testing.T) {
 	}
 
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 	out := waitForEventType(t, ch, "scoring.requested")
 	if out.SourceAgent != scoringNodeID {
 		t.Fatalf("expected source_agent=%s, got %q", scoringNodeID, out.SourceAgent)
@@ -100,10 +100,10 @@ func TestScoringNodeIdempotency(t *testing.T) {
 	}
 
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 	_ = waitForEventType(t, ch, "scoring.requested")
 
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 	assertNoEventType(t, ch, "scoring.requested", 250*time.Millisecond)
 
 	var count int
@@ -128,11 +128,10 @@ func TestScoringNodeDeadLetter(t *testing.T) {
 	if node == nil {
 		t.Fatal("expected scoring node")
 	}
-	node.retryLimit = 2
-	node.backoffFn = func(int) time.Duration { return time.Millisecond }
-	node.overrideHandle = func(context.Context, events.Event) error {
+	node.SetRetryPolicyForTest(2, func(int) time.Duration { return time.Millisecond })
+	node.SetOverrideHandleForTest(func(context.Context, events.Event) error {
 		return errors.New("forced failure")
-	}
+	})
 
 	deadCh := bus.Subscribe("ops-watch", events.EventType("pipeline.dead_letter"))
 	verticalID := uuid.NewString()
@@ -151,7 +150,7 @@ func TestScoringNodeDeadLetter(t *testing.T) {
 	}
 
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 	out := waitForEventType(t, deadCh, "pipeline.dead_letter")
 	if out.SourceAgent != scoringNodeID {
 		t.Fatalf("expected dead-letter source=%s, got %q", scoringNodeID, out.SourceAgent)
@@ -213,7 +212,7 @@ func TestScoringNode_DerivedScoringExcludesGeneratorWhenAlternateAnalysisAgentSu
 	}
 
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 
 	out := waitForEventType(t, alternateCh, "scoring.requested")
 	payload := parsePayloadMap(out.Payload)
@@ -259,7 +258,7 @@ func TestScoringNode_DerivedScoringFallsBackWhenNoAlternateAnalysisAgent(t *test
 	}
 
 	insertEventForScoringNodeLedger(t, db, evt)
-	node.processEvent(context.Background(), evt)
+	node.ProcessEventForTest(context.Background(), evt)
 
 	out := waitForEventType(t, generatorCh, "scoring.requested")
 	payload := parsePayloadMap(out.Payload)

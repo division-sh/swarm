@@ -45,6 +45,9 @@ func (r *echoRuntime) ContinueSession(_ context.Context, s *llm.Session, message
 }
 
 func TestConversationLongRunContinuity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soak coverage in -short mode")
+	}
 	rt := &echoRuntime{}
 	c := llm.NewConversation(
 		"agent-soak",
@@ -79,6 +82,9 @@ func TestConversationLongRunContinuity(t *testing.T) {
 }
 
 func TestSessionRegistryLockContentionSoak(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soak coverage in -short mode")
+	}
 	sr := sessions.NewInMemoryRegistry(0)
 
 	first, err := sr.Acquire("agent-lock", "cli_test", "holder", "")
@@ -113,6 +119,9 @@ func TestSessionRegistryLockContentionSoak(t *testing.T) {
 }
 
 func TestConversationConcurrentTurnLoad(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping soak coverage in -short mode")
+	}
 	const (
 		agents = 12
 		turns  = 80

@@ -19,8 +19,7 @@ func TestMain_LoadAuditSpecInput_And_ManagedMigrations_And_MailboxSideEffects(t 
 	root := repoRootFromCmd(t)
 	dsn, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	ctx := context.Background()
 

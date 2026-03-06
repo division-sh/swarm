@@ -15,8 +15,7 @@ import (
 func TestRunAgentSubcommand_PromptLifecycle(t *testing.T) {
 	root := repoRootFromCmd(t)
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 	ctx := context.Background()
 
 	agentID := "empire-coordinator"

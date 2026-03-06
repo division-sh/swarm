@@ -13,8 +13,7 @@ import (
 func TestChatSubcommand_AsyncInteractive_UsesStdinLoop(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	// Pre-seed a vertical so the target fallback gets a real UUID vertical_id.
 	cfg, err := config.Load(cfgPath)
@@ -69,8 +68,7 @@ func TestChatSubcommand_UsageError(t *testing.T) {
 func TestChatSubcommand_LiveOneShot_ExercisesRuntimeSetup(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	// Ensure a real vertical exists; live chat will upsert + recover agents from store.
 	cfg, err := config.Load(cfgPath)
@@ -106,8 +104,7 @@ func TestChatSubcommand_LiveOneShot_ExercisesRuntimeSetup(t *testing.T) {
 func TestChatSubcommand_LiveInteractive_ExitImmediately(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {

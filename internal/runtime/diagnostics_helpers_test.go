@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"empireai/internal/events"
+	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -79,3 +82,69 @@ func TestDiagnosticsHelpers_MissingTableAndDBTxNilPaths(t *testing.T) {
 	}
 }
 
+func TestRuntimeLogger_IntegrationAndMissingTableTolerance(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS runtime_log (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			level TEXT NOT NULL,
+			component TEXT NOT NULL,
+			action TEXT NOT NULL,
+			event_id UUID,
+			event_type TEXT,
+			agent_id TEXT,
+			vertical_id UUID,
+			campaign_id UUID,
+			scan_id UUID,
+			session_id UUID,
+			detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+			error TEXT,
+			duration_us INT,
+			created_at TIMESTAMPTZ DEFAULT now()
+		)
+	`); err != nil {
+		t.Fatalf("create runtime_log table: %v", err)
+	}
+
+	logger := NewRuntimeLogger(db)
+	bus := NewEventBus(InMemoryEventStore{})
+	bus.SetRuntimeLogger(logger)
+	if err := bus.Publish(ctx, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "human",
+		Payload:     mustJSON(map[string]any{"directive_text": "SaaS in Chile"}),
+		CreatedAt:   time.Now(),
+	}); err != nil {
+		t.Fatalf("publish with runtime logger: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM runtime_log`).Scan(&count); err != nil {
+		t.Fatalf("count runtime_log: %v", err)
+	}
+	if count == 0 {
+		t.Fatal("expected runtime_log rows to be written")
+	}
+
+	logger.Log(ctx, RuntimeLogEntry{
+		Level:      "info",
+		Component:  "test",
+		Action:     "manual",
+		EventID:    "not-a-uuid",
+		VerticalID: "not-a-uuid",
+		Detail:     map[string]any{"ok": true},
+	})
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE runtime_log`); err != nil {
+		t.Fatalf("drop runtime_log: %v", err)
+	}
+
+	logger.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Component: "test",
+		Action:    "missing-table-path",
+		Detail:    map[string]any{"expected": "no panic"},
+	})
+}

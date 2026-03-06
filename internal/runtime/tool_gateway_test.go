@@ -583,3 +583,42 @@ func slicesContains(in []string, target string) bool {
 	}
 	return false
 }
+
+func TestToolGatewayHelpers_AuthorizeAndMCPError(t *testing.T) {
+	g := NewToolGateway(nil, "secret-token")
+	req := httptest.NewRequest(http.MethodPost, "/tools/sql_execute", nil)
+	if err := g.authorize(req); err == nil {
+		t.Fatal("expected missing authorization error")
+	}
+	req.Header.Set("Authorization", "Bearer wrong")
+	if err := g.authorize(req); err == nil {
+		t.Fatal("expected invalid token error")
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+	if err := g.authorize(req); err != nil {
+		t.Fatalf("expected authorize success, got %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	g.writeMCPError(w, "id-1", -32600, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected MCP error HTTP 200 envelope, got %d", w.Code)
+	}
+	var resp mcpRPCResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode mcp error response: %v", err)
+	}
+	if resp.Error == nil || resp.Error.Code != -32600 || resp.Error.Message == "" {
+		t.Fatalf("unexpected mcp error response: %+v", resp)
+	}
+
+	if got := toolResultText(nil); got != "ok" {
+		t.Fatalf("toolResultText nil mismatch: %q", got)
+	}
+	if got := toolResultText(""); got != "ok" {
+		t.Fatalf("toolResultText empty string mismatch: %q", got)
+	}
+	if got := toolResultText(map[string]any{"ok": true}); got == "" {
+		t.Fatalf("toolResultText map should marshal, got empty")
+	}
+}

@@ -1,4 +1,4 @@
-package runtime
+package contracts
 
 import (
 	"strings"
@@ -76,7 +76,7 @@ func TestContractPromptAgentIDForConfig(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := contractPromptAgentIDForConfig(tc.cfg); got != tc.want {
+			if got := PromptAgentIDForConfig(tc.cfg); got != tc.want {
 				t.Fatalf("prompt id mismatch: got %q want %q", got, tc.want)
 			}
 		})
@@ -85,9 +85,9 @@ func TestContractPromptAgentIDForConfig(t *testing.T) {
 
 func TestLoadContractPromptForAgent(t *testing.T) {
 	cases := []struct {
-		name    string
-		cfg     models.AgentConfig
-		mode    string
+		name     string
+		cfg      models.AgentConfig
+		mode     string
 		contains string
 	}{
 		{
@@ -98,7 +98,7 @@ func TestLoadContractPromptForAgent(t *testing.T) {
 				ParentAgent: "scanner-agent",
 				Mode:        "factory",
 			},
-			mode:    "",
+			mode:     "",
 			contains: "Scanner Agent",
 		},
 		{
@@ -108,7 +108,7 @@ func TestLoadContractPromptForAgent(t *testing.T) {
 				Role: "market-research-agent",
 				Mode: "factory",
 			},
-			mode:    "corpus",
+			mode:     "corpus",
 			contains: "CORPUS MODE",
 		},
 		{
@@ -118,14 +118,14 @@ func TestLoadContractPromptForAgent(t *testing.T) {
 				Role: "analysis-agent",
 				Mode: "factory",
 			},
-			mode:    "",
+			mode:     "",
 			contains: "Analysis Agent",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt, found, err := loadContractPromptForAgent(tc.cfg, tc.mode)
+			prompt, found, err := LoadPromptForAgent(tc.cfg, tc.mode)
 			if err != nil {
 				t.Fatalf("loadContractPromptForAgent error: %v", err)
 			}

@@ -125,7 +125,19 @@ func TestFactoryPipelineCoordinator_LocalServicesDiscoveryEmitsScoringRequested(
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	scoringNode := NewScoringNode(bus, pc, nil)
+	subscribed := make(chan struct{}, 1)
+	scoringNode.SetOnSubscribeForTest(func() {
+		select {
+		case subscribed <- struct{}{}:
+		default:
+		}
+	})
 	go scoringNode.Run(ctx)
+	select {
+	case <-subscribed:
+	case <-time.After(time.Second):
+		t.Fatal("expected scoring node subscription")
+	}
 
 	scoringCh := bus.Subscribe("analysis-agent", events.EventType("scoring.requested"))
 	scanID := uuid.NewString()

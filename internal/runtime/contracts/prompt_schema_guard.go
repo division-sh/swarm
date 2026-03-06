@@ -1,20 +1,17 @@
-package runtime
+package contracts
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-	"testing"
 )
 
-func runPromptSchemaGuardCases(t *testing.T) {
-	t.Helper()
-	ensureEventSchemaRegistry()
-
-	repoRoot := contractComplianceRepoRoot(t)
+func ValidatePromptSchemaGuards(repoRoot string) error {
 	promptsDir := filepath.Join(repoRoot, "contracts", "prompts")
+	schemas := EventSchemaRegistry()
 
 	type guardCase struct {
 		promptFile       string
@@ -45,56 +42,50 @@ func runPromptSchemaGuardCases(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.promptFile, func(t *testing.T) {
-			path := filepath.Join(promptsDir, tc.promptFile)
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-			text := string(raw)
+		path := filepath.Join(promptsDir, tc.promptFile)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+		text := string(raw)
 
-			eventType, ok := eventTypeFromEmitToolName(tc.emitTool)
-			if !ok {
-				t.Fatalf("unknown emit tool %s", tc.emitTool)
-			}
-			schema := schemaForEventType(eventType)
-			props := schemaProperties(schema.Schema["properties"])
-			if len(props) == 0 {
-				t.Fatalf("schema for %s has no properties", eventType)
-			}
+		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.emitTool, "emit_"), "_", ".")
+		schema, ok := schemas[eventType]
+		if !ok {
+			return fmt.Errorf("unknown emit tool %s", tc.emitTool)
+		}
+		props := schemaProperties(schema.Schema["properties"])
+		if len(props) == 0 {
+			return fmt.Errorf("schema for %s has no properties", eventType)
+		}
 
-			fields := extractPromptEmitTopLevelFields(text, tc.emitTool)
-			if len(fields) > 0 {
-				invalid := make([]string, 0)
-				for _, f := range fields {
-					if _, ok := props[f]; !ok {
-						invalid = append(invalid, f)
-					}
-				}
-				if len(invalid) > 0 {
-					sort.Strings(invalid)
-					t.Fatalf("prompt %s: fields not in %s schema: %v", tc.promptFile, eventType, invalid)
+		fields := extractPromptEmitTopLevelFields(text, tc.emitTool)
+		if len(fields) > 0 {
+			invalid := make([]string, 0)
+			for _, f := range fields {
+				if _, ok := props[f]; !ok {
+					invalid = append(invalid, f)
 				}
 			}
-
-			for _, required := range tc.requiredTopLevel {
-				if !promptMentionsField(text, fields, required) {
-					t.Fatalf("prompt %s: missing required top-level field %q for %s", tc.promptFile, required, tc.emitTool)
-				}
+			if len(invalid) > 0 {
+				sort.Strings(invalid)
+				return fmt.Errorf("prompt %s: fields not in %s schema: %v", tc.promptFile, eventType, invalid)
 			}
+		}
 
-			for _, forbidden := range tc.forbiddenTokens {
-				if promptContainsToken(text, forbidden) {
-					t.Fatalf("prompt %s: contains forbidden legacy token %q", tc.promptFile, forbidden)
-				}
+		for _, required := range tc.requiredTopLevel {
+			if !promptMentionsField(text, fields, required) {
+				return fmt.Errorf("prompt %s: missing required top-level field %q for %s", tc.promptFile, required, tc.emitTool)
 			}
-		})
+		}
+
+		for _, forbidden := range tc.forbiddenTokens {
+			if promptContainsToken(text, forbidden) {
+				return fmt.Errorf("prompt %s: contains forbidden legacy token %q", tc.promptFile, forbidden)
+			}
+		}
 	}
-}
-
-func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
-	runPromptSchemaGuardCases(t)
+	return nil
 }
 
 var promptEmitFieldBulletPattern = regexp.MustCompile(`^\s*-\s*([a-zA-Z0-9_]+)\s*:`)
@@ -135,10 +126,17 @@ func extractPromptEmitTopLevelFields(promptText, emitTool string) []string {
 			}
 		}
 	}
-	return uniqueNonEmpty(fields)
+	return uniquePromptStrings(fields)
 }
 
-func guardContainsString(in []string, want string) bool {
+func promptMentionsField(promptText string, parsedFields []string, field string) bool {
+	if containsExactPrompt(parsedFields, field) {
+		return true
+	}
+	return promptContainsToken(promptText, field)
+}
+
+func containsExactPrompt(in []string, want string) bool {
 	want = strings.TrimSpace(want)
 	for _, item := range in {
 		if strings.TrimSpace(item) == want {
@@ -148,13 +146,6 @@ func guardContainsString(in []string, want string) bool {
 	return false
 }
 
-func promptMentionsField(promptText string, parsedFields []string, field string) bool {
-	if guardContainsString(parsedFields, field) {
-		return true
-	}
-	return promptContainsToken(promptText, field)
-}
-
 func promptContainsToken(text, token string) bool {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -162,4 +153,26 @@ func promptContainsToken(text, token string) bool {
 	}
 	pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(token) + `\b`)
 	return pattern.FindStringIndex(text) != nil
+}
+
+func uniquePromptStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func schemaProperties(raw any) map[string]any {
+	props, _ := raw.(map[string]any)
+	return props
 }

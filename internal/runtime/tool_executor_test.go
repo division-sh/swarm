@@ -4,6 +4,7 @@ import (
 	"context"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"encoding/json"
 	"github.com/DATA-DOG/go-sqlmock"
@@ -1305,10 +1306,10 @@ func TestRuntimeToolExecutor_ExternalProxy_DefaultMethodAndParseBody(t *testing.
 	}
 
 	// Small helpers.
-	if defaultExternalMethod("whatsapp_name_check") != http.MethodGet {
+	if runtimetools.DefaultExternalMethod("whatsapp_name_check") != http.MethodGet {
 		t.Fatal("expected GET for whatsapp_name_check")
 	}
-	if parseExternalResponseBody([]byte(`{"x":1}`)) == nil {
+	if runtimetools.ParseExternalResponseBody([]byte(`{"x":1}`)) == nil {
 		t.Fatal("expected parsed json")
 	}
 

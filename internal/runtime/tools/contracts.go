@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import (
 	"encoding/json"
@@ -14,41 +14,41 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type contractToolSchemaEntry struct {
+type ContractSchemaEntry struct {
 	Category    string         `yaml:"category"`
 	Description string         `yaml:"description"`
 	InputSchema map[string]any `yaml:"input_schema"`
 }
 
 var (
-	contractToolSchemasOnce sync.Once
-	contractToolSchemas     map[string]contractToolSchemaEntry
-	contractToolSchemasErr  error
+	contractSchemasOnce sync.Once
+	contractSchemas     map[string]ContractSchemaEntry
+	contractSchemasErr  error
 )
 
-func loadContractToolSchemas() (map[string]contractToolSchemaEntry, error) {
-	contractToolSchemasOnce.Do(func() {
-		path := filepath.Join(runtimeRepoRoot(), "contracts", "tool-schemas.yaml")
+func LoadContractSchemas() (map[string]ContractSchemaEntry, error) {
+	contractSchemasOnce.Do(func() {
+		path := filepath.Join(repoRoot(), "contracts", "tool-schemas.yaml")
 		raw, err := os.ReadFile(path)
 		if err != nil {
-			contractToolSchemasErr = fmt.Errorf("read %s: %w", path, err)
+			contractSchemasErr = fmt.Errorf("read %s: %w", path, err)
 			return
 		}
-		parsed := map[string]contractToolSchemaEntry{}
+		parsed := map[string]ContractSchemaEntry{}
 		if err := yaml.Unmarshal(raw, &parsed); err != nil {
-			contractToolSchemasErr = fmt.Errorf("parse %s: %w", path, err)
+			contractSchemasErr = fmt.Errorf("parse %s: %w", path, err)
 			return
 		}
-		contractToolSchemas = parsed
+		contractSchemas = parsed
 	})
-	if contractToolSchemasErr != nil {
-		return nil, contractToolSchemasErr
+	if contractSchemasErr != nil {
+		return nil, contractSchemasErr
 	}
-	return contractToolSchemas, nil
+	return contractSchemas, nil
 }
 
-func contractToolDefinitions() ([]llm.ToolDefinition, error) {
-	entries, err := loadContractToolSchemas()
+func ContractDefinitions() ([]llm.ToolDefinition, error) {
+	entries, err := LoadContractSchemas()
 	if err != nil {
 		return nil, err
 	}
@@ -74,12 +74,24 @@ func contractToolDefinitions() ([]llm.ToolDefinition, error) {
 	return defs, nil
 }
 
-func runtimeRepoRoot() string {
+func ObjectSchema(properties map[string]any, required ...string) map[string]any {
+	schema := map[string]any{
+		"type":                 "object",
+		"properties":           properties,
+		"additionalProperties": false,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+func repoRoot() string {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return "."
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 }
 
 func deepCloneJSONValue(v any) any {

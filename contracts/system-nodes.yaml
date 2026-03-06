@@ -92,7 +92,7 @@ scoring-node:
     - vertical.rejected
     - scoring.contested       # rare: sharded dimension conflict
     - pipeline.dead_letter    # escalation after retry exhaustion
-  implementation: internal/runtime/scoring_node.go
+  implementation: internal/runtime/pipeline/scoring_node.go
   state_table: scoring_digest_buffer  # v2.0.37: in-memory ScoringAccumulator struct; persistence TBD at implementation
   idempotency_table: system_node_ledger
 

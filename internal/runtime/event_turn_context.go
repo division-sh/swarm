@@ -2,65 +2,30 @@ package runtime
 
 import (
 	"context"
-	"sync"
+
+	runtimebus "empireai/internal/runtime/bus"
 
 	"empireai/internal/events"
 )
 
-type inboundEventContextKey struct{}
-type emittedEventsContextKey struct{}
+type EmittedEventsRecorder = runtimebus.EmittedEventsRecorder
 
 func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
-	return context.WithValue(ctx, inboundEventContextKey{}, evt)
+	return runtimebus.WithInboundEvent(ctx, evt)
 }
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
-	v := ctx.Value(inboundEventContextKey{})
-	if v == nil {
-		return events.Event{}, false
-	}
-	evt, ok := v.(events.Event)
-	return evt, ok
-}
-
-type EmittedEventsRecorder struct {
-	mu     sync.Mutex
-	events []events.Event
+	return runtimebus.InboundEventFromContext(ctx)
 }
 
 func NewEmittedEventsRecorder() *EmittedEventsRecorder {
-	return &EmittedEventsRecorder{}
+	return runtimebus.NewEmittedEventsRecorder()
 }
 
 func WithEmittedEventsRecorder(ctx context.Context, rec *EmittedEventsRecorder) context.Context {
-	return context.WithValue(ctx, emittedEventsContextKey{}, rec)
+	return runtimebus.WithEmittedEventsRecorder(ctx, rec)
 }
 
 func EmittedEventsRecorderFromContext(ctx context.Context) (*EmittedEventsRecorder, bool) {
-	v := ctx.Value(emittedEventsContextKey{})
-	if v == nil {
-		return nil, false
-	}
-	rec, ok := v.(*EmittedEventsRecorder)
-	return rec, ok
-}
-
-func (r *EmittedEventsRecorder) Append(evt events.Event) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	r.events = append(r.events, evt)
-	r.mu.Unlock()
-}
-
-func (r *EmittedEventsRecorder) Snapshot() []events.Event {
-	if r == nil {
-		return nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]events.Event, len(r.events))
-	copy(out, r.events)
-	return out
+	return runtimebus.EmittedEventsRecorderFromContext(ctx)
 }

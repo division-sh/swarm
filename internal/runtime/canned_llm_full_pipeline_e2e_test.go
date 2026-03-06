@@ -774,6 +774,9 @@ func assertTransitionEmitsEvent(t *testing.T, db *sql.DB, eventType, emitted str
 }
 
 func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned full-pipeline e2e in -short mode")
+	}
 	_, db, _ := testutil.StartPostgres(t)
 	eventStore := &postgresEventStore{db: db}
 	bus := NewEventBus(eventStore)

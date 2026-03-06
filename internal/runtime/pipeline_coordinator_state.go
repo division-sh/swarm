@@ -1,0 +1,475 @@
+package runtime
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"sort"
+	"strings"
+	"time"
+)
+
+func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
+	if pc == nil || pc.db == nil {
+		return
+	}
+	if !pc.isStatePersistenceEnabled(ctx) {
+		pc.mu.Lock()
+		pc.stateLoaded = true
+		pc.mu.Unlock()
+		return
+	}
+	pc.mu.Lock()
+	loaded := pc.stateLoaded
+	pc.mu.Unlock()
+	if loaded {
+		return
+	}
+
+	scans := make(map[string]*scanAccumulator)
+	pending := make(map[string]pendingCandidate)
+	validations := make(map[string]*validationPipelineState)
+	processed := make(map[string]struct{})
+
+	scanRows, err := dbQueryContext(ctx, pc.db, `
+		SELECT scan_id, COALESCE(campaign_id,''), mode, geography,
+		       expected, COALESCE(completed_by, '{}'::jsonb), reports,
+		       discovered, skipped, COALESCE(started_at, now())
+		FROM scan_accumulators
+	`)
+	if err == nil {
+		for scanRows.Next() {
+			var (
+				scanID, campaignID, mode, geography    string
+				expected, reports, discovered, skipped int
+				completedRaw                           []byte
+				createdAt                              time.Time
+			)
+			if scanErr := scanRows.Scan(&scanID, &campaignID, &mode, &geography, &expected, &completedRaw, &reports, &discovered, &skipped, &createdAt); scanErr != nil {
+				continue
+			}
+			completedBy := map[string]struct{}{}
+			var completedObj map[string]any
+			if err := json.Unmarshal(completedRaw, &completedObj); err == nil && len(completedObj) > 0 {
+				for key := range completedObj {
+					key = strings.TrimSpace(key)
+					if key != "" {
+						completedBy[key] = struct{}{}
+					}
+				}
+			} else {
+				// Backward-compatible fallback if old state persisted an array.
+				var completed []string
+				_ = json.Unmarshal(completedRaw, &completed)
+				for _, key := range completed {
+					key = strings.TrimSpace(key)
+					if key != "" {
+						completedBy[key] = struct{}{}
+					}
+				}
+			}
+			scans[scanID] = &scanAccumulator{
+				ScanID:      scanID,
+				CampaignID:  campaignID,
+				Mode:        mode,
+				Geography:   geography,
+				Expected:    expected,
+				CompletedBy: completedBy,
+				ReportData:  make([]map[string]any, 0),
+				Reports:     reports,
+				Discovered:  discovered,
+				Skipped:     skipped,
+				CreatedAt:   createdAt,
+			}
+		}
+		_ = scanRows.Close()
+	}
+
+	pendingRows, err := dbQueryContext(ctx, pc.db, `
+		SELECT
+			dedup_event_id,
+			COALESCE(existing_id, ''),
+			scan_id,
+			COALESCE(campaign_id, ''),
+			COALESCE(mode, ''),
+			signal_strength,
+			geography,
+			discovery_mode,
+			COALESCE(name, ''),
+			COALESCE(payload, '{}'::jsonb)
+		FROM pending_dedup_candidates
+		WHERE status = 'pending'
+	`)
+	if err == nil {
+		for pendingRows.Next() {
+			var (
+				dedupID, existingID, scanID, campaignID, mode, geography, discoveryMode, name string
+				signalFloat                                                                   float64
+				payloadRaw                                                                    []byte
+			)
+			if scanErr := pendingRows.Scan(&dedupID, &existingID, &scanID, &campaignID, &mode, &signalFloat, &geography, &discoveryMode, &name, &payloadRaw); scanErr != nil {
+				continue
+			}
+			payload := parsePayloadMap(payloadRaw)
+			candidateName := strings.TrimSpace(name)
+			if candidateName == "" {
+				candidateName = deriveDiscoveryCandidateName(payload)
+			}
+			resolvedCampaignID := strings.TrimSpace(campaignID)
+			if resolvedCampaignID == "" {
+				resolvedCampaignID = strings.TrimSpace(asString(payload["campaign_id"]))
+			}
+			resolvedMode := normalizeScanMode(firstNonEmpty(mode, discoveryMode))
+			if resolvedMode == "" {
+				resolvedMode = normalizeScanMode(asString(payload["mode"]))
+			}
+			pending[dedupID] = pendingCandidate{
+				DedupEventID: dedupID,
+				ExistingID:   strings.TrimSpace(existingID),
+				ScanID:       scanID,
+				CampaignID:   resolvedCampaignID,
+				Mode:         resolvedMode,
+				Geography:    geography,
+				Name:         candidateName,
+				Signal:       signalFloat,
+				Payload:      payload,
+			}
+		}
+		_ = pendingRows.Close()
+	}
+
+	validationRows, err := dbQueryContext(ctx, pc.db, `
+		SELECT vertical_id::text, status, g1_research, g2_spec, g3_cto, g4_brand,
+		       COALESCE(research_payload, '{}'::jsonb), COALESCE(spec_payload, '{}'::jsonb),
+		       COALESCE(cto_payload, '{}'::jsonb), COALESCE(brand_payload, '{}'::jsonb),
+		       COALESCE(scoring_payload, '{}'::jsonb),
+		       revision_count, inner_revision_count, spec_version,
+		       packaging_requested, packaging_requested_at, packaging_retries
+		FROM validation_pipelines
+	`)
+	if err == nil {
+		for validationRows.Next() {
+			var (
+				verticalID, status                                                     string
+				g1, g2, g3, g4, packagingRequested                                     bool
+				researchPayload, specPayload, ctoPayload, brandPayload, scoringPayload []byte
+				revisionCount, innerRevisionCount, specVersion, packagingRetries       int
+				packagingRequestedAt                                                   sql.NullTime
+			)
+			if scanErr := validationRows.Scan(
+				&verticalID, &status, &g1, &g2, &g3, &g4,
+				&researchPayload, &specPayload, &ctoPayload, &brandPayload,
+				&scoringPayload,
+				&revisionCount, &innerRevisionCount, &specVersion,
+				&packagingRequested, &packagingRequestedAt, &packagingRetries,
+			); scanErr != nil {
+				continue
+			}
+			var packagingAt *time.Time
+			if packagingRequestedAt.Valid {
+				t := packagingRequestedAt.Time
+				packagingAt = &t
+			}
+			validations[verticalID] = &validationPipelineState{
+				VerticalID:           verticalID,
+				Status:               status,
+				G1Research:           g1,
+				G2Spec:               g2,
+				G3CTO:                g3,
+				G4Brand:              g4,
+				ResearchPayload:      cloneRaw(researchPayload),
+				SpecPayload:          cloneRaw(specPayload),
+				CTOPayload:           cloneRaw(ctoPayload),
+				BrandPayload:         cloneRaw(brandPayload),
+				ScoringPayload:       cloneRaw(scoringPayload),
+				RevisionCount:        revisionCount,
+				InnerRevisionCount:   innerRevisionCount,
+				SpecVersion:          specVersion,
+				PackagingRequested:   packagingRequested || packagingAt != nil,
+				PackagingRequestedAt: packagingAt,
+				PackagingRetries:     packagingRetries,
+			}
+		}
+		_ = validationRows.Close()
+	}
+
+	processedRows, err := dbQueryContext(ctx, pc.db, `
+		SELECT event_id::text
+		FROM pipeline_processed_events
+		WHERE processed_at >= now() - interval '7 days'
+	`)
+	if err == nil {
+		for processedRows.Next() {
+			var eventID string
+			if scanErr := processedRows.Scan(&eventID); scanErr != nil {
+				continue
+			}
+			processed[eventID] = struct{}{}
+		}
+		_ = processedRows.Close()
+	}
+
+	pc.mu.Lock()
+	if pc.stateLoaded {
+		pc.mu.Unlock()
+		return
+	}
+	if len(scans) > 0 {
+		pc.scans = scans
+	}
+	if pc.scoring == nil {
+		pc.scoring = make(map[string]*scoringAccumulator)
+	}
+	if len(pending) > 0 {
+		pc.pendingDedup = pending
+	}
+	if len(validations) > 0 {
+		pc.validations = validations
+	}
+	if len(processed) > 0 {
+		pc.processed = processed
+	}
+	pc.stateLoaded = true
+	pc.mu.Unlock()
+
+	// Ensure dashboard-facing stage projection is consistent with recovered validation state.
+	for verticalID, st := range validations {
+		if st == nil {
+			continue
+		}
+		pc.updateVerticalStage(ctx, verticalID, pc.validationStageForState(st), "")
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) markEventProcessed(ctx context.Context, eventID string) bool {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return false
+	}
+	pc.mu.Lock()
+	if _, ok := pc.processed[eventID]; ok {
+		pc.mu.Unlock()
+		return false
+	}
+	pc.mu.Unlock()
+
+	if pc.db != nil && pc.isStatePersistenceEnabled(ctx) {
+		res, err := dbExecContext(ctx, pc.db, `
+			INSERT INTO pipeline_processed_events (event_id, processed_at)
+			VALUES ($1, now())
+			ON CONFLICT (event_id) DO NOTHING
+		`, eventID)
+		if err == nil {
+			if n, _ := res.RowsAffected(); n == 0 {
+				pc.mu.Lock()
+				pc.processed[eventID] = struct{}{}
+				pc.mu.Unlock()
+				return false
+			}
+		}
+	}
+
+	pc.mu.Lock()
+	pc.processed[eventID] = struct{}{}
+	pc.mu.Unlock()
+	return true
+}
+
+func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
+	if pc == nil || pc.db == nil {
+		return
+	}
+	ctx = withoutSQLTxContext(ctx)
+	if !pc.isStatePersistenceEnabled(ctx) {
+		return
+	}
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM scan_accumulators`)
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM pending_dedup_candidates`)
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM validation_pipelines`)
+
+	for _, acc := range pc.scans {
+		if acc == nil {
+			continue
+		}
+		if strings.TrimSpace(acc.CampaignID) == "" {
+			continue
+		}
+		completedBy := make([]string, 0, len(acc.CompletedBy))
+		completedByMap := make(map[string]any, len(acc.CompletedBy))
+		for key := range acc.CompletedBy {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				completedBy = append(completedBy, key)
+				completedByMap[key] = true
+			}
+		}
+		sort.Strings(completedBy)
+		startedAt := acc.CreatedAt
+		if startedAt.IsZero() {
+			startedAt = time.Now()
+		}
+		timeoutAt := startedAt.Add(scanTimeout)
+		pendingCount := 0
+		for _, cand := range pc.pendingDedup {
+			if cand.ScanID == acc.ScanID {
+				pendingCount++
+			}
+		}
+		_, _ = dbExecContext(ctx, pc.db, `
+			INSERT INTO scan_accumulators (
+				scan_id, campaign_id, mode, geography, expected, complete,
+				completed_by, reports, discovered, skipped, pending_dedup,
+				timeout_at, started_at, completed_at
+			)
+			VALUES (
+				$1, $2, $3, $4, $5,
+				$6, $7::jsonb, $8, $9, $10, $11, $12, $13, NULL
+			)
+			ON CONFLICT (scan_id) DO UPDATE SET
+				campaign_id = EXCLUDED.campaign_id,
+				mode = EXCLUDED.mode,
+				geography = EXCLUDED.geography,
+				expected = EXCLUDED.expected,
+				complete = EXCLUDED.complete,
+				completed_by = EXCLUDED.completed_by,
+				reports = EXCLUDED.reports,
+				discovered = EXCLUDED.discovered,
+				skipped = EXCLUDED.skipped,
+				pending_dedup = EXCLUDED.pending_dedup,
+				timeout_at = EXCLUDED.timeout_at,
+				started_at = EXCLUDED.started_at
+		`, acc.ScanID, acc.CampaignID, acc.Mode, acc.Geography, acc.Expected, len(acc.CompletedBy), string(mustJSON(completedByMap)), maxInt(acc.Reports, len(completedBy)), acc.Discovered, acc.Skipped, pendingCount, timeoutAt, startedAt)
+	}
+
+	for _, cand := range pc.pendingDedup {
+		dedupEventID := strings.TrimSpace(cand.DedupEventID)
+		if dedupEventID == "" {
+			dedupEventID = stableUUID(cand.ScanID + ":" + cand.Name + ":" + cand.Geography).String()
+		}
+		candidateName := strings.TrimSpace(cand.Name)
+		if candidateName == "" {
+			candidateName = deriveDiscoveryCandidateName(cand.Payload)
+		}
+		_, _ = dbExecContext(ctx, pc.db, `
+			INSERT INTO pending_dedup_candidates (
+				dedup_event_id, scan_id, campaign_id, mode, name, geography, discovery_mode, signal_strength, payload, existing_id, status, created_at, resolved_at
+			)
+			VALUES (
+				$1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NULLIF($10,''), 'pending', now(), NULL
+			)
+			ON CONFLICT (dedup_event_id) DO UPDATE SET
+				campaign_id = EXCLUDED.campaign_id,
+				mode = EXCLUDED.mode,
+				name = EXCLUDED.name,
+				geography = EXCLUDED.geography,
+				discovery_mode = EXCLUDED.discovery_mode,
+				signal_strength = EXCLUDED.signal_strength,
+				payload = EXCLUDED.payload,
+				existing_id = EXCLUDED.existing_id
+		`, dedupEventID, cand.ScanID, strings.TrimSpace(cand.CampaignID), strings.TrimSpace(cand.Mode), candidateName, cand.Geography, cand.Mode, cand.Signal, string(mustJSON(cand.Payload)), strings.TrimSpace(cand.ExistingID))
+	}
+
+	for _, st := range pc.validations {
+		if st == nil {
+			continue
+		}
+		var packagingAt any
+		if st.PackagingRequestedAt != nil {
+			packagingAt = *st.PackagingRequestedAt
+		}
+		_, _ = dbExecContext(ctx, pc.db, `
+			INSERT INTO validation_pipelines (
+				vertical_id, status, g1_research, g2_spec, g3_cto, g4_brand,
+				research_payload, spec_payload, cto_payload, brand_payload,
+				scoring_payload,
+				revision_count, inner_revision_count, spec_version,
+				packaging_requested, packaging_requested_at, packaging_retries, updated_at
+			)
+			VALUES (
+				$1::uuid, $2, $3, $4, $5, $6,
+				$7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb,
+				$12, $13, $14, $15, $16, $17, now()
+			)
+			ON CONFLICT (vertical_id) DO UPDATE SET
+				status = EXCLUDED.status,
+				g1_research = EXCLUDED.g1_research,
+				g2_spec = EXCLUDED.g2_spec,
+				g3_cto = EXCLUDED.g3_cto,
+				g4_brand = EXCLUDED.g4_brand,
+				research_payload = EXCLUDED.research_payload,
+				spec_payload = EXCLUDED.spec_payload,
+				cto_payload = EXCLUDED.cto_payload,
+				brand_payload = EXCLUDED.brand_payload,
+				scoring_payload = EXCLUDED.scoring_payload,
+				revision_count = EXCLUDED.revision_count,
+				inner_revision_count = EXCLUDED.inner_revision_count,
+				spec_version = EXCLUDED.spec_version,
+				packaging_requested = EXCLUDED.packaging_requested,
+				packaging_requested_at = EXCLUDED.packaging_requested_at,
+				packaging_retries = EXCLUDED.packaging_retries,
+				updated_at = now()
+		`,
+			st.VerticalID, st.Status, st.G1Research, st.G2Spec, st.G3CTO, st.G4Brand,
+			string(mustJSON(parsePayloadMap(st.ResearchPayload))),
+			string(mustJSON(parsePayloadMap(st.SpecPayload))),
+			string(mustJSON(parsePayloadMap(st.CTOPayload))),
+			string(mustJSON(parsePayloadMap(st.BrandPayload))),
+			string(mustJSON(parsePayloadMap(st.ScoringPayload))),
+			st.RevisionCount, st.InnerRevisionCount, st.SpecVersion,
+			st.PackagingRequested, packagingAt, st.PackagingRetries,
+		)
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) clearPersistentState(ctx context.Context) {
+	if pc == nil || pc.db == nil {
+		return
+	}
+	ctx = withoutSQLTxContext(ctx)
+	if pc.isScoringDigestBufferEnabled(ctx) {
+		_, _ = dbExecContext(ctx, pc.db, `DELETE FROM scoring_digest_buffer`)
+	}
+	if !pc.isStatePersistenceEnabled(ctx) {
+		return
+	}
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM scan_accumulators`)
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM pending_dedup_candidates`)
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM validation_pipelines`)
+	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM pipeline_processed_events`)
+}
+
+func (pc *FactoryPipelineCoordinator) isStatePersistenceEnabled(ctx context.Context) bool {
+	if pc == nil || pc.db == nil {
+		return false
+	}
+	pc.mu.Lock()
+	if pc.statePersistenceChecked {
+		enabled := pc.statePersistenceEnabled
+		pc.mu.Unlock()
+		return enabled
+	}
+	pc.mu.Unlock()
+
+	var (
+		scansOK       bool
+		pendingOK     bool
+		validationsOK bool
+		processedOK   bool
+	)
+	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.scan_accumulators') IS NOT NULL`).Scan(&scansOK)
+	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.pending_dedup_candidates') IS NOT NULL`).Scan(&pendingOK)
+	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.validation_pipelines') IS NOT NULL`).Scan(&validationsOK)
+	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.pipeline_processed_events') IS NOT NULL`).Scan(&processedOK)
+	enabled := scansOK && pendingOK && validationsOK && processedOK
+
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if !pc.statePersistenceChecked {
+		pc.statePersistenceEnabled = enabled
+		pc.statePersistenceChecked = true
+	}
+	return pc.statePersistenceEnabled
+}

@@ -30,24 +30,35 @@ func repoRootFromCmd(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 }
 
-func mustPortFromDSN(t *testing.T, dsn string) int {
+func mustDSNField(t *testing.T, dsn, key string) string {
 	t.Helper()
 	for _, part := range strings.Fields(dsn) {
-		if strings.HasPrefix(part, "port=") {
-			v := strings.TrimPrefix(part, "port=")
-			n, err := strconv.Atoi(v)
-			if err != nil {
-				t.Fatalf("parse port from dsn %q: %v", dsn, err)
-			}
-			return n
+		if strings.HasPrefix(part, key+"=") {
+			return strings.TrimPrefix(part, key+"=")
 		}
 	}
-	t.Fatalf("port not found in dsn: %q", dsn)
-	return 0
+	t.Fatalf("%s not found in dsn: %q", key, dsn)
+	return ""
 }
 
-func writeTempConfig(t *testing.T, port int) string {
+func mustPortFromDSN(t *testing.T, dsn string) int {
 	t.Helper()
+	n, err := strconv.Atoi(mustDSNField(t, dsn, "port"))
+	if err != nil {
+		t.Fatalf("parse port from dsn %q: %v", dsn, err)
+	}
+	return n
+}
+
+func mustDBNameFromDSN(t *testing.T, dsn string) string {
+	t.Helper()
+	return mustDSNField(t, dsn, "dbname")
+}
+
+func writeTempConfig(t *testing.T, dsn string) string {
+	t.Helper()
+	port := mustPortFromDSN(t, dsn)
+	dbName := mustDBNameFromDSN(t, dsn)
 	cfg := strings.Join([]string{
 		"runtime:",
 		"  max_concurrent_agents: 10",
@@ -56,7 +67,7 @@ func writeTempConfig(t *testing.T, port int) string {
 		"database:",
 		"  host: 127.0.0.1",
 		fmt.Sprintf("  port: %d", port),
-		"  name: empireai",
+		fmt.Sprintf("  name: %s", dbName),
 		"  user: postgres",
 		"  password: postgres",
 		"  sslmode: disable",
@@ -92,11 +103,44 @@ func writeTempConfig(t *testing.T, port int) string {
 	return p
 }
 
+func writeTempEmpireConfig(t *testing.T, dsn string) string {
+	t.Helper()
+	port := mustPortFromDSN(t, dsn)
+	dbName := mustDBNameFromDSN(t, dsn)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empire.yaml")
+	raw := `
+runtime:
+  max_concurrent_agents: 2
+llm:
+  runtime_mode: cli_test
+  session:
+    lock_ttl: 1s
+    rotate_after_turns: 40
+    rotate_on_parse_failures: 3
+  claude_cli:
+    command: "true"
+    output_format: "json"
+    timeout: 1s
+    retries: 1
+database:
+  host: 127.0.0.1
+  port: ` + strconv.Itoa(port) + `
+  name: ` + dbName + `
+  user: postgres
+  password: postgres
+  sslmode: disable
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	return path
+}
+
 func TestCLI_PrintTasksAndMailboxAndDigest(t *testing.T) {
 	root := repoRootFromCmd(t)
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	// Seed minimal org template + agents so some operator actions have data.
 	if _, err := db.ExecContext(context.Background(), `

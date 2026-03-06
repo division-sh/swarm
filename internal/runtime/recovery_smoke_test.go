@@ -21,6 +21,9 @@ import (
 )
 
 func TestPostgresRecoverySmoke(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping postgres recovery smoke in -short mode")
+	}
 	adminDSN := os.Getenv("EMPIREAI_PG_ADMIN_DSN")
 	if strings.TrimSpace(adminDSN) == "" {
 		t.Skip("set EMPIREAI_PG_ADMIN_DSN to run postgres recovery smoke test")

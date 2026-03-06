@@ -1,0 +1,140 @@
+package runtime_test
+
+import (
+	"bufio"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRuntimeSubpackagesDoNotImportRuntimeRoot(t *testing.T) {
+	t.Helper()
+
+	repoRoot := projectRootFromArchitectureTest(t)
+	checks := map[string]string{
+		filepath.Join(repoRoot, "internal", "runtime", "pipeline"):  "empireai/internal/runtime",
+		filepath.Join(repoRoot, "internal", "runtime", "bus"):       "empireai/internal/runtime",
+		filepath.Join(repoRoot, "internal", "runtime", "manager"):   "empireai/internal/runtime",
+		filepath.Join(repoRoot, "internal", "runtime", "mcp"):       "empireai/internal/runtime",
+		filepath.Join(repoRoot, "internal", "runtime", "tools"):     "empireai/internal/runtime",
+		filepath.Join(repoRoot, "internal", "runtime", "contracts"): "empireai/internal/runtime",
+	}
+
+	for dir, forbidden := range checks {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+			if err != nil {
+				t.Fatalf("parse imports %s: %v", path, err)
+			}
+			for _, imp := range file.Imports {
+				got := strings.Trim(imp.Path.Value, `"`)
+				if got == forbidden {
+					t.Fatalf("%s imports forbidden root package %s", path, forbidden)
+				}
+			}
+		}
+	}
+}
+
+func TestRuntimeRootFileCountStaysBounded(t *testing.T) {
+	t.Helper()
+
+	repoRoot := projectRootFromArchitectureTest(t)
+	root := filepath.Join(repoRoot, "internal", "runtime")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read %s: %v", root, err)
+	}
+
+	prodCount := 0
+	testCount := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		if strings.HasSuffix(name, "_test.go") {
+			testCount++
+			continue
+		}
+		prodCount++
+	}
+
+	if prodCount > 65 {
+		t.Fatalf("runtime root has too many production files: got=%d want<=65", prodCount)
+	}
+	if testCount > 60 {
+		t.Fatalf("runtime root has too many test files: got=%d want<=60", testCount)
+	}
+}
+
+func TestRuntimeRootHasNoZZZOmnibusTests(t *testing.T) {
+	t.Helper()
+
+	root := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime")
+	matches, err := filepath.Glob(filepath.Join(root, "zzz*.go"))
+	if err != nil {
+		t.Fatalf("glob zzz files: %v", err)
+	}
+	if len(matches) > 0 {
+		t.Fatalf("runtime root still contains omnibus zzz files: %v", matches)
+	}
+}
+
+func TestRuntimeRootWrapperFilesStayThin(t *testing.T) {
+	t.Helper()
+
+	root := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime")
+	limits := map[string]int{
+		"tool_gateway.go":          180,
+		"mcp_stall_diagnostics.go": 60,
+		"runtime_epoch.go":         80,
+		"event_turn_context.go":    80,
+		"scheduler.go":             40,
+		"recovery.go":              40,
+		"sharding.go":              80,
+	}
+	for name, maxLines := range limits {
+		path := filepath.Join(root, name)
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		lines := 0
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			lines++
+		}
+		_ = f.Close()
+		if err := scanner.Err(); err != nil {
+			t.Fatalf("scan %s: %v", path, err)
+		}
+		if lines > maxLines {
+			t.Fatalf("runtime root wrapper grew too large: %s has %d lines, want <= %d", name, lines, maxLines)
+		}
+	}
+}
+
+func projectRootFromArchitectureTest(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(wd, "..", ".."))
+}

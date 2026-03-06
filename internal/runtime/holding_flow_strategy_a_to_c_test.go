@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimetestkit "empireai/internal/runtime/testkit"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -129,7 +130,7 @@ func (s *holdingFlowCampaignStore) ResumePausedScanCampaigns(ctx context.Context
 
 func waitForEventType(t *testing.T, ch <-chan events.Event, typ string) events.Event {
 	t.Helper()
-	return waitForEventTypes(t, ch, []string{typ})[typ]
+	return runtimetestkit.WaitForEventTypes(t, ch, []string{typ}, 0)[typ]
 }
 
 func assertNoEventType(t *testing.T, ch <-chan events.Event, typ string, d time.Duration) {
@@ -469,7 +470,7 @@ func TestHoldingFlow_B2_HighScoreShortlistedTriggersValidationPipeline(t *testin
 	}); err != nil {
 		t.Fatalf("publish vertical.shortlisted: %v", err)
 	}
-	waitForEventTypes(t, ch, []string{"validation.started", "brand.requested"})
+	runtimetestkit.WaitForEventTypes(t, ch, []string{"validation.started", "brand.requested"}, 0)
 
 	pc.mu.Lock()
 	st := pc.validations[verticalID]
@@ -519,7 +520,7 @@ func TestHoldingFlow_C1_ShortlistedCreatesValidationPipelineAndEnrichedPayloads(
 	}); err != nil {
 		t.Fatalf("publish vertical.shortlisted: %v", err)
 	}
-	got := waitForEventTypes(t, ch, []string{"validation.started", "brand.requested"})
+	got := runtimetestkit.WaitForEventTypes(t, ch, []string{"validation.started", "brand.requested"}, 0)
 
 	pc.mu.Lock()
 	st := pc.validations[verticalID]

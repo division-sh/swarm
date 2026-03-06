@@ -11,8 +11,11 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/sessions"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type LLMAgent struct {
@@ -226,7 +229,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 		return strings.TrimSpace(cached)
 	}
 
-	prompt, found, err := loadContractPromptForAgent(a.cfg, mode)
+	prompt, found, err := runtimecontracts.LoadPromptForAgent(a.cfg, mode)
 	if err != nil {
 		runtimeWarn(
 			"agent-llm",
@@ -475,7 +478,7 @@ func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrain
 	}
 	out := make([]llm.ToolDefinition, 0, len(in))
 	for _, t := range in {
-		if IsUniversalRuntimeTool(t.Name) {
+		if runtimetools.IsUniversal(t.Name) {
 			out = append(out, t)
 			continue
 		}
@@ -682,25 +685,11 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 }
 
 func normalizeScanMode(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus", "derived":
-		return strings.ToLower(strings.TrimSpace(raw))
-	case "local_underserved":
-		return "local_services"
-	case "trend_opportunity", "adjacent_opportunity":
-		return "saas_trend"
-	default:
-		return ""
-	}
+	return runtimepipeline.NormalizeScanMode(raw)
 }
 
 func normalizeScanPriority(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "low", "normal", "high", "critical":
-		return strings.ToLower(strings.TrimSpace(raw))
-	default:
-		return ""
-	}
+	return runtimepipeline.NormalizeScanPriority(raw)
 }
 
 func extractCategoryList(payload map[string]any) []string {

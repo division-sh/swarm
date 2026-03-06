@@ -29,8 +29,7 @@ func TestMain_EntrypointHandlesSubcommandSuccess(t *testing.T) {
 
 func TestMain_EntrypointOperatorMailboxStatus(t *testing.T) {
 	dsn, _, _ := testutil.StartPostgres(t)
-	port := portFromDSN(t, dsn)
-	cfgFile := writeTempEmpireConfig(t, port)
+	cfgFile := writeTempEmpireConfig(t, dsn)
 
 	origArgs := os.Args
 	origFlagSet := flag.CommandLine

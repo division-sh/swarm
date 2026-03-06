@@ -23,8 +23,7 @@ func TestRunInitSubcommand_TemplateCompileFailure(t *testing.T) {
 	root := repoRootFromCmd(t)
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	// Force template compilation failure after stores are built/migrations applied.
 	err := runInitSubcommand([]string{
@@ -77,7 +76,7 @@ agents:
 `), 0o644); err != nil {
 		t.Fatalf("write roster: %v", err)
 	}
-if err := os.WriteFile(filepath.Join(dir, "empire-coordinator.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "empire-coordinator.yaml"), []byte(`
 id: empire-coordinator
 role: empire-coordinator
 mode: holding

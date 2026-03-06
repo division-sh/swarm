@@ -1100,8 +1100,8 @@ func parseWiringEventCatalogYAML(raw []byte) map[string]wiringEventContract {
 func loadRuntimeManagedEvents(repoRoot string) map[string]struct{} {
 	out := map[string]struct{}{}
 	paths := []string{
-		filepath.Join(repoRoot, "internal", "runtime", "scan_campaign_manager.go"),
-		filepath.Join(repoRoot, "internal", "runtime", "scoring_node.go"),
+		filepath.Join(repoRoot, "internal", "runtime", "pipeline", "scan_campaign_manager.go"),
+		filepath.Join(repoRoot, "internal", "runtime", "pipeline", "scoring_node.go"),
 	}
 	for _, p := range paths {
 		raw, err := os.ReadFile(p)

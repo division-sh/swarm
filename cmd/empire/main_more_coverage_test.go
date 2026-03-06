@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,55 +22,6 @@ func repoRootForCmd(t *testing.T) string {
 	}
 	// cmd/empire -> repo root
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-}
-
-func portFromDSN(t *testing.T, dsn string) int {
-	t.Helper()
-	// Example: "host=127.0.0.1 port=12345 user=postgres ..."
-	for _, part := range strings.Fields(dsn) {
-		if strings.HasPrefix(part, "port=") {
-			p, err := strconv.Atoi(strings.TrimPrefix(part, "port="))
-			if err != nil {
-				t.Fatalf("parse port from dsn: %v", err)
-			}
-			return p
-		}
-	}
-	t.Fatalf("dsn missing port: %q", dsn)
-	return 0
-}
-
-func writeTempEmpireConfig(t *testing.T, port int) string {
-	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "empire.yaml")
-	// Minimal config that passes internal/config validation.
-	raw := `
-runtime:
-  max_concurrent_agents: 2
-llm:
-  runtime_mode: cli_test
-  session:
-    lock_ttl: 1s
-    rotate_after_turns: 40
-    rotate_on_parse_failures: 3
-  claude_cli:
-    command: "true"
-    output_format: "json"
-    timeout: 1s
-    retries: 1
-database:
-  host: 127.0.0.1
-  port: ` + strconv.Itoa(port) + `
-  name: empireai
-  user: postgres
-  password: postgres
-  sslmode: disable
-`
-	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	return path
 }
 
 func TestTryRunSubcommand_CoversSwitchCasesFast(t *testing.T) {
@@ -244,8 +194,7 @@ func TestCLIStatusAndVerticalCommands_WithPostgres(t *testing.T) {
 	migrationFile := filepath.Join(root, "contracts", "ddl-canonical.sql")
 
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := portFromDSN(t, dsn)
-	cfgPath := writeTempEmpireConfig(t, port)
+	cfgPath := writeTempEmpireConfig(t, dsn)
 
 	ctx := context.Background()
 
@@ -336,8 +285,7 @@ func TestSecretsSetListRotate_WithOptionalEncryption(t *testing.T) {
 	migrationFile := filepath.Join(root, "contracts", "ddl-canonical.sql")
 
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := portFromDSN(t, dsn)
-	cfgPath := writeTempEmpireConfig(t, port)
+	cfgPath := writeTempEmpireConfig(t, dsn)
 
 	ctx := context.Background()
 	verticalID := uuid.NewString()
@@ -419,8 +367,7 @@ func TestVerticalKill_DockerDisabled(t *testing.T) {
 	migrationFile := filepath.Join(root, "contracts", "ddl-canonical.sql")
 
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := portFromDSN(t, dsn)
-	cfgPath := writeTempEmpireConfig(t, port)
+	cfgPath := writeTempEmpireConfig(t, dsn)
 
 	ctx := context.Background()
 	verticalID := uuid.NewString()

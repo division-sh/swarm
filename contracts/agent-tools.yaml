@@ -50,7 +50,7 @@ scoring-node:
   - vertical.rejected
   - vertical.scored
   - vertical.shortlisted
-  implementation: internal/runtime/scoring_node.go
+  implementation: internal/runtime/pipeline/scoring_node.go
   state_table: scoring_digest_buffer
   idempotency_table: system_node_ledger
   _note: 'v2.0.37: Migrated from interceptor cases handleVerticalDiscovered and handleScoreDimensionComplete. Receives events

@@ -718,6 +718,9 @@ func (s *e2eCampaignStore) ResumePausedScanCampaigns(ctx context.Context) (int, 
 }
 
 func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping canned runtime e2e in -short mode")
+	}
 	_, db, _ := testutil.StartPostgres(t)
 	eventStore := &threadSafeEventStore{}
 	bus := NewEventBus(eventStore)

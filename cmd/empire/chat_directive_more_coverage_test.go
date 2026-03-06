@@ -11,8 +11,7 @@ import (
 
 func TestCLI_ChatAsync_AndResolveTargets(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 
 	// Seed agents used for target resolution and FK constraints (deliveries -> agents.id).
 	verticalID := uuid.NewString()
@@ -59,8 +58,7 @@ func TestCLI_ChatAsync_AndResolveTargets(t *testing.T) {
 
 func TestResolveTargetAgent_AmbiguousRoleErrors(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 	_ = cfgPath
 
 	// Seed two vp-product agents -> ambiguous resolution by role alias.

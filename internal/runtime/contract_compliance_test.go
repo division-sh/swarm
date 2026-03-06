@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"empireai/internal/commgraph"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
 	"gopkg.in/yaml.v3"
 )
@@ -541,7 +542,9 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("gate10_prompt_schema_guard", func(t *testing.T) {
-		runPromptSchemaGuardCases(t)
+		if err := runtimecontracts.ValidatePromptSchemaGuards(repoRoot); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
 

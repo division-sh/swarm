@@ -19,8 +19,7 @@ func TestCLI_Subcommands_EndToEnd_More(t *testing.T) {
 	root := repoRootFromCmd(t)
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := mustPortFromDSN(t, dsn)
-	cfgPath := writeTempConfig(t, port)
+	cfgPath := writeTempConfig(t, dsn)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("load cfg: %v", err)

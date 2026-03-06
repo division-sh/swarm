@@ -1,0 +1,1073 @@
+package runtime
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"log"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"empireai/internal/events"
+	"github.com/google/uuid"
+)
+
+func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
+	payload := parsePayloadMap(evt.Payload)
+	scanID := strings.TrimSpace(asString(payload["scan_id"]))
+	if scanID == "" {
+		runtimeWarn(
+			"pipeline-coordinator",
+			"dropping discovery report missing scan_id event_id=%s type=%s source=%s",
+			strings.TrimSpace(evt.ID),
+			strings.TrimSpace(string(evt.Type)),
+			strings.TrimSpace(evt.SourceAgent),
+		)
+		return
+	}
+
+	pc.mu.Lock()
+	acc := pc.scans[scanID]
+	if acc == nil {
+		acc = &scanAccumulator{
+			ScanID:      scanID,
+			Mode:        normalizeScanMode(asString(payload["mode"])),
+			Geography:   strings.TrimSpace(asString(payload["geography"])),
+			Expected:    1,
+			CompletedBy: make(map[string]struct{}),
+			ReportData:  make([]map[string]any, 0),
+			CreatedAt:   time.Now(),
+		}
+		if acc.Mode == "" {
+			acc.Mode = "saas_gap"
+		}
+		pc.scans[scanID] = acc
+	}
+	acc.ReportData = append(acc.ReportData, cloneMap(payload))
+	acc.Reports++
+	pc.mu.Unlock()
+
+	if payloadIndicatesSynthesisNeeded(payload) {
+		pc.publish(ctx, "synthesis.needed", "", payloadMap(pc.buildSynthesisNeededPayload(scanID, acc, payload)))
+		return
+	}
+
+	candidates := buildDiscoveryCandidatesForReport(acc.Mode, payload)
+	for _, cand := range candidates {
+		pc.processDiscoveryCandidate(ctx, evt, scanID, acc, cand)
+	}
+}
+
+type discoveryCandidate struct {
+	Mode    string
+	Signal  float64
+	Payload map[string]any
+}
+
+func buildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []discoveryCandidate {
+	baseMode := normalizeScanMode(firstNonEmptyString(asString(payload["mode"]), scanMode))
+	if baseMode == "" {
+		baseMode = "saas_gap"
+	}
+	basePayload := cloneMap(payload)
+	basePayload["mode"] = baseMode
+	candidates := []discoveryCandidate{{
+		Mode:    baseMode,
+		Signal:  asFloat(basePayload["signal_strength"]),
+		Payload: basePayload,
+	}}
+
+	autoRaw, _ := payload["automation_micro"].(map[string]any)
+	if len(autoRaw) == 0 {
+		return candidates
+	}
+
+	autoPayload := cloneMap(payload)
+	// Let automation-micro propose its own candidate name from its own hypothesis.
+	delete(autoPayload, "vertical_name")
+	delete(autoPayload, "name")
+	delete(autoPayload, "title")
+	autoPayload["mode"] = "automation_micro"
+	autoPayload["automation_micro"] = autoRaw
+	autoPayload["signal_strength"] = autoRaw["signal_strength"]
+	if v := strings.TrimSpace(asString(autoRaw["opportunity_hypothesis"])); v != "" {
+		autoPayload["opportunity_hypothesis"] = v
+	}
+	if v := strings.TrimSpace(asString(autoRaw["evidence"])); v != "" {
+		autoPayload["evidence"] = v
+	}
+	candidates = append(candidates, discoveryCandidate{
+		Mode:    "automation_micro",
+		Signal:  asFloat(autoRaw["signal_strength"]),
+		Payload: autoPayload,
+	})
+	return candidates
+}
+
+var (
+	roleTokens = []string{
+		"owner", "operator", "manager", "founder", "director", "admin", "coordinator", "lead",
+	}
+	cohortTokens = []string{
+		"clinic", "dental", "restaurant", "salon", "agency", "smb", "small business", "warehouse", "logistics",
+	}
+	workflowTokens = []string{
+		"schedule", "booking", "invoice", "payroll", "lead", "dispatch", "inventory", "compliance", "reporting",
+	}
+	blockingRedFlagTypes = map[string]struct{}{
+		"phone_led_sales":            {},
+		"enterprise_procurement":     {},
+		"relationship_networking":    {},
+		"physical_presence_required": {},
+		"support_mode_phone_video":   {},
+	}
+)
+
+func evaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string) {
+	signal := applyRedFlagPenalty(rawSignal, payload)
+	if signal < 55 {
+		return false, signal, "signal_below_threshold"
+	}
+	if reason := blockingRedFlagReason(payload); reason != "" {
+		return false, signal, reason
+	}
+	// Backwards-compatible fallback for legacy scanner payloads.
+	if !hasStructuredDiscoveryContext(payload) {
+		return true, signal, ""
+	}
+	if !passesICPPositiveCheck(payload) {
+		return false, signal, "icp_positive_check_failed"
+	}
+	if !passesEvidenceCompleteness(payload) {
+		return false, signal, "evidence_insufficient"
+	}
+	if !passesRetentionPrimitive(payload) {
+		return false, signal, "no_retention_primitive"
+	}
+	return true, signal, ""
+}
+
+func applyRedFlagPenalty(signal float64, payload map[string]any) float64 {
+	flags := extractRedFlagTypes(payload)
+	if len(flags) == 0 {
+		return signal
+	}
+	penalized := signal - float64(len(flags)*5)
+	if penalized < 0 {
+		return 0
+	}
+	if penalized > 100 {
+		return 100
+	}
+	return penalized
+}
+
+func hasBlockingRedFlags(payload map[string]any) bool {
+	return blockingRedFlagReason(payload) != ""
+}
+
+func blockingRedFlagReason(payload map[string]any) string {
+	flags := extractRedFlagTypes(payload)
+	flagSet := make(map[string]struct{}, len(flags))
+	for _, flag := range flags {
+		flagSet[flag] = struct{}{}
+		if _, blocked := blockingRedFlagTypes[flag]; blocked {
+			return "blocking_red_flag"
+		}
+	}
+	_, hasComplexIntegration := flagSet["complex_integration"]
+	_, hasHighFeatureCount := flagSet["high_feature_count"]
+	_, hasMultiModule := flagSet["multi_module"]
+	if hasComplexIntegration && (hasHighFeatureCount || hasMultiModule) {
+		return "co_occurrence_block"
+	}
+	return ""
+}
+
+func extractRedFlagTypes(payload map[string]any) []string {
+	if len(payload) == 0 {
+		return nil
+	}
+	buildSketch, _ := asObject(payload["build_sketch"])
+	redFlags, _ := asArray(buildSketch["red_flags"])
+	out := make([]string, 0, len(redFlags))
+	for _, item := range redFlags {
+		switch typed := item.(type) {
+		case string:
+			if v := strings.TrimSpace(typed); v != "" {
+				out = append(out, strings.ToLower(v))
+			}
+		case map[string]any:
+			if v := strings.TrimSpace(asString(typed["type"])); v != "" {
+				out = append(out, strings.ToLower(v))
+			}
+		}
+	}
+	return out
+}
+
+func hasStructuredDiscoveryContext(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	if strings.TrimSpace(asString(payload["opportunity_name"])) != "" {
+		return true
+	}
+	if strings.TrimSpace(asString(payload["preliminary_icp"])) != "" {
+		return true
+	}
+	if buildSketch, ok := asObject(payload["build_sketch"]); ok && len(buildSketch) > 0 {
+		return true
+	}
+	if evidence, ok := asObject(payload["evidence"]); ok && len(evidence) > 0 {
+		return true
+	}
+	return false
+}
+
+func passesICPPositiveCheck(payload map[string]any) bool {
+	icp := strings.ToLower(strings.TrimSpace(asString(payload["preliminary_icp"])))
+	hypothesis := strings.ToLower(strings.TrimSpace(asString(payload["opportunity_hypothesis"])))
+	text := strings.TrimSpace(icp + " " + hypothesis)
+	if text == "" {
+		return false
+	}
+	hasRole := containsAnyToken(text, roleTokens)
+	hasCohort := containsAnyToken(text, cohortTokens)
+	hasWorkflow := containsAnyToken(text, workflowTokens)
+	if !(hasRole || hasCohort) || !hasWorkflow {
+		return false
+	}
+	evidence, _ := asObject(payload["evidence"])
+	communities, _ := asArray(evidence["buyer_communities"])
+	for _, item := range communities {
+		obj, _ := asObject(item)
+		if isURLLike(asString(obj["source_url"])) {
+			return true
+		}
+	}
+	return false
+}
+
+func passesEvidenceCompleteness(payload map[string]any) bool {
+	evidence, ok := asObject(payload["evidence"])
+	if !ok || len(evidence) == 0 {
+		return false
+	}
+	competitors, _ := asArray(evidence["competitors"])
+	buyerCommunities, _ := asArray(evidence["buyer_communities"])
+	painSignals, _ := asArray(evidence["pain_signals"])
+	if !hasCompetitorEvidence(competitors) {
+		return false
+	}
+	if !hasSourceURL(buyerCommunities) {
+		return false
+	}
+	if !hasSourceURL(painSignals) {
+		return false
+	}
+	regulatory, _ := asArray(evidence["regulatory"])
+	urls := collectEvidenceURLs(competitors, buyerCommunities, painSignals, regulatory)
+	if len(urls) < 2 {
+		return false
+	}
+	return true
+}
+
+func hasCompetitorEvidence(items []any) bool {
+	for _, item := range items {
+		obj, _ := asObject(item)
+		if strings.TrimSpace(asString(obj["name"])) == "" {
+			continue
+		}
+		if strings.TrimSpace(asString(obj["pricing"])) == "" {
+			continue
+		}
+		if !isURLLike(asString(obj["source_url"])) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func hasSourceURL(items []any) bool {
+	for _, item := range items {
+		obj, _ := asObject(item)
+		if isURLLike(asString(obj["source_url"])) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectEvidenceURLs(parts ...[]any) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, items := range parts {
+		for _, item := range items {
+			obj, _ := asObject(item)
+			raw := strings.TrimSpace(strings.ToLower(asString(obj["source_url"])))
+			if isURLLike(raw) {
+				out[raw] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func passesRetentionPrimitive(payload map[string]any) bool {
+	return len(extractRetentionPrimitives(payload)) > 0
+}
+
+func extractRetentionPrimitives(payload map[string]any) []string {
+	keys := []string{
+		"recurring_data",
+		"workflow_embedding",
+		"integration_lock_in",
+		"compliance_cadence",
+		"team_collaboration",
+	}
+	out := make(map[string]struct{}, len(keys))
+	add := func(key string) {
+		token := strings.TrimSpace(strings.ToLower(key))
+		if token != "" {
+			out[token] = struct{}{}
+		}
+	}
+	for _, key := range keys {
+		if parseBool(payload[key]) {
+			add(key)
+		}
+	}
+	buildSketch, _ := asObject(payload["build_sketch"])
+	for _, key := range keys {
+		if parseBool(buildSketch[key]) {
+			add(key)
+		}
+	}
+	checkArray := func(v any) {
+		items, _ := asArray(v)
+		for _, item := range items {
+			token := strings.TrimSpace(strings.ToLower(asString(item)))
+			for _, key := range keys {
+				if token == key {
+					add(key)
+				}
+			}
+		}
+	}
+	checkArray(payload["retention_primitives"])
+	checkArray(buildSketch["retention_primitives"])
+
+	// v2.0.47 category.assessed schema does not carry explicit retention_primitives.
+	// Infer plausible primitives from structured narrative fields to avoid blind drops.
+	for _, primitive := range inferRetentionPrimitives(payload) {
+		add(primitive)
+	}
+
+	result := make([]string, 0, len(out))
+	for _, key := range keys {
+		if _, ok := out[key]; ok {
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+func inferRetentionPrimitives(payload map[string]any) []string {
+	textParts := []string{
+		strings.ToLower(strings.TrimSpace(asString(payload["opportunity_hypothesis"]))),
+		strings.ToLower(strings.TrimSpace(asString(payload["preliminary_icp"]))),
+	}
+	buildSketch, _ := asObject(payload["build_sketch"])
+	if coreFeatures, ok := asArray(buildSketch["core_features"]); ok {
+		for _, item := range coreFeatures {
+			textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(item))))
+		}
+	}
+	if integrations, ok := asArray(buildSketch["key_integrations"]); ok {
+		for _, item := range integrations {
+			textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(item))))
+		}
+	}
+	requiredCaps, _ := asObject(payload["required_capabilities"])
+	if current, ok := asArray(requiredCaps["current"]); ok {
+		for _, item := range current {
+			textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(item))))
+		}
+	}
+	textParts = append(textParts, strings.ToLower(strings.TrimSpace(asString(requiredCaps["would_unlock"]))))
+	joined := strings.Join(textParts, " ")
+	if joined == "" {
+		return nil
+	}
+	out := make(map[string]struct{}, 5)
+	add := func(primitive string) { out[primitive] = struct{}{} }
+	if containsAnyToken(joined, []string{"calendar", "history", "ledger", "records", "tracking", "dashboard", "library", "portfolio", "reconciliation", "audit trail"}) {
+		add("recurring_data")
+	}
+	if containsAnyToken(joined, []string{"workflow", "approval", "queue", "submission", "tracker", "daily", "weekly", "coordinator"}) {
+		add("workflow_embedding")
+	}
+	if containsAnyToken(joined, []string{"integration", "sync", "api", "oauth", "quickbooks", "xero", "sage", "procore", "clio", "mri", "yardi", "erp"}) {
+		add("integration_lock_in")
+	}
+	if containsAnyToken(joined, []string{"compliance", "deadline", "regulatory", "renewal", "expiration", "guideline", "ocg", "lien waiver", "coi"}) {
+		add("compliance_cadence")
+	}
+	if containsAnyToken(joined, []string{"team", "partner", "manager", "attorney", "coordinator", "approval routing"}) {
+		add("team_collaboration")
+	}
+	keys := []string{"recurring_data", "workflow_embedding", "integration_lock_in", "compliance_cadence", "team_collaboration"}
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if _, ok := out[key]; ok {
+			result = append(result, key)
+		}
+	}
+	return result
+}
+
+func buildPrefilterSkipDetail(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
+	evidence, _ := asObject(payload["evidence"])
+	competitors, _ := asArray(evidence["competitors"])
+	buyerCommunities, _ := asArray(evidence["buyer_communities"])
+	painSignals, _ := asArray(evidence["pain_signals"])
+	regulatory, _ := asArray(evidence["regulatory"])
+	evidenceURLs := collectEvidenceURLs(competitors, buyerCommunities, painSignals, regulatory)
+	urls := make([]string, 0, len(evidenceURLs))
+	for url := range evidenceURLs {
+		urls = append(urls, url)
+	}
+	sort.Strings(urls)
+	retentionPrimitives := extractRetentionPrimitives(payload)
+	detail := map[string]any{
+		"skip_reason":             strings.TrimSpace(reason),
+		"mode":                    strings.TrimSpace(mode),
+		"raw_signal_strength":     rawSignal,
+		"signal_strength":         adjustedSignal,
+		"red_flags":               extractRedFlagTypes(payload),
+		"evidence_urls":           urls,
+		"retention_primitive":     retentionPrimitives,
+		"opportunity_name":        strings.TrimSpace(asString(payload["opportunity_name"])),
+		"opportunity_pattern":     strings.TrimSpace(asString(payload["opportunity_pattern"])),
+		"passes_icp_gate":         passesICPPositiveCheck(payload),
+		"passes_evidence_gate":    passesEvidenceCompleteness(payload),
+		"passes_retention_gate":   len(retentionPrimitives) > 0,
+		"structured_context":      hasStructuredDiscoveryContext(payload),
+		"blocking_red_flags_gate": hasBlockingRedFlags(payload),
+	}
+	return detail
+}
+
+func (pc *FactoryPipelineCoordinator) logPrefilterSkip(ctx context.Context, evt events.Event, scanID, campaignID, reason, mode string, payload map[string]any, rawSignal, adjustedSignal float64) {
+	if pc == nil || pc.bus == nil {
+		return
+	}
+	pc.bus.logRuntime(ctx, RuntimeLogEntry{
+		Level:      "warn",
+		Component:  "prefilter",
+		Action:     "skipped",
+		EventID:    strings.TrimSpace(evt.ID),
+		EventType:  strings.TrimSpace(string(evt.Type)),
+		AgentID:    strings.TrimSpace(evt.SourceAgent),
+		CampaignID: strings.TrimSpace(campaignID),
+		ScanID:     strings.TrimSpace(scanID),
+		Detail:     buildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode),
+	})
+}
+
+func containsAnyToken(text string, tokens []string) bool {
+	for _, token := range tokens {
+		tok := strings.TrimSpace(strings.ToLower(token))
+		if tok != "" && strings.Contains(text, tok) {
+			return true
+		}
+	}
+	return false
+}
+
+func isURLLike(raw string) bool {
+	s := strings.TrimSpace(strings.ToLower(raw))
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
+	ctx context.Context,
+	evt events.Event,
+	scanID string,
+	acc *scanAccumulator,
+	candidate discoveryCandidate,
+) {
+	signal := candidate.Signal
+	allowed, adjustedSignal, reason := evaluateDiscoveryPreFilter(candidate.Payload, signal)
+	if !allowed {
+		pc.logPrefilterSkip(ctx, evt, scanID, acc.CampaignID, reason, candidate.Mode, candidate.Payload, signal, adjustedSignal)
+		pc.mu.Lock()
+		acc.Skipped++
+		pc.mu.Unlock()
+		return
+	}
+	signal = adjustedSignal
+	candidate.Payload["signal_strength"] = adjustedSignal
+
+	payload := candidate.Payload
+	name := deriveDiscoveryCandidateName(payload)
+	if name == "" {
+		runtimeWarn(
+			"pipeline-coordinator",
+			"skipping discovery candidate with missing name scan_id=%s event_id=%s source=%s mode=%s",
+			scanID,
+			strings.TrimSpace(evt.ID),
+			strings.TrimSpace(evt.SourceAgent),
+			candidate.Mode,
+		)
+		pc.mu.Lock()
+		acc.Skipped++
+		pc.mu.Unlock()
+		return
+	}
+
+	geography := strings.TrimSpace(firstNonEmptyString(asString(payload["geography"]), acc.Geography))
+	if geography == "" {
+		geography = "unknown"
+	}
+
+	existing, err := pc.loadVerticalsByGeography(ctx, geography)
+	if err != nil {
+		log.Printf("pipeline: dedup lookup failed scan=%s geo=%s err=%v", scanID, geography, err)
+		existing = nil
+	}
+	for _, v := range existing {
+		if normalizeName(v.Name) == normalizeName(name) {
+			pc.mu.Lock()
+			acc.Skipped++
+			pc.mu.Unlock()
+			return
+		}
+	}
+
+	if best, score := fuzzyBestMatch(name, existing); best.ID != "" && score >= 0.70 {
+		dedupEventID := uuid.NewString()
+		cand := pendingCandidate{
+			DedupEventID: dedupEventID,
+			ExistingID:   strings.TrimSpace(best.ID),
+			ScanID:       scanID,
+			CampaignID:   acc.CampaignID,
+			Mode:         candidate.Mode,
+			Geography:    geography,
+			Name:         name,
+			Signal:       signal,
+			Payload:      payload,
+		}
+		pc.mu.Lock()
+		pc.pendingDedup[dedupEventID] = cand
+		pc.mu.Unlock()
+		pc.publish(ctx, "dedup.ambiguous", "", payloadMap(pc.buildDedupAmbiguousPayload(scanID, dedupEventID, score, name, geography, signal, best.ID, best.Name)))
+		return
+	}
+
+	verticalID, err := pc.ensureVerticalDiscovered(ctx, name, geography, candidate.Mode, payload)
+	if err != nil {
+		log.Printf("pipeline: ensure discovered vertical failed name=%s geo=%s mode=%s err=%v", name, geography, candidate.Mode, err)
+		return
+	}
+	pc.mu.Lock()
+	acc.Discovered++
+	pc.mu.Unlock()
+	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, name, geography, candidate.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload))
+	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+}
+
+func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
+	payload := parsePayloadMap(evt.Payload)
+	dedupEventID := strings.TrimSpace(asString(payload["dedup_event_id"]))
+	if dedupEventID == "" {
+		return
+	}
+
+	pc.mu.Lock()
+	cand, ok := pc.pendingDedup[dedupEventID]
+	if ok {
+		delete(pc.pendingDedup, dedupEventID)
+	}
+	pc.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(asString(payload["action"])))
+	if action == "merge" {
+		pc.mu.Lock()
+		if acc := pc.scans[cand.ScanID]; acc != nil {
+			acc.Skipped++
+		}
+		pc.mu.Unlock()
+		return
+	}
+
+	verticalID, err := pc.ensureVerticalDiscovered(ctx, cand.Name, cand.Geography, cand.Mode, cand.Payload)
+	if err != nil {
+		log.Printf("pipeline: dedup keep_both insert failed err=%v", err)
+		return
+	}
+	pc.mu.Lock()
+	if acc := pc.scans[cand.ScanID]; acc != nil {
+		acc.Discovered++
+	}
+	pc.mu.Unlock()
+	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "pipeline-coordinator", cand.Payload))
+	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+}
+
+func (pc *FactoryPipelineCoordinator) pendingDedupCountForScan(scanID string) int {
+	count := 0
+	for _, cand := range pc.pendingDedup {
+		if cand.ScanID == scanID {
+			count++
+		}
+	}
+	return count
+}
+
+type verticalCandidate struct {
+	ID   string
+	Name string
+}
+
+func (pc *FactoryPipelineCoordinator) loadVerticalsByGeography(ctx context.Context, geography string) ([]verticalCandidate, error) {
+	if pc == nil || pc.db == nil || strings.TrimSpace(geography) == "" {
+		return nil, nil
+	}
+	rows, err := dbQueryContext(ctx, pc.db, `
+		SELECT id::text, name
+		FROM verticals
+		WHERE lower(geography) = lower($1)
+		ORDER BY created_at DESC
+		LIMIT 500
+	`, geography)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]verticalCandidate, 0, 32)
+	for rows.Next() {
+		var v verticalCandidate
+		if err := rows.Scan(&v.ID, &v.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (pc *FactoryPipelineCoordinator) loadVerticalIdentity(ctx context.Context, verticalID string) (string, string, error) {
+	if pc == nil || pc.db == nil || strings.TrimSpace(verticalID) == "" {
+		return "", "", nil
+	}
+	var name, geography string
+	err := dbQueryRowContext(ctx, pc.db, `
+		SELECT COALESCE(name, ''), COALESCE(geography, '')
+		FROM verticals
+		WHERE id = $1::uuid
+	`, verticalID).Scan(&name, &geography)
+	if err == sql.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(name), strings.TrimSpace(geography), nil
+}
+
+func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Context, name, geography, mode string, payload map[string]any) (string, error) {
+	existing, err := pc.loadVerticalsByGeography(ctx, geography)
+	if err != nil {
+		return "", err
+	}
+	norm := normalizeName(name)
+	for _, v := range existing {
+		if normalizeName(v.Name) == norm {
+			return v.ID, nil
+		}
+	}
+	verticalID := uuid.NewString()
+	if pc == nil || pc.db == nil {
+		return verticalID, nil
+	}
+	slug := buildVerticalSlug(name, verticalID)
+	if _, err := dbExecContext(ctx, pc.db, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, raw_signals, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3, $4, 'discovered', 'factory', $5::jsonb, now(), now())
+	`, verticalID, name, slug, geography, string(mustJSON(payload))); err != nil {
+		return "", err
+	}
+	_ = pc.updateVerticalDiscoveryMetadata(ctx, verticalID, mode, payload)
+	return verticalID, nil
+}
+
+func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx context.Context, verticalID, mode string, payload map[string]any) error {
+	if pc == nil || pc.db == nil || strings.TrimSpace(verticalID) == "" {
+		return nil
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	discoveryMode := normalizeScanMode(mode)
+	if discoveryMode == "" {
+		discoveryMode = strings.ToLower(strings.TrimSpace(mode))
+	}
+	if discoveryMode == "" {
+		discoveryMode = strings.ToLower(strings.TrimSpace(asString(payload["mode"])))
+	}
+	if discoveryMode == "" {
+		discoveryMode = "saas_gap"
+	}
+	opportunityPattern := normalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
+	if opportunityPattern == "" {
+		opportunityPattern = "unknown"
+	}
+	signalSources := payload["signal_sources"]
+	if signalSources == nil {
+		signalSources = []any{}
+	}
+	requiredCapabilities := payload["required_capabilities"]
+	if requiredCapabilities == nil {
+		requiredCapabilities = map[string]any{}
+	}
+	parentID := strings.TrimSpace(asString(payload["parent_id"]))
+	generationDepth := intFromAny(payload["generation_depth"])
+	if generationDepth < 0 {
+		generationDepth = 0
+	}
+	if generationDepth > 2 {
+		generationDepth = 2
+	}
+	generatorAgentID := strings.TrimSpace(asString(payload["generator_agent_id"]))
+	derivationRationale := payload["derivation_rationale"]
+	if derivationRationale == nil {
+		derivationRationale = map[string]any{}
+	}
+	_, err := dbExecContext(ctx, pc.db, `
+		UPDATE verticals
+		SET
+			discovery_mode = $2,
+			opportunity_pattern = COALESCE(NULLIF($3, ''), opportunity_pattern),
+			signal_sources = COALESCE($4::jsonb, signal_sources),
+			required_capabilities = COALESCE($5::jsonb, required_capabilities),
+			parent_id = COALESCE(NULLIF($6, '')::uuid, parent_id),
+			generation_depth = CASE WHEN $7 > 0 THEN $7 ELSE generation_depth END,
+			generator_agent_id = COALESCE(NULLIF($8, ''), generator_agent_id),
+			derivation_rationale = COALESCE($9::jsonb, derivation_rationale),
+			updated_at = now()
+		WHERE id = $1::uuid
+	`, verticalID, discoveryMode, opportunityPattern, string(mustJSON(signalSources)), string(mustJSON(requiredCapabilities)), parentID, generationDepth, generatorAgentID, string(mustJSON(derivationRationale)))
+	if err != nil {
+		// Older test fixtures may not include newer columns; ignore metadata enrichment failures.
+		return err
+	}
+	return nil
+}
+
+var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+var punctuationHeavyName = regexp.MustCompile(`[.!?;:]`)
+
+var knownVerticalAcronyms = map[string]string{
+	"ai":    "AI",
+	"api":   "API",
+	"b2b":   "B2B",
+	"b2c":   "B2C",
+	"crm":   "CRM",
+	"erp":   "ERP",
+	"hr":    "HR",
+	"kpi":   "KPI",
+	"ppc":   "PPC",
+	"pos":   "POS",
+	"saas":  "SaaS",
+	"seo":   "SEO",
+	"spi":   "SPI",
+	"smb":   "SMB",
+	"smes":  "SMEs",
+	"whats": "Whats",
+}
+
+func normalizeName(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	raw = nonAlnum.ReplaceAllString(raw, " ")
+	return strings.Join(strings.Fields(raw), " ")
+}
+
+func deriveDiscoveryCandidateName(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	for _, key := range []string{"opportunity_name", "vertical_name", "name", "title"} {
+		if v := normalizeProvidedVerticalName(asString(payload[key]), false); v != "" {
+			return v
+		}
+	}
+	if v := humanizeTaxonomyLabel(firstNonEmptyString(
+		asString(payload["subcategory"]),
+		asString(payload["trend_category"]),
+	)); v != "" {
+		return v
+	}
+	if v := humanizeTaxonomyLabel(asString(payload["category"])); v != "" {
+		return v
+	}
+	for _, key := range []string{"trend_description", "opportunity_hypothesis"} {
+		if v := normalizeProvidedVerticalName(asString(payload[key]), true); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func normalizeProvidedVerticalName(raw string, strictNarrative bool) string {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		return ""
+	}
+	name = strings.Join(strings.Fields(name), " ")
+	if strictNarrative {
+		if len(name) > maxNarrativeFallbackNameLen {
+			return ""
+		}
+		if len(strings.Fields(name)) > maxNarrativeFallbackNameWords {
+			return ""
+		}
+		if punctuationHeavyName.MatchString(name) {
+			return ""
+		}
+	}
+	if len(name) > maxVerticalNameLen {
+		name = strings.TrimSpace(truncateRunes(name, maxVerticalNameLen))
+	}
+	// If the candidate looks like a taxonomy token, present a readable label.
+	if !strings.Contains(name, " ") && (strings.Contains(name, "_") || strings.Contains(name, "-") || strings.Contains(name, "/")) {
+		if humanized := humanizeTaxonomyLabel(name); humanized != "" {
+			return humanized
+		}
+	}
+	return name
+}
+
+func humanizeTaxonomyLabel(raw string) string {
+	norm := normalizeName(raw)
+	if norm == "" {
+		return ""
+	}
+	parts := strings.Fields(norm)
+	for i, part := range parts {
+		if acronym, ok := knownVerticalAcronyms[part]; ok {
+			parts[i] = acronym
+			continue
+		}
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	name := strings.Join(parts, " ")
+	if len(name) > maxVerticalNameLen {
+		name = strings.TrimSpace(truncateRunes(name, maxVerticalNameLen))
+	}
+	return name
+}
+
+func buildVerticalSlug(name, id string) string {
+	base := normalizeName(name)
+	base = strings.ReplaceAll(base, " ", "-")
+	base = strings.Trim(base, "-")
+	if base == "" {
+		base = "vertical"
+	}
+	if len(base) > maxVerticalSlugLen {
+		base = strings.Trim(base[:maxVerticalSlugLen], "-")
+	}
+	if base == "" {
+		base = "vertical"
+	}
+	suffix := id
+	if len(suffix) > 8 {
+		suffix = suffix[:8]
+	}
+	return base + "-" + suffix
+}
+
+func fuzzyBestMatch(name string, existing []verticalCandidate) (verticalCandidate, float64) {
+	cand := tokenSet(normalizeName(name))
+	best := verticalCandidate{}
+	bestScore := 0.0
+	for _, v := range existing {
+		score := jaccard(cand, tokenSet(normalizeName(v.Name)))
+		if score > bestScore {
+			bestScore = score
+			best = v
+		}
+	}
+	return best, bestScore
+}
+
+func tokenSet(s string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, t := range strings.Fields(strings.TrimSpace(s)) {
+		if t == "" {
+			continue
+		}
+		out[t] = struct{}{}
+	}
+	return out
+}
+
+func jaccard(a, b map[string]struct{}) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	union := len(a)
+	for k := range b {
+		if _, ok := a[k]; ok {
+			inter++
+		} else {
+			union++
+		}
+	}
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max])
+}
+
+func parsePayloadMap(raw []byte) map[string]any {
+	out := map[string]any{}
+	if len(raw) == 0 {
+		return out
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		runtimeWarn(
+			"payload-parse",
+			"failed to parse JSON payload bytes=%d error=%v snippet=%q",
+			len(raw),
+			err,
+			snippetForLog(string(raw), 220),
+		)
+		return map[string]any{}
+	}
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out
+}
+
+func payloadMap(v any) map[string]any {
+	return parsePayloadMap(mustJSON(v))
+}
+
+func cloneRaw(raw []byte) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	cp := make([]byte, len(raw))
+	copy(cp, raw)
+	return cp
+}
+
+func mergeRawPayload(current, incoming []byte) json.RawMessage {
+	base := parsePayloadMap(current)
+	next := parsePayloadMap(incoming)
+	for k, v := range next {
+		base[k] = v
+	}
+	return mustJSON(base)
+}
+
+func asFloat(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case float32:
+		return float64(t)
+	case int:
+		return float64(t)
+	case int32:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	default:
+		s := strings.TrimSpace(asString(v))
+		if s == "" {
+			return 0
+		}
+		var num json.Number = json.Number(s)
+		f, _ := num.Float64()
+		return f
+	}
+}
+
+func payloadIndicatesSynthesisNeeded(payload map[string]any) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	for _, key := range []string{"requires_synthesis", "needs_synthesis", "conflict_detected", "conflicting_signals"} {
+		if parseBool(payload[key]) {
+			return true
+		}
+	}
+	if notes := strings.TrimSpace(asString(payload["conflict_notes"])); notes != "" {
+		return true
+	}
+	return false
+}
+
+func parseBool(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "1", "true", "yes", "y", "on":
+			return true
+		default:
+			return false
+		}
+	case int:
+		return t != 0
+	case int64:
+		return t != 0
+	case float64:
+		return t != 0
+	default:
+		return false
+	}
+}

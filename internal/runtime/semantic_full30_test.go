@@ -10,6 +10,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -826,10 +827,10 @@ func checkBudgetHumanMailboxContracts(t *testing.T) {
 			t.Fatalf("missing contract payload fields for %s", evt)
 		}
 	}
-	if mt, err := normalizeMailboxType("vertical_approval"); err != nil || mt != "vertical_approval" {
+	if mt, err := runtimetools.NormalizeMailboxType("vertical_approval"); err != nil || mt != "vertical_approval" {
 		t.Fatalf("mailbox type normalization mismatch type=%q err=%v", mt, err)
 	}
-	if mp, err := normalizeMailboxPriority("critical"); err != nil || mp != "critical" {
+	if mp, err := runtimetools.NormalizeMailboxPriority("critical"); err != nil || mp != "critical" {
 		t.Fatalf("mailbox priority normalization mismatch priority=%q err=%v", mp, err)
 	}
 }

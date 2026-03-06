@@ -1,4 +1,4 @@
-package runtime
+package tools
 
 import "strings"
 
@@ -7,7 +7,7 @@ var universalRuntimeTools = map[string]struct{}{
 	"mailbox_send":  {},
 }
 
-func IsUniversalRuntimeTool(toolName string) bool {
+func IsUniversal(toolName string) bool {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
 		return false

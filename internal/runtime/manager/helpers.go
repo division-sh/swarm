@@ -1,0 +1,245 @@
+package manager
+
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"empireai/internal/events"
+	"empireai/internal/models"
+	"github.com/google/uuid"
+)
+
+func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
+	if len(in) == 0 {
+		return in, nil
+	}
+	inSet := make(map[string]struct{}, len(in))
+	for _, a := range in {
+		if id := strings.TrimSpace(a.Config.ID); id != "" {
+			inSet[id] = struct{}{}
+		}
+	}
+
+	done := make(map[string]struct{}, len(in))
+	pending := append([]PersistedAgent(nil), in...)
+	out := make([]PersistedAgent, 0, len(in))
+
+	for len(pending) > 0 {
+		progress := false
+		next := pending[:0]
+		for _, a := range pending {
+			id := strings.TrimSpace(a.Config.ID)
+			parent := strings.TrimSpace(a.ParentAgentID)
+			if parent == "" {
+				parent = strings.TrimSpace(a.Config.ParentAgent)
+			}
+			if parent == "" {
+				out = append(out, a)
+				if id != "" {
+					done[id] = struct{}{}
+				}
+				progress = true
+				continue
+			}
+			if _, ok := inSet[parent]; !ok {
+				return nil, fmt.Errorf("agent %s references missing parent %s", id, parent)
+			}
+			if _, ok := done[parent]; ok {
+				out = append(out, a)
+				if id != "" {
+					done[id] = struct{}{}
+				}
+				progress = true
+				continue
+			}
+			next = append(next, a)
+		}
+		if !progress {
+			ids := make([]string, 0, len(next))
+			for _, a := range next {
+				ids = append(ids, strings.TrimSpace(a.Config.ID))
+			}
+			sort.Strings(ids)
+			return nil, fmt.Errorf("cyclic parent links: %v", ids)
+		}
+		pending = next
+	}
+	return out, nil
+}
+
+func RenderMandateText(m models.MandateDocument) string {
+	obj := map[string]any{
+		"vertical_id":        strings.TrimSpace(m.VerticalID),
+		"geography":          strings.TrimSpace(m.Geography),
+		"founder_notes":      strings.TrimSpace(m.FounderNotes),
+		"founder_directives": strings.TrimSpace(m.FounderDirectives),
+	}
+	if len(m.BusinessBrief) > 0 {
+		obj["business_brief"] = json.RawMessage(m.BusinessBrief)
+	}
+	if len(m.MVPSpec) > 0 {
+		obj["mvp_spec"] = json.RawMessage(m.MVPSpec)
+	}
+	if len(m.Brand) > 0 {
+		obj["brand"] = json.RawMessage(m.Brand)
+	}
+	if len(m.Budget) > 0 {
+		obj["budget"] = json.RawMessage(m.Budget)
+	}
+	if len(m.CTOFeasibility) > 0 {
+		obj["cto_feasibility"] = json.RawMessage(m.CTOFeasibility)
+	}
+	if len(m.LaunchTargets) > 0 {
+		obj["launch_targets"] = json.RawMessage(m.LaunchTargets)
+	}
+	b, _ := json.MarshalIndent(obj, "", "  ")
+	return string(b)
+}
+
+func DefaultJSON(raw, fallback []byte) []byte {
+	if len(raw) == 0 {
+		return fallback
+	}
+	return raw
+}
+
+func NormalizeStringList(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, raw := range in {
+		v := strings.TrimSpace(raw)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func MergeAgentConfig(base, patch models.AgentConfig) models.AgentConfig {
+	out := base
+	if patch.ID != "" {
+		out.ID = patch.ID
+	}
+	if patch.Type != "" {
+		out.Type = patch.Type
+	}
+	if patch.Role != "" {
+		out.Role = patch.Role
+	}
+	if patch.Mode != "" {
+		out.Mode = patch.Mode
+	}
+	if patch.VerticalID != "" {
+		out.VerticalID = patch.VerticalID
+	}
+	if patch.ParentAgent != "" {
+		out.ParentAgent = patch.ParentAgent
+	}
+	if len(patch.Subscriptions) > 0 {
+		out.Subscriptions = patch.Subscriptions
+	}
+	if len(patch.Config) > 0 {
+		out.Config = patch.Config
+	}
+	if patch.BudgetEnvelope != 0 {
+		out.BudgetEnvelope = patch.BudgetEnvelope
+	}
+	return out
+}
+
+func ExtractSystemPromptFromConfig(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	v, _ := obj["system_prompt"].(string)
+	return strings.TrimSpace(v)
+}
+
+func WithSystemPrompt(raw json.RawMessage, prompt string) json.RawMessage {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return raw
+	}
+	obj := map[string]any{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &obj)
+	}
+	obj["system_prompt"] = prompt
+	b, err := json.Marshal(obj)
+	if err != nil || len(b) == 0 {
+		return json.RawMessage([]byte("{}"))
+	}
+	return json.RawMessage(b)
+}
+
+func DeterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
+	seed := strings.Join([]string{
+		strings.TrimSpace(inbound.ID),
+		strings.TrimSpace(agentID),
+		fmt.Sprintf("%d", index),
+		strings.TrimSpace(string(out.Type)),
+		strings.TrimSpace(out.VerticalID),
+	}, "|")
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()
+}
+
+func ExtractDirectiveText(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err != nil {
+		return ""
+	}
+	text, _ := obj["directive_text"].(string)
+	if strings.TrimSpace(text) == "" {
+		text, _ = obj["message"].(string)
+	}
+	return strings.TrimSpace(text)
+}
+
+func IsEmergencyAllowedFlow(role, eventType string) bool {
+	if role == "support-agent" {
+		return true
+	}
+	if strings.Contains(eventType, "bug") || strings.Contains(eventType, "incident") || strings.Contains(eventType, "outage") {
+		return true
+	}
+	if strings.HasPrefix(eventType, "human_task.") || strings.HasPrefix(eventType, "runtime.") || strings.HasPrefix(eventType, "ops.") {
+		return true
+	}
+	return false
+}
+
+func IsGrowthRole(role string) bool {
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "vp-growth", "marketing-agent", "discovery-coordinator",
+		"market-research-agent", "trend-research-agent", "scanner-agent", "analysis-agent":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsProactiveHeartbeat(role, eventType string) bool {
+	if !strings.HasPrefix(eventType, "heartbeat.") {
+		return false
+	}
+	switch strings.TrimSpace(strings.ToLower(role)) {
+	case "opco-ceo", "chief-of-staff", "vp-product", "vp-growth":
+		return true
+	default:
+		return false
+	}
+}
