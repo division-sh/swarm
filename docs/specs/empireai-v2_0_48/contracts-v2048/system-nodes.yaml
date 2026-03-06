@@ -443,7 +443,7 @@ campaign_termination:
   rules:
     - id: time_cap
       description: "Hard time limit for campaign execution"
-      rule: "campaign.elapsed >= campaign.time_cap (default 4h)"
+      rule: "campaign.elapsed >= campaign.time_cap (default 24h)"
       action: "Drop pending derivations with reason='time_cap_exceeded', wait for active scoring to complete or timeout, emit campaign.completed"
       priority: 1  # evaluated first
 

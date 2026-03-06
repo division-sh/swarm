@@ -68,6 +68,11 @@ func TestConversationLongRunContinuity(t *testing.T) {
 	if c.Session == nil || c.Session.ID == "" {
 		t.Fatal("expected non-empty session after soak conversation")
 	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if got := rt.turns["agent-soak"]; got != 60 {
+		t.Fatalf("expected runtime turn counter=60, got %d", got)
+	}
 }
 
 func TestSessionRegistryLockContentionSoak(t *testing.T) {
@@ -101,5 +106,70 @@ func TestSessionRegistryLockContentionSoak(t *testing.T) {
 	}
 	if _, err := sr.Acquire("agent-lock", "cli_test", "after-release", ""); err != nil {
 		t.Fatalf("expected acquire after release, got: %v", err)
+	}
+}
+
+func TestConversationConcurrentTurnLoad(t *testing.T) {
+	const (
+		agents = 12
+		turns  = 80
+	)
+
+	rt := &echoRuntime{}
+	var wg sync.WaitGroup
+	errs := make(chan error, agents)
+
+	for i := 0; i < agents; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			agentID := fmt.Sprintf("agent-soak-%02d", i)
+			c := NewConversation(
+				agentID,
+				"",
+				"concurrent soak prompt",
+				nil,
+				SessionScoped,
+				turns+20,
+				rt,
+			)
+			for step := 1; step <= turns; step++ {
+				resp, err := c.Step(context.Background(), fmt.Sprintf("a=%d step=%d", i, step))
+				if err != nil {
+					errs <- fmt.Errorf("agent=%s step=%d: %w", agentID, step, err)
+					return
+				}
+				if resp == nil || resp.Message.Content == "" {
+					errs <- fmt.Errorf("agent=%s step=%d returned empty response", agentID, step)
+					return
+				}
+			}
+			if c.Session == nil || c.Session.ID == "" {
+				errs <- fmt.Errorf("agent=%s missing session id after run", agentID)
+				return
+			}
+			if c.TurnCount != turns {
+				errs <- fmt.Errorf("agent=%s turn_count=%d want=%d", agentID, c.TurnCount, turns)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if got := len(rt.turns); got != agents {
+		t.Fatalf("expected %d runtime agent counters, got %d", agents, got)
+	}
+	for i := 0; i < agents; i++ {
+		agentID := fmt.Sprintf("agent-soak-%02d", i)
+		if got := rt.turns[agentID]; got != turns {
+			t.Fatalf("agent=%s runtime turns=%d want=%d", agentID, got, turns)
+		}
 	}
 }

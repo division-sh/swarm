@@ -1442,15 +1442,15 @@ func resolveFieldSet(expr ast.Expr, varMap map[string]wiringEmitSite) (map[strin
 func typedBuilderFields(name string) map[string]struct{} {
 	switch {
 	case strings.HasSuffix(name, "buildValidationStartedPayload"):
-		return setOf("vertical_id", "vertical_name", "name", "geography", "scoring")
+		return setOf("vertical_id", "vertical_name", "geography", "scoring_context")
 	case strings.HasSuffix(name, "buildBrandRequestedPayload"):
-		return setOf("vertical_id", "vertical_name", "name", "geography", "scoring", "business_brief")
+		return setOf("vertical_id", "vertical_name", "geography", "business_brief")
 	case strings.HasSuffix(name, "buildScanAssignedPayload"):
 		return setOf("scan_id", "campaign_id", "mode", "geography", "geography_id", "taxonomy_categories", "priority", "campaign_context", "directive_id", "strategic_context", "requested_at", "planned_shards")
 	case strings.HasSuffix(name, "buildSynthesisNeededPayload"):
-		return setOf("scan_id", "campaign_id", "mode", "geography", "category", "subcategory", "conflict_notes", "raw_report")
+		return setOf("conflicting_reports", "context")
 	case strings.HasSuffix(name, "buildDedupAmbiguousPayload"):
-		return setOf("scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_vertical")
+		return setOf("dedup_id", "new_candidate", "existing_vertical", "similarity")
 	case strings.HasSuffix(name, "buildVerticalDiscoveredPayload"):
 		return setOf("vertical_id", "vertical_name", "name", "geography", "geographic_scope", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals", "discovery_context")
 	case strings.HasSuffix(name, "buildScanCompletedPayload"):
@@ -1468,15 +1468,15 @@ func typedBuilderFields(name string) map[string]struct{} {
 	case strings.HasSuffix(name, "buildVerticalRejectedPayload"):
 		return setOf("vertical_id", "reason")
 	case strings.HasSuffix(name, "buildValidationPackageReadyPayload"):
-		return setOf("vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version")
+		return setOf("vertical_id", "research", "spec", "cto_notes", "brand")
 	case strings.HasSuffix(name, "buildSpecValidationRequestedPayload"):
 		return setOf("vertical_id", "spec_content", "spec_tier")
 	case strings.HasSuffix(name, "buildCTOSpecReviewRequestedPayload"):
-		return setOf("vertical_id", "vertical_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring")
+		return setOf("vertical_id", "mvp_spec", "business_brief", "vertical_context")
 	case strings.HasSuffix(name, "buildSpecRevisionRequestedPayload"):
-		return setOf("vertical_id", "vertical_name", "geography", "source", "feedback", "research", "spec", "scoring")
+		return setOf("vertical_id", "cto_feedback")
 	case strings.HasSuffix(name, "buildValidationMoreDataPayload"):
-		return setOf("vertical_id", "vertical_name", "geography", "request", "research", "spec", "scoring")
+		return setOf("vertical_id", "questions")
 	case strings.HasSuffix(name, "buildBrandRevisionNeededPayload"):
 		return setOf("vertical_id", "vertical_name", "geography", "feedback", "brand")
 	case strings.HasSuffix(name, "buildVerticalKilledPayload"):

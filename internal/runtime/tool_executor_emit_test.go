@@ -107,6 +107,61 @@ func TestRuntimeToolExecutor_HandleEmitToolSchemaValidation(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolExecutor_HandleEmitToolVerticalDerivedCoercesLegacyRationaleString(t *testing.T) {
+	store := &captureStore{}
+	bus := NewEventBus(store)
+	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	actor := models.AgentConfig{ID: "analysis-agent", Role: "analysis-agent", Mode: "factory"}
+
+	ctx := WithActor(context.Background(), actor)
+	ctx = WithInboundEvent(ctx, events.Event{
+		ID:          "score-req-legacy-rationale",
+		Type:        events.EventType("scoring.requested"),
+		SourceAgent: "scoring-node",
+		VerticalID:  "v-parent-1",
+		Payload:     mustJSON(map[string]any{"vertical_id": "v-parent-1"}),
+	})
+	_, err := exec.Execute(ctx, "emit_vertical_derived", map[string]any{
+		"parent_id":            "v-parent-1",
+		"generation_depth":     1,
+		"generator_agent_id":   "analysis-agent",
+		"derivation_rationale": "narrow ICP to owner-operated firms",
+		"opportunity_name":     "Derived Opportunity",
+		"signal_strength":      72,
+		"discovery_context":    map[string]any{"mode": "derived"},
+	})
+	if err != nil {
+		t.Fatalf("expected legacy derivation_rationale string to be normalized, got %v", err)
+	}
+
+	if len(store.events) == 0 {
+		t.Fatal("expected published vertical.derived event")
+	}
+	var last events.Event
+	found := false
+	for i := len(store.events) - 1; i >= 0; i-- {
+		if strings.TrimSpace(string(store.events[i].Type)) == "vertical.derived" {
+			last = store.events[i]
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected vertical.derived event, got %+v", store.events)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(last.Payload, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	rationale, ok := payload["derivation_rationale"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected derivation_rationale object after normalization, got %T", payload["derivation_rationale"])
+	}
+	if strings.TrimSpace(asString(rationale["summary"])) == "" {
+		t.Fatalf("expected derivation_rationale.summary to be populated, got %#v", rationale)
+	}
+}
+
 func TestRuntimeToolExecutor_HandleEmitToolCoordinatorLegacyNestedPayload(t *testing.T) {
 	store := &captureStore{}
 	bus := NewEventBus(store)

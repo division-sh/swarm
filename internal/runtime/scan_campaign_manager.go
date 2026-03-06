@@ -26,6 +26,8 @@ type ScanCampaignManager struct {
 	backpressurePaused bool
 }
 
+const defaultCampaignTimeCap = 24 * time.Hour
+
 func NewScanCampaignManager(bus *EventBus, store ScanCampaignPersistence, db ...*sql.DB) *ScanCampaignManager {
 	var sqlDB *sql.DB
 	if len(db) > 0 {
@@ -229,6 +231,8 @@ func (m *ScanCampaignManager) emitCampaignCompletedIfDone(ctx context.Context, c
 }
 
 func (m *ScanCampaignManager) tick(ctx context.Context) {
+	m.enforceCampaignTimeCap(ctx, time.Now().UTC())
+
 	if m.shouldPauseForBackpressure(ctx) {
 		return
 	}
@@ -284,6 +288,51 @@ func (m *ScanCampaignManager) tick(ctx context.Context) {
 			strings.TrimSpace(c.Mode),
 			err,
 		)
+	}
+}
+
+func (m *ScanCampaignManager) enforceCampaignTimeCap(ctx context.Context, now time.Time) {
+	if m == nil || m.db == nil || m.store == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	rows, err := m.db.QueryContext(ctx, `
+		SELECT id::text, COALESCE(discoveries, 0)
+		FROM scan_campaigns
+		WHERE status IN ('queued', 'active', 'paused')
+		  AND deadline_at IS NOT NULL
+		  AND deadline_at <= $1
+		ORDER BY deadline_at ASC, created_at ASC
+		LIMIT 100
+	`, now)
+	if err != nil {
+		runtimeWarn("scan-campaign-manager", "campaign time_cap query failed: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var campaignID string
+		var discoveries int
+		if err := rows.Scan(&campaignID, &discoveries); err != nil {
+			runtimeWarn("scan-campaign-manager", "campaign time_cap row scan failed: %v", err)
+			continue
+		}
+		campaignID = strings.TrimSpace(campaignID)
+		if campaignID == "" {
+			continue
+		}
+		if err := m.store.MarkScanCampaignCompleted(ctx, campaignID, discoveries); err != nil {
+			runtimeWarn("scan-campaign-manager", "campaign time_cap mark completed failed campaign_id=%s: %v", campaignID, err)
+			continue
+		}
+		_ = m.emitCampaignCompletedIfDone(ctx, campaignID, discoveries, "campaign_time_cap_exceeded")
+	}
+	if err := rows.Err(); err != nil {
+		runtimeWarn("scan-campaign-manager", "campaign time_cap row iteration failed: %v", err)
 	}
 }
 
@@ -409,7 +458,7 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	if corpusPath != "" {
 		strategic["corpus_path"] = corpusPath
 	}
-	deadline := time.Now().UTC().Add(24 * time.Hour)
+	deadline := time.Now().UTC().Add(defaultCampaignTimeCap)
 
 	for _, nextMode := range campaignModesForDirective(mode, explicitMode) {
 		if err := m.ensureQueuedCampaign(ctx, geoID, nextMode, strings.TrimSpace(evt.ID), mustJSON(strategic), &deadline); err != nil {

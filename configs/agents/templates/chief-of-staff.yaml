@@ -11,6 +11,7 @@ subscriptions:
   - prelaunch_ready
   - support_critical
   - channel_blocked
+  - mandate_updated
 tools:
   - agent_message
   - configure_routing

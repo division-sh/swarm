@@ -82,6 +82,9 @@ type FactoryPipelineCoordinator struct {
 	scoringDigestBufferChecked bool
 	scoringDigestBufferEnabled bool
 	lastScoringDigestReadAt    time.Time
+
+	testSubscribeHook     func()
+	testVerticalStageHook func(verticalID, stage string)
 }
 
 type scanAccumulator struct {
@@ -165,11 +168,12 @@ type validationPipelineState struct {
 }
 
 type ValidationStartedPayload struct {
-	VerticalID   string         `json:"vertical_id"`
-	VerticalName string         `json:"vertical_name,omitempty"`
-	Name         string         `json:"name,omitempty"`
-	Geography    string         `json:"geography,omitempty"`
-	Scoring      map[string]any `json:"scoring"`
+	VerticalID     string         `json:"vertical_id"`
+	VerticalName   string         `json:"vertical_name,omitempty"`
+	Name           string         `json:"name,omitempty"`
+	Geography      string         `json:"geography,omitempty"`
+	ScoringContext string         `json:"scoring_context,omitempty"`
+	Scoring        map[string]any `json:"scoring,omitempty"`
 }
 
 type BrandRequestedPayload struct {
@@ -200,18 +204,22 @@ type SpecValidationRequestedPayload struct {
 }
 
 type CTOSpecReviewRequestedPayload struct {
-	VerticalID     string         `json:"vertical_id"`
-	VerticalName   string         `json:"vertical_name,omitempty"`
-	Geography      string         `json:"geography,omitempty"`
-	SpecValidation map[string]any `json:"spec_validation"`
-	SpecVersion    int            `json:"spec_version"`
-	Research       map[string]any `json:"research"`
-	Spec           map[string]any `json:"spec"`
-	Scoring        map[string]any `json:"scoring"`
+	VerticalID      string         `json:"vertical_id"`
+	MvPSpec         string         `json:"mvp_spec,omitempty"`
+	BusinessBrief   map[string]any `json:"business_brief,omitempty"`
+	VerticalContext map[string]any `json:"vertical_context,omitempty"`
+	VerticalName    string         `json:"vertical_name,omitempty"`
+	Geography       string         `json:"geography,omitempty"`
+	SpecValidation  map[string]any `json:"spec_validation"`
+	SpecVersion     int            `json:"spec_version"`
+	Research        map[string]any `json:"research"`
+	Spec            map[string]any `json:"spec"`
+	Scoring         map[string]any `json:"scoring"`
 }
 
 type SpecRevisionRequestedPayload struct {
 	VerticalID   string         `json:"vertical_id"`
+	CTOFeedback  string         `json:"cto_feedback,omitempty"`
 	VerticalName string         `json:"vertical_name,omitempty"`
 	Geography    string         `json:"geography,omitempty"`
 	Source       string         `json:"source"`
@@ -223,6 +231,7 @@ type SpecRevisionRequestedPayload struct {
 
 type ValidationMoreDataNeededPayload struct {
 	VerticalID   string         `json:"vertical_id"`
+	Questions    string         `json:"questions,omitempty"`
 	VerticalName string         `json:"vertical_name,omitempty"`
 	Geography    string         `json:"geography,omitempty"`
 	Request      map[string]any `json:"request"`
@@ -285,6 +294,7 @@ type DedupCandidatePayload struct {
 
 type DedupAmbiguousPayload struct {
 	ScanID           string                `json:"scan_id"`
+	DedupID          string                `json:"dedup_id"`
 	DedupEventID     string                `json:"dedup_event_id"`
 	Similarity       float64               `json:"similarity"`
 	NewCandidate     DedupCandidatePayload `json:"new_candidate"`
@@ -457,6 +467,7 @@ func (pc *FactoryPipelineCoordinator) Run(ctx context.Context) {
 		return
 	}
 	ch := pc.subscribe()
+	pc.notifyTestSubscribed()
 
 	for {
 		select {
@@ -466,10 +477,35 @@ func (pc *FactoryPipelineCoordinator) Run(ctx context.Context) {
 			if !ok {
 				pc.resetInMemoryState()
 				ch = pc.subscribe()
+				pc.notifyTestSubscribed()
 				continue
 			}
 			pc.handleEvent(ctx, evt)
 		}
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) notifyTestSubscribed() {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	hook := pc.testSubscribeHook
+	pc.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) notifyTestVerticalStageUpdated(verticalID, stage string) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	hook := pc.testVerticalStageHook
+	pc.mu.Unlock()
+	if hook != nil {
+		hook(strings.TrimSpace(verticalID), strings.TrimSpace(stage))
 	}
 }
 
@@ -2988,6 +3024,8 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 			WHERE id = $1::uuid
 			`, verticalID, stage, string(mustJSON(scoredPayloadMap)), strings.TrimSpace(result.Reason)); err != nil {
 			log.Printf("pipeline: update vertical score state failed vertical=%s err=%v", verticalID, err)
+		} else {
+			pc.notifyTestVerticalStageUpdated(verticalID, stage)
 		}
 	}
 }
@@ -4177,6 +4215,7 @@ func (pc *FactoryPipelineCoordinator) buildDedupAmbiguousPayload(
 ) DedupAmbiguousPayload {
 	return DedupAmbiguousPayload{
 		ScanID:       strings.TrimSpace(scanID),
+		DedupID:      strings.TrimSpace(dedupEventID),
 		DedupEventID: strings.TrimSpace(dedupEventID),
 		Similarity:   similarity,
 		NewCandidate: DedupCandidatePayload{
@@ -4393,6 +4432,42 @@ func buildDiscoveryContextPayload(raw map[string]any) map[string]any {
 	return out
 }
 
+func firstNonEmptyMap(maps ...map[string]any) map[string]any {
+	for _, item := range maps {
+		if len(item) > 0 {
+			return item
+		}
+	}
+	return map[string]any{}
+}
+
+func summarizeContractPayload(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(t)
+	case map[string]any:
+		if text := strings.TrimSpace(asString(t["questions"])); text != "" {
+			return text
+		}
+		if text := strings.TrimSpace(asString(t["cto_feedback"])); text != "" {
+			return text
+		}
+		if text := strings.TrimSpace(asString(t["feedback"])); text != "" {
+			return text
+		}
+		if b, err := json.Marshal(t); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	default:
+		if b, err := json.Marshal(t); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return strings.TrimSpace(asString(v))
+}
+
 func normalizeOpportunityPattern(raw string) string {
 	v := strings.ToLower(strings.TrimSpace(raw))
 	if v == "" {
@@ -4574,8 +4649,23 @@ func (pc *FactoryPipelineCoordinator) buildCTOSpecReviewRequestedPayload(ctx con
 	if specVersion == 0 {
 		specVersion = snap.SpecVersion
 	}
+	businessBrief := parsePayloadMap(nil)
+	if snap.Research != nil {
+		if brief, ok := snap.Research["business_brief"].(map[string]any); ok && brief != nil {
+			businessBrief = brief
+		} else {
+			businessBrief = snap.Research
+		}
+	}
 	return CTOSpecReviewRequestedPayload{
-		VerticalID:     strings.TrimSpace(verticalID),
+		VerticalID:    strings.TrimSpace(verticalID),
+		MvPSpec:       summarizeContractPayload(firstNonEmptyMap(specValidation, snap.Spec)),
+		BusinessBrief: businessBrief,
+		VerticalContext: map[string]any{
+			"vertical_name": name,
+			"geography":     geography,
+			"scoring":       snap.Scoring,
+		},
 		VerticalName:   name,
 		Geography:      geography,
 		SpecValidation: specValidation,
@@ -4594,6 +4684,7 @@ func (pc *FactoryPipelineCoordinator) buildSpecRevisionRequestedPayload(ctx cont
 	name, geography := pc.identityForPayload(ctx, verticalID)
 	return SpecRevisionRequestedPayload{
 		VerticalID:   strings.TrimSpace(verticalID),
+		CTOFeedback:  summarizeContractPayload(feedback),
 		VerticalName: name,
 		Geography:    geography,
 		Source:       strings.TrimSpace(source),
@@ -4611,6 +4702,7 @@ func (pc *FactoryPipelineCoordinator) buildValidationMoreDataPayload(ctx context
 	name, geography := pc.identityForPayload(ctx, verticalID)
 	return ValidationMoreDataNeededPayload{
 		VerticalID:   strings.TrimSpace(verticalID),
+		Questions:    summarizeContractPayload(request),
 		VerticalName: name,
 		Geography:    geography,
 		Request:      request,
@@ -4692,6 +4784,7 @@ func (pc *FactoryPipelineCoordinator) buildValidationStartedPayload(ctx context.
 	if strings.TrimSpace(geography) != "" {
 		out.Geography = strings.TrimSpace(geography)
 	}
+	out.ScoringContext = summarizeContractPayload(scoring)
 	return out
 }
 

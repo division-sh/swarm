@@ -142,20 +142,20 @@ func TestNewLLMAgent_AutoInjectsEmitToolsWhenConstrained(t *testing.T) {
 		{Name: "mailbox_send"},
 	})
 	foundEmit := false
-	foundDisallowed := false
+	foundMailbox := false
 	for _, tool := range agent.conversation.Tools {
 		if tool.Name == "emit_scan_requested" {
 			foundEmit = true
 		}
 		if tool.Name == "mailbox_send" {
-			foundDisallowed = true
+			foundMailbox = true
 		}
 	}
 	if !foundEmit {
 		t.Fatalf("expected emit_scan_requested auto-injected, got %+v", agent.conversation.Tools)
 	}
-	if foundDisallowed {
-		t.Fatalf("expected constrained static tools filtering to exclude mailbox_send, got %+v", agent.conversation.Tools)
+	if !foundMailbox {
+		t.Fatalf("expected constrained static tools filtering to retain universal mailbox_send, got %+v", agent.conversation.Tools)
 	}
 }
 

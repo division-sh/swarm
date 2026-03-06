@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
+func runPromptSchemaGuardCases(t *testing.T) {
 	t.Helper()
 	ensureEventSchemaRegistry()
 
@@ -91,6 +91,10 @@ func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
+	runPromptSchemaGuardCases(t)
 }
 
 var promptEmitFieldBulletPattern = regexp.MustCompile(`^\s*-\s*([a-zA-Z0-9_]+)\s*:`)

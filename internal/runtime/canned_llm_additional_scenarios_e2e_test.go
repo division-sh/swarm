@@ -89,6 +89,8 @@ type e2eScenarioRig struct {
 	cancel        context.CancelFunc
 	db            *sql.DB
 	bus           *EventBus
+	eventStore    *postgresEventStore
+	mailboxStore  *sqlMailboxStore
 	pc            *FactoryPipelineCoordinator
 	am            *AgentManager
 	scanMgr       *ScanCampaignManager
@@ -118,7 +120,8 @@ func loadCannedScenario(t *testing.T, name string) cannedE2EScenario {
 func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool) *e2eScenarioRig {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
-	bus := NewEventBus(&postgresEventStore{db: db})
+	eventStore := &postgresEventStore{db: db}
+	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
 	pc := NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
@@ -153,8 +156,9 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 		})
 	}
 
+	mailboxStore := &sqlMailboxStore{db: db}
 	exec := NewRuntimeToolExecutor(bus, scheduler, nil, scheduleStore)
-	exec.SetMailboxStore(&sqlMailboxStore{db: db})
+	exec.SetMailboxStore(mailboxStore)
 	baseFactory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	factory := func(cfg models.AgentConfig) (Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
@@ -193,6 +197,8 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 		cancel:        cancel,
 		db:            db,
 		bus:           bus,
+		eventStore:    eventStore,
+		mailboxStore:  mailboxStore,
 		pc:            pc,
 		am:            am,
 		scanMgr:       scanMgr,
@@ -275,7 +281,7 @@ func TestCannedLLME2E_Scenario2_PrefilterRejectsAll(t *testing.T) {
 	defer rig.Close()
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "campaign.completed", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "campaign.completed", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait campaign.completed: %v", err)
 	}
 
@@ -296,13 +302,13 @@ func TestCannedLLME2E_Scenario3_MarginalPath(t *testing.T) {
 	defer rig.Close()
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "campaign.completed", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "campaign.completed", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait campaign.completed: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.marginal", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.marginal", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait vertical.marginal: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.rejected", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.rejected", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait vertical.rejected: %v", err)
 	}
 
@@ -340,7 +346,7 @@ func TestCannedLLME2E_Scenario3_MarginalPath(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish timer.marginal_review: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.resumed", 1, cannedE2EWaitTimeout); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.resumed", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait vertical.resumed: %v", err)
 	}
 
@@ -370,10 +376,10 @@ func TestCannedLLME2E_Scenario4_DerivationLoop(t *testing.T) {
 	defer rig.Close()
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "vertical.derived", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.derived", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait vertical.derived: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.shortlisted", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.shortlisted", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait vertical.shortlisted: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
@@ -414,7 +420,7 @@ func TestCannedLLME2E_Scenario5_ValidationFailureRevision(t *testing.T) {
 	defer rig.Close()
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "vertical.ready_for_review", 1, 15*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.ready_for_review", 1, 15*time.Second); err != nil {
 		t.Fatalf("wait vertical.ready_for_review: %v", err)
 	}
 	verticalID := latestVerticalIDByEvent(t, rig.db, "vertical.ready_for_review")
@@ -431,7 +437,7 @@ func TestCannedLLME2E_Scenario5_ValidationFailureRevision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish vertical.approved: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.approved", 1, cannedE2EWaitTimeout); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.approved", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait vertical.approved: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
@@ -455,10 +461,10 @@ func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
 	defer rig.Close()
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "vertical.ready_for_review", 1, 15*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.ready_for_review", 1, 15*time.Second); err != nil {
 		t.Fatalf("wait first vertical.ready_for_review: %v", err)
 	}
-	mailboxID, verticalID, err := waitForPendingMailboxApproval(rig.db, 5*time.Second)
+	mailboxID, verticalID, err := waitForPendingMailboxApproval(rig.mailboxStore, 5*time.Second)
 	if err != nil {
 		t.Fatalf("wait first pending mailbox approval: %v", err)
 	}
@@ -485,7 +491,7 @@ func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish vertical.needs_more_data: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "validation.more_data_needed", 1, cannedE2EWaitTimeout); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "validation.more_data_needed", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait validation.more_data_needed: %v", err)
 	}
 	if err := rig.bus.Publish(rig.ctx, events.Event{
@@ -521,7 +527,7 @@ func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish scoring.requested cycle2: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.ready_for_review", 2, 20*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.ready_for_review", 2, 20*time.Second); err != nil {
 		t.Fatalf("wait second vertical.ready_for_review: %v", err)
 	}
 	if err := rig.bus.Publish(rig.ctx, events.Event{
@@ -534,7 +540,7 @@ func TestCannedLLME2E_Scenario6_HumanRejectsMailboxThenApproves(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish vertical.approved: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "opco.spinup_requested", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "opco.spinup_requested", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait opco.spinup_requested: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
@@ -563,7 +569,7 @@ func TestCannedLLME2E_Scenario7_CampaignMultiMode(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish saas_trend directive: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "campaign.completed", 1, 15*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "campaign.completed", 1, 15*time.Second); err != nil {
 		t.Fatalf("wait campaign.completed: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
@@ -603,7 +609,7 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 	rig.am.SetBudgetTracker(tracker)
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "scoring.requested", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "scoring.requested", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait scoring.requested: %v", err)
 	}
 
@@ -619,7 +625,7 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish budget.threshold_crossed throttle: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "budget.throttle", 1, cannedE2EWaitTimeout); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "budget.throttle", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait budget.throttle: %v", err)
 	}
 
@@ -643,14 +649,14 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish budget.threshold_crossed emergency: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "budget.emergency", 1, cannedE2EWaitTimeout); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "budget.emergency", 1, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("wait budget.emergency: %v", err)
 	}
 
-	if err := waitForDBEventTypeCount(rig.db, "score.dimension_complete", 11, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "score.dimension_complete", 11, 12*time.Second); err != nil {
 		t.Fatalf("wait scoring drain before emergency suppression check: %v", err)
 	}
-	before := dbEventTypeCounts(t, rig.db)["score.dimension_complete"]
+	scoreWatch := rig.bus.Subscribe("watch-budget-emergency-score", events.EventType("score.dimension_complete"))
 	if err := rig.bus.Publish(rig.ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scoring.requested"),
@@ -665,11 +671,7 @@ func TestCannedLLME2E_Scenario8_BudgetThrottleEmergency(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish scoring.requested during emergency: %v", err)
 	}
-	time.Sleep(500 * time.Millisecond)
-	after := dbEventTypeCounts(t, rig.db)["score.dimension_complete"]
-	if after != before {
-		t.Fatalf("expected scoring work paused during emergency; score.dimension_complete before=%d after=%d", before, after)
-	}
+	assertNoEventType(t, scoreWatch, "score.dimension_complete", 500*time.Millisecond)
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
 }
 
@@ -679,13 +681,13 @@ func TestCannedLLME2E_Scenario9_DedupCollision(t *testing.T) {
 	defer rig.Close()
 
 	publishScenarioDirective(t, rig, "Corpus in Argentina")
-	if err := waitForDBEventTypeCount(rig.db, "dedup.ambiguous", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "dedup.ambiguous", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait dedup.ambiguous: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "scan.completed", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "scan.completed", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait scan.completed: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "campaign.completed", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "campaign.completed", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait campaign.completed: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
@@ -753,7 +755,7 @@ func TestCannedLLME2E_Scenario10_OpCoTeardown(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish opco.spinup_requested: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "opco.ceo_ready", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "opco.ceo_ready", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait opco.ceo_ready: %v", err)
 	}
 
@@ -770,10 +772,10 @@ func TestCannedLLME2E_Scenario10_OpCoTeardown(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish opco.teardown_requested: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "opco.teardown_complete", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "opco.teardown_complete", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait opco.teardown_complete: %v", err)
 	}
-	if err := waitForDBEventTypeCount(rig.db, "vertical.killed", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(rig.eventStore, "vertical.killed", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait vertical.killed: %v", err)
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)

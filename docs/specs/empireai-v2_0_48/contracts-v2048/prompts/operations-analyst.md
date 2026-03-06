@@ -93,3 +93,9 @@ budget.threshold_crossed:
     simultaneously, flag the pattern and recommend which
     verticals to prioritize vs throttle.
   → STOP.
+
+pipeline.dead_letter:
+  → An event failed processing 5 times. Analyze the failure pattern.
+  → If multiple dead letters share a root cause (e.g. same agent type,
+    same event type), call emit_analyst_anti_pattern_advisory.
+  → STOP.

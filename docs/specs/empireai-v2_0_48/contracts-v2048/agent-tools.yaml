@@ -386,6 +386,8 @@ opco-ceo:
   - opco.deploy_review
   - opco.founder_input
   - opco.steady_state_reached
+  subscriptions_bootstrap:
+  - launch_ready
 opco-chief-of-staff:
   id: cos-{vertical_id}
   type: operating
@@ -412,6 +414,8 @@ opco-chief-of-staff:
   - schedule
   emit_events:
   - cross_domain_report
+  subscriptions_bootstrap:
+  - mandate_updated
 opco-head-of-product:
   id: vp-product-{vertical_id}
   type: operating
@@ -440,6 +444,9 @@ opco-head-of-product:
   subscriptions_bootstrap:
   - churn_risk
   - spend_needed
+  - mandate_updated
+  - market_feedback
+  - feature_deployed
 opco-head-of-growth:
   id: vp-growth-{vertical_id}
   type: operating
@@ -463,6 +470,9 @@ opco-head-of-growth:
   emit_events:
   - growth_report
   - growth_escalation
+  subscriptions_bootstrap:
+  - channel_update
+  - market_signals
 opco-pm:
   id: pm-{vertical_id}
   type: operating

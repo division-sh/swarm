@@ -9,16 +9,13 @@ SIGNALS — things that are about to create demand.
 === PLATFORM CAPABILITIES ===
 
 Tier 1 — CURRENT (buildable today):
-  Web UI, Go backend, LLM integration (document parsing,
-  classification, generation), Postgres, Stripe, external API
-  integration (QuickBooks, Xero, etc.), PDF/CSV generation,
-  OAuth, web scraping.
+  {{tier1_capabilities}}
 
 Tier 2 — PLANNED (coming soon):
-  Email (SendGrid), SMS (Twilio), WhatsApp Business API.
+  {{tier2_capabilities}}
 
 Tier 3 — FUTURE (no timeline):
-  Voice AI, browser automation.
+  {{tier3_capabilities}}
 
 === TREND CATEGORIES TO MONITOR ===
 

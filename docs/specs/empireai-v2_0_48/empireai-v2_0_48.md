@@ -2618,7 +2618,7 @@ The scoring pipeline follows the same accumulator pattern as discovery (§4.2.2.
 
 **v2.0.37 change — ScoringNode replaces interceptor:** Prior to v2.0.37, scoring was handled by two interceptor cases inside `EventBus.Publish`. This caused a critical bug: `vertical.discovered` was often produced as a deferred event from the discovery accumulator (§4.2.2.3), and deferred events bypass `runInterceptors`. The `handleVerticalDiscovered` interceptor case never fired for discovery-originated verticals, leaving the entire scoring pipeline dead (zero `scoring.requested` emitted). See §4.2.2.10 for the system node architecture that replaces this pattern.
 
-**Design:** The `ScoringNode` is a system node (§4.2.2.10) that subscribes to `vertical.discovered` and `score.dimension_complete` via normal EventBus subscription. It executes the same deterministic logic that was previously in the interceptor, but as a subscriber rather than middleware. Events it publishes go through the full `Publish` path, eliminating the deferred event chaining problem.
+**Design:** The `ScoringNode` is a system node (§4.2.2.10) that subscribes to `vertical.discovered`, `vertical.derived`, `score.dimension_complete`, and `scoring.contest_resolved` via normal EventBus subscription. It executes the same deterministic logic that was previously in the interceptor, but as a subscriber rather than middleware. Events it publishes go through the full `Publish` path, eliminating the deferred event chaining problem.
 
 ```go
 // ScoringNode implements SystemNode
@@ -6926,8 +6926,8 @@ empireai/
 │   ┘── 001_initial.sql
 ├── contracts/                    # Machine-readable contracts (authoritative over spec prose)
 │   ├── agent-tools.yaml          # 28 agents: wiring, subscriptions, tools, emit_events
-│   ├── event-catalog.yaml        # 165 events: emitter, consumer, delivery_channel, payloads
-│   ├── ddl-canonical.sql         # 36 tables: FK-ordered, empire init runs this
+│   ├── event-catalog.yaml        # 167 events: emitter, consumer, delivery_channel, payloads
+│   ├── ddl-canonical.sql         # 37 tables: FK-ordered, empire init runs this
 │   ├── upgrade-actions.yaml      # Per-version typed actions (add/edit/drop/rename/migrate)
 │   ├── verification-gates.yaml   # Test gate manifest: required commands + pass criteria
 │   ├── agent-config-map.yaml     # Agent ID → exact config file path mapping

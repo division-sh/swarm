@@ -4,6 +4,7 @@ import "strings"
 
 var universalRuntimeTools = map[string]struct{}{
 	"agent_message": {},
+	"mailbox_send":  {},
 }
 
 func IsUniversalRuntimeTool(toolName string) bool {

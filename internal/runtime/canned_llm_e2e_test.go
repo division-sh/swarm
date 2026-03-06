@@ -24,15 +24,23 @@ import (
 const cannedE2EWaitTimeout = 20 * time.Second
 
 type threadSafeEventStore struct {
-	mu         sync.Mutex
-	events     []events.Event
-	deliveries map[string][]string
+	mu          sync.Mutex
+	events      []events.Event
+	deliveries  map[string][]string
+	eventCounts map[string]int
+	notifyCh    chan struct{}
 }
 
 func (s *threadSafeEventStore) AppendEvent(_ context.Context, evt events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureNotifyLocked()
 	s.events = append(s.events, evt)
+	if s.eventCounts == nil {
+		s.eventCounts = make(map[string]int)
+	}
+	s.eventCounts[strings.TrimSpace(string(evt.Type))]++
+	s.signalLocked()
 	return nil
 }
 
@@ -52,6 +60,70 @@ func (s *threadSafeEventStore) SnapshotEvents() []events.Event {
 	out := make([]events.Event, len(s.events))
 	copy(out, s.events)
 	return out
+}
+
+func (s *threadSafeEventStore) ensureNotifyLocked() {
+	if s.notifyCh == nil {
+		s.notifyCh = make(chan struct{}, 1)
+	}
+}
+
+func (s *threadSafeEventStore) signalLocked() {
+	s.ensureNotifyLocked()
+	select {
+	case s.notifyCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *threadSafeEventStore) WaitForEventTypeCount(eventType string, want int, timeout time.Duration) error {
+	eventType = strings.TrimSpace(eventType)
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		s.ensureNotifyLocked()
+		got := s.eventCounts[eventType]
+		notifyCh := s.notifyCh
+		s.mu.Unlock()
+		if got >= want {
+			return nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("timed out waiting for %s count>=%d (last=%d)", eventType, want, got)
+		}
+		select {
+		case <-notifyCh:
+		case <-time.After(remaining):
+			return fmt.Errorf("timed out waiting for %s count>=%d (last=%d)", eventType, want, got)
+		}
+	}
+}
+
+func (s *threadSafeEventStore) WaitUntil(timeout time.Duration, condition func() (bool, error)) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		ok, err := condition()
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+		s.mu.Lock()
+		s.ensureNotifyLocked()
+		notifyCh := s.notifyCh
+		s.mu.Unlock()
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("condition not met within %s", timeout)
+		}
+		select {
+		case <-notifyCh:
+		case <-time.After(remaining):
+			return fmt.Errorf("condition not met within %s", timeout)
+		}
+	}
 }
 
 type cannedRoleRuntime struct {
@@ -384,36 +456,31 @@ func countEventTypes(eventsList []events.Event) map[string]int {
 }
 
 func waitForEventTypeCount(store *threadSafeEventStore, eventType string, want int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var lastCount int
-	for time.Now().Before(deadline) {
-		counts := countEventTypes(store.SnapshotEvents())
-		lastCount = counts[strings.TrimSpace(eventType)]
-		if lastCount >= want {
-			return nil
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for %s count>=%d (last=%d)", strings.TrimSpace(eventType), want, lastCount)
+	return store.WaitForEventTypeCount(eventType, want, timeout)
 }
 
-func waitForVerticalStageCounts(db *sql.DB, wantShortlisted, wantMarginal int, timeout time.Duration) (shortlisted int, marginal int, err error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if qErr := db.QueryRow(`
-			SELECT
-				COUNT(*) FILTER (WHERE stage = 'shortlisted') AS shortlisted,
-				COUNT(*) FILTER (WHERE stage = 'marginal_review') AS marginal
-			FROM verticals
-		`).Scan(&shortlisted, &marginal); qErr != nil {
-			return 0, 0, qErr
-		}
-		if shortlisted == wantShortlisted && marginal == wantMarginal {
-			return shortlisted, marginal, nil
-		}
-		time.Sleep(25 * time.Millisecond)
+func waitForStageSignals(t *testing.T, ch <-chan string, want []string, timeout time.Duration) {
+	t.Helper()
+	remaining := make(map[string]int, len(want))
+	for _, stage := range want {
+		remaining[strings.TrimSpace(stage)]++
 	}
-	return shortlisted, marginal, fmt.Errorf("timed out waiting for vertical stage counts shortlisted=%d marginal=%d (want shortlisted=%d marginal=%d)", shortlisted, marginal, wantShortlisted, wantMarginal)
+	deadline := time.After(timeout)
+	for len(remaining) > 0 {
+		select {
+		case stage := <-ch:
+			stage = strings.TrimSpace(stage)
+			if count, ok := remaining[stage]; ok {
+				if count <= 1 {
+					delete(remaining, stage)
+				} else {
+					remaining[stage] = count - 1
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for stage updates: remaining=%v", remaining)
+		}
+	}
 }
 
 var validDraft202012Types = map[string]struct{}{
@@ -655,6 +722,13 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
 	pc := NewFactoryPipelineCoordinator(bus, db)
+	stageSignals := make(chan string, 8)
+	pc.testVerticalStageHook = func(_ string, stage string) {
+		select {
+		case stageSignals <- strings.TrimSpace(stage):
+		default:
+		}
+	}
 	bus.SetInterceptors(pc)
 
 	canned := newCannedRoleRuntime()
@@ -760,9 +834,21 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	if err := waitForEventTypeCount(eventStore, "vertical.scored", 2, cannedE2EWaitTimeout); err != nil {
 		t.Fatalf("waiting for vertical.scored fanout: %v", err)
 	}
-	shortlistedCount, marginalCount, err := waitForVerticalStageCounts(db, 1, 1, cannedE2EWaitTimeout)
-	if err != nil {
-		t.Fatalf("waiting for expected vertical stages: %v", err)
+	if err := waitForEventTypeCount(eventStore, "vertical.shortlisted", 1, cannedE2EWaitTimeout); err != nil {
+		t.Fatalf("waiting for vertical.shortlisted fanout: %v", err)
+	}
+	if err := waitForEventTypeCount(eventStore, "vertical.marginal", 1, cannedE2EWaitTimeout); err != nil {
+		t.Fatalf("waiting for vertical.marginal fanout: %v", err)
+	}
+	waitForStageSignals(t, stageSignals, []string{"shortlisted", "marginal_review"}, cannedE2EWaitTimeout)
+	var shortlistedCount, marginalCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*) FILTER (WHERE stage = 'shortlisted') AS shortlisted,
+			COUNT(*) FILTER (WHERE stage = 'marginal_review') AS marginal
+		FROM verticals
+	`).Scan(&shortlistedCount, &marginalCount); err != nil {
+		t.Fatalf("query expected vertical stages: %v", err)
 	}
 	if shortlistedCount != 1 || marginalCount != 1 {
 		rows, _ := db.QueryContext(ctx, `

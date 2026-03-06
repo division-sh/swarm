@@ -70,7 +70,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.0.48"
+	runtimeSpecVersion      = "v2.0.49"
 )
 
 func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
@@ -2362,7 +2362,7 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   opCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.48",
+			TemplateVersion: "2.0.49",
 		}
 	}
 
@@ -2372,10 +2372,10 @@ func defaultOpCoRoster(verticalID string) []PersistedAgent {
 	cto := opCoAgentID("cto-agent", verticalID)
 
 	return []PersistedAgent{
-		mk("opco-ceo", "operating", "", "opco.spinup_requested", "product_report", "growth_report", "cross_domain_report", "product_escalation", "growth_escalation", "spend_request", "spend.approved", "spend.rejected", "cto.architecture_directive", "founder_input.response", "opco.escalation_response"),
-		mk("chief-of-staff", "operating", ceo, "product_report", "growth_report", "feature_deployed", "churn_risk", "build_complete", "prelaunch_ready", "support_critical", "channel_blocked"),
-		mk("vp-product", "operating", ceo, "build_complete", "build_blocked", "product_escalation", "support_digest", "support_critical", "build_progress"),
-		mk("vp-growth", "operating", ceo, "outreach_digest", "channel_blocked", "user_onboarded", "prelaunch_ready", "spend_needed"),
+		mk("opco-ceo", "operating", "", "opco.spinup_requested", "product_report", "growth_report", "cross_domain_report", "product_escalation", "growth_escalation", "spend_request", "spend.approved", "spend.rejected", "cto.architecture_directive", "founder_input.response", "opco.escalation_response", "launch_ready"),
+		mk("chief-of-staff", "operating", ceo, "product_report", "growth_report", "feature_deployed", "churn_risk", "build_complete", "prelaunch_ready", "support_critical", "channel_blocked", "mandate_updated"),
+		mk("vp-product", "operating", ceo, "build_complete", "build_blocked", "product_escalation", "support_digest", "support_critical", "build_progress", "churn_risk", "spend_needed", "mandate_updated", "market_feedback", "feature_deployed"),
+		mk("vp-growth", "operating", ceo, "outreach_digest", "channel_blocked", "user_onboarded", "prelaunch_ready", "spend_needed", "channel_update", "market_signals"),
 		mk("cto-agent", "operating", vpProduct),
 		mk("pm-agent", "operating", vpProduct),
 		mk("support-agent", "operating", vpProduct),

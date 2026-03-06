@@ -52,8 +52,40 @@ func TestRegisterMCPTurnContextWithTTL_RespectsCustomTTL(t *testing.T) {
 		t.Fatal("expected token to resolve immediately")
 	}
 
-	time.Sleep(75 * time.Millisecond)
+	globalMCPTurnRegistry.mu.Lock()
+	globalMCPTurnRegistry.pruneLocked(time.Now().UTC().Add(75 * time.Millisecond))
+	globalMCPTurnRegistry.mu.Unlock()
 	if _, ok := resolveMCPTurnContext(token); ok {
 		t.Fatal("expected token to expire after custom TTL")
+	}
+}
+
+func TestMCPTurnRegistry_UnregisterAndReset(t *testing.T) {
+	resetMCPTurnContexts()
+	defer resetMCPTurnContexts()
+
+	ctx := WithActor(context.Background(), models.AgentConfig{
+		ID:   "agent-cleanup",
+		Role: "analysis-agent",
+		Mode: "factory",
+	})
+
+	token1 := registerMCPTurnContextWithTTL(ctx, 2*time.Minute)
+	token2 := registerMCPTurnContextWithTTL(ctx, 2*time.Minute)
+	if token1 == "" || token2 == "" {
+		t.Fatalf("expected non-empty tokens, got token1=%q token2=%q", token1, token2)
+	}
+
+	unregisterMCPTurnContext(token1)
+	if _, ok := resolveMCPTurnContext(token1); ok {
+		t.Fatal("expected unregister to remove token1")
+	}
+	if _, ok := resolveMCPTurnContext(token2); !ok {
+		t.Fatal("expected token2 to remain before reset")
+	}
+
+	resetMCPTurnContexts()
+	if _, ok := resolveMCPTurnContext(token2); ok {
+		t.Fatal("expected reset to clear all tokens")
 	}
 }

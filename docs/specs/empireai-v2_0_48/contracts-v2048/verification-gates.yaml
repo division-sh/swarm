@@ -453,7 +453,7 @@ gates:
   name: corpus mode exists in expectedAgentsPerMode
   priority: must_pass
   category: contracts
-  command: 'grep -q ''"corpus"'' empireai-v2_0_45.md && grep -q ''corpus.*1'' empireai-v2_0_45.md
+  command: 'grep -q ''"corpus"'' empireai-current.md && grep -q ''corpus.*1'' empireai-current.md
 
     '
   pass_criteria: corpus mode present in expectedAgentsPerMode with count 1
@@ -463,7 +463,7 @@ gates:
   name: corpus mode exists in completionSignals
   priority: must_pass
   category: contracts
-  command: 'grep -q ''"corpus".*market_research.scan_complete'' empireai-v2_0_45.md
+  command: 'grep -q ''"corpus".*market_research.scan_complete'' empireai-current.md
 
     '
   pass_criteria: corpus mode completion signal is market_research.scan_complete
@@ -473,7 +473,7 @@ gates:
   name: corpus in scan.requested mode enum
   priority: must_pass
   category: contracts
-  command: 'grep -q ''"corpus"'' contracts/event-catalog.yaml || grep -q ''corpus'' empireai-v2_0_45.md
+  command: 'grep -q ''"corpus"'' contracts/event-catalog.yaml || grep -q ''corpus'' empireai-current.md
 
     '
   pass_criteria: corpus is a valid mode in scan.requested schema
@@ -523,7 +523,7 @@ gates:
   name: Pre-filter signal threshold is 55 (not 50)
   priority: must_pass
   category: contracts
-  command: 'grep -q ''signal_strength < 55'' empireai-v2_0_45.md
+  command: 'grep -q ''signal_strength < 55'' empireai-current.md
 
     '
   pass_criteria: Pre-filter rejects signals below 55 (raised from 50 in v2.0.44)
@@ -533,7 +533,7 @@ gates:
   name: Pre-filter includes retention primitive gate
   priority: must_pass
   category: contracts
-  command: 'grep -q ''retention_primitive\|Retention primitive gate\|no_retention_primitive'' empireai-v2_0_45.md
+  command: 'grep -q ''retention_primitive\|Retention primitive gate\|no_retention_primitive'' empireai-current.md
 
     '
   pass_criteria: Pre-filter stage 6 checks for at least 1 retention primitive
@@ -563,7 +563,7 @@ gates:
   name: MRA corpus mode prompt variant exists in spec
   priority: must_pass
   category: contracts
-  command: 'grep -q ''B.10.1.*Corpus Mode'' empireai-v2_0_45.md
+  command: 'grep -q ''B.10.1.*Corpus Mode'' empireai-current.md
 
     '
   pass_criteria: Appendix B.10.1 contains MRA corpus mode prompt variant
@@ -573,7 +573,7 @@ gates:
   name: Platform Capability Registry section exists
   priority: must_pass
   category: contracts
-  command: 'grep -q ''Platform Capability Registry'' empireai-v2_0_45.md
+  command: 'grep -q ''Platform Capability Registry'' empireai-current.md
 
     '
   pass_criteria: Spec contains Platform Capability Registry section with tier definitions

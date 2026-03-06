@@ -12,6 +12,9 @@ func TestIsUniversalRuntimeTool(t *testing.T) {
 	if !IsUniversalRuntimeTool("agent_message") {
 		t.Fatal("expected agent_message to be universal")
 	}
+	if !IsUniversalRuntimeTool("mailbox_send") {
+		t.Fatal("expected mailbox_send to be universal")
+	}
 	if IsUniversalRuntimeTool("sql_execute") {
 		t.Fatal("expected sql_execute to be non-universal")
 	}
@@ -20,6 +23,7 @@ func TestIsUniversalRuntimeTool(t *testing.T) {
 func TestFilterToolsIncludesUniversalEvenWhenConstrained(t *testing.T) {
 	in := []ToolDefinition{
 		{Name: "agent_message"},
+		{Name: "mailbox_send"},
 		{Name: "sql_execute"},
 	}
 	allowed := map[string]struct{}{
@@ -32,6 +36,9 @@ func TestFilterToolsIncludesUniversalEvenWhenConstrained(t *testing.T) {
 	}
 	if _, ok := got["agent_message"]; !ok {
 		t.Fatalf("expected filtered tools to include universal agent_message, got %#v", filtered)
+	}
+	if _, ok := got["mailbox_send"]; !ok {
+		t.Fatalf("expected filtered tools to include universal mailbox_send, got %#v", filtered)
 	}
 	if _, ok := got["sql_execute"]; !ok {
 		t.Fatalf("expected filtered tools to include explicitly allowed sql_execute, got %#v", filtered)

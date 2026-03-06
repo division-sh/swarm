@@ -15,6 +15,7 @@ subscriptions:
   - founder_input.response
   - opco.escalation_response
   - cto.architecture_directive
+  - launch_ready
 tools:
   - agent_hire
   - agent_fire

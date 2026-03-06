@@ -23,8 +23,8 @@
 #   depends_on:      List of action IDs that must complete first (null if none)
 
 spec_version: "2.0.48"
-previous_version: "2.0.44"
-generated_at: "2026-02-26"
+previous_version: "2.0.47"
+generated_at: "2026-03-05"
 
 actions:
 
@@ -792,3 +792,78 @@ v2045-prompt-manifest:
   target: contracts/prompt-manifest.sha256
   action: "New file. Run sha256sum -c to verify all 19 prompt files match tarball."
   verify: "cd contracts/prompts && sha256sum -c ../prompt-manifest.sha256"
+
+# ============================================================================
+# v2.0.46 Upgrade Actions — Audit Remediation
+# ============================================================================
+
+v2046-scanner-model-haiku:
+  description: "Change scanner-agent model_tier from sonnet to haiku"
+  type: code
+  priority: must
+  action: "Update scanner-agent config: model_tier: haiku"
+  verify: "grep model_tier configs/agents/scanner-agent.yaml | grep -q haiku"
+
+v2046-signal-threshold-55:
+  description: "Reconcile signal_strength threshold to 55 in all contracts and prompts"
+  type: contract
+  priority: must
+  action: "system-nodes.yaml derivation pre-filter, discovery-coordinator prompt — all set to 55"
+  verify: "grep -q 'signal_strength >= 55' contracts/system-nodes.yaml"
+
+v2046-ddl-indexes:
+  description: "Add 4 missing indexes to database"
+  type: migration
+  priority: should
+  action: "Create migration 026 with: idx_events_source_agent, idx_spend_ledger_created_at, idx_vertical_metrics_period_end, idx_agent_sessions_active"
+  verify: "psql -c \"SELECT indexname FROM pg_indexes WHERE tablename='events' AND indexname='idx_events_source_agent'\""
+
+v2046-budget-envelope-type:
+  description: "Align budget_envelope DDL type with Go model"
+  type: migration
+  priority: should
+  action: "DDL says INTEGER, Go says float64. Change DDL to NUMERIC(12,2) to match Go float64 without precision loss"
+  verify: "grep 'budget_envelope.*NUMERIC' contracts/ddl-canonical.sql"
+
+# ============================================================================
+# v2.0.47 Upgrade Actions — Prompt Template Variables
+# ============================================================================
+
+v2047-prompt-variables:
+  description: "Wire prompt template renderer to substitute {{variables}} from prompt-variables.yaml"
+  type: code
+  priority: must
+  action: "Load prompt-variables.yaml at startup. After reading .md prompt files, substitute {{key}} with values. Add TestPromptVariablesComplete."
+  verify: "go test ./internal/promptcontracts -run TestPromptVariablesComplete"
+
+v2047-symlink-current-spec:
+  description: "Create empireai-current.md symlink for version-agnostic gate references"
+  type: code
+  priority: must
+  action: "At startup or deploy, symlink empireai-current.md → empireai-v2_0_XX.md. Gates now reference empireai-current.md."
+  verify: "test -L empireai-current.md"
+
+# ============================================================================
+# v2.0.48 Upgrade Actions — Prompt Schema Discipline
+# ============================================================================
+
+v2048-prompt-schema-discipline:
+  description: "Updated prompts defer payload structure to tool schemas"
+  type: prompt
+  priority: must
+  action: "Sync all prompt files from tarball. Run sha256sum -c prompt-manifest.sha256."
+  verify: "cd contracts/prompts && sha256sum -c ../prompt-manifest.sha256"
+
+v2048-vertical-derived-handler:
+  description: "Wire vertical.derived handler in PipelineCoordinator"
+  type: code
+  priority: must
+  action: "Handler receives vertical.derived, runs derivation pre-filter, creates child vertical row, emits vertical.discovered"
+  verify: "go test ./internal/runtime -run TestPipelineCoordinatorContractSemantics_DerivedEventMaterializesChildVertical"
+
+v2048-gate8-subscription-handler-coverage:
+  description: "Add Gate 8: every subscription in contracts has a handler in code"
+  type: code
+  priority: should
+  action: "Scan agent-tools.yaml subscriptions + system-nodes.yaml subscribes_to. For each (subscriber, event), assert handler exists in Go code."
+  verify: "go test ./internal/runtime -run TestSubscriptionHandlerCoverage"

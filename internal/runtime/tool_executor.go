@@ -79,6 +79,13 @@ func toolObjectSchema(properties map[string]any, required ...string) map[string]
 }
 
 func (e *RuntimeToolExecutor) ToolDefinitions() []ToolDefinition {
+	if defs, err := contractToolDefinitions(); err == nil && len(defs) > 0 {
+		return defs
+	}
+	return e.legacyToolDefinitions()
+}
+
+func (e *RuntimeToolExecutor) legacyToolDefinitions() []ToolDefinition {
 	return []ToolDefinition{
 		{
 			Name:        "agent_message",
@@ -406,10 +413,277 @@ func (e *RuntimeToolExecutor) Execute(ctx context.Context, name string, input an
 	if err := e.authorizeToolUsage(ctx, actor, name); err != nil {
 		return nil, err
 	}
+	if err := e.validateRuntimeToolInput(name, input); err != nil {
+		return nil, WrapRuntimeError(
+			"invalid_tool_input",
+			"tool-executor",
+			"execute.validate_runtime_tool_input",
+			false,
+			err,
+			"runtime tool input validation failed",
+		)
+	}
+	input = normalizeRuntimeToolInput(name, input)
 	start := time.Now()
 	out, err := e.executeTool(ctx, actor, name, input)
 	e.emitToolExecutionEvent(ctx, actor, name, input, out, err, time.Since(start))
 	return out, err
+}
+
+func (e *RuntimeToolExecutor) validateRuntimeToolInput(name string, input any) error {
+	name = strings.TrimSpace(name)
+	if name == "" || strings.HasPrefix(name, "emit_") {
+		return nil
+	}
+	payload := map[string]any{}
+	if err := decodeToolInput(input, &payload); err != nil {
+		return err
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	contractSchema, foundContract := runtimeToolSchemaForName(e.ToolDefinitions(), name)
+	if foundContract && contractSchema != nil {
+		if err := validateSchemaObject("$", contractSchema, payload); err == nil {
+			return nil
+		} else if payloadTouchesSchemaProps(payload, contractSchema) &&
+			!payloadHasLegacyOnlyProps(payload, contractSchema) &&
+			!toolAllowsLegacySubsetFallback(name) {
+			return err
+		}
+	}
+
+	err, found := validateToolInputAgainstToolDefinitions(name, payload, e.legacyToolDefinitions())
+	if !found || err == nil {
+		return nil
+	}
+	legacyErr, legacyFound := validateToolInputAgainstToolDefinitions(name, input, e.legacyToolDefinitions())
+	if legacyFound && legacyErr == nil {
+		return nil
+	}
+	return err
+}
+
+func validateToolInputAgainstToolDefinitions(name string, input any, defs []ToolDefinition) (error, bool) {
+	schema, ok := runtimeToolSchemaForName(defs, name)
+	if !ok || schema == nil {
+		return nil, false
+	}
+	payload := map[string]any{}
+	if err := decodeToolInput(input, &payload); err != nil {
+		return err, true
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	return validateSchemaObject("$", schema, payload), true
+}
+
+func runtimeToolSchemaForName(defs []ToolDefinition, name string) (map[string]any, bool) {
+	name = strings.TrimSpace(name)
+	for _, def := range defs {
+		if strings.TrimSpace(def.Name) != name {
+			continue
+		}
+		schema, ok := def.Schema.(map[string]any)
+		return schema, ok
+	}
+	return nil, false
+}
+
+func payloadTouchesSchemaProps(payload map[string]any, schema map[string]any) bool {
+	if len(payload) == 0 || schema == nil {
+		return false
+	}
+	props := schemaProperties(schema["properties"])
+	for key := range payload {
+		if _, ok := props[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func payloadHasLegacyOnlyProps(payload map[string]any, schema map[string]any) bool {
+	if len(payload) == 0 || schema == nil {
+		return false
+	}
+	props := schemaProperties(schema["properties"])
+	for key := range payload {
+		if _, ok := props[key]; !ok {
+			return true
+		}
+	}
+	return false
+}
+
+func toolAllowsLegacySubsetFallback(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "agent_message",
+		"configure_routing",
+		"agent_fire",
+		"mailbox_send",
+		"human_task_request",
+		"human_task_decide",
+		"systemd_control":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRuntimeToolInput(name string, input any) any {
+	if strings.TrimSpace(name) == "" || strings.HasPrefix(strings.TrimSpace(name), "emit_") {
+		return input
+	}
+	var payload map[string]any
+	if err := decodeToolInput(input, &payload); err != nil || payload == nil {
+		return input
+	}
+
+	switch name {
+	case "agent_message":
+		if strings.TrimSpace(asString(payload["target_agent_id"])) == "" {
+			if to := strings.TrimSpace(asString(payload["to"])); to != "" {
+				payload["target_agent_id"] = to
+			}
+		}
+	case "schedule":
+		if strings.TrimSpace(asString(payload["event_type"])) == "" {
+			if action := strings.TrimSpace(asString(payload["action"])); action != "" {
+				payload["event_type"] = action
+			}
+		}
+		if payload["payload"] == nil && payload["context"] != nil {
+			payload["payload"] = payload["context"]
+		}
+		if strings.TrimSpace(asString(payload["at"])) == "" && asInt(payload["delay_seconds"]) > 0 {
+			payload["mode"] = "once"
+			payload["at"] = time.Now().Add(time.Duration(asInt(payload["delay_seconds"])) * time.Second).UTC().Format(time.RFC3339)
+		}
+	case "configure_routing":
+		if strings.TrimSpace(asString(payload["event_pattern"])) == "" {
+			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
+				payload["event_pattern"] = eventType
+			}
+		}
+		if strings.TrimSpace(asString(payload["status"])) == "" {
+			switch strings.ToLower(strings.TrimSpace(asString(payload["operation"]))) {
+			case "remove":
+				payload["status"] = "deactivated"
+			case "add", "modify":
+				payload["status"] = "active"
+			}
+		}
+	case "agent_hire":
+		if payload["config"] == nil {
+			config := map[string]any{
+				"id":   strings.TrimSpace(asString(payload["agent_id"])),
+				"role": strings.TrimSpace(asString(payload["role"])),
+			}
+			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
+				config["mode"] = mode
+			}
+			if verticalID := strings.TrimSpace(asString(payload["vertical_id"])); verticalID != "" {
+				config["vertical_id"] = verticalID
+			}
+			rawConfig := map[string]any{}
+			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
+				rawConfig["model_tier"] = modelTier
+			}
+			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
+				rawConfig["system_prompt"] = systemPrompt
+			}
+			if len(rawConfig) > 0 {
+				config["config"] = rawConfig
+			}
+			payload["config"] = config
+		}
+	case "agent_reconfigure":
+		if payload["config"] == nil {
+			config := map[string]any{}
+			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
+				config["model_tier"] = modelTier
+			}
+			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
+				config["system_prompt"] = systemPrompt
+			}
+			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
+				config["max_turns_per_task"] = maxTurns
+			}
+			payload["config"] = config
+		}
+	case "mailbox_send":
+		if strings.TrimSpace(asString(payload["summary"])) == "" {
+			if subject := strings.TrimSpace(asString(payload["subject"])); subject != "" {
+				payload["summary"] = subject
+			}
+		}
+		if payload["context"] == nil && payload["payload"] != nil {
+			payload["context"] = payload["payload"]
+		}
+	case "human_task_request":
+		if strings.TrimSpace(asString(payload["deadline"])) == "" &&
+			strings.TrimSpace(asString(payload["deadline_at"])) == "" &&
+			strings.TrimSpace(asString(payload["deadline_rfc3339"])) == "" {
+			if hours := asInt(payload["deadline_hours"]); hours > 0 {
+				payload["deadline_at"] = time.Now().Add(time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339)
+			}
+		}
+	case "systemd_control":
+		if strings.TrimSpace(asString(payload["unit"])) == "" {
+			if service := strings.TrimSpace(asString(payload["service"])); service != "" {
+				payload["unit"] = service
+			}
+		}
+	case "email_api":
+		if to := strings.TrimSpace(asString(payload["to"])); to != "" {
+			payload["to"] = []string{to}
+		}
+	case "whatsapp_business_api":
+		normalizeExternalContractPayload(payload, http.MethodPost)
+	case "instagram_api":
+		normalizeExternalContractPayload(payload, http.MethodPost)
+	case "domain_purchase":
+		normalizeExternalContractPayload(payload, http.MethodPost)
+	case "domain_availability_check":
+		if strings.TrimSpace(asString(payload["method"])) == "" {
+			payload["method"] = http.MethodGet
+		}
+		if payload["query"] == nil && strings.TrimSpace(asString(payload["domain"])) != "" {
+			payload["query"] = map[string]any{"domain": strings.TrimSpace(asString(payload["domain"]))}
+		}
+	case "dns_configure":
+		normalizeExternalContractPayload(payload, http.MethodPost)
+	case "whatsapp_name_check":
+		normalizeExternalContractPayload(payload, http.MethodPost)
+	}
+	return payload
+}
+
+func normalizeExternalContractPayload(payload map[string]any, method string) {
+	if payload == nil {
+		return
+	}
+	if strings.TrimSpace(asString(payload["method"])) == "" {
+		payload["method"] = method
+	}
+	if payload["body"] != nil {
+		return
+	}
+	body := map[string]any{}
+	for key, value := range payload {
+		switch key {
+		case "method", "url", "path", "query", "headers", "body", "timeout_seconds":
+			continue
+		default:
+			body[key] = value
+		}
+	}
+	if len(body) > 0 {
+		payload["body"] = body
+	}
 }
 
 func (e *RuntimeToolExecutor) executeTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
@@ -1133,7 +1407,7 @@ func (e *RuntimeToolExecutor) execMailboxSend(actor models.AgentConfig, input an
 func normalizeMailboxType(raw string) (string, error) {
 	t := strings.ToLower(strings.TrimSpace(raw))
 	switch t {
-	case "vertical_decision":
+	case "vertical_decision", "vertical_promotion_review", "vertical-promotion-review", "vertical.promotion_review", "promotion_review", "approval":
 		t = "vertical_approval"
 	case "template_migration_review", "template_migration":
 		t = "migration_approval"
@@ -1272,15 +1546,8 @@ func (e *RuntimeToolExecutor) execHumanTaskRequest(ctx context.Context, actor mo
 	payload := map[string]any{
 		"task_id":          taskID,
 		"requesting_agent": actor.ID,
-		"vertical_id":      in.VerticalID,
-		"category":         in.Category,
+		"task_type":        in.Category,
 		"description":      in.Description,
-		"talking_points":   json.RawMessage(talkingJSON),
-		"expected_value":   in.ExpectedValue,
-		"priority":         in.Priority,
-	}
-	if deadline.Valid {
-		payload["deadline"] = deadline.Time.UTC().Format(time.RFC3339)
 	}
 
 	if err := e.bus.Publish(ctx, events.Event{
@@ -1625,6 +1892,9 @@ func (e *RuntimeToolExecutor) preNormalizeEmitPayload(actor models.AgentConfig, 
 	if eventType == "source.scraped" {
 		return preNormalizeSourceScrapedPayload(inbound, payload)
 	}
+	if eventType == "vertical.derived" {
+		return preNormalizeVerticalDerivedPayload(payload)
+	}
 	role := canonicalRuntimeRole(actor.Role)
 	if role == "empire-coordinator" && eventType == "scan.requested" {
 		return preNormalizeCoordinatorScanRequestedPayload(inbound, payload)
@@ -1633,6 +1903,23 @@ func (e *RuntimeToolExecutor) preNormalizeEmitPayload(actor models.AgentConfig, 
 		return preNormalizeLegacyNestedEmitPayload(payload)
 	}
 	return payload
+}
+
+func preNormalizeVerticalDerivedPayload(payload map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range payload {
+		out[k] = v
+	}
+	if rationale, ok := out["derivation_rationale"]; ok {
+		if _, isObj := rationale.(map[string]any); !isObj {
+			if summary := strings.TrimSpace(asString(rationale)); summary != "" {
+				out["derivation_rationale"] = map[string]any{
+					"summary": summary,
+				}
+			}
+		}
+	}
+	return out
 }
 
 func (e *RuntimeToolExecutor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
@@ -2544,21 +2831,36 @@ func (e *RuntimeToolExecutor) execSystemdControl(ctx context.Context, actor mode
 		return nil, errors.New("systemd_control is restricted to holding-devops")
 	}
 	var in struct {
-		Action string `json:"action"`
-		Unit   string `json:"unit"`
+		Action  string `json:"action"`
+		Unit    string `json:"unit"`
+		Service string `json:"service"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
 	}
 	action := strings.TrimSpace(strings.ToLower(in.Action))
 	unit := strings.TrimSpace(in.Unit)
+	if unit == "" {
+		unit = strings.TrimSpace(in.Service)
+	}
 	switch action {
-	case "start", "stop", "restart", "enable", "disable":
+	case "start", "stop", "restart", "enable", "disable", "status":
 	default:
 		return nil, fmt.Errorf("unsupported systemd action: %s", action)
 	}
 	if !strings.HasPrefix(unit, "empireai-") {
 		return nil, errors.New("systemd unit must start with empireai-")
+	}
+	if action == "status" {
+		out, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).CombinedOutput()
+		state := strings.TrimSpace(string(out))
+		if state == "" {
+			state = "unknown"
+		}
+		if err != nil && state == "unknown" {
+			return nil, fmt.Errorf("systemctl status %s failed: %w", unit, err)
+		}
+		return map[string]any{"status": "ok", "action": action, "unit": unit, "state": state}, nil
 	}
 	out, err := exec.CommandContext(ctx, "systemctl", action, unit).CombinedOutput()
 	if err != nil {
@@ -2573,6 +2875,7 @@ func (e *RuntimeToolExecutor) execCertbotExecute(ctx context.Context, actor mode
 	}
 	var in struct {
 		Domain string `json:"domain"`
+		Action string `json:"action"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
@@ -2581,11 +2884,26 @@ func (e *RuntimeToolExecutor) execCertbotExecute(ctx context.Context, actor mode
 	if domain == "" {
 		return nil, errors.New("domain is required")
 	}
-	out, err := exec.CommandContext(ctx, "certbot", "--nginx", "-d", domain, "--non-interactive", "--agree-tos").CombinedOutput()
+	action := strings.TrimSpace(strings.ToLower(in.Action))
+	if action == "" {
+		action = "provision"
+	}
+	var cmd *exec.Cmd
+	switch action {
+	case "provision":
+		cmd = exec.CommandContext(ctx, "certbot", "--nginx", "-d", domain, "--non-interactive", "--agree-tos")
+	case "renew":
+		cmd = exec.CommandContext(ctx, "certbot", "renew", "--cert-name", domain, "--non-interactive")
+	case "revoke":
+		cmd = exec.CommandContext(ctx, "certbot", "revoke", "--cert-name", domain, "--non-interactive")
+	default:
+		return nil, fmt.Errorf("unsupported certbot action: %s", action)
+	}
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("certbot failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
-	return map[string]any{"status": "ok", "domain": domain}, nil
+	return map[string]any{"status": "ok", "domain": domain, "action": action}, nil
 }
 
 func (e *RuntimeToolExecutor) execInstagramHandleCheck(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

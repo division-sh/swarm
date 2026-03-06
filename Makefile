@@ -1,5 +1,6 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover \
-	dashboard-build dashboard-redeploy dashboard-logs dashboard-ps
+	dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
+	sync-current-spec
 
 COMPOSE ?= docker compose
 
@@ -38,3 +39,6 @@ dashboard-logs:
 
 dashboard-ps:
 	$(COMPOSE) ps dashboard orchestrator
+
+sync-current-spec:
+	./scripts/sync_current_spec.sh

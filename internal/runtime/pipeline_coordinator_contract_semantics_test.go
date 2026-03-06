@@ -287,11 +287,12 @@ func TestPipelineCoordinatorContractSemantics_DerivationConstraintVectors(t *tes
 		t.Fatal("derivation vectors empty")
 	}
 
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+
 	for _, tc := range vectors.Cases {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			ctx := context.Background()
 			bus := NewEventBus(InMemoryEventStore{})
 			pc := NewFactoryPipelineCoordinator(bus, db)
 

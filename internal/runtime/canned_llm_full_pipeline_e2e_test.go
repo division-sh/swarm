@@ -24,7 +24,10 @@ import (
 )
 
 type postgresEventStore struct {
-	db *sql.DB
+	db          *sql.DB
+	mu          sync.Mutex
+	eventCounts map[string]int
+	notifyCh    chan struct{}
 }
 
 func (s *postgresEventStore) AppendEvent(ctx context.Context, evt events.Event) error {
@@ -50,7 +53,55 @@ func (s *postgresEventStore) AppendEvent(ctx context.Context, evt events.Event) 
 		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
 		ON CONFLICT (id) DO NOTHING
 	`, id, strings.TrimSpace(string(evt.Type)), strings.TrimSpace(evt.SourceAgent), taskID, verticalID, payload, createdAt)
+	if err == nil {
+		s.mu.Lock()
+		s.ensureNotifyLocked()
+		if s.eventCounts == nil {
+			s.eventCounts = make(map[string]int)
+		}
+		s.eventCounts[strings.TrimSpace(string(evt.Type))]++
+		s.signalLocked()
+		s.mu.Unlock()
+	}
 	return err
+}
+
+func (s *postgresEventStore) ensureNotifyLocked() {
+	if s.notifyCh == nil {
+		s.notifyCh = make(chan struct{}, 1)
+	}
+}
+
+func (s *postgresEventStore) signalLocked() {
+	s.ensureNotifyLocked()
+	select {
+	case s.notifyCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *postgresEventStore) WaitForEventTypeCount(eventType string, want int, timeout time.Duration) error {
+	eventType = strings.TrimSpace(eventType)
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		s.ensureNotifyLocked()
+		got := s.eventCounts[eventType]
+		notifyCh := s.notifyCh
+		s.mu.Unlock()
+		if got >= want {
+			return nil
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("timed out waiting for events type=%s count>=%d", eventType, want)
+		}
+		select {
+		case <-notifyCh:
+		case <-time.After(remaining):
+			return fmt.Errorf("timed out waiting for events type=%s count>=%d", eventType, want)
+		}
+	}
 }
 
 func (s *postgresEventStore) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
@@ -74,7 +125,10 @@ func sanitizeOptionalUUIDForTest(raw string) string {
 }
 
 type sqlMailboxStore struct {
-	db *sql.DB
+	db       *sql.DB
+	mu       sync.Mutex
+	items    []MailboxItem
+	notifyCh chan struct{}
 }
 
 func (s *sqlMailboxStore) InsertMailboxItem(ctx context.Context, item MailboxItem) (string, error) {
@@ -119,7 +173,56 @@ func (s *sqlMailboxStore) InsertMailboxItem(ctx context.Context, item MailboxIte
 	if err != nil {
 		return "", err
 	}
+	item.ID = id
+	item.Status = status
+	item.Priority = priority
+	s.mu.Lock()
+	s.ensureNotifyLocked()
+	s.items = append(s.items, item)
+	s.signalLocked()
+	s.mu.Unlock()
 	return id, nil
+}
+
+func (s *sqlMailboxStore) ensureNotifyLocked() {
+	if s.notifyCh == nil {
+		s.notifyCh = make(chan struct{}, 1)
+	}
+}
+
+func (s *sqlMailboxStore) signalLocked() {
+	s.ensureNotifyLocked()
+	select {
+	case s.notifyCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *sqlMailboxStore) WaitForLatestMailboxItem(mailboxType string, timeout time.Duration) (mailboxID string, verticalID string, err error) {
+	mailboxType = strings.TrimSpace(mailboxType)
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		s.ensureNotifyLocked()
+		for i := len(s.items) - 1; i >= 0; i-- {
+			item := s.items[i]
+			if strings.TrimSpace(item.Type) == mailboxType && strings.TrimSpace(item.Status) == "pending" {
+				s.mu.Unlock()
+				return strings.TrimSpace(item.ID), strings.TrimSpace(item.VerticalID), nil
+			}
+		}
+		notifyCh := s.notifyCh
+		s.mu.Unlock()
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return "", "", sql.ErrNoRows
+		}
+		select {
+		case <-notifyCh:
+		case <-time.After(remaining):
+			return "", "", sql.ErrNoRows
+		}
+	}
 }
 
 func (s *sqlMailboxStore) ListMailboxItems(context.Context, string, int) ([]MailboxItem, error) {
@@ -422,38 +525,12 @@ func extractTemplateVars(input, eventType string) map[string]any {
 	return vars
 }
 
-func waitForDBEventTypeCount(db *sql.DB, eventType string, want int, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		var got int
-		err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE type = $1`, strings.TrimSpace(eventType)).Scan(&got)
-		if err == nil && got >= want {
-			return nil
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return fmt.Errorf("timed out waiting for events type=%s count>=%d", strings.TrimSpace(eventType), want)
+func waitForDBEventTypeCount(store *postgresEventStore, eventType string, want int, timeout time.Duration) error {
+	return store.WaitForEventTypeCount(eventType, want, timeout)
 }
 
-func waitForPendingMailboxApproval(db *sql.DB, timeout time.Duration) (mailboxID string, verticalID string, err error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		err = db.QueryRowContext(context.Background(), `
-			SELECT id::text, vertical_id::text
-			FROM mailbox
-			WHERE type = 'vertical_approval' AND status = 'pending'
-			ORDER BY created_at DESC
-			LIMIT 1
-		`).Scan(&mailboxID, &verticalID)
-		if err == nil {
-			return strings.TrimSpace(mailboxID), strings.TrimSpace(verticalID), nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return "", "", err
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	return "", "", sql.ErrNoRows
+func waitForPendingMailboxApproval(store *sqlMailboxStore, timeout time.Duration) (mailboxID string, verticalID string, err error) {
+	return store.WaitForLatestMailboxItem("vertical_approval", timeout)
 }
 
 func dbEventTypeCounts(t *testing.T, db *sql.DB) map[string]int {
@@ -697,7 +774,8 @@ func assertTransitionEmitsEvent(t *testing.T, db *sql.DB, eventType, emitted str
 
 func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	bus := NewEventBus(&postgresEventStore{db: db})
+	eventStore := &postgresEventStore{db: db}
+	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
 	pc := NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
@@ -709,8 +787,9 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	}
 	canned := newYAMLCannedRuntime(fixtures)
 
+	mailboxStore := &sqlMailboxStore{db: db}
 	exec := NewRuntimeToolExecutor(bus, nil, nil)
-	exec.SetMailboxStore(&sqlMailboxStore{db: db})
+	exec.SetMailboxStore(mailboxStore)
 	baseFactory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	factory := func(cfg models.AgentConfig) (Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
@@ -775,13 +854,13 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 		t.Fatalf("publish system.directive: %v", err)
 	}
 
-	if err := waitForDBEventTypeCount(db, "campaign.completed", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(eventStore, "campaign.completed", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait campaign.completed: %v", err)
 	}
-	if err := waitForDBEventTypeCount(db, "score.dimension_complete", 22, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(eventStore, "score.dimension_complete", 22, 12*time.Second); err != nil {
 		t.Fatalf("wait score.dimension_complete: %v", err)
 	}
-	if err := waitForDBEventTypeCount(db, "vertical.ready_for_review", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(eventStore, "vertical.ready_for_review", 1, 12*time.Second); err != nil {
 		starts := map[string]int{
 			"market-research-agent":   canned.StartsFor("market-research-agent"),
 			"analysis-agent":          canned.StartsFor("analysis-agent"),
@@ -806,7 +885,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 		)
 	}
 
-	pendingMailboxID, readyVerticalID, err := waitForPendingMailboxApproval(db, 4*time.Second)
+	pendingMailboxID, readyVerticalID, err := waitForPendingMailboxApproval(mailboxStore, 4*time.Second)
 	if err != nil {
 		t.Fatalf(
 			"load pending mailbox item: %v counts=%v failed_tools=%v recent=%v",
@@ -844,10 +923,10 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 		t.Fatalf("publish vertical.approved: %v", err)
 	}
 
-	if err := waitForDBEventTypeCount(db, "opco.spinup_requested", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(eventStore, "opco.spinup_requested", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait opco.spinup_requested: %v counts=%v failed_tools=%v starts=%v", err, dbEventTypeCounts(t, db), failedToolExecutions(t, db, 20), map[string]int{"empire-coordinator": canned.StartsFor("empire-coordinator")})
 	}
-	if err := waitForDBEventTypeCount(db, "opco.ceo_ready", 1, 12*time.Second); err != nil {
+	if err := waitForDBEventTypeCount(eventStore, "opco.ceo_ready", 1, 12*time.Second); err != nil {
 		t.Fatalf("wait opco.ceo_ready: %v counts=%v failed_tools=%v starts=%v recent=%v", err, dbEventTypeCounts(t, db), failedToolExecutions(t, db, 20), map[string]int{"empire-coordinator": canned.StartsFor("empire-coordinator")}, recentEventTypes(t, db, 30))
 	}
 

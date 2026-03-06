@@ -1,4 +1,4 @@
-# EmpireAI agent-config-map.yaml — v2.0.36
+# EmpireAI agent-config-map.yaml — v2.0.48
 # Maps contract agent IDs to actual config file paths in the repository.
 # Authoritative for filename resolution — no guessing.
 #

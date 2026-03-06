@@ -8,6 +8,8 @@ subscriptions:
   - user_onboarded
   - prelaunch_ready
   - spend_needed
+  - channel_update
+  - market_signals
 tools:
   - agent_hire
   - agent_fire

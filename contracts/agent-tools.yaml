@@ -1,5 +1,5 @@
 # ============================================================================
-# EmpireAI Agent Tools Contract — v2.0.48
+# EmpireAI Agent Tools Contract — v2.0.49
 # ============================================================================
 # Defines every agent's wiring: subscriptions, tools, emit_events, model config.
 #
@@ -17,9 +17,17 @@
 #
 # Subscription model:
 #   - Holding/factory agents: subscriptions (static EventBus)
-#   - OpCo leadership (CEO, VPs, CoS): subscriptions (static EventBus)
-#   - OpCo workers: subscriptions_bootstrap (routing_rules table)
-#   - agent_message and emit_* tools injected into ALL agents (never list per-agent)
+#   - OpCo leadership (CEO, VPs, CoS): subscriptions (static EventBus only, no bootstrap)
+#   - OpCo workers: subscriptions_bootstrap (routing_rules table, REQUIRED — dynamic routing)
+#     TestContractCompliance/subscriptions asserts workers use bootstrap, leadership uses static
+#   - agent_message, mailbox_send, and emit_* tools injected into ALL agents (never list per-agent)
+#
+# Universal tool schemas:
+#   agent_message:  {to: agent_id, message: string}
+#   mailbox_send:   {type: enum[review, escalation, spend_request, budget_increase,
+#                    digest, vertical_approval, migration_approval, domain_approval],
+#                    priority: enum[low, normal, high, critical],
+#                    subject: string, vertical_id?: uuid, payload: object}
 #
 # System nodes (scoring-node): node_type: system, no model/prompt fields
 # ============================================================================
@@ -370,6 +378,7 @@ opco-ceo:
   - cto.architecture_directive
   - founder_input.response
   - opco.escalation_response
+  - launch_ready
   tools_tier2:
   - agent_hire
   - agent_fire
@@ -386,6 +395,7 @@ opco-ceo:
   - opco.deploy_review
   - opco.founder_input
   - opco.steady_state_reached
+  - mandate_updated
 opco-chief-of-staff:
   id: cos-{vertical_id}
   type: operating
@@ -402,6 +412,7 @@ opco-chief-of-staff:
   - prelaunch_ready
   - support_critical
   - channel_blocked
+  - mandate_updated
   _routing_note: 'CoS uses static subscriptions only. Do NOT add seeded routes for the same events — static and seeded routes
     for the same agent+event cause double delivery. This applies to all OpCo leadership agents with static subscriptions (CEO,
     CoS).
@@ -426,6 +437,11 @@ opco-head-of-product:
   - product_escalation
   - support_digest
   - support_critical
+  - churn_risk
+  - spend_needed
+  - mandate_updated
+  - market_feedback
+  - feature_deployed
   tools_tier2:
   - agent_hire
   - agent_fire
@@ -437,9 +453,6 @@ opco-head-of-product:
   - product_report
   - product_escalation
   - opco.product_spec_review
-  subscriptions_bootstrap:
-  - churn_risk
-  - spend_needed
 opco-head-of-growth:
   id: vp-growth-{vertical_id}
   type: operating
@@ -453,6 +466,8 @@ opco-head-of-growth:
   - user_onboarded
   - prelaunch_ready
   - spend_needed
+  - channel_update
+  - market_signals
   tools_tier2:
   - agent_hire
   - agent_fire
@@ -509,6 +524,7 @@ opco-cto:
   - deploy_requested
   - feature_deployed
   - bug_fix_deployed
+  - launch_ready
 opco-tech-writer:
   id: techwriter-{vertical_id}
   type: operating
@@ -600,6 +616,7 @@ opco-marketing:
   - outreach_digest
   - channel_blocked
   - spend_needed
+  - channel_update
 opco-support:
   id: support-{vertical_id}
   type: operating
@@ -622,3 +639,4 @@ opco-support:
   - support_digest
   - support_critical
   - churn_risk
+  - market_feedback

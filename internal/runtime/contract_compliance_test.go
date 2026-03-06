@@ -78,6 +78,14 @@ type contractComplianceVerificationGates struct {
 	SpecVersion string `yaml:"spec_version"`
 }
 
+type contractComplianceToolingLock struct {
+	ContractFormatVersion string `yaml:"contract_format_version"`
+}
+
+type contractComplianceToolSchema struct {
+	InputSchema map[string]any `yaml:"input_schema"`
+}
+
 func TestContractCompliance(t *testing.T) {
 	t.Helper()
 	ensureEventSchemaRegistry()
@@ -89,6 +97,8 @@ func TestContractCompliance(t *testing.T) {
 	systemNodes := contractComplianceLoadSystemNodes(t, repoRoot)
 	routes := contractComplianceLoadRoutes(t, repoRoot)
 	specVersion := contractComplianceLoadSpecVersion(t, repoRoot)
+	toolingLockVersion := contractComplianceLoadToolingLockVersion(t, repoRoot)
+	toolSchemas := contractComplianceLoadToolSchemas(t, repoRoot)
 
 	t.Run("gate1_agent_config_fields_match_contract", func(t *testing.T) {
 		ids := make([]string, 0, len(contractAgents))
@@ -239,21 +249,21 @@ func TestContractCompliance(t *testing.T) {
 		for _, eventType := range eventTypes {
 			cat := eventCatalog[eventType]
 			emitterType := strings.ToLower(strings.TrimSpace(cat.EmitterType))
-			// Gate 3 scope (v2.0.47):
-			// - agent: enforce against commgraph agentProducerEvents.
+			// Gate 3 scope:
+			// - agent/opco_agent: enforce against commgraph producer events.
 			// - system_node: enforce against contracts/system-nodes.yaml produces.
-			// - runtime, human, opco_agent: intentionally skipped here.
-			if emitterType == "runtime" || emitterType == "human" || emitterType == "opco_agent" {
+			// - runtime, human: intentionally skipped here.
+			if emitterType == "runtime" || emitterType == "human" {
 				continue
 			}
-			if emitterType != "agent" && emitterType != "system_node" {
+			if emitterType != "agent" && emitterType != "system_node" && emitterType != "opco_agent" {
 				errs = append(errs, fmt.Sprintf("event-catalog emitter_type unsupported for %s (emitter_type=%q)", eventType, cat.EmitterType))
 				continue
 			}
 			emitters := append([]string{cat.Emitter}, cat.AlternateEmitters...)
 			match := false
 			for _, emitter := range emitters {
-				if emitterType == "agent" && contractComplianceAgentEmitterProduces(eventType, emitter) {
+				if (emitterType == "agent" || emitterType == "opco_agent") && contractComplianceAgentEmitterProduces(eventType, emitter) {
 					match = true
 					break
 				}
@@ -376,6 +386,9 @@ func TestContractCompliance(t *testing.T) {
 		if got, want := contractComplianceNormVersion(runtimeSpecVersion), contractComplianceNormVersion(specVersion); got != want {
 			t.Fatalf("runtimeSpecVersion mismatch: got=%q want=%q", runtimeSpecVersion, specVersion)
 		}
+		if got, want := contractComplianceNormVersion(toolingLockVersion), contractComplianceNormVersion(specVersion); got != want {
+			t.Fatalf("tooling.lock contract_format_version mismatch: got=%q want=%q", toolingLockVersion, specVersion)
+		}
 		roster := defaultOpCoRoster("contract-version-check")
 		for _, rec := range roster {
 			if got, want := contractComplianceNormVersion(rec.TemplateVersion), contractComplianceNormVersion(specVersion); got != want {
@@ -445,6 +458,89 @@ func TestContractCompliance(t *testing.T) {
 		if len(errs) > 0 {
 			t.Fatalf("gate8 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
 		}
+	})
+
+	t.Run("gate9_tool_schemas_match_contract", func(t *testing.T) {
+		errs := make([]string, 0, 32)
+		expectedTools := map[string]struct{}{
+			"agent_message": {},
+			"mailbox_send":  {},
+		}
+		for _, ag := range contractAgents {
+			for _, tool := range ag.ToolsTier2 {
+				tool = strings.TrimSpace(tool)
+				if tool == "" {
+					continue
+				}
+				expectedTools[tool] = struct{}{}
+			}
+		}
+
+		runtimeDefs := NewRuntimeToolExecutor(nil, nil, nil).ToolDefinitions()
+		runtimeByName := make(map[string]ToolDefinition, len(runtimeDefs))
+		for _, def := range runtimeDefs {
+			runtimeByName[strings.TrimSpace(def.Name)] = def
+		}
+
+		for toolName := range expectedTools {
+			entry, ok := toolSchemas[toolName]
+			if !ok {
+				errs = append(errs, fmt.Sprintf("tool %s missing from contracts/tool-schemas.yaml", toolName))
+				continue
+			}
+			def, ok := runtimeByName[toolName]
+			if !ok {
+				errs = append(errs, fmt.Sprintf("tool %s missing from runtime ToolDefinitions()", toolName))
+				continue
+			}
+			runtimeSchema, ok := def.Schema.(map[string]any)
+			if !ok {
+				errs = append(errs, fmt.Sprintf("tool %s runtime schema is not object map", toolName))
+				continue
+			}
+			contractProps := schemaProperties(entry.InputSchema["properties"])
+			runtimeProps := schemaProperties(runtimeSchema["properties"])
+			contractFields := make([]string, 0, len(contractProps))
+			runtimeFields := make([]string, 0, len(runtimeProps))
+			for field := range contractProps {
+				contractFields = append(contractFields, field)
+			}
+			for field := range runtimeProps {
+				runtimeFields = append(runtimeFields, field)
+			}
+			if diff := contractComplianceDiffSet(contractFields, runtimeFields); diff != "" {
+				errs = append(errs, fmt.Sprintf("tool %s schema properties mismatch (%s)", toolName, diff))
+			}
+			if diff := contractComplianceDiffSet(contractComplianceRequiredFields(entry.InputSchema["required"]), contractComplianceRequiredFields(runtimeSchema["required"])); diff != "" {
+				errs = append(errs, fmt.Sprintf("tool %s required fields mismatch (%s)", toolName, diff))
+			}
+
+			validPayload, err := contractComplianceBuildValidToolPayload(entry.InputSchema)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("tool %s valid payload generation failed: %v", toolName, err))
+				continue
+			}
+			exec := NewRuntimeToolExecutor(nil, nil, nil)
+			if err := exec.validateRuntimeToolInput(toolName, validPayload); err != nil {
+				errs = append(errs, fmt.Sprintf("tool %s rejected valid contract payload: %v", toolName, err))
+			}
+
+			invalidPayload, err := contractComplianceBuildInvalidToolPayload(entry.InputSchema)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("tool %s invalid payload generation failed: %v", toolName, err))
+				continue
+			}
+			if err := exec.validateRuntimeToolInput(toolName, invalidPayload); err == nil {
+				errs = append(errs, fmt.Sprintf("tool %s accepted invalid contract payload", toolName))
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("gate9 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+
+	t.Run("gate10_prompt_schema_guard", func(t *testing.T) {
+		runPromptSchemaGuardCases(t)
 	})
 }
 
@@ -568,6 +664,143 @@ func contractComplianceLoadSpecVersion(t *testing.T, repoRoot string) string {
 		t.Fatalf("spec_version missing in %s", path)
 	}
 	return strings.TrimSpace(gates.SpecVersion)
+}
+
+func contractComplianceLoadToolingLockVersion(t *testing.T, repoRoot string) string {
+	t.Helper()
+	path := filepath.Join(repoRoot, "contracts", "tooling.lock")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var lock contractComplianceToolingLock
+	if err := yaml.Unmarshal(raw, &lock); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	if strings.TrimSpace(lock.ContractFormatVersion) == "" {
+		t.Fatalf("contract_format_version missing in %s", path)
+	}
+	return strings.TrimSpace(lock.ContractFormatVersion)
+}
+
+func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string]contractComplianceToolSchema {
+	t.Helper()
+	path := filepath.Join(repoRoot, "contracts", "tool-schemas.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	all := map[string]contractComplianceToolSchema{}
+	if err := yaml.Unmarshal(raw, &all); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return all
+}
+
+func contractComplianceRequiredFields(raw any) []string {
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if field, ok := item.(string); ok {
+			out = append(out, strings.TrimSpace(field))
+		}
+	}
+	return out
+}
+
+func contractComplianceBuildValidToolPayload(schema map[string]any) (map[string]any, error) {
+	v, err := contractComplianceBuildSchemaValue(schema)
+	if err != nil {
+		return nil, err
+	}
+	payload, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("schema root is not object")
+	}
+	return payload, nil
+}
+
+func contractComplianceBuildInvalidToolPayload(schema map[string]any) (map[string]any, error) {
+	valid, err := contractComplianceBuildValidToolPayload(schema)
+	if err != nil {
+		return nil, err
+	}
+	required := contractComplianceRequiredFields(schema["required"])
+	if len(required) > 0 {
+		valid[required[0]] = []any{"wrong_type"}
+		return valid, nil
+	}
+	props := schemaProperties(schema["properties"])
+	keys := make([]string, 0, len(props))
+	for key := range props {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("schema has no fields to invalidate")
+	}
+	valid[keys[0]] = []any{"wrong_type"}
+	return valid, nil
+}
+
+func contractComplianceBuildSchemaValue(schema map[string]any) (any, error) {
+	if schema == nil {
+		return map[string]any{}, nil
+	}
+	if enumRaw, ok := schema["enum"]; ok {
+		switch enum := enumRaw.(type) {
+		case []any:
+			if len(enum) > 0 {
+				return enum[0], nil
+			}
+		case []string:
+			if len(enum) > 0 {
+				return enum[0], nil
+			}
+		}
+	}
+	switch strings.TrimSpace(asString(schema["type"])) {
+	case "", "object":
+		payload := map[string]any{}
+		props := schemaProperties(schema["properties"])
+		for _, field := range contractComplianceRequiredFields(schema["required"]) {
+			propSchema, ok := props[field]
+			if !ok {
+				return nil, fmt.Errorf("required field %s missing property schema", field)
+			}
+			value, err := contractComplianceBuildSchemaValue(propSchema)
+			if err != nil {
+				return nil, fmt.Errorf("field %s: %w", field, err)
+			}
+			payload[field] = value
+		}
+		return payload, nil
+	case "string":
+		return "x", nil
+	case "number":
+		return 1.0, nil
+	case "integer":
+		return 1, nil
+	case "boolean":
+		return true, nil
+	case "array":
+		items, _ := schema["items"].(map[string]any)
+		if items == nil {
+			return []any{}, nil
+		}
+		value, err := contractComplianceBuildSchemaValue(items)
+		if err != nil {
+			return nil, err
+		}
+		return []any{value}, nil
+	case "null":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported schema type %q", schema["type"])
+	}
 }
 
 func contractComplianceConfigPathForAgent(id string, cfgMap contractComplianceAgentConfigMap) (string, bool) {

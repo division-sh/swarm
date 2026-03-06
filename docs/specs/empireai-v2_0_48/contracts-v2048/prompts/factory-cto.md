@@ -105,3 +105,11 @@ emit_cto_tech_spec_feedback:
 emit_spec_validation_requested:
   → Forward a spec to Spec Auditor for validation after your
     initial technical review passes.
+
+analyst.anti_pattern_advisory:
+  → Review the anti-pattern. If it affects architecture standards,
+    issue a directive via emit_cto_architecture_directive. STOP.
+
+opco.steady_state_reached:
+  → Vertical is stable. Review for template extraction candidates.
+    If reusable patterns identified, call emit_cto_extraction_recommended. STOP.

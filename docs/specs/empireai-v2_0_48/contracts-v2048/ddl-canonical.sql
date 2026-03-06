@@ -1,5 +1,5 @@
 -- EmpireAI Canonical DDL — authoritative schema definition
--- Generated from spec v2.0.28, v2.0.33, v2.0.44
+-- Generated from spec v2.0.28, v2.0.33, v2.0.44, v2.0.46 (indexes), v2.0.48
 --
 -- This file is AUTHORITATIVE. `empire init` executes this directly.
 -- If the spec prose disagrees with this file, this file wins.
@@ -138,7 +138,7 @@ CREATE TABLE agents (
     coordinator_id  TEXT,
     config          JSONB NOT NULL,
     template_version TEXT,                  -- Org template version this agent was spawned from (NULL for factory agents)
-    budget_envelope INTEGER,               -- Monthly API budget allocated by manager (NULL for factory agents)
+    budget_envelope NUMERIC(12,2),               -- Monthly API budget allocated by manager (NULL for factory agents)
     hired_by        TEXT,                   -- Manager agent ID that hired this agent (NULL for factory + seeded agents)
     started_at      TIMESTAMPTZ DEFAULT now(),
     last_active_at  TIMESTAMPTZ DEFAULT now()

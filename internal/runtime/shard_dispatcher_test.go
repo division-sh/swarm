@@ -58,11 +58,11 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 	}
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
-	dispatcher.SetPollInterval(100 * time.Millisecond)
+	dispatcher.SetPollInterval(20 * time.Millisecond)
 	go dispatcher.Run(ctx)
 
 	var shardStatus, agentID string
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		_ = db.QueryRowContext(ctx, `
 			SELECT status, COALESCE(agent_id, '')
@@ -73,7 +73,7 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 		if shardStatus == "assigned" && agentID != "" {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	if shardStatus != "assigned" || agentID == "" {
 		t.Fatalf("expected shard assigned with agent_id, got status=%s agent_id=%s", shardStatus, agentID)
@@ -120,11 +120,11 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 	}
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
-	dispatcher.SetPollInterval(50 * time.Millisecond)
+	dispatcher.SetPollInterval(20 * time.Millisecond)
 	go dispatcher.Run(ctx)
 
 	// Allow at least one dispatcher tick while the table is missing.
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
 
 	ensureShardsTable(t, db)
 
@@ -148,7 +148,7 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 	}
 
 	var shardStatus, agentID string
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		_ = db.QueryRowContext(ctx, `
 			SELECT status, COALESCE(agent_id, '')
@@ -159,7 +159,7 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 		if shardStatus == "assigned" && agentID != "" {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	if shardStatus != "assigned" || agentID == "" {
 		t.Fatalf("expected shard assignment after delayed table readiness, got status=%s agent_id=%s", shardStatus, agentID)
@@ -214,11 +214,11 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 	}
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
-	dispatcher.SetPollInterval(100 * time.Millisecond)
+	dispatcher.SetPollInterval(20 * time.Millisecond)
 	go dispatcher.Run(ctx)
 
 	var status string
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		_ = db.QueryRowContext(ctx, `
 			SELECT status
@@ -229,7 +229,7 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 		if status == "timed_out" {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	if status != "timed_out" {
 		t.Fatalf("expected timed_out shard status, got %s", status)
@@ -315,11 +315,11 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 	}
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
-	dispatcher.SetPollInterval(50 * time.Millisecond)
-	dispatcher.SetReceiptGracePeriod(1500 * time.Millisecond)
+	dispatcher.SetPollInterval(20 * time.Millisecond)
+	dispatcher.SetReceiptGracePeriod(250 * time.Millisecond)
 	go dispatcher.Run(ctx)
 
-	time.Sleep(350 * time.Millisecond)
+	time.Sleep(80 * time.Millisecond)
 
 	var pending int
 	if err := db.QueryRowContext(ctx, `
@@ -339,7 +339,7 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 		t.Fatal("expected agent to stay alive while receipt is pending within grace period")
 	}
 
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		var status string
 		err := db.QueryRowContext(ctx, `
@@ -350,12 +350,12 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 		`, assignEventID, agentID).Scan(&status)
 		if err == nil && status == "processed" {
 			if _, ok := manager.GetAgentConfig(agentID); ok {
-				time.Sleep(80 * time.Millisecond)
+				time.Sleep(20 * time.Millisecond)
 				continue
 			}
 			return
 		}
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("expected dispatcher to reconcile pending receipt and teardown terminal agent")
 }
@@ -431,11 +431,11 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 	}
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
-	dispatcher.SetPollInterval(50 * time.Millisecond)
-	dispatcher.SetStartupGracePeriod(250 * time.Millisecond)
+	dispatcher.SetPollInterval(20 * time.Millisecond)
+	dispatcher.SetStartupGracePeriod(80 * time.Millisecond)
 	go dispatcher.Run(ctx)
 
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 	var (
 		status     string
 		retryCount int
@@ -448,7 +448,7 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 		`, shardID).Scan(&status, &retryCount); err == nil && retryCount >= 1 {
 			break
 		}
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	if retryCount < 1 {
 		t.Fatalf("expected startup stall watchdog to increment retry_count, got status=%s retry_count=%d", status, retryCount)
@@ -551,11 +551,11 @@ func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T)
 	}
 
 	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
-	dispatcher.SetPollInterval(50 * time.Millisecond)
-	dispatcher.SetStartupGracePeriod(250 * time.Millisecond)
+	dispatcher.SetPollInterval(20 * time.Millisecond)
+	dispatcher.SetStartupGracePeriod(80 * time.Millisecond)
 	go dispatcher.Run(ctx)
 
-	time.Sleep(900 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	var (
 		status     string

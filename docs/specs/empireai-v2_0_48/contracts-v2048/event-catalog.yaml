@@ -624,6 +624,8 @@ devops.health_check_failed:
     endpoint: string
     error: string
   emitter_type: runtime
+  alternate_emitters:
+  - holding-devops
 devops.infra_change_needed:
   emitter: holding-devops
   consumer:
@@ -791,10 +793,8 @@ human_task.deferred:
   emitter_type: agent
 human_task.expired:
   emitter: runtime
-  consumer:
-  - empire-coordinator
-  - requesting-agent
-  consumer_type: agent
+  consumer: requesting-agent (resolved at runtime)
+  consumer_type: dynamic
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
@@ -1667,6 +1667,8 @@ spec.validation_requested:
     spec_tier: string
     vertical_id: string
   emitter_type: agent
+  alternate_emitters:
+  - opco-cto
 spec_review.issues_found:
   emitter: spec-reviewer
   consumer: business-research-agent
@@ -1703,10 +1705,8 @@ spec_review.requested:
   emitter_type: agent
 spend.approved:
   emitter: human
-  consumer:
-  - requesting-agent
-  - holding-devops
-  consumer_type: agent
+  consumer: requesting-agent (resolved at runtime)
+  consumer_type: dynamic
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
@@ -1716,10 +1716,8 @@ spend.approved:
   emitter_type: human
 spend.rejected:
   emitter: human
-  consumer:
-  - requesting-agent
-  - holding-devops
-  consumer_type: agent
+  consumer: requesting-agent (resolved at runtime)
+  consumer_type: dynamic
   intercepted: false
   routing: static
   delivery_channel: eventbus_static

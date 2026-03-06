@@ -221,13 +221,13 @@ func TestToolGatewayMCPToolsListCoreRuntimeToolsExposeRequiredFields(t *testing.
 		tool     string
 		required []string
 	}{
-		{tool: "agent_fire", required: []string{"agent_id"}},
+		{tool: "agent_fire", required: []string{"agent_id", "reason"}},
 		{tool: "agent_reconfigure", required: []string{"agent_id"}},
-		{tool: "configure_routing", required: []string{"event_pattern", "subscriber_id"}},
-		{tool: "human_task_request", required: []string{"category", "description"}},
+		{tool: "configure_routing", required: []string{"operation", "event_type"}},
+		{tool: "human_task_request", required: []string{"category", "description", "talking_points"}},
 		{tool: "human_task_decide", required: []string{"task_id", "decision"}},
 		{tool: "sql_execute", required: []string{"query"}},
-		{tool: "systemd_control", required: []string{"action", "unit"}},
+		{tool: "systemd_control", required: []string{"action", "service"}},
 		{tool: "certbot_execute", required: []string{"domain"}},
 		{tool: "instagram_handle_check", required: []string{"handle"}},
 	}

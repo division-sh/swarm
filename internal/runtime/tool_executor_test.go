@@ -326,6 +326,37 @@ func TestRuntimeToolExecutor_MailboxSend(t *testing.T) {
 	}
 }
 
+func TestRuntimeToolExecutor_MailboxSend_NormalizesApprovalAliases(t *testing.T) {
+	bus := NewEventBus(InMemoryEventStore{})
+	manager := NewAgentManager(bus, nil)
+	exec := NewRuntimeToolExecutor(bus, nil, manager)
+	ms := &mailboxStoreStub{}
+	exec.SetMailboxStore(ms)
+
+	ctx := WithActor(context.Background(), models.AgentConfig{
+		ID:         "empire-coordinator",
+		Role:       "empire-coordinator",
+		Mode:       "holding",
+		VerticalID: "v1",
+	})
+
+	cases := []string{"approval", "vertical.promotion_review"}
+	for _, mt := range cases {
+		_, err := exec.Execute(ctx, "mailbox_send", map[string]any{
+			"type":     mt,
+			"priority": "normal",
+			"summary":  "Needs approval",
+			"context":  map[string]any{"source": "test"},
+		})
+		if err != nil {
+			t.Fatalf("mailbox_send(%q) failed: %v", mt, err)
+		}
+		if ms.last.Type != "vertical_approval" {
+			t.Fatalf("expected type vertical_approval for %q, got %q", mt, ms.last.Type)
+		}
+	}
+}
+
 func TestRuntimeToolExecutor_SQLExecuteRequiresDB(t *testing.T) {
 	bus := NewEventBus(InMemoryEventStore{})
 	exec := NewRuntimeToolExecutor(bus, nil, nil)

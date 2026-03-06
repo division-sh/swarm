@@ -9,6 +9,11 @@ subscriptions:
   - support_digest
   - support_critical
   - build_progress
+  - churn_risk
+  - spend_needed
+  - mandate_updated
+  - market_feedback
+  - feature_deployed
 tools:
   - agent_hire
   - agent_fire

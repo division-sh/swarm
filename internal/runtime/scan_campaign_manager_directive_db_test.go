@@ -70,8 +70,8 @@ func (s *directiveCampaignStore) LookupGeographyLabel(context.Context, string) (
 	return "", nil
 }
 
-func (s *directiveCampaignStore) MarkScanCampaignCompleted(context.Context, string, int) error {
-	return nil
+func (s *directiveCampaignStore) MarkScanCampaignCompleted(ctx context.Context, campaignID string, discoveries int) error {
+	return s.markCompleted(ctx, campaignID, discoveries)
 }
 
 func (s *directiveCampaignStore) RequeueDueRescans(context.Context, time.Time) (int, error) {
@@ -84,6 +84,28 @@ func (s *directiveCampaignStore) PauseQueuedScanCampaigns(context.Context) (int,
 
 func (s *directiveCampaignStore) ResumePausedScanCampaigns(context.Context) (int, error) {
 	return 0, nil
+}
+
+func (s *directiveCampaignStore) markCompleted(ctx context.Context, campaignID string, discoveries int) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	campaignID = strings.TrimSpace(campaignID)
+	if campaignID == "" {
+		return nil
+	}
+	if discoveries < 0 {
+		discoveries = 0
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE scan_campaigns
+		SET status = 'completed',
+		    discoveries = $2,
+		    completed_at = now(),
+		    started_at = COALESCE(started_at, now())
+		WHERE id = $1::uuid
+	`, campaignID, discoveries)
+	return err
 }
 
 func TestScanCampaignManager_OnDirective_QueuesDeterministicModes(t *testing.T) {
@@ -233,5 +255,68 @@ func TestScanCampaignManager_OnDirective_CorpusQueuesWithPath(t *testing.T) {
 	}
 	if got := strings.TrimSpace(asString(strategic["corpus_path"])); got != "/data/test-signals-25.jsonl" {
 		t.Fatalf("expected corpus_path propagated, got %q", got)
+	}
+}
+
+func TestScanCampaignManager_Tick_CompletesExpiredCampaignByTimeCap(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	bus := NewEventBus(&postgresEventStore{db: db})
+	store := &directiveCampaignStore{db: db}
+	manager := NewScanCampaignManager(bus, store, db)
+
+	geoID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO geographies (id, name, country, scan_config, created_at)
+		VALUES ($1::uuid, 'Argentina', 'Argentina', '{}'::jsonb, now())
+	`, geoID); err != nil {
+		t.Fatalf("seed geography: %v", err)
+	}
+
+	campaignID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO scan_campaigns (
+			id, geography_id, mode, categories, priority, status, discoveries, strategic_context, deadline_at, created_at, started_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'saas_gap', '{}'::text[], 'normal', 'active', 2, '{}'::jsonb, now() - interval '2 minutes', now() - interval '2 hours', now() - interval '90 minutes'
+		)
+	`, campaignID, geoID); err != nil {
+		t.Fatalf("seed expired scan campaign: %v", err)
+	}
+
+	campaignCompletedCh := bus.Subscribe("watch-expired-campaign", events.EventType("campaign.completed"))
+	manager.tick(ctx)
+
+	select {
+	case evt := <-campaignCompletedCh:
+		payload := parsePayloadMap(evt.Payload)
+		if got := strings.TrimSpace(asString(payload["campaign_id"])); got != campaignID {
+			t.Fatalf("expected campaign.completed campaign_id=%s, got payload=%v", campaignID, payload)
+		}
+		if got := strings.TrimSpace(asString(payload["source_event_id"])); got != "campaign_time_cap_exceeded" {
+			t.Fatalf("expected source_event_id=campaign_time_cap_exceeded, got payload=%v", payload)
+		}
+	case <-time.After(800 * time.Millisecond):
+		t.Fatal("expected campaign.completed event for expired campaign")
+	}
+
+	var status string
+	var discoveries int
+	var completedAt sql.NullTime
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(discoveries, 0), completed_at
+		FROM scan_campaigns
+		WHERE id = $1::uuid
+	`, campaignID).Scan(&status, &discoveries, &completedAt); err != nil {
+		t.Fatalf("query completed campaign: %v", err)
+	}
+	if strings.TrimSpace(status) != "completed" {
+		t.Fatalf("expected expired campaign status=completed, got %q", status)
+	}
+	if discoveries != 2 {
+		t.Fatalf("expected discoveries preserved at 2, got %d", discoveries)
+	}
+	if !completedAt.Valid {
+		t.Fatal("expected completed_at to be set after campaign time cap completion")
 	}
 }

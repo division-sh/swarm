@@ -182,20 +182,23 @@ agents:
   scanner-agent: null   # ephemeral, no config file
 ```
 
-### 2.8 prompts/ directory (19 files)
+### 2.8 prompts/ directory (19 files) + prompt-variables.yaml
 
 Canonical system prompts. One markdown file per agent. Runtime loads directly from these files.
 
 - `{agent-id}.md` — default prompt
 - `{agent-id}.{mode}.md` — mode variant (e.g. `market-research-agent.corpus.md`)
 - `prompt-manifest.sha256` — hash manifest for verification
+- `prompt-variables.yaml` — single source of truth for all shared values (thresholds, enum lists, capability tiers). Prompts use `{{variable_name}}` syntax; runtime substitutes before sending to LLM.
 
 **Critical rules:**
 - Every agent in agent-tools.yaml must have a corresponding prompt file
 - Prompt must reference every event in the agent's `emit_events` list
-- Prompt must not reference removed fields or invalid enum values
+- Prompt must not describe payload structures inline — defer to tool schema ("see tool schema")
 - When updating prompts, regenerate `prompt-manifest.sha256`
+- When changing any threshold, enum list, or capability, update `prompt-variables.yaml` — not individual prompts
 - `TestContractCompliance/agent_prompts` verifies hash parity
+- `TestPromptVariablesComplete` verifies all `{{}}` tokens resolve
 
 ### 2.9 CHANGELOG-v2.0.XX.md
 
@@ -295,6 +298,7 @@ empireai-v2_0_XX/
     ├── verification-gates.yaml
     ├── agent-config-map.yaml
     ├── prompt-manifest.sha256
+    ├── prompt-variables.yaml
     ├── tooling.lock
     └── prompts/
         ├── empire-coordinator.md

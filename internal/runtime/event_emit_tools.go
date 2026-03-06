@@ -59,7 +59,15 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 func validateValue(path string, schema map[string]any, value any) error {
 	st := strings.TrimSpace(asString(schema["type"]))
 	if st == "" {
-		st = "object"
+		props := schemaProperties(schema["properties"])
+		switch {
+		case len(props) > 0 || len(requiredList(schema["required"])) > 0:
+			st = "object"
+		case schema["items"] != nil:
+			st = "array"
+		default:
+			return nil
+		}
 	}
 	if enumRaw, ok := schema["enum"]; ok {
 		if !valueInEnum(value, enumRaw) {
@@ -70,6 +78,10 @@ func validateValue(path string, schema map[string]any, value any) error {
 	case "string":
 		if _, ok := value.(string); !ok {
 			return fmt.Errorf("schema validation failed: %s must be string", path)
+		}
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("schema validation failed: %s must be boolean", path)
 		}
 	case "number":
 		if !isNumeric(value) {
@@ -106,6 +118,10 @@ func validateValue(path string, schema map[string]any, value any) error {
 		}
 		if err := validateSchemaObject(path, schema, obj); err != nil {
 			return err
+		}
+	case "null":
+		if value != nil {
+			return fmt.Errorf("schema validation failed: %s must be null", path)
 		}
 	}
 	return nil
@@ -262,10 +278,10 @@ func asArray(v any) ([]any, bool) {
 	}
 }
 
-// EventSchemaRegistry is the single source of truth for runtime-generated
-// emit_* tool schemas. Missing entries are auto-filled from known produced
-// events so every emit tool has an explicit schema record.
-var EventSchemaRegistry = map[string]EventSchema{
+// legacyEventSchemaRegistry preserves hand-written schemas that still act as
+// strict overrides for a small set of events. The generated catalog-backed
+// registry is the default source of truth.
+var legacyEventSchemaRegistry = map[string]EventSchema{
 	"scan.requested": {
 		Description: "Request a market scan for a geography.",
 		Schema: map[string]any{
@@ -322,232 +338,6 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"vertical_id":  map[string]any{"type": "string"},
 			},
 			"required":             []string{"mode", "geography", "campaign_context"},
-			"additionalProperties": false,
-		},
-	},
-	"opco.spinup_requested": {
-		Description: "Request creation of a new OpCo from approved validation output.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id": map[string]any{"type": "string"},
-				"mandate": map[string]any{
-					"type":                 "object",
-					"additionalProperties": true,
-				},
-				"brand": map[string]any{
-					"type":                 "object",
-					"additionalProperties": true,
-				},
-				"founder_directives": map[string]any{
-					"type": "string",
-				},
-				"task_id": map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id"},
-			"additionalProperties": false,
-		},
-	},
-	"portfolio.digest_compiled": {
-		Description: "Portfolio digest compiled for board/operator visibility.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"message":               map[string]any{"type": "string"},
-				"digest_text":           map[string]any{"type": "string"},
-				"trigger_reason":        map[string]any{"type": "string"},
-				"trigger_event_id":      map[string]any{"type": "string"},
-				"action_required_count": map[string]any{"type": "integer"},
-				"snapshot":              map[string]any{"type": "object", "additionalProperties": true},
-				"compiled_at":           map[string]any{"type": "string"},
-				"task_id":               map[string]any{"type": "string"},
-				"vertical_id":           map[string]any{"type": "string"},
-			},
-			"required":             []string{"message"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.health_warning": {
-		Description: "Critical vertical health warning requiring attention.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":      map[string]any{"type": "string"},
-				"severity":         map[string]any{"type": "string"},
-				"breached_metrics": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"trend_data":       map[string]any{"type": "object", "additionalProperties": true},
-				"recommendation":   map[string]any{"type": "string"},
-				"notes":            map[string]any{"type": "string"},
-				"task_id":          map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id"},
-			"additionalProperties": false,
-		},
-	},
-	"template.migration_planned": {
-		Description: "Template migration plan prepared for one or more running verticals.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"template_version": map[string]any{"type": "string"},
-				"migration_plan":   map[string]any{"type": "object", "additionalProperties": true},
-				"affected_verticals": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "string"},
-				},
-				"migration_id":  map[string]any{"type": "string"},
-				"from_version":  map[string]any{"type": "string"},
-				"to_version":    map[string]any{"type": "string"},
-				"vertical_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"plan_summary":  map[string]any{"type": "string"},
-				"task_id":       map[string]any{"type": "string"},
-				"requested_by":  map[string]any{"type": "string"},
-				"requested_at":  map[string]any{"type": "string"},
-				"template_diff": map[string]any{"type": "object", "additionalProperties": true},
-			},
-			"required":             []string{"migration_id", "from_version", "to_version"},
-			"additionalProperties": false,
-		},
-	},
-	"template.migration_completed": {
-		Description: "Template migration completed successfully.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"migration_id": map[string]any{"type": "string"},
-				"from_version": map[string]any{"type": "string"},
-				"to_version":   map[string]any{"type": "string"},
-				"vertical_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"summary":      map[string]any{"type": "string"},
-				"task_id":      map[string]any{"type": "string"},
-				"completed_at": map[string]any{"type": "string"},
-			},
-			"required":             []string{"migration_id", "from_version", "to_version"},
-			"additionalProperties": false,
-		},
-	},
-	"template.migration_failed": {
-		Description: "Template migration failed and may require human remediation.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"migration_id":  map[string]any{"type": "string"},
-				"from_version":  map[string]any{"type": "string"},
-				"to_version":    map[string]any{"type": "string"},
-				"error":         map[string]any{"type": "string"},
-				"failed_step":   map[string]any{"type": "string"},
-				"recoverable":   map[string]any{"type": "boolean"},
-				"vertical_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"task_id":       map[string]any{"type": "string"},
-				"failed_at":     map[string]any{"type": "string"},
-				"remediation":   map[string]any{"type": "string"},
-				"template_diff": map[string]any{"type": "object", "additionalProperties": true},
-			},
-			"required":             []string{"migration_id", "from_version", "to_version", "error"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.resumed": {
-		Description: "Empire Coordinator resumes a paused validation pipeline.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id": map[string]any{"type": "string"},
-				"reason":      map[string]any{"type": "string"},
-				"task_id":     map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id"},
-			"additionalProperties": false,
-		},
-	},
-	"opco.routing_updated": {
-		Description: "Routing rule change was installed for an OpCo.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":       map[string]any{"type": "string"},
-				"event_pattern":     map[string]any{"type": "string"},
-				"subscriber_id":     map[string]any{"type": "string"},
-				"installed_by":      map[string]any{"type": "string"},
-				"reason":            map[string]any{"type": "string"},
-				"status":            map[string]any{"type": "string"},
-				"source":            map[string]any{"type": "string"},
-				"bootstrap_version": map[string]any{"type": "integer"},
-				"runtime_tool_event": map[string]any{
-					"type": "boolean",
-				},
-			},
-			"required":             []string{"vertical_id", "event_pattern", "subscriber_id", "installed_by", "reason", "status", "source"},
-			"additionalProperties": false,
-		},
-	},
-	"inbound.whatsapp_message": {
-		Description: "Inbound WhatsApp message normalized for Support routing.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":       map[string]any{"type": "string"},
-				"from":              map[string]any{"type": "string"},
-				"message":           map[string]any{"type": "string"},
-				"timestamp":         map[string]any{"type": "string"},
-				"media_urls":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"provider_event_id": map[string]any{"type": "string"},
-				"provider":          map[string]any{"type": "string"},
-				"received_at":       map[string]any{"type": "string"},
-				"payload":           map[string]any{"type": "object", "additionalProperties": true},
-				"headers":           map[string]any{"type": "object", "additionalProperties": true},
-			},
-			"required":             []string{"vertical_id", "from", "message", "timestamp", "media_urls"},
-			"additionalProperties": false,
-		},
-	},
-	"inbound.email": {
-		Description: "Inbound email normalized for Support routing.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":       map[string]any{"type": "string"},
-				"from":              map[string]any{"type": "string"},
-				"subject":           map[string]any{"type": "string"},
-				"body":              map[string]any{"type": "string"},
-				"attachments":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"provider_event_id": map[string]any{"type": "string"},
-				"provider":          map[string]any{"type": "string"},
-				"received_at":       map[string]any{"type": "string"},
-				"payload":           map[string]any{"type": "object", "additionalProperties": true},
-				"headers":           map[string]any{"type": "object", "additionalProperties": true},
-			},
-			"required":             []string{"vertical_id", "from", "subject", "body", "attachments"},
-			"additionalProperties": false,
-		},
-	},
-	"human_task.assigned": {
-		Description: "Dashboard assigned a human task and notified the requesting agent.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"task_id":          map[string]any{"type": "string"},
-				"requesting_agent": map[string]any{"type": "string"},
-				"vertical_id":      map[string]any{"type": "string"},
-				"assigned_to":      map[string]any{"type": "string"},
-			},
-			"required":             []string{"task_id", "requesting_agent", "assigned_to"},
-			"additionalProperties": false,
-		},
-	},
-	"opco.escalation_response": {
-		Description: "Escalation response directive sent back to OpCo CEO.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":            map[string]any{"type": "string"},
-				"original_escalation_id": map[string]any{"type": "string"},
-				"directive":              map[string]any{"type": "string"},
-				"directive_text":         map[string]any{"type": "string"},
-				"priority":               map[string]any{"type": "string"},
-				"action_items":           map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
-			},
-			"required":             []string{"vertical_id"},
 			"additionalProperties": false,
 		},
 	},
@@ -735,80 +525,6 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"vertical_id": map[string]any{"type": "string"},
 			},
 			"required":             []string{"scan_id", "category", "subcategory", "geography", "signal_strength", "opportunity_name", "preliminary_icp", "build_sketch", "evidence", "opportunity_hypothesis", "geographic_scope"},
-			"additionalProperties": false,
-		},
-	},
-	"market_research.scan_assigned": {
-		Description: "Runtime assignment payload for Market Research Agent.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"scan_id":     map[string]any{"type": "string"},
-				"campaign_id": map[string]any{"type": "string"},
-				"mode": map[string]any{
-					"type": "string",
-					"enum": []string{"automation_micro", "saas_gap", "saas_trend", "local_services", "corpus"},
-				},
-				"geography":           map[string]any{"type": "string"},
-				"geography_id":        map[string]any{"type": "string"},
-				"taxonomy_categories": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"corpus_signals":      map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
-				"shard":               map[string]any{"type": "object", "additionalProperties": true},
-				"task_id":             map[string]any{"type": "string"},
-				"vertical_id":         map[string]any{"type": "string"},
-			},
-			"required":             []string{"scan_id"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.derived": {
-		Description: "Analysis Agent proposes a derived opportunity variant for re-scoring.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"opportunity_id":         map[string]any{"type": "string"},
-				"parent_id":              map[string]any{"type": "string"},
-				"generation_depth":       map[string]any{"type": "integer", "minimum": 0, "maximum": 2},
-				"generator_agent_id":     map[string]any{"type": "string"},
-				"campaign_id":            map[string]any{"type": "string"},
-				"derivation_rationale":   map[string]any{"type": "object", "additionalProperties": true},
-				"opportunity_name":       map[string]any{"type": "string"},
-				"preliminary_icp":        map[string]any{"type": "string"},
-				"build_sketch":           map[string]any{"type": "object", "additionalProperties": true},
-				"evidence":               map[string]any{"type": "object", "additionalProperties": true},
-				"geographic_scope":       map[string]any{"type": "string"},
-				"signal_strength":        map[string]any{"type": "number", "minimum": 0, "maximum": 100},
-				"discovery_context":      map[string]any{"type": "object", "additionalProperties": true},
-				"opportunity_hypothesis": map[string]any{"type": "string"},
-				"geography":              map[string]any{"type": "string"},
-				"opportunity_pattern":    map[string]any{"type": "string"},
-				"signal_sources":         map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
-				"required_capabilities":  map[string]any{"type": "object", "additionalProperties": true},
-				"task_id":                map[string]any{"type": "string"},
-				"vertical_id":            map[string]any{"type": "string"},
-			},
-			"required":             []string{"parent_id", "generation_depth", "generator_agent_id", "derivation_rationale", "opportunity_name", "signal_strength", "discovery_context"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.discovered": {
-		Description: "Runtime discovery projection for scoring intake.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_name":         map[string]any{"type": "string"},
-				"raw_signals":           map[string]any{"type": "object", "additionalProperties": true},
-				"geography":             map[string]any{"type": "string"},
-				"mode":                  map[string]any{"type": "string"},
-				"discovery_context":     map[string]any{"type": "object", "additionalProperties": true},
-				"geographic_scope":      map[string]any{"type": "string"},
-				"opportunity_pattern":   map[string]any{"type": "string"},
-				"signal_sources":        map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": true}},
-				"required_capabilities": map[string]any{"type": "object", "additionalProperties": true},
-				"task_id":               map[string]any{"type": "string"},
-				"vertical_id":           map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_name", "raw_signals", "geography", "mode", "discovery_context", "geographic_scope"},
 			"additionalProperties": false,
 		},
 	},
@@ -1151,47 +867,6 @@ var EventSchemaRegistry = map[string]EventSchema{
 			"additionalProperties": false,
 		},
 	},
-	"scoring.contest_resolved": {
-		Description: "Empire Coordinator resolves a contested scoring dimension.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id": map[string]any{"type": "string"},
-				"dimension":   map[string]any{"type": "string"},
-				"resolved_score": map[string]any{
-					"type":    "integer",
-					"minimum": 0,
-					"maximum": 100,
-				},
-				"reasoning": map[string]any{"type": "string"},
-				"task_id":   map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "dimension", "resolved_score"},
-			"additionalProperties": false,
-		},
-	},
-	"scoring.contested": {
-		Description: "Scoring disagreement needs coordinator arbitration.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id": map[string]any{"type": "string"},
-				"dimension":   map[string]any{"type": "string"},
-				"scores": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "integer"},
-				},
-				"evidence": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "string"},
-				},
-				"spread":  map[string]any{"type": "integer"},
-				"task_id": map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "dimension", "scores", "evidence", "spread"},
-			"additionalProperties": false,
-		},
-	},
 	"score.dimension_complete": {
 		Description: "Analysis Agent reports score for one dimension of one vertical.",
 		Schema: map[string]any{
@@ -1248,242 +923,6 @@ var EventSchemaRegistry = map[string]EventSchema{
 				"task_id": map[string]any{"type": "string"},
 			},
 			"required":             []string{"vertical_id", "composite_score", "viability_score", "dimensions"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.scored": {
-		Description: "Final scoring result for a discovered vertical.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":     map[string]any{"type": "string"},
-				"result":          map[string]any{"type": "string", "enum": []string{"shortlisted", "marginal", "rejected"}},
-				"composite_score": map[string]any{"type": "number"},
-				"viability_score": map[string]any{"type": "number"},
-				"market_score":    map[string]any{"type": "number"},
-				"dimensions":      map[string]any{"type": "object", "additionalProperties": true},
-				"rubric":          map[string]any{"type": "string"},
-				"partial":         map[string]any{"type": "boolean"},
-				"reason":          map[string]any{"type": "string"},
-				"vertical_name":   map[string]any{"type": "string"},
-				"geography":       map[string]any{"type": "string"},
-				"signal_strength": map[string]any{"type": "number"},
-				"campaign_id":     map[string]any{"type": "string"},
-				"task_id":         map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "result", "composite_score", "viability_score", "market_score", "dimensions", "rubric"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.rejected": {
-		Description: "Rejected scoring outcome for audit stream.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id": map[string]any{"type": "string"},
-				"reason":      map[string]any{"type": "string"},
-				"task_id":     map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "reason"},
-			"additionalProperties": false,
-		},
-	},
-	"vertical.ready_for_review": {
-		Description: "Validation package is complete and ready for human review.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id": map[string]any{"type": "string"},
-				"validation_kit": map[string]any{
-					"type":                 "object",
-					"additionalProperties": true,
-				},
-				"task_id":      map[string]any{"type": "string"},
-				"spec_version": map[string]any{"type": "integer"},
-				"summary":      map[string]any{"type": "string"},
-				"research":     map[string]any{"type": "object", "additionalProperties": true},
-				"spec":         map[string]any{"type": "object", "additionalProperties": true},
-				"cto_notes":    map[string]any{"type": "object", "additionalProperties": true},
-				"brand":        map[string]any{"type": "object", "additionalProperties": true},
-			},
-			"required":             []string{"vertical_id"},
-			"additionalProperties": false,
-		},
-	},
-	"devops.deploy_requested": {
-		Description: "OpCo DevOps requests deploy to Holding DevOps.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":      map[string]any{"type": "string"},
-				"vertical_name":    map[string]any{"type": "string"},
-				"requesting_agent": map[string]any{"type": "string"},
-				"environment":      map[string]any{"type": "string", "enum": []string{"staging", "production"}},
-				"version":          map[string]any{"type": "integer"},
-				"manifest":         map[string]any{"type": "object", "additionalProperties": true},
-				"skip_staging":     map[string]any{"type": "boolean"},
-				"task_id":          map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "requesting_agent", "environment", "version", "manifest"},
-			"additionalProperties": false,
-		},
-	},
-	"devops.deploy_complete": {
-		Description: "Deploy succeeded (audit).",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":    map[string]any{"type": "string"},
-				"environment":    map[string]any{"type": "string", "enum": []string{"staging", "production"}},
-				"status":         map[string]any{"type": "string"},
-				"health_check":   map[string]any{"type": "object", "additionalProperties": true},
-				"url":            map[string]any{"type": "string"},
-				"active_version": map[string]any{"type": "integer"},
-				"task_id":        map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "environment", "status"},
-			"additionalProperties": false,
-		},
-	},
-	"devops.deploy_failed": {
-		Description: "Deploy failed (audit).",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":       map[string]any{"type": "string"},
-				"environment":       map[string]any{"type": "string", "enum": []string{"staging", "production"}},
-				"error":             map[string]any{"type": "string"},
-				"rollback_status":   map[string]any{"type": "string"},
-				"requires_approval": map[string]any{"type": "boolean"},
-				"task_id":           map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "environment", "error"},
-			"additionalProperties": false,
-		},
-	},
-	"devops.rollback_requested": {
-		Description: "OpCo DevOps requests rollback to Holding DevOps.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":        map[string]any{"type": "string"},
-				"requesting_agent":   map[string]any{"type": "string"},
-				"target_version":     map[string]any{"type": "integer"},
-				"rollback_migration": map[string]any{"type": "string"},
-				"manifest":           map[string]any{"type": "object", "additionalProperties": true},
-				"task_id":            map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "requesting_agent", "target_version"},
-			"additionalProperties": false,
-		},
-	},
-	"devops.rollback_complete": {
-		Description: "Rollback succeeded (audit).",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":    map[string]any{"type": "string"},
-				"status":         map[string]any{"type": "string"},
-				"health_check":   map[string]any{"type": "object", "additionalProperties": true},
-				"active_version": map[string]any{"type": "integer"},
-				"task_id":        map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "status", "active_version"},
-			"additionalProperties": false,
-		},
-	},
-	"devops.rollback_failed": {
-		Description: "Rollback failed and manual intervention is required.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":                map[string]any{"type": "string"},
-				"error":                      map[string]any{"type": "string"},
-				"manual_intervention_needed": map[string]any{"type": "boolean"},
-				"task_id":                    map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "error"},
-			"additionalProperties": false,
-		},
-	},
-	"cycle_limit_reached": {
-		Description: "Runtime detected a repetitive OpCo event cycle.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":       map[string]any{"type": "string"},
-				"event_pattern":     map[string]any{"type": "string"},
-				"count":             map[string]any{"type": "integer"},
-				"agents_involved":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"window_start":      map[string]any{"type": "string"},
-				"recommendation":    map[string]any{"type": "string"},
-				"escalation_target": map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "event_pattern", "count", "agents_involved", "recommendation"},
-			"additionalProperties": false,
-		},
-	},
-	"cycle_reset": {
-		Description: "OpCo CTO resets a cycle counter after investigation.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"vertical_id":   map[string]any{"type": "string"},
-				"event_pattern": map[string]any{"type": "string"},
-				"reason":        map[string]any{"type": "string"},
-				"task_id":       map[string]any{"type": "string"},
-			},
-			"required":             []string{"vertical_id", "event_pattern", "reason"},
-			"additionalProperties": false,
-		},
-	},
-	"spec.validation_passed": {
-		Description: "Spec auditor validation passed.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"validation_notes": map[string]any{"type": "string"},
-				"severity": map[string]any{
-					"type": "string",
-					"enum": []string{"clean", "medium", "high"},
-				},
-				"issues": map[string]any{
-					"type":                 "array",
-					"items":                map[string]any{"type": "object"},
-					"minItems":             0,
-					"additionalProperties": true,
-				},
-				"status":       map[string]any{"type": "string"},
-				"passed":       map[string]any{"type": "boolean"},
-				"spec_version": map[string]any{"type": "integer"},
-				"vertical_id":  map[string]any{"type": "string"},
-				"task_id":      map[string]any{"type": "string"},
-			},
-			"additionalProperties": false,
-		},
-	},
-	"spec.validation_failed": {
-		Description: "Spec auditor validation failed with blocker issues.",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"severity": map[string]any{
-					"type": "string",
-					"enum": []string{"blocker", "high"},
-				},
-				"issues": map[string]any{
-					"type":                 "array",
-					"items":                map[string]any{"type": "object"},
-					"minItems":             1,
-					"additionalProperties": true,
-				},
-				"status":       map[string]any{"type": "string"},
-				"passed":       map[string]any{"type": "boolean"},
-				"spec_version": map[string]any{"type": "integer"},
-				"vertical_id":  map[string]any{"type": "string"},
-				"task_id":      map[string]any{"type": "string"},
-			},
-			"required":             []string{"severity"},
 			"additionalProperties": false,
 		},
 	},
