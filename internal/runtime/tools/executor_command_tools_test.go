@@ -56,7 +56,7 @@ func TestRuntimeToolExecutor_CommandTools_SuccessPaths(t *testing.T) {
 
 	rec := &recordingEventStore{}
 	bus := rt.NewEventBus(rec)
-	ex := rt.NewRuntimeToolExecutor(bus, nil, nil)
+	ex := NewRuntimeToolExecutor(bus, nil, nil)
 	ex.SetConfig(&config.Config{
 		LLM: config.LLMConfig{
 			RuntimeMode: "cli_test",

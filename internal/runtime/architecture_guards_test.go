@@ -101,13 +101,13 @@ func TestRuntimeRootWrapperFilesStayThin(t *testing.T) {
 
 	root := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime")
 	limits := map[string]int{
-		"tool_gateway.go":          180,
-		"mcp_stall_diagnostics.go": 60,
-		"runtime_epoch.go":         80,
-		"event_turn_context.go":    80,
-		"scheduler.go":             40,
-		"recovery.go":              40,
-		"sharding.go":              80,
+		"aliases.go":            140,
+		"event_turn_context.go": 80,
+		"directive_parser.go":   80,
+		"sharding.go":           80,
+		"pipeline_helpers.go":   90,
+		"helpers.go":            220,
+		"mcp_hooks.go":          320,
 	}
 	for name, maxLines := range limits {
 		path := filepath.Join(root, name)

@@ -17,6 +17,8 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -217,7 +219,7 @@ func buildCannedMRAResponse(input string) (*llm.Response, error) {
 		return nil, errors.New("canned MRA runtime could not extract scan_id from market_research.scan_assigned")
 	}
 	campaignID := extractMessageField(input, "campaign_id")
-	mode := normalizeScanModeCompat(extractMessageField(input, "mode"))
+	mode := runtimepipeline.NormalizeScanMode(extractMessageField(input, "mode"))
 	if mode == "" {
 		mode = "corpus"
 	}
@@ -736,7 +738,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	bus.SetInterceptors(pc)
 
 	canned := newCannedRoleRuntime()
-	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	exec := runtimetools.NewExecutor(bus, nil, nil)
 	factory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	am := NewAgentManager(bus, factory)
 

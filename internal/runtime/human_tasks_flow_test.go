@@ -11,6 +11,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -24,7 +25,7 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 	bus := NewEventBus(InMemoryEventStore{})
 	reqCh := bus.Subscribe("coordinator", events.EventType("human_task.requested"))
 
-	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	exec := runtimetools.NewExecutor(bus, nil, nil)
 	exec.SetSQLDB(db)
 	exec.SetConfig(&config.Config{
 		Budget: config.BudgetConfig{
@@ -105,7 +106,7 @@ func TestRuntimeToolExecutor_HumanTaskDecide_ApprovalBudgetExhaustedForcesDeferr
 	reqAgentCh := bus.Subscribe("agent-req")
 	coordCh := bus.Subscribe("coordinator", events.EventType("human_task.*"))
 
-	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	exec := runtimetools.NewExecutor(bus, nil, nil)
 	exec.SetSQLDB(db)
 	exec.SetConfig(&config.Config{
 		Budget: config.BudgetConfig{

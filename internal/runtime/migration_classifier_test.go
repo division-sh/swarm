@@ -7,6 +7,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type mailboxStoreStub struct {
@@ -69,7 +70,7 @@ func TestClassifyMigration_DestructiveRequiresApproval(t *testing.T) {
 func TestRuntimeToolExecutor_DeployMigrationGuardrailRejectsDestructiveSQL(t *testing.T) {
 	store := &captureStore{}
 	bus := NewEventBus(store)
-	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	exec := runtimetools.NewExecutor(bus, nil, nil)
 	mb := &mailboxStoreStub{}
 	exec.SetMailboxStore(mb)
 	actor := models.AgentConfig{

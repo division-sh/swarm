@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
@@ -37,7 +38,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	ictx := runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
-	if txStore, ok := eb.store.(TransactionalEventStore); ok {
+	if txStore, ok := eb.store.(runtimebus.TransactionalEventStore); ok {
 		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
 	}
 
@@ -92,7 +93,7 @@ func (eb *EventBus) publishTransactional(
 	evt events.Event,
 	start time.Time,
 	deferredTransitions *[]runtimepipeline.DeferredPipelineTransition,
-	txStore TransactionalEventStore,
+	txStore runtimebus.TransactionalEventStore,
 ) error {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
@@ -216,6 +217,50 @@ func txTableExists(ctx context.Context, tx *sql.Tx, table string) bool {
 		return false
 	}
 	return ok
+}
+
+func WithRuntimeEpoch(ctx context.Context, epoch int64) context.Context {
+	return runtimebus.WithRuntimeEpoch(ctx, epoch)
+}
+
+func RuntimeEpochFromContext(ctx context.Context) (int64, bool) {
+	return runtimebus.RuntimeEpochFromContext(ctx)
+}
+
+func WithCurrentRuntimeEpoch(ctx context.Context) context.Context {
+	return runtimebus.WithCurrentRuntimeEpoch(ctx)
+}
+
+func CurrentRuntimeEpoch() int64 {
+	return runtimebus.CurrentRuntimeEpoch()
+}
+
+func BumpRuntimeEpoch() int64 {
+	return runtimebus.BumpRuntimeEpoch()
+}
+
+func IsCurrentRuntimeEpoch(epoch int64) bool {
+	return runtimebus.IsCurrentRuntimeEpoch(epoch)
+}
+
+func PauseRuntimeIngress() {
+	runtimebus.PauseRuntimeIngress()
+}
+
+func ResumeRuntimeIngress() {
+	runtimebus.ResumeRuntimeIngress()
+}
+
+func RuntimeIngressPaused() bool {
+	return runtimebus.RuntimeIngressPaused()
+}
+
+func EnterRuntimeResetMode() int64 {
+	return runtimebus.EnterRuntimeResetMode()
+}
+
+func ExitRuntimeResetMode() {
+	runtimebus.ExitRuntimeResetMode()
 }
 
 func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
@@ -418,7 +463,7 @@ func (eb *EventBus) snapshotCycleTracker() *OpCoCycleTracker {
 
 func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, recipients []string) error {
 	recipients = uniqueStrings(recipients)
-	if atomicStore, ok := eb.store.(AtomicEventPersistence); ok {
+	if atomicStore, ok := eb.store.(runtimebus.AtomicEventPersistence); ok {
 		if err := atomicStore.PersistEventWithDeliveries(ctx, evt, recipients); err != nil {
 			return fmt.Errorf("persist event transaction: %w", err)
 		}

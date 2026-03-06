@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -15,6 +16,18 @@ import (
 	"empireai/internal/events"
 	"github.com/google/uuid"
 )
+
+type InboundPersistence interface {
+	RecordInboundEvent(ctx context.Context, providerEventID, verticalID, provider string) (bool, error)
+	ResolveInboundTarget(ctx context.Context, verticalKey, provider string) (InboundTarget, error)
+	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
+}
+
+type InboundTarget struct {
+	VerticalID    string
+	VerticalSlug  string
+	WebhookSecret string
+}
 
 type InboundGateway struct {
 	mux   *http.ServeMux

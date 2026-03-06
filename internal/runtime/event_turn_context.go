@@ -8,8 +8,6 @@ import (
 	"empireai/internal/events"
 )
 
-type EmittedEventsRecorder = runtimebus.EmittedEventsRecorder
-
 func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
 	return runtimebus.WithInboundEvent(ctx, evt)
 }

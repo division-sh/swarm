@@ -4,23 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"empireai/internal/config"
-	runtimepipeline "empireai/internal/runtime/pipeline"
 )
-
-const (
-	ShardStageMarketResearch = runtimepipeline.ShardStageMarketResearch
-	ShardStageTrendResearch  = runtimepipeline.ShardStageTrendResearch
-)
-
-type ShardAssignment = runtimepipeline.ShardAssignment
-type ShardPlanFunc = runtimepipeline.ShardPlanFunc
-type ShardPlanner = runtimepipeline.ShardPlanner
-
-func NewShardPlanner(cfg config.ShardingConfig) *ShardPlanner {
-	return runtimepipeline.NewShardPlanner(cfg)
-}
 
 func toStringList(raw any) []string {
 	switch t := raw.(type) {

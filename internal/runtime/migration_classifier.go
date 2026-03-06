@@ -3,6 +3,8 @@ package runtime
 import (
 	"regexp"
 	"strings"
+
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 // MigrationClassification captures whether a SQL migration can be auto-executed.
@@ -55,7 +57,7 @@ func ClassifyMigration(sqlText string) MigrationClassification {
 		}
 		destructive = append(destructive, "UNCLASSIFIED "+compactSQL(stmt))
 	}
-	destructive = uniqueNonEmpty(destructive)
+	destructive = runtimetools.UniqueNonEmpty(destructive)
 	return MigrationClassification{
 		Safe:             len(destructive) == 0,
 		DestructiveOps:   destructive,

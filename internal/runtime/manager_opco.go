@@ -371,7 +371,7 @@ func (am *AgentManager) resolveBootstrapVersion(ctx context.Context, templateVer
 	if am == nil || am.store == nil {
 		return 1
 	}
-	resolver, ok := am.store.(BootstrapVersionResolver)
+	resolver, ok := am.store.(runtimemanager.BootstrapVersionResolver)
 	if !ok || resolver == nil {
 		return 1
 	}

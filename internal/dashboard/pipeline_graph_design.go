@@ -13,7 +13,7 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	models "empireai/internal/models"
-	runtimepkg "empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/templateops"
 )
 
@@ -169,7 +169,7 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 	for evt := range commgraph.KnownProducedEvents() {
 		addEventType(evt)
 	}
-	eventSchemas := runtimepkg.EventSchemaSnapshot()
+	eventSchemas := runtimetools.EventSchemaSnapshot()
 	for evt := range eventSchemas {
 		addEventType(evt)
 	}

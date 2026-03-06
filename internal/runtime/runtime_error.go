@@ -2,9 +2,6 @@ package runtime
 
 import runtimerterr "empireai/internal/runtime/rterrors"
 
-// RuntimeError is a structured runtime error envelope for operator-facing diagnostics.
-type RuntimeError = runtimerterr.RuntimeError
-
 func WrapRuntimeError(code, component, operation string, retryable bool, cause error, format string, args ...any) error {
 	return runtimerterr.WrapRuntimeError(code, component, operation, retryable, cause, format, args...)
 }

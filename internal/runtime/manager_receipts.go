@@ -234,7 +234,7 @@ func (am *AgentManager) unmarkEventInFlight(agentID, eventID string) {
 }
 
 func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {
-	reader, ok := am.store.(EventReceiptReader)
+	reader, ok := am.store.(runtimemanager.EventReceiptReader)
 	if !ok || reader == nil {
 		return false
 	}
@@ -383,7 +383,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID, stat
 }
 
 func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, agentID string) {
-	reader, ok := am.store.(EventReceiptReader)
+	reader, ok := am.store.(runtimemanager.EventReceiptReader)
 	if !ok || reader == nil {
 		return
 	}

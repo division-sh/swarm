@@ -1,9 +1,23 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	"empireai/internal/models"
+	runtimetools "empireai/internal/runtime/tools"
 )
+
+func coalesce(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
 
 func asFloat64(v any) (float64, bool) {
 	switch n := v.(type) {
@@ -122,4 +136,46 @@ func asString(v any) string {
 	default:
 		return fmt.Sprintf("%v", t)
 	}
+}
+
+func WeekStartUTC(now time.Time, resetDay string) time.Time {
+	now = now.UTC()
+	target := parseWeekday(resetDay)
+	daysBack := (int(now.Weekday()) - int(target) + 7) % 7
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -daysBack)
+	return start
+}
+
+func NextWeekResetUTC(now time.Time, resetDay string) time.Time {
+	start := WeekStartUTC(now, resetDay)
+	return start.Add(7 * 24 * time.Hour)
+}
+
+func parseWeekday(raw string) time.Weekday {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "sunday":
+		return time.Sunday
+	case "monday":
+		return time.Monday
+	case "tuesday":
+		return time.Tuesday
+	case "wednesday":
+		return time.Wednesday
+	case "thursday":
+		return time.Thursday
+	case "friday":
+		return time.Friday
+	case "saturday":
+		return time.Saturday
+	default:
+		return time.Monday
+	}
+}
+
+func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {
+	return runtimetools.WithActor(ctx, actor)
+}
+
+func ActorFromContext(ctx context.Context) (models.AgentConfig, bool) {
+	return runtimetools.ActorFromContext(ctx)
 }

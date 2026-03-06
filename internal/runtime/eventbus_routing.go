@@ -266,7 +266,7 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 	if eventID == "" {
 		return
 	}
-	recorder, ok := eb.store.(PipelineReceiptPersistence)
+	recorder, ok := eb.store.(runtimebus.PipelineReceiptPersistence)
 	if !ok {
 		return
 	}

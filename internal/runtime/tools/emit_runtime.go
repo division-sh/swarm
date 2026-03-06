@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 
@@ -9,22 +10,84 @@ import (
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	llm "empireai/internal/runtime/llm"
 )
 
 var (
 	emitToolIndexOnce sync.Once
 	emitToolToEvent   map[string]string
 	activeSchemas     map[string]EmitSchema
+	generatedSchemas  map[string]struct{}
 )
 
 func ensureEventSchemaRegistry() {
 	emitToolIndexOnce.Do(func() {
 		activeSchemas = runtimecontracts.EventSchemaRegistry()
+		generatedSchemas = make(map[string]struct{})
+		missing := MissingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
+		for _, eventType := range missing {
+			generatedSchemas[eventType] = struct{}{}
+		}
 		emitToolToEvent = make(map[string]string, len(activeSchemas))
 		for eventType := range activeSchemas {
 			emitToolToEvent[EmitToolName(eventType)] = eventType
 		}
 	})
+}
+
+func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...any)) []llm.ToolDefinition {
+	ensureEventSchemaRegistry()
+	return GenerateEmitTools(
+		role,
+		commgraph.ProducerEventsForRole,
+		func(eventType string) (EmitSchema, bool) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				return EmitSchema{}, false
+			}
+			schema, ok := activeSchemas[eventType]
+			if !ok {
+				return EmitSchema{}, false
+			}
+			return schema, true
+		},
+		warn,
+	)
+}
+
+func GeneratedEmitSchemas() []string {
+	ensureEventSchemaRegistry()
+	out := make([]string, 0, len(generatedSchemas))
+	for eventType := range generatedSchemas {
+		out = append(out, eventType)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func GeneratedEmitSchemasForAgentRoles() []string {
+	ensureEventSchemaRegistry()
+	out := make([]string, 0, 64)
+	seen := make(map[string]struct{}, 128)
+	for _, role := range commgraph.ProducerRoles() {
+		for _, eventType := range commgraph.ProducerEventsForRole(role) {
+			if _, ok := generatedSchemas[eventType]; !ok {
+				continue
+			}
+			if _, dup := seen[eventType]; dup {
+				continue
+			}
+			seen[eventType] = struct{}{}
+			out = append(out, eventType)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func EventSchemaSnapshot() map[string]EmitSchema {
+	ensureEventSchemaRegistry()
+	return SnapshotEmitSchemas(activeSchemas)
 }
 
 func ValidateEventPayloadAgainstSchema(eventType string, payload map[string]any) error {

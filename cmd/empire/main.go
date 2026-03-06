@@ -31,7 +31,9 @@ import (
 	"empireai/internal/ops"
 	"empireai/internal/runtime"
 	llm "empireai/internal/runtime/llm"
+	runtimemcp "empireai/internal/runtime/mcp"
 	"empireai/internal/runtime/sessions"
+	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
 	"empireai/internal/specaudit"
 	"empireai/internal/store"
@@ -111,7 +113,7 @@ func main() {
 func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, selfCheck bool) error {
 	bus := runtime.NewEventBus(stores.EventStore)
 	var runtimeLogger *runtime.RuntimeLogger
-	if generated := runtime.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
+	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
 		if envBool("EMPIREAI_EMIT_SCHEMA_STRICT", true) {
 			return fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
 		}
@@ -234,7 +236,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		return fmt.Errorf("build runtime: %w", err)
 	}
 
-	toolExecutor := runtime.NewRuntimeToolExecutor(bus, scheduler, nil, stores.ScheduleStore)
+	toolExecutor := runtimetools.NewExecutor(bus, scheduler, nil, stores.ScheduleStore)
 	toolExecutor.SetConfig(cfg)
 	toolExecutor.SetMailboxStore(stores.MailboxStore)
 	toolExecutor.SetSQLDB(stores.SQLDB)
@@ -256,8 +258,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	}
 	if toolGatewayAddr != "" {
 		token := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN"))
-		toolGateway := runtime.NewToolGateway(toolExecutor, token)
-		toolGateway.SetRuntimeLogger(runtimeLogger)
+		toolGateway := runtimemcp.NewGateway(toolExecutor, token, runtime.RuntimeMCPGatewayHooks(runtimeLogger))
 		go func() {
 			if err := http.ListenAndServe(toolGatewayAddr, toolGateway.Handler()); err != nil {
 				log.Printf("tool gateway stopped: %v", err)
@@ -2961,7 +2962,7 @@ func runChatSubcommand(args []string) error {
 	}
 	scheduler := runtime.NewScheduler(func(runtime.Schedule) {})
 	defer scheduler.Stop()
-	toolExecutor := runtime.NewRuntimeToolExecutor(bus, scheduler, nil, stores.ScheduleStore)
+	toolExecutor := runtimetools.NewExecutor(bus, scheduler, nil, stores.ScheduleStore)
 	toolExecutor.SetConfig(cfg)
 	toolExecutor.SetMailboxStore(stores.MailboxStore)
 	toolExecutor.SetSQLDB(stores.SQLDB)

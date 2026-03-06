@@ -7,12 +7,6 @@ import (
 	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
-type PriceRange = runtimepipeline.PriceRange
-
-type ParsedDirective = runtimepipeline.ParsedDirective
-
-type DirectiveParser = runtimepipeline.DirectiveParser
-
 func parseDirectiveMode(text string) (string, bool) {
 	return runtimepipeline.ParseDirectiveMode(text)
 }

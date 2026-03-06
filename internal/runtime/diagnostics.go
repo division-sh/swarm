@@ -35,6 +35,21 @@ type RuntimeLogger struct {
 	db *sql.DB
 }
 
+type VerticalDigestRow struct {
+	VerticalID     string
+	Name           string
+	Stage          string
+	UsersTotal     int
+	MRRCents       int
+	SpendCents30d  int
+	LastMetricDate time.Time
+}
+
+type DigestPersistence interface {
+	CountActiveVerticals(ctx context.Context) (int, error)
+	ListVerticalDigestRows(ctx context.Context, limit int) ([]VerticalDigestRow, error)
+}
+
 type deferredPipelineTransition struct {
 	db    *sql.DB
 	input PipelineTransitionInput

@@ -13,6 +13,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -157,7 +158,7 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	}
 
 	mailboxStore := &sqlMailboxStore{db: db}
-	exec := NewRuntimeToolExecutor(bus, scheduler, nil, scheduleStore)
+	exec := runtimetools.NewExecutor(bus, scheduler, nil, scheduleStore)
 	exec.SetMailboxStore(mailboxStore)
 	baseFactory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	factory := func(cfg models.AgentConfig) (Agent, error) {
@@ -257,6 +258,42 @@ func assertScenarioExpectedCounts(t *testing.T, db *sql.DB, expected cannedE2EEx
 		if got := counts[strings.TrimSpace(eventType)]; got != 0 {
 			t.Fatalf("expected event type %s to be absent, got=%d counts=%v", eventType, got, counts)
 		}
+	}
+}
+
+func waitForPendingDedupCount(t *testing.T, db *sql.DB, ctx context.Context, minCount int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		var pending int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pending_dedup_candidates WHERE status='pending'`).Scan(&pending); err != nil {
+			t.Fatalf("count pending_dedup_candidates: %v", err)
+		}
+		if pending >= minCount {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected pending_dedup_candidates >= %d, got %d", minCount, pending)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func waitForPendingDedupDrain(t *testing.T, db *sql.DB, ctx context.Context, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		var pending int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pending_dedup_candidates WHERE status='pending'`).Scan(&pending); err != nil {
+			t.Fatalf("recount pending_dedup_candidates: %v", err)
+		}
+		if pending == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected pending dedup queue to drain, got %d rows", pending)
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 
@@ -721,13 +758,7 @@ func TestCannedLLME2E_Scenario9_DedupCollision(t *testing.T) {
 	}
 	assertScenarioExpectedCounts(t, rig.db, sc.Expected)
 
-	var pending int
-	if err := rig.db.QueryRowContext(rig.ctx, `SELECT COUNT(*) FROM pending_dedup_candidates WHERE status='pending'`).Scan(&pending); err != nil {
-		t.Fatalf("count pending_dedup_candidates: %v", err)
-	}
-	if pending < 1 {
-		t.Fatalf("expected pending_dedup_candidates row, got %d", pending)
-	}
+	waitForPendingDedupCount(t, rig.db, rig.ctx, 1, 5*time.Second)
 
 	payload := latestEventPayload(t, rig.db, "dedup.ambiguous")
 	dedupEventID := strings.TrimSpace(asString(payload["dedup_event_id"]))
@@ -746,13 +777,7 @@ func TestCannedLLME2E_Scenario9_DedupCollision(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("publish dedup.resolved: %v", err)
 	}
-	var stillPending int
-	if err := rig.db.QueryRowContext(rig.ctx, `SELECT COUNT(*) FROM pending_dedup_candidates WHERE status='pending'`).Scan(&stillPending); err != nil {
-		t.Fatalf("recount pending_dedup_candidates: %v", err)
-	}
-	if stillPending != 0 {
-		t.Fatalf("expected pending dedup queue to drain, got %d rows", stillPending)
-	}
+	waitForPendingDedupDrain(t, rig.db, rig.ctx, 5*time.Second)
 }
 
 func TestCannedLLME2E_Scenario10_OpCoTeardown(t *testing.T) {

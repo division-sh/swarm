@@ -19,6 +19,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -792,7 +793,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	canned := newYAMLCannedRuntime(fixtures)
 
 	mailboxStore := &sqlMailboxStore{db: db}
-	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	exec := runtimetools.NewExecutor(bus, nil, nil)
 	exec.SetMailboxStore(mailboxStore)
 	baseFactory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	factory := func(cfg models.AgentConfig) (Agent, error) {

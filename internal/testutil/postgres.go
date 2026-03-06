@@ -95,7 +95,7 @@ func (s *sharedPostgresState) startLocked() error {
 		return fmt.Errorf("docker not found in PATH: %w", err)
 	}
 
-	name := fmt.Sprintf("empireai-test-pg-%d", os.Getpid())
+	name := fmt.Sprintf("empireai-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
 	runArgs := []string{
 		"run", "-d", "--rm",
 		"--name", name,
@@ -138,7 +138,7 @@ func (s *sharedPostgresState) startLocked() error {
 	}
 	defer db.Close()
 
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		pingErr := db.PingContext(ctx)

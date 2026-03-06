@@ -17,6 +17,7 @@ import (
 	"empireai/internal/commgraph"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
+	runtimetools "empireai/internal/runtime/tools"
 	"gopkg.in/yaml.v3"
 )
 
@@ -91,7 +92,7 @@ type contractComplianceToolSchema struct {
 
 func TestContractCompliance(t *testing.T) {
 	t.Helper()
-	ensureEventSchemaRegistry()
+	_ = runtimetools.EventSchemaSnapshot()
 
 	repoRoot := contractComplianceRepoRoot(t)
 	contractAgents := contractComplianceLoadAgentTools(t, repoRoot)
@@ -287,7 +288,7 @@ func TestContractCompliance(t *testing.T) {
 
 	t.Run("gate4_event_schema_registry_payload_coverage", func(t *testing.T) {
 		errs := make([]string, 0, 32)
-		schemas := EventSchemaSnapshot()
+		schemas := runtimetools.EventSchemaSnapshot()
 		events := make([]string, 0, len(eventCatalog))
 		for evt := range eventCatalog {
 			events = append(events, evt)
@@ -479,7 +480,7 @@ func TestContractCompliance(t *testing.T) {
 			}
 		}
 
-		runtimeDefs := NewRuntimeToolExecutor(nil, nil, nil).ToolDefinitions()
+		runtimeDefs := runtimetools.NewExecutor(nil, nil, nil).ToolDefinitions()
 		runtimeByName := make(map[string]llm.ToolDefinition, len(runtimeDefs))
 		for _, def := range runtimeDefs {
 			runtimeByName[strings.TrimSpace(def.Name)] = def
@@ -523,8 +524,8 @@ func TestContractCompliance(t *testing.T) {
 				errs = append(errs, fmt.Sprintf("tool %s valid payload generation failed: %v", toolName, err))
 				continue
 			}
-			exec := NewRuntimeToolExecutor(nil, nil, nil)
-			if err := exec.validateRuntimeToolInput(toolName, validPayload); err != nil {
+			exec := runtimetools.NewExecutor(nil, nil, nil)
+			if err := exec.ValidateRuntimeToolInputForTest(toolName, validPayload); err != nil {
 				errs = append(errs, fmt.Sprintf("tool %s rejected valid contract payload: %v", toolName, err))
 			}
 
@@ -533,7 +534,7 @@ func TestContractCompliance(t *testing.T) {
 				errs = append(errs, fmt.Sprintf("tool %s invalid payload generation failed: %v", toolName, err))
 				continue
 			}
-			if err := exec.validateRuntimeToolInput(toolName, invalidPayload); err == nil {
+			if err := exec.ValidateRuntimeToolInputForTest(toolName, invalidPayload); err == nil {
 				errs = append(errs, fmt.Sprintf("tool %s accepted invalid contract payload", toolName))
 			}
 		}

@@ -10,6 +10,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type llmToolCallRuntime struct {
@@ -45,7 +46,7 @@ func (r *llmNoToolRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ 
 func TestLLMAgentOnEvent_EmitViaToolCall(t *testing.T) {
 	store := &captureStore{}
 	bus := NewEventBus(store)
-	exec := NewRuntimeToolExecutor(bus, nil, nil)
+	exec := runtimetools.NewExecutor(bus, nil, nil)
 
 	cfg := models.AgentConfig{
 		ID:            "empire-coordinator",

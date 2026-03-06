@@ -18,6 +18,7 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/promptcontracts"
+	runtimetools "empireai/internal/runtime/tools"
 	"gopkg.in/yaml.v3"
 )
 
@@ -124,7 +125,7 @@ var (
 )
 
 func TestSpecRuntimeWiringVerification(t *testing.T) {
-	ensureEventSchemaRegistry()
+	_ = runtimetools.EventSchemaSnapshot()
 	_, thisFile, _, ok := goruntime.Caller(0)
 	if !ok {
 		t.Fatalf("resolve current file path for repo root")
@@ -272,7 +273,7 @@ func verifyEmitToolCompleteness(agents []wiringAgent, schemas map[string]wiringS
 				})
 				continue
 			}
-			if !IsEmitToolAllowedForRole(a.Role, tool) {
+			if !runtimetools.IsEmitToolAllowedForRole(a.Role, tool) {
 				out = append(out, wiringResult{
 					Severity: wiringFail,
 					Message:  fmt.Sprintf("%s prompt references %s but role %s is not allowed to emit %s", a.ID, tool, a.Role, eventType),
@@ -1198,7 +1199,7 @@ func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {
 }
 
 func loadWiringSchemasFromRegistry() map[string]wiringSchema {
-	ensureEventSchemaRegistry()
+	_ = runtimetools.EventSchemaSnapshot()
 	out := make(map[string]wiringSchema, len(EventSchemaRegistry))
 	for evt, schema := range EventSchemaRegistry {
 		required := map[string]struct{}{}
@@ -1222,10 +1223,10 @@ func loadWiringSchemasFromRegistry() map[string]wiringSchema {
 }
 
 func buildToolToEventMap() map[string]string {
-	ensureEventSchemaRegistry()
+	_ = runtimetools.EventSchemaSnapshot()
 	out := map[string]string{}
 	for evt := range EventSchemaRegistry {
-		out[emitToolName(evt)] = evt
+		out[runtimetools.EmitToolName(evt)] = evt
 	}
 	return out
 }

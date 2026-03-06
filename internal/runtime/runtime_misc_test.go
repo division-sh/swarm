@@ -12,6 +12,7 @@ import (
 
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
 func TestTimeutil_WeekStartAndNextReset(t *testing.T) {
@@ -34,7 +35,7 @@ func TestTimeutil_WeekStartAndNextReset(t *testing.T) {
 }
 
 func TestDirectiveParser(t *testing.T) {
-	parser := DirectiveParser{}
+	parser := runtimepipeline.DirectiveParser{}
 	parsed := parser.Parse("Run saas_trend in Paraguay focus on fintech, payroll avoid crypto budget $1200")
 	if parsed.Mode != "saas_trend" {
 		t.Fatalf("expected mode saas_trend, got %q", parsed.Mode)
@@ -60,7 +61,7 @@ func TestDirectiveParser(t *testing.T) {
 }
 
 func TestDirectiveParser_ExtractsCorpusPath(t *testing.T) {
-	parsed := (DirectiveParser{}).Parse("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	parsed := (runtimepipeline.DirectiveParser{}).Parse("US, corpus, corpus_path=/data/test-signals-25.jsonl")
 	if parsed.Mode != "corpus" {
 		t.Fatalf("expected corpus mode, got %q", parsed.Mode)
 	}

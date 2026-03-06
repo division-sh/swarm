@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
@@ -17,6 +18,39 @@ import (
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 )
+
+type AgentTurnRecord struct {
+	AgentID        string
+	RuntimeMode    string
+	SessionID      string
+	TaskID         string
+	RequestPayload []byte
+	ResponseRaw    []byte
+	ParseOK        bool
+	Latency        time.Duration
+	RetryCount     int
+	Error          string
+}
+
+type TurnPersistence interface {
+	AppendAgentTurn(ctx context.Context, rec AgentTurnRecord) error
+}
+
+type ConversationRecord struct {
+	AgentID   string
+	ScopeKey  string
+	TaskID    string
+	Mode      string
+	Messages  []llm.Message
+	Summary   string
+	TurnCount int
+	Status    string
+}
+
+type ConversationPersistence interface {
+	UpsertConversation(ctx context.Context, rec ConversationRecord) error
+	LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (ConversationRecord, bool, error)
+}
 
 type LLMAgent struct {
 	cfg           models.AgentConfig
@@ -38,7 +72,7 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
 	allowedToolSet, constrained := extractAllowedToolSet(cfg)
-	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), GenerateEmitTools(cfg.Role))
+	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), runtimetools.GenerateEmitToolsForRole(cfg.Role, runtimeWarnOnce))
 
 	maxTurns := 1000
 	mode := llm.SessionScoped
@@ -220,7 +254,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 	if a == nil || a.conversation == nil {
 		return ""
 	}
-	mode = normalizeScanModeCompat(mode)
+	mode = runtimepipeline.NormalizeScanMode(mode)
 	cacheKey := mode
 	if a.promptCache == nil {
 		a.promptCache = map[string]string{}
@@ -530,7 +564,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	allowed := commgraph.ProducerEventsForRole(cfg.Role)
 	emitTools := make([]string, 0, len(allowed))
 	for _, evtType := range allowed {
-		emitTools = append(emitTools, emitToolName(evtType))
+		emitTools = append(emitTools, runtimetools.EmitToolName(evtType))
 	}
 	toolsLine := "(none declared)"
 	if len(emitTools) > 0 {
