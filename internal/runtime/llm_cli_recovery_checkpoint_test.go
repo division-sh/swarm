@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 )
 
 type rotateCaptureRegistry struct {
@@ -16,11 +18,11 @@ type rotateCaptureRegistry struct {
 	rotateSummary string
 }
 
-func (r *rotateCaptureRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*SessionLease, error) {
+func (r *rotateCaptureRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*sessions.Lease, error) {
 	if strings.TrimSpace(r.sessionID) == "" {
 		r.sessionID = "sid-old"
 	}
-	return &SessionLease{
+	return &sessions.Lease{
 		SessionID:   r.sessionID,
 		AgentID:     agentID,
 		RuntimeMode: runtimeMode,
@@ -30,12 +32,12 @@ func (r *rotateCaptureRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKe
 	}, nil
 }
 
-func (r *rotateCaptureRegistry) Release(_ *SessionLease) error { return nil }
+func (r *rotateCaptureRegistry) Release(_ *sessions.Lease) error { return nil }
 
-func (r *rotateCaptureRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*SessionLease, error) {
+func (r *rotateCaptureRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*sessions.Lease, error) {
 	r.rotateSummary = summary
 	r.sessionID = "sid-rotated"
-	return &SessionLease{
+	return &sessions.Lease{
 		SessionID:   r.sessionID,
 		AgentID:     agentID,
 		RuntimeMode: runtimeMode,
@@ -88,7 +90,7 @@ printf '%s' '{"content":[{"type":"text","text":"ok"}]}'
 		t.Fatalf("StartSession: %v", err)
 	}
 
-	if _, err := rt.ContinueSession(context.Background(), s, Message{Role: "user", Content: "hello"}); err != nil {
+	if _, err := rt.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "hello"}); err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
 	if !strings.Contains(reg.rotateSummary, "rotation_reason=session not found") {
@@ -98,4 +100,3 @@ printf '%s' '{"content":[{"type":"text","text":"ok"}]}'
 		t.Fatalf("expected session summary in checkpoint summary, got %q", reg.rotateSummary)
 	}
 }
-

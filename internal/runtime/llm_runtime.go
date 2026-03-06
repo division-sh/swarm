@@ -7,21 +7,24 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
 )
 
 type RuntimeFactory struct {
 	Cfg           *config.Config
-	Sessions      SessionRegistry
+	Sessions      sessions.Registry
 	Turns         TurnPersistence
 	Conversations ConversationPersistence
 	Budget        *BudgetTracker
 	LockOwner     string
-	Workspaces    WorkspaceResolver
+	Workspaces    workspace.Resolver
 }
 
-func (f RuntimeFactory) Build() (LLMRuntime, error) {
+func (f RuntimeFactory) Build() (llm.Runtime, error) {
 	if f.Sessions == nil {
-		f.Sessions = NewInMemorySessionRegistry(f.Cfg.LLM.Session.LockTTL)
+		f.Sessions = sessions.NewInMemoryRegistry(f.Cfg.LLM.Session.LockTTL)
 	}
 	if f.LockOwner == "" {
 		f.LockOwner = defaultLockOwner()
@@ -40,15 +43,15 @@ func (f RuntimeFactory) Build() (LLMRuntime, error) {
 // NoopRuntime is useful in early bootstrap phases and tests.
 type NoopRuntime struct{}
 
-func (NoopRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "noop", AgentID: agentID, RuntimeMode: "noop"}, nil
+func (NoopRuntime) StartSession(_ context.Context, agentID, _ string, _ []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{ID: "noop", AgentID: agentID, RuntimeMode: "noop"}, nil
 }
 
-func (NoopRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {
-	return &Response{Message: Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
+func (NoopRuntime) ContinueSession(_ context.Context, _ *llm.Session, message llm.Message) (*llm.Response, error) {
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 
-func (NoopRuntime) PersistConversationSnapshot(context.Context, *Session) error { return nil }
+func (NoopRuntime) PersistConversationSnapshot(context.Context, *llm.Session) error { return nil }
 
 func defaultLockOwner() string {
 	host, _ := os.Hostname()

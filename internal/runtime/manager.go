@@ -13,6 +13,8 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
 
@@ -43,11 +45,11 @@ type AgentManager struct {
 	agentCfg    map[string]models.AgentConfig
 	agentUpAt   map[string]time.Time
 	routeMeta   map[string]PersistedRoutingRule
-	workspaces  WorkspaceLifecycle
+	workspaces  workspace.Lifecycle
 	bus         *EventBus
 	factory     AgentFactory
 	store       ManagerPersistence
-	sessions    SessionRegistry
+	sessions    sessions.Registry
 	budget      *BudgetTracker
 	runtimeMode string
 	inFlightMu  sync.Mutex
@@ -94,7 +96,7 @@ func NewAgentManager(bus *EventBus, factory AgentFactory, stores ...ManagerPersi
 
 // SetSessionRegistry enables spec v2.0 session rotation behavior on reconfigure.
 // runtimeMode should match the LLM runtime (e.g. "api" or "cli_test").
-func (am *AgentManager) SetSessionRegistry(sessions SessionRegistry, runtimeMode string) {
+func (am *AgentManager) SetSessionRegistry(sessions sessions.Registry, runtimeMode string) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.sessions = sessions
@@ -1038,7 +1040,7 @@ func (am *AgentManager) TeardownOpCo(verticalID string) error {
 	return nil
 }
 
-func (am *AgentManager) SetWorkspaceLifecycle(workspaces WorkspaceLifecycle) {
+func (am *AgentManager) SetWorkspaceLifecycle(workspaces workspace.Lifecycle) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.workspaces = workspaces
@@ -1501,13 +1503,13 @@ func (am *AgentManager) ResetRuntimeState() error {
 	if err := am.Shutdown(); err != nil {
 		return err
 	}
-	if killer, ok := am.workspaces.(WorkspaceOrphanKiller); ok && killer != nil {
+	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
 			return fmt.Errorf("kill workspace orphan processes: %w", err)
 		}
 	}
 	resetMCPTurnContexts()
-	if resetter, ok := am.sessions.(SessionResetter); ok && resetter != nil {
+	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
 		if err := resetter.ResetAll(am.runtimeMode); err != nil {
 			log.Printf("session reset failed: %v", err)
 		}

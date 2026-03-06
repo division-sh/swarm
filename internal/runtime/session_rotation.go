@@ -3,10 +3,13 @@ package runtime
 import (
 	"fmt"
 	"strings"
+
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 )
 
-func maybeRotateAfterTurn(s *Session, runtimeMode string, sessions SessionRegistry, lockOwner string, rotateAfter int) (*SessionLease, error) {
-	if s == nil || sessions == nil || rotateAfter <= 0 {
+func maybeRotateAfterTurn(s *llm.Session, runtimeMode string, registry sessions.Registry, lockOwner string, rotateAfter int) (*sessions.Lease, error) {
+	if s == nil || registry == nil || rotateAfter <= 0 {
 		return nil, nil
 	}
 	if s.TurnCount < rotateAfter {
@@ -16,14 +19,14 @@ func maybeRotateAfterTurn(s *Session, runtimeMode string, sessions SessionRegist
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := buildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
-	lease, err := sessions.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
+	lease, err := registry.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}
 	s.ID = lease.SessionID
 	s.TurnCount = 0
 	s.ParseFailures = 0
-	s.Messages = []Message{
+	s.Messages = []llm.Message{
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
 	logSessionRotated(
@@ -39,8 +42,8 @@ func maybeRotateAfterTurn(s *Session, runtimeMode string, sessions SessionRegist
 	return lease, nil
 }
 
-func maybeRotateAfterParseFailures(s *Session, runtimeMode string, sessions SessionRegistry, lockOwner string, threshold int) (*SessionLease, error) {
-	if s == nil || sessions == nil || threshold <= 0 {
+func maybeRotateAfterParseFailures(s *llm.Session, runtimeMode string, registry sessions.Registry, lockOwner string, threshold int) (*sessions.Lease, error) {
+	if s == nil || registry == nil || threshold <= 0 {
 		return nil, nil
 	}
 	if s.ParseFailures < threshold {
@@ -50,14 +53,14 @@ func maybeRotateAfterParseFailures(s *Session, runtimeMode string, sessions Sess
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := buildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
-	lease, err := sessions.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
+	lease, err := registry.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}
 	s.ID = lease.SessionID
 	s.TurnCount = 0
 	s.ParseFailures = 0
-	s.Messages = []Message{
+	s.Messages = []llm.Message{
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
 	logSessionRotated(
@@ -73,7 +76,7 @@ func maybeRotateAfterParseFailures(s *Session, runtimeMode string, sessions Sess
 	return lease, nil
 }
 
-func buildSessionSummary(s *Session) string {
+func buildSessionSummary(s *llm.Session) string {
 	if s == nil || len(s.Messages) == 0 {
 		return "No prior turns."
 	}

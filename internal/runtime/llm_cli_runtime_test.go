@@ -12,6 +12,9 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
 )
 
 type cliConvoCapture struct {
@@ -31,10 +34,10 @@ func (c *cliConvoCapture) LoadActiveConversation(_ context.Context, _ string, _ 
 
 type wsStub struct {
 	calls int
-	ret   *WorkspaceTarget
+	ret   *workspace.Target
 }
 
-func (w *wsStub) ResolveWorkspace(_ context.Context, _ models.AgentConfig) (*WorkspaceTarget, error) {
+func (w *wsStub) ResolveWorkspace(_ context.Context, _ models.AgentConfig) (*workspace.Target, error) {
 	w.calls++
 	return w.ret, nil
 }
@@ -64,7 +67,7 @@ func TestClaudeCLIRuntime_StartAndContinueSession_RunsCommandAndPersistsTurns(t 
 		},
 	}
 
-	sessions := NewInMemorySessionRegistry(5 * time.Second)
+	sessions := sessions.NewInMemoryRegistry(5 * time.Second)
 	turns := &turnCapture{}
 	convos := &cliConvoCapture{}
 	ws := &wsStub{}
@@ -72,7 +75,7 @@ func TestClaudeCLIRuntime_StartAndContinueSession_RunsCommandAndPersistsTurns(t 
 	rt := NewClaudeCLIRuntime(cfg, sessions, "lock-owner-1", turns, nil, ws, convos)
 	rt.SetWorkspaceResolver(ws)
 
-	s, err := rt.StartSession(context.Background(), "agent-1", "sys", []ToolDefinition{{Name: "t1", Description: "d"}})
+	s, err := rt.StartSession(context.Background(), "agent-1", "sys", []llm.ToolDefinition{{Name: "t1", Description: "d"}})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -83,7 +86,7 @@ func TestClaudeCLIRuntime_StartAndContinueSession_RunsCommandAndPersistsTurns(t 
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Type: "worker", Role: "pm-agent", Mode: "operating", VerticalID: "v1"})
 
 	// First turn uses --session-id and buildInitialPrompt.
-	resp1, err := rt.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"})
+	resp1, err := rt.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "hello"})
 	if err != nil {
 		t.Fatalf("ContinueSession 1: %v", err)
 	}
@@ -92,7 +95,7 @@ func TestClaudeCLIRuntime_StartAndContinueSession_RunsCommandAndPersistsTurns(t 
 	}
 
 	// Second turn uses -r sessionid.
-	resp2, err := rt.ContinueSession(ctx, s, Message{Role: "user", Content: "world"})
+	resp2, err := rt.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "world"})
 	if err != nil {
 		t.Fatalf("ContinueSession 2: %v", err)
 	}
@@ -155,7 +158,7 @@ func TestClaudeCLIRuntime_ContinueSession_AdoptsCLIReportedSessionID(t *testing.
 			},
 		},
 	}
-	sessions := NewInMemorySessionRegistry(5 * time.Second)
+	sessions := sessions.NewInMemoryRegistry(5 * time.Second)
 	rt := NewClaudeCLIRuntime(cfg, sessions, "owner", &turnCapture{}, nil, nil, nil)
 
 	s, err := rt.StartSession(context.Background(), "agent-sid", "sys", nil)
@@ -163,7 +166,7 @@ func TestClaudeCLIRuntime_ContinueSession_AdoptsCLIReportedSessionID(t *testing.
 		t.Fatalf("StartSession: %v", err)
 	}
 	orig := s.ID
-	if _, err := rt.ContinueSession(context.Background(), s, Message{Role: "user", Content: "hello"}); err != nil {
+	if _, err := rt.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "hello"}); err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
 	if s.ID != "claude-session-xyz" {
@@ -193,15 +196,15 @@ func TestClaudeCLIRuntime_BuildCommand_DockerExecShape(t *testing.T) {
 			},
 		},
 	}
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(5*time.Second), "o", nil, nil, nil, nil)
-	cmd := rt.buildCommand(context.Background(), []string{"-p", "x"}, &WorkspaceTarget{Container: "c1", Workdir: "/w"})
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(5*time.Second), "o", nil, nil, nil, nil)
+	cmd := rt.buildCommand(context.Background(), []string{"-p", "x"}, &workspace.Target{Container: "c1", Workdir: "/w"})
 	if len(cmd.Args) == 0 || !strings.Contains(strings.Join(cmd.Args, " "), "docker exec") {
 		t.Fatalf("expected docker exec command, got args=%v", cmd.Args)
 	}
 }
 
 func TestClaudeCLIHelpers(t *testing.T) {
-	if !isSessionInUseError(assertErr("Session ID already in use")) {
+	if !isSessionInUseError(assertErr("llm.Session ID already in use")) {
 		t.Fatal("expected session in use error detection")
 	}
 	if !isSessionNotFoundError(assertErr("No conversation found with session ID: abc")) {
@@ -222,12 +225,12 @@ func TestClaudeCLIHelpers(t *testing.T) {
 	if estimateTokensFromBytes([]byte("abcd")) != 1 {
 		t.Fatal("expected 1 token for 4 bytes")
 	}
-	p := buildInitialPrompt(&Session{SystemPrompt: "s", Tools: []ToolDefinition{{Name: "t", Description: "d"}}}, "m")
+	p := buildInitialPrompt(&llm.Session{SystemPrompt: "s", Tools: []llm.ToolDefinition{{Name: "t", Description: "d"}}}, "m")
 	if !strings.Contains(p, "System:") || !strings.Contains(p, "Tools:") {
 		t.Fatalf("unexpected initial prompt: %q", p)
 	}
 
-	usage := estimateCLIUsageTokens(Message{Role: "user", Content: "x"}, &Response{Raw: []byte(`{"ok":true}`)}, models.AgentConfig{ID: "opco-ceo-v1", Role: "opco-ceo"})
+	usage := estimateCLIUsageTokens(llm.Message{Role: "user", Content: "x"}, &llm.Response{Raw: []byte(`{"ok":true}`)}, models.AgentConfig{ID: "opco-ceo-v1", Role: "opco-ceo"})
 	if usage.InputTokens < 2000 || usage.OutputTokens < 200 {
 		t.Fatalf("expected role floors applied, got %+v", usage)
 	}
@@ -267,7 +270,7 @@ printf '%s' '{"content":[{"type":"text","text":"recovered"}]}'
 		},
 	}
 
-	sessions := NewInMemorySessionRegistry(5 * time.Second)
+	sessions := sessions.NewInMemoryRegistry(5 * time.Second)
 	turns := &turnCapture{}
 	rt := NewClaudeCLIRuntime(cfg, sessions, "owner", turns, nil, nil, nil)
 
@@ -277,7 +280,7 @@ printf '%s' '{"content":[{"type":"text","text":"recovered"}]}'
 	}
 	oldID := s.ID
 
-	resp, err := rt.ContinueSession(context.Background(), s, Message{Role: "user", Content: "hello"})
+	resp, err := rt.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "hello"})
 	if err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
@@ -315,12 +318,12 @@ func TestClaudeCLIRuntime_ContinueSession_AuthRequiredError(t *testing.T) {
 			},
 		},
 	}
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(5*time.Second), "owner", &turnCapture{}, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(5*time.Second), "owner", &turnCapture{}, nil, nil, nil)
 	s, err := rt.StartSession(context.Background(), "agent-auth", "sys", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	_, err = rt.ContinueSession(context.Background(), s, Message{Role: "user", Content: "hello"})
+	_, err = rt.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "hello"})
 	if err == nil {
 		t.Fatal("expected auth error")
 	}
@@ -353,8 +356,8 @@ func TestClaudeCLIRuntime_ContinueSession_WorkspaceRequiresOAuthToken(t *testing
 			},
 		},
 	}
-	ws := &wsStub{ret: &WorkspaceTarget{Container: "w1", Workdir: "/workspace"}}
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(5*time.Second), "owner", &turnCapture{}, nil, ws, nil)
+	ws := &wsStub{ret: &workspace.Target{Container: "w1", Workdir: "/workspace"}}
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(5*time.Second), "owner", &turnCapture{}, nil, ws, nil)
 	rt.SetWorkspaceResolver(ws)
 
 	s, err := rt.StartSession(context.Background(), "agent-auth", "sys", nil)
@@ -362,7 +365,7 @@ func TestClaudeCLIRuntime_ContinueSession_WorkspaceRequiresOAuthToken(t *testing
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "agent-auth", Mode: "holding"})
-	_, err = rt.ContinueSession(ctx, s, Message{Role: "user", Content: "hello"})
+	_, err = rt.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "hello"})
 	if err == nil {
 		t.Fatal("expected auth error")
 	}

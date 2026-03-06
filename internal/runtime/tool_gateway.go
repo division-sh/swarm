@@ -8,18 +8,20 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	llm "empireai/internal/runtime/llm"
 	"time"
 
 	"empireai/internal/models"
 )
 
 type ToolGateway struct {
-	executor  ToolExecutor
+	executor  llm.ToolExecutor
 	authToken string
 	logger    *RuntimeLogger
 }
 
-func NewToolGateway(executor ToolExecutor, authToken string) *ToolGateway {
+func NewToolGateway(executor llm.ToolExecutor, authToken string) *ToolGateway {
 	return &ToolGateway{
 		executor:  executor,
 		authToken: strings.TrimSpace(authToken),
@@ -356,8 +358,8 @@ func mcpActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 
 func (g *ToolGateway) mcpToolsForRequest(r *http.Request) []mcpToolDef {
 	allowed := parseAllowedToolsFromRequest(r)
-	catalog := map[string]ToolDefinition{}
-	if provider, ok := g.executor.(interface{ ToolDefinitions() []ToolDefinition }); ok {
+	catalog := map[string]llm.ToolDefinition{}
+	if provider, ok := g.executor.(interface{ ToolDefinitions() []llm.ToolDefinition }); ok {
 		for _, def := range provider.ToolDefinitions() {
 			name := strings.TrimSpace(def.Name)
 			if name == "" {

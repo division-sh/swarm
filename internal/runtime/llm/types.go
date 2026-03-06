@@ -1,4 +1,4 @@
-package runtime
+package llm
 
 import "context"
 
@@ -38,7 +38,7 @@ type Session struct {
 	Messages         []Message
 }
 
-type LLMRuntime interface {
+type Runtime interface {
 	StartSession(ctx context.Context, agentID string, systemPrompt string, tools []ToolDefinition) (*Session, error)
 	ContinueSession(ctx context.Context, session *Session, message Message) (*Response, error)
 }

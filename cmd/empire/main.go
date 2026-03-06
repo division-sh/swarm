@@ -30,6 +30,9 @@ import (
 	"empireai/internal/models"
 	"empireai/internal/ops"
 	"empireai/internal/runtime"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
 	"empireai/internal/specaudit"
 	"empireai/internal/store"
 	"empireai/internal/templateops"
@@ -1517,7 +1520,7 @@ func runVerticalKillSubcommand(target string, args []string) error {
 		return fmt.Errorf("kill vertical: %w", err)
 	}
 	if envBool("EMPIREAI_ENABLE_DOCKER_WORKSPACES", true) {
-		workspaces := runtime.NewDockerWorkspaceManager(stores.SQLDB)
+		workspaces := workspace.NewDockerManager(stores.SQLDB)
 		if err := workspaces.StopVerticalWorkspace(ctx, verticalID); err != nil && envBool("EMPIREAI_REQUIRE_DOCKER_WORKSPACES", false) {
 			return fmt.Errorf("stop vertical workspace: %w", err)
 		}
@@ -3261,7 +3264,7 @@ func syncRuntimeGlobalAgents(ctx context.Context, managerStore runtime.ManagerPe
 	return seedGlobalAgentsFromYAML(ctx, managerStore, agentsDir)
 }
 
-func rotateGlobalAgentSessions(ctx context.Context, managerStore runtime.ManagerPersistence, sessions runtime.SessionRegistry, runtimeMode string) error {
+func rotateGlobalAgentSessions(ctx context.Context, managerStore runtime.ManagerPersistence, sessions sessions.Registry, runtimeMode string) error {
 	if managerStore == nil || sessions == nil {
 		return nil
 	}
@@ -3466,7 +3469,7 @@ func dispatchSystemDirectiveViaDashboard(ctx context.Context, target targetAgent
 type storeBundle struct {
 	SQLDB             *sql.DB
 	EventStore        runtime.EventStore
-	SessionRegistry   runtime.SessionRegistry
+	SessionRegistry   sessions.Registry
 	ConversationStore runtime.ConversationPersistence
 	ManagerStore      runtime.ManagerPersistence
 	ScheduleStore     runtime.SchedulePersistence
@@ -3504,7 +3507,7 @@ func buildStores(
 				log.Fatalf("migration failed: %v", err)
 			}
 		}
-		sr := runtime.NewPostgresSessionRegistry(pg.DB, cfg.LLM.Session.LockTTL)
+		sr := sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL)
 		return storeBundle{
 			SQLDB:             pg.DB,
 			EventStore:        pg,
@@ -3523,7 +3526,7 @@ func buildStores(
 	default:
 		return storeBundle{
 			EventStore:      runtime.InMemoryEventStore{},
-			SessionRegistry: runtime.NewInMemorySessionRegistry(cfg.LLM.Session.LockTTL),
+			SessionRegistry: sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
 		}
 	}
 }
@@ -3743,14 +3746,14 @@ func applyManagedMigrations(ctx context.Context, pg *store.PostgresStore, migrat
 	return pg.ApplyManagedMigrations(ctx, specs)
 }
 
-func buildWorkspaceLifecycle(ctx context.Context, db *sql.DB) runtime.WorkspaceLifecycle {
+func buildWorkspaceLifecycle(ctx context.Context, db *sql.DB) workspace.Lifecycle {
 	if db == nil {
 		return nil
 	}
 	if !envBool("EMPIREAI_ENABLE_DOCKER_WORKSPACES", true) {
 		return nil
 	}
-	workspaces := runtime.NewDockerWorkspaceManager(db)
+	workspaces := workspace.NewDockerManager(db)
 	if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
 		if envBool("EMPIREAI_REQUIRE_DOCKER_WORKSPACES", false) {
 			log.Fatalf("workspace bootstrap failed: %v", err)
@@ -4512,7 +4515,7 @@ func splitCSV(raw string) []string {
 	return out
 }
 
-func runSelfCheck(llm runtime.LLMRuntime, bus *runtime.EventBus) error {
+func runSelfCheck(modelRuntime llm.Runtime, bus *runtime.EventBus) error {
 	ctx := context.Background()
 
 	// Minimal event path check.
@@ -4537,6 +4540,6 @@ func runSelfCheck(llm runtime.LLMRuntime, bus *runtime.EventBus) error {
 
 	// Runtime wiring check intentionally avoids provider calls.
 	// Session start requires a real agent record in postgres-backed mode.
-	_ = llm
+	_ = modelRuntime
 	return nil
 }

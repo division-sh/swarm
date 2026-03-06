@@ -24,6 +24,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
@@ -78,15 +79,15 @@ func toolObjectSchema(properties map[string]any, required ...string) map[string]
 	return schema
 }
 
-func (e *RuntimeToolExecutor) ToolDefinitions() []ToolDefinition {
+func (e *RuntimeToolExecutor) ToolDefinitions() []llm.ToolDefinition {
 	if defs, err := contractToolDefinitions(); err == nil && len(defs) > 0 {
 		return defs
 	}
 	return e.legacyToolDefinitions()
 }
 
-func (e *RuntimeToolExecutor) legacyToolDefinitions() []ToolDefinition {
-	return []ToolDefinition{
+func (e *RuntimeToolExecutor) legacyToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{
 		{
 			Name:        "agent_message",
 			Description: "Direct message to another agent (requires target_agent_id)",
@@ -465,7 +466,7 @@ func (e *RuntimeToolExecutor) validateRuntimeToolInput(name string, input any) e
 	return err
 }
 
-func validateToolInputAgainstToolDefinitions(name string, input any, defs []ToolDefinition) (error, bool) {
+func validateToolInputAgainstToolDefinitions(name string, input any, defs []llm.ToolDefinition) (error, bool) {
 	schema, ok := runtimeToolSchemaForName(defs, name)
 	if !ok || schema == nil {
 		return nil, false
@@ -480,7 +481,7 @@ func validateToolInputAgainstToolDefinitions(name string, input any, defs []Tool
 	return validateSchemaObject("$", schema, payload), true
 }
 
-func runtimeToolSchemaForName(defs []ToolDefinition, name string) (map[string]any, bool) {
+func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
 	name = strings.TrimSpace(name)
 	for _, def := range defs {
 		if strings.TrimSpace(def.Name) != name {

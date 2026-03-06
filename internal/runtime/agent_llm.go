@@ -11,18 +11,20 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 )
 
 type LLMAgent struct {
 	cfg           models.AgentConfig
 	subscriptions []events.EventType
-	conversation  *Conversation
+	conversation  *llm.Conversation
 	scopeKey      string
 	promptCache   map[string]string
 	mu            sync.Mutex
 }
 
-func NewLLMAgent(cfg models.AgentConfig, llm LLMRuntime, toolExecutor ToolExecutor, tools []ToolDefinition) *LLMAgent {
+func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor llm.ToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
 		if strings.TrimSpace(s) == "" {
@@ -36,9 +38,9 @@ func NewLLMAgent(cfg models.AgentConfig, llm LLMRuntime, toolExecutor ToolExecut
 	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), GenerateEmitTools(cfg.Role))
 
 	maxTurns := 1000
-	mode := SessionScoped
+	mode := llm.SessionScoped
 	if cfg.Mode == "factory" {
-		mode = TaskScoped
+		mode = llm.TaskScoped
 		maxTurns = 100
 	}
 	if overrideMode, overrideMaxTurns := extractConversationConstraints(cfg.Config); overrideMode != nil {
@@ -49,7 +51,7 @@ func NewLLMAgent(cfg models.AgentConfig, llm LLMRuntime, toolExecutor ToolExecut
 	} else if overrideMaxTurns > 0 {
 		maxTurns = overrideMaxTurns
 	}
-	c := NewConversation(cfg.ID, "", systemPrompt, tools, mode, maxTurns, llm)
+	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, mode, maxTurns, modelRuntime)
 	c.SetToolExecutor(toolExecutor)
 	promptCache := map[string]string{}
 	if systemPrompt != "" {
@@ -63,7 +65,7 @@ func NewLLMAgent(cfg models.AgentConfig, llm LLMRuntime, toolExecutor ToolExecut
 	}
 }
 
-func extractConversationConstraints(raw json.RawMessage) (*ConversationMode, int) {
+func extractConversationConstraints(raw json.RawMessage) (*llm.ConversationMode, int) {
 	if len(raw) == 0 || !json.Valid(raw) {
 		return nil, 0
 	}
@@ -72,7 +74,7 @@ func extractConversationConstraints(raw json.RawMessage) (*ConversationMode, int
 		return nil, 0
 	}
 	var (
-		modePtr  *ConversationMode
+		modePtr  *llm.ConversationMode
 		maxTurns int
 	)
 	if constraints, ok := obj["constraints"].(map[string]any); ok {
@@ -99,16 +101,16 @@ func extractConversationConstraints(raw json.RawMessage) (*ConversationMode, int
 	return modePtr, maxTurns
 }
 
-func parseConversationMode(raw string) (ConversationMode, bool) {
+func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "task", "task_scoped", "task-scoped":
-		return TaskScoped, true
+		return llm.TaskScoped, true
 	case "session", "session_scoped", "session-scoped":
-		return SessionScoped, true
+		return llm.SessionScoped, true
 	case "session_per_vertical", "session-per-vertical", "session_per_scope":
-		return SessionPerVerticalScoped, true
+		return llm.SessionPerVerticalScoped, true
 	default:
-		return TaskScoped, false
+		return llm.TaskScoped, false
 	}
 }
 
@@ -132,7 +134,7 @@ func asIntFromAny(v any) int {
 	}
 }
 
-func NewLLMAgentFactory(llm LLMRuntime, toolExecutor ToolExecutor, tools []ToolDefinition) AgentFactory {
+func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor llm.ToolExecutor, tools []llm.ToolDefinition) AgentFactory {
 	return func(cfg models.AgentConfig) (Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
 			agentID := strings.TrimSpace(cfg.ID)
@@ -144,7 +146,7 @@ func NewLLMAgentFactory(llm LLMRuntime, toolExecutor ToolExecutor, tools []ToolD
 			}
 			return nil, errors.New("missing required system_prompt for agent " + agentID)
 		}
-		return NewLLMAgent(cfg, llm, toolExecutor, tools), nil
+		return NewLLMAgent(cfg, modelRuntime, toolExecutor, tools), nil
 	}
 }
 
@@ -161,7 +163,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 
 	ctx = WithActor(ctx, a.cfg)
 	ctx = WithInboundEvent(ctx, evt)
-	ctx = withSessionScope(ctx, a.conversation.Mode, conversationScopeKeyForEvent(a.conversation.Mode, evt))
+	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := NewEmittedEventsRecorder()
 	ctx = WithEmittedEventsRecorder(ctx, recorder)
 
@@ -277,7 +279,7 @@ func (a *LLMAgent) resetConversationScopeIfNeeded(evt events.Event) {
 	if scopeKey == "" {
 		return
 	}
-	if a.conversation.Mode == SessionScoped {
+	if a.conversation.Mode == llm.SessionScoped {
 		return
 	}
 	if a.scopeKey == scopeKey {
@@ -296,11 +298,11 @@ func taskScopeKeyForEvent(evt events.Event) string {
 	return strings.TrimSpace(verticalID)
 }
 
-func conversationScopeKeyForEvent(mode ConversationMode, evt events.Event) string {
+func conversationScopeKeyForEvent(mode llm.ConversationMode, evt events.Event) string {
 	switch mode {
-	case TaskScoped:
+	case llm.TaskScoped:
 		return taskScopeKeyForEvent(evt)
-	case SessionPerVerticalScoped:
+	case llm.SessionPerVerticalScoped:
 		verticalID, _ := extractContextIDs(evt)
 		return strings.TrimSpace(verticalID)
 	default:
@@ -309,7 +311,7 @@ func conversationScopeKeyForEvent(mode ConversationMode, evt events.Event) strin
 }
 
 func (a *LLMAgent) shouldRetryAfterTaskScopeReset(err error) bool {
-	if a == nil || a.conversation == nil || a.conversation.Mode != TaskScoped || err == nil {
+	if a == nil || a.conversation == nil || a.conversation.Mode != llm.TaskScoped || err == nil {
 		return false
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
@@ -467,11 +469,11 @@ func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 	return allowed, found
 }
 
-func filterTools(in []ToolDefinition, allowed map[string]struct{}, constrained bool) []ToolDefinition {
+func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {
 	if !constrained {
 		return in
 	}
-	out := make([]ToolDefinition, 0, len(in))
+	out := make([]llm.ToolDefinition, 0, len(in))
 	for _, t := range in {
 		if IsUniversalRuntimeTool(t.Name) {
 			out = append(out, t)
@@ -484,16 +486,16 @@ func filterTools(in []ToolDefinition, allowed map[string]struct{}, constrained b
 	return out
 }
 
-func mergeTools(in []ToolDefinition, extra []ToolDefinition) []ToolDefinition {
+func mergeTools(in []llm.ToolDefinition, extra []llm.ToolDefinition) []llm.ToolDefinition {
 	if len(extra) == 0 {
 		return in
 	}
 	if len(in) == 0 {
-		out := make([]ToolDefinition, len(extra))
+		out := make([]llm.ToolDefinition, len(extra))
 		copy(out, extra)
 		return out
 	}
-	out := make([]ToolDefinition, 0, len(in)+len(extra))
+	out := make([]llm.ToolDefinition, 0, len(in)+len(extra))
 	seen := make(map[string]struct{}, len(in)+len(extra))
 	for _, t := range in {
 		name := strings.TrimSpace(t.Name)

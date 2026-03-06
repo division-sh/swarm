@@ -10,6 +10,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -184,7 +185,7 @@ func TestRuntimeToolExecutor_HumanTaskDecide_ApprovalBudgetExhaustedForcesDeferr
 
 func TestLLMAgent_InjectsHumanTaskOutcomeAsAsyncToolResult(t *testing.T) {
 	rt := &humanTaskOutcomeRuntime{}
-	te := &fakeToolExec{}
+	te := noopToolExec{}
 
 	agent := NewLLMAgent(models.AgentConfig{
 		ID:   "agent-req",
@@ -240,12 +241,12 @@ func TestLLMAgent_InjectsHumanTaskOutcomeAsAsyncToolResult(t *testing.T) {
 
 type humanTaskOutcomeRuntime struct{}
 
-func (h *humanTaskOutcomeRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "sess-ht", AgentID: agentID, RuntimeMode: "api"}, nil
+func (h *humanTaskOutcomeRuntime) StartSession(_ context.Context, agentID, _ string, _ []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{ID: "sess-ht", AgentID: agentID, RuntimeMode: "api"}, nil
 }
 
-func (h *humanTaskOutcomeRuntime) ContinueSession(_ context.Context, _ *Session, _ Message) (*Response, error) {
-	return &Response{Message: Message{Role: "assistant", Content: "ack"}}, nil
+func (h *humanTaskOutcomeRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ack"}}, nil
 }
 
 // sqlmock will compare sql.NullTime values via driver.Valuer; ensure it doesn't panic.

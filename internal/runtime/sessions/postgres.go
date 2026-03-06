@@ -1,4 +1,4 @@
-package runtime
+package sessions
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 var ErrSessionLeased = errors.New("session currently leased by another worker")
 
-type PostgresSessionRegistry struct {
+type PostgresRegistry struct {
 	db      *sql.DB
 	lockTTL time.Duration
 	nowFn   func() time.Time
@@ -23,11 +23,11 @@ type PostgresSessionRegistry struct {
 	scopeKeyEnabled bool
 }
 
-func NewPostgresSessionRegistry(db *sql.DB, lockTTL time.Duration) *PostgresSessionRegistry {
+func NewPostgresRegistry(db *sql.DB, lockTTL time.Duration) *PostgresRegistry {
 	if lockTTL <= 0 {
 		lockTTL = 120 * time.Second
 	}
-	return &PostgresSessionRegistry{
+	return &PostgresRegistry{
 		db:              db,
 		lockTTL:         lockTTL,
 		nowFn:           time.Now,
@@ -35,7 +35,7 @@ func NewPostgresSessionRegistry(db *sql.DB, lockTTL time.Duration) *PostgresSess
 	}
 }
 
-func (sr *PostgresSessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*SessionLease, error) {
+func (sr *PostgresRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -134,7 +134,7 @@ func (sr *PostgresSessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scop
 		if !useScope {
 			leaseScope = ""
 		}
-		return &SessionLease{
+		return &Lease{
 			SessionID:   r.sessionID,
 			AgentID:     agentID,
 			RuntimeMode: runtimeMode,
@@ -166,7 +166,7 @@ func (sr *PostgresSessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scop
 		return nil, fmt.Errorf("commit acquire existing: %w", err)
 	}
 
-	return &SessionLease{
+	return &Lease{
 		SessionID:   r.sessionID,
 		AgentID:     agentID,
 		RuntimeMode: runtimeMode,
@@ -181,7 +181,7 @@ func (sr *PostgresSessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scop
 	}, nil
 }
 
-func (sr *PostgresSessionRegistry) Release(lease *SessionLease) error {
+func (sr *PostgresRegistry) Release(lease *Lease) error {
 	if lease == nil {
 		return errors.New("nil lease")
 	}
@@ -231,7 +231,7 @@ func (sr *PostgresSessionRegistry) Release(lease *SessionLease) error {
 	return nil
 }
 
-func (sr *PostgresSessionRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*SessionLease, error) {
+func (sr *PostgresRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -299,21 +299,21 @@ rotateLoaded:
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET status = 'rotated',
-		    checkpoint_summary = $1,
 		    rotated_at = now(),
+		    checkpoint_summary = $1,
 		    lock_owner = NULL,
 		    lock_expires_at = NULL,
 		    last_used_at = now()
 		WHERE id = $2::uuid
 	`, summary, id); err != nil {
-		return nil, fmt.Errorf("mark session rotated: %w", err)
+		return nil, fmt.Errorf("mark rotated session: %w", err)
 	}
 
 	newSessionID := uuid.NewString()
 	provider := providerForRuntime(runtimeMode)
-	var row *sql.Row
+	var expiresAt time.Time
 	if useScope {
-		row = tx.QueryRowContext(ctx, `
+		row := tx.QueryRowContext(ctx, `
 			INSERT INTO agent_sessions (
 				agent_id, runtime_mode, scope_key, provider, session_id, status,
 				lock_owner, lock_expires_at, last_used_at, created_at
@@ -321,8 +321,17 @@ rotateLoaded:
 			VALUES ($1, $2, NULLIF($3,''), $4, $5, 'active', $6, now() + ($7 * interval '1 second'), now(), now())
 			RETURNING lock_expires_at
 		`, agentID, runtimeMode, scopeKey, provider, newSessionID, lockOwner, int(sr.lockTTL.Seconds()))
-	} else {
-		row = tx.QueryRowContext(ctx, `
+		if err := row.Scan(&expiresAt); err != nil {
+			if shouldFallbackSessionScope(err) {
+				sr.disableScopeKey()
+				useScope = false
+			} else {
+				return nil, fmt.Errorf("insert rotated session: %w", err)
+			}
+		}
+	}
+	if !useScope {
+		row := tx.QueryRowContext(ctx, `
 			INSERT INTO agent_sessions (
 				agent_id, runtime_mode, provider, session_id, status,
 				lock_owner, lock_expires_at, last_used_at, created_at
@@ -330,21 +339,16 @@ rotateLoaded:
 			VALUES ($1, $2, $3, $4, 'active', $5, now() + ($6 * interval '1 second'), now(), now())
 			RETURNING lock_expires_at
 		`, agentID, runtimeMode, provider, newSessionID, lockOwner, int(sr.lockTTL.Seconds()))
-	}
-	var expiresAt time.Time
-	if err := row.Scan(&expiresAt); err != nil {
-		if useScope && shouldFallbackSessionScope(err) {
-			sr.disableScopeKey()
-			return sr.Rotate(agentID, runtimeMode, lockOwner, summary, "")
+		if err := row.Scan(&expiresAt); err != nil {
+			return nil, fmt.Errorf("insert rotated session: %w", err)
 		}
-		return nil, fmt.Errorf("insert rotated session: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit rotate: %w", err)
 	}
 
-	return &SessionLease{
+	return &Lease{
 		SessionID:   newSessionID,
 		AgentID:     agentID,
 		RuntimeMode: runtimeMode,
@@ -359,7 +363,7 @@ rotateLoaded:
 	}, nil
 }
 
-func (sr *PostgresSessionRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error {
+func (sr *PostgresRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error {
 	useScope := sr.isScopeKeyEnabled()
 	var (
 		res sql.Result
@@ -402,7 +406,7 @@ func (sr *PostgresSessionRegistry) IncrementTurn(agentID, runtimeMode, sessionID
 	return nil
 }
 
-func (sr *PostgresSessionRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func (sr *PostgresRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	lockOwner = strings.TrimSpace(lockOwner)
@@ -505,7 +509,22 @@ func shouldFallbackSessionScope(err error) bool {
 	return strings.Contains(msg, "scope_key") && strings.Contains(msg, "does not exist")
 }
 
-func (sr *PostgresSessionRegistry) isScopeKeyEnabled() bool {
+func (sr *PostgresRegistry) SetNowFnForTest(nowFn func() time.Time) {
+	if sr == nil {
+		return
+	}
+	if nowFn == nil {
+		sr.nowFn = time.Now
+		return
+	}
+	sr.nowFn = nowFn
+}
+
+func (sr *PostgresRegistry) ScopeKeyEnabledForTest() bool {
+	return sr.isScopeKeyEnabled()
+}
+
+func (sr *PostgresRegistry) isScopeKeyEnabled() bool {
 	if sr == nil {
 		return true
 	}
@@ -514,7 +533,7 @@ func (sr *PostgresSessionRegistry) isScopeKeyEnabled() bool {
 	return sr.scopeKeyEnabled
 }
 
-func (sr *PostgresSessionRegistry) disableScopeKey() {
+func (sr *PostgresRegistry) disableScopeKey() {
 	if sr == nil {
 		return
 	}
@@ -523,7 +542,7 @@ func (sr *PostgresSessionRegistry) disableScopeKey() {
 	sr.scopeMu.Unlock()
 }
 
-func (sr *PostgresSessionRegistry) ResetAll(runtimeMode string) error {
+func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	if runtimeMode == "" {
 		_, err := sr.db.Exec(`

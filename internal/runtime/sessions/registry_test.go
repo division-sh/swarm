@@ -1,9 +1,9 @@
-package runtime
+package sessions
 
 import "testing"
 
 func TestInMemorySessionRegistryLeaseConflictAndRelease(t *testing.T) {
-	sr := NewInMemorySessionRegistry(0)
+	sr := NewInMemoryRegistry(0)
 
 	leaseA, err := sr.Acquire("agent-a", "cli_test", "worker-a", "")
 	if err != nil {
@@ -28,7 +28,7 @@ func TestInMemorySessionRegistryLeaseConflictAndRelease(t *testing.T) {
 }
 
 func TestInMemorySessionRegistryRotate(t *testing.T) {
-	sr := NewInMemorySessionRegistry(0)
+	sr := NewInMemoryRegistry(0)
 
 	lease, err := sr.Acquire("agent-a", "cli_test", "worker-a", "")
 	if err != nil {
@@ -46,7 +46,7 @@ func TestInMemorySessionRegistryRotate(t *testing.T) {
 }
 
 func TestInMemorySessionRegistryAdoptSessionID(t *testing.T) {
-	sr := NewInMemorySessionRegistry(0)
+	sr := NewInMemoryRegistry(0)
 	_, err := sr.Acquire("agent-a", "cli_test", "worker-a", "")
 	if err != nil {
 		t.Fatalf("acquire: %v", err)

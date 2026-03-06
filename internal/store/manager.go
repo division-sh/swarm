@@ -13,6 +13,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	"empireai/internal/runtime"
+	llm "empireai/internal/runtime/llm"
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtime.PersistedAgent) error {
@@ -781,9 +782,9 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.Conv
 		status = "active"
 	}
 	scopeKey := strings.TrimSpace(rec.ScopeKey)
-	msgs := make([]runtime.Message, 0, len(rec.Messages))
+	msgs := make([]llm.Message, 0, len(rec.Messages))
 	for _, m := range rec.Messages {
-		msgs = append(msgs, runtime.Message{
+		msgs = append(msgs, llm.Message{
 			Role:    strings.TrimSpace(m.Role),
 			Content: redactText(m.Content),
 		})
@@ -985,7 +986,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 		return runtime.ConversationRecord{}, false, fmt.Errorf("load active conversation: %w", err)
 	}
 	if len(rawMessages) > 0 {
-		var msgs []runtime.Message
+		var msgs []llm.Message
 		if json.Unmarshal(rawMessages, &msgs) == nil {
 			rec.Messages = msgs
 		}

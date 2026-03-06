@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"os/exec"
 	"strconv"
+
+	workspace "empireai/internal/runtime/workspace"
 	"strings"
 	"sync"
 	"time"
@@ -326,7 +328,7 @@ func resolveDiagnosticContainer(ctx context.Context, db *sql.DB, role, verticalI
 	role = strings.ToLower(strings.TrimSpace(role))
 	switch role {
 	case "holding-devops":
-		return envOrDefault("EMPIREAI_INFRA_CONTAINER", "empireai-infra"), ""
+		return workspace.EnvOrDefault("EMPIREAI_INFRA_CONTAINER", "empireai-infra"), ""
 	case "factory-cto",
 		"empire-coordinator",
 		"operations-analyst",
@@ -341,7 +343,7 @@ func resolveDiagnosticContainer(ctx context.Context, db *sql.DB, role, verticalI
 		"trend-research-agent",
 		"spec-auditor",
 		"discovery-coordinator":
-		return envOrDefault("EMPIREAI_FACTORY_CONTAINER", "empireai-factory"), ""
+		return workspace.EnvOrDefault("EMPIREAI_FACTORY_CONTAINER", "empireai-factory"), ""
 	}
 	verticalID = strings.TrimSpace(verticalID)
 	if verticalID == "" {
@@ -353,14 +355,14 @@ func resolveDiagnosticContainer(ctx context.Context, db *sql.DB, role, verticalI
 		FROM verticals
 		WHERE id = $1::uuid
 	`, verticalID).Scan(&slug)
-	slug = sanitizeWorkspaceSlug(slug)
+	slug = workspace.SanitizeSlug(slug)
 	if slug == "" {
-		slug = sanitizeWorkspaceSlug(verticalID)
+		slug = workspace.SanitizeSlug(verticalID)
 	}
 	if slug == "" {
 		return "", ""
 	}
-	return envOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-") + slug, slug
+	return workspace.EnvOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-") + slug, slug
 }
 
 func findSessionProjectFileInContainer(ctx context.Context, container, sessionID string) (string, error) {
@@ -394,7 +396,7 @@ func tailContainerPath(ctx context.Context, container, path string, lines int) (
 }
 
 func runDockerInspectCommand(ctx context.Context, args ...string) (string, error) {
-	dockerBin := strings.TrimSpace(envOrDefault("EMPIREAI_DOCKER_BIN", "docker"))
+	dockerBin := strings.TrimSpace(workspace.EnvOrDefault("EMPIREAI_DOCKER_BIN", "docker"))
 	cmd := exec.CommandContext(ctx, dockerBin, args...)
 	raw, err := cmd.CombinedOutput()
 	out := strings.TrimSpace(string(raw))

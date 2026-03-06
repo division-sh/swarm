@@ -1,4 +1,4 @@
-package runtime
+package sessions
 
 import (
 	"errors"
@@ -10,18 +10,18 @@ import (
 	"github.com/google/uuid"
 )
 
-type SessionRegistry interface {
-	Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*SessionLease, error)
-	Release(lease *SessionLease) error
-	Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*SessionLease, error)
+type Registry interface {
+	Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error)
+	Release(lease *Lease) error
+	Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error)
 	IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error
 }
 
-type SessionResetter interface {
+type Resetter interface {
 	ResetAll(runtimeMode string) error
 }
 
-type SessionLease struct {
+type Lease struct {
 	SessionID   string
 	AgentID     string
 	RuntimeMode string
@@ -30,7 +30,7 @@ type SessionLease struct {
 	ExpiresAt   time.Time
 }
 
-type SessionRecord struct {
+type Record struct {
 	SessionID         string
 	AgentID           string
 	RuntimeMode       string
@@ -43,34 +43,33 @@ type SessionRecord struct {
 	LastUsedAt        time.Time
 }
 
-// InMemorySessionRegistry is the process-local bootstrap implementation.
+// InMemoryRegistry is the process-local bootstrap implementation.
 // It can be replaced by a Postgres-backed implementation with the same API.
-type InMemorySessionRegistry struct {
+type InMemoryRegistry struct {
 	mu      sync.Mutex
-	byKey   map[string]*SessionRecord
+	byKey   map[string]*Record
 	lockTTL time.Duration
 }
 
-func NewInMemorySessionRegistry(lockTTL time.Duration) *InMemorySessionRegistry {
+func NewInMemoryRegistry(lockTTL time.Duration) *InMemoryRegistry {
 	if lockTTL <= 0 {
 		lockTTL = 120 * time.Second
 	}
-	return &InMemorySessionRegistry{
-		byKey:   make(map[string]*SessionRecord),
+	return &InMemoryRegistry{
+		byKey:   make(map[string]*Record),
 		lockTTL: lockTTL,
 	}
 }
 
-// NewSessionRegistry keeps backward compatibility with earlier bootstrap code.
-func NewSessionRegistry(lockTTL time.Duration) SessionRegistry {
-	return NewInMemorySessionRegistry(lockTTL)
+func NewRegistry(lockTTL time.Duration) Registry {
+	return NewInMemoryRegistry(lockTTL)
 }
 
-func sessionRegistryKey(agentID, runtimeMode, scopeKey string) string {
+func registryKey(agentID, runtimeMode, scopeKey string) string {
 	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(runtimeMode) + "|" + strings.TrimSpace(scopeKey)
 }
 
-func (sr *InMemorySessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*SessionLease, error) {
+func (sr *InMemoryRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -80,10 +79,10 @@ func (sr *InMemorySessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scop
 	defer sr.mu.Unlock()
 
 	now := time.Now()
-	key := sessionRegistryKey(agentID, runtimeMode, scopeKey)
+	key := registryKey(agentID, runtimeMode, scopeKey)
 	rec, ok := sr.byKey[key]
 	if !ok || rec.Status != "active" {
-		rec = &SessionRecord{
+		rec = &Record{
 			SessionID:   uuid.NewString(),
 			AgentID:     agentID,
 			RuntimeMode: runtimeMode,
@@ -101,7 +100,7 @@ func (sr *InMemorySessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scop
 	rec.LockExpiresAt = now.Add(sr.lockTTL)
 	rec.LastUsedAt = now
 
-	return &SessionLease{
+	return &Lease{
 		SessionID:   rec.SessionID,
 		AgentID:     rec.AgentID,
 		RuntimeMode: rec.RuntimeMode,
@@ -111,7 +110,7 @@ func (sr *InMemorySessionRegistry) Acquire(agentID, runtimeMode, lockOwner, scop
 	}, nil
 }
 
-func (sr *InMemorySessionRegistry) Release(lease *SessionLease) error {
+func (sr *InMemoryRegistry) Release(lease *Lease) error {
 	if lease == nil {
 		return errors.New("nil lease")
 	}
@@ -119,7 +118,7 @@ func (sr *InMemorySessionRegistry) Release(lease *SessionLease) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
-	key := sessionRegistryKey(lease.AgentID, lease.RuntimeMode, lease.ScopeKey)
+	key := registryKey(lease.AgentID, lease.RuntimeMode, lease.ScopeKey)
 	rec, ok := sr.byKey[key]
 	if !ok {
 		return fmt.Errorf("session for agent %s not found", lease.AgentID)
@@ -134,12 +133,12 @@ func (sr *InMemorySessionRegistry) Release(lease *SessionLease) error {
 	return nil
 }
 
-func (sr *InMemorySessionRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*SessionLease, error) {
+func (sr *InMemoryRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
 	scopeKey = strings.TrimSpace(scopeKey)
-	key := sessionRegistryKey(agentID, runtimeMode, scopeKey)
+	key := registryKey(agentID, runtimeMode, scopeKey)
 	rec, ok := sr.byKey[key]
 	if !ok {
 		return nil, fmt.Errorf("session for agent %s not found", agentID)
@@ -159,7 +158,7 @@ func (sr *InMemorySessionRegistry) Rotate(agentID, runtimeMode, lockOwner, summa
 	rec.LockExpiresAt = now.Add(sr.lockTTL)
 	rec.LastUsedAt = now
 
-	return &SessionLease{
+	return &Lease{
 		SessionID:   rec.SessionID,
 		AgentID:     rec.AgentID,
 		RuntimeMode: rec.RuntimeMode,
@@ -169,10 +168,10 @@ func (sr *InMemorySessionRegistry) Rotate(agentID, runtimeMode, lockOwner, summa
 	}, nil
 }
 
-func (sr *InMemorySessionRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	key := sessionRegistryKey(agentID, runtimeMode, strings.TrimSpace(scopeKey))
+	key := registryKey(agentID, runtimeMode, strings.TrimSpace(scopeKey))
 	if rec, ok := sr.byKey[key]; ok {
 		if rec.SessionID != sessionID {
 			return fmt.Errorf("session mismatch: have=%s want=%s", rec.SessionID, sessionID)
@@ -184,7 +183,7 @@ func (sr *InMemorySessionRegistry) IncrementTurn(agentID, runtimeMode, sessionID
 	return fmt.Errorf("session for agent %s not found", agentID)
 }
 
-func (sr *InMemorySessionRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	lockOwner = strings.TrimSpace(lockOwner)
@@ -198,7 +197,7 @@ func (sr *InMemorySessionRegistry) AdoptSessionID(agentID, runtimeMode, lockOwne
 	defer sr.mu.Unlock()
 
 	var (
-		rec *SessionRecord
+		rec *Record
 		ok  bool
 	)
 	for _, candidate := range sr.byKey {
@@ -235,7 +234,7 @@ func (sr *InMemorySessionRegistry) AdoptSessionID(agentID, runtimeMode, lockOwne
 	return nil
 }
 
-func (sr *InMemorySessionRegistry) Snapshot(agentID string) (*SessionRecord, bool) {
+func (sr *InMemoryRegistry) Snapshot(agentID string) (*Record, bool) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	for _, rec := range sr.byKey {
@@ -248,12 +247,12 @@ func (sr *InMemorySessionRegistry) Snapshot(agentID string) (*SessionRecord, boo
 	return nil, false
 }
 
-func (sr *InMemorySessionRegistry) ResetAll(runtimeMode string) error {
+func (sr *InMemoryRegistry) ResetAll(runtimeMode string) error {
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	if runtimeMode == "" {
-		sr.byKey = make(map[string]*SessionRecord)
+		sr.byKey = make(map[string]*Record)
 		return nil
 	}
 	for key, rec := range sr.byKey {

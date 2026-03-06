@@ -1,10 +1,12 @@
-package runtime
+package llm
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"empireai/internal/runtime/sessions"
 	"strings"
 )
 
@@ -45,7 +47,7 @@ type Conversation struct {
 	TurnCount    int
 	Mode         ConversationMode
 
-	runtime       LLMRuntime
+	runtime       Runtime
 	toolExecutor  ToolExecutor
 	maxToolRounds int
 }
@@ -65,7 +67,7 @@ type conversationSnapshotPersister interface {
 	PersistConversationSnapshot(ctx context.Context, s *Session) error
 }
 
-func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, mode ConversationMode, maxTurns int, runtime LLMRuntime) *Conversation {
+func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinition, mode ConversationMode, maxTurns int, runtime Runtime) *Conversation {
 	if maxTurns <= 0 {
 		maxTurns = 25
 	}
@@ -132,7 +134,7 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	case TaskScoped, SessionPerVerticalScoped:
 		scopeKey = strings.TrimSpace(c.TaskID)
 	}
-	ctx = withSessionScope(ctx, c.Mode, scopeKey)
+	ctx = sessions.WithScope(ctx, ConversationModeString(c.Mode), scopeKey)
 	s, err := c.runtime.StartSession(ctx, c.AgentID, c.SystemPrompt, c.Tools)
 	if err != nil {
 		return err

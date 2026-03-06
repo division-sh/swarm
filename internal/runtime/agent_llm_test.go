@@ -9,20 +9,21 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 )
 
 type llmToolCallRuntime struct {
-	firstResponse Response
+	firstResponse llm.Response
 	secondText    string
 }
 
-func (r *llmToolCallRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "sess-1", AgentID: agentID, RuntimeMode: "api"}, nil
+func (r *llmToolCallRuntime) StartSession(_ context.Context, agentID, _ string, _ []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{ID: "sess-1", AgentID: agentID, RuntimeMode: "api"}, nil
 }
 
-func (r *llmToolCallRuntime) ContinueSession(_ context.Context, _ *Session, msg Message) (*Response, error) {
+func (r *llmToolCallRuntime) ContinueSession(_ context.Context, _ *llm.Session, msg llm.Message) (*llm.Response, error) {
 	if msg.Role == "tool" {
-		return &Response{Message: Message{Role: "assistant", Content: strings.TrimSpace(r.secondText)}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: strings.TrimSpace(r.secondText)}}, nil
 	}
 	resp := r.firstResponse
 	if strings.TrimSpace(resp.Message.Role) == "" {
@@ -33,12 +34,12 @@ func (r *llmToolCallRuntime) ContinueSession(_ context.Context, _ *Session, msg 
 
 type llmNoToolRuntime struct{}
 
-func (r *llmNoToolRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "sess-2", AgentID: agentID, RuntimeMode: "api"}, nil
+func (r *llmNoToolRuntime) StartSession(_ context.Context, agentID, _ string, _ []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{ID: "sess-2", AgentID: agentID, RuntimeMode: "api"}, nil
 }
 
-func (r *llmNoToolRuntime) ContinueSession(_ context.Context, _ *Session, _ Message) (*Response, error) {
-	return &Response{Message: Message{Role: "assistant", Content: "acknowledged"}}, nil
+func (r *llmNoToolRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "acknowledged"}}, nil
 }
 
 func TestLLMAgentOnEvent_EmitViaToolCall(t *testing.T) {
@@ -55,9 +56,9 @@ func TestLLMAgentOnEvent_EmitViaToolCall(t *testing.T) {
 		Config:        mustJSON(map[string]any{"system_prompt": "coordinator", "tools": []string{"agent_message"}}),
 	}
 	rt := &llmToolCallRuntime{
-		firstResponse: Response{
-			Message: Message{Role: "assistant", Content: "calling emit tool"},
-			ToolCalls: []ToolCall{{
+		firstResponse: llm.Response{
+			Message: llm.Message{Role: "assistant", Content: "calling emit tool"},
+			ToolCalls: []llm.ToolCall{{
 				Name: "emit_scan_requested",
 				Arguments: map[string]any{
 					"mode":      "saas_gap",
@@ -137,7 +138,7 @@ func TestNewLLMAgent_AutoInjectsEmitToolsWhenConstrained(t *testing.T) {
 			"tools":         []string{"agent_message"},
 		}),
 	}
-	agent := NewLLMAgent(cfg, &llmNoToolRuntime{}, noopToolExec{}, []ToolDefinition{
+	agent := NewLLMAgent(cfg, &llmNoToolRuntime{}, noopToolExec{}, []llm.ToolDefinition{
 		{Name: "agent_message"},
 		{Name: "mailbox_send"},
 	})
@@ -244,7 +245,7 @@ func TestNewLLMAgent_ConstraintsOverrideConversationDefaults(t *testing.T) {
 	if agent.conversation.MaxTurns != 40 {
 		t.Fatalf("expected max turns override=40, got %d", agent.conversation.MaxTurns)
 	}
-	if agent.conversation.Mode != SessionScoped {
+	if agent.conversation.Mode != llm.SessionScoped {
 		t.Fatalf("expected conversation mode override=session, got %v", agent.conversation.Mode)
 	}
 }
@@ -254,7 +255,7 @@ func TestExtractConversationConstraints_TopLevelFallback(t *testing.T) {
 		"conversation_mode":  "task",
 		"max_turns_per_task": 12,
 	}))
-	if mode == nil || *mode != TaskScoped {
+	if mode == nil || *mode != llm.TaskScoped {
 		t.Fatalf("expected task mode from top-level fallback, got %v", mode)
 	}
 	if maxTurns != 12 {
@@ -270,13 +271,13 @@ type countingSessionRuntime struct {
 	startCalls int
 }
 
-func (r *countingSessionRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
+func (r *countingSessionRuntime) StartSession(_ context.Context, agentID, _ string, _ []llm.ToolDefinition) (*llm.Session, error) {
 	r.startCalls++
-	return &Session{ID: "sess-count", AgentID: agentID, RuntimeMode: "api"}, nil
+	return &llm.Session{ID: "sess-count", AgentID: agentID, RuntimeMode: "api"}, nil
 }
 
-func (r *countingSessionRuntime) ContinueSession(_ context.Context, _ *Session, _ Message) (*Response, error) {
-	return &Response{Message: Message{Role: "assistant", Content: "ok"}}, nil
+func (r *countingSessionRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
 }
 
 func TestLLMAgentOnEvent_TaskScopedResetsAcrossVerticalContexts(t *testing.T) {
@@ -291,7 +292,7 @@ func TestLLMAgentOnEvent_TaskScopedResetsAcrossVerticalContexts(t *testing.T) {
 		}),
 	}
 	agent := NewLLMAgent(cfg, rt, noopToolExec{}, nil)
-	if agent.conversation.Mode != TaskScoped {
+	if agent.conversation.Mode != llm.TaskScoped {
 		t.Fatalf("expected task scoped conversation for factory mode, got %v", agent.conversation.Mode)
 	}
 

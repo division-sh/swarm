@@ -11,6 +11,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 )
 
 type toolGatewayExecStub struct {
@@ -31,8 +32,8 @@ func (s *toolGatewayExecStub) Execute(ctx context.Context, name string, input an
 	return map[string]any{"ok": true}, nil
 }
 
-func (s *toolGatewayExecStub) ToolDefinitions() []ToolDefinition {
-	return []ToolDefinition{
+func (s *toolGatewayExecStub) ToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{
 		{Name: "sql_execute", Description: "sql tool"},
 		{Name: "agent_message", Description: "msg tool"},
 	}

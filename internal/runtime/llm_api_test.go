@@ -10,6 +10,8 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 )
 
 type apiTurnCapture struct {
@@ -79,7 +81,7 @@ func TestAnthropicAPIRuntime_ContinueSession_SendsRequestParsesUsageAndIncrement
 		},
 	}
 
-	sessions := NewInMemorySessionRegistry(5 * time.Second)
+	sessions := sessions.NewInMemoryRegistry(5 * time.Second)
 	turns := &apiTurnCapture{}
 	convos := &apiConvoCapture{}
 
@@ -88,7 +90,7 @@ func TestAnthropicAPIRuntime_ContinueSession_SendsRequestParsesUsageAndIncrement
 	r.apiKey = "test-key"
 	r.httpClient = srv.Client()
 
-	s, err := r.StartSession(context.Background(), "agent-1", "sys", []ToolDefinition{{Name: "echo", Description: "echo"}})
+	s, err := r.StartSession(context.Background(), "agent-1", "sys", []llm.ToolDefinition{{Name: "echo", Description: "echo"}})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -97,7 +99,7 @@ func TestAnthropicAPIRuntime_ContinueSession_SendsRequestParsesUsageAndIncrement
 	}
 
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Type: "worker", Role: "pm-agent", Mode: "operating", VerticalID: "v1"})
-	resp, err := r.ContinueSession(ctx, s, Message{Role: "user", Content: "hi"})
+	resp, err := r.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "hi"})
 	if err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}

@@ -2,13 +2,14 @@ package runtime
 
 import (
 	"context"
+	"empireai/internal/events"
+	"empireai/internal/models"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	"empireai/internal/models"
+	workspace "empireai/internal/runtime/workspace"
 )
 
 type workspaceLifecycleStub struct {
@@ -19,7 +20,7 @@ type workspaceLifecycleStub struct {
 }
 
 func (s *workspaceLifecycleStub) EnsureSystemWorkspaces(context.Context) error { return nil }
-func (s *workspaceLifecycleStub) ResolveWorkspace(context.Context, models.AgentConfig) (*WorkspaceTarget, error) {
+func (s *workspaceLifecycleStub) ResolveWorkspace(context.Context, models.AgentConfig) (*workspace.Target, error) {
 	return nil, nil
 }
 func (s *workspaceLifecycleStub) EnsureVerticalWorkspace(context.Context, string) error {
@@ -282,4 +283,198 @@ func TestManagerHandlesOpCoSpinupControlEvent(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("expected opco roster to be spawned from control event, got count=%d", am.Count())
+}
+
+type budgetPolicyAgent struct {
+	id    string
+	calls int
+}
+
+func (a *budgetPolicyAgent) ID() string { return a.id }
+
+func (a *budgetPolicyAgent) Type() string { return "llm" }
+
+func (a *budgetPolicyAgent) Subscriptions() []events.EventType { return nil }
+
+func (a *budgetPolicyAgent) OnEvent(_ context.Context, _ events.Event) ([]events.Event, error) {
+	a.calls++
+	return nil, nil
+}
+
+func TestAgentManager_BudgetSuppressionPolicy(t *testing.T) {
+	makeMgr := func(stateKey, stateValue string, role string) (*AgentManager, *budgetPolicyAgent) {
+		am := NewAgentManager(NewEventBus(InMemoryEventStore{}), nil, nil)
+		agent := &budgetPolicyAgent{id: "a1"}
+		am.agents[agent.id] = agent
+		am.agentCfg[agent.id] = models.AgentConfig{
+			ID:         agent.id,
+			Role:       role,
+			Mode:       "operating",
+			VerticalID: "v1",
+		}
+		am.SetBudgetTracker(&BudgetTracker{
+			lastState: map[string]string{
+				stateKey: stateValue,
+			},
+		})
+		return am, agent
+	}
+
+	t.Run("emergency suppresses non-critical flows", func(t *testing.T) {
+		am, agent := makeMgr("vertical|v1", "emergency", "marketing-agent")
+		err := am.processEvent(context.Background(), agent, events.Event{
+			ID:   "e1",
+			Type: events.EventType("market_signals"),
+		})
+		if err != nil {
+			t.Fatalf("processEvent: %v", err)
+		}
+		if agent.calls != 0 {
+			t.Fatalf("expected suppression during emergency, calls=%d", agent.calls)
+		}
+	})
+
+	t.Run("emergency allows support", func(t *testing.T) {
+		am, agent := makeMgr("vertical|v1", "emergency", "support-agent")
+		err := am.processEvent(context.Background(), agent, events.Event{
+			ID:   "e2",
+			Type: events.EventType("inbound.whatsapp_message"),
+		})
+		if err != nil {
+			t.Fatalf("processEvent: %v", err)
+		}
+		if agent.calls != 1 {
+			t.Fatalf("expected support flow allowed, calls=%d", agent.calls)
+		}
+	})
+
+	t.Run("throttle pauses growth", func(t *testing.T) {
+		am, agent := makeMgr("vertical|v1", "throttle", "vp-growth")
+		err := am.processEvent(context.Background(), agent, events.Event{
+			ID:   "e3",
+			Type: events.EventType("outreach_digest"),
+		})
+		if err != nil {
+			t.Fatalf("processEvent: %v", err)
+		}
+		if agent.calls != 0 {
+			t.Fatalf("expected growth pause on throttle, calls=%d", agent.calls)
+		}
+	})
+
+	t.Run("throttle suppresses management heartbeats", func(t *testing.T) {
+		am, agent := makeMgr("vertical|v1", "throttle", "opco-ceo")
+		err := am.processEvent(context.Background(), agent, events.Event{
+			ID:   "e4",
+			Type: events.EventType("heartbeat.opco_ceo"),
+		})
+		if err != nil {
+			t.Fatalf("processEvent: %v", err)
+		}
+		if agent.calls != 0 {
+			t.Fatalf("expected heartbeat suppression on throttle, calls=%d", agent.calls)
+		}
+	})
+}
+func TestDirectiveRequiresCoordinator(t *testing.T) {
+	complex := events.Event{
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "human",
+		Payload: mustJSON(map[string]any{
+			"directive_text": "Focus on compliance-driven opportunities in LATAM countries with over 80 percent internet penetration",
+		}),
+	}
+	if !directiveRequiresCoordinator(complex) {
+		t.Fatal("expected complex directive to require coordinator")
+	}
+
+	simple := events.Event{
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "human",
+		Payload: mustJSON(map[string]any{
+			"directive_text": "SaaS in Uruguay",
+		}),
+	}
+	if directiveRequiresCoordinator(simple) {
+		t.Fatal("expected simple directive to be runtime-handled")
+	}
+
+	forwarded := events.Event{
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "scan-campaign-manager",
+		Payload:     mustJSON(map[string]any{"directive_text": "anything"}),
+	}
+	if !directiveRequiresCoordinator(forwarded) {
+		t.Fatal("expected scan-campaign-manager forwarded directive to require coordinator")
+	}
+}
+
+type directiveProbeAgent struct {
+	id    string
+	calls int
+}
+
+func (a *directiveProbeAgent) ID() string { return a.id }
+
+func (a *directiveProbeAgent) Type() string { return "worker" }
+
+func (a *directiveProbeAgent) Subscriptions() []events.EventType {
+	return []events.EventType{events.EventType("system.directive")}
+}
+
+func (a *directiveProbeAgent) OnEvent(_ context.Context, _ events.Event) ([]events.Event, error) {
+	a.calls++
+	return nil, nil
+}
+
+func TestAgentManager_ProcessEvent_InterceptsSimpleDirective(t *testing.T) {
+	am := NewAgentManager(NewEventBus(InMemoryEventStore{}), nil, nil)
+	agent := &directiveProbeAgent{id: "empire-coordinator"}
+	am.agents[agent.id] = agent
+	am.agentCfg[agent.id] = models.AgentConfig{
+		ID:   agent.id,
+		Role: "empire-coordinator",
+		Mode: "holding",
+	}
+
+	err := am.processEvent(context.Background(), agent, events.Event{
+		ID:          "evt-simple-directive",
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "human",
+		Payload: mustJSON(map[string]any{
+			"directive_text": "SaaS in Uruguay",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("processEvent returned error: %v", err)
+	}
+	if agent.calls != 0 {
+		t.Fatalf("expected simple directive to be intercepted by runtime, calls=%d", agent.calls)
+	}
+}
+
+func TestAgentManager_ProcessEvent_ForwardsComplexDirective(t *testing.T) {
+	am := NewAgentManager(NewEventBus(InMemoryEventStore{}), nil, nil)
+	agent := &directiveProbeAgent{id: "empire-coordinator"}
+	am.agents[agent.id] = agent
+	am.agentCfg[agent.id] = models.AgentConfig{
+		ID:   agent.id,
+		Role: "empire-coordinator",
+		Mode: "holding",
+	}
+
+	err := am.processEvent(context.Background(), agent, events.Event{
+		ID:          "evt-complex-directive",
+		Type:        events.EventType("system.directive"),
+		SourceAgent: "human",
+		Payload: mustJSON(map[string]any{
+			"directive_text": "Focus on compliance-driven opportunities in LATAM countries with over 80 percent internet penetration",
+		}),
+	})
+	if err != nil {
+		t.Fatalf("processEvent returned error: %v", err)
+	}
+	if agent.calls != 1 {
+		t.Fatalf("expected complex directive to reach coordinator agent, calls=%d", agent.calls)
+	}
 }

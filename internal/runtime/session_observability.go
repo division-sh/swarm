@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	llm "empireai/internal/runtime/llm"
 )
 
-func buildRotationCheckpoint(reason string, s *Session) string {
+func buildRotationCheckpoint(reason string, s *llm.Session) string {
 	summary := buildSessionSummary(s)
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
@@ -46,4 +48,3 @@ func logSessionAdopted(agentID, runtimeMode, oldSessionID, newSessionID, scopeKe
 		strings.TrimSpace(newSessionID),
 	)
 }
-

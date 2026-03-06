@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 	"empireai/internal/testutil"
 )
 
@@ -47,14 +49,14 @@ func TestResetRuntimeState_PostgresSessions_AfterCLIRunRotatesAndUnlocks(t *test
 		},
 	}
 
-	sessions := NewPostgresSessionRegistry(db, 15*time.Second)
+	sessions := sessions.NewPostgresRegistry(db, 15*time.Second)
 	cli := NewClaudeCLIRuntime(cfg, sessions, "reset-integration-owner", nil, nil, nil, nil)
 
 	s, err := cli.StartSession(ctx, agentID, "reset smoke prompt", nil)
 	if err != nil {
 		t.Fatalf("start cli session: %v", err)
 	}
-	if _, err := cli.ContinueSession(ctx, s, Message{Role: "user", Content: "run smoke step"}); err != nil {
+	if _, err := cli.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "run smoke step"}); err != nil {
 		t.Fatalf("continue cli session: %v", err)
 	}
 

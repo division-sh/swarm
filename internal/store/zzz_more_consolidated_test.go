@@ -5,6 +5,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	"empireai/internal/runtime"
+	llm "empireai/internal/runtime/llm"
 	"empireai/internal/testutil"
 	"encoding/json"
 	"github.com/google/uuid"
@@ -1018,7 +1019,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 
 	if err := pg.UpsertConversation(ctx, runtime.ConversationRecord{
 		AgentID: "a1",
-		Messages: []runtime.Message{
+		Messages: []llm.Message{
 			{Role: "user", Content: "reach me at a@example.com"},
 		},
 		TurnCount: 2,
@@ -1279,7 +1280,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		AgentID:   ceoID,
 		TaskID:    "",
 		Mode:      "session",
-		Messages:  []runtime.Message{{Role: "user", Content: "hi"}},
+		Messages:  []llm.Message{{Role: "user", Content: "hi"}},
 		Summary:   "sum",
 		TurnCount: 1,
 		Status:    "active",

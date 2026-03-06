@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	"empireai/internal/runtime/sessions"
 )
 
 func TestRuntimeFactory_Build_APIAndCLI(t *testing.T) {
@@ -54,8 +55,7 @@ func TestRuntimeFactory_Build_APIAndCLI(t *testing.T) {
 	}
 
 	// Back-compat helper.
-	if NewSessionRegistry(1*time.Second) == nil {
+	if sessions.NewRegistry(1*time.Second) == nil {
 		t.Fatal("expected session registry")
 	}
 }
-

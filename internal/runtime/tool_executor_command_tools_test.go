@@ -28,7 +28,9 @@ func (r *recordingEventStore) AppendEvent(_ context.Context, evt events.Event) e
 	r.events = append(r.events, evt)
 	return nil
 }
-func (r *recordingEventStore) InsertEventDeliveries(context.Context, string, []string) error { return nil }
+func (r *recordingEventStore) InsertEventDeliveries(context.Context, string, []string) error {
+	return nil
+}
 
 func TestRuntimeToolExecutor_CommandTools_SuccessPaths(t *testing.T) {
 	if runtime.GOOS == "windows" {

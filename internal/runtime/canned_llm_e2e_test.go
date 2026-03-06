@@ -16,6 +16,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -141,7 +142,7 @@ func newCannedRoleRuntime() *cannedRoleRuntime {
 	}
 }
 
-func (r *cannedRoleRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+func (r *cannedRoleRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	if err := validateToolDefinitionsDraft202012(tools); err != nil {
 		return nil, fmt.Errorf("invalid tool schema for agent %s: %w", strings.TrimSpace(agentID), err)
 	}
@@ -149,7 +150,7 @@ func (r *cannedRoleRuntime) StartSession(_ context.Context, agentID string, syst
 	r.prompts[strings.TrimSpace(agentID)] = strings.TrimSpace(systemPrompt)
 	r.starts[strings.TrimSpace(agentID)]++
 	r.mu.Unlock()
-	return &Session{
+	return &llm.Session{
 		ID:               "sess-" + strings.TrimSpace(agentID) + "-" + uuid.NewString(),
 		AgentID:          strings.TrimSpace(agentID),
 		RuntimeMode:      "canned",
@@ -157,7 +158,7 @@ func (r *cannedRoleRuntime) StartSession(_ context.Context, agentID string, syst
 	}, nil
 }
 
-func (r *cannedRoleRuntime) ContinueSession(_ context.Context, session *Session, msg Message) (*Response, error) {
+func (r *cannedRoleRuntime) ContinueSession(_ context.Context, session *llm.Session, msg llm.Message) (*llm.Response, error) {
 	if session == nil {
 		return nil, errors.New("session is required")
 	}
@@ -166,14 +167,14 @@ func (r *cannedRoleRuntime) ContinueSession(_ context.Context, session *Session,
 		return nil, errors.New("session.AgentID is required")
 	}
 	if strings.EqualFold(strings.TrimSpace(msg.Role), "tool") {
-		return &Response{Message: Message{Role: "assistant", Content: "ack"}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ack"}}, nil
 	}
 
 	switch agentID {
 	case "market-research-agent":
 		turn := r.nextUserTurn(agentID)
 		if turn > 0 {
-			return &Response{Message: Message{Role: "assistant", Content: "done"}}, nil
+			return &llm.Response{Message: llm.Message{Role: "assistant", Content: "done"}}, nil
 		}
 		return buildCannedMRAResponse(msg.Content)
 	case "analysis-agent":
@@ -184,9 +185,9 @@ func (r *cannedRoleRuntime) ContinueSession(_ context.Context, session *Session,
 		if turn == 1 {
 			return buildCannedAnalysisResponse(msg.Content, "marginal")
 		}
-		return &Response{Message: Message{Role: "assistant", Content: "done"}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: "done"}}, nil
 	default:
-		return &Response{Message: Message{Role: "assistant", Content: "noop"}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: "noop"}}, nil
 	}
 }
 
@@ -210,7 +211,7 @@ func (r *cannedRoleRuntime) StartsFor(agentID string) int {
 	return r.starts[strings.TrimSpace(agentID)]
 }
 
-func buildCannedMRAResponse(input string) (*Response, error) {
+func buildCannedMRAResponse(input string) (*llm.Response, error) {
 	scanID := extractMessageField(input, "scan_id")
 	if scanID == "" {
 		return nil, errors.New("canned MRA runtime could not extract scan_id from market_research.scan_assigned")
@@ -225,7 +226,7 @@ func buildCannedMRAResponse(input string) (*Response, error) {
 		geography = "argentina"
 	}
 
-	calls := []ToolCall{
+	calls := []llm.ToolCall{
 		{
 			Name: "emit_category_assessed",
 			Arguments: map[string]any{
@@ -347,13 +348,13 @@ func buildCannedMRAResponse(input string) (*Response, error) {
 			},
 		},
 	}
-	return &Response{
-		Message:   Message{Role: "assistant", Content: "emitting corpus findings"},
+	return &llm.Response{
+		Message:   llm.Message{Role: "assistant", Content: "emitting corpus findings"},
 		ToolCalls: calls,
 	}, nil
 }
 
-func buildCannedAnalysisResponse(input string, profile string) (*Response, error) {
+func buildCannedAnalysisResponse(input string, profile string) (*llm.Response, error) {
 	verticalID := extractMessageField(input, "vertical_id")
 	if verticalID == "" {
 		return nil, errors.New("canned analysis runtime could not extract vertical_id from scoring.requested")
@@ -387,13 +388,13 @@ func buildCannedAnalysisResponse(input string, profile string) (*Response, error
 		}
 	}
 	dims := expectedScoringDimensions("universal")
-	calls := make([]ToolCall, 0, len(dims))
+	calls := make([]llm.ToolCall, 0, len(dims))
 	for _, dim := range dims {
 		score := scores[dim]
 		if score == 0 {
 			score = 60
 		}
-		calls = append(calls, ToolCall{
+		calls = append(calls, llm.ToolCall{
 			Name: "emit_score_dimension_complete",
 			Arguments: map[string]any{
 				"vertical_id": verticalID,
@@ -404,8 +405,8 @@ func buildCannedAnalysisResponse(input string, profile string) (*Response, error
 			},
 		})
 	}
-	return &Response{
-		Message:   Message{Role: "assistant", Content: "emitting scores"},
+	return &llm.Response{
+		Message:   llm.Message{Role: "assistant", Content: "emitting scores"},
 		ToolCalls: calls,
 	}, nil
 }
@@ -493,7 +494,7 @@ var validDraft202012Types = map[string]struct{}{
 	"null":    {},
 }
 
-func validateToolDefinitionsDraft202012(tools []ToolDefinition) error {
+func validateToolDefinitionsDraft202012(tools []llm.ToolDefinition) error {
 	for _, tool := range tools {
 		name := strings.TrimSpace(tool.Name)
 		if name == "" {

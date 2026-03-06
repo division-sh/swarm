@@ -18,6 +18,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -290,7 +291,7 @@ func newYAMLCannedRuntime(fixtures map[string]cannedRoleFixture) *yamlCannedRunt
 	}
 }
 
-func (r *yamlCannedRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+func (r *yamlCannedRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	if err := validateToolDefinitionsDraft202012(tools); err != nil {
 		return nil, fmt.Errorf("invalid tool schema for agent %s: %w", strings.TrimSpace(agentID), err)
 	}
@@ -299,7 +300,7 @@ func (r *yamlCannedRuntime) StartSession(_ context.Context, agentID string, syst
 	r.prompts[agentID] = strings.TrimSpace(systemPrompt)
 	r.starts[agentID]++
 	r.mu.Unlock()
-	return &Session{
+	return &llm.Session{
 		ID:               "sess-" + agentID + "-" + uuid.NewString(),
 		AgentID:          agentID,
 		RuntimeMode:      "canned-yaml",
@@ -307,7 +308,7 @@ func (r *yamlCannedRuntime) StartSession(_ context.Context, agentID string, syst
 	}, nil
 }
 
-func (r *yamlCannedRuntime) ContinueSession(_ context.Context, session *Session, msg Message) (*Response, error) {
+func (r *yamlCannedRuntime) ContinueSession(_ context.Context, session *llm.Session, msg llm.Message) (*llm.Response, error) {
 	if session == nil {
 		return nil, errors.New("session is required")
 	}
@@ -316,11 +317,11 @@ func (r *yamlCannedRuntime) ContinueSession(_ context.Context, session *Session,
 		return nil, errors.New("session.AgentID is required")
 	}
 	if strings.EqualFold(strings.TrimSpace(msg.Role), "tool") {
-		return &Response{Message: Message{Role: "assistant", Content: "ack"}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ack"}}, nil
 	}
 	fixture, ok := r.fixtures[agentID]
 	if !ok {
-		return &Response{Message: Message{Role: "assistant", Content: "noop"}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: "noop"}}, nil
 	}
 
 	eventType := extractInboundEventType(msg.Content)
@@ -328,7 +329,7 @@ func (r *yamlCannedRuntime) ContinueSession(_ context.Context, session *Session,
 	turn := r.turns[agentID]
 	if turn >= len(fixture.Responses) {
 		r.mu.Unlock()
-		return &Response{Message: Message{Role: "assistant", Content: "done"}}, nil
+		return &llm.Response{Message: llm.Message{Role: "assistant", Content: "done"}}, nil
 	}
 	respFixture := fixture.Responses[turn]
 	r.turns[agentID] = turn + 1
@@ -340,14 +341,14 @@ func (r *yamlCannedRuntime) ContinueSession(_ context.Context, session *Session,
 	}
 
 	vars := extractTemplateVars(msg.Content, eventType)
-	calls := make([]ToolCall, 0, len(respFixture.ToolCalls))
+	calls := make([]llm.ToolCall, 0, len(respFixture.ToolCalls))
 	for _, tc := range respFixture.ToolCalls {
 		args := applyTemplateVars(tc.Arguments, vars)
 		argMap, _ := args.(map[string]any)
 		if argMap == nil {
 			argMap = map[string]any{}
 		}
-		calls = append(calls, ToolCall{
+		calls = append(calls, llm.ToolCall{
 			Name:      strings.TrimSpace(tc.Name),
 			Arguments: argMap,
 		})
@@ -356,7 +357,7 @@ func (r *yamlCannedRuntime) ContinueSession(_ context.Context, session *Session,
 	if content == "" {
 		content = "canned response"
 	}
-	return &Response{Message: Message{Role: "assistant", Content: content}, ToolCalls: calls}, nil
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: content}, ToolCalls: calls}, nil
 }
 
 func (r *yamlCannedRuntime) StartsFor(agentID string) int {

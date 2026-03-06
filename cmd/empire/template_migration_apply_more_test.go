@@ -8,6 +8,7 @@ import (
 
 	"empireai/internal/models"
 	"empireai/internal/runtime"
+	"empireai/internal/runtime/sessions"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -91,8 +92,8 @@ func TestTemplateMigrationApply_EndToEnd_WithMailboxApproval(t *testing.T) {
 					Type:          "worker",
 					Role:          "", // exercise extractRoleFromAgentID
 					Mode:          "operating",
-					VerticalID:     verticalID,
-					Subscriptions:  []string{"product.*"},
+					VerticalID:    verticalID,
+					Subscriptions: []string{"product.*"},
 					Config: mustJSON(map[string]any{
 						"system_prompt": "hello {vertical_slug}\n{org_roster}\n{mandate_document}",
 						"tools":         []string{"agent_message"},
@@ -131,7 +132,7 @@ func TestTemplateMigrationApply_EndToEnd_WithMailboxApproval(t *testing.T) {
 		EventStore:      pg,
 		ManagerStore:    pg,
 		MailboxStore:    pg,
-		SessionRegistry: runtime.NewInMemorySessionRegistry(0),
+		SessionRegistry: sessions.NewInMemoryRegistry(0),
 	}
 	if err := applyTemplateMigrationWithPrimitives(ctx, "cli_test", stores, migID, "factory-cto"); err != nil {
 		t.Fatalf("applyTemplateMigrationWithPrimitives: %v", err)
@@ -214,7 +215,7 @@ func TestTemplateMigrationApply_RejectsUnapprovedMailbox(t *testing.T) {
 	`, migID, verticalID, `{"vertical_id":"`+verticalID+`","operations":[{"type":"ADD_AGENT","agent_id":"x","config":{"id":"x","type":"worker","vertical_id":"`+verticalID+`","config":{"system_prompt":"hi"}}}]}`, mbID); err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}
-	stores := storeBundle{SQLDB: db, EventStore: pg, ManagerStore: pg, MailboxStore: pg, SessionRegistry: runtime.NewInMemorySessionRegistry(0)}
+	stores := storeBundle{SQLDB: db, EventStore: pg, ManagerStore: pg, MailboxStore: pg, SessionRegistry: sessions.NewInMemoryRegistry(0)}
 	if err := applyTemplateMigrationWithPrimitives(ctx, "cli_test", stores, migID, "factory-cto"); err == nil {
 		t.Fatalf("expected error for unapproved mailbox")
 	}
@@ -249,7 +250,7 @@ func TestTemplateMigrationApply_InvalidPlanFailsAndEmits(t *testing.T) {
 	`, migID, verticalID); err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}
-	stores := storeBundle{SQLDB: db, EventStore: pg, ManagerStore: pg, MailboxStore: pg, SessionRegistry: runtime.NewInMemorySessionRegistry(0)}
+	stores := storeBundle{SQLDB: db, EventStore: pg, ManagerStore: pg, MailboxStore: pg, SessionRegistry: sessions.NewInMemoryRegistry(0)}
 	if err := applyTemplateMigrationWithPrimitives(ctx, "cli_test", stores, migID, "factory-cto"); err == nil {
 		t.Fatalf("expected failure")
 	}

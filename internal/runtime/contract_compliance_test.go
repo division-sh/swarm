@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"empireai/internal/commgraph"
+	llm "empireai/internal/runtime/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -477,7 +478,7 @@ func TestContractCompliance(t *testing.T) {
 		}
 
 		runtimeDefs := NewRuntimeToolExecutor(nil, nil, nil).ToolDefinitions()
-		runtimeByName := make(map[string]ToolDefinition, len(runtimeDefs))
+		runtimeByName := make(map[string]llm.ToolDefinition, len(runtimeDefs))
 		for _, def := range runtimeDefs {
 			runtimeByName[strings.TrimSpace(def.Name)] = def
 		}

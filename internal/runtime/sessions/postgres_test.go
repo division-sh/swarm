@@ -1,4 +1,4 @@
-package runtime
+package sessions
 
 import (
 	"database/sql"
@@ -16,9 +16,9 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	sr.nowFn = func() time.Time { return fixedNow }
+	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	// Acquire new session (no rows).
 	mock.ExpectBegin()
@@ -62,7 +62,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET lock_owner = NULL").
 		WithArgs("a1", "api", "sess-1", "", "owner-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := sr.Release(&SessionLease{AgentID: "a1", RuntimeMode: "api", SessionID: "sess-1", LockOwner: "owner-1"}); err != nil {
+	if err := sr.Release(&Lease{AgentID: "a1", RuntimeMode: "api", SessionID: "sess-1", LockOwner: "owner-1"}); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 
@@ -71,16 +71,16 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	}
 }
 
-func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrSessionLeased(t *testing.T) {
+func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrLeased(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	sr.nowFn = func() time.Time { return fixedNow }
+	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id::text, session_id, scope_key, lock_owner, lock_expires_at\\s+FROM agent_sessions").
@@ -106,9 +106,9 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	sr.nowFn = func() time.Time { return fixedNow }
+	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	// Rotate happy path.
 	mock.ExpectBegin()
@@ -160,9 +160,9 @@ func TestPostgresSessionRegistry_AdoptSessionID(t *testing.T) {
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	sr.nowFn = func() time.Time { return fixedNow }
+	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id::text, lock_owner, lock_expires_at\\s+FROM agent_sessions").
@@ -190,9 +190,9 @@ func TestPostgresSessionRegistry_Rotate_FallbackWithoutScopeKeyColumn(t *testing
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	fixedNow := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	sr.nowFn = func() time.Time { return fixedNow }
+	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id::text, session_id, lock_owner, lock_expires_at\\s+FROM agent_sessions").
@@ -217,7 +217,7 @@ func TestPostgresSessionRegistry_Rotate_FallbackWithoutScopeKeyColumn(t *testing
 	if lease.ScopeKey != "" {
 		t.Fatalf("expected empty scope key on fallback, got %q", lease.ScopeKey)
 	}
-	if sr.isScopeKeyEnabled() {
+	if sr.ScopeKeyEnabledForTest() {
 		t.Fatal("expected scope-key mode disabled after fallback")
 	}
 
@@ -233,7 +233,7 @@ func TestPostgresSessionRegistry_ResetAll_AllRuntimesUsesRotatedStatus(t *testin
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'rotated'").
 		WillReturnResult(sqlmock.NewResult(0, 2))
 
@@ -253,7 +253,7 @@ func TestPostgresSessionRegistry_ResetAll_RuntimeScopedUsesRotatedStatus(t *test
 	}
 	defer db.Close()
 
-	sr := NewPostgresSessionRegistry(db, 30*time.Second)
+	sr := NewPostgresRegistry(db, 30*time.Second)
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'rotated'").
 		WithArgs("cli_test").
 		WillReturnResult(sqlmock.NewResult(0, 1))

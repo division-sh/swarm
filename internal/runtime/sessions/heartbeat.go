@@ -1,4 +1,4 @@
-package runtime
+package sessions
 
 import (
 	"context"
@@ -13,7 +13,7 @@ const (
 	maxLeaseHeartbeatInterval = 45 * time.Second
 )
 
-func startLeaseHeartbeat(ctx context.Context, sessions SessionRegistry, lease *SessionLease, runtimeMode string) func() {
+func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, runtimeMode string) func() {
 	if sessions == nil || lease == nil {
 		return func() {}
 	}
@@ -25,7 +25,7 @@ func startLeaseHeartbeat(ctx context.Context, sessions SessionRegistry, lease *S
 		return func() {}
 	}
 
-	interval := leaseHeartbeatInterval(lease.ExpiresAt)
+	interval := LeaseHeartbeatInterval(lease.ExpiresAt)
 	stopCh := make(chan struct{})
 	var once sync.Once
 	var wg sync.WaitGroup
@@ -58,7 +58,7 @@ func startLeaseHeartbeat(ctx context.Context, sessions SessionRegistry, lease *S
 	}
 }
 
-func leaseHeartbeatInterval(expiresAt time.Time) time.Duration {
+func LeaseHeartbeatInterval(expiresAt time.Time) time.Duration {
 	if expiresAt.IsZero() {
 		return 30 * time.Second
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	llm "empireai/internal/runtime/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -46,7 +47,7 @@ func loadContractToolSchemas() (map[string]contractToolSchemaEntry, error) {
 	return contractToolSchemas, nil
 }
 
-func contractToolDefinitions() ([]ToolDefinition, error) {
+func contractToolDefinitions() ([]llm.ToolDefinition, error) {
 	entries, err := loadContractToolSchemas()
 	if err != nil {
 		return nil, err
@@ -61,10 +62,10 @@ func contractToolDefinitions() ([]ToolDefinition, error) {
 	}
 	sort.Strings(names)
 
-	defs := make([]ToolDefinition, 0, len(names))
+	defs := make([]llm.ToolDefinition, 0, len(names))
 	for _, name := range names {
 		entry := entries[name]
-		defs = append(defs, ToolDefinition{
+		defs = append(defs, llm.ToolDefinition{
 			Name:        name,
 			Description: strings.TrimSpace(entry.Description),
 			Schema:      deepCloneJSONValue(entry.InputSchema),

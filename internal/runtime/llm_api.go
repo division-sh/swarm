@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 )
 
 // AnthropicAPIRuntime provides production API-backed LLM execution.
 type AnthropicAPIRuntime struct {
 	cfg           *config.Config
-	sessions      SessionRegistry
+	sessions      sessions.Registry
 	turns         TurnPersistence
 	conversations ConversationPersistence
 	budget        *BudgetTracker
@@ -29,7 +31,7 @@ type AnthropicAPIRuntime struct {
 	apiKey        string
 }
 
-func NewAnthropicAPIRuntime(cfg *config.Config, sessions SessionRegistry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget *BudgetTracker) *AnthropicAPIRuntime {
+func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget *BudgetTracker) *AnthropicAPIRuntime {
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
@@ -45,7 +47,7 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions SessionRegistry, lockOw
 	}
 }
 
-func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
+func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s *llm.Session) error {
 	if r.conversations == nil || s == nil {
 		return nil
 	}
@@ -64,8 +66,8 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 	})
 }
 
-func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	scope := sessionScopeFromContext(ctx)
+func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	scope := sessions.ScopeFromContext(ctx)
 	mode := strings.TrimSpace(scope.ConversationMode)
 	if mode == "" {
 		mode = "session"
@@ -80,7 +82,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		return nil, err
 	}
 
-	s := &Session{
+	s := &llm.Session{
 		ID:               lease.SessionID,
 		AgentID:          agentID,
 		RuntimeMode:      "api",
@@ -99,7 +101,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 	return s, nil
 }
 
-func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -123,7 +125,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		return nil, err
 	}
 	defer func() { _ = r.sessions.Release(lease) }()
-	stopLeaseHeartbeat := startLeaseHeartbeat(ctx, r.sessions, lease, "api")
+	stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, "api")
 	defer stopLeaseHeartbeat()
 
 	if lease.SessionID != s.ID {
@@ -239,7 +241,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	return &resp, nil
 }
 
-func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Session) {
+func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *llm.Session) {
 	if r.conversations == nil || s == nil {
 		return
 	}
@@ -270,7 +272,7 @@ func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRec
 	}
 }
 
-func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, input Message) (anthropicRequest, error) {
+func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *llm.Session, input llm.Message) (anthropicRequest, error) {
 	msgs := make([]anthropicMessage, 0, len(s.Messages)+1)
 	for _, m := range s.Messages {
 		am, ok := toAnthropicMessage(m)
@@ -326,7 +328,7 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 	}, nil
 }
 
-func toAnthropicMessage(m Message) (anthropicMessage, bool) {
+func toAnthropicMessage(m llm.Message) (anthropicMessage, bool) {
 	content := strings.TrimSpace(m.Content)
 	if content == "" {
 		return anthropicMessage{}, false
@@ -415,9 +417,9 @@ func shouldRetryAnthropicError(err error) bool {
 	return strings.Contains(msg, "request failed") || strings.Contains(msg, "timeout") || strings.Contains(msg, "temporary")
 }
 
-func convertAnthropicResponse(parsed anthropicResponse) Response {
-	resp := Response{
-		Message: Message{Role: "assistant"},
+func convertAnthropicResponse(parsed anthropicResponse) llm.Response {
+	resp := llm.Response{
+		Message: llm.Message{Role: "assistant"},
 	}
 	var textParts []string
 	for _, block := range parsed.Content {
@@ -427,7 +429,7 @@ func convertAnthropicResponse(parsed anthropicResponse) Response {
 				textParts = append(textParts, block.Text)
 			}
 		case "tool_use":
-			resp.ToolCalls = append(resp.ToolCalls, ToolCall{
+			resp.ToolCalls = append(resp.ToolCalls, llm.ToolCall{
 				Name:      block.Name,
 				Arguments: block.Input,
 			})

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
+	llm "empireai/internal/runtime/llm"
+
 	"empireai/internal/events"
 	"empireai/internal/models"
 )
@@ -240,7 +242,7 @@ type ConversationRecord struct {
 	ScopeKey  string
 	TaskID    string
 	Mode      string
-	Messages  []Message
+	Messages  []llm.Message
 	Summary   string
 	TurnCount int
 	Status    string

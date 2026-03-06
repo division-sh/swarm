@@ -292,7 +292,7 @@ func TestAgentManager_SpawnAgent_RejectsMissingSystemPrompt(t *testing.T) {
 	t.Setenv("EMPIREAI_PROMPTS_DIR", t.TempDir())
 
 	bus := NewEventBus(InMemoryEventStore{})
-	factory := NewLLMAgentFactory(&captureRuntime{}, &fakeToolExec{}, nil)
+	factory := NewLLMAgentFactory(&llmNoToolRuntime{}, noopToolExec{}, nil)
 	am := NewAgentManager(bus, factory)
 
 	err := am.SpawnAgent(models.AgentConfig{
@@ -320,7 +320,7 @@ func TestAgentManager_Recover_RejectsMissingSystemPrompt(t *testing.T) {
 			},
 		},
 	}
-	factory := NewLLMAgentFactory(&captureRuntime{}, &fakeToolExec{}, nil)
+	factory := NewLLMAgentFactory(&llmNoToolRuntime{}, noopToolExec{}, nil)
 	am := NewAgentManager(bus, factory, store)
 
 	err := am.Recover(context.Background())

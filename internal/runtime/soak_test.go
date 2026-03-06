@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
 )
 
 type echoRuntime struct {
@@ -12,7 +15,7 @@ type echoRuntime struct {
 	turns map[string]int
 }
 
-func (r *echoRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
+func (r *echoRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	_ = systemPrompt
 	_ = tools
 	r.mu.Lock()
@@ -21,20 +24,20 @@ func (r *echoRuntime) StartSession(_ context.Context, agentID, systemPrompt stri
 		r.turns = make(map[string]int)
 	}
 	r.turns[agentID] = 0
-	return &Session{
+	return &llm.Session{
 		ID:          "sess-" + agentID,
 		AgentID:     agentID,
 		RuntimeMode: "test",
 	}, nil
 }
 
-func (r *echoRuntime) ContinueSession(_ context.Context, s *Session, message Message) (*Response, error) {
+func (r *echoRuntime) ContinueSession(_ context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.turns[s.AgentID]++
 	n := r.turns[s.AgentID]
-	return &Response{
-		Message: Message{
+	return &llm.Response{
+		Message: llm.Message{
 			Role:    "assistant",
 			Content: fmt.Sprintf("turn=%d echo=%s", n, message.Content),
 		},
@@ -43,12 +46,12 @@ func (r *echoRuntime) ContinueSession(_ context.Context, s *Session, message Mes
 
 func TestConversationLongRunContinuity(t *testing.T) {
 	rt := &echoRuntime{}
-	c := NewConversation(
+	c := llm.NewConversation(
 		"agent-soak",
 		"",
 		"soak test prompt",
 		nil,
-		SessionScoped,
+		llm.SessionScoped,
 		200,
 		rt,
 	)
@@ -76,7 +79,7 @@ func TestConversationLongRunContinuity(t *testing.T) {
 }
 
 func TestSessionRegistryLockContentionSoak(t *testing.T) {
-	sr := NewInMemorySessionRegistry(0)
+	sr := sessions.NewInMemoryRegistry(0)
 
 	first, err := sr.Acquire("agent-lock", "cli_test", "holder", "")
 	if err != nil {
@@ -124,12 +127,12 @@ func TestConversationConcurrentTurnLoad(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			agentID := fmt.Sprintf("agent-soak-%02d", i)
-			c := NewConversation(
+			c := llm.NewConversation(
 				agentID,
 				"",
 				"concurrent soak prompt",
 				nil,
-				SessionScoped,
+				llm.SessionScoped,
 				turns+20,
 				rt,
 			)

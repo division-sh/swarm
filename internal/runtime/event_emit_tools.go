@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"empireai/internal/commgraph"
+	llm "empireai/internal/runtime/llm"
 )
 
 var (
@@ -1273,13 +1274,13 @@ func defaultAgentEventSchema(eventType string) EventSchema {
 	}
 }
 
-func GenerateEmitTools(role string) []ToolDefinition {
+func GenerateEmitTools(role string) []llm.ToolDefinition {
 	allowed := commgraph.ProducerEventsForRole(role)
 	if len(allowed) == 0 {
 		return nil
 	}
 	ensureEventSchemaRegistry()
-	tools := make([]ToolDefinition, 0, len(allowed))
+	tools := make([]llm.ToolDefinition, 0, len(allowed))
 	for _, eventType := range allowed {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
@@ -1295,7 +1296,7 @@ func GenerateEmitTools(role string) []ToolDefinition {
 			continue
 		}
 		schema := schemaForEventType(eventType)
-		tools = append(tools, ToolDefinition{
+		tools = append(tools, llm.ToolDefinition{
 			Name:        emitToolName(eventType),
 			Description: schema.Description,
 			Schema:      schema.Schema,

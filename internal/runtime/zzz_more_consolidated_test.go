@@ -9,6 +9,9 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	"empireai/internal/runtime/sessions"
+	llm "empireai/internal/runtime/llm"
+	workspace "empireai/internal/runtime/workspace"
 	"empireai/internal/testutil"
 	"encoding/hex"
 	"encoding/json"
@@ -94,15 +97,15 @@ func TestAgentContractHelpers_BudgetExpectationAndRemediation(t *testing.T) {
 
 type failingContinueRuntime struct{}
 
-func (failingContinueRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
-	return &Session{ID: "s", AgentID: agentID, RuntimeMode: "api"}, nil
+func (failingContinueRuntime) StartSession(_ context.Context, agentID, _ string, _ []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{ID: "s", AgentID: agentID, RuntimeMode: "api"}, nil
 }
 
-func (failingContinueRuntime) ContinueSession(context.Context, *Session, Message) (*Response, error) {
+func (failingContinueRuntime) ContinueSession(context.Context, *llm.Session, llm.Message) (*llm.Response, error) {
 	return nil, errors.New("continue failed")
 }
 
-func (failingContinueRuntime) PersistConversationSnapshot(context.Context, *Session) error {
+func (failingContinueRuntime) PersistConversationSnapshot(context.Context, *llm.Session) error {
 	return nil
 }
 
@@ -122,12 +125,12 @@ func TestAttemptPostTurnContractRemediation_Branches(t *testing.T) {
 
 	okAgent := &LLMAgent{
 		cfg: models.AgentConfig{ID: "empire-coordinator", Role: "empire-coordinator"},
-		conversation: NewConversation(
+		conversation: llm.NewConversation(
 			"empire-coordinator",
 			"",
 			"prompt",
 			nil,
-			SessionScoped,
+			llm.SessionScoped,
 			10,
 			&llmNoToolRuntime{},
 		),
@@ -145,12 +148,12 @@ func TestAttemptPostTurnContractRemediation_Branches(t *testing.T) {
 
 	failAgent := &LLMAgent{
 		cfg: models.AgentConfig{ID: "empire-coordinator", Role: "empire-coordinator"},
-		conversation: NewConversation(
+		conversation: llm.NewConversation(
 			"empire-coordinator",
 			"",
 			"prompt",
 			nil,
-			SessionScoped,
+			llm.SessionScoped,
 			10,
 			failingContinueRuntime{},
 		),
@@ -186,7 +189,7 @@ func TestAllowedTools_ExtractionAndFiltering(t *testing.T) {
 		}
 	}
 
-	in := []ToolDefinition{{Name: "t1"}, {Name: "t2"}, {Name: "t9"}}
+	in := []llm.ToolDefinition{{Name: "t1"}, {Name: "t2"}, {Name: "t9"}}
 	out := filterTools(in, allowed, true)
 	if len(out) != 2 {
 		t.Fatalf("expected 2 tools after filtering, got %d", len(out))
@@ -219,9 +222,9 @@ func TestAllowedTools_InvalidConfig_DoesNotConstrain(t *testing.T) {
 }
 
 func TestInjectHumanTaskToolResult_Branches(t *testing.T) {
-	conv := &Conversation{
+	conv := &llm.Conversation{
 		AgentID: "a1",
-		Session: &Session{ID: "s1", AgentID: "a1"},
+		Session: &llm.Session{ID: "s1", AgentID: "a1"},
 	}
 	agent := &LLMAgent{cfg: models.AgentConfig{ID: "a1"}, conversation: conv}
 
@@ -357,7 +360,7 @@ func TestRuntimeHelperFunctions_Misc(t *testing.T) {
 		t.Fatalf("filterOutVerticalScopedAgentIDs mismatch: %+v", filtered)
 	}
 
-	deduped := dedupeToolCalls([]ToolCall{
+	deduped := dedupeToolCalls([]llm.ToolCall{
 		{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "saas_gap"}},
 		{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "saas_gap"}},
 		{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "saas_trend"}},
@@ -608,14 +611,14 @@ func TestAnthropicAPIRuntime_ContinueSession_BudgetEmergencyStops(t *testing.T) 
 		},
 	}
 	b := &BudgetTracker{lastState: map[string]string{"vertical|v1": "emergency"}}
-	r := NewAnthropicAPIRuntime(cfg, NewInMemorySessionRegistry(time.Second), "o", nil, nil, b)
+	r := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "o", nil, nil, b)
 
 	s, err := r.StartSession(context.Background(), "a1", "sys", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "a1", VerticalID: "v1"})
-	if _, err := r.ContinueSession(ctx, s, Message{Role: "user", Content: "x"}); err == nil || !strings.Contains(err.Error(), "budget emergency") {
+	if _, err := r.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "x"}); err == nil || !strings.Contains(err.Error(), "budget emergency") {
 		t.Fatalf("expected budget emergency error, got %v", err)
 	}
 }
@@ -636,7 +639,7 @@ func TestAnthropicAPIRuntime_ContinueSession_ParseFailure_PersistsAndRotates(t *
 			},
 		},
 	}
-	sessions := NewInMemorySessionRegistry(time.Second)
+	sessions := sessions.NewInMemoryRegistry(time.Second)
 	turns := &apiTurnCapture{}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -656,7 +659,7 @@ func TestAnthropicAPIRuntime_ContinueSession_ParseFailure_PersistsAndRotates(t *
 	}
 	oldID := s.ID
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "a1", VerticalID: "v1"})
-	if _, err := r.ContinueSession(ctx, s, Message{Role: "user", Content: "x"}); err == nil || !strings.Contains(err.Error(), "anthropic status 500") {
+	if _, err := r.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "x"}); err == nil || !strings.Contains(err.Error(), "anthropic status 500") {
 		t.Fatalf("expected anthropic status error, got %v", err)
 	}
 	if turns.calls != 1 || turns.last.ParseOK {
@@ -706,8 +709,8 @@ func TestAnthropicAPIRuntime_StartContinue_MissingKey_And_Success(t *testing.T) 
 			},
 		},
 	}
-	sessions := NewInMemorySessionRegistry(1 * time.Second)
-	convs := &convStubAPI{loadOK: true, loadRec: ConversationRecord{Messages: []Message{{Role: "user", Content: "prior"}}, TurnCount: 1}, upsertErr: os.ErrInvalid}
+	sessions := sessions.NewInMemoryRegistry(1 * time.Second)
+	convs := &convStubAPI{loadOK: true, loadRec: ConversationRecord{Messages: []llm.Message{{Role: "user", Content: "prior"}}, TurnCount: 1}, upsertErr: os.ErrInvalid}
 	turns := &turnStubAPI{err: os.ErrInvalid}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -738,13 +741,13 @@ func TestAnthropicAPIRuntime_StartContinue_MissingKey_And_Success(t *testing.T) 
 	}
 
 	r.apiKey = ""
-	if _, err := r.ContinueSession(context.Background(), s, Message{Role: "user", Content: "x"}); err == nil {
+	if _, err := r.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "x"}); err == nil {
 		t.Fatalf("expected missing ANTHROPIC_API_KEY error")
 	}
 
 	r.apiKey = "k"
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "a1", Type: "haiku", VerticalID: "v1"})
-	resp, err := r.ContinueSession(ctx, s, Message{Role: "user", Content: "go"})
+	resp, err := r.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "go"})
 	if err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
@@ -754,8 +757,8 @@ func TestAnthropicAPIRuntime_StartContinue_MissingKey_And_Success(t *testing.T) 
 }
 
 func TestAnthropicAPIRuntime_NilSession_Error(t *testing.T) {
-	r := NewAnthropicAPIRuntime(&config.Config{LLM: config.LLMConfig{RuntimeMode: "api", Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3}, ClaudeAPI: config.ClaudeAPIConfig{DefaultModel: "m"}}}, NewInMemorySessionRegistry(time.Second), "x", nil, nil, nil)
-	if _, err := r.ContinueSession(context.Background(), nil, Message{Role: "user", Content: "x"}); err == nil {
+	r := NewAnthropicAPIRuntime(&config.Config{LLM: config.LLMConfig{RuntimeMode: "api", Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3}, ClaudeAPI: config.ClaudeAPIConfig{DefaultModel: "m"}}}, sessions.NewInMemoryRegistry(time.Second), "x", nil, nil, nil)
+	if _, err := r.ContinueSession(context.Background(), nil, llm.Message{Role: "user", Content: "x"}); err == nil {
 		t.Fatalf("expected nil session error")
 	}
 }
@@ -790,7 +793,7 @@ func TestAnthropicAPIRuntime_SendRequest_ErrorBranches(t *testing.T) {
 			},
 		},
 	}
-	r := NewAnthropicAPIRuntime(cfg, NewInMemorySessionRegistry(time.Second), "o", nil, nil, nil)
+	r := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "o", nil, nil, nil)
 	r.apiKey = "k"
 
 	t.Run("decode error", func(t *testing.T) {
@@ -855,20 +858,20 @@ func TestAnthropicAPIRuntime_SendRequest_ErrorBranches(t *testing.T) {
 }
 
 func TestAnthropicHelpers_ToAnthropicMessage_AndBuildRequestErrors(t *testing.T) {
-	if _, ok := toAnthropicMessage(Message{Role: "user", Content: "  "}); ok {
+	if _, ok := toAnthropicMessage(llm.Message{Role: "user", Content: "  "}); ok {
 		t.Fatal("expected empty content to be skipped")
 	}
 
-	am, ok := toAnthropicMessage(Message{Role: "assistant", Content: "hi"})
+	am, ok := toAnthropicMessage(llm.Message{Role: "assistant", Content: "hi"})
 	if !ok || am.Role != "assistant" {
 		t.Fatalf("expected assistant role, got ok=%v msg=%+v", ok, am)
 	}
 
-	um, ok := toAnthropicMessage(Message{Role: "board_directive", Content: "x"})
+	um, ok := toAnthropicMessage(llm.Message{Role: "board_directive", Content: "x"})
 	if !ok || um.Role != "user" {
 		t.Fatalf("expected user role for unknown, got ok=%v msg=%+v", ok, um)
 	}
-	m, ok := toAnthropicMessage(Message{Role: "tool", Content: "x"})
+	m, ok := toAnthropicMessage(llm.Message{Role: "tool", Content: "x"})
 	if !ok || m.Role != "user" || !strings.Contains(m.Content.(string), "Tool result:") {
 		t.Fatalf("unexpected tool message: ok=%v msg=%+v", ok, m)
 	}
@@ -880,15 +883,15 @@ func TestAnthropicHelpers_ToAnthropicMessage_AndBuildRequestErrors(t *testing.T)
 			ClaudeAPI:   config.ClaudeAPIConfig{DefaultModel: ""},
 		},
 	}
-	r := NewAnthropicAPIRuntime(cfg, NewInMemorySessionRegistry(time.Second), "o", nil, nil, nil)
+	r := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "o", nil, nil, nil)
 
-	_, err := r.buildRequest(context.Background(), &Session{AgentID: "a", SystemPrompt: "s", Messages: []Message{{Role: "user", Content: " "}}}, Message{Role: "user", Content: ""})
+	_, err := r.buildRequest(context.Background(), &llm.Session{AgentID: "a", SystemPrompt: "s", Messages: []llm.Message{{Role: "user", Content: " "}}}, llm.Message{Role: "user", Content: ""})
 	if err == nil {
 		t.Fatal("expected messages required error")
 	}
 
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "a", Role: "pm-agent", VerticalID: "v1"})
-	_, err = r.buildRequest(ctx, &Session{AgentID: "a", SystemPrompt: "s", Messages: []Message{{Role: "user", Content: "hi"}}}, Message{Role: "user", Content: "x"})
+	_, err = r.buildRequest(ctx, &llm.Session{AgentID: "a", SystemPrompt: "s", Messages: []llm.Message{{Role: "user", Content: "hi"}}}, llm.Message{Role: "user", Content: "x"})
 	if err == nil || !strings.Contains(err.Error(), "default_model is required") {
 		t.Fatalf("expected model required error, got %v", err)
 	}
@@ -918,7 +921,7 @@ func TestClaudeCLIRuntime_Run_ErrorOutputBranches(t *testing.T) {
 			},
 		},
 	}
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(5*time.Second), "owner", nil, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(5*time.Second), "owner", nil, nil, nil, nil)
 
 	_, err := rt.run(context.Background(), []string{"-p", "x"}, nil)
 	if err == nil || !strings.Contains(err.Error(), "claude cli run failed") {
@@ -953,7 +956,7 @@ func TestClaudeCLIRuntime_Run_TimeoutErrorIsExplicit(t *testing.T) {
 			},
 		},
 	}
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(5*time.Second), "owner", nil, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(5*time.Second), "owner", nil, nil, nil, nil)
 	_, err := rt.run(context.Background(), []string{"-p", "x"}, nil)
 	if err == nil {
 		t.Fatal("expected timeout error")
@@ -1001,7 +1004,7 @@ func TestParseCLIResponse_ToolCallsForms(t *testing.T) {
 }
 
 func TestClaudeCLIHelpers_ToolNamesAndUnsupportedFlags(t *testing.T) {
-	if got := toolNamesCSV([]ToolDefinition{
+	if got := toolNamesCSV([]llm.ToolDefinition{
 		{Name: "agent_message"},
 		{Name: "sql_execute"},
 		{Name: "agent_message"},
@@ -1032,7 +1035,7 @@ func TestClaudeCLIRuntime_EffectiveCLITimeout_FactoryFloorAndEnvOverride(t *test
 			},
 		},
 	}
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(5*time.Second), "owner", nil, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(5*time.Second), "owner", nil, nil, nil, nil)
 
 	factoryCtx := WithActor(context.Background(), models.AgentConfig{ID: "factory-1", Mode: "factory"})
 	if got := rt.effectiveCLITimeout(factoryCtx); got != 300*time.Second {
@@ -1103,9 +1106,9 @@ func TestClaudeCLIRuntime_StartContinue_And_AuthError(t *testing.T) {
 			},
 		},
 	}
-	sessions := NewInMemorySessionRegistry(1 * time.Second)
+	sessions := sessions.NewInMemoryRegistry(1 * time.Second)
 	turns := &turnStub{err: os.ErrInvalid}
-	convs := &convStub{loadOK: true, loadRec: ConversationRecord{Messages: []Message{{Role: "user", Content: "prior"}}, TurnCount: 1}, upsertErr: os.ErrInvalid}
+	convs := &convStub{loadOK: true, loadRec: ConversationRecord{Messages: []llm.Message{{Role: "user", Content: "prior"}}, TurnCount: 1}, upsertErr: os.ErrInvalid}
 
 	r := NewClaudeCLIRuntime(cfg, sessions, "lock", turns, nil, nil, convs)
 	s, err := r.StartSession(context.Background(), "a1", "sys", nil)
@@ -1117,7 +1120,7 @@ func TestClaudeCLIRuntime_StartContinue_And_AuthError(t *testing.T) {
 	}
 
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "a1", Type: "worker", VerticalID: "v1"})
-	resp, err := r.ContinueSession(ctx, s, Message{Role: "user", Content: "go"})
+	resp, err := r.ContinueSession(ctx, s, llm.Message{Role: "user", Content: "go"})
 	if err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
@@ -1132,14 +1135,14 @@ func TestClaudeCLIRuntime_StartContinue_And_AuthError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession2: %v", err)
 	}
-	if _, err := r2.ContinueSession(context.Background(), s2, Message{Role: "user", Content: "x"}); err == nil {
+	if _, err := r2.ContinueSession(context.Background(), s2, llm.Message{Role: "user", Content: "x"}); err == nil {
 		t.Fatalf("expected auth required error")
 	}
 }
 
 func TestClaudeCLIRuntime_NilSession_Error(t *testing.T) {
-	r := NewClaudeCLIRuntime(&config.Config{LLM: config.LLMConfig{RuntimeMode: "cli_test", Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3}, ClaudeCLI: config.ClaudeCLIConfig{Command: "true", OutputFormat: "json"}}}, NewInMemorySessionRegistry(time.Second), "x", nil, nil, nil, nil)
-	if _, err := r.ContinueSession(context.Background(), nil, Message{Role: "user", Content: "x"}); err == nil {
+	r := NewClaudeCLIRuntime(&config.Config{LLM: config.LLMConfig{RuntimeMode: "cli_test", Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3}, ClaudeCLI: config.ClaudeCLIConfig{Command: "true", OutputFormat: "json"}}}, sessions.NewInMemoryRegistry(time.Second), "x", nil, nil, nil, nil)
+	if _, err := r.ContinueSession(context.Background(), nil, llm.Message{Role: "user", Content: "x"}); err == nil {
 		t.Fatalf("expected nil session error")
 	}
 
@@ -1165,12 +1168,12 @@ func TestClaudeCLIRuntime_FirstTurn_WithTools_UsesStdinPrompt(t *testing.T) {
 			},
 		},
 	}
-	r := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(1*time.Second), "lock", nil, nil, nil, nil)
-	s, err := r.StartSession(context.Background(), "a-tools", "sys", []ToolDefinition{{Name: "agent_message"}})
+	r := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(1*time.Second), "lock", nil, nil, nil, nil)
+	s, err := r.StartSession(context.Background(), "a-tools", "sys", []llm.ToolDefinition{{Name: "agent_message"}})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	resp, err := r.ContinueSession(context.Background(), s, Message{Role: "user", Content: "hello"})
+	resp, err := r.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "hello"})
 	if err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
@@ -1200,12 +1203,12 @@ func TestClaudeCLIRuntime_PromptArgFallback_OnPrintInputError(t *testing.T) {
 		},
 	}
 	turns := &turnCaptureStub{}
-	r := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(1*time.Second), "lock", turns, nil, nil, nil)
-	s, err := r.StartSession(context.Background(), "a-fallback", "sys", []ToolDefinition{{Name: "agent_message"}})
+	r := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(1*time.Second), "lock", turns, nil, nil, nil)
+	s, err := r.StartSession(context.Background(), "a-fallback", "sys", []llm.ToolDefinition{{Name: "agent_message"}})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	resp, err := r.ContinueSession(context.Background(), s, Message{Role: "user", Content: "hello from event"})
+	resp, err := r.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "hello from event"})
 	if err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
@@ -1234,12 +1237,12 @@ func TestClaudeCLIRuntime_EmptyPromptFailsFast(t *testing.T) {
 			},
 		},
 	}
-	r := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(1*time.Second), "lock", nil, nil, nil, nil)
+	r := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(1*time.Second), "lock", nil, nil, nil, nil)
 	s, err := r.StartSession(context.Background(), "a-empty", "sys", nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	if _, err := r.ContinueSession(context.Background(), s, Message{Role: "user", Content: "   "}); err == nil || !strings.Contains(err.Error(), "empty prompt input") {
+	if _, err := r.ContinueSession(context.Background(), s, llm.Message{Role: "user", Content: "   "}); err == nil || !strings.Contains(err.Error(), "empty prompt input") {
 		t.Fatalf("expected empty prompt error, got: %v", err)
 	}
 }
@@ -4041,10 +4044,12 @@ func TestToolExecutor_AgentManagement_AndMailbox_ErrorBranches(t *testing.T) {
 }
 
 func TestDockerWorkspaceManager_RunDocker_ExecSuccessAndErrors(t *testing.T) {
-	m := NewDockerWorkspaceManager(nil)
-	m.cfg.DockerBin = "sh"
+	m := workspace.NewDockerManager(nil)
+	cfg := workspace.DefaultDockerConfig()
+	cfg.DockerBin = "sh"
+	m.SetConfigForTest(cfg)
 
-	out, err := m.runDocker(context.Background(), "-c", "printf 'ok'")
+	out, err := m.RunDocker(context.Background(), "-c", "printf 'ok'")
 	if err != nil {
 		t.Fatalf("expected success, err=%v", err)
 	}
@@ -4052,27 +4057,27 @@ func TestDockerWorkspaceManager_RunDocker_ExecSuccessAndErrors(t *testing.T) {
 		t.Fatalf("expected ok, got %q", out)
 	}
 
-	_, err = m.runDocker(context.Background(), "-c", "echo bad 1>&2; exit 2")
+	_, err = m.RunDocker(context.Background(), "-c", "echo bad 1>&2; exit 2")
 	if err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatalf("expected error containing stderr, got %v", err)
 	}
 
-	_, err = m.runDocker(context.Background(), "-c", "exit 2")
+	_, err = m.RunDocker(context.Background(), "-c", "exit 2")
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestDockerWorkspaceManager_InspectContainer_NoSuchObject(t *testing.T) {
-	m := NewDockerWorkspaceManager(nil)
-	m.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m := workspace.NewDockerManager(nil)
+	m.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "inspect" {
 			return "", errors.New("Error: No such object: whatever")
 		}
 		return "", fmt.Errorf("unexpected args: %v", args)
-	}
+	})
 
-	exists, running, err := m.inspectContainer(context.Background(), "c1")
+	exists, running, err := m.InspectContainer(context.Background(), "c1")
 	if err != nil {
 		t.Fatalf("expected nil err, got %v", err)
 	}
@@ -4082,10 +4087,10 @@ func TestDockerWorkspaceManager_InspectContainer_NoSuchObject(t *testing.T) {
 }
 
 func TestDockerWorkspaceManager_EnsureContainerRunning_CreateStart_AndAlreadyRunning(t *testing.T) {
-	m := NewDockerWorkspaceManager(nil)
+	m := workspace.NewDockerManager(nil)
 	var calls []string
 	inspected := false
-	m.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		calls = append(calls, strings.Join(args, " "))
 		if len(args) == 0 {
 			return "", errors.New("missing args")
@@ -4106,9 +4111,9 @@ func TestDockerWorkspaceManager_EnsureContainerRunning_CreateStart_AndAlreadyRun
 		default:
 			return "", fmt.Errorf("unexpected: %v", args)
 		}
-	}
+	})
 
-	if err := m.ensureContainerRunning(context.Background(), "c1", []string{"img", "sleep", "infinity"}); err != nil {
+	if err := m.EnsureContainerRunning(context.Background(), "c1", []string{"img", "sleep", "infinity"}); err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
 	if len(calls) < 3 {
@@ -4117,8 +4122,8 @@ func TestDockerWorkspaceManager_EnsureContainerRunning_CreateStart_AndAlreadyRun
 }
 
 func TestDockerWorkspaceManager_EnsureContainerRunning_StartFailure(t *testing.T) {
-	m := NewDockerWorkspaceManager(nil)
-	m.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m := workspace.NewDockerManager(nil)
+	m.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		if len(args) == 0 {
 			return "", errors.New("missing args")
 		}
@@ -4132,16 +4137,16 @@ func TestDockerWorkspaceManager_EnsureContainerRunning_StartFailure(t *testing.T
 		default:
 			return "", nil
 		}
-	}
+	})
 
-	if err := m.ensureContainerRunning(context.Background(), "c1", []string{"img"}); err == nil {
+	if err := m.EnsureContainerRunning(context.Background(), "c1", []string{"img"}); err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestDockerWorkspaceManager_ResolveWorkspace_RoleAndVertical(t *testing.T) {
-	m := NewDockerWorkspaceManager(nil)
-	m.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m := workspace.NewDockerManager(nil)
+	m.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 
 		if len(args) > 0 && args[0] == "inspect" {
 			return "true", nil
@@ -4150,13 +4155,14 @@ func TestDockerWorkspaceManager_ResolveWorkspace_RoleAndVertical(t *testing.T) {
 			return "connected", nil
 		}
 		return "", nil
-	}
+	})
 
 	target, err := m.ResolveWorkspace(context.Background(), models.AgentConfig{Role: "factory-cto"})
 	if err != nil {
 		t.Fatalf("resolve role: %v", err)
 	}
-	if target == nil || target.Container != m.cfg.FactoryContainer || target.Workdir != m.cfg.FactoryWorkdir {
+	cfg := workspace.DefaultDockerConfig()
+	if target == nil || target.Container != cfg.FactoryContainer || target.Workdir != cfg.FactoryWorkdir {
 		t.Fatalf("unexpected target: %+v", target)
 	}
 
@@ -4164,10 +4170,10 @@ func TestDockerWorkspaceManager_ResolveWorkspace_RoleAndVertical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve vertical: %v", err)
 	}
-	if target2 == nil || !strings.HasPrefix(target2.Container, m.cfg.VerticalContainerPrefix) {
+	if target2 == nil || !strings.HasPrefix(target2.Container, cfg.VerticalContainerPrefix) {
 		t.Fatalf("unexpected target2: %+v", target2)
 	}
-	if target2.Workdir != m.cfg.VerticalWorkdir {
+	if target2.Workdir != cfg.VerticalWorkdir {
 		t.Fatalf("unexpected workdir: %q", target2.Workdir)
 	}
 }
@@ -4175,12 +4181,12 @@ func TestDockerWorkspaceManager_ResolveWorkspace_RoleAndVertical(t *testing.T) {
 func TestDockerWorkspaceManager_LookupVerticalSlug_Branches(t *testing.T) {
 	ctx := context.Background()
 
-	m := NewDockerWorkspaceManager(nil)
-	if _, err := m.lookupVerticalSlug(ctx, " "); err == nil {
+	m := workspace.NewDockerManager(nil)
+	if _, err := m.LookupVerticalSlug(ctx, " "); err == nil {
 		t.Fatal("expected vertical_id required error")
 	}
 
-	slug, err := m.lookupVerticalSlug(ctx, "  Ab_Cd / 123  ")
+	slug, err := m.LookupVerticalSlug(ctx, "  Ab_Cd / 123  ")
 	if err != nil {
 		t.Fatalf("lookup fallback: %v", err)
 	}
@@ -4189,13 +4195,13 @@ func TestDockerWorkspaceManager_LookupVerticalSlug_Branches(t *testing.T) {
 	}
 
 	_, db, _ := testutil.StartPostgres(t)
-	m2 := NewDockerWorkspaceManager(db)
-	m2.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m2 := workspace.NewDockerManager(db)
+	m2.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		if len(args) > 0 && args[0] == "inspect" {
 			return "true", nil
 		}
 		return "", nil
-	}
+	})
 
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -4204,7 +4210,7 @@ func TestDockerWorkspaceManager_LookupVerticalSlug_Branches(t *testing.T) {
 	`, verticalID); err != nil {
 		t.Fatalf("seed vertical: %v", err)
 	}
-	got, err := m2.lookupVerticalSlug(ctx, verticalID)
+	got, err := m2.LookupVerticalSlug(ctx, verticalID)
 	if err != nil {
 		t.Fatalf("lookup db: %v", err)
 	}
@@ -4219,15 +4225,15 @@ func TestDockerWorkspaceManager_LookupVerticalSlug_Branches(t *testing.T) {
 	`, verticalNoSlug); err != nil {
 		t.Fatalf("seed no slug: %v", err)
 	}
-	if _, err := m2.lookupVerticalSlug(ctx, verticalNoSlug); err == nil {
+	if _, err := m2.LookupVerticalSlug(ctx, verticalNoSlug); err == nil {
 		t.Fatal("expected error for missing slug")
 	}
 }
 
 func TestDockerWorkspaceManager_StopContainer_AndInspectError(t *testing.T) {
-	m := NewDockerWorkspaceManager((*sql.DB)(nil))
+	m := workspace.NewDockerManager((*sql.DB)(nil))
 	stopped := false
-	m.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		if len(args) == 0 {
 			return "", errors.New("missing args")
 		}
@@ -4240,34 +4246,36 @@ func TestDockerWorkspaceManager_StopContainer_AndInspectError(t *testing.T) {
 		default:
 			return "", nil
 		}
-	}
+	})
 
-	if err := m.stopContainer(context.Background(), "c1"); err != nil {
+	if err := m.StopContainer(context.Background(), "c1"); err != nil {
 		t.Fatalf("stop: %v", err)
 	}
 	if !stopped {
 		t.Fatal("expected stop to be called when running")
 	}
 
-	m2 := NewDockerWorkspaceManager(nil)
-	m2.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m2 := workspace.NewDockerManager(nil)
+	m2.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		return "", errors.New("permission denied")
-	}
-	if _, _, err := m2.inspectContainer(context.Background(), "c1"); err == nil {
+	})
+	if _, _, err := m2.InspectContainer(context.Background(), "c1"); err == nil {
 		t.Fatal("expected inspect error")
 	}
 }
 
 func TestDockerWorkspaceManager_EnsureContainerNetwork_AlreadyConnectedIsNonFatal(t *testing.T) {
-	m := NewDockerWorkspaceManager(nil)
-	m.cfg.WorkspaceNetwork = "empireai_default"
-	m.runDockerFn = func(_ context.Context, args ...string) (string, error) {
+	m := workspace.NewDockerManager(nil)
+	cfg := workspace.DefaultDockerConfig()
+	cfg.WorkspaceNetwork = "empireai_default"
+	m.SetConfigForTest(cfg)
+	m.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
 		if len(args) >= 4 && args[0] == "network" && args[1] == "connect" {
 			return "", errors.New("endpoint with name empireai-factory already exists in network empireai_default")
 		}
 		return "", nil
-	}
-	if err := m.ensureContainerNetwork(context.Background(), "empireai-factory"); err != nil {
+	})
+	if err := m.EnsureContainerNetwork(context.Background(), "empireai-factory"); err != nil {
 		t.Fatalf("expected already-connected error to be ignored, got %v", err)
 	}
 }

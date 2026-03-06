@@ -9,6 +9,10 @@ import (
 	"testing"
 	"time"
 
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
+
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
@@ -21,9 +25,9 @@ func TestClaudeCLIRuntimeBuildCommandInWorkspace(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.Timeout = time.Second
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(time.Second), "owner", nil, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "owner", nil, nil, nil, nil)
 
-	cmd := rt.buildCommand(context.Background(), []string{"-p", "hello"}, &WorkspaceTarget{
+	cmd := rt.buildCommand(context.Background(), []string{"-p", "hello"}, &workspace.Target{
 		Container: "empireai-v1",
 		Workdir:   "/workspace",
 	})
@@ -42,7 +46,7 @@ func TestClaudeCLIRuntimeBuildCommandHostFallback(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.Timeout = time.Second
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(time.Second), "owner", nil, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "owner", nil, nil, nil, nil)
 
 	cmd := rt.buildCommand(context.Background(), []string{"-p", "hello"}, nil)
 	expected := []string{"claude", "-p", "hello"}
@@ -134,7 +138,7 @@ func TestBuildMCPConfigArg_IncludesScopedHeaders(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.Timeout = time.Second
-	rt := NewClaudeCLIRuntime(cfg, NewInMemorySessionRegistry(time.Second), "owner", nil, nil, nil, nil)
+	rt := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "owner", nil, nil, nil, nil)
 
 	rec := NewEmittedEventsRecorder()
 	ctx := WithActor(context.Background(), models.AgentConfig{
@@ -146,9 +150,9 @@ func TestBuildMCPConfigArg_IncludesScopedHeaders(t *testing.T) {
 	ctx = WithInboundEvent(ctx, events.Event{ID: "e1", Type: events.EventType("market_research.scan_assigned")})
 	ctx = WithEmittedEventsRecorder(ctx, rec)
 
-	s := &Session{
+	s := &llm.Session{
 		AgentID: "a1",
-		Tools: []ToolDefinition{
+		Tools: []llm.ToolDefinition{
 			{Name: "emit_category_assessed"},
 			{Name: "emit_market_research_scan_complete"},
 			{Name: "sql_execute"},

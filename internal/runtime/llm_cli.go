@@ -16,16 +16,19 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
 )
 
 type ClaudeCLIRuntime struct {
 	cfg           *config.Config
-	sessions      SessionRegistry
+	sessions      sessions.Registry
 	turns         TurnPersistence
 	conversations ConversationPersistence
 	budget        *BudgetTracker
 	lockOwner     string
-	workspaces    WorkspaceResolver
+	workspaces    workspace.Resolver
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
@@ -37,11 +40,11 @@ type promptTransportFallback struct {
 
 func NewClaudeCLIRuntime(
 	cfg *config.Config,
-	sessions SessionRegistry,
+	sessions sessions.Registry,
 	lockOwner string,
 	turns TurnPersistence,
 	budget *BudgetTracker,
-	workspaces WorkspaceResolver,
+	workspaces workspace.Resolver,
 	conversations ConversationPersistence,
 ) *ClaudeCLIRuntime {
 	return &ClaudeCLIRuntime{
@@ -55,7 +58,7 @@ func NewClaudeCLIRuntime(
 	}
 }
 
-func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
+func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *llm.Session) error {
 	if r.conversations == nil || s == nil {
 		return nil
 	}
@@ -74,12 +77,12 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 	})
 }
 
-func (r *ClaudeCLIRuntime) SetWorkspaceResolver(resolver WorkspaceResolver) {
+func (r *ClaudeCLIRuntime) SetWorkspaceResolver(resolver workspace.Resolver) {
 	r.workspaces = resolver
 }
 
-func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	scope := sessionScopeFromContext(ctx)
+func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	scope := sessions.ScopeFromContext(ctx)
 	mode := strings.TrimSpace(scope.ConversationMode)
 	if mode == "" {
 		mode = "session"
@@ -93,7 +96,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 		return nil, err
 	}
 
-	s := &Session{
+	s := &llm.Session{
 		ID:               lease.SessionID,
 		AgentID:          agentID,
 		RuntimeMode:      "cli_test",
@@ -112,7 +115,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 	return s, nil
 }
 
-func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, message Message) (*Response, error) {
+func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
@@ -136,7 +139,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		return nil, err
 	}
 	defer func() { _ = r.sessions.Release(lease) }()
-	stopLeaseHeartbeat := startLeaseHeartbeat(ctx, r.sessions, lease, "cli_test")
+	stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, "cli_test")
 	defer stopLeaseHeartbeat()
 
 	if lease.SessionID != s.ID {
@@ -226,7 +229,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			s.ID = rotated.SessionID
 			s.TurnCount = 0
 			if len(s.Messages) > 0 {
-				s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
+				s.Messages = []llm.Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
 			}
 			logSessionRotated(
 				s.AgentID,
@@ -403,7 +406,7 @@ func isPromptArgRequiredError(err error) bool {
 	return strings.Contains(msg, "input must be provided either through stdin or as a prompt argument when using --print")
 }
 
-func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *WorkspaceTarget, prompt string) (*Response, error) {
+func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string) (*llm.Response, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, errors.New("prompt argument fallback requires non-empty prompt")
@@ -412,7 +415,7 @@ func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, 
 	return r.runWithInput(ctx, runArgs, target, "")
 }
 
-func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
+func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *llm.Session) (configJSON string, contextToken string, enabled bool, err error) {
 	if !shouldUseMCPBridge() || s == nil || len(s.Tools) == 0 {
 		return "", "", false, nil
 	}
@@ -557,7 +560,7 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	return strings.TrimSpace(u.String())
 }
 
-func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *WorkspaceTarget, prompt string) (*Response, promptTransportFallback, error) {
+func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string) (*llm.Response, promptTransportFallback, error) {
 	resp, err := r.runWithInput(ctx, args, target, prompt)
 	if err == nil || !isPromptArgRequiredError(err) {
 		return resp, promptTransportFallback{}, err
@@ -571,11 +574,11 @@ func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, a
 	return resp, used, err
 }
 
-func (r *ClaudeCLIRuntime) run(ctx context.Context, args []string, target *WorkspaceTarget) (*Response, error) {
+func (r *ClaudeCLIRuntime) run(ctx context.Context, args []string, target *workspace.Target) (*llm.Response, error) {
 	return r.runWithInput(ctx, args, target, "")
 }
 
-func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *WorkspaceTarget, input string) (*Response, error) {
+func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *workspace.Target, input string) (*llm.Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
 	if target != nil && target.Enabled() {
 		if strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) == "" {
@@ -684,7 +687,7 @@ func summarizeCLIErrorOutput(raw string) string {
 	return msg
 }
 
-func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, target *WorkspaceTarget) *exec.Cmd {
+func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, target *workspace.Target) *exec.Cmd {
 	if target != nil && target.Enabled() {
 		dockerBin := strings.TrimSpace(os.Getenv("EMPIREAI_DOCKER_BIN"))
 		if dockerBin == "" {
@@ -714,7 +717,7 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 	return exec.CommandContext(ctx, r.cfg.LLM.ClaudeCLI.Command, args...)
 }
 
-func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*WorkspaceTarget, error) {
+func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Target, error) {
 	if r.workspaces == nil {
 		return nil, nil
 	}
@@ -734,7 +737,7 @@ func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord
 	}
 }
 
-func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) {
+func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *llm.Session) {
 	if r.conversations == nil || s == nil {
 		return
 	}
@@ -755,9 +758,9 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 	}
 }
 
-func parseCLIResponse(raw []byte) *Response {
-	resp := &Response{
-		Message: Message{Role: "assistant"},
+func parseCLIResponse(raw []byte) *llm.Response {
+	resp := &llm.Response{
+		Message: llm.Message{Role: "assistant"},
 	}
 	if len(raw) == 0 {
 		return resp
@@ -805,7 +808,7 @@ func parseCLIResponse(raw []byte) *Response {
 					if args == nil {
 						args = m["arguments"]
 					}
-					resp.ToolCalls = append(resp.ToolCalls, ToolCall{
+					resp.ToolCalls = append(resp.ToolCalls, llm.ToolCall{
 						Name:      name,
 						Arguments: args,
 					})
@@ -823,7 +826,7 @@ func parseCLIResponse(raw []byte) *Response {
 				if args == nil {
 					args = m["input"]
 				}
-				resp.ToolCalls = append(resp.ToolCalls, ToolCall{
+				resp.ToolCalls = append(resp.ToolCalls, llm.ToolCall{
 					Name:      name,
 					Arguments: args,
 				})
@@ -842,7 +845,7 @@ func parseCLIResponse(raw []byte) *Response {
 	return resp
 }
 
-func dedupeToolCalls(calls []ToolCall) []ToolCall {
+func dedupeToolCalls(calls []llm.ToolCall) []llm.ToolCall {
 	if len(calls) <= 1 {
 		return calls
 	}
@@ -851,7 +854,7 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 		args string
 	}
 	seen := map[key]struct{}{}
-	out := make([]ToolCall, 0, len(calls))
+	out := make([]llm.ToolCall, 0, len(calls))
 	for _, c := range calls {
 		name := strings.TrimSpace(c.Name)
 		if name == "" {
@@ -872,7 +875,7 @@ type sessionIDAdopter interface {
 	AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
 }
 
-func adoptRegistrySessionID(reg SessionRegistry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func adoptRegistrySessionID(reg sessions.Registry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
 	if reg == nil {
 		return nil
 	}
@@ -883,7 +886,7 @@ func adoptRegistrySessionID(reg SessionRegistry, agentID, runtimeMode, lockOwner
 	return adopter.AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
 }
 
-func claudeToolsArg(tools []ToolDefinition) string {
+func claudeToolsArg(tools []llm.ToolDefinition) string {
 	if len(tools) == 0 {
 		return ""
 	}
@@ -905,7 +908,7 @@ func claudeToolsArg(tools []ToolDefinition) string {
 	return strings.TrimSpace(string(b))
 }
 
-func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig) UsageTokens {
+func estimateCLIUsageTokens(in llm.Message, out *llm.Response, actor models.AgentConfig) UsageTokens {
 	// This is intentionally crude. Claude Code does not currently expose usage
 	// metadata in a stable non-interactive way, so we approximate from payload sizes
 	// and apply a role-based floor to avoid undercounting long-session context.
@@ -956,7 +959,7 @@ func estimateTokensFromBytes(b []byte) int {
 	return (len(b) + 3) / 4
 }
 
-func toolNamesCSV(tools []ToolDefinition) string {
+func toolNamesCSV(tools []llm.ToolDefinition) string {
 	if len(tools) == 0 {
 		return ""
 	}
@@ -976,7 +979,7 @@ func toolNamesCSV(tools []ToolDefinition) string {
 	return strings.Join(names, ",")
 }
 
-func buildInitialPrompt(s *Session, firstMessage string) string {
+func buildInitialPrompt(s *llm.Session, firstMessage string) string {
 	var b strings.Builder
 	if strings.TrimSpace(s.SystemPrompt) != "" {
 		b.WriteString("System: ")
