@@ -448,7 +448,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	runtimeMode := strings.TrimSpace(am.runtimeMode)
 	am.mu.RUnlock()
 	if sessions != nil && runtimeMode != "" {
-		if rotated, err := sessions.Rotate(agentID, runtimeMode, "reconfigure", "agent reconfigured", ""); err != nil {
+		if rotated, err := sessions.Rotate(ctx, agentID, runtimeMode, "reconfigure", "agent reconfigured", ""); err != nil {
 			log.Printf("agent reconfigure session rotation failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
 		} else if rotated != nil {
 			logSessionRotated(agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)

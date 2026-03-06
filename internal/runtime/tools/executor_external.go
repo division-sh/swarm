@@ -67,18 +67,37 @@ func (e *Executor) execEmailAPI(ctx context.Context, actor models.AgentConfig, i
 	}
 
 	var in struct {
-		To      []string `json:"to"`
-		Subject string   `json:"subject"`
-		Body    string   `json:"body"`
+		To      any    `json:"to"`
+		Subject string `json:"subject"`
+		Body    string `json:"body"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
 	}
-	if len(in.To) == 0 {
+	recipients := make([]string, 0, 1)
+	switch t := in.To.(type) {
+	case string:
+		if to := strings.TrimSpace(t); to != "" {
+			recipients = append(recipients, to)
+		}
+	case []any:
+		for _, item := range t {
+			if to := strings.TrimSpace(asString(item)); to != "" {
+				recipients = append(recipients, to)
+			}
+		}
+	case []string:
+		for _, item := range t {
+			if to := strings.TrimSpace(item); to != "" {
+				recipients = append(recipients, to)
+			}
+		}
+	}
+	if len(recipients) == 0 {
 		return nil, errors.New("email_api requires at least one recipient")
 	}
 	msg := []byte(
-		"To: " + strings.Join(in.To, ",") + "\r\n" +
+		"To: " + strings.Join(recipients, ",") + "\r\n" +
 			"Subject: " + in.Subject + "\r\n" +
 			"MIME-Version: 1.0\r\n" +
 			"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
@@ -89,10 +108,10 @@ func (e *Executor) execEmailAPI(ctx context.Context, actor models.AgentConfig, i
 	if strings.TrimSpace(username) != "" || strings.TrimSpace(password) != "" {
 		auth = smtp.PlainAuth("", username, password, host)
 	}
-	if err := smtp.SendMail(smtpAddr, auth, from, in.To, msg); err != nil {
+	if err := smtp.SendMail(smtpAddr, auth, from, recipients, msg); err != nil {
 		return nil, fmt.Errorf("send email failed: %w", err)
 	}
-	return map[string]any{"status": "sent", "to": in.To}, nil
+	return map[string]any{"status": "sent", "to": recipients}, nil
 }
 
 func (e *Executor) execExternalProxy(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {

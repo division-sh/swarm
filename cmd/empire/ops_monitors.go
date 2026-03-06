@@ -110,7 +110,7 @@ func portfolioDigestLoop(
 		if trigger == "" {
 			trigger = string(triggerEvent.Type)
 		}
-		snap, err := digest.BuildSnapshot(context.Background(), digestStore, mailboxStore, topN)
+		snap, err := digest.BuildSnapshot(ctx, digestStore, mailboxStore, topN)
 		if err != nil {
 			log.Printf("portfolio digest compile failed trigger=%s err=%v", trigger, err)
 			return
@@ -137,14 +137,14 @@ func portfolioDigestLoop(
 			Payload:     payload,
 			CreatedAt:   time.Now(),
 		}
-		if err := bus.Publish(context.Background(), evt); err != nil {
+		if err := bus.Publish(ctx, evt); err != nil {
 			log.Printf("portfolio digest publish failed: %v", err)
 		}
 
 		// Delivery: Telegram push (compact summary) if configured.
 		if tg != nil {
 			compact := renderCompactDigest(trigger, snap)
-			sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			err := tg.NotifyText(sendCtx, compact)
 			cancel()
 			if err != nil {
@@ -254,13 +254,15 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 				"recommendation":   w.Recommendation,
 				"evaluated_at":     time.Now().UTC().Format(time.RFC3339),
 			})
-			_ = bus.Publish(context.Background(), events.Event{
+			if err := bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("vertical.health_warning"),
 				SourceAgent: "empire-coordinator",
 				Payload:     payload,
 				CreatedAt:   time.Now(),
-			})
+			}); err != nil {
+				log.Printf("vertical health warning publish failed vertical=%s err=%v", verticalID, err)
+			}
 
 			if mailboxStore != nil {
 				priority := "normal"
@@ -268,7 +270,7 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 					priority = "critical"
 				}
 				summary := fmt.Sprintf("Vertical health %s: %s", strings.ToUpper(w.Severity), w.Recommendation)
-				_, _ = mailboxStore.InsertMailboxItem(context.Background(), runtime.MailboxItem{
+				if _, err := mailboxStore.InsertMailboxItem(ctx, runtime.MailboxItem{
 					ID:         uuid.NewString(),
 					VerticalID: verticalID,
 					FromAgent:  "empire-coordinator",
@@ -278,7 +280,9 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 					Summary:    summary,
 					Context:    payload,
 					TimeoutAt:  time.Now().Add(7 * 24 * time.Hour),
-				})
+				}); err != nil {
+					log.Printf("vertical health mailbox insert failed vertical=%s err=%v", verticalID, err)
+				}
 			}
 		}
 	}

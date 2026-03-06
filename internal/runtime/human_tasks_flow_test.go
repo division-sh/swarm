@@ -30,7 +30,7 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 	exec.SetConfig(&config.Config{
 		Budget: config.BudgetConfig{
 			HumanTasks: config.HumanTasksConfig{
-				CategoriesEnabled: []string{"auth"},
+				CategoriesEnabled: []string{"verification"},
 			},
 		},
 	})
@@ -39,7 +39,7 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 		WithArgs(
 			"agent-1",
 			"v1",
-			"auth",
+			"verification",
 			"call supplier",
 			sqlmock.AnyArg(), // talking_points json
 			"",
@@ -56,8 +56,7 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 	})
 
 	out, err := exec.Execute(ctx, "human_task_request", map[string]any{
-		"vertical_id":    "v1",
-		"category":       "auth",
+		"category":       "verification",
 		"description":    "call supplier",
 		"talking_points": []string{"ask about lead times"},
 		"priority":       "high",
@@ -140,10 +139,9 @@ func TestRuntimeToolExecutor_HumanTaskDecide_ApprovalBudgetExhaustedForcesDeferr
 	})
 
 	out, err := exec.Execute(ctx, "human_task_decide", map[string]any{
-		"task_id":       "task-1",
-		"decision":      "approve",
-		"reason":        "ok",
-		"priority_rank": 2,
+		"task_id":  "task-1",
+		"decision": "approved",
+		"reason":   "ok",
 	})
 	if err != nil {
 		t.Fatalf("decide: %v", err)

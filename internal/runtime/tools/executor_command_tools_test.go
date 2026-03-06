@@ -71,7 +71,7 @@ func TestRuntimeToolExecutor_CommandTools_SuccessPaths(t *testing.T) {
 	if _, err := ex.Execute(rt.WithActor(ctx, actor), "nginx_reload", map[string]any{}); err != nil {
 		t.Fatalf("nginx_reload: %v", err)
 	}
-	if _, err := ex.Execute(rt.WithActor(ctx, actor), "systemd_control", map[string]any{"action": "restart", "unit": "empireai-orchestrator"}); err != nil {
+	if _, err := ex.Execute(rt.WithActor(ctx, actor), "systemd_control", map[string]any{"action": "restart", "service": "empireai-orchestrator"}); err != nil {
 		t.Fatalf("systemd_control: %v", err)
 	}
 	if _, err := ex.Execute(rt.WithActor(ctx, actor), "certbot_execute", map[string]any{"domain": "example.com"}); err != nil {

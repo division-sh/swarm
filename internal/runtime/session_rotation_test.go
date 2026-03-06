@@ -15,18 +15,18 @@ type rotateStubRegistry struct {
 	rotations int
 }
 
-func (r *rotateStubRegistry) Acquire(_, runtimeMode, _ string, scopeKey string) (*sessions.Lease, error) {
+func (r *rotateStubRegistry) Acquire(_ context.Context, _, runtimeMode, _ string, scopeKey string) (*sessions.Lease, error) {
 	return &sessions.Lease{SessionID: "sess-1", AgentID: "a1", RuntimeMode: runtimeMode, LockOwner: "owner", ScopeKey: scopeKey}, nil
 }
 
-func (r *rotateStubRegistry) Release(_ *sessions.Lease) error { return nil }
+func (r *rotateStubRegistry) Release(_ context.Context, _ *sessions.Lease) error { return nil }
 
-func (r *rotateStubRegistry) Rotate(agentID, runtimeMode, lockOwner, _ string, scopeKey string) (*sessions.Lease, error) {
+func (r *rotateStubRegistry) Rotate(_ context.Context, agentID, runtimeMode, lockOwner, _ string, scopeKey string) (*sessions.Lease, error) {
 	r.rotations++
 	return &sessions.Lease{SessionID: "sess-rotated", AgentID: agentID, RuntimeMode: runtimeMode, LockOwner: lockOwner, ScopeKey: scopeKey}, nil
 }
 
-func (r *rotateStubRegistry) IncrementTurn(_, _, _, _ string) error { return nil }
+func (r *rotateStubRegistry) IncrementTurn(_ context.Context, _, _, _, _ string) error { return nil }
 
 type turnCapture struct {
 	records []AgentTurnRecord
@@ -50,7 +50,7 @@ func TestMaybeRotateAfterTurn(t *testing.T) {
 	}
 	reg := &rotateStubRegistry{}
 
-	lease, err := maybeRotateAfterTurn(s, "api", reg, "owner", 3)
+	lease, err := maybeRotateAfterTurn(context.Background(), s, "api", reg, "owner", 3)
 	if err != nil {
 		t.Fatalf("rotate error: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestMaybeRotateAfterParseFailures(t *testing.T) {
 	}
 	reg := &rotateStubRegistry{}
 
-	lease, err := maybeRotateAfterParseFailures(s, "cli_test", reg, "owner", 2)
+	lease, err := maybeRotateAfterParseFailures(context.Background(), s, "cli_test", reg, "owner", 2)
 	if err != nil {
 		t.Fatalf("rotate error: %v", err)
 	}

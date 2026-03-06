@@ -15,13 +15,11 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimetools "empireai/internal/runtime/tools"
 	runtimetestkit "empireai/internal/runtime/testkit"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
-
-
 
 func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_Fire_Reconfigure_Mailbox_HumanTasks(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -87,8 +85,8 @@ func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_
 		t.Fatalf("spawn actor: %v", err)
 	}
 	if _, err := exec.Execute(WithActor(ctx, actor), "agent_message", map[string]any{
-		"target_agent_id": targetID,
-		"message":         "hi",
+		"to":      targetID,
+		"message": "hi",
 	}); err != nil {
 		t.Fatalf("agent_message: %v", err)
 	}
@@ -99,10 +97,9 @@ func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_
 	}
 
 	if _, err := exec.Execute(WithActor(ctx, actor), "schedule", map[string]any{
-		"event_type": "timer.test",
-		"mode":       "once",
-		"at":         time.Now().Add(10 * time.Second).UTC().Format(time.RFC3339),
-		"payload":    map[string]any{"x": 1},
+		"action":        "timer.test",
+		"delay_seconds": 10,
+		"context":       map[string]any{"x": 1},
 	}); err != nil {
 		t.Fatalf("schedule: %v", err)
 	}
@@ -111,24 +108,19 @@ func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_
 	}
 
 	if _, err := exec.Execute(WithActor(ctx, actor), "configure_routing", map[string]any{
-		"event_pattern": "opco.*",
+		"operation":     "add",
+		"event_type":    "opco.*",
 		"subscriber_id": targetID,
 		"reason":        "test",
-		"status":        "active",
 	}); err != nil {
 		t.Fatalf("configure_routing: %v", err)
 	}
 
 	hiredID := "qa-agent-" + verticalID
 	if _, err := exec.Execute(WithActor(ctx, actor), "agent_hire", map[string]any{
-		"config": map[string]any{
-			"id":          hiredID,
-			"type":        "stub",
-			"role":        "qa-agent",
-			"mode":        "operating",
-			"vertical_id": verticalID,
-			"config":      json.RawMessage(`{"system_prompt":"x","tools":["*"]}`),
-		},
+		"agent_id":      hiredID,
+		"role":          "qa-agent",
+		"system_prompt": "x",
 	}); err != nil {
 		t.Fatalf("agent_hire: %v", err)
 	}
@@ -145,15 +137,15 @@ func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_
 	}); err != nil {
 		t.Fatalf("agent_reconfigure: %v", err)
 	}
-	if _, err := exec.Execute(WithActor(ctx, actor), "agent_fire", map[string]any{"agent_id": hiredID}); err != nil {
+	if _, err := exec.Execute(WithActor(ctx, actor), "agent_fire", map[string]any{"agent_id": hiredID, "reason": "test"}); err != nil {
 		t.Fatalf("agent_fire: %v", err)
 	}
 
 	if _, err := exec.Execute(WithActor(ctx, actor), "mailbox_send", map[string]any{
 		"type":     "review",
 		"priority": "critical",
-		"summary":  "please review",
-		"context":  map[string]any{"a": 1},
+		"subject":  "please review",
+		"payload":  map[string]any{"a": 1},
 	}); err != nil {
 		t.Fatalf("mailbox_send: %v", err)
 	}
@@ -164,7 +156,7 @@ func TestRuntimeToolExecutor_EndToEndActions_AgentMessage_Schedule_Routing_Hire_
 	out, err := exec.Execute(WithActor(ctx, actor), "human_task_request", map[string]any{
 		"category":    "verification",
 		"description": "call someone",
-		"priority":    "medium",
+		"priority":    "normal",
 		"deadline":    time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339),
 		"talking_points": []string{
 			"x",
@@ -1263,7 +1255,7 @@ func TestRuntimeToolExecutor_SetManager_Instagram_Email_SystemTools(t *testing.T
 		cancel()
 
 		toolCtx, cancel = context.WithTimeout(ctx, 500*time.Millisecond)
-		if _, err := exec.Execute(WithActor(toolCtx, actor), "systemd_control", map[string]any{"action": "nope", "unit": "empireai-x"}); err == nil {
+		if _, err := exec.Execute(WithActor(toolCtx, actor), "systemd_control", map[string]any{"action": "nope", "service": "empireai-x"}); err == nil {
 			t.Fatal("expected systemd_control to reject invalid action")
 		}
 		cancel()

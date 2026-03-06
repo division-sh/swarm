@@ -1,24 +1,27 @@
 package sessions
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestInMemorySessionRegistryLeaseConflictAndRelease(t *testing.T) {
 	sr := NewInMemoryRegistry(0)
 
-	leaseA, err := sr.Acquire("agent-a", "cli_test", "worker-a", "")
+	leaseA, err := sr.Acquire(context.Background(), "agent-a", "cli_test", "worker-a", "")
 	if err != nil {
 		t.Fatalf("acquire A: %v", err)
 	}
 
-	if _, err := sr.Acquire("agent-a", "cli_test", "worker-b", ""); err == nil {
+	if _, err := sr.Acquire(context.Background(), "agent-a", "cli_test", "worker-b", ""); err == nil {
 		t.Fatalf("expected lease conflict for worker-b")
 	}
 
-	if err := sr.Release(leaseA); err != nil {
+	if err := sr.Release(context.Background(), leaseA); err != nil {
 		t.Fatalf("release A: %v", err)
 	}
 
-	leaseB, err := sr.Acquire("agent-a", "cli_test", "worker-b", "")
+	leaseB, err := sr.Acquire(context.Background(), "agent-a", "cli_test", "worker-b", "")
 	if err != nil {
 		t.Fatalf("acquire B after release: %v", err)
 	}
@@ -30,13 +33,13 @@ func TestInMemorySessionRegistryLeaseConflictAndRelease(t *testing.T) {
 func TestInMemorySessionRegistryRotate(t *testing.T) {
 	sr := NewInMemoryRegistry(0)
 
-	lease, err := sr.Acquire("agent-a", "cli_test", "worker-a", "")
+	lease, err := sr.Acquire(context.Background(), "agent-a", "cli_test", "worker-a", "")
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 	old := lease.SessionID
 
-	rotated, err := sr.Rotate("agent-a", "cli_test", "worker-a", "checkpoint", "")
+	rotated, err := sr.Rotate(context.Background(), "agent-a", "cli_test", "worker-a", "checkpoint", "")
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -47,11 +50,11 @@ func TestInMemorySessionRegistryRotate(t *testing.T) {
 
 func TestInMemorySessionRegistryAdoptSessionID(t *testing.T) {
 	sr := NewInMemoryRegistry(0)
-	_, err := sr.Acquire("agent-a", "cli_test", "worker-a", "")
+	_, err := sr.Acquire(context.Background(), "agent-a", "cli_test", "worker-a", "")
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	if err := sr.AdoptSessionID("agent-a", "cli_test", "worker-a", "claude-session-1", ""); err != nil {
+	if err := sr.AdoptSessionID(context.Background(), "agent-a", "cli_test", "worker-a", "claude-session-1", ""); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
 	rec, ok := sr.Snapshot("agent-a")

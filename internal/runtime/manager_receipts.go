@@ -204,7 +204,6 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	return false, ""
 }
 
-
 func (am *AgentManager) markEventInFlight(agentID, eventID string) bool {
 	agentID = strings.TrimSpace(agentID)
 	eventID = strings.TrimSpace(eventID)
@@ -360,12 +359,12 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID, stat
 		// Agent loop contexts are canceled aggressively during teardown; receipts
 		// must still persist so pending deliveries do not get stuck indefinitely.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			retryCtx, cancel := context.WithTimeout(context.Background(), receiptWriteTimeout)
+			retryCtx, cancel := context.WithTimeout(context.WithoutCancel(writeCtx), receiptWriteTimeout)
 			retryErr := am.store.UpsertEventReceipt(retryCtx, eventID, agentID, status, errText)
 			cancel()
 			if retryErr == nil {
 				if status == "error" {
-					am.maybeEscalateDeadLetter(context.Background(), eventID, agentID)
+					am.maybeEscalateDeadLetter(context.WithoutCancel(writeCtx), eventID, agentID)
 				}
 				return
 			}

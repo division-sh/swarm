@@ -1,15 +1,16 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
-	"strings"
 	"log"
+	"strings"
 
 	llm "empireai/internal/runtime/llm"
 	"empireai/internal/runtime/sessions"
 )
 
-func maybeRotateAfterTurn(s *llm.Session, runtimeMode string, registry sessions.Registry, lockOwner string, rotateAfter int) (*sessions.Lease, error) {
+func maybeRotateAfterTurn(ctx context.Context, s *llm.Session, runtimeMode string, registry sessions.Registry, lockOwner string, rotateAfter int) (*sessions.Lease, error) {
 	if s == nil || registry == nil || rotateAfter <= 0 {
 		return nil, nil
 	}
@@ -20,7 +21,7 @@ func maybeRotateAfterTurn(s *llm.Session, runtimeMode string, registry sessions.
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := buildRotationCheckpoint(fmt.Sprintf("turn_limit_reached:%d", rotateAfter), s)
-	lease, err := registry.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
+	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func maybeRotateAfterTurn(s *llm.Session, runtimeMode string, registry sessions.
 	return lease, nil
 }
 
-func maybeRotateAfterParseFailures(s *llm.Session, runtimeMode string, registry sessions.Registry, lockOwner string, threshold int) (*sessions.Lease, error) {
+func maybeRotateAfterParseFailures(ctx context.Context, s *llm.Session, runtimeMode string, registry sessions.Registry, lockOwner string, threshold int) (*sessions.Lease, error) {
 	if s == nil || registry == nil || threshold <= 0 {
 		return nil, nil
 	}
@@ -54,7 +55,7 @@ func maybeRotateAfterParseFailures(s *llm.Session, runtimeMode string, registry 
 	oldTurnCount := s.TurnCount
 	oldParseFailures := s.ParseFailures
 	summary := buildRotationCheckpoint(fmt.Sprintf("parse_failures_threshold:%d", threshold), s)
-	lease, err := registry.Rotate(s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
+	lease, err := registry.Rotate(ctx, s.AgentID, runtimeMode, lockOwner, summary, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}

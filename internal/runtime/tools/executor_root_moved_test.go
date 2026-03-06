@@ -17,8 +17,6 @@ import (
 	"time"
 )
 
-
-
 type mailboxStoreStub struct {
 	last MailboxItem
 }
@@ -92,9 +90,8 @@ func TestRuntimeToolExecutor_AgentMessage(t *testing.T) {
 	})
 
 	_, err := exec.Execute(ctx, "agent_message", map[string]any{
-		"target_agent_id": "t",
-		"event_type":      "agent.message",
-		"payload":         map[string]any{"ok": true},
+		"to":      "t",
+		"message": "hello",
 	})
 	if err != nil {
 		t.Fatalf("execute agent_message: %v", err)
@@ -131,13 +128,10 @@ func TestRuntimeToolExecutor_Schedule(t *testing.T) {
 		Mode:       "operating",
 		VerticalID: "v1",
 	})
-	at := time.Now().Add(40 * time.Millisecond).UTC().Format(time.RFC3339)
 	_, err := exec.Execute(ctx, "schedule", map[string]any{
-		"agent_id":   "a1",
-		"event_type": "timer.tick",
-		"mode":       "once",
-		"at":         at,
-		"payload":    map[string]any{"n": 1},
+		"action":        "timer.tick",
+		"delay_seconds": 0,
+		"context":       map[string]any{"n": 1},
 	})
 	if err != nil {
 		t.Fatalf("execute schedule: %v", err)
@@ -162,14 +156,8 @@ func TestRuntimeToolExecutor_AgentHireFire(t *testing.T) {
 	})
 
 	_, err := exec.Execute(ctx, "agent_hire", map[string]any{
-		"vertical_id": "v1",
-		"config": map[string]any{
-			"id":            "a-hire",
-			"type":          "worker",
-			"role":          "r1",
-			"mode":          "factory",
-			"subscriptions": []string{"x.y"},
-		},
+		"agent_id": "a-hire",
+		"role":     "r1",
 	})
 	if err != nil {
 		t.Fatalf("agent_hire failed: %v", err)
@@ -180,6 +168,7 @@ func TestRuntimeToolExecutor_AgentHireFire(t *testing.T) {
 
 	_, err = exec.Execute(ctx, "agent_fire", map[string]any{
 		"agent_id": "a-hire",
+		"reason":   "test",
 	})
 	if err != nil {
 		t.Fatalf("agent_fire failed: %v", err)
@@ -218,10 +207,9 @@ func TestRuntimeToolExecutor_ConfigureRouting(t *testing.T) {
 	})
 
 	_, err := exec.Execute(ctx, "configure_routing", map[string]any{
-		"vertical_id":   "v1",
-		"event_pattern": "foo.*",
+		"operation":     "add",
+		"event_type":    "foo.*",
 		"subscriber_id": "a1",
-		"installed_by":  "ceo-v1",
 	})
 	if err != nil {
 		t.Fatalf("configure_routing failed: %v", err)
@@ -268,10 +256,9 @@ func TestRuntimeToolExecutor_ConfigureRoutingCoSRequiresProposed(t *testing.T) {
 	})
 
 	_, err := exec.Execute(ctx, "configure_routing", map[string]any{
-		"vertical_id":   "v1",
-		"event_pattern": "foo.*",
+		"operation":     "add",
+		"event_type":    "foo.*",
 		"subscriber_id": "a2",
-		"status":        "active",
 	})
 	if err == nil {
 		t.Fatal("expected CoS active routing request to be rejected")
@@ -293,10 +280,9 @@ func TestRuntimeToolExecutor_ConfigureRoutingRejectsBootstrapMutation(t *testing
 	})
 
 	_, err := exec.Execute(ctx, "configure_routing", map[string]any{
-		"vertical_id":   "v1",
-		"event_pattern": "product_spec_ready",
+		"operation":     "remove",
+		"event_type":    "product_spec_ready",
 		"subscriber_id": "cto-agent-v1",
-		"status":        "deactivated",
 	})
 	if err == nil {
 		t.Fatal("expected bootstrap route mutation to be rejected")
@@ -317,11 +303,10 @@ func TestRuntimeToolExecutor_MailboxSend(t *testing.T) {
 		VerticalID: "v1",
 	})
 	out, err := exec.Execute(ctx, "mailbox_send", map[string]any{
-		"type":       "spend_request",
-		"priority":   "normal",
-		"summary":    "Need budget",
-		"context":    map[string]any{"amount": 12},
-		"timeout_at": time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339),
+		"type":     "spend_request",
+		"priority": "normal",
+		"subject":  "Need budget",
+		"payload":  map[string]any{"amount": 12},
 	})
 	if err != nil {
 		t.Fatalf("mailbox_send failed: %v", err)
@@ -354,8 +339,8 @@ func TestRuntimeToolExecutor_MailboxSend_NormalizesApprovalAliases(t *testing.T)
 		_, err := exec.Execute(ctx, "mailbox_send", map[string]any{
 			"type":     mt,
 			"priority": "normal",
-			"summary":  "Needs approval",
-			"context":  map[string]any{"source": "test"},
+			"subject":  "Needs approval",
+			"payload":  map[string]any{"source": "test"},
 		})
 		if err != nil {
 			t.Fatalf("mailbox_send(%q) failed: %v", mt, err)
@@ -1055,8 +1040,8 @@ func TestToolExecutor_SystemTools_ValidationAndAuth(t *testing.T) {
 		t.Fatal("expected invalid action error")
 	}
 	_, err = exec.Execute(WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "holding-devops"}), "systemd_control", map[string]any{
-		"action": "restart",
-		"unit":   "nginx",
+		"action":  "restart",
+		"service": "nginx",
 	})
 	if err == nil {
 		t.Fatal("expected unit prefix error")
@@ -1204,9 +1189,6 @@ func TestRuntimeToolExecutor_ExternalProxy_LoadsCredsDecryptsAndCallsEndpoint(t 
 		if got := r.Header.Get("X-From"); got != "cred" {
 			t.Fatalf("expected X-From=cred, got %q", got)
 		}
-		if got := r.Header.Get("X-User"); got != "u" {
-			t.Fatalf("expected X-User=u, got %q", got)
-		}
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
@@ -1244,8 +1226,8 @@ func TestRuntimeToolExecutor_ExternalProxy_LoadsCredsDecryptsAndCallsEndpoint(t 
 	})
 
 	out, err := exec.Execute(ctx, "whatsapp_business_api", map[string]any{
-		"headers": map[string]any{"X-User": "u"},
-		"body":    map[string]any{"hello": "world"},
+		"to":      "+15551234567",
+		"message": "hello world",
 	})
 	if err != nil {
 		t.Fatalf("external proxy: %v", err)
@@ -1294,9 +1276,7 @@ func TestRuntimeToolExecutor_ExternalProxy_DefaultMethodAndParseBody(t *testing.
 	ctx := WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "opco-ceo", Mode: "operating", VerticalID: verticalID})
 
 	out, err := exec.Execute(ctx, "domain_availability_check", map[string]any{
-		// method empty -> defaultExternalMethod => GET
-		"path":  "/v1/check",
-		"query": map[string]any{"q": "x"},
+		"domain": "example.com",
 	})
 	if err != nil {
 		t.Fatalf("domain_availability_check: %v", err)
@@ -1353,13 +1333,7 @@ func TestRuntimeToolExecutor_ExternalProxy_Succeeds_WithVerticalCredentials(t *t
 	}
 
 	out, err := exec.Execute(WithActor(ctx, actor), "domain_availability_check", map[string]any{
-		"path": "/check",
-		"query": map[string]any{
-			"domain": "example.com",
-		},
-		"headers": map[string]any{
-			"x-test": "1",
-		},
+		"domain": "example.com",
 	})
 	if err != nil {
 		t.Fatalf("external proxy: %v", err)
@@ -1378,7 +1352,7 @@ func TestRuntimeToolExecutor_ExternalProxy_Succeeds_WithVerticalCredentials(t *t
 	if _, err := db.ExecContext(ctx, `UPDATE verticals SET credentials=$2::jsonb WHERE id=$1::uuid`, verticalID, `{"registrar":{"endpoint":"`+badSrv.URL+`","api_key":"k1"}}`); err != nil {
 		t.Fatalf("update creds: %v", err)
 	}
-	if _, err := exec.Execute(WithActor(ctx, actor), "domain_availability_check", map[string]any{"path": "/check"}); err == nil {
+	if _, err := exec.Execute(WithActor(ctx, actor), "domain_availability_check", map[string]any{}); err == nil {
 		t.Fatal("expected error on 500 response")
 	}
 }

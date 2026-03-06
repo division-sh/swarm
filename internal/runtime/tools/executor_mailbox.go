@@ -11,7 +11,7 @@ import (
 	"empireai/internal/models"
 )
 
-func (e *Executor) execMailboxSend(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if e.mailboxStore == nil {
 		return nil, errors.New("mailbox store is not configured")
 	}
@@ -68,7 +68,7 @@ func (e *Executor) execMailboxSend(actor models.AgentConfig, input any) (any, er
 		timeout = parsed
 	}
 
-	id, err := e.mailboxStore.InsertMailboxItem(context.Background(), MailboxItem{
+	id, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
 		EventID:    in.EventID,
 		VerticalID: in.VerticalID,
 		FromAgent:  actor.ID,

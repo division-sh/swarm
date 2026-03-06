@@ -457,7 +457,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		summary := fmt.Sprintf("Budget emergency: scope=%s spent=%d cap=%d (%.0f%%)",
 			scope, spent, capCents, ratio*100.0)
 		// Best-effort: avoid breaking spend path if mailbox insert fails.
-		_, _ = t.mailbox.InsertMailboxItem(context.Background(), MailboxItem{
+		if _, err := t.mailbox.InsertMailboxItem(ctx, MailboxItem{
 			EventID:    evtID,
 			VerticalID: verticalID,
 			FromAgent:  t.mailboxFrom,
@@ -466,7 +466,9 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			Status:     "pending",
 			Context:    mustJSON(payload),
 			Summary:    summary,
-		})
+		}); err != nil {
+			runtimeWarn("budget", "failed to insert emergency budget mailbox item vertical=%s scope=%s: %v", verticalID, scope, err)
+		}
 	}
 	return nil
 }

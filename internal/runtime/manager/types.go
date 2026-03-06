@@ -84,24 +84,40 @@ type OrgTemplateRecord struct {
 	CreatedAt       time.Time
 }
 
-type ManagerPersistence interface {
+type AgentPersistence interface {
 	UpsertAgent(ctx context.Context, rec PersistedAgent) error
 	LoadAgents(ctx context.Context) ([]PersistedAgent, error)
 	MarkAgentTerminated(ctx context.Context, agentID string) error
+}
+
+type TemplatePersistence interface {
 	EnsureVerticalSchema(ctx context.Context, verticalID string) error
 	LoadLatestOrgTemplate(ctx context.Context) (OrgTemplateRecord, error)
 	LoadOrgTemplate(ctx context.Context, version string) (OrgTemplateRecord, error)
 	SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error
+}
+
+type RoutingPersistence interface {
 	UpsertRoutingRule(ctx context.Context, rule PersistedRoutingRule) error
 	LoadRoutingRules(ctx context.Context) ([]PersistedRoutingRule, error)
 	DeactivateRoutingRulesByVertical(ctx context.Context, verticalID string) error
+}
+
+type ReceiptPersistence interface {
 	UpsertEventReceipt(ctx context.Context, eventID, agentID, status, errText string) error
+}
+
+type PendingEventPersistence interface {
 	ListPendingEventsForAgent(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error)
 	ListPendingSubscribedEvents(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error)
 }
 
-type ManagerStore interface {
-	ManagerPersistence
+type ManagerPersistence interface {
+	AgentPersistence
+	TemplatePersistence
+	RoutingPersistence
+	ReceiptPersistence
+	PendingEventPersistence
 }
 
 type StrategicContext = json.RawMessage

@@ -41,7 +41,7 @@ func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, r
 			case <-stopCh:
 				return
 			case <-ticker.C:
-				refreshed, err := sessions.Acquire(agentID, runtimeMode, lockOwner, scopeKey)
+				refreshed, err := sessions.Acquire(ctx, agentID, runtimeMode, lockOwner, scopeKey)
 				if err != nil {
 					log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
 					continue

@@ -175,11 +175,13 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	}
 
 	scheduler := runtime.NewScheduler(func(sc runtime.Schedule) {
+		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
 		payload := sc.Payload
 		if len(payload) == 0 {
 			payload = []byte("{}")
 		}
-		_ = bus.Publish(context.Background(), events.Event{
+		if err := bus.Publish(callbackCtx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType(sc.EventType),
 			SourceAgent: sc.AgentID,
@@ -187,9 +189,13 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 			VerticalID:  sc.VerticalID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		})
+		}); err != nil {
+			log.Printf("schedule publish failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
+		}
 		if stores.ScheduleStore != nil {
-			_ = stores.ScheduleStore.MarkScheduleFired(context.Background(), sc)
+			if err := stores.ScheduleStore.MarkScheduleFired(callbackCtx, sc); err != nil {
+				log.Printf("mark schedule fired failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
+			}
 		}
 	})
 	defer scheduler.Stop()
@@ -296,14 +302,16 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 				if len(ctxPayload) == 0 {
 					ctxPayload = []byte("{}")
 				}
-				_, _ = stores.MailboxStore.InsertMailboxItem(ctx, runtime.MailboxItem{
+				if _, mailboxErr := stores.MailboxStore.InsertMailboxItem(ctx, runtime.MailboxItem{
 					FromAgent: "runtime",
 					Type:      "runtime.recovery_failed",
 					Priority:  "critical",
 					Status:    "pending",
 					Context:   ctxPayload,
 					Summary:   truncateString("Runtime recovery failed: "+err.Error(), 200),
-				})
+				}); mailboxErr != nil {
+					log.Printf("runtime recovery mailbox insert failed: %v", mailboxErr)
+				}
 			}
 
 			// Also emit an event for the live event stream / traces.
@@ -314,13 +322,15 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 			if len(payload) == 0 {
 				payload = []byte("{}")
 			}
-			_ = bus.Publish(ctx, events.Event{
+			if publishErr := bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("runtime.recovery_failed"),
 				SourceAgent: "runtime",
 				Payload:     payload,
 				CreatedAt:   time.Now(),
-			})
+			}); publishErr != nil {
+				log.Printf("runtime recovery_failed publish failed: %v", publishErr)
+			}
 		}
 	}
 	manager.Run(ctx)
@@ -343,7 +353,9 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 
 	// Emit system.started after agents are subscribed so the coordinator receives it immediately.
 	if stores.SQLDB != nil {
-		_ = emitSystemStarted(ctx, stores, bus)
+		if err := emitSystemStarted(ctx, stores, bus); err != nil {
+			log.Printf("emit system.started failed: %v", err)
+		}
 	}
 
 	if selfCheck {
@@ -2276,13 +2288,15 @@ func runTemplateSubcommand(args []string) error {
 				"routes_yaml":  strings.TrimSpace(*routesYAML),
 				"requested_at": time.Now().UTC().Format(time.RFC3339),
 			}
-			_ = appendTargetedEvent(ctx, stores, events.Event{
+			if err := appendTargetedEvent(ctx, stores, events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("template.publish_requested"),
 				SourceAgent: "human",
 				Payload:     mustJSON(reqPayload),
 				CreatedAt:   time.Now(),
-			}, []string{"factory-cto"})
+			}, []string{"factory-cto"}); err != nil {
+				log.Printf("template publish_requested append failed: %v", err)
+			}
 		}
 
 		if err := svc.PublishTemplate(ctx, *version, agents, bootstrapRoutes, seededRoutes, *createdBy, *description); err != nil {
@@ -2842,7 +2856,9 @@ func runDirectiveSubcommand(args []string) error {
 		return err
 	}
 	stores := buildStores(ctx, *storeMode, cfg, *migrate, *migrationFile)
-	_ = syncRuntimeGlobalAgents(ctx, stores.ManagerStore)
+	if err := syncRuntimeGlobalAgents(ctx, stores.ManagerStore); err != nil {
+		log.Printf("directive command global agents sync failed (continuing): %v", err)
+	}
 	if len(fs.Args()) < 1 {
 		return fmt.Errorf("usage: empire directive \"message\"  (or legacy: empire directive <target> \"message\")")
 	}
@@ -2972,7 +2988,9 @@ func runChatSubcommand(args []string) error {
 	manager.SetSessionRegistry(stores.SessionRegistry, cfg.LLM.RuntimeMode)
 	manager.SetBudgetTracker(budgetTracker)
 	toolExecutor.SetManager(manager)
-	_ = syncRuntimeGlobalAgents(ctx, stores.ManagerStore)
+	if err := syncRuntimeGlobalAgents(ctx, stores.ManagerStore); err != nil {
+		log.Printf("chat command global agents sync failed (continuing): %v", err)
+	}
 	if err := manager.Recover(ctx); err != nil {
 		return fmt.Errorf("recover manager for chat: %w", err)
 	}
@@ -3282,7 +3300,7 @@ func rotateGlobalAgentSessions(ctx context.Context, managerStore runtime.Manager
 		if agentID == "" || strings.TrimSpace(rec.Config.VerticalID) != "" {
 			continue
 		}
-		if _, err := sessions.Rotate(agentID, runtimeMode, "runtime-sync", "global config sync", ""); err != nil {
+		if _, err := sessions.Rotate(ctx, agentID, runtimeMode, "runtime-sync", "global config sync", ""); err != nil {
 			errText := strings.ToLower(strings.TrimSpace(err.Error()))
 			if strings.Contains(errText, "no active session to rotate") {
 				continue
@@ -4401,13 +4419,17 @@ func mailboxCriticalNotifyLoop(ctx context.Context, store runtime.MailboxPersist
 					"summary":     item.Summary,
 					"notified_at": time.Now().UTC().Format(time.RFC3339),
 				})
-				_ = bus.Publish(context.Background(), events.Event{
+				publishCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+				if err := bus.Publish(publishCtx, events.Event{
 					ID:          uuid.NewString(),
 					Type:        events.EventType("mailbox.critical_notified"),
 					SourceAgent: "mailbox-notifier",
 					Payload:     payload,
 					CreatedAt:   time.Now(),
-				})
+				}); err != nil {
+					log.Printf("mailbox.critical_notified publish failed mailbox=%s err=%v", item.ID, err)
+				}
+				cancel()
 			}
 		}
 	}

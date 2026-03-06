@@ -35,13 +35,15 @@ func NewPostgresRegistry(db *sql.DB, lockTTL time.Duration) *PostgresRegistry {
 	}
 }
 
-func (sr *PostgresRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
 	scopeKey = strings.TrimSpace(scopeKey)
 
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	tx, err := sr.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -181,9 +183,12 @@ func (sr *PostgresRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey st
 	}, nil
 }
 
-func (sr *PostgresRegistry) Release(lease *Lease) error {
+func (sr *PostgresRegistry) Release(ctx context.Context, lease *Lease) error {
 	if lease == nil {
 		return errors.New("nil lease")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	useScope := sr.isScopeKeyEnabled()
 	var (
@@ -191,7 +196,7 @@ func (sr *PostgresRegistry) Release(lease *Lease) error {
 		err error
 	)
 	if useScope {
-		res, err = sr.db.Exec(`
+		res, err = sr.db.ExecContext(ctx, `
 			UPDATE agent_sessions
 			SET lock_owner = NULL,
 			    lock_expires_at = NULL,
@@ -209,7 +214,7 @@ func (sr *PostgresRegistry) Release(lease *Lease) error {
 		}
 	}
 	if !useScope {
-		res, err = sr.db.Exec(`
+		res, err = sr.db.ExecContext(ctx, `
 			UPDATE agent_sessions
 			SET lock_owner = NULL,
 			    lock_expires_at = NULL,
@@ -231,13 +236,15 @@ func (sr *PostgresRegistry) Release(lease *Lease) error {
 	return nil
 }
 
-func (sr *PostgresRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
 	scopeKey = strings.TrimSpace(scopeKey)
 
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	tx, err := sr.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -363,14 +370,17 @@ rotateLoaded:
 	}, nil
 }
 
-func (sr *PostgresRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error {
+func (sr *PostgresRegistry) IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionID, scopeKey string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	useScope := sr.isScopeKeyEnabled()
 	var (
 		res sql.Result
 		err error
 	)
 	if useScope {
-		res, err = sr.db.Exec(`
+		res, err = sr.db.ExecContext(ctx, `
 			UPDATE agent_sessions
 			SET turn_count = turn_count + 1,
 			    last_used_at = now()
@@ -386,7 +396,7 @@ func (sr *PostgresRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scope
 		}
 	}
 	if !useScope {
-		res, err = sr.db.Exec(`
+		res, err = sr.db.ExecContext(ctx, `
 			UPDATE agent_sessions
 			SET turn_count = turn_count + 1,
 			    last_used_at = now()
@@ -406,7 +416,7 @@ func (sr *PostgresRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scope
 	return nil
 }
 
-func (sr *PostgresRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	lockOwner = strings.TrimSpace(lockOwner)
@@ -416,7 +426,9 @@ func (sr *PostgresRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newS
 	}
 	scopeKey = strings.TrimSpace(scopeKey)
 
-	ctx := context.Background()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	tx, err := sr.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

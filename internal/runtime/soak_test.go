@@ -87,7 +87,7 @@ func TestSessionRegistryLockContentionSoak(t *testing.T) {
 	}
 	sr := sessions.NewInMemoryRegistry(0)
 
-	first, err := sr.Acquire("agent-lock", "cli_test", "holder", "")
+	first, err := sr.Acquire(context.Background(), "agent-lock", "cli_test", "holder", "")
 	if err != nil {
 		t.Fatalf("initial acquire failed: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestSessionRegistryLockContentionSoak(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := sr.Acquire("agent-lock", "cli_test", fmt.Sprintf("worker-%d", i), "")
+			_, err := sr.Acquire(context.Background(), "agent-lock", "cli_test", fmt.Sprintf("worker-%d", i), "")
 			if err == nil {
 				errs <- fmt.Errorf("worker-%d unexpectedly acquired lock while holder active", i)
 			}
@@ -110,10 +110,10 @@ func TestSessionRegistryLockContentionSoak(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sr.Release(first); err != nil {
+	if err := sr.Release(context.Background(), first); err != nil {
 		t.Fatalf("release initial lease failed: %v", err)
 	}
-	if _, err := sr.Acquire("agent-lock", "cli_test", "after-release", ""); err != nil {
+	if _, err := sr.Acquire(context.Background(), "agent-lock", "cli_test", "after-release", ""); err != nil {
 		t.Fatalf("expected acquire after release, got: %v", err)
 	}
 }

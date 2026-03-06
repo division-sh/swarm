@@ -234,7 +234,7 @@ func uniqueNonEmptyStrings(in []string) []string {
 	return out
 }
 
-func (e *Executor) execSchedule(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if e.scheduler == nil {
 		return nil, errors.New("scheduler is not configured")
 	}
@@ -298,7 +298,7 @@ func (e *Executor) execSchedule(actor models.AgentConfig, input any) (any, error
 		return nil, err
 	}
 	if e.scheduleStore != nil {
-		if err := e.scheduleStore.UpsertSchedule(context.Background(), schedule); err != nil {
+		if err := e.scheduleStore.UpsertSchedule(ctx, schedule); err != nil {
 			return nil, err
 		}
 	}
@@ -306,7 +306,7 @@ func (e *Executor) execSchedule(actor models.AgentConfig, input any) (any, error
 	return map[string]any{"status": "scheduled"}, nil
 }
 
-func (e *Executor) execConfigureRouting(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -355,7 +355,7 @@ func (e *Executor) execConfigureRouting(actor models.AgentConfig, input any) (an
 		return nil, err
 	}
 	if e.bus != nil {
-		if err := e.bus.Publish(context.Background(), events.Event{
+		if err := e.bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("opco.routing_updated"),
 			SourceAgent: actor.ID,

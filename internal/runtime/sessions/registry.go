@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,10 +12,10 @@ import (
 )
 
 type Registry interface {
-	Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error)
-	Release(lease *Lease) error
-	Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error)
-	IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error
+	Acquire(ctx context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error)
+	Release(ctx context.Context, lease *Lease) error
+	Rotate(ctx context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error)
+	IncrementTurn(ctx context.Context, agentID, runtimeMode, sessionID, scopeKey string) error
 }
 
 type Resetter interface {
@@ -69,7 +70,7 @@ func registryKey(agentID, runtimeMode, scopeKey string) string {
 	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(runtimeMode) + "|" + strings.TrimSpace(scopeKey)
 }
 
-func (sr *InMemoryRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
+func (sr *InMemoryRegistry) Acquire(_ context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*Lease, error) {
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
@@ -110,7 +111,7 @@ func (sr *InMemoryRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey st
 	}, nil
 }
 
-func (sr *InMemoryRegistry) Release(lease *Lease) error {
+func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 	if lease == nil {
 		return errors.New("nil lease")
 	}
@@ -133,7 +134,7 @@ func (sr *InMemoryRegistry) Release(lease *Lease) error {
 	return nil
 }
 
-func (sr *InMemoryRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
+func (sr *InMemoryRegistry) Rotate(_ context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
@@ -168,7 +169,7 @@ func (sr *InMemoryRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, sco
 	}, nil
 }
 
-func (sr *InMemoryRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) IncrementTurn(_ context.Context, agentID, runtimeMode, sessionID, scopeKey string) error {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	key := registryKey(agentID, runtimeMode, strings.TrimSpace(scopeKey))
@@ -183,7 +184,7 @@ func (sr *InMemoryRegistry) IncrementTurn(agentID, runtimeMode, sessionID, scope
 	return fmt.Errorf("session for agent %s not found", agentID)
 }
 
-func (sr *InMemoryRegistry) AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func (sr *InMemoryRegistry) AdoptSessionID(_ context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	lockOwner = strings.TrimSpace(lockOwner)

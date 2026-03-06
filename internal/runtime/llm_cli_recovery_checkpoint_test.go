@@ -18,7 +18,7 @@ type rotateCaptureRegistry struct {
 	rotateSummary string
 }
 
-func (r *rotateCaptureRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKey string) (*sessions.Lease, error) {
+func (r *rotateCaptureRegistry) Acquire(_ context.Context, agentID, runtimeMode, lockOwner, scopeKey string) (*sessions.Lease, error) {
 	if strings.TrimSpace(r.sessionID) == "" {
 		r.sessionID = "sid-old"
 	}
@@ -32,9 +32,9 @@ func (r *rotateCaptureRegistry) Acquire(agentID, runtimeMode, lockOwner, scopeKe
 	}, nil
 }
 
-func (r *rotateCaptureRegistry) Release(_ *sessions.Lease) error { return nil }
+func (r *rotateCaptureRegistry) Release(_ context.Context, _ *sessions.Lease) error { return nil }
 
-func (r *rotateCaptureRegistry) Rotate(agentID, runtimeMode, lockOwner, summary, scopeKey string) (*sessions.Lease, error) {
+func (r *rotateCaptureRegistry) Rotate(_ context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*sessions.Lease, error) {
 	r.rotateSummary = summary
 	r.sessionID = "sid-rotated"
 	return &sessions.Lease{
@@ -47,7 +47,7 @@ func (r *rotateCaptureRegistry) Rotate(agentID, runtimeMode, lockOwner, summary,
 	}, nil
 }
 
-func (r *rotateCaptureRegistry) IncrementTurn(_, _, _, _ string) error { return nil }
+func (r *rotateCaptureRegistry) IncrementTurn(_ context.Context, _, _, _, _ string) error { return nil }
 
 func TestClaudeCLIRuntime_RecoveryRotation_StoresCheckpointReasonAndSummary(t *testing.T) {
 	dir := t.TempDir()

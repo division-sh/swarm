@@ -88,11 +88,11 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 		mode = "session"
 	}
 	scopeKey := strings.TrimSpace(scope.ScopeKey)
-	lease, err := r.sessions.Acquire(agentID, "cli_test", r.lockOwner, scopeKey)
+	lease, err := r.sessions.Acquire(ctx, agentID, "cli_test", r.lockOwner, scopeKey)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.sessions.Release(lease); err != nil {
+	if err := r.sessions.Release(ctx, lease); err != nil {
 		return nil, err
 	}
 
@@ -107,7 +107,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 		Messages:         nil,
 	}
 	if r.conversations != nil {
-		if rec, ok, err := r.conversations.LoadActiveConversation(context.Background(), agentID, mode, scopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, scopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -134,11 +134,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, 
 		}
 	}
 
-	lease, err := r.sessions.Acquire(s.AgentID, "cli_test", r.lockOwner, strings.TrimSpace(s.ScopeKey))
+	lease, err := r.sessions.Acquire(ctx, s.AgentID, "cli_test", r.lockOwner, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = r.sessions.Release(lease) }()
+	defer func() { _ = r.sessions.Release(ctx, lease) }()
 	stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, "cli_test")
 	defer stopLeaseHeartbeat()
 
@@ -224,7 +224,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, 
 		oldTurnCount := s.TurnCount
 		oldParseFailures := s.ParseFailures
 		checkpoint := buildRotationCheckpoint(rotateReason, s)
-		rotated, rotateErr := r.sessions.Rotate(s.AgentID, "cli_test", r.lockOwner, checkpoint, strings.TrimSpace(s.ScopeKey))
+		rotated, rotateErr := r.sessions.Rotate(ctx, s.AgentID, "cli_test", r.lockOwner, checkpoint, strings.TrimSpace(s.ScopeKey))
 		if rotateErr == nil && rotated != nil {
 			s.ID = rotated.SessionID
 			s.TurnCount = 0
@@ -291,7 +291,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, 
 			Latency: latency,
 			Error:   err.Error(),
 		})
-		if rotated, rotateErr := maybeRotateAfterParseFailures(s, "cli_test", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
+		if rotated, rotateErr := maybeRotateAfterParseFailures(ctx, s, "cli_test", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
 			lease = rotated
 		}
 		return nil, err
@@ -300,7 +300,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, 
 	s.Messages = append(s.Messages, message, resp.Message)
 	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ID {
 		oldSessionID := s.ID
-		if err := adoptRegistrySessionID(r.sessions, s.AgentID, "cli_test", lease.LockOwner, sid, strings.TrimSpace(s.ScopeKey)); err != nil {
+		if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, "cli_test", lease.LockOwner, sid, strings.TrimSpace(s.ScopeKey)); err != nil {
 			log.Printf("failed to adopt claude session id: agent=%s old=%s new=%s err=%v", s.AgentID, s.ID, sid, err)
 		} else {
 			s.ID = sid
@@ -311,7 +311,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, 
 	s.TurnCount++
 	s.ParseFailures = 0
 
-	if err := r.sessions.IncrementTurn(s.AgentID, "cli_test", s.ID, strings.TrimSpace(s.ScopeKey)); err != nil {
+	if err := r.sessions.IncrementTurn(ctx, s.AgentID, "cli_test", s.ID, strings.TrimSpace(s.ScopeKey)); err != nil {
 		return nil, err
 	}
 
@@ -341,7 +341,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *llm.Session, 
 		}
 	}
 
-	if rotated, rotateErr := maybeRotateAfterTurn(s, "cli_test", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
+	if rotated, rotateErr := maybeRotateAfterTurn(ctx, s, "cli_test", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
 		lease = rotated
 	}
 	return resp, nil
@@ -872,10 +872,10 @@ func dedupeToolCalls(calls []llm.ToolCall) []llm.ToolCall {
 }
 
 type sessionIDAdopter interface {
-	AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
+	AdoptSessionID(ctx context.Context, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error
 }
 
-func adoptRegistrySessionID(reg sessions.Registry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
+func adoptRegistrySessionID(ctx context.Context, reg sessions.Registry, agentID, runtimeMode, lockOwner, newSessionID, scopeKey string) error {
 	if reg == nil {
 		return nil
 	}
@@ -883,7 +883,7 @@ func adoptRegistrySessionID(reg sessions.Registry, agentID, runtimeMode, lockOwn
 	if !ok {
 		return nil
 	}
-	return adopter.AdoptSessionID(agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
+	return adopter.AdoptSessionID(ctx, agentID, runtimeMode, lockOwner, newSessionID, scopeKey)
 }
 
 func claudeToolsArg(tools []llm.ToolDefinition) string {

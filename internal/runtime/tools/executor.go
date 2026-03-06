@@ -63,329 +63,12 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 }
 
 func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
-	if defs, err := ContractDefinitions(); err == nil && len(defs) > 0 {
-		return defs
+	defs, err := ContractDefinitions()
+	if err != nil {
+		runtimeWarn("tool-executor", "failed to load contract tool definitions: %v", err)
+		return nil
 	}
-	return e.legacyToolDefinitions()
-}
-
-func (e *Executor) legacyToolDefinitions() []llm.ToolDefinition {
-	return []llm.ToolDefinition{
-		{
-			Name:        "agent_message",
-			Description: "Direct message to another agent (requires target_agent_id)",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"target_agent_id":  map[string]any{"type": "string"},
-					"target_agent_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"to_agent_id":      map[string]any{"type": "string"},
-					"to_agent_ids":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-					"event_type":       map[string]any{"type": "string"},
-					"source_agent":     map[string]any{"type": "string"},
-					"vertical_id":      map[string]any{"type": "string"},
-					"task_id":          map[string]any{"type": "string"},
-					"message":          map[string]any{"type": "string"},
-					"payload":          map[string]any{},
-				},
-				"additionalProperties": false,
-			},
-		},
-		{
-			Name:        "schedule",
-			Description: "Register timer-based wake-up events",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"agent_id":    map[string]any{"type": "string"},
-					"event_type":  map[string]any{"type": "string"},
-					"mode":        map[string]any{"type": "string", "enum": []string{"once", "cron"}},
-					"cron":        map[string]any{"type": "string"},
-					"at":          map[string]any{"type": "string"},
-					"vertical_id": map[string]any{"type": "string"},
-					"task_id":     map[string]any{"type": "string"},
-					"payload":     map[string]any{},
-				},
-				"required":             []string{"event_type"},
-				"additionalProperties": false,
-			},
-		},
-		{
-			Name:        "configure_routing",
-			Description: "Install or update routing rule for a vertical",
-			Schema: ObjectSchema(
-				map[string]any{
-					"vertical_id":        map[string]any{"type": "string"},
-					"event_pattern":      map[string]any{"type": "string"},
-					"subscriber_id":      map[string]any{"type": "string"},
-					"installed_by":       map[string]any{"type": "string"},
-					"reason":             map[string]any{"type": "string"},
-					"status":             map[string]any{"type": "string"},
-					"source":             map[string]any{"type": "string"},
-					"bootstrap_version":  map[string]any{"type": "integer"},
-					"runtime_tool_event": map[string]any{"type": "boolean"},
-				},
-				"event_pattern",
-				"subscriber_id",
-			),
-		},
-		{
-			Name:        "agent_hire",
-			Description: "Hire/spawn an agent with given config",
-			Schema: ObjectSchema(
-				map[string]any{
-					"vertical_id": map[string]any{"type": "string"},
-					"config": map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"id":          map[string]any{"type": "string"},
-							"role":        map[string]any{"type": "string"},
-							"mode":        map[string]any{"type": "string"},
-							"vertical_id": map[string]any{"type": "string"},
-						},
-						"required":             []string{"id"},
-						"additionalProperties": true,
-					},
-				},
-				"config",
-			),
-		},
-		{
-			Name:        "agent_fire",
-			Description: "Terminate an agent",
-			Schema: ObjectSchema(
-				map[string]any{
-					"agent_id": map[string]any{"type": "string"},
-				},
-				"agent_id",
-			),
-		},
-		{
-			Name:        "agent_reconfigure",
-			Description: "Reconfigure an existing agent",
-			Schema: ObjectSchema(
-				map[string]any{
-					"agent_id": map[string]any{"type": "string"},
-					"config": map[string]any{
-						"type":                 "object",
-						"additionalProperties": true,
-					},
-				},
-				"agent_id",
-			),
-		},
-		{
-			Name:        "mailbox_send",
-			Description: "Create a mailbox item for human review/approval",
-			Schema: ObjectSchema(
-				map[string]any{
-					"event_id":    map[string]any{"type": "string"},
-					"vertical_id": map[string]any{"type": "string"},
-					"type":        map[string]any{"type": "string"},
-					"priority":    map[string]any{"type": "string"},
-					"summary":     map[string]any{"type": "string"},
-					"context":     map[string]any{"type": "object"},
-					"timeout_at":  map[string]any{"type": "string"},
-				},
-				"type",
-			),
-		},
-		{
-			Name:        "human_task_request",
-			Description: "Request human execution for a physical-world task (creates human_tasks row and emits human_task.requested)",
-			Schema: ObjectSchema(
-				map[string]any{
-					"vertical_id":      map[string]any{"type": "string"},
-					"category":         map[string]any{"type": "string"},
-					"description":      map[string]any{"type": "string"},
-					"talking_points":   map[string]any{},
-					"expected_value":   map[string]any{"type": "string"},
-					"priority":         map[string]any{"type": "string"},
-					"deadline":         map[string]any{"type": "string"},
-					"deadline_at":      map[string]any{"type": "string"},
-					"deadline_rfc3339": map[string]any{"type": "string"},
-				},
-				"category",
-				"description",
-			),
-		},
-		{
-			Name:        "human_task_decide",
-			Description: "Empire Coordinator only: approve/reject/defer a human task request (updates human_tasks + emits human_task.{approved,rejected,deferred})",
-			Schema: ObjectSchema(
-				map[string]any{
-					"task_id":       map[string]any{"type": "string"},
-					"decision":      map[string]any{"type": "string", "enum": []string{"approve", "approved", "reject", "rejected", "defer", "deferred"}},
-					"reason":        map[string]any{"type": "string"},
-					"priority_rank": map[string]any{"type": "integer"},
-					"requeue_date":  map[string]any{"type": "string"},
-				},
-				"task_id",
-				"decision",
-			),
-		},
-		{
-			Name:        "sql_execute",
-			Description: "Execute read-only SQL (SELECT/CTE) in the actor's scoped vertical schema",
-			Schema: ObjectSchema(
-				map[string]any{
-					"query": map[string]any{"type": "string"},
-				},
-				"query",
-			),
-		},
-		{
-			Name:        "nginx_reload",
-			Description: "Reload nginx after config validation (holding-devops only)",
-			Schema:      ObjectSchema(map[string]any{}),
-		},
-		{
-			Name:        "systemd_control",
-			Description: "Control empireai-* systemd units (holding-devops only)",
-			Schema: ObjectSchema(
-				map[string]any{
-					"action": map[string]any{"type": "string", "enum": []string{"start", "stop", "restart", "enable", "disable"}},
-					"unit":   map[string]any{"type": "string"},
-				},
-				"action",
-				"unit",
-			),
-		},
-		{
-			Name:        "certbot_execute",
-			Description: "Issue/renew certbot cert for a domain (holding-devops only)",
-			Schema: ObjectSchema(
-				map[string]any{
-					"domain": map[string]any{"type": "string"},
-				},
-				"domain",
-			),
-		},
-		{
-			Name:        "whatsapp_business_api",
-			Description: "Call WhatsApp Business API with per-vertical credentials",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method":          map[string]any{"type": "string"},
-					"url":             map[string]any{"type": "string"},
-					"path":            map[string]any{"type": "string"},
-					"query":           map[string]any{"type": "object"},
-					"headers":         map[string]any{"type": "object"},
-					"body":            map[string]any{},
-					"timeout_seconds": map[string]any{"type": "integer"},
-				},
-				"additionalProperties": true,
-			},
-		},
-		{
-			Name:        "email_api",
-			Description: "Send email via per-vertical credentials",
-			Schema: ObjectSchema(
-				map[string]any{
-					"to":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1},
-					"subject": map[string]any{"type": "string"},
-					"body":    map[string]any{"type": "string"},
-				},
-				"to",
-			),
-		},
-		{
-			Name:        "instagram_api",
-			Description: "Call Instagram Graph API with per-vertical credentials",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method":          map[string]any{"type": "string"},
-					"url":             map[string]any{"type": "string"},
-					"path":            map[string]any{"type": "string"},
-					"query":           map[string]any{"type": "object"},
-					"headers":         map[string]any{"type": "object"},
-					"body":            map[string]any{},
-					"timeout_seconds": map[string]any{"type": "integer"},
-				},
-				"additionalProperties": true,
-			},
-		},
-		{
-			Name:        "domain_purchase",
-			Description: "Submit domain purchase via registrar integration",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method":          map[string]any{"type": "string"},
-					"url":             map[string]any{"type": "string"},
-					"path":            map[string]any{"type": "string"},
-					"query":           map[string]any{"type": "object"},
-					"headers":         map[string]any{"type": "object"},
-					"body":            map[string]any{},
-					"timeout_seconds": map[string]any{"type": "integer"},
-				},
-				"additionalProperties": true,
-			},
-		},
-		{
-			Name:        "domain_availability_check",
-			Description: "Check domain availability via registrar integration",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method":          map[string]any{"type": "string"},
-					"url":             map[string]any{"type": "string"},
-					"path":            map[string]any{"type": "string"},
-					"query":           map[string]any{"type": "object"},
-					"headers":         map[string]any{"type": "object"},
-					"body":            map[string]any{},
-					"timeout_seconds": map[string]any{"type": "integer"},
-				},
-				"additionalProperties": true,
-			},
-		},
-		{
-			Name:        "dns_configure",
-			Description: "Configure DNS via provider integration",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method":          map[string]any{"type": "string"},
-					"url":             map[string]any{"type": "string"},
-					"path":            map[string]any{"type": "string"},
-					"query":           map[string]any{"type": "object"},
-					"headers":         map[string]any{"type": "object"},
-					"body":            map[string]any{},
-					"timeout_seconds": map[string]any{"type": "integer"},
-				},
-				"additionalProperties": true,
-			},
-		},
-		{
-			Name:        "instagram_handle_check",
-			Description: "Check if an Instagram handle appears available",
-			Schema: ObjectSchema(
-				map[string]any{
-					"handle": map[string]any{"type": "string"},
-				},
-				"handle",
-			),
-		},
-		{
-			Name:        "whatsapp_name_check",
-			Description: "Check WhatsApp display name via provider integration",
-			Schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"method":          map[string]any{"type": "string"},
-					"url":             map[string]any{"type": "string"},
-					"path":            map[string]any{"type": "string"},
-					"query":           map[string]any{"type": "object"},
-					"headers":         map[string]any{"type": "object"},
-					"body":            map[string]any{},
-					"timeout_seconds": map[string]any{"type": "integer"},
-				},
-				"additionalProperties": true,
-			},
-		},
-	}
+	return defs
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
@@ -419,6 +102,7 @@ func (e *Executor) validateRuntimeToolInput(name string, input any) error {
 	if name == "" || strings.HasPrefix(name, "emit_") {
 		return nil
 	}
+	input = normalizeRuntimeToolInput(name, input)
 	payload := map[string]any{}
 	if err := decodeToolInput(input, &payload); err != nil {
 		return err
@@ -427,41 +111,16 @@ func (e *Executor) validateRuntimeToolInput(name string, input any) error {
 		payload = map[string]any{}
 	}
 
-	contractSchema, foundContract := runtimeToolSchemaForName(e.ToolDefinitions(), name)
+	defs, defsErr := ContractDefinitions()
+	if defsErr != nil {
+		return defsErr
+	}
+
+	contractSchema, foundContract := runtimeToolSchemaForName(defs, name)
 	if foundContract && contractSchema != nil {
-		if err := ValidatePayloadAgainstSchema(contractSchema, payload); err == nil {
-			return nil
-		} else if payloadTouchesSchemaProps(payload, contractSchema) &&
-			!payloadHasLegacyOnlyProps(payload, contractSchema) &&
-			!toolAllowsLegacySubsetFallback(name) {
-			return err
-		}
+		return ValidatePayloadAgainstSchema(contractSchema, pruneSchemaUnknownKeys(payload, contractSchema))
 	}
-
-	err, found := validateToolInputAgainstToolDefinitions(name, payload, e.legacyToolDefinitions())
-	if !found || err == nil {
-		return nil
-	}
-	legacyErr, legacyFound := validateToolInputAgainstToolDefinitions(name, input, e.legacyToolDefinitions())
-	if legacyFound && legacyErr == nil {
-		return nil
-	}
-	return err
-}
-
-func validateToolInputAgainstToolDefinitions(name string, input any, defs []llm.ToolDefinition) (error, bool) {
-	schema, ok := runtimeToolSchemaForName(defs, name)
-	if !ok || schema == nil {
-		return nil, false
-	}
-	payload := map[string]any{}
-	if err := decodeToolInput(input, &payload); err != nil {
-		return err, true
-	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	return ValidatePayloadAgainstSchema(schema, payload), true
+	return nil
 }
 
 func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
@@ -474,6 +133,23 @@ func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[strin
 		return schema, ok
 	}
 	return nil, false
+}
+
+func pruneSchemaUnknownKeys(payload map[string]any, schema map[string]any) map[string]any {
+	if payload == nil {
+		return map[string]any{}
+	}
+	props := schemaProperties(schema["properties"])
+	if len(props) == 0 {
+		return payload
+	}
+	out := make(map[string]any, len(payload))
+	for key, value := range payload {
+		if _, ok := props[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func payloadTouchesSchemaProps(payload map[string]any, schema map[string]any) bool {
@@ -528,25 +204,75 @@ func normalizeRuntimeToolInput(name string, input any) any {
 
 	switch name {
 	case "agent_message":
+		if strings.TrimSpace(asString(payload["to"])) == "" {
+			if target := strings.TrimSpace(asString(payload["target_agent_id"])); target != "" {
+				payload["to"] = target
+			}
+		}
 		if strings.TrimSpace(asString(payload["target_agent_id"])) == "" {
 			if to := strings.TrimSpace(asString(payload["to"])); to != "" {
 				payload["target_agent_id"] = to
 			}
 		}
+		if strings.TrimSpace(asString(payload["message"])) == "" {
+			if data, ok := payload["payload"].(map[string]any); ok {
+				if msg := strings.TrimSpace(asString(data["message"])); msg != "" {
+					payload["message"] = msg
+				}
+			}
+			if strings.TrimSpace(asString(payload["message"])) == "" {
+				payload["message"] = "runtime_tool"
+			}
+		}
 	case "schedule":
+		if strings.TrimSpace(asString(payload["action"])) == "" {
+			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
+				payload["action"] = eventType
+			}
+		}
 		if strings.TrimSpace(asString(payload["event_type"])) == "" {
 			if action := strings.TrimSpace(asString(payload["action"])); action != "" {
 				payload["event_type"] = action
 			}
 		}
+		if asInt(payload["delay_seconds"]) <= 0 {
+			if at := strings.TrimSpace(asString(payload["at"])); at != "" {
+				if parsed, err := time.Parse(time.RFC3339, at); err == nil {
+					delay := int(time.Until(parsed).Seconds())
+					if delay < 0 {
+						delay = 0
+					}
+					payload["delay_seconds"] = delay
+				}
+			}
+		}
 		if payload["payload"] == nil && payload["context"] != nil {
 			payload["payload"] = payload["context"]
 		}
-		if strings.TrimSpace(asString(payload["at"])) == "" && asInt(payload["delay_seconds"]) > 0 {
-			payload["mode"] = "once"
-			payload["at"] = time.Now().Add(time.Duration(asInt(payload["delay_seconds"])) * time.Second).UTC().Format(time.RFC3339)
+		if strings.TrimSpace(asString(payload["at"])) == "" {
+			if rawDelay, ok := payload["delay_seconds"]; ok {
+				delaySeconds := asInt(rawDelay)
+				if delaySeconds < 0 {
+					delaySeconds = 0
+				}
+				payload["mode"] = "once"
+				payload["at"] = time.Now().Add(time.Duration(delaySeconds) * time.Second).UTC().Format(time.RFC3339)
+			}
 		}
 	case "configure_routing":
+		if strings.TrimSpace(asString(payload["operation"])) == "" {
+			switch strings.ToLower(strings.TrimSpace(asString(payload["status"]))) {
+			case "deactivated":
+				payload["operation"] = "remove"
+			default:
+				payload["operation"] = "add"
+			}
+		}
+		if strings.TrimSpace(asString(payload["event_type"])) == "" {
+			if pattern := strings.TrimSpace(asString(payload["event_pattern"])); pattern != "" {
+				payload["event_type"] = pattern
+			}
+		}
 		if strings.TrimSpace(asString(payload["event_pattern"])) == "" {
 			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
 				payload["event_pattern"] = eventType
@@ -561,6 +287,16 @@ func normalizeRuntimeToolInput(name string, input any) any {
 			}
 		}
 	case "agent_hire":
+		if strings.TrimSpace(asString(payload["agent_id"])) == "" {
+			if config, ok := payload["config"].(map[string]any); ok {
+				payload["agent_id"] = strings.TrimSpace(asString(config["id"]))
+			}
+		}
+		if strings.TrimSpace(asString(payload["role"])) == "" {
+			if config, ok := payload["config"].(map[string]any); ok {
+				payload["role"] = strings.TrimSpace(asString(config["role"]))
+			}
+		}
 		if payload["config"] == nil {
 			config := map[string]any{
 				"id":   strings.TrimSpace(asString(payload["agent_id"])),
@@ -584,6 +320,10 @@ func normalizeRuntimeToolInput(name string, input any) any {
 			}
 			payload["config"] = config
 		}
+	case "agent_fire":
+		if strings.TrimSpace(asString(payload["reason"])) == "" {
+			payload["reason"] = "runtime_tool"
+		}
 	case "agent_reconfigure":
 		if payload["config"] == nil {
 			config := map[string]any{}
@@ -599,6 +339,20 @@ func normalizeRuntimeToolInput(name string, input any) any {
 			payload["config"] = config
 		}
 	case "mailbox_send":
+		if mailboxType, err := NormalizeMailboxType(asString(payload["type"])); err == nil && mailboxType != "" {
+			payload["type"] = mailboxType
+		}
+		if priority, err := NormalizeMailboxPriority(asString(payload["priority"])); err == nil && priority != "" {
+			payload["priority"] = priority
+		}
+		if strings.TrimSpace(asString(payload["subject"])) == "" {
+			if summary := strings.TrimSpace(asString(payload["summary"])); summary != "" {
+				payload["subject"] = summary
+			}
+		}
+		if payload["payload"] == nil && payload["context"] != nil {
+			payload["payload"] = payload["context"]
+		}
 		if strings.TrimSpace(asString(payload["summary"])) == "" {
 			if subject := strings.TrimSpace(asString(payload["subject"])); subject != "" {
 				payload["summary"] = subject
@@ -608,6 +362,7 @@ func normalizeRuntimeToolInput(name string, input any) any {
 			payload["context"] = payload["payload"]
 		}
 	case "human_task_request":
+		delete(payload, "vertical_id")
 		if strings.TrimSpace(asString(payload["deadline"])) == "" &&
 			strings.TrimSpace(asString(payload["deadline_at"])) == "" &&
 			strings.TrimSpace(asString(payload["deadline_rfc3339"])) == "" {
@@ -615,23 +370,52 @@ func normalizeRuntimeToolInput(name string, input any) any {
 				payload["deadline_at"] = time.Now().Add(time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339)
 			}
 		}
+	case "human_task_decide":
+		switch strings.ToLower(strings.TrimSpace(asString(payload["decision"]))) {
+		case "approve":
+			payload["decision"] = "approved"
+		case "reject":
+			payload["decision"] = "rejected"
+		case "defer":
+			payload["decision"] = "deferred"
+		}
 	case "systemd_control":
+		if strings.TrimSpace(asString(payload["service"])) == "" {
+			if unit := strings.TrimSpace(asString(payload["unit"])); unit != "" {
+				payload["service"] = unit
+			}
+		}
 		if strings.TrimSpace(asString(payload["unit"])) == "" {
 			if service := strings.TrimSpace(asString(payload["service"])); service != "" {
 				payload["unit"] = service
 			}
 		}
 	case "email_api":
-		if to := strings.TrimSpace(asString(payload["to"])); to != "" {
-			payload["to"] = []string{to}
+		if arr, ok := payload["to"].([]string); ok && len(arr) == 1 {
+			payload["to"] = strings.TrimSpace(arr[0])
 		}
 	case "whatsapp_business_api":
+		if body, ok := payload["body"].(map[string]any); ok {
+			if strings.TrimSpace(asString(payload["to"])) == "" {
+				payload["to"] = strings.TrimSpace(asString(body["to"]))
+			}
+			if strings.TrimSpace(asString(payload["message"])) == "" {
+				payload["message"] = strings.TrimSpace(asString(body["message"]))
+			}
+		}
 		NormalizeExternalContractPayload(payload, http.MethodPost)
 	case "instagram_api":
 		NormalizeExternalContractPayload(payload, http.MethodPost)
 	case "domain_purchase":
 		NormalizeExternalContractPayload(payload, http.MethodPost)
 	case "domain_availability_check":
+		if strings.TrimSpace(asString(payload["domain"])) == "" {
+			if query, ok := payload["query"].(map[string]any); ok {
+				if domain := strings.TrimSpace(asString(query["domain"])); domain != "" {
+					payload["domain"] = domain
+				}
+			}
+		}
 		if strings.TrimSpace(asString(payload["method"])) == "" {
 			payload["method"] = http.MethodGet
 		}
@@ -641,6 +425,13 @@ func normalizeRuntimeToolInput(name string, input any) any {
 	case "dns_configure":
 		NormalizeExternalContractPayload(payload, http.MethodPost)
 	case "whatsapp_name_check":
+		if strings.TrimSpace(asString(payload["name"])) == "" {
+			if query, ok := payload["query"].(map[string]any); ok {
+				if name := strings.TrimSpace(asString(query["name"])); name != "" {
+					payload["name"] = name
+				}
+			}
+		}
 		NormalizeExternalContractPayload(payload, http.MethodPost)
 	}
 	return payload
@@ -654,9 +445,9 @@ func (e *Executor) executeTool(ctx context.Context, actor models.AgentConfig, na
 	case "agent_message":
 		return e.execAgentMessage(ctx, actor, input)
 	case "schedule":
-		return e.execSchedule(actor, input)
+		return e.execSchedule(ctx, actor, input)
 	case "configure_routing":
-		return e.execConfigureRouting(actor, input)
+		return e.execConfigureRouting(ctx, actor, input)
 	case "agent_hire":
 		return e.execAgentHire(actor, input)
 	case "agent_fire":
@@ -664,7 +455,7 @@ func (e *Executor) executeTool(ctx context.Context, actor models.AgentConfig, na
 	case "agent_reconfigure":
 		return e.execAgentReconfigure(actor, input)
 	case "mailbox_send":
-		return e.execMailboxSend(actor, input)
+		return e.execMailboxSend(ctx, actor, input)
 	case "human_task_request":
 		return e.execHumanTaskRequest(ctx, actor, input)
 	case "human_task_decide":
@@ -888,11 +679,11 @@ func (e *Executor) ExecAgentMessageDirect(ctx context.Context, actor models.Agen
 }
 
 func (e *Executor) ExecScheduleDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execSchedule(actor, input)
+	return e.execSchedule(context.Background(), actor, input)
 }
 
 func (e *Executor) ExecConfigureRoutingDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execConfigureRouting(actor, input)
+	return e.execConfigureRouting(context.Background(), actor, input)
 }
 
 func (e *Executor) ExecAgentHireDirect(actor models.AgentConfig, input any) (any, error) {
@@ -908,7 +699,7 @@ func (e *Executor) ExecAgentReconfigureDirect(actor models.AgentConfig, input an
 }
 
 func (e *Executor) ExecMailboxSendDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execMailboxSend(actor, input)
+	return e.execMailboxSend(context.Background(), actor, input)
 }
 
 func (e *Executor) ExecHumanTaskRequestDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

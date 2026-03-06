@@ -48,14 +48,16 @@ func marginalMaintenanceLoop(ctx context.Context, db *sql.DB, bus *runtime.Event
 							"vertical_id": id,
 							"reason":      "stale_marginal",
 						})
-						_ = bus.Publish(context.Background(), events.Event{
+						if err := bus.Publish(ctx, events.Event{
 							ID:          uuid.NewString(),
 							Type:        events.EventType("factory.marginal_killed"),
 							SourceAgent: "runtime",
 							VerticalID:  id,
 							Payload:     payload,
 							CreatedAt:   time.Now(),
-						})
+						}); err != nil {
+							log.Printf("marginal killed publish failed vertical=%s err=%v", id, err)
+						}
 					}
 				}
 				_ = rows.Close()
@@ -85,14 +87,16 @@ func marginalMaintenanceLoop(ctx context.Context, db *sql.DB, bus *runtime.Event
 						"vertical_id": id,
 						"reason":      "scheduled_14d_review",
 					})
-					_ = bus.Publish(context.Background(), events.Event{
+					if err := bus.Publish(ctx, events.Event{
 						ID:          uuid.NewString(),
 						Type:        events.EventType("factory.marginal_requeued"),
 						SourceAgent: "runtime",
 						VerticalID:  id,
 						Payload:     payload,
 						CreatedAt:   time.Now(),
-					})
+					}); err != nil {
+						log.Printf("marginal requeued publish failed vertical=%s err=%v", id, err)
+					}
 				}
 			}
 			_ = rows.Close()

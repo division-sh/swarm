@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"testing"
@@ -30,7 +31,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "session_id", "scope_key"}).AddRow("row-1", "sess-1", nil))
 	mock.ExpectCommit()
 
-	lease, err := sr.Acquire("a1", "api", "owner-1", "")
+	lease, err := sr.Acquire(context.Background(), "a1", "api", "owner-1", "")
 	if err != nil {
 		t.Fatalf("Acquire new: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "lock_expires_at"}).AddRow("sess-1", existingExpiry))
 	mock.ExpectCommit()
 
-	lease2, err := sr.Acquire("a1", "api", "owner-1", "")
+	lease2, err := sr.Acquire(context.Background(), "a1", "api", "owner-1", "")
 	if err != nil {
 		t.Fatalf("Acquire existing: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET lock_owner = NULL").
 		WithArgs("a1", "api", "sess-1", "", "owner-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := sr.Release(&Lease{AgentID: "a1", RuntimeMode: "api", SessionID: "sess-1", LockOwner: "owner-1"}); err != nil {
+	if err := sr.Release(context.Background(), &Lease{AgentID: "a1", RuntimeMode: "api", SessionID: "sess-1", LockOwner: "owner-1"}); err != nil {
 		t.Fatalf("Release: %v", err)
 	}
 
@@ -89,7 +90,7 @@ func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrLeased(t *testing
 			AddRow("row-1", "sess-1", nil, "someone-else", fixedNow.Add(10*time.Second)))
 	// Transaction should be rolled back by defer.
 
-	_, err = sr.Acquire("a1", "api", "owner-1", "")
+	_, err = sr.Acquire(context.Background(), "a1", "api", "owner-1", "")
 	if err != ErrSessionLeased {
 		t.Fatalf("expected ErrSessionLeased, got %v", err)
 	}
@@ -124,7 +125,7 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"lock_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectCommit()
 
-	lease, err := sr.Rotate("a1", "api", "owner-1", "sum", "")
+	lease, err := sr.Rotate(context.Background(), "a1", "api", "owner-1", "sum", "")
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET turn_count = turn_count \\+ 1").
 		WithArgs("a1", "api", lease.SessionID, "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	if err := sr.IncrementTurn("a1", "api", lease.SessionID, ""); err != nil {
+	if err := sr.IncrementTurn(context.Background(), "a1", "api", lease.SessionID, ""); err != nil {
 		t.Fatalf("IncrementTurn: %v", err)
 	}
 
@@ -144,7 +145,7 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 	mock.ExpectExec("UPDATE agent_sessions\\s+SET turn_count = turn_count \\+ 1").
 		WithArgs("a1", "api", "missing", "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	if err := sr.IncrementTurn("a1", "api", "missing", ""); err == nil {
+	if err := sr.IncrementTurn(context.Background(), "a1", "api", "missing", ""); err == nil {
 		t.Fatal("expected IncrementTurn to error on missing session")
 	}
 
@@ -174,7 +175,7 @@ func TestPostgresSessionRegistry_AdoptSessionID(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	if err := sr.AdoptSessionID("a1", "cli_test", "owner-1", "claude-session-1", ""); err != nil {
+	if err := sr.AdoptSessionID(context.Background(), "a1", "cli_test", "owner-1", "claude-session-1", ""); err != nil {
 		t.Fatalf("AdoptSessionID: %v", err)
 	}
 
@@ -210,7 +211,7 @@ func TestPostgresSessionRegistry_Rotate_FallbackWithoutScopeKeyColumn(t *testing
 		WillReturnRows(sqlmock.NewRows([]string{"lock_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectCommit()
 
-	lease, err := sr.Rotate("a1", "api", "owner-1", "sum", "scope-a")
+	lease, err := sr.Rotate(context.Background(), "a1", "api", "owner-1", "sum", "scope-a")
 	if err != nil {
 		t.Fatalf("Rotate fallback: %v", err)
 	}

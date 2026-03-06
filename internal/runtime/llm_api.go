@@ -74,11 +74,11 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 	}
 	scopeKey := strings.TrimSpace(scope.ScopeKey)
 
-	lease, err := r.sessions.Acquire(agentID, "api", r.lockOwner, scopeKey)
+	lease, err := r.sessions.Acquire(ctx, agentID, "api", r.lockOwner, scopeKey)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.sessions.Release(lease); err != nil {
+	if err := r.sessions.Release(ctx, lease); err != nil {
 		return nil, err
 	}
 
@@ -93,7 +93,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 		Messages:         nil,
 	}
 	if r.conversations != nil {
-		if rec, ok, err := r.conversations.LoadActiveConversation(context.Background(), agentID, mode, scopeKey); err == nil && ok {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, scopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -120,11 +120,11 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *llm.Sessio
 		}
 	}
 
-	lease, err := r.sessions.Acquire(s.AgentID, "api", r.lockOwner, strings.TrimSpace(s.ScopeKey))
+	lease, err := r.sessions.Acquire(ctx, s.AgentID, "api", r.lockOwner, strings.TrimSpace(s.ScopeKey))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = r.sessions.Release(lease) }()
+	defer func() { _ = r.sessions.Release(ctx, lease) }()
 	stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, "api")
 	defer stopLeaseHeartbeat()
 
@@ -195,7 +195,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *llm.Sessio
 			RetryCount:     retryCount,
 			Error:          lastErr.Error(),
 		})
-		if rotated, rotateErr := maybeRotateAfterParseFailures(s, "api", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
+		if rotated, rotateErr := maybeRotateAfterParseFailures(ctx, s, "api", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
 			lease = rotated
 		}
 		return nil, lastErr
@@ -207,7 +207,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *llm.Sessio
 	s.Messages = append(s.Messages, message, resp.Message)
 	s.TurnCount++
 	s.ParseFailures = 0
-	if err := r.sessions.IncrementTurn(s.AgentID, "api", s.ID, strings.TrimSpace(s.ScopeKey)); err != nil {
+	if err := r.sessions.IncrementTurn(ctx, s.AgentID, "api", s.ID, strings.TrimSpace(s.ScopeKey)); err != nil {
 		return nil, err
 	}
 
@@ -234,7 +234,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *llm.Sessio
 		}
 	}
 
-	if rotated, rotateErr := maybeRotateAfterTurn(s, "api", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
+	if rotated, rotateErr := maybeRotateAfterTurn(ctx, s, "api", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
 		lease = rotated
 	}
 
