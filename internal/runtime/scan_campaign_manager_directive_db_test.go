@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -113,9 +114,9 @@ func TestScanCampaignManager_OnDirective_QueuesDeterministicModes(t *testing.T) 
 	ctx := context.Background()
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &directiveCampaignStore{db: db}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
 
-	manager.onDirective(ctx, events.Event{
+	manager.OnDirectiveForTest(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human",
@@ -188,10 +189,10 @@ func TestScanCampaignManager_OnDirective_ComplexForwardsToCoordinator(t *testing
 	ctx := context.Background()
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &directiveCampaignStore{db: db}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
 
 	ch := bus.Subscribe("empire-coordinator", events.EventType("system.directive"))
-	manager.onDirective(ctx, events.Event{
+	manager.OnDirectiveForTest(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human",
@@ -231,9 +232,9 @@ func TestScanCampaignManager_OnDirective_CorpusQueuesWithPath(t *testing.T) {
 	ctx := context.Background()
 	bus := NewEventBus(InMemoryEventStore{})
 	store := &directiveCampaignStore{db: db}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
 
-	manager.onDirective(ctx, events.Event{
+	manager.OnDirectiveForTest(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human",
@@ -263,7 +264,7 @@ func TestScanCampaignManager_Tick_CompletesExpiredCampaignByTimeCap(t *testing.T
 	ctx := context.Background()
 	bus := NewEventBus(&postgresEventStore{db: db})
 	store := &directiveCampaignStore{db: db}
-	manager := NewScanCampaignManager(bus, store, db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
 
 	geoID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -285,7 +286,7 @@ func TestScanCampaignManager_Tick_CompletesExpiredCampaignByTimeCap(t *testing.T
 	}
 
 	campaignCompletedCh := bus.Subscribe("watch-expired-campaign", events.EventType("campaign.completed"))
-	manager.tick(ctx)
+	manager.TickForTest(ctx)
 
 	select {
 	case evt := <-campaignCompletedCh:

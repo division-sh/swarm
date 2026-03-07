@@ -7,7 +7,34 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
+
+type Agent interface {
+	ID() string
+	Type() string
+	Subscriptions() []events.EventType
+	OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error)
+}
+
+type BoardInteractiveAgent interface {
+	BoardStep(ctx context.Context, directive string) (string, error)
+}
+
+type AgentFactory func(cfg models.AgentConfig) (Agent, error)
+
+type Bus interface {
+	Publish(ctx context.Context, evt events.Event) error
+	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
+	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
+	Unsubscribe(agentID string)
+	Store() runtimebus.EventStore
+	ResetInMemoryState()
+	SetRoutingTable(verticalID string, table *runtimebus.RoutingTable) error
+	GetRoutingTable(verticalID string) *runtimebus.RoutingTable
+	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
+}
 
 type PersistedAgent struct {
 	Config          models.AgentConfig
@@ -118,6 +145,11 @@ type ManagerPersistence interface {
 	RoutingPersistence
 	ReceiptPersistence
 	PendingEventPersistence
+}
+
+type BudgetGuard interface {
+	IsEmergency(verticalID string) bool
+	IsThrottle(verticalID string) bool
 }
 
 type StrategicContext = json.RawMessage

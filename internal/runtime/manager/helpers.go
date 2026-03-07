@@ -3,6 +3,7 @@ package manager
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -120,6 +121,35 @@ func NormalizeStringList(in []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+func RuntimeWarn(component string, format string, args ...any) {
+	component = strings.TrimSpace(component)
+	if component == "" {
+		component = "runtime"
+	}
+	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if msg == "" {
+		return
+	}
+	log.Printf("runtime.warn component=%s message=%s", component, msg)
+}
+
+func MustJSON(v any) []byte {
+	raw, err := json.Marshal(v)
+	if err != nil || len(raw) == 0 {
+		return []byte("{}")
+	}
+	return raw
+}
+
+func FirstNonEmptyString(vals ...string) string {
+	for _, val := range vals {
+		if trimmed := strings.TrimSpace(val); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func MergeAgentConfig(base, patch models.AgentConfig) models.AgentConfig {

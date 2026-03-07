@@ -10,6 +10,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/runtime"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -41,7 +42,7 @@ func TestFactoryPipelineCoordinator_RecordsConsumedTransition(t *testing.T) {
 
 	pg := &store.PostgresStore{DB: db}
 	bus := runtime.NewEventBus(pg)
-	pc := runtime.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	if _, err := db.ExecContext(context.Background(), `
 		CREATE TABLE IF NOT EXISTS shards (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -75,7 +76,7 @@ func TestFactoryPipelineCoordinator_RecordsConsumedTransition(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("config validate: %v", err)
 	}
-	pc.SetShardPlanner(runtime.NewShardPlanner(cfg.Sharding))
+	pc.SetShardPlanner(runtimepipeline.NewShardPlanner(cfg.Sharding))
 	bus.SetInterceptors(pc)
 
 	scanID := uuid.NewString()
@@ -155,7 +156,7 @@ func TestFactoryPipelineCoordinator_RecordsDroppedTransition(t *testing.T) {
 
 	pg := &store.PostgresStore{DB: db}
 	bus := runtime.NewEventBus(pg)
-	pc := runtime.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
 
 	evt := events.Event{

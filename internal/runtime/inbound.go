@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
 	"github.com/google/uuid"
 )
 
@@ -54,7 +55,7 @@ func (g *InboundGateway) Handler() http.Handler {
 }
 
 func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
-	if RuntimeIngressPaused() {
+	if runtimebus.RuntimeIngressPaused() {
 		http.Error(w, "runtime reset in progress", http.StatusServiceUnavailable)
 		return
 	}
@@ -124,7 +125,7 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	envelopeBytes, _ := json.Marshal(pubPayload)
 	if g.bus != nil {
-		pubCtx := WithCurrentRuntimeEpoch(r.Context())
+		pubCtx := runtimebus.WithCurrentRuntimeEpoch(r.Context())
 		_ = g.bus.Publish(pubCtx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        pubType,

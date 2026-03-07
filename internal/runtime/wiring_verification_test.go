@@ -18,6 +18,7 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/promptcontracts"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimetools "empireai/internal/runtime/tools"
 	"gopkg.in/yaml.v3"
 )
@@ -1199,9 +1200,9 @@ func loadWiringAgentsFromRoster(agentsDir string) ([]wiringAgent, error) {
 }
 
 func loadWiringSchemasFromRegistry() map[string]wiringSchema {
-	_ = runtimetools.EventSchemaSnapshot()
-	out := make(map[string]wiringSchema, len(EventSchemaRegistry))
-	for evt, schema := range EventSchemaRegistry {
+	registry := runtimecontracts.EventSchemaRegistry()
+	out := make(map[string]wiringSchema, len(registry))
+	for evt, schema := range registry {
 		required := map[string]struct{}{}
 		for _, r := range requiredList(schema.Schema["required"]) {
 			required[r] = struct{}{}
@@ -1223,9 +1224,9 @@ func loadWiringSchemasFromRegistry() map[string]wiringSchema {
 }
 
 func buildToolToEventMap() map[string]string {
-	_ = runtimetools.EventSchemaSnapshot()
+	registry := runtimecontracts.EventSchemaRegistry()
 	out := map[string]string{}
-	for evt := range EventSchemaRegistry {
+	for evt := range registry {
 		out[runtimetools.EmitToolName(evt)] = evt
 	}
 	return out

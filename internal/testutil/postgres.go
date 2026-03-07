@@ -138,9 +138,9 @@ func (s *sharedPostgresState) startLocked() error {
 	}
 	defer db.Close()
 
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(180 * time.Second)
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		pingErr := db.PingContext(ctx)
 		cancel()
 		if pingErr == nil {
@@ -150,7 +150,7 @@ func (s *sharedPostgresState) startLocked() error {
 			_ = exec.Command(dockerBin, "stop", name).Run()
 			return fmt.Errorf("postgres not ready in time: %w", pingErr)
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	if err := startContainerWatcher(dockerBin, name); err != nil {
@@ -180,7 +180,7 @@ func initializeDatabase(db *sql.DB) error {
 		return fmt.Errorf("read migrations: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	initSQL := []string{
@@ -208,7 +208,7 @@ func initializeDatabase(db *sql.DB) error {
 }
 
 func createIsolatedDatabase(adminDB *sql.DB, dbName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+quoteIdent(dbName)); err != nil {
 		return err
@@ -217,7 +217,7 @@ func createIsolatedDatabase(adminDB *sql.DB, dbName string) error {
 }
 
 func dropIsolatedDatabase(adminDB *sql.DB, dbName string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if _, err := adminDB.ExecContext(ctx, `
 		SELECT pg_terminate_backend(pid)

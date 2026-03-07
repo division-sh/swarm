@@ -18,7 +18,10 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeagents "empireai/internal/runtime/agents"
 	llm "empireai/internal/runtime/llm"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -795,14 +798,14 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	mailboxStore := &sqlMailboxStore{db: db}
 	exec := runtimetools.NewExecutor(bus, nil, nil)
 	exec.SetMailboxStore(mailboxStore)
-	baseFactory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
+	baseFactory := runtimeagents.NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	factory := func(cfg models.AgentConfig) (Agent, error) {
-		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
+		if strings.TrimSpace(extractSystemPromptForTest(cfg)) == "" {
 			cfg.Config = withSystemPrompt(cfg.Config, "Canned runtime prompt for "+strings.TrimSpace(cfg.Role))
 		}
 		return baseFactory(cfg)
 	}
-	am := NewAgentManager(bus, factory)
+	am := runtimemanager.NewAgentManager(bus, factory)
 
 	spawn := func(id, role, mode string, subscriptions ...string) {
 		t.Helper()
@@ -828,7 +831,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	spawn("validation-coordinator", "validation-coordinator", "factory", "validation.package_ready")
 	spawn("empire-coordinator", "empire-coordinator", "holding", "vertical.approved")
 
-	scanMgr := NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, db)
+	scanMgr := runtimepipeline.NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, newScanCampaignHooksForTest(), db)
 	scoringNode := NewScoringNode(bus, pc, nil)
 	if scoringNode == nil {
 		t.Fatal("expected scoring node")

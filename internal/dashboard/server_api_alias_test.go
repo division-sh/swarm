@@ -17,6 +17,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -108,7 +109,7 @@ func TestDashboardServer_APIAliases_Work(t *testing.T) {
 	factory := func(cfg models.AgentConfig) (rt.Agent, error) { //nolint:revive
 		return &aliasStubAgent{id: cfg.ID}, nil
 	}
-	manager := rt.NewAgentManager(bus, factory, pg)
+	manager := runtimemanager.NewAgentManager(bus, factory, pg)
 	manager.Run(context.Background())
 	// Also register the stub in memory so ChatWithAgent works.
 	_ = manager.SpawnAgent(models.AgentConfig{ID: "empire-coordinator", Role: "empire-coordinator", Mode: "holding", Type: "stub"})

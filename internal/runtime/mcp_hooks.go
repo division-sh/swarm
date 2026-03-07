@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	runtimecorpus "empireai/internal/runtime/corpusobs"
+	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimetools "empireai/internal/runtime/tools"
@@ -38,6 +40,7 @@ const (
 
 func init() {
 	runtimemcp.SetActorResolver(ActorFromContext)
+	llm.SetMCPTurnContextHooks(runtimemcp.RegisterTurnContextWithTTL, runtimemcp.UnregisterTurnContext)
 }
 
 func newMCPTurnRegistry() *mcpTurnRegistry {
@@ -98,15 +101,15 @@ func runtimeErrorEnvelope(raw string) string {
 
 func RuntimeMCPGatewayHooks(logger *RuntimeLogger) runtimemcp.GatewayHooks {
 	return runtimemcp.GatewayHooks{
-		RuntimeIngressPaused:      RuntimeIngressPaused,
+		RuntimeIngressPaused:      runtimebus.RuntimeIngressPaused,
 		FormatError:               FormatRuntimeError,
 		NewRuntimeError:           newMCPRuntimeError,
 		RetryableFromError:        retryableFromGatewayError,
 		WithActor:                 WithActor,
 		ActorFromContext:          ActorFromContext,
-		WithRuntimeEpoch:          WithRuntimeEpoch,
-		WithCurrentRuntimeEpoch:   WithCurrentRuntimeEpoch,
-		IsCurrentRuntimeEpoch:     IsCurrentRuntimeEpoch,
+		WithRuntimeEpoch:          runtimebus.WithRuntimeEpoch,
+		WithCurrentRuntimeEpoch:   runtimebus.WithCurrentRuntimeEpoch,
+		IsCurrentRuntimeEpoch:     runtimebus.IsCurrentRuntimeEpoch,
 		WithInboundEvent:          WithInboundEvent,
 		WithEmittedEventsRecorder: WithEmittedEventsRecorder,
 		ResolveTurnContext:        resolveMCPTurnContext,
@@ -173,12 +176,12 @@ func runtimeMCPAfterToolSuccess(logger *RuntimeLogger, ctx context.Context, r *h
 	if logger == nil {
 		return
 	}
-	if meta, snapshot, ok := recordCorpusEmitFromContext(ctx, toolName, time.Now().UTC()); ok && snapshot.EmitCount == 1 {
+	if meta, snapshot, ok := runtimecorpus.RecordEmitFromContext(ctx, toolName, time.Now().UTC()); ok && snapshot.EmitCount == 1 {
 		runtimeMCPLogCorpusFirstEmit(logger, ctx, r, meta, snapshot, toolName)
 	}
 }
 
-func runtimeMCPLogCorpusFirstEmit(logger *RuntimeLogger, ctx context.Context, r *http.Request, meta corpusTurnMeta, snapshot corpusEmitSnapshot, toolName string) {
+func runtimeMCPLogCorpusFirstEmit(logger *RuntimeLogger, ctx context.Context, r *http.Request, meta runtimecorpus.TurnMeta, snapshot runtimecorpus.EmitSnapshot, toolName string) {
 	if logger == nil {
 		return
 	}

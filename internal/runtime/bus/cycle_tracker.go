@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
 
@@ -286,11 +287,7 @@ func asString(v any) string {
 }
 
 func mustJSON(v any) []byte {
-	b, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	return b
+	return runtimesharedjson.MustJSON(v)
 }
 
 func runtimeWarn(component string, format string, args ...any) {

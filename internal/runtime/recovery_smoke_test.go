@@ -15,6 +15,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"github.com/google/uuid"
 	_ "github.com/lib/pq"
@@ -80,7 +81,7 @@ func TestPostgresRecoverySmoke(t *testing.T) {
 	}
 
 	bus1 := rt.NewEventBus(pg)
-	manager1 := rt.NewAgentManager(bus1, nil, pg)
+	manager1 := runtimemanager.NewAgentManager(bus1, nil, pg)
 	if err := manager1.SpawnOpCo(verticalID, models.MandateDocument{VerticalID: verticalID}); err != nil {
 		t.Fatalf("spawn opco: %v", err)
 	}
@@ -105,7 +106,7 @@ func TestPostgresRecoverySmoke(t *testing.T) {
 	}
 
 	bus2 := rt.NewEventBus(pg)
-	manager2 := rt.NewAgentManager(bus2, nil, pg)
+	manager2 := runtimemanager.NewAgentManager(bus2, nil, pg)
 	if err := manager2.Recover(ctx); err != nil {
 		t.Fatalf("recover manager2: %v", err)
 	}

@@ -75,11 +75,11 @@ func TestRuntimeRootFileCountStaysBounded(t *testing.T) {
 		prodCount++
 	}
 
-	if prodCount > 65 {
-		t.Fatalf("runtime root has too many production files: got=%d want<=65", prodCount)
+	if prodCount > 15 {
+		t.Fatalf("runtime root has too many production files: got=%d want<=15", prodCount)
 	}
-	if testCount > 60 {
-		t.Fatalf("runtime root has too many test files: got=%d want<=60", testCount)
+	if testCount > 45 {
+		t.Fatalf("runtime root has too many test files: got=%d want<=45", testCount)
 	}
 }
 
@@ -101,13 +101,10 @@ func TestRuntimeRootWrapperFilesStayThin(t *testing.T) {
 
 	root := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime")
 	limits := map[string]int{
-		"aliases.go":            140,
-		"event_turn_context.go": 80,
-		"directive_parser.go":   80,
-		"sharding.go":           80,
-		"pipeline_helpers.go":   90,
-		"helpers.go":            220,
-		"mcp_hooks.go":          320,
+		"aliases.go":   140,
+		"eventbus.go":  140,
+		"helpers.go":   320,
+		"mcp_hooks.go": 320,
 	}
 	for name, maxLines := range limits {
 		path := filepath.Join(root, name)
@@ -137,4 +134,14 @@ func projectRootFromArchitectureTest(t *testing.T) string {
 		t.Fatalf("getwd: %v", err)
 	}
 	return filepath.Clean(filepath.Join(wd, "..", ".."))
+}
+
+func TestRuntimeRootNoLegacyAgentLLM(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime", "agent_llm.go")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("legacy root agent_llm.go still present: %s", path)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", path, err)
+	}
 }

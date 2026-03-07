@@ -9,6 +9,9 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimemanager "empireai/internal/runtime/manager"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -92,9 +95,8 @@ func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 	}
 
 	bus := NewEventBus(InMemoryEventStore{})
-	am := NewAgentManager(bus, nil)
 	store := &templateStoreStub{bootstrapVersion: 7, info: VerticalInfo{ID: "v1", Name: "Acme Vertical", Slug: "acme", Geography: "US"}}
-	am.store = store
+	am := runtimemanager.NewAgentManager(bus, nil, store)
 	if err := am.SpawnOpCo("v1", models.MandateDocument{VerticalID: "v1"}); err != nil {
 		t.Fatalf("SpawnOpCo: %v", err)
 	}
@@ -105,11 +107,11 @@ func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 
 func checkCycleCounterCircuitBreaker(t *testing.T) {
 	ctx := context.Background()
-	tracker := NewOpCoCycleTracker(nil)
+	tracker := runtimebus.NewOpCoCycleTracker(nil)
 	verticalID := uuid.NewString()
 	var escalated bool
 	var escalation *events.Event
-	for i := 0; i < defaultOpCoCycleLimit; i++ {
+	for i := 0; i < 5; i++ {
 		escalated, escalation = tracker.Check(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("qa.validation_failed"), VerticalID: verticalID, SourceAgent: "opco-qa-" + verticalID, Payload: mustJSON(map[string]any{"cycle": i + 1})})
 	}
 	if !escalated || escalation == nil || strings.TrimSpace(string(escalation.Type)) != "cycle_limit_reached" {
@@ -125,7 +127,7 @@ func checkBudgetHumanMailboxContracts(t *testing.T) {
 		}
 	}
 	for _, evt := range []string{"human_task.requested", "human_task.approved", "human_task.rejected", "human_task.deferred", "mailbox.item_decided"} {
-		if _, ok := contractEventPayloadFields[evt]; !ok {
+		if _, ok := runtimecontracts.EventPayloadFields()[evt]; !ok {
 			t.Fatalf("missing contract payload fields for %s", evt)
 		}
 	}

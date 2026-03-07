@@ -8,6 +8,7 @@ import (
 	"empireai/internal/models"
 	"empireai/internal/runtime"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"encoding/json"
@@ -232,7 +233,7 @@ func TestDashboard_ControlChat_LiveAndAsyncPaths(t *testing.T) {
 	}
 
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, func(cfg models.AgentConfig) (rt.Agent, error) {
+	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (rt.Agent, error) {
 		return &chatStubAgent{id: cfg.ID}, nil
 	}, pg)
 	manager.Run(ctx)
@@ -367,7 +368,7 @@ func TestDashboardServer_ControlPlane_MoreBranches(t *testing.T) {
 	factory := func(cfg models.AgentConfig) (rt.Agent, error) {
 		return &controlStubAgent{id: cfg.ID}, nil
 	}
-	manager := rt.NewAgentManager(bus, factory, pg)
+	manager := runtimemanager.NewAgentManager(bus, factory, pg)
 	manager.Run(context.Background())
 	t.Cleanup(func() { _ = manager.Shutdown() })
 	_ = manager.SpawnAgent(models.AgentConfig{ID: "empire-coordinator", Role: "empire-coordinator", Mode: "holding", Type: "stub"})

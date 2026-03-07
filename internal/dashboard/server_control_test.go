@@ -14,6 +14,8 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimemanager "empireai/internal/runtime/manager"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -53,7 +55,7 @@ func TestHandleControlSeedOrg_LoadErrorFromYAML(t *testing.T) {
 	t.Setenv("EMPIREAI_GLOBAL_AGENTS_DIR", agentsDir)
 
 	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
-	manager := runtime.NewAgentManager(bus, nil)
+	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
 
 	req := httptest.NewRequest(http.MethodPost, "/dashboard/api/control/seed-org", nil)
@@ -109,7 +111,7 @@ func TestHandleControlSeedOrg_SuccessFromYAML(t *testing.T) {
 	}
 
 	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
-	manager := runtime.NewAgentManager(bus, nil)
+	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
 
 	req := httptest.NewRequest(http.MethodPost, "/dashboard/api/control/seed-org", nil)
@@ -160,7 +162,7 @@ func TestHandleControlRuntime_ResetDB_LoadErrorFromYAML(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
 	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
-	manager := runtime.NewAgentManager(bus, nil)
+	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(db, nil, nil, nil, manager)
 
 	body := []byte(`{"action":"reset_db","confirm":"RESET","seed_org":true}`)
@@ -195,10 +197,10 @@ func TestHandleControlRuntime_InvalidAction(t *testing.T) {
 }
 
 func TestHandleControlRuntime_PauseResume(t *testing.T) {
-	runtime.ResumeRuntimeIngress()
-	defer runtime.ResumeRuntimeIngress()
+	runtimebus.ResumeRuntimeIngress()
+	defer runtimebus.ResumeRuntimeIngress()
 	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
-	manager := runtime.NewAgentManager(bus, nil)
+	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
 
 	resumeReq := httptest.NewRequest(http.MethodPost, "/dashboard/api/control/runtime", bytes.NewReader([]byte(`{"action":"resume"}`)))
@@ -210,7 +212,7 @@ func TestHandleControlRuntime_PauseResume(t *testing.T) {
 	if !manager.IsRunning() {
 		t.Fatal("expected manager running after resume")
 	}
-	if runtime.RuntimeIngressPaused() {
+	if runtimebus.RuntimeIngressPaused() {
 		t.Fatal("expected ingress resumed after resume action")
 	}
 
@@ -223,7 +225,7 @@ func TestHandleControlRuntime_PauseResume(t *testing.T) {
 	if manager.IsRunning() {
 		t.Fatal("expected manager stopped after pause")
 	}
-	if !runtime.RuntimeIngressPaused() {
+	if !runtimebus.RuntimeIngressPaused() {
 		t.Fatal("expected ingress paused after pause action")
 	}
 }
@@ -250,7 +252,7 @@ func TestHandleControlChat_LiveMarksReceiptProcessed(t *testing.T) {
 	factory := func(cfg models.AgentConfig) (runtime.Agent, error) {
 		return &stubBoardAgent{id: cfg.ID}, nil
 	}
-	manager := runtime.NewAgentManager(bus, factory)
+	manager := runtimemanager.NewAgentManager(bus, factory)
 	if err := manager.SpawnAgent(models.AgentConfig{ID: "empire-coordinator", Role: "empire-coordinator"}); err != nil {
 		t.Fatalf("spawn: %v", err)
 	}

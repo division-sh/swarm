@@ -2,12 +2,16 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
 func coalesce(values ...string) string {
@@ -20,111 +24,31 @@ func coalesce(values ...string) string {
 }
 
 func asFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case int:
-		return float64(n), true
-	case int8:
-		return float64(n), true
-	case int16:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint8:
-		return float64(n), true
-	case uint16:
-		return float64(n), true
-	case uint32:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	case float32:
-		return float64(n), true
-	case float64:
-		return n, true
-	default:
-		return 0, false
-	}
+	return runtimesharedjson.AsFloat64(v)
 }
 
 func schemaAdditionalProps(raw any) bool {
-	if raw == nil {
-		return true
-	}
-	if b, ok := raw.(bool); ok {
-		return b
-	}
-	return true
+	return runtimesharedjson.SchemaAdditionalProps(raw)
 }
 
 func isNumeric(v any) bool {
-	switch v.(type) {
-	case float64, float32, int, int64, int32, uint, uint64, uint32:
-		return true
-	default:
-		return false
-	}
+	return runtimesharedjson.IsNumeric(v)
 }
 
 func isInteger(v any) bool {
-	switch v.(type) {
-	case int, int64, int32, uint, uint64, uint32:
-		return true
-	case float64:
-		return v.(float64) == float64(int64(v.(float64)))
-	case float32:
-		return v.(float32) == float32(int64(v.(float32)))
-	default:
-		return false
-	}
+	return runtimesharedjson.IsInteger(v)
 }
 
 func asArray(v any) ([]any, bool) {
-	switch t := v.(type) {
-	case []any:
-		return t, true
-	case []string:
-		out := make([]any, 0, len(t))
-		for _, s := range t {
-			out = append(out, s)
-		}
-		return out, true
-	default:
-		return nil, false
-	}
+	return runtimesharedjson.AsArray(v)
 }
 
 func schemaProperties(raw any) map[string]map[string]any {
-	out := map[string]map[string]any{}
-	switch t := raw.(type) {
-	case map[string]any:
-		for k, v := range t {
-			if s, ok := v.(map[string]any); ok {
-				out[k] = s
-			}
-		}
-	}
-	return out
+	return runtimesharedjson.SchemaProperties(raw)
 }
 
 func requiredList(raw any) []string {
-	switch t := raw.(type) {
-	case []string:
-		return t
-	case []any:
-		out := make([]string, 0, len(t))
-		for _, v := range t {
-			if s := strings.TrimSpace(asString(v)); s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
+	return runtimesharedjson.RequiredList(raw)
 }
 
 func asString(v any) string {
@@ -136,6 +60,98 @@ func asString(v any) string {
 	default:
 		return fmt.Sprintf("%v", t)
 	}
+}
+
+func parsePayloadMap(raw []byte) map[string]any {
+	return runtimesharedjson.ParsePayloadMap(raw)
+}
+
+func mustJSON(v any) []byte {
+	return runtimesharedjson.MustJSON(v)
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, val := range vals {
+		if trimmed := strings.TrimSpace(val); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func asInt(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case string:
+		t = strings.TrimSpace(t)
+		if t == "" {
+			return 0
+		}
+		var n int
+		if _, err := fmt.Sscanf(t, "%d", &n); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func toStringList(raw any) []string {
+	switch t := raw.(type) {
+	case nil:
+		return nil
+	case []string:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			item = strings.TrimSpace(item)
+			if item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		text := strings.TrimSpace(t)
+		if text == "" {
+			return nil
+		}
+		if strings.HasPrefix(text, "[") {
+			var items []string
+			if err := json.Unmarshal([]byte(text), &items); err == nil {
+				return toStringList(items)
+			}
+		}
+		parts := strings.Split(text, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
+	default:
+		return []string{strings.TrimSpace(fmt.Sprintf("%v", raw))}
+	}
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func WeekStartUTC(now time.Time, resetDay string) time.Time {
@@ -173,9 +189,29 @@ func parseWeekday(raw string) time.Weekday {
 }
 
 func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {
-	return runtimetools.WithActor(ctx, actor)
+	return runtimeactor.WithActor(ctx, actor)
 }
 
 func ActorFromContext(ctx context.Context) (models.AgentConfig, bool) {
-	return runtimetools.ActorFromContext(ctx)
+	return runtimeactor.ActorFromContext(ctx)
+}
+
+func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
+	return runtimebus.WithInboundEvent(ctx, evt)
+}
+
+func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
+	return runtimebus.InboundEventFromContext(ctx)
+}
+
+func NewEmittedEventsRecorder() *runtimebus.EmittedEventsRecorder {
+	return runtimebus.NewEmittedEventsRecorder()
+}
+
+func WithEmittedEventsRecorder(ctx context.Context, rec *runtimebus.EmittedEventsRecorder) context.Context {
+	return runtimebus.WithEmittedEventsRecorder(ctx, rec)
+}
+
+func EmittedEventsRecorderFromContext(ctx context.Context) (*runtimebus.EmittedEventsRecorder, bool) {
+	return runtimebus.EmittedEventsRecorderFromContext(ctx)
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
 func inferDiscoveryMode(text string) string {
@@ -142,12 +143,5 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 }
 
 func parsePayloadMap(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return map[string]any{}
-	}
-	return payload
+	return runtimesharedjson.ParsePayloadMap(raw)
 }

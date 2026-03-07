@@ -11,6 +11,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"github.com/google/uuid"
 )
 
@@ -73,7 +74,7 @@ func applyTemplateMigrationWithPrimitives(ctx context.Context, cfgRuntimeMode st
 
 	// Hydrate a manager so we can execute primitives without calling the LLM.
 	bus := runtime.NewEventBus(stores.EventStore)
-	manager := runtime.NewAgentManager(bus, nil, stores.ManagerStore)
+	manager := runtimemanager.NewAgentManager(bus, nil, stores.ManagerStore)
 	manager.SetSessionRegistry(stores.SessionRegistry, cfgRuntimeMode)
 	if err := manager.Recover(ctx); err != nil {
 		return failTemplateMigration(ctx, stores, migrationID, verticalID, executedBy, fmt.Errorf("recover manager: %w", err))
@@ -170,7 +171,7 @@ func decodeTemplateMigrationPlan(planRaw []byte) (templateMigrationPlan, error) 
 func executeMigrationOp(
 	ctx context.Context,
 	db *sql.DB,
-	manager *runtime.AgentManager,
+	manager *runtimemanager.AgentManager,
 	verticalID, toVersion, executedBy string,
 	op templateMigrationOp,
 ) error {

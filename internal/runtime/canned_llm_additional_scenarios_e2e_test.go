@@ -13,6 +13,9 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeagents "empireai/internal/runtime/agents"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -93,8 +96,8 @@ type e2eScenarioRig struct {
 	eventStore    *postgresEventStore
 	mailboxStore  *sqlMailboxStore
 	pc            *FactoryPipelineCoordinator
-	am            *AgentManager
-	scanMgr       *ScanCampaignManager
+	am            *runtimemanager.AgentManager
+	scanMgr       *runtimepipeline.ScanCampaignManager
 	scoringNode   *ScoringNode
 	scheduler     *Scheduler
 	scheduleStore *captureScheduleStore
@@ -160,14 +163,14 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	mailboxStore := &sqlMailboxStore{db: db}
 	exec := runtimetools.NewExecutor(bus, scheduler, nil, scheduleStore)
 	exec.SetMailboxStore(mailboxStore)
-	baseFactory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
+	baseFactory := runtimeagents.NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
 	factory := func(cfg models.AgentConfig) (Agent, error) {
-		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
+		if strings.TrimSpace(extractSystemPromptForTest(cfg)) == "" {
 			cfg.Config = withSystemPrompt(cfg.Config, "Canned scenario prompt for "+strings.TrimSpace(cfg.Role))
 		}
 		return baseFactory(cfg)
 	}
-	am := NewAgentManager(bus, factory)
+	am := runtimemanager.NewAgentManager(bus, factory)
 	exec.SetManager(am)
 
 	for _, agent := range sc.Agents {
@@ -182,7 +185,7 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 		}
 	}
 
-	scanMgr := NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, db)
+	scanMgr := runtimepipeline.NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, newScanCampaignHooksForTest(), db)
 	scoringNode := NewScoringNode(bus, pc, nil)
 	if scoringNode == nil {
 		t.Fatal("expected scoring node")
@@ -650,7 +653,7 @@ func TestCannedLLME2E_Scenario7_CampaignMultiMode(t *testing.T) {
 		if err := rows.Scan(&mode); err != nil {
 			t.Fatalf("scan mode: %v", err)
 		}
-		modes = append(modes, normalizeScanMode(strings.TrimSpace(mode)))
+		modes = append(modes, runtimepipeline.NormalizeScanMode(strings.TrimSpace(mode)))
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate scan.completed modes: %v", err)

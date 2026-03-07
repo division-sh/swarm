@@ -12,6 +12,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 )
@@ -48,7 +49,7 @@ func TestDashboardServer_ErrorBranches(t *testing.T) {
 	factory := func(cfg models.AgentConfig) (rt.Agent, error) {
 		return &stubAgent{id: cfg.ID, subs: nil}, nil
 	}
-	manager := rt.NewAgentManager(bus, factory, pg)
+	manager := runtimemanager.NewAgentManager(bus, factory, pg)
 	manager.Run(context.Background())
 
 	srv := NewServer(db, cfg, pg, pg, manager)

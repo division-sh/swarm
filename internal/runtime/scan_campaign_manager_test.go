@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
-	"empireai/internal/events"
 	"encoding/json"
 	"testing"
 	"time"
+
+	"empireai/internal/events"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
 type scanStoreStub struct {
@@ -73,8 +75,8 @@ func TestScanCampaignManager_Tick_ClaimsAndEmitsScanRequested(t *testing.T) {
 			}),
 		},
 	}
-	mgr := NewScanCampaignManager(bus, store)
-	mgr.tick(context.Background())
+	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest())
+	mgr.TickForTest(context.Background())
 
 	select {
 	case evt := <-ch:
@@ -114,12 +116,12 @@ func TestScanCampaignManager_OnEvent_ThrottleResumeAndCompleted(t *testing.T) {
 			Priority:    "low",
 		},
 	}
-	mgr := NewScanCampaignManager(bus, store)
+	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest())
 
-	mgr.onEvent(context.Background(), events.Event{Type: events.EventType("budget.throttle")})
-	mgr.onEvent(context.Background(), events.Event{Type: events.EventType("budget.resumed")})
+	mgr.OnEventForTest(context.Background(), events.Event{Type: events.EventType("budget.throttle")})
+	mgr.OnEventForTest(context.Background(), events.Event{Type: events.EventType("budget.resumed")})
 
-	mgr.onEvent(context.Background(), events.Event{
+	mgr.OnEventForTest(context.Background(), events.Event{
 		Type:    events.EventType("scan.completed"),
 		Payload: mustJSON(map[string]any{"campaign_id": "c1", "discoveries_count": "3"}),
 	})
@@ -152,7 +154,7 @@ func TestScanCampaignManager_Run_KicksOnceAndStops(t *testing.T) {
 			Priority:    "low",
 		},
 	}
-	mgr := NewScanCampaignManager(bus, store)
+	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -180,77 +182,77 @@ func TestAsInt(t *testing.T) {
 }
 
 func TestParseDirectiveMode(t *testing.T) {
-	mode, explicit := parseDirectiveMode("SaaS in Paraguay")
+	mode, explicit := runtimepipeline.ParseDirectiveMode("SaaS in Paraguay")
 	if mode != "saas_gap" || explicit {
 		t.Fatalf("expected default open campaign mode saas_gap, got mode=%s explicit=%v", mode, explicit)
 	}
 
-	mode, explicit = parseDirectiveMode("run saas_trend in Paraguay")
+	mode, explicit = runtimepipeline.ParseDirectiveMode("run saas_trend in Paraguay")
 	if mode != "saas_trend" || !explicit {
 		t.Fatalf("expected explicit saas_trend mode, got mode=%s explicit=%v", mode, explicit)
 	}
 
-	mode, explicit = parseDirectiveMode("run automation micro in Paraguay")
+	mode, explicit = runtimepipeline.ParseDirectiveMode("run automation micro in Paraguay")
 	if mode != "saas_gap" || !explicit {
 		t.Fatalf("expected explicit automation_micro alias to saas_gap, got mode=%s explicit=%v", mode, explicit)
 	}
 
-	mode, explicit = parseDirectiveMode("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	mode, explicit = runtimepipeline.ParseDirectiveMode("US, corpus, corpus_path=/data/test-signals-25.jsonl")
 	if mode != "corpus" || !explicit {
 		t.Fatalf("expected explicit corpus mode, got mode=%s explicit=%v", mode, explicit)
 	}
 }
 
 func TestRemainingCampaignModes(t *testing.T) {
-	out := remainingCampaignModes("saas_gap")
+	out := runtimepipeline.RemainingCampaignModes("saas_gap")
 	if len(out) != 2 || out[0] != "saas_trend" || out[1] != "local_services" {
 		t.Fatalf("unexpected campaign remainder for saas_gap: %+v", out)
 	}
-	out = remainingCampaignModes("automation_micro")
+	out = runtimepipeline.RemainingCampaignModes("automation_micro")
 	if len(out) != 2 || out[0] != "saas_trend" || out[1] != "local_services" {
 		t.Fatalf("unexpected campaign remainder for automation_micro alias: %+v", out)
 	}
-	out = remainingCampaignModes("local_services")
+	out = runtimepipeline.RemainingCampaignModes("local_services")
 	if len(out) != 0 {
 		t.Fatalf("local_services should have no follow-on modes, got %+v", out)
 	}
 }
 
 func TestCampaignModesForDirective(t *testing.T) {
-	got := campaignModesForDirective("saas_gap", false)
+	got := runtimepipeline.CampaignModesForDirective("saas_gap", false)
 	if len(got) != 3 || got[0] != "saas_gap" || got[1] != "saas_trend" || got[2] != "local_services" {
 		t.Fatalf("unexpected full-cycle modes: %+v", got)
 	}
 
-	single := campaignModesForDirective("saas_trend", true)
+	single := runtimepipeline.CampaignModesForDirective("saas_trend", true)
 	if len(single) != 1 || single[0] != "saas_trend" {
 		t.Fatalf("unexpected explicit single mode: %+v", single)
 	}
 
-	corpus := campaignModesForDirective("corpus", true)
+	corpus := runtimepipeline.CampaignModesForDirective("corpus", true)
 	if len(corpus) != 1 || corpus[0] != "corpus" {
 		t.Fatalf("unexpected corpus explicit mode: %+v", corpus)
 	}
 }
 
 func TestIsComplexDirectiveText(t *testing.T) {
-	if !isComplexDirectiveText("Focus on compliance-driven opportunities in LATAM countries with over 80 percent internet penetration") {
+	if !runtimepipeline.IsComplexDirectiveText("Focus on compliance-driven opportunities in LATAM countries with over 80 percent internet penetration") {
 		t.Fatal("expected complex directive to be detected")
 	}
-	if isComplexDirectiveText("SaaS in Uruguay") {
+	if runtimepipeline.IsComplexDirectiveText("SaaS in Uruguay") {
 		t.Fatal("expected simple directive to stay deterministic-runtime path")
 	}
 }
 
 func TestParseDirectiveMode_Corpus(t *testing.T) {
-	mode, explicit := parseDirectiveMode("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	mode, explicit := runtimepipeline.ParseDirectiveMode("US, corpus, corpus_path=/data/test-signals-25.jsonl")
 	if mode != "corpus" || !explicit {
 		t.Fatalf("expected corpus explicit mode, got mode=%q explicit=%v", mode, explicit)
 	}
 }
 
 func TestParseDirectiveGeography_USAbbrev(t *testing.T) {
-	name, country, _ := parseDirectiveGeography("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	name, country, _ := runtimepipeline.ParseDirectiveGeography("US, corpus, corpus_path=/data/test-signals-25.jsonl")
 	if name != "United States" || country != "United States" {
 		t.Fatalf("expected US abbreviation to map to United States, got name=%q country=%q", name, country)
 	}

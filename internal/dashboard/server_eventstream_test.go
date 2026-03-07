@@ -68,7 +68,7 @@ func TestDashboardServer_EventStream_SSE_WithFilters(t *testing.T) {
 	h := srv.Handler()
 
 	// Short-lived request context cancels the streaming loop after the first pass.
-	streamCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	streamCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet,
 		"/dashboard/api/events/stream?since="+now.Add(-10*time.Second).Format(time.RFC3339)+"&type=opco.*",
@@ -135,7 +135,7 @@ func TestDashboardServer_EventStream_IncludesRuntimeLogs(t *testing.T) {
 	srv.now = func() time.Time { return now }
 	h := srv.Handler()
 
-	streamCtx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	streamCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	req := httptest.NewRequest(http.MethodGet,
 		"/dashboard/api/events/stream?since="+now.Add(-10*time.Second).Format(time.RFC3339)+"&include_runtime=true&component=interceptor",

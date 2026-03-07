@@ -30,8 +30,12 @@ import (
 	"empireai/internal/models"
 	"empireai/internal/ops"
 	"empireai/internal/runtime"
+	runtimeagents "empireai/internal/runtime/agents"
+	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
+	runtimemanager "empireai/internal/runtime/manager"
 	runtimemcp "empireai/internal/runtime/mcp"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -123,18 +127,18 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		}
 		log.Printf("emit schema hardening warning: %d agent-emitted event schemas are missing explicit definitions; add explicit schemas (sample: %s)", len(generated), strings.Join(sample, ", "))
 	}
-	var pipelineCoordinator *runtime.FactoryPipelineCoordinator
-	var scoringNode *runtime.ScoringNode
+	var pipelineCoordinator *runtimepipeline.FactoryPipelineCoordinator
+	var scoringNode *runtimepipeline.ScoringNode
 	if stores.SQLDB != nil {
 		runtimeLogger = runtime.NewRuntimeLogger(stores.SQLDB)
 		bus.SetRuntimeLogger(runtimeLogger)
-		bus.SetCycleTracker(runtime.NewOpCoCycleTracker(stores.SQLDB))
-		pipelineCoordinator = runtime.NewFactoryPipelineCoordinator(bus, stores.SQLDB)
+		bus.SetCycleTracker(runtimebus.NewOpCoCycleTracker(stores.SQLDB))
+		pipelineCoordinator = runtimepipeline.NewFactoryPipelineCoordinator(bus, stores.SQLDB)
 		if pipelineCoordinator != nil {
-			pipelineCoordinator.SetShardPlanner(runtime.NewShardPlanner(cfg.Sharding))
+			pipelineCoordinator.SetShardPlanner(runtimepipeline.NewShardPlanner(cfg.Sharding))
 			bus.SetInterceptors(pipelineCoordinator)
 			go pipelineCoordinator.RunMaintenance(ctx)
-			scoringNode = runtime.NewScoringNode(bus, pipelineCoordinator, stores.SQLDB)
+			scoringNode = runtimepipeline.NewScoringNode(bus, pipelineCoordinator, stores.SQLDB)
 			if scoringNode != nil {
 				go scoringNode.Run(ctx)
 			}
@@ -145,7 +149,29 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		go runner.Run(ctx)
 	}
 	if stores.ScanCampaignStore != nil {
-		manager := runtime.NewScanCampaignManager(bus, stores.ScanCampaignStore, stores.SQLDB)
+		hooks := runtimepipeline.ScanCampaignHooks{
+			Warnf: func(component, format string, args ...any) {
+				log.Printf("runtime.warn component=%s message=%s", strings.TrimSpace(component), fmt.Sprintf(format, args...))
+			},
+			RecordTransition: func(ctx context.Context, db *sql.DB, in runtimepipeline.ScanCampaignTransitionInput) error {
+				return runtime.RecordPipelineTransition(ctx, db, runtime.PipelineTransitionInput{
+					EventID:       in.EventID,
+					EventType:     in.EventType,
+					Handler:       in.Handler,
+					PipelineType:  in.PipelineType,
+					PipelineID:    in.PipelineID,
+					Action:        in.Action,
+					StateBefore:   in.StateBefore,
+					StateAfter:    in.StateAfter,
+					EventsEmitted: in.EventsEmitted,
+					DropReason:    in.DropReason,
+					Error:         in.Error,
+					Duration:      in.Duration,
+				})
+			},
+			EnsureDirectiveGeography: runtimepipeline.EnsureDirectiveGeography,
+		}
+		manager := runtimepipeline.NewScanCampaignManager(bus, stores.ScanCampaignStore, hooks, stores.SQLDB)
 		go manager.Run(ctx)
 	}
 	inboundAddr := os.Getenv("EMPIREAI_INBOUND_ADDR")
@@ -246,8 +272,8 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	toolExecutor.SetConfig(cfg)
 	toolExecutor.SetMailboxStore(stores.MailboxStore)
 	toolExecutor.SetSQLDB(stores.SQLDB)
-	factory := runtime.NewLLMAgentFactory(llm, toolExecutor, toolExecutor.ToolDefinitions())
-	manager := runtime.NewAgentManager(bus, factory, stores.ManagerStore)
+	factory := runtimeagents.NewLLMAgentFactory(llm, toolExecutor, toolExecutor.ToolDefinitions())
+	manager := runtimemanager.NewAgentManager(bus, factory, stores.ManagerStore)
 	manager.SetWorkspaceLifecycle(workspaceLifecycle)
 	manager.SetSessionRegistry(stores.SessionRegistry, cfg.LLM.RuntimeMode)
 	manager.SetBudgetTracker(budgetTracker)
@@ -2982,8 +3008,8 @@ func runChatSubcommand(args []string) error {
 	toolExecutor.SetConfig(cfg)
 	toolExecutor.SetMailboxStore(stores.MailboxStore)
 	toolExecutor.SetSQLDB(stores.SQLDB)
-	factory := runtime.NewLLMAgentFactory(llm, toolExecutor, toolExecutor.ToolDefinitions())
-	manager := runtime.NewAgentManager(bus, factory, stores.ManagerStore)
+	factory := runtimeagents.NewLLMAgentFactory(llm, toolExecutor, toolExecutor.ToolDefinitions())
+	manager := runtimemanager.NewAgentManager(bus, factory, stores.ManagerStore)
 	manager.SetWorkspaceLifecycle(workspaceLifecycle)
 	manager.SetSessionRegistry(stores.SessionRegistry, cfg.LLM.RuntimeMode)
 	manager.SetBudgetTracker(budgetTracker)

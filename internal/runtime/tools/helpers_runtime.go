@@ -1,12 +1,12 @@
 package tools
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
 func canonicalRuntimeRole(role string) string {
@@ -26,11 +26,7 @@ func runtimeWarn(component string, format string, args ...any) {
 }
 
 func mustJSON(v any) []byte {
-	raw, err := json.Marshal(v)
-	if err != nil || len(raw) == 0 {
-		return []byte("{}")
-	}
-	return raw
+	return runtimesharedjson.MustJSON(v)
 }
 
 func normalizeScanMode(raw string) string {

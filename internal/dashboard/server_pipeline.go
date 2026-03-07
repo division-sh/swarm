@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/runtime"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -471,9 +471,9 @@ func (s *Server) shardEventStats(ctx context.Context, stage, scanID, agentID str
 
 func shardCompletionEventType(stage string) string {
 	switch strings.TrimSpace(stage) {
-	case runtime.ShardStageMarketResearch:
+	case runtimepipeline.ShardStageMarketResearch:
 		return "market_research.scan_complete"
-	case runtime.ShardStageTrendResearch:
+	case runtimepipeline.ShardStageTrendResearch:
 		return "trend_research.scan_complete"
 	default:
 		return ""

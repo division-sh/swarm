@@ -10,6 +10,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 )
@@ -21,7 +22,7 @@ func TestDashboard_APIAgentPromptLifecycle(t *testing.T) {
 	t.Setenv("EMPIREAI_API_KEY", "test-key")
 
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if _, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS prompt_overrides (
 			agent_id TEXT PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,

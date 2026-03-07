@@ -23,6 +23,7 @@ import (
 	"empireai/internal/events"
 	mailboxsvc "empireai/internal/mailbox"
 	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/specaudit"
 	"empireai/internal/store"
 	"empireai/internal/templateops"
@@ -55,7 +56,7 @@ type Server struct {
 	now          func() time.Time
 	eventStore   runtime.EventStore
 	mailboxStore runtime.MailboxPersistence
-	manager      *runtime.AgentManager
+	manager      *runtimemanager.AgentManager
 }
 
 func NewServer(
@@ -63,7 +64,7 @@ func NewServer(
 	cfg *config.Config,
 	eventStore runtime.EventStore,
 	mailboxStore runtime.MailboxPersistence,
-	manager *runtime.AgentManager,
+	manager *runtimemanager.AgentManager,
 ) *Server {
 	return &Server{
 		db:           db,

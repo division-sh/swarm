@@ -8,7 +8,7 @@ type TransitionHook interface {
 }
 
 type LoggerHook interface {
-	Log(ctx context.Context, level, component, action, agentID, verticalID string, detail any, errText string)
+	Log(ctx context.Context, level, component, action, eventID, eventType, agentID, verticalID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int)
 }
 
 type WarningHook interface {

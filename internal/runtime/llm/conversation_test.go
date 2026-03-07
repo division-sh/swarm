@@ -58,7 +58,7 @@ func (l largeToolExec) Execute(context.Context, string, any) (any, error) {
 	return l.payload, nil
 }
 
-func asString(v any) string {
+func testAsString(v any) string {
 	s, _ := v.(string)
 	return s
 }
@@ -161,7 +161,7 @@ func TestConversation_ExecuteToolCalls_RecoversPanic(t *testing.T) {
 	if len(arr) != 1 || arr[0]["ok"] != false {
 		t.Fatalf("expected panic to be captured as error payload, got %#v", arr)
 	}
-	if !strings.Contains(strings.ToLower(asString(arr[0]["error"])), "tool panic") {
+	if !strings.Contains(strings.ToLower(testAsString(arr[0]["error"])), "tool panic") {
 		t.Fatalf("expected tool panic text, got %#v", arr[0]["error"])
 	}
 }

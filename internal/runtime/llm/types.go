@@ -38,6 +38,19 @@ type Session struct {
 	Messages         []Message
 }
 
+type UsageTokens struct {
+	InputTokens  int
+	OutputTokens int
+	Model        string
+}
+
+type BudgetGuard interface {
+	LockExecutionScope(scope string) func()
+	IsEmergency(verticalID string) bool
+	IsThrottle(verticalID string) bool
+	RecordLLMUsage(ctx context.Context, verticalID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error
+}
+
 type Runtime interface {
 	StartSession(ctx context.Context, agentID string, systemPrompt string, tools []ToolDefinition) (*Session, error)
 	ContinueSession(ctx context.Context, session *Session, message Message) (*Response, error)

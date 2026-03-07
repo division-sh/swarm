@@ -13,6 +13,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 )
@@ -67,7 +68,7 @@ func TestDashboardServer_ControlRuntime_Actions(t *testing.T) {
 	factory := func(cfg models.AgentConfig) (rt.Agent, error) { //nolint:revive
 		return &controlStubAgent{id: cfg.ID}, nil
 	}
-	manager := rt.NewAgentManager(bus, factory, pg)
+	manager := runtimemanager.NewAgentManager(bus, factory, pg)
 	manager.Run(context.Background())
 	t.Cleanup(func() { _ = manager.Shutdown() })
 
@@ -125,4 +126,3 @@ func TestDashboardServer_ControlRuntime_Actions(t *testing.T) {
 		}
 	}
 }
-

@@ -16,6 +16,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -110,7 +111,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 		}
 		return &stubAgent{id: cfg.ID, subs: subs}, nil
 	}
-	manager := rt.NewAgentManager(bus, factory, pg)
+	manager := runtimemanager.NewAgentManager(bus, factory, pg)
 	manager.Run(context.Background())
 
 	srv := NewServer(db, cfg, pg, pg, manager)

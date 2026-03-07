@@ -16,7 +16,9 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeagents "empireai/internal/runtime/agents"
 	llm "empireai/internal/runtime/llm"
+	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
@@ -739,8 +741,8 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 
 	canned := newCannedRoleRuntime()
 	exec := runtimetools.NewExecutor(bus, nil, nil)
-	factory := NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
-	am := NewAgentManager(bus, factory)
+	factory := runtimeagents.NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
+	am := runtimemanager.NewAgentManager(bus, factory)
 
 	if err := am.SpawnAgent(models.AgentConfig{
 		ID:            "market-research-agent",
@@ -761,7 +763,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 		t.Fatalf("spawn analysis-agent: %v", err)
 	}
 
-	scanMgr := NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, db)
+	scanMgr := runtimepipeline.NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, newScanCampaignHooksForTest(), db)
 	scoringNode := NewScoringNode(bus, pc, nil)
 	if scoringNode == nil {
 		t.Fatal("expected scoring node")
@@ -829,7 +831,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 		}
 		t.Fatalf("campaign.completed discoveries_count mismatch: got=%d want=2 payload=%v counts=%v skips=%v", got, campaignPayload, countsAtCompletion, skips)
 	}
-	if got := normalizeScanMode(strings.TrimSpace(asString(campaignPayload["completed_mode"]))); got != "corpus" {
+	if got := runtimepipeline.NormalizeScanMode(strings.TrimSpace(asString(campaignPayload["completed_mode"]))); got != "corpus" {
 		t.Fatalf("campaign.completed completed_mode mismatch: got=%q want=%q payload=%v", got, "corpus", campaignPayload)
 	}
 	assertScanCampaignState(t, db, campaignID, 2)
@@ -940,7 +942,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 		t.Fatalf("missing scan.requested event in snapshot")
 	}
 	scanPayload := parsePayloadMap(scanRequested.Payload)
-	if got := normalizeScanMode(strings.TrimSpace(asString(scanPayload["mode"]))); got != "corpus" {
+	if got := runtimepipeline.NormalizeScanMode(strings.TrimSpace(asString(scanPayload["mode"]))); got != "corpus" {
 		t.Fatalf("scan.requested mode mismatch: got=%q want=%q payload=%v", got, "corpus", scanPayload)
 	}
 	if got := strings.TrimSpace(asString(scanPayload["corpus_path"])); got != corpusPath {

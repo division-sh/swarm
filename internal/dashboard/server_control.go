@@ -16,6 +16,7 @@ import (
 	mailboxsvc "empireai/internal/mailbox"
 	"empireai/internal/models"
 	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	"empireai/internal/specaudit"
 	"empireai/internal/store"
 	"empireai/internal/templateops"
@@ -403,33 +404,33 @@ func (s *Server) handleControlRuntime(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
-		runtime.PauseRuntimeIngress()
+		runtimebus.PauseRuntimeIngress()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":             true,
 			"action":         "pause",
 			"running":        s.manager.IsRunning(),
-			"ingress_paused": runtime.RuntimeIngressPaused(),
+			"ingress_paused": runtimebus.RuntimeIngressPaused(),
 		})
 	case "resume":
 		if s.manager == nil {
 			writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("agent manager unavailable"))
 			return
 		}
-		runtime.ResumeRuntimeIngress()
+		runtimebus.ResumeRuntimeIngress()
 		s.manager.Run(context.Background())
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":             true,
 			"action":         "resume",
 			"running":        s.manager.IsRunning(),
-			"ingress_paused": runtime.RuntimeIngressPaused(),
+			"ingress_paused": runtimebus.RuntimeIngressPaused(),
 		})
 	case "reset_state":
 		if strings.TrimSpace(req.Confirm) != "RESET" {
 			writeErr(w, http.StatusBadRequest, fmt.Errorf("confirmation required: set confirm=RESET"))
 			return
 		}
-		resetEpoch := runtime.EnterRuntimeResetMode()
-		defer runtime.ExitRuntimeResetMode()
+		resetEpoch := runtimebus.EnterRuntimeResetMode()
+		defer runtimebus.ExitRuntimeResetMode()
 		// Match reset_db ordering to avoid writes racing with truncate.
 		if s.manager != nil {
 			if err := s.manager.ResetRuntimeState(); err != nil {
@@ -462,8 +463,8 @@ func (s *Server) handleControlRuntime(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusServiceUnavailable, fmt.Errorf("agent manager unavailable"))
 			return
 		}
-		resetEpoch := runtime.EnterRuntimeResetMode()
-		defer runtime.ExitRuntimeResetMode()
+		resetEpoch := runtimebus.EnterRuntimeResetMode()
+		defer runtimebus.ExitRuntimeResetMode()
 
 		// Stop agent loops and clear in-memory state before we truncate the DB.
 		if err := s.manager.ResetRuntimeState(); err != nil {

@@ -11,6 +11,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -24,7 +25,7 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if err := manager.SpawnAgent(models.AgentConfig{
 		ID:            "market-research-agent",
 		Type:          "sonnet",
@@ -99,7 +100,7 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if err := manager.SpawnAgent(models.AgentConfig{
 		ID:            "market-research-agent",
 		Type:          "sonnet",
@@ -177,7 +178,7 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	manager.Run(ctx)
 
 	rootTaskID := uuid.NewString()
@@ -270,7 +271,7 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if err := manager.SpawnAgent(models.AgentConfig{
 		ID:            "trend-research-agent-shard-0-testscan",
 		Type:          "sonnet",
@@ -369,7 +370,7 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 
 	cloneID := "market-research-agent-shard-0-stallscan"
 	if err := manager.SpawnAgent(models.AgentConfig{
@@ -476,7 +477,7 @@ func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T)
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
 	bus := rt.NewEventBus(pg)
-	manager := rt.NewAgentManager(bus, nil, pg)
+	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 
 	cloneID := "market-research-agent-shard-0-livelease"
 	if err := manager.SpawnAgent(models.AgentConfig{
@@ -614,7 +615,7 @@ func ensureShardsTable(t *testing.T, db *sql.DB) {
 	}
 }
 
-func startManagedDispatcher(t *testing.T, ctx context.Context, cancel context.CancelFunc, manager *rt.AgentManager, dispatcher *rt.ShardDispatcher) {
+func startManagedDispatcher(t *testing.T, ctx context.Context, cancel context.CancelFunc, manager *runtimemanager.AgentManager, dispatcher *rt.ShardDispatcher) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {

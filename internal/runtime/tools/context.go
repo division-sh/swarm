@@ -4,19 +4,13 @@ import (
 	"context"
 
 	"empireai/internal/models"
+	runtimeactor "empireai/internal/runtime/actorctx"
 )
 
-type actorContextKey struct{}
-
 func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {
-	return context.WithValue(ctx, actorContextKey{}, actor)
+	return runtimeactor.WithActor(ctx, actor)
 }
 
 func ActorFromContext(ctx context.Context) (models.AgentConfig, bool) {
-	v := ctx.Value(actorContextKey{})
-	if v == nil {
-		return models.AgentConfig{}, false
-	}
-	cfg, ok := v.(models.AgentConfig)
-	return cfg, ok
+	return runtimeactor.ActorFromContext(ctx)
 }

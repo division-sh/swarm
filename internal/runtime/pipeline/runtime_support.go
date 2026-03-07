@@ -9,12 +9,13 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
 type RuntimeLogEntry struct {
-	Level     string
-	Component string
-	Action    string
+	Level      string
+	Component  string
+	Action     string
 	EventID    string
 	EventType  string
 	AgentID    string
@@ -100,47 +101,11 @@ func asInt(v any) int {
 }
 
 func asFloat64(v any) (float64, bool) {
-	switch n := v.(type) {
-	case int:
-		return float64(n), true
-	case int8:
-		return float64(n), true
-	case int16:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint8:
-		return float64(n), true
-	case uint16:
-		return float64(n), true
-	case uint32:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	case float32:
-		return float64(n), true
-	case float64:
-		return n, true
-	default:
-		return 0, false
-	}
+	return runtimesharedjson.AsFloat64(v)
 }
 
 func asArray(v any) ([]any, bool) {
-	switch t := v.(type) {
-	case []any:
-		return t, true
-	case []string:
-		out := make([]any, 0, len(t))
-		for _, s := range t { out = append(out, s) }
-		return out, true
-	default:
-		return nil, false
-	}
+	return runtimesharedjson.AsArray(v)
 }
 
 func asObject(v any) (map[string]any, bool) {
@@ -158,13 +123,17 @@ func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 }
 
 func sqlTxFromContext(ctx context.Context) (*sql.Tx, bool) {
-	if ctx == nil { return nil, false }
+	if ctx == nil {
+		return nil, false
+	}
 	tx, ok := ctx.Value(sqlTxContextKey{}).(*sql.Tx)
 	return tx, ok && tx != nil
 }
 
 func withoutSQLTxContext(ctx context.Context) context.Context {
-	if ctx == nil { return context.Background() }
+	if ctx == nil {
+		return context.Background()
+	}
 	return context.WithValue(ctx, sqlTxContextKey{}, (*sql.Tx)(nil))
 }
 

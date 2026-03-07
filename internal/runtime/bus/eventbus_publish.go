@@ -1,0 +1,484 @@
+package bus
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"empireai/internal/events"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	"github.com/google/uuid"
+)
+
+func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	start := time.Now()
+	if evt.Type == "" {
+		return errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	if eb.cycleTracker != nil {
+		eb.cycleTracker.HandleResetEvent(ctx, evt)
+	}
+
+	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
+	ictx := runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
+	if txStore, ok := eb.store.(TransactionalEventStore); ok {
+		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
+	}
+
+	persisted := false
+	passthrough := true
+	deferred := []events.Event{}
+	defer func() {
+		if !persisted {
+			return
+		}
+		status := "processed"
+		errText := ""
+		if err != nil {
+			status = "error"
+			errText = err.Error()
+		}
+		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+	}()
+
+	// Interceptors execute before fan-out and can consume the event.
+	// Deferred events are persisted after the inbound event commits.
+	if pass, out, ierr := eb.runInterceptors(ictx, evt); ierr != nil {
+		return ierr
+	} else {
+		passthrough = pass
+		deferred = out
+	}
+
+	if passthrough {
+		if err := eb.routeAndDeliver(ctx, evt); err != nil {
+			return err
+		}
+		persisted = true
+	} else {
+		if err := eb.persistEventRecord(ctx, evt, nil); err != nil {
+			return err
+		}
+		persisted = true
+	}
+	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
+	for _, d := range deferred {
+		if err := eb.publishDeferred(ctx, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (eb *EventBus) publishTransactional(
+	ctx context.Context,
+	evt events.Event,
+	start time.Time,
+	deferredTransitions *[]runtimepipeline.DeferredPipelineTransition,
+	txStore TransactionalEventStore,
+) error {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	tx, err := txStore.BeginEventTx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin publish tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	if err != nil {
+		return err
+	}
+	var inboundPlan eventDeliveryPlan
+	if passthrough {
+		inboundPlan, err = eb.buildDeliveryPlan(ctx, evt)
+		if err != nil {
+			return err
+		}
+	}
+
+		if err := txStore.AppendEventTx(ctx, tx, evt); err != nil {
+			return fmt.Errorf("persist event: %w", err)
+		}
+	receiptTableExists := txTableExists(ctx, tx, "pipeline_receipts")
+	if passthrough && len(inboundPlan.PersistedRecipients) > 0 {
+		if err := txStore.InsertEventDeliveriesTx(ctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
+			return fmt.Errorf("persist event deliveries: %w", err)
+		}
+	}
+	if receiptTableExists {
+		if err := txStore.UpsertPipelineReceiptTx(ctx, tx, evt.ID, "processed", ""); err != nil {
+			return fmt.Errorf("persist pipeline receipt: %w", err)
+		}
+	}
+
+	deferredPlans := make([]eventDeliveryPlan, 0, len(deferred))
+	for _, d := range deferred {
+		plan, perr := eb.buildDeliveryPlan(ctx, d)
+		if perr != nil {
+			return perr
+		}
+		if err := txStore.AppendEventTx(ctx, tx, d); err != nil {
+			return fmt.Errorf("persist deferred event: %w", err)
+		}
+		if len(plan.PersistedRecipients) > 0 {
+			if err := txStore.InsertEventDeliveriesTx(ctx, tx, d.ID, plan.PersistedRecipients); err != nil {
+				return fmt.Errorf("persist deferred deliveries: %w", err)
+			}
+		}
+		if receiptTableExists {
+			if err := txStore.UpsertPipelineReceiptTx(ctx, tx, d.ID, "processed", ""); err != nil {
+				return fmt.Errorf("persist deferred pipeline receipt: %w", err)
+			}
+		}
+		deferredPlans = append(deferredPlans, plan)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit publish tx: %w", err)
+	}
+	committed = true
+	if deferredTransitions != nil {
+		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
+	}
+
+	if passthrough {
+		if len(inboundPlan.Recipients) > 0 {
+			eb.deliverToAgents(ctx, evt, inboundPlan.Recipients)
+			eb.logDelivery(ctx, evt, inboundPlan.Recipients, inboundPlan.ExtraDetail)
+		}
+		if inboundPlan.BlockedByCycle && inboundPlan.CycleEscalation != nil {
+			if err := eb.publishDeferred(ctx, *inboundPlan.CycleEscalation); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
+			_ = eb.emitContradiction(ctx, evt, inboundPlan.ContradictionReason)
+		}
+	}
+	if !receiptTableExists {
+		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
+	}
+	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
+
+	for _, plan := range deferredPlans {
+		if len(plan.Recipients) > 0 {
+			eb.deliverToAgents(ctx, plan.Event, plan.Recipients)
+			eb.logDelivery(ctx, plan.Event, plan.Recipients, plan.ExtraDetail)
+		}
+		if plan.BlockedByCycle && plan.CycleEscalation != nil {
+			if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+				return err
+			}
+		}
+		if strings.TrimSpace(plan.ContradictionReason) != "" {
+			_ = eb.emitContradiction(ctx, plan.Event, plan.ContradictionReason)
+		}
+		if !receiptTableExists {
+			eb.markPipelineReceipt(ctx, plan.Event.ID, "processed", "")
+		}
+		eb.logPublished(ctx, plan.Event, 0)
+	}
+	return nil
+}
+
+func txTableExists(ctx context.Context, tx *sql.Tx, table string) bool {
+	if tx == nil || strings.TrimSpace(table) == "" {
+		return false
+	}
+	var ok bool
+	if err := tx.QueryRowContext(ctx, `SELECT to_regclass($1) IS NOT NULL`, "public."+strings.TrimSpace(table)).Scan(&ok); err != nil {
+		return false
+	}
+	return ok
+}
+
+func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	eb.mu.RLock()
+	interceptors := append([]EventInterceptor(nil), eb.interceptors...)
+	eb.mu.RUnlock()
+	if len(interceptors) == 0 {
+		return true, nil, nil
+	}
+	passthrough := true
+	deferred := make([]events.Event, 0, 4)
+	for _, it := range interceptors {
+		pass, out, err := it.Intercept(ctx, evt)
+		if err != nil {
+			return true, nil, err
+		}
+		if !pass {
+			passthrough = false
+		}
+		for _, d := range out {
+			if d.ID == "" {
+				d.ID = uuid.NewString()
+			}
+			if d.CreatedAt.IsZero() {
+				d.CreatedAt = time.Now()
+			}
+			deferred = append(deferred, d)
+		}
+	}
+	return passthrough, deferred, nil
+}
+
+func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	if evt.Type == "" {
+		return errors.New("deferred event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	if strings.TrimSpace(evt.SourceAgent) == "" {
+		evt.SourceAgent = "runtime"
+	}
+	persisted := false
+	defer func() {
+		if !persisted {
+			return
+		}
+		status := "processed"
+		errText := ""
+		if err != nil {
+			status = "error"
+			errText = err.Error()
+		}
+		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+	}()
+	if err := eb.routeAndDeliver(ctx, evt); err != nil {
+		return err
+	}
+	persisted = true
+	eb.logPublished(ctx, evt, 0)
+	return nil
+}
+
+func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
+	eb.logRuntime(ctx, "debug", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.VerticalID, "", "", "", map[string]any{
+		"type":   string(evt.Type),
+		"source": evt.SourceAgent,
+	}, "", durationUS)
+}
+
+func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error {
+	plan, err := eb.buildDeliveryPlan(ctx, evt)
+	if err != nil {
+		return err
+	}
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
+		return err
+	}
+	if len(plan.Recipients) > 0 {
+		eb.deliverToAgents(ctx, evt, plan.Recipients)
+		eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
+	}
+	if plan.BlockedByCycle && plan.CycleEscalation != nil {
+		if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(plan.ContradictionReason) != "" {
+		_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
+	}
+	return nil
+}
+
+func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
+	plan := eventDeliveryPlan{Event: evt}
+	if tracker := eb.snapshotCycleTracker(); tracker != nil {
+		blocked, escalation := tracker.Check(ctx, evt)
+		if blocked {
+			plan.BlockedByCycle = true
+			plan.CycleEscalation = escalation
+			return plan, nil
+		}
+	}
+	// Budget events are broadcast guardrails. Deliver via delivery manifest so
+	// operating (OpCo) agents also receive them during backlog replay.
+	if strings.HasPrefix(string(evt.Type), "budget.") {
+		recipients := []string{}
+		if lister, ok := eb.store.(ActiveAgentLister); ok {
+			if ids, err := lister.ListActiveAgentIDs(ctx); err == nil {
+				recipients = ids
+			}
+		}
+		if len(recipients) == 0 {
+			// Best-effort fallback: deliver to currently subscribed agents.
+			recipients = eb.resolveSubscribedRecipients(string(evt.Type))
+		}
+		plan.Recipients = uniqueStrings(recipients)
+		plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
+		return plan, nil
+	}
+
+	// Human task events must always reach the requesting agent (even if operating
+	// and not subscribed) and should also be visible to subscribers like the
+	// Empire Coordinator. Treat them as global events, not OpCo-routed events.
+	if strings.HasPrefix(string(evt.Type), "human_task.") {
+		recipients := eb.resolveSubscribedRecipients(string(evt.Type))
+		// Only outcome/decision events are forced to the requesting agent; the
+		// initial request event is intended for coordinator review.
+		switch string(evt.Type) {
+		case "human_task.approved",
+			"human_task.rejected",
+			"human_task.deferred",
+			"human_task.completed",
+			"human_task.expired":
+			recipients = append(recipients, eb.resolveHumanTaskRecipients(evt)...)
+		}
+		plan.Recipients = uniqueStrings(recipients)
+		plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
+		return plan, nil
+	}
+
+	if !eb.isFactoryEvent(evt.Type) {
+		// OpCo events are delivered via per-vertical routing tables to operating agents.
+		// Holding/factory agents may also subscribe to OpCo event patterns and should receive
+		// them live without bypassing the vertical routing contract.
+		opcoRecipients := eb.resolveOpCoRecipients(evt)
+
+		// Subscribers are filtered to avoid accidentally delivering to operating agents
+		// in the same vertical that weren't routed (routing is the source of truth for OpCo).
+		subscribed := eb.resolveSubscribedRecipients(string(evt.Type))
+		subscribed = filterOutAgentIDs(subscribed, opcoRecipients)
+		if strings.TrimSpace(evt.VerticalID) != "" {
+			subscribed = filterOutVerticalScopedAgentIDs(subscribed, evt.VerticalID)
+		}
+
+		plan.Recipients = uniqueStrings(append(opcoRecipients, subscribed...))
+		plan.PersistedRecipients = plan.Recipients
+		plan.ExtraDetail = map[string]any{"opco_routed": len(opcoRecipients)}
+		if len(plan.Recipients) == 0 {
+			plan.ContradictionReason = "opco event resolved zero recipients"
+		} else if len(opcoRecipients) == 0 {
+			plan.ContradictionReason = "opco event resolved zero opco recipients"
+		}
+		return plan, nil
+	}
+
+	plan.Recipients = uniqueStrings(eb.resolveSubscribedRecipients(string(evt.Type)))
+	plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
+	return plan, nil
+}
+
+func (eb *EventBus) snapshotCycleTracker() *OpCoCycleTracker {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.cycleTracker
+}
+
+func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, recipients []string) error {
+	recipients = uniqueStrings(recipients)
+	if atomicStore, ok := eb.store.(AtomicEventPersistence); ok {
+		if err := atomicStore.PersistEventWithDeliveries(ctx, evt, recipients); err != nil {
+			return fmt.Errorf("persist event transaction: %w", err)
+		}
+		return nil
+	}
+	if err := eb.store.AppendEvent(ctx, evt); err != nil {
+		return fmt.Errorf("persist event: %w", err)
+	}
+	if len(recipients) == 0 {
+		return nil
+	}
+	if err := eb.store.InsertEventDeliveries(ctx, evt.ID, recipients); err != nil {
+		return fmt.Errorf("persist event deliveries: %w", err)
+	}
+	return nil
+}
+
+func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipients []string, extra map[string]any) {
+	detail := map[string]any{"recipients_count": len(recipients)}
+	for k, v := range extra {
+		detail[k] = v
+	}
+	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.VerticalID, "", "", "", detail, "", 0)
+}
+
+// PublishDirect persists an event and delivers it to the specified recipients
+// regardless of routing tables or subscription patterns. This is the "message"
+// primitive: explicit, point-to-point delivery.
+func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) (err error) {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	start := time.Now()
+	persisted := false
+	defer func() {
+		if !persisted {
+			return
+		}
+		status := "processed"
+		errText := ""
+		if err != nil {
+			status = "error"
+			errText = err.Error()
+		}
+		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+	}()
+	recipients = uniqueStrings(recipients)
+	if len(recipients) == 0 {
+		return errors.New("direct publish recipients are required")
+	}
+	if evt.Type == "" {
+		return errors.New("event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	if err := eb.persistEventRecord(ctx, evt, recipients); err != nil {
+		return err
+	}
+	persisted = true
+	eb.deliverToAgents(ctx, evt, recipients)
+	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.VerticalID, "", "", "", map[string]any{
+		"direct":           true,
+		"recipients_count": len(recipients),
+	}, "", int(time.Since(start)/time.Microsecond))
+	return nil
+}

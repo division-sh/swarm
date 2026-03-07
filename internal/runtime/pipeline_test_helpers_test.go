@@ -1,19 +1,19 @@
 package runtime
 
-import (
-	"testing"
-	"time"
+import runtimepipeline "empireai/internal/runtime/pipeline"
 
-	"empireai/internal/events"
-)
+func expectedScoringDimensions(rubric string) []string {
+	return runtimepipeline.ExpectedScoringDimensionsForTest(rubric)
+}
 
-func assertNoEventType(t *testing.T, ch <-chan events.Event, typ string, d time.Duration) {
-	t.Helper()
-	select {
-	case evt := <-ch:
-		if string(evt.Type) == typ {
-			t.Fatalf("unexpected %s event: %+v", typ, evt)
-		}
-	case <-time.After(d):
-	}
+func evaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string) {
+	return runtimepipeline.EvaluateDiscoveryPreFilterForTest(payload, rawSignal)
+}
+
+func buildPrefilterSkipDetail(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
+	return runtimepipeline.BuildPrefilterSkipDetailForTest(payload, rawSignal, adjustedSignal, reason, mode)
+}
+
+func cloneMap(in map[string]any) map[string]any {
+	return runtimepipeline.CloneMapForTest(in)
 }

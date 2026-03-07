@@ -10,6 +10,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeagents "empireai/internal/runtime/agents"
 	llm "empireai/internal/runtime/llm"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
@@ -184,9 +185,9 @@ func TestRuntimeToolExecutor_HumanTaskDecide_ApprovalBudgetExhaustedForcesDeferr
 
 func TestLLMAgent_InjectsHumanTaskOutcomeAsAsyncToolResult(t *testing.T) {
 	rt := &humanTaskOutcomeRuntime{}
-	te := noopToolExec{}
+	te := noopToolExecForAgentTest{}
 
-	agent := NewLLMAgent(models.AgentConfig{
+	agent := runtimeagents.NewLLMAgent(models.AgentConfig{
 		ID:   "agent-req",
 		Type: "worker",
 		Role: "pm-agent",
@@ -212,11 +213,11 @@ func TestLLMAgent_InjectsHumanTaskOutcomeAsAsyncToolResult(t *testing.T) {
 	}
 
 	// The injected async tool result should exist in the conversation session messages.
-	if agent.conversation == nil || agent.conversation.Session == nil {
+	if agent.Conversation() == nil || agent.Conversation().Session == nil {
 		t.Fatal("expected conversation session to be initialized")
 	}
 	found := false
-	for _, m := range agent.conversation.Session.Messages {
+	for _, m := range agent.Conversation().Session.Messages {
 		if m.Role != "tool" {
 			continue
 		}
@@ -234,9 +235,13 @@ func TestLLMAgent_InjectsHumanTaskOutcomeAsAsyncToolResult(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("expected injected tool-result style message in session, got %+v", agent.conversation.Session.Messages)
+		t.Fatalf("expected injected tool-result style message in session, got %+v", agent.Conversation().Session.Messages)
 	}
 }
+
+type noopToolExecForAgentTest struct{}
+
+func (noopToolExecForAgentTest) Execute(context.Context, string, any) (any, error) { return nil, nil }
 
 type humanTaskOutcomeRuntime struct{}
 

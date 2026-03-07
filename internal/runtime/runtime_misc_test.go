@@ -142,7 +142,7 @@ func TestRuntimeHelperFunctions_Misc(t *testing.T) {
 		t.Fatalf("filterOutVerticalScopedAgentIDs mismatch: %+v", filtered)
 	}
 
-	deduped := dedupeToolCalls([]llm.ToolCall{
+	deduped := llm.DedupeToolCalls([]llm.ToolCall{
 		{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "saas_gap"}},
 		{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "saas_gap"}},
 		{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "saas_trend"}},
@@ -176,23 +176,57 @@ func TestRuntimeHelperFunctions_Misc(t *testing.T) {
 		t.Fatalf("toStringList csv mismatch: %+v", got)
 	}
 
-	if name, country, _ := parseDirectiveGeography("SaaS in Paraguay for clinics"); name != "Paraguay" || country != "Paraguay" {
+	if name, country, _ := runtimepipeline.ParseDirectiveGeography("SaaS in Paraguay for clinics"); name != "Paraguay" || country != "Paraguay" {
 		t.Fatalf("parseDirectiveGeography known country mismatch: name=%q country=%q", name, country)
 	}
-	if name, _, _ := parseDirectiveGeography("SaaS in custom market where internet is high"); name != "Custom Market" {
+	if name, _, _ := runtimepipeline.ParseDirectiveGeography("SaaS in custom market where internet is high"); name != "Custom Market" {
 		t.Fatalf("parseDirectiveGeography phrase extraction mismatch: %q", name)
 	}
 }
 
+func extractCategoryListForTest(payload map[string]any) []string {
+	toList := func(v any) []string {
+		switch t := v.(type) {
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				s := strings.TrimSpace(asString(item))
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		case []string:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				s := strings.TrimSpace(item)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		default:
+			return nil
+		}
+	}
+	if out := toList(payload["taxonomy_categories"]); len(out) > 0 {
+		return out
+	}
+	if out := toList(payload["categories"]); len(out) > 0 {
+		return out
+	}
+	return []string{}
+}
+
 func TestExtractCategoryList(t *testing.T) {
-	got := extractCategoryList(map[string]any{
+	got := extractCategoryListForTest(map[string]any{
 		"taxonomy_categories": []any{"a", "b"},
 	})
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("extractCategoryList mismatch: %+v", got)
 	}
 
-	got2 := extractCategoryList(map[string]any{
+	got2 := extractCategoryListForTest(map[string]any{
 		"taxonomy_categories": []string{"x", "y"},
 	})
 	if len(got2) != 2 || got2[0] != "x" || got2[1] != "y" {

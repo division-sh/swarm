@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
 
@@ -979,22 +980,25 @@ func truncateRunes(s string, max int) string {
 }
 
 func parsePayloadMap(raw []byte) map[string]any {
-	out := map[string]any{}
 	if len(raw) == 0 {
-		return out
+		return map[string]any{}
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		runtimeWarn(
-			"payload-parse",
-			"failed to parse JSON payload bytes=%d error=%v snippet=%q",
-			len(raw),
-			err,
-			snippetForLog(string(raw), 220),
-		)
+	out := runtimesharedjson.ParsePayloadMap(raw)
+	if len(out) == 0 {
+		var probe map[string]any
+		if err := json.Unmarshal(raw, &probe); err != nil {
+			runtimeWarn(
+				"payload-parse",
+				"failed to parse JSON payload bytes=%d error=%v snippet=%q",
+				len(raw),
+				err,
+				snippetForLog(string(raw), 220),
+			)
+		}
 		return map[string]any{}
 	}
 	if out == nil {
-		out = map[string]any{}
+		return map[string]any{}
 	}
 	return out
 }

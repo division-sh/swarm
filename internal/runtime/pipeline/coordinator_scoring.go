@@ -110,6 +110,10 @@ func selectScoringRubric(mode string) string {
 	}
 }
 
+func ExpectedScoringDimensionsForTest(rubric string) []string {
+	return expectedScoringDimensions(rubric)
+}
+
 func clampScore100(v int) int {
 	if v < 0 {
 		return 0

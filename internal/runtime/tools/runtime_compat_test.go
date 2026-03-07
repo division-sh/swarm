@@ -7,28 +7,29 @@ import (
 	"net/http"
 	"time"
 
-    "empireai/internal/events"
-    "empireai/internal/models"
-    rt "empireai/internal/runtime"
-    runtimetools "empireai/internal/runtime/tools"
+	"empireai/internal/events"
+	"empireai/internal/models"
+	rt "empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type MailboxItem = runtimetools.MailboxItem
 type Schedule = rt.Schedule
 type InMemoryEventStore = rt.InMemoryEventStore
 type EventBus = rt.EventBus
-type AgentManager = rt.AgentManager
+type AgentManager = runtimemanager.AgentManager
 type Scheduler = rt.Scheduler
 type MailboxPersistence = runtimetools.MailboxPersistence
 type SchedulePersistence = runtimetools.SchedulePersistence
 type Agent = rt.Agent
 
 func NewEventBus(store rt.EventStore) *rt.EventBus { return rt.NewEventBus(store) }
-func NewAgentManager(bus *rt.EventBus, factory rt.AgentFactory, stores ...rt.ManagerPersistence) *rt.AgentManager {
-    return rt.NewAgentManager(bus, factory, stores...)
+func NewAgentManager(bus *rt.EventBus, factory rt.AgentFactory, stores ...rt.ManagerPersistence) *runtimemanager.AgentManager {
+	return runtimemanager.NewAgentManager(bus, factory, stores...)
 }
 func NewScheduler(callbacks ...func(Schedule)) *rt.Scheduler { return rt.NewScheduler(callbacks...) }
-func NewRuntimeToolExecutor(bus *rt.EventBus, scheduler *rt.Scheduler, manager *rt.AgentManager, stores ...SchedulePersistence) *runtimetools.Executor {
+func NewRuntimeToolExecutor(bus *rt.EventBus, scheduler *rt.Scheduler, manager *runtimemanager.AgentManager, stores ...SchedulePersistence) *runtimetools.Executor {
 	var publisher runtimetools.EventPublisher
 	if bus != nil {
 		publisher = bus

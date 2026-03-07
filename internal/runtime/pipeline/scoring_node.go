@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,11 +11,12 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
 
 const (
-	ScoringNodeID               = "scoring-node"
+	ScoringNodeID                = "scoring-node"
 	DefaultScoringNodeRetryLimit = 5
 )
 
@@ -280,11 +280,7 @@ func defaultPanicBackoff(attempt int) time.Duration {
 }
 
 func mustJSON(v any) []byte {
-	b, _ := json.Marshal(v)
-	if len(b) == 0 {
-		return []byte("{}")
-	}
-	return b
+	return runtimesharedjson.MustJSON(v)
 }
 
 func maxInt(a, b int) int {

@@ -12,6 +12,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
+	llm "empireai/internal/runtime/llm"
 	"github.com/google/uuid"
 )
 
@@ -223,13 +224,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	return nil
 }
 
-type UsageTokens struct {
-	InputTokens  int
-	OutputTokens int
-	Model        string
-}
-
-func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, verticalID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error {
+func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, verticalID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
 	if t == nil || t.db == nil {
 		return nil
 	}
