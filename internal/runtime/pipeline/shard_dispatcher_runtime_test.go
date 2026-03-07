@@ -1,4 +1,4 @@
-package runtime_test
+package pipeline_test
 
 import (
 	"context"
@@ -10,8 +10,9 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/models"
-	rt "empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -24,7 +25,7 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if err := manager.SpawnAgent(models.AgentConfig{
 		ID:            "market-research-agent",
@@ -57,9 +58,9 @@ func TestShardDispatcher_AssignsPendingShard(t *testing.T) {
 		t.Fatalf("insert shard: %v", err)
 	}
 
-	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher := runtimepipeline.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
-	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
+	startManagedPipelineDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	var shardStatus, agentID string
 	deadline := time.Now().Add(2 * time.Second)
@@ -99,7 +100,7 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if err := manager.SpawnAgent(models.AgentConfig{
 		ID:            "market-research-agent",
@@ -118,9 +119,9 @@ func TestShardDispatcher_RecoversWhenShardsTableAppearsLate(t *testing.T) {
 		t.Fatalf("drop shards table: %v", err)
 	}
 
-	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher := runtimepipeline.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
-	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
+	startManagedPipelineDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	// Allow at least one dispatcher tick while the table is missing.
 	time.Sleep(60 * time.Millisecond)
@@ -177,7 +178,7 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	manager.Run(ctx)
 
@@ -211,9 +212,9 @@ func TestShardDispatcher_TerminalTimeoutEmitsCompletion(t *testing.T) {
 		t.Fatalf("insert assigned shard: %v", err)
 	}
 
-	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher := runtimepipeline.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
-	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
+	startManagedPipelineDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	var status string
 	deadline := time.Now().Add(2 * time.Second)
@@ -270,7 +271,7 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 	if err := manager.SpawnAgent(models.AgentConfig{
 		ID:            "trend-research-agent-shard-0-testscan",
@@ -316,10 +317,10 @@ func TestShardDispatcher_DelaysTeardownUntilAssignmentReceiptSettles(t *testing.
 		t.Fatalf("insert assignment delivery: %v", err)
 	}
 
-	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher := runtimepipeline.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
 	dispatcher.SetReceiptGracePeriod(250 * time.Millisecond)
-	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
+	startManagedPipelineDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	time.Sleep(80 * time.Millisecond)
 
@@ -369,7 +370,7 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 
 	cloneID := "market-research-agent-shard-0-stallscan"
@@ -431,10 +432,10 @@ func TestShardDispatcher_RequeuesAssignedShardWhenStartupStalled(t *testing.T) {
 		t.Fatalf("insert assignment delivery: %v", err)
 	}
 
-	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher := runtimepipeline.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
 	dispatcher.SetStartupGracePeriod(80 * time.Millisecond)
-	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
+	startManagedPipelineDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	deadline := time.Now().Add(2 * time.Second)
 	var (
@@ -476,7 +477,7 @@ func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T)
 
 	cfg := testDispatcherConfig(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 	manager := runtimemanager.NewAgentManager(bus, nil, pg)
 
 	cloneID := "market-research-agent-shard-0-livelease"
@@ -550,10 +551,10 @@ func TestShardDispatcher_DoesNotRequeueStartupStallWithActiveLease(t *testing.T)
 		t.Fatalf("insert active lease session: %v", err)
 	}
 
-	dispatcher := rt.NewShardDispatcher(db, bus, manager, cfg.Sharding)
+	dispatcher := runtimepipeline.NewShardDispatcher(db, bus, manager, cfg.Sharding)
 	dispatcher.SetPollInterval(20 * time.Millisecond)
 	dispatcher.SetStartupGracePeriod(80 * time.Millisecond)
-	startManagedDispatcher(t, ctx, cancel, manager, dispatcher)
+	startManagedPipelineDispatcher(t, ctx, cancel, manager, dispatcher)
 
 	time.Sleep(250 * time.Millisecond)
 
@@ -615,7 +616,7 @@ func ensureShardsTable(t *testing.T, db *sql.DB) {
 	}
 }
 
-func startManagedDispatcher(t *testing.T, ctx context.Context, cancel context.CancelFunc, manager *runtimemanager.AgentManager, dispatcher *rt.ShardDispatcher) {
+func startManagedPipelineDispatcher(t *testing.T, ctx context.Context, cancel context.CancelFunc, manager *runtimemanager.AgentManager, dispatcher *runtimepipeline.ShardDispatcher) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {

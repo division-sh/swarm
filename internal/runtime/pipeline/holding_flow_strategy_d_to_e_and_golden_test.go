@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimetestkit "empireai/internal/runtime/testkit"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -691,7 +692,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	marketCh := bus.Subscribe("market-research-agent", events.EventType("market_research.scan_assigned"))
 	go func() {
-		evt := waitForEventType(t, marketCh, "market_research.scan_assigned")
+		evt := runtimetestkit.WaitForEventTypes(t, marketCh, []string{"market_research.scan_assigned"}, 5*time.Second)["market_research.scan_assigned"]
 		payload := parsePayloadMap(evt.Payload)
 		scanID := strings.TrimSpace(asString(payload["scan_id"]))
 		campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
@@ -729,7 +730,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	scoringCh := bus.Subscribe("pipeline-coordinator", events.EventType("vertical.discovered"))
 	go func() {
-		evt := waitForEventType(t, scoringCh, "vertical.discovered")
+		evt := runtimetestkit.WaitForEventTypes(t, scoringCh, []string{"vertical.discovered"}, 5*time.Second)["vertical.discovered"]
 		payload := parsePayloadMap(evt.Payload)
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
@@ -767,7 +768,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	braCh := bus.Subscribe("business-research-agent", events.EventType("validation.started"))
 	go func() {
-		evt := waitForEventType(t, braCh, "validation.started")
+		evt := runtimetestkit.WaitForEventTypes(t, braCh, []string{"validation.started"}, 5*time.Second)["validation.started"]
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("research.completed"),
@@ -797,7 +798,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	lsaCh := bus.Subscribe("lightweight-spec-agent", events.EventType("spec.requested"))
 	go func() {
-		evt := waitForEventType(t, lsaCh, "spec.requested")
+		evt := runtimetestkit.WaitForEventTypes(t, lsaCh, []string{"spec.requested"}, 5*time.Second)["spec.requested"]
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("spec.approved"),
@@ -816,7 +817,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	auditorCh := bus.Subscribe("spec-auditor", events.EventType("spec.validation_requested"))
 	go func() {
-		evt := waitForEventType(t, auditorCh, "spec.validation_requested")
+		evt := runtimetestkit.WaitForEventTypes(t, auditorCh, []string{"spec.validation_requested"}, 5*time.Second)["spec.validation_requested"]
 		payload := parsePayloadMap(evt.Payload)
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
@@ -834,7 +835,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	ctoCh := bus.Subscribe("factory-cto", events.EventType("cto.spec_review_requested"))
 	go func() {
-		evt := waitForEventType(t, ctoCh, "cto.spec_review_requested")
+		evt := runtimetestkit.WaitForEventTypes(t, ctoCh, []string{"cto.spec_review_requested"}, 5*time.Second)["cto.spec_review_requested"]
 		payload := parsePayloadMap(evt.Payload)
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
@@ -852,7 +853,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	brandCh := bus.Subscribe("pre-brand-agent", events.EventType("brand.requested"))
 	go func() {
-		evt := waitForEventType(t, brandCh, "brand.requested")
+		evt := runtimetestkit.WaitForEventTypes(t, brandCh, []string{"brand.requested"}, 5*time.Second)["brand.requested"]
 		_ = bus.Publish(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("brand.candidates_ready"),
@@ -866,7 +867,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 
 	vcCh := bus.Subscribe("validation-coordinator", events.EventType("validation.package_ready"))
 	go func() {
-		evt := waitForEventType(t, vcCh, "validation.package_ready")
+		evt := runtimetestkit.WaitForEventTypes(t, vcCh, []string{"validation.package_ready"}, 5*time.Second)["validation.package_ready"]
 		payload := parsePayloadMap(evt.Payload)
 		summary := "Ready for review"
 		if g := strings.TrimSpace(asString(payload["geography"])); g != "" {
@@ -901,7 +902,7 @@ func TestHoldingFlow_GoldenPath_DirectiveToMailbox_WithStubAgents(t *testing.T) 
 		CreatedAt: time.Now().UTC(),
 	})
 
-	deadline := time.Now().Add(8 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		var pending int
 		err := db.QueryRowContext(ctx, `

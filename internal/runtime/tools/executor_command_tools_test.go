@@ -13,7 +13,7 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	rt "empireai/internal/runtime"
+	runtimeactor "empireai/internal/runtime/actorctx"
 	"github.com/google/uuid"
 )
 
@@ -55,7 +55,7 @@ func TestRuntimeToolExecutor_CommandTools_SuccessPaths(t *testing.T) {
 	_ = os.Setenv("PATH", bin+string(os.PathListSeparator)+oldPath)
 
 	rec := &recordingEventStore{}
-	bus := rt.NewEventBus(rec)
+	bus := NewEventBus(rec)
 	ex := NewRuntimeToolExecutor(bus, nil, nil)
 	ex.SetConfig(&config.Config{
 		LLM: config.LLMConfig{
@@ -68,13 +68,14 @@ func TestRuntimeToolExecutor_CommandTools_SuccessPaths(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	if _, err := ex.Execute(rt.WithActor(ctx, actor), "nginx_reload", map[string]any{}); err != nil {
+	ctx = runtimeactor.WithActor(ctx, actor)
+	if _, err := ex.Execute(ctx, "nginx_reload", map[string]any{}); err != nil {
 		t.Fatalf("nginx_reload: %v", err)
 	}
-	if _, err := ex.Execute(rt.WithActor(ctx, actor), "systemd_control", map[string]any{"action": "restart", "service": "empireai-orchestrator"}); err != nil {
+	if _, err := ex.Execute(ctx, "systemd_control", map[string]any{"action": "restart", "service": "empireai-orchestrator"}); err != nil {
 		t.Fatalf("systemd_control: %v", err)
 	}
-	if _, err := ex.Execute(rt.WithActor(ctx, actor), "certbot_execute", map[string]any{"domain": "example.com"}); err != nil {
+	if _, err := ex.Execute(ctx, "certbot_execute", map[string]any{"domain": "example.com"}); err != nil {
 		t.Fatalf("certbot_execute: %v", err)
 	}
 

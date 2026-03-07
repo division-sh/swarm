@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	runtimeactor "empireai/internal/runtime/actorctx"
 	runtimecorpus "empireai/internal/runtime/corpusobs"
 	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
@@ -39,7 +40,7 @@ const (
 )
 
 func init() {
-	runtimemcp.SetActorResolver(ActorFromContext)
+	runtimemcp.SetActorResolver(runtimeactor.ActorFromContext)
 	llm.SetMCPTurnContextHooks(runtimemcp.RegisterTurnContextWithTTL, runtimemcp.UnregisterTurnContext)
 }
 
@@ -105,13 +106,13 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger) runtimemcp.GatewayHooks {
 		FormatError:               FormatRuntimeError,
 		NewRuntimeError:           newMCPRuntimeError,
 		RetryableFromError:        retryableFromGatewayError,
-		WithActor:                 WithActor,
-		ActorFromContext:          ActorFromContext,
+		WithActor:                 runtimeactor.WithActor,
+		ActorFromContext:          runtimeactor.ActorFromContext,
 		WithRuntimeEpoch:          runtimebus.WithRuntimeEpoch,
 		WithCurrentRuntimeEpoch:   runtimebus.WithCurrentRuntimeEpoch,
 		IsCurrentRuntimeEpoch:     runtimebus.IsCurrentRuntimeEpoch,
-		WithInboundEvent:          WithInboundEvent,
-		WithEmittedEventsRecorder: WithEmittedEventsRecorder,
+		WithInboundEvent:          runtimebus.WithInboundEvent,
+		WithEmittedEventsRecorder: runtimebus.WithEmittedEventsRecorder,
 		ResolveTurnContext:        resolveMCPTurnContext,
 		EmitTools: func(role string) []llm.ToolDefinition {
 			return runtimetools.GenerateEmitToolsForRole(role, runtimeWarnOnce)
@@ -186,11 +187,11 @@ func runtimeMCPLogCorpusFirstEmit(logger *RuntimeLogger, ctx context.Context, r 
 		return
 	}
 	agentID := strings.TrimSpace(meta.AgentID)
-	if actor, ok := ActorFromContext(ctx); ok && strings.TrimSpace(actor.ID) != "" {
+	if actor, ok := runtimeactor.ActorFromContext(ctx); ok && strings.TrimSpace(actor.ID) != "" {
 		agentID = strings.TrimSpace(actor.ID)
 	}
 	verticalID := strings.TrimSpace(meta.VerticalID)
-	if actor, ok := ActorFromContext(ctx); ok && strings.TrimSpace(actor.VerticalID) != "" {
+	if actor, ok := runtimeactor.ActorFromContext(ctx); ok && strings.TrimSpace(actor.VerticalID) != "" {
 		verticalID = strings.TrimSpace(actor.VerticalID)
 	}
 	msToFirstEmit := int64(0)

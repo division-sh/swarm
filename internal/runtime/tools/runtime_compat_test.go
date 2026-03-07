@@ -10,6 +10,8 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimetools "empireai/internal/runtime/tools"
 )
@@ -44,8 +46,12 @@ func NewRuntimeToolExecutor(bus *rt.EventBus, scheduler *rt.Scheduler, manager *
 	}
 	return runtimetools.NewExecutor(publisher, sched, mgr, stores...)
 }
-func WithActor(ctx context.Context, actor models.AgentConfig) context.Context { return rt.WithActor(ctx, actor) }
-func WithInboundEvent(ctx context.Context, evt events.Event) context.Context { return rt.WithInboundEvent(ctx, evt) }
+func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {
+	return runtimeactor.WithActor(ctx, actor)
+}
+func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
+	return runtimebus.WithInboundEvent(ctx, evt)
+}
 
 type stubAgent struct {
     id   string

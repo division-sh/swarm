@@ -1,4 +1,4 @@
-package runtime
+package tools_test
 
 import (
 	"context"
@@ -7,40 +7,13 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimetools "empireai/internal/runtime/tools"
 )
 
-type mailboxStoreStub struct {
-	last MailboxItem
-}
-
-func (m *mailboxStoreStub) InsertMailboxItem(_ context.Context, item MailboxItem) (string, error) {
-	m.last = item
-	if item.ID == "" {
-		return "m-1", nil
-	}
-	return item.ID, nil
-}
-func (m *mailboxStoreStub) ListMailboxItems(context.Context, string, int) ([]MailboxItem, error) {
-	return nil, nil
-}
-func (m *mailboxStoreStub) CountMailboxItems(context.Context, string) (int, error) { return 0, nil }
-func (m *mailboxStoreStub) GetMailboxItem(context.Context, string) (MailboxItem, error) {
-	return MailboxItem{}, nil
-}
-func (m *mailboxStoreStub) ExpireMailboxItems(context.Context, int) ([]MailboxItem, error) {
-	return nil, nil
-}
-func (m *mailboxStoreStub) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]MailboxItem, error) {
-	return nil, nil
-}
-func (m *mailboxStoreStub) MarkMailboxItemNotified(context.Context, string) error { return nil }
-func (m *mailboxStoreStub) DecideMailboxItem(context.Context, string, string, string, string) error {
-	return nil
-}
-
 func TestClassifyMigration_AdditiveOnlyIsSafe(t *testing.T) {
-	classification := ClassifyMigration(`
+	classification := runtimetools.ClassifyMigration(`
 		CREATE TABLE foo (id uuid primary key);
 		CREATE INDEX idx_foo_id ON foo(id);
 		ALTER TABLE foo ADD COLUMN name text;
@@ -55,7 +28,7 @@ func TestClassifyMigration_AdditiveOnlyIsSafe(t *testing.T) {
 }
 
 func TestClassifyMigration_DestructiveRequiresApproval(t *testing.T) {
-	classification := ClassifyMigration(`
+	classification := runtimetools.ClassifyMigration(`
 		ALTER TABLE users DROP COLUMN legacy_phone;
 		TRUNCATE audit_log;
 	`)
@@ -80,8 +53,8 @@ func TestRuntimeToolExecutor_DeployMigrationGuardrailRejectsDestructiveSQL(t *te
 		VerticalID: "11111111-1111-1111-1111-111111111111",
 	}
 
-	ctx := WithActor(context.Background(), actor)
-	ctx = WithInboundEvent(ctx, events.Event{
+	ctx := runtimeactor.WithActor(context.Background(), actor)
+	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
 		ID:          "deploy-req-1",
 		Type:        events.EventType("deploy_requested"),
 		SourceAgent: "cto-agent-11111111-1111-1111-1111-111111111111",

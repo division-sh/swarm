@@ -1,4 +1,4 @@
-package runtime
+package pipeline_test
 
 import (
 	"context"
@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -17,10 +20,10 @@ import (
 
 type directiveCampaignStore struct {
 	db      *sql.DB
-	created []CreateScanCampaignInput
+	created []runtimepipeline.CreateScanCampaignInput
 }
 
-func (s *directiveCampaignStore) CreateScanCampaign(ctx context.Context, in CreateScanCampaignInput) (ScanCampaign, error) {
+func (s *directiveCampaignStore) CreateScanCampaign(ctx context.Context, in runtimepipeline.CreateScanCampaignInput) (runtimepipeline.ScanCampaign, error) {
 	s.created = append(s.created, in)
 	id := uuid.NewString()
 	priority := strings.TrimSpace(in.Priority)
@@ -43,9 +46,9 @@ func (s *directiveCampaignStore) CreateScanCampaign(ctx context.Context, in Crea
 		)
 	`, id, in.GeographyID, in.Mode, pq.Array(in.Categories), priority, status, strategic, in.DeadlineAt)
 	if err != nil {
-		return ScanCampaign{}, err
+		return runtimepipeline.ScanCampaign{}, err
 	}
-	return ScanCampaign{
+	return runtimepipeline.ScanCampaign{
 		ID:               id,
 		GeographyID:      in.GeographyID,
 		DirectiveID:      "",
@@ -59,12 +62,12 @@ func (s *directiveCampaignStore) CreateScanCampaign(ctx context.Context, in Crea
 	}, nil
 }
 
-func (s *directiveCampaignStore) ListScanCampaigns(context.Context, ScanCampaignFilter) ([]ScanCampaign, error) {
+func (s *directiveCampaignStore) ListScanCampaigns(context.Context, runtimepipeline.ScanCampaignFilter) ([]runtimepipeline.ScanCampaign, error) {
 	return nil, nil
 }
 
-func (s *directiveCampaignStore) ClaimNextDueScanCampaign(context.Context) (ScanCampaign, bool, error) {
-	return ScanCampaign{}, false, nil
+func (s *directiveCampaignStore) ClaimNextDueScanCampaign(context.Context) (runtimepipeline.ScanCampaign, bool, error) {
+	return runtimepipeline.ScanCampaign{}, false, nil
 }
 
 func (s *directiveCampaignStore) LookupGeographyLabel(context.Context, string) (string, error) {
@@ -112,15 +115,15 @@ func (s *directiveCampaignStore) markCompleted(ctx context.Context, campaignID s
 func TestScanCampaignManager_OnDirective_QueuesDeterministicModes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &directiveCampaignStore{db: db}
-	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest(), db)
 
 	manager.OnDirectiveForTest(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human",
-		Payload: mustJSON(map[string]any{
+		Payload: runtimesharedjson.MustJSON(map[string]any{
 			"directive_text": "SaaS in Argentina",
 			"sent_by":        "dashboard",
 		}),
@@ -187,16 +190,16 @@ func TestScanCampaignManager_OnDirective_QueuesDeterministicModes(t *testing.T) 
 func TestScanCampaignManager_OnDirective_ComplexForwardsToCoordinator(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &directiveCampaignStore{db: db}
-	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest(), db)
 
 	ch := bus.Subscribe("empire-coordinator", events.EventType("system.directive"))
 	manager.OnDirectiveForTest(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human",
-		Payload: mustJSON(map[string]any{
+		Payload: runtimesharedjson.MustJSON(map[string]any{
 			"directive_text": "Focus on compliance-driven opportunities in LATAM countries with over 80 percent internet penetration",
 		}),
 		CreatedAt: time.Now().UTC(),
@@ -211,7 +214,7 @@ func TestScanCampaignManager_OnDirective_ComplexForwardsToCoordinator(t *testing
 		if err := json.Unmarshal(forwarded.Payload, &payload); err != nil {
 			t.Fatalf("decode forwarded payload: %v", err)
 		}
-		if strings.TrimSpace(asString(payload["forwarded_by"])) != "scan-campaign-manager" {
+		if strings.TrimSpace(runtimesharedjson.AsString(payload["forwarded_by"])) != "scan-campaign-manager" {
 			t.Fatalf("expected forwarded_by marker, got payload=%v", payload)
 		}
 	case <-time.After(500 * time.Millisecond):
@@ -230,15 +233,15 @@ func TestScanCampaignManager_OnDirective_ComplexForwardsToCoordinator(t *testing
 func TestScanCampaignManager_OnDirective_CorpusQueuesWithPath(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &directiveCampaignStore{db: db}
-	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest(), db)
 
 	manager.OnDirectiveForTest(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human",
-		Payload: mustJSON(map[string]any{
+		Payload: runtimesharedjson.MustJSON(map[string]any{
 			"directive_text": "US, corpus, corpus_path=/data/test-signals-25.jsonl",
 		}),
 		CreatedAt: time.Now().UTC(),
@@ -254,7 +257,7 @@ func TestScanCampaignManager_OnDirective_CorpusQueuesWithPath(t *testing.T) {
 	if err := json.Unmarshal(store.created[0].StrategicContext, &strategic); err != nil {
 		t.Fatalf("decode strategic context: %v", err)
 	}
-	if got := strings.TrimSpace(asString(strategic["corpus_path"])); got != "/data/test-signals-25.jsonl" {
+	if got := strings.TrimSpace(runtimesharedjson.AsString(strategic["corpus_path"])); got != "/data/test-signals-25.jsonl" {
 		t.Fatalf("expected corpus_path propagated, got %q", got)
 	}
 }
@@ -262,9 +265,9 @@ func TestScanCampaignManager_OnDirective_CorpusQueuesWithPath(t *testing.T) {
 func TestScanCampaignManager_Tick_CompletesExpiredCampaignByTimeCap(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
-	bus := NewEventBus(&postgresEventStore{db: db})
+	bus := runtimebus.NewEventBus(&store.PostgresStore{DB: db})
 	store := &directiveCampaignStore{db: db}
-	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest(), db)
+	manager := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest(), db)
 
 	geoID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
@@ -290,11 +293,11 @@ func TestScanCampaignManager_Tick_CompletesExpiredCampaignByTimeCap(t *testing.T
 
 	select {
 	case evt := <-campaignCompletedCh:
-		payload := parsePayloadMap(evt.Payload)
-		if got := strings.TrimSpace(asString(payload["campaign_id"])); got != campaignID {
+		payload := runtimesharedjson.ParsePayloadMap(evt.Payload)
+		if got := strings.TrimSpace(runtimesharedjson.AsString(payload["campaign_id"])); got != campaignID {
 			t.Fatalf("expected campaign.completed campaign_id=%s, got payload=%v", campaignID, payload)
 		}
-		if got := strings.TrimSpace(asString(payload["source_event_id"])); got != "campaign_time_cap_exceeded" {
+		if got := strings.TrimSpace(runtimesharedjson.AsString(payload["source_event_id"])); got != "campaign_time_cap_exceeded" {
 			t.Fatalf("expected source_event_id=campaign_time_cap_exceeded, got payload=%v", payload)
 		}
 	case <-time.After(800 * time.Millisecond):

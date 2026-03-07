@@ -1,4 +1,4 @@
-package runtime_test
+package pipeline_test
 
 import (
 	"context"
@@ -85,7 +85,7 @@ func TestFactoryPipelineCoordinator_RecordsConsumedTransition(t *testing.T) {
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scan.requested"),
 		SourceAgent: "empire-coordinator",
-		Payload: mustJSON(t, map[string]any{
+		Payload: mustJSONPipeline(t, map[string]any{
 			"scan_id":     scanID,
 			"campaign_id": campaignID,
 			"mode":        "saas_gap",
@@ -163,7 +163,7 @@ func TestFactoryPipelineCoordinator_RecordsDroppedTransition(t *testing.T) {
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.validation_passed"),
 		SourceAgent: "spec-auditor",
-		Payload:     mustJSON(t, map[string]any{"status": "pass"}),
+		Payload:     mustJSONPipeline(t, map[string]any{"status": "pass"}),
 		CreatedAt:   time.Now(),
 	}
 	if err := bus.Publish(context.Background(), evt); err != nil {
@@ -188,7 +188,7 @@ func TestFactoryPipelineCoordinator_RecordsDroppedTransition(t *testing.T) {
 	}
 }
 
-func mustJSON(t *testing.T, v any) []byte {
+func mustJSONPipeline(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)
 	if err != nil {

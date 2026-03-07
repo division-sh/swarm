@@ -1,4 +1,4 @@
-package runtime
+package pipeline_test
 
 import (
 	"context"
@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
 type scanStoreStub struct {
@@ -19,19 +21,19 @@ type scanStoreStub struct {
 	lookupCalls  int
 
 	nextClaimOk bool
-	nextClaim   ScanCampaign
+	nextClaim   runtimepipeline.ScanCampaign
 }
 
-func (s *scanStoreStub) CreateScanCampaign(context.Context, CreateScanCampaignInput) (ScanCampaign, error) {
-	return ScanCampaign{}, nil
+func (s *scanStoreStub) CreateScanCampaign(context.Context, runtimepipeline.CreateScanCampaignInput) (runtimepipeline.ScanCampaign, error) {
+	return runtimepipeline.ScanCampaign{}, nil
 }
-func (s *scanStoreStub) ListScanCampaigns(context.Context, ScanCampaignFilter) ([]ScanCampaign, error) {
+func (s *scanStoreStub) ListScanCampaigns(context.Context, runtimepipeline.ScanCampaignFilter) ([]runtimepipeline.ScanCampaign, error) {
 	return nil, nil
 }
-func (s *scanStoreStub) ClaimNextDueScanCampaign(context.Context) (ScanCampaign, bool, error) {
+func (s *scanStoreStub) ClaimNextDueScanCampaign(context.Context) (runtimepipeline.ScanCampaign, bool, error) {
 	s.claimCalls++
 	if !s.nextClaimOk {
-		return ScanCampaign{}, false, nil
+		return runtimepipeline.ScanCampaign{}, false, nil
 	}
 	s.nextClaimOk = false
 	return s.nextClaim, true, nil
@@ -58,24 +60,24 @@ func (s *scanStoreStub) ResumePausedScanCampaigns(context.Context) (int, error) 
 }
 
 func TestScanCampaignManager_Tick_ClaimsAndEmitsScanRequested(t *testing.T) {
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	ch := bus.Subscribe("watch", events.EventType("scan.requested"))
 
 	store := &scanStoreStub{
 		nextClaimOk: true,
-		nextClaim: ScanCampaign{
+		nextClaim: runtimepipeline.ScanCampaign{
 			ID:          "c1",
 			GeographyID: "geo1",
 			Mode:        "default",
 			Categories:  []string{"a", "b"},
 			Priority:    "high",
-			StrategicContext: mustJSON(map[string]any{
+			StrategicContext: runtimesharedjson.MustJSON(map[string]any{
 				"directive_text": "US, corpus",
 				"corpus_path":    "/data/test-signals-25.jsonl",
 			}),
 		},
 	}
-	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest())
+	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest())
 	mgr.TickForTest(context.Background())
 
 	select {
@@ -90,7 +92,7 @@ func TestScanCampaignManager_Tick_ClaimsAndEmitsScanRequested(t *testing.T) {
 		if payload["campaign_id"] != "c1" {
 			t.Fatalf("expected c1, got %#v", payload["campaign_id"])
 		}
-		if got := asString(payload["corpus_path"]); got != "/data/test-signals-25.jsonl" {
+		if got := runtimesharedjson.AsString(payload["corpus_path"]); got != "/data/test-signals-25.jsonl" {
 			t.Fatalf("expected corpus_path propagated, got %q", got)
 		}
 	case <-time.After(250 * time.Millisecond):
@@ -103,12 +105,12 @@ func TestScanCampaignManager_Tick_ClaimsAndEmitsScanRequested(t *testing.T) {
 }
 
 func TestScanCampaignManager_OnEvent_ThrottleResumeAndCompleted(t *testing.T) {
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	ch := bus.Subscribe("watch", events.EventType("scan.requested"))
 
 	store := &scanStoreStub{
 		nextClaimOk: true,
-		nextClaim: ScanCampaign{
+		nextClaim: runtimepipeline.ScanCampaign{
 			ID:          "c2",
 			GeographyID: "geo1",
 			Mode:        "default",
@@ -116,14 +118,14 @@ func TestScanCampaignManager_OnEvent_ThrottleResumeAndCompleted(t *testing.T) {
 			Priority:    "low",
 		},
 	}
-	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest())
+	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest())
 
 	mgr.OnEventForTest(context.Background(), events.Event{Type: events.EventType("budget.throttle")})
 	mgr.OnEventForTest(context.Background(), events.Event{Type: events.EventType("budget.resumed")})
 
 	mgr.OnEventForTest(context.Background(), events.Event{
 		Type:    events.EventType("scan.completed"),
-		Payload: mustJSON(map[string]any{"campaign_id": "c1", "discoveries_count": "3"}),
+		Payload: runtimesharedjson.MustJSON(map[string]any{"campaign_id": "c1", "discoveries_count": "3"}),
 	})
 
 	select {
@@ -142,11 +144,11 @@ func TestScanCampaignManager_OnEvent_ThrottleResumeAndCompleted(t *testing.T) {
 }
 
 func TestScanCampaignManager_Run_KicksOnceAndStops(t *testing.T) {
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	ch := bus.Subscribe("watch", events.EventType("scan.requested"))
 	store := &scanStoreStub{
 		nextClaimOk: true,
-		nextClaim: ScanCampaign{
+		nextClaim: runtimepipeline.ScanCampaign{
 			ID:          "c-run",
 			GeographyID: "geo1",
 			Mode:        "default",
@@ -154,7 +156,7 @@ func TestScanCampaignManager_Run_KicksOnceAndStops(t *testing.T) {
 			Priority:    "low",
 		},
 	}
-	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForTest())
+	mgr := runtimepipeline.NewScanCampaignManager(bus, store, newScanCampaignHooksForPipelineTest())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -170,13 +172,13 @@ func TestScanCampaignManager_Run_KicksOnceAndStops(t *testing.T) {
 }
 
 func TestAsInt(t *testing.T) {
-	if asInt(" 42 ") != 42 {
+	if asIntForPipelineTest(" 42 ") != 42 {
 		t.Fatal("expected 42")
 	}
-	if asInt("x") != 0 {
+	if asIntForPipelineTest("x") != 0 {
 		t.Fatal("expected 0")
 	}
-	if asInt(float64(3)) != 3 {
+	if asIntForPipelineTest(float64(3)) != 3 {
 		t.Fatal("expected 3")
 	}
 }

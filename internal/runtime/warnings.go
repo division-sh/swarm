@@ -56,3 +56,7 @@ func snippetForLog(raw string, max int) string {
 	}
 	return raw[:max] + "..."
 }
+
+func RuntimeWarnForTest(component string, format string, args ...any) {
+	runtimeWarn(component, format, args...)
+}

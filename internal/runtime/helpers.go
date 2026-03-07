@@ -1,16 +1,11 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	"empireai/internal/models"
-	runtimeactor "empireai/internal/runtime/actorctx"
-	runtimebus "empireai/internal/runtime/bus"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -186,32 +181,4 @@ func parseWeekday(raw string) time.Weekday {
 	default:
 		return time.Monday
 	}
-}
-
-func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {
-	return runtimeactor.WithActor(ctx, actor)
-}
-
-func ActorFromContext(ctx context.Context) (models.AgentConfig, bool) {
-	return runtimeactor.ActorFromContext(ctx)
-}
-
-func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
-	return runtimebus.WithInboundEvent(ctx, evt)
-}
-
-func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
-	return runtimebus.InboundEventFromContext(ctx)
-}
-
-func NewEmittedEventsRecorder() *runtimebus.EmittedEventsRecorder {
-	return runtimebus.NewEmittedEventsRecorder()
-}
-
-func WithEmittedEventsRecorder(ctx context.Context, rec *runtimebus.EmittedEventsRecorder) context.Context {
-	return runtimebus.WithEmittedEventsRecorder(ctx, rec)
-}
-
-func EmittedEventsRecorderFromContext(ctx context.Context) (*runtimebus.EmittedEventsRecorder, bool) {
-	return runtimebus.EmittedEventsRecorderFromContext(ctx)
 }

@@ -1,17 +1,20 @@
-package runtime
+package pipeline_test
 
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
+	runtime "empireai/internal/runtime"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
-func newScanCampaignHooksForTest() runtimepipeline.ScanCampaignHooks {
+func newScanCampaignHooksForPipelineTest() runtimepipeline.ScanCampaignHooks {
 	return runtimepipeline.ScanCampaignHooks{
-		Warnf: runtimeWarn,
+		Warnf: runtime.RuntimeWarnForTest,
 		RecordTransition: func(ctx context.Context, db *sql.DB, in runtimepipeline.ScanCampaignTransitionInput) error {
-			return RecordPipelineTransition(ctx, db, PipelineTransitionInput{
+			return runtime.RecordPipelineTransition(ctx, db, runtime.PipelineTransitionInput{
 				EventID:       in.EventID,
 				EventType:     in.EventType,
 				Handler:       in.Handler,
@@ -28,4 +31,21 @@ func newScanCampaignHooksForTest() runtimepipeline.ScanCampaignHooks {
 		},
 		EnsureDirectiveGeography: runtimepipeline.EnsureDirectiveGeography,
 	}
+}
+
+func asIntForPipelineTest(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case string:
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimSpace(t), "%d", &n); err == nil {
+			return n
+		}
+	}
+	return 0
 }

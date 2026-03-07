@@ -1,4 +1,4 @@
-package runtime
+package manager
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimemanager "empireai/internal/runtime/manager"
+	runtimebus "empireai/internal/runtime/bus"
 )
 
 type templateStoreStub struct {
@@ -113,7 +113,7 @@ func (s *templateStoreStub) GetVerticalInfo(_ context.Context, _ string) (Vertic
 }
 
 func TestManager_SpawnOpCo_UsesTemplateAndExpandsPrompts(t *testing.T) {
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &templateStoreStub{
 		bootstrapVersion: 7,
 		info: VerticalInfo{
@@ -123,7 +123,7 @@ func TestManager_SpawnOpCo_UsesTemplateAndExpandsPrompts(t *testing.T) {
 			Geography: "US",
 		},
 	}
-	am := runtimemanager.NewAgentManager(bus, nil, store)
+	am := NewAgentManager(bus, nil, store)
 
 	readyCh := bus.Subscribe("watch", events.EventType("opco.ceo_ready"))
 	if err := am.SpawnOpCo("v1", models.MandateDocument{VerticalID: "v1", FounderNotes: "do it"}); err != nil {

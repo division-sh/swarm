@@ -101,7 +101,7 @@ func TestFactoryPipelineInterceptor_DeduplicatesRepeatedInboundEventID(t *testin
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scan.requested"),
 		SourceAgent: "empire-coordinator",
-		Payload: mustJSON(t, map[string]any{
+		Payload: mustJSONTest(t, map[string]any{
 			"scan_id":   scanID,
 			"mode":      "saas_gap",
 			"geography": "Buenos Aires, Argentina",
@@ -145,4 +145,13 @@ func asString(v any) string {
 		return s
 	}
 	return ""
+}
+
+func mustJSONTest(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	return b
 }

@@ -78,8 +78,8 @@ func TestRuntimeRootFileCountStaysBounded(t *testing.T) {
 	if prodCount > 15 {
 		t.Fatalf("runtime root has too many production files: got=%d want<=15", prodCount)
 	}
-	if testCount > 45 {
-		t.Fatalf("runtime root has too many test files: got=%d want<=45", testCount)
+	if testCount > 25 {
+		t.Fatalf("runtime root has too many test files: got=%d want<=25", testCount)
 	}
 }
 

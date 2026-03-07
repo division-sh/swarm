@@ -13,12 +13,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
 
 type sharedPostgresState struct {
 	mu        sync.Mutex
+	lifecycle sync.Mutex
 	started   bool
 	dockerBin string
 	name      string
@@ -52,7 +54,9 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	}
 	defer adminDB.Close()
 
+	sharedPostgres.lifecycle.Lock()
 	if err := createIsolatedDatabase(adminDB, dbName); err != nil {
+		sharedPostgres.lifecycle.Unlock()
 		t.Fatalf("create isolated postgres database %q: %v", dbName, err)
 	}
 
@@ -60,13 +64,16 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 	db, err = sql.Open("postgres", dsn)
 	if err != nil {
 		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
 		t.Fatalf("open postgres %q: %v", dbName, err)
 	}
 	if err := initializeDatabase(db); err != nil {
 		_ = db.Close()
 		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
 		t.Fatalf("initialize postgres %q: %v", dbName, err)
 	}
+	sharedPostgres.lifecycle.Unlock()
 
 	released := false
 	release := func() {
@@ -80,6 +87,8 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 			t.Fatalf("reopen postgres admin for cleanup: %v", err)
 		}
 		defer adminCleanupDB.Close()
+		sharedPostgres.lifecycle.Lock()
+		defer sharedPostgres.lifecycle.Unlock()
 		if err := dropIsolatedDatabase(adminCleanupDB, dbName); err != nil {
 			t.Fatalf("drop isolated postgres database %q: %v", dbName, err)
 		}
@@ -93,6 +102,9 @@ func (s *sharedPostgresState) startLocked() error {
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
 		return fmt.Errorf("docker not found in PATH: %w", err)
+	}
+	if err := cleanupStaleTestContainers(dockerBin); err != nil {
+		return err
 	}
 
 	name := fmt.Sprintf("empireai-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
@@ -162,6 +174,33 @@ func (s *sharedPostgresState) startLocked() error {
 	s.dockerBin = dockerBin
 	s.name = name
 	s.adminDSN = adminDSN
+	return nil
+}
+
+func cleanupStaleTestContainers(dockerBin string) error {
+	out, err := exec.Command(dockerBin, "ps", "--format", "{{.Names}}").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("list docker containers: %v output=%s", err, strings.TrimSpace(string(out)))
+	}
+	for _, name := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(name, "empireai-test-pg-") {
+			continue
+		}
+		rest := strings.TrimPrefix(name, "empireai-test-pg-")
+		pidPart := rest
+		if idx := strings.Index(pidPart, "-"); idx >= 0 {
+			pidPart = pidPart[:idx]
+		}
+		pid, convErr := strconv.Atoi(strings.TrimSpace(pidPart))
+		if convErr != nil || pid <= 0 {
+			continue
+		}
+		proc, findErr := os.FindProcess(pid)
+		if findErr == nil && proc != nil && proc.Signal(syscall.Signal(0)) == nil {
+			continue
+		}
+		_ = exec.Command(dockerBin, "stop", name).Run()
+	}
 	return nil
 }
 

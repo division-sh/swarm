@@ -13,24 +13,24 @@ type MigrationClassification struct {
 
 var (
 	sqlLineCommentPattern   = regexp.MustCompile(`(?m)--.*$`)
-	sqlBlockCommentPattern  = regexp.MustCompile(`(?s)/\\*.*?\\*/`)
-	sqlWhitespacePattern    = regexp.MustCompile(`\\s+`)
+	sqlBlockCommentPattern  = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	sqlWhitespacePattern    = regexp.MustCompile(`\s+`)
 	sqlAdditiveStmtPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)^create\\s+table\\b`),
-		regexp.MustCompile(`(?i)^create\\s+(unique\\s+)?index\\b`),
-		regexp.MustCompile(`(?i)^create\\s+type\\b`),
-		regexp.MustCompile(`(?i)^alter\\s+table\\b.*\\badd\\s+column\\b`),
-		regexp.MustCompile(`(?i)^insert\\s+into\\b`),
+		regexp.MustCompile(`(?i)^create\s+table\b`),
+		regexp.MustCompile(`(?i)^create\s+(unique\s+)?index\b`),
+		regexp.MustCompile(`(?i)^create\s+type\b`),
+		regexp.MustCompile(`(?i)^alter\s+table\b.*\badd\s+column\b`),
+		regexp.MustCompile(`(?i)^insert\s+into\b`),
 	}
 	sqlDestructivePatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\\bdrop\\s+table\\b`),
-		regexp.MustCompile(`(?i)\\bdrop\\s+column\\b`),
-		regexp.MustCompile(`(?i)\\bdrop\\s+index\\b`),
-		regexp.MustCompile(`(?i)\\bdrop\\s+type\\b`),
-		regexp.MustCompile(`(?i)\\btruncate\\b`),
-		regexp.MustCompile(`(?i)\\balter\\s+table\\b.*\\balter\\s+column\\b.*\\btype\\b`),
-		regexp.MustCompile(`(?i)\\bdelete\\s+from\\b`),
-		regexp.MustCompile(`(?i)\\balter\\s+table\\b.*\\bdrop\\s+constraint\\b`),
+		regexp.MustCompile(`(?i)\bdrop\s+table\b`),
+		regexp.MustCompile(`(?i)\bdrop\s+column\b`),
+		regexp.MustCompile(`(?i)\bdrop\s+index\b`),
+		regexp.MustCompile(`(?i)\bdrop\s+type\b`),
+		regexp.MustCompile(`(?i)\btruncate\b`),
+		regexp.MustCompile(`(?i)\balter\s+table\b.*\balter\s+column\b.*\btype\b`),
+		regexp.MustCompile(`(?i)\bdelete\s+from\b`),
+		regexp.MustCompile(`(?i)\balter\s+table\b.*\bdrop\s+constraint\b`),
 	}
 )
 

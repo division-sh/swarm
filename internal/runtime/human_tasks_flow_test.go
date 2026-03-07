@@ -11,6 +11,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	runtimeagents "empireai/internal/runtime/agents"
+	runtimeactor "empireai/internal/runtime/actorctx"
 	llm "empireai/internal/runtime/llm"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
@@ -49,7 +50,7 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 		).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("task-123"))
 
-	ctx := WithActor(context.Background(), models.AgentConfig{
+	ctx := runtimeactor.WithActor(context.Background(), models.AgentConfig{
 		ID:         "agent-1",
 		Role:       "opco-ceo",
 		Mode:       "operating",
@@ -132,7 +133,7 @@ func TestRuntimeToolExecutor_HumanTaskDecide_ApprovalBudgetExhaustedForcesDeferr
 		WithArgs("task-1", "deferred", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"requesting_agent", "vertical_id"}).AddRow("agent-req", "v1"))
 
-	ctx := WithActor(context.Background(), models.AgentConfig{
+	ctx := runtimeactor.WithActor(context.Background(), models.AgentConfig{
 		ID:         "coordinator-1",
 		Role:       "empire-coordinator",
 		Mode:       "holding",

@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"empireai/internal/events"
 	"empireai/internal/models"
@@ -16,6 +18,66 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
+
+type semanticTemplateStoreStub struct {
+	setTplCalls      int
+	lastTplVersion   string
+	bootstrapVersion int
+	info             runtimemanager.VerticalInfo
+}
+
+func (s *semanticTemplateStoreStub) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
+	return nil
+}
+func (s *semanticTemplateStoreStub) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return nil, nil
+}
+func (s *semanticTemplateStoreStub) MarkAgentTerminated(context.Context, string) error  { return nil }
+func (s *semanticTemplateStoreStub) EnsureVerticalSchema(context.Context, string) error { return nil }
+func (s *semanticTemplateStoreStub) LoadLatestOrgTemplate(context.Context) (runtimemanager.OrgTemplateRecord, error) {
+	agents := []map[string]any{{"role": "opco-ceo", "type": "worker", "system_prompt": "CEO for {vertical_id}", "tools": []string{"agent_message"}, "subscriptions": []string{"opco.*"}}, {"role": "vp-product", "parent_role": "opco-ceo", "type": "worker", "system_prompt": "VP for {vertical_slug}", "tools": []string{"agent_message"}, "subscriptions": []string{"product.*"}}}
+	bootstrap := []map[string]any{{"event_pattern": "opco.*", "subscriber_role": "opco-ceo", "reason": "bootstrap"}}
+	seeded := []map[string]any{{"event_pattern": "product.*", "subscriber_role": "vp-product", "reason": "seeded"}}
+	aj, _ := json.Marshal(agents)
+	bj, _ := json.Marshal(bootstrap)
+	sj, _ := json.Marshal(seeded)
+	return runtimemanager.OrgTemplateRecord{Version: "tpl-1", Agents: aj, BootstrapRoutes: bj, SeededRoutes: sj}, nil
+}
+func (s *semanticTemplateStoreStub) LoadOrgTemplate(context.Context, string) (runtimemanager.OrgTemplateRecord, error) {
+	return runtimemanager.OrgTemplateRecord{}, nil
+}
+func (s *semanticTemplateStoreStub) SetVerticalTemplateVersion(_ context.Context, _ string, version string) error {
+	s.setTplCalls++
+	s.lastTplVersion = version
+	return nil
+}
+func (s *semanticTemplateStoreStub) UpsertRoutingRule(context.Context, runtimemanager.PersistedRoutingRule) error {
+	return nil
+}
+func (s *semanticTemplateStoreStub) LoadRoutingRules(context.Context) ([]runtimemanager.PersistedRoutingRule, error) {
+	return nil, nil
+}
+func (s *semanticTemplateStoreStub) DeactivateRoutingRulesByVertical(context.Context, string) error {
+	return nil
+}
+func (s *semanticTemplateStoreStub) UpsertEventReceipt(context.Context, string, string, string, string) error {
+	return nil
+}
+func (s *semanticTemplateStoreStub) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (s *semanticTemplateStoreStub) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (s *semanticTemplateStoreStub) ResolveBootstrapVersion(_ context.Context, _ string) (int, error) {
+	if s.bootstrapVersion <= 0 {
+		return 1, nil
+	}
+	return s.bootstrapVersion, nil
+}
+func (s *semanticTemplateStoreStub) GetVerticalInfo(_ context.Context, _ string) (runtimemanager.VerticalInfo, bool, error) {
+	return s.info, true, nil
+}
 
 type semanticIntegrationMatrix struct {
 	Cases []semanticIntegrationCase `yaml:"cases"`
@@ -95,7 +157,7 @@ func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 	}
 
 	bus := NewEventBus(InMemoryEventStore{})
-	store := &templateStoreStub{bootstrapVersion: 7, info: VerticalInfo{ID: "v1", Name: "Acme Vertical", Slug: "acme", Geography: "US"}}
+	store := &semanticTemplateStoreStub{bootstrapVersion: 7, info: runtimemanager.VerticalInfo{ID: "v1", Name: "Acme Vertical", Slug: "acme", Geography: "US"}}
 	am := runtimemanager.NewAgentManager(bus, nil, store)
 	if err := am.SpawnOpCo("v1", models.MandateDocument{VerticalID: "v1"}); err != nil {
 		t.Fatalf("SpawnOpCo: %v", err)
