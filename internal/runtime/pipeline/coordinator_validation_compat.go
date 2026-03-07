@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"time"
 
 	"empireai/internal/events"
 )
@@ -68,4 +69,8 @@ func (pc *FactoryPipelineCoordinator) handleInnerSpecRevision(ctx context.Contex
 
 func (pc *FactoryPipelineCoordinator) handleSpecRevisionRequested(evt events.Event) {
 	pc.validationGate.handleSpecRevisionRequested(evt)
+}
+
+func (pc *FactoryPipelineCoordinator) checkPackagingTimeouts(ctx context.Context, now time.Time) {
+	pc.validationGate.checkPackagingTimeouts(ctx, now)
 }

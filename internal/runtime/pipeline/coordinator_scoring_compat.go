@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"strings"
+	"time"
 
 	"empireai/internal/events"
 )
@@ -22,6 +23,10 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 
 func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Context, verticalID string, partial bool) {
 	pc.scoringState.finalizeScoringAccumulator(ctx, verticalID, partial)
+}
+
+func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, now time.Time) {
+	pc.scoringState.checkTimeouts(ctx, now)
 }
 
 func (pc *FactoryPipelineCoordinator) updateScoredVerticalState(ctx context.Context, verticalID, stage string, scoredPayloadMap map[string]any, reason string) {

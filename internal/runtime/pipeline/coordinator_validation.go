@@ -445,8 +445,8 @@ func (pc *FactoryPipelineCoordinator) parkVerticalWithMailbox(ctx context.Contex
 	pc.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
 }
 
-func (pc *FactoryPipelineCoordinator) checkPackagingTimeouts(ctx context.Context, now time.Time) {
-	if pc == nil {
+func (vg *ValidationGate) checkPackagingTimeouts(ctx context.Context, now time.Time) {
+	if vg == nil {
 		return
 	}
 	if now.IsZero() {
@@ -458,8 +458,8 @@ func (pc *FactoryPipelineCoordinator) checkPackagingTimeouts(ctx context.Context
 		snapshot   validationContextSnapshot
 	}
 	expired := make([]timedOut, 0, 4)
-	pc.mu.Lock()
-	for _, st := range pc.validationGate.states {
+	vg.mu.Lock()
+	for _, st := range vg.states {
 		if st == nil || st.Status != "active" || st.PackagingRequestedAt == nil {
 			continue
 		}
@@ -489,13 +489,13 @@ func (pc *FactoryPipelineCoordinator) checkPackagingTimeouts(ctx context.Context
 		st.PackagingRequestedAt = nil
 		expired = append(expired, timedOut{verticalID: st.VerticalID, retry: false})
 	}
-	pc.mu.Unlock()
+	vg.mu.Unlock()
 
 	for _, item := range expired {
 		if item.retry {
-			pc.publish(ctx, "validation.package_ready", item.verticalID, payloadMap(pc.payloadFactory.BuildValidationPackageReadyPayload(ctx, item.verticalID, item.snapshot)))
+			vg.runtime.publish(ctx, "validation.package_ready", item.verticalID, payloadMap(vg.payloadFactory.BuildValidationPackageReadyPayload(ctx, item.verticalID, item.snapshot)))
 			continue
 		}
-		pc.parkVerticalWithMailbox(ctx, item.verticalID, "Validation packaging timed out after retry. Human intervention required.", map[string]any{"vertical_id": item.verticalID})
+		vg.runtime.parkVerticalWithMailbox(ctx, item.verticalID, "Validation packaging timed out after retry. Human intervention required.", map[string]any{"vertical_id": item.verticalID})
 	}
 }

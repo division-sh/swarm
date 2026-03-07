@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	"github.com/google/uuid"
 )
 
@@ -541,16 +542,7 @@ func hasAllExpectedDimensions(acc *scoringAccumulator) bool {
 	return true
 }
 
-type scoringComposite struct {
-	Result         string
-	Reason         string
-	CompositeScore float64
-	ViabilityScore float64
-	MarketScore    float64
-	Dimensions     map[string]scoreDimensionResult
-	Rubric         string
-	Partial        bool
-}
+type scoringComposite = empirepipeline.ScoringComposite
 
 func (ss *ScoringState) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
 	weights := rubricWeights[acc.Rubric]
@@ -951,10 +943,16 @@ func detectScoringDigestBuffer(ctx context.Context, db *sql.DB) bool {
 	return ok
 }
 
-func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, now time.Time) {
-	pc.mu.Lock()
-	stale := make([]string, 0, len(pc.scoringState.accumulators))
-	for verticalID, acc := range pc.scoringState.accumulators {
+func (ss *ScoringState) checkTimeouts(ctx context.Context, now time.Time) {
+	if ss == nil {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	ss.mu.Lock()
+	stale := make([]string, 0, len(ss.accumulators))
+	for verticalID, acc := range ss.accumulators {
 		if acc == nil {
 			continue
 		}
@@ -972,8 +970,8 @@ func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, 
 			stale = append(stale, verticalID)
 		}
 	}
-	pc.mu.Unlock()
+	ss.mu.Unlock()
 	for _, verticalID := range stale {
-		pc.finalizeScoringAccumulator(ctx, verticalID, true)
+		ss.finalizeScoringAccumulator(ctx, verticalID, true)
 	}
 }

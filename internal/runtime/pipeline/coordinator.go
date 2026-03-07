@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 )
 
 const (
@@ -62,6 +63,7 @@ type FactoryPipelineCoordinator struct {
 	scoringState    *ScoringState
 	validationGate  *ValidationGate
 	processed       map[string]struct{}
+	stateStore      *PipelineStateStore
 	stateLoaded     bool
 
 	statePersistenceChecked bool
@@ -141,19 +143,9 @@ type scanAccumulator struct {
 	CreatedAt   time.Time
 }
 
-type scoreDimensionResult struct {
-	Score      int    `json:"score"`
-	Evidence   string `json:"evidence"`
-	Confidence string `json:"confidence,omitempty"`
-}
+type scoreDimensionResult = empirepipeline.ScoreDimensionResult
 
-type contestedDimension struct {
-	Dimension string                 `json:"dimension"`
-	Scores    []int                  `json:"scores"`
-	Evidence  []string               `json:"evidence"`
-	Spread    int                    `json:"spread"`
-	Options   []scoreDimensionResult `json:"options,omitempty"`
-}
+type contestedDimension = empirepipeline.ContestedDimension
 
 type scoringAccumulator struct {
 	VerticalID       string
@@ -207,124 +199,6 @@ type validationPipelineState struct {
 	PackagingRetries     int
 }
 
-type ValidationStartedPayload struct {
-	VerticalID     string         `json:"vertical_id"`
-	VerticalName   string         `json:"vertical_name,omitempty"`
-	Name           string         `json:"name,omitempty"`
-	Geography      string         `json:"geography,omitempty"`
-	ScoringContext string         `json:"scoring_context,omitempty"`
-	Scoring        map[string]any `json:"scoring,omitempty"`
-}
-
-type BrandRequestedPayload struct {
-	VerticalID    string         `json:"vertical_id"`
-	VerticalName  string         `json:"vertical_name,omitempty"`
-	Name          string         `json:"name,omitempty"`
-	Geography     string         `json:"geography,omitempty"`
-	Scoring       map[string]any `json:"scoring"`
-	BusinessBrief map[string]any `json:"business_brief,omitempty"`
-}
-
-type ValidationPackageReadyPayload struct {
-	VerticalID   string         `json:"vertical_id"`
-	VerticalName string         `json:"vertical_name,omitempty"`
-	Geography    string         `json:"geography,omitempty"`
-	Research     map[string]any `json:"research"`
-	Spec         map[string]any `json:"spec"`
-	CTONotes     map[string]any `json:"cto_notes"`
-	Brand        map[string]any `json:"brand"`
-	Scoring      map[string]any `json:"scoring"`
-	SpecVersion  int            `json:"spec_version"`
-}
-
-type SpecValidationRequestedPayload struct {
-	VerticalID  string         `json:"vertical_id"`
-	SpecContent map[string]any `json:"spec_content"`
-	SpecTier    string         `json:"spec_tier"`
-}
-
-type CTOSpecReviewRequestedPayload struct {
-	VerticalID      string         `json:"vertical_id"`
-	MvPSpec         string         `json:"mvp_spec,omitempty"`
-	BusinessBrief   map[string]any `json:"business_brief,omitempty"`
-	VerticalContext map[string]any `json:"vertical_context,omitempty"`
-	VerticalName    string         `json:"vertical_name,omitempty"`
-	Geography       string         `json:"geography,omitempty"`
-	SpecValidation  map[string]any `json:"spec_validation"`
-	SpecVersion     int            `json:"spec_version"`
-	Research        map[string]any `json:"research"`
-	Spec            map[string]any `json:"spec"`
-	Scoring         map[string]any `json:"scoring"`
-}
-
-type SpecRevisionRequestedPayload struct {
-	VerticalID   string         `json:"vertical_id"`
-	CTOFeedback  string         `json:"cto_feedback,omitempty"`
-	VerticalName string         `json:"vertical_name,omitempty"`
-	Geography    string         `json:"geography,omitempty"`
-	Source       string         `json:"source"`
-	Feedback     map[string]any `json:"feedback"`
-	Research     map[string]any `json:"research"`
-	Spec         map[string]any `json:"spec"`
-	Scoring      map[string]any `json:"scoring"`
-}
-
-type ValidationMoreDataNeededPayload struct {
-	VerticalID   string         `json:"vertical_id"`
-	Questions    string         `json:"questions,omitempty"`
-	VerticalName string         `json:"vertical_name,omitempty"`
-	Geography    string         `json:"geography,omitempty"`
-	Request      map[string]any `json:"request"`
-	Research     map[string]any `json:"research"`
-	Spec         map[string]any `json:"spec"`
-	Scoring      map[string]any `json:"scoring"`
-}
-
-type BrandRevisionNeededPayload struct {
-	VerticalID   string         `json:"vertical_id"`
-	VerticalName string         `json:"vertical_name,omitempty"`
-	Geography    string         `json:"geography,omitempty"`
-	Feedback     map[string]any `json:"feedback"`
-	Brand        map[string]any `json:"brand"`
-}
-
-type VerticalKilledPayload struct {
-	VerticalID   string         `json:"vertical_id"`
-	VerticalName string         `json:"vertical_name,omitempty"`
-	Geography    string         `json:"geography,omitempty"`
-	SourceEvent  string         `json:"source_event"`
-	Priority     string         `json:"priority"`
-	Reason       map[string]any `json:"reason"`
-}
-
-type ScanAssignedPayload struct {
-	ScanID             string `json:"scan_id"`
-	CampaignID         string `json:"campaign_id,omitempty"`
-	Mode               string `json:"mode,omitempty"`
-	Geography          string `json:"geography,omitempty"`
-	GeographyID        string `json:"geography_id,omitempty"`
-	TaxonomyCategories any    `json:"taxonomy_categories,omitempty"`
-	Priority           string `json:"priority,omitempty"`
-	CampaignContext    any    `json:"campaign_context,omitempty"`
-	DirectiveID        string `json:"directive_id,omitempty"`
-	StrategicContext   any    `json:"strategic_context,omitempty"`
-	CorpusPath         string `json:"corpus_path,omitempty"`
-	CorpusSignals      any    `json:"corpus_signals,omitempty"`
-	RequestedAt        string `json:"requested_at,omitempty"`
-	PlannedShards      int    `json:"planned_shards,omitempty"`
-}
-
-type SynthesisNeededPayload struct {
-	ScanID        string         `json:"scan_id"`
-	CampaignID    string         `json:"campaign_id,omitempty"`
-	Mode          string         `json:"mode,omitempty"`
-	Geography     string         `json:"geography,omitempty"`
-	Category      string         `json:"category,omitempty"`
-	Subcategory   string         `json:"subcategory,omitempty"`
-	ConflictNotes any            `json:"conflict_notes,omitempty"`
-	RawReport     map[string]any `json:"raw_report,omitempty"`
-}
-
 type DedupCandidatePayload struct {
 	Name           string  `json:"name,omitempty"`
 	Geography      string  `json:"geography,omitempty"`
@@ -332,32 +206,19 @@ type DedupCandidatePayload struct {
 	ID             string  `json:"id,omitempty"`
 }
 
-type DedupAmbiguousPayload struct {
-	ScanID           string                `json:"scan_id"`
-	DedupID          string                `json:"dedup_id"`
-	DedupEventID     string                `json:"dedup_event_id"`
-	Similarity       float64               `json:"similarity"`
-	NewCandidate     DedupCandidatePayload `json:"new_candidate"`
-	ExistingVertical DedupCandidatePayload `json:"existing_vertical"`
-}
-
-type VerticalDiscoveredPayload struct {
-	VerticalID           string         `json:"vertical_id"`
-	VerticalName         string         `json:"vertical_name,omitempty"`
-	Name                 string         `json:"name,omitempty"`
-	Geography            string         `json:"geography,omitempty"`
-	GeographicScope      string         `json:"geographic_scope,omitempty"`
-	Mode                 string         `json:"mode,omitempty"`
-	ScanID               string         `json:"scan_id,omitempty"`
-	CampaignID           string         `json:"campaign_id,omitempty"`
-	SignalStrength       float64        `json:"signal_strength,omitempty"`
-	OpportunityPattern   string         `json:"opportunity_pattern,omitempty"`
-	SignalSources        any            `json:"signal_sources,omitempty"`
-	RequiredCapabilities any            `json:"required_capabilities,omitempty"`
-	DiscoverySource      string         `json:"discovery_source,omitempty"`
-	RawSignals           map[string]any `json:"raw_signals,omitempty"`
-	DiscoveryContext     map[string]any `json:"discovery_context,omitempty"`
-}
+type ValidationStartedPayload = empirepipeline.ValidationStartedPayload
+type BrandRequestedPayload = empirepipeline.BrandRequestedPayload
+type ValidationPackageReadyPayload = empirepipeline.ValidationPackageReadyPayload
+type SpecValidationRequestedPayload = empirepipeline.SpecValidationRequestedPayload
+type CTOSpecReviewRequestedPayload = empirepipeline.CTOSpecReviewRequestedPayload
+type SpecRevisionRequestedPayload = empirepipeline.SpecRevisionRequestedPayload
+type ValidationMoreDataNeededPayload = empirepipeline.ValidationMoreDataNeededPayload
+type BrandRevisionNeededPayload = empirepipeline.BrandRevisionNeededPayload
+type VerticalKilledPayload = empirepipeline.VerticalKilledPayload
+type ScanAssignedPayload = empirepipeline.ScanAssignedPayload
+type SynthesisNeededPayload = empirepipeline.SynthesisNeededPayload
+type DedupAmbiguousPayload = empirepipeline.DedupAmbiguousPayload
+type VerticalDiscoveredPayload = empirepipeline.VerticalDiscoveredPayload
 
 type VerticalDerivedPayload struct {
 	OpportunityID         string         `json:"opportunity_id,omitempty"`
@@ -380,103 +241,16 @@ type VerticalDerivedPayload struct {
 	RequiredCapabilities  any            `json:"required_capabilities,omitempty"`
 }
 
-type ScanCompletedPayload struct {
-	ScanID          string `json:"scan_id"`
-	CampaignID      string `json:"campaign_id,omitempty"`
-	Mode            string `json:"mode,omitempty"`
-	Geography       string `json:"geography,omitempty"`
-	ReportsReceived int    `json:"reports_received"`
-	Expected        int    `json:"agents_expected"`
-	Complete        int    `json:"agents_complete"`
-	Discovered      int    `json:"verticals_discovered"`
-	Skipped         int    `json:"verticals_skipped"`
-	PendingDedup    int    `json:"pending_dedup"`
-	TimedOut        bool   `json:"timed_out"`
-	ShardsTotal     int    `json:"shards_total,omitempty"`
-	ShardsCompleted int    `json:"shards_completed,omitempty"`
-	ShardsFailed    int    `json:"shards_failed,omitempty"`
-}
-
-type ScoringRequestedPayload struct {
-	VerticalID              string         `json:"vertical_id"`
-	VerticalName            string         `json:"vertical_name,omitempty"`
-	Geography               string         `json:"geography,omitempty"`
-	Mode                    string         `json:"mode,omitempty"`
-	Rubric                  string         `json:"rubric,omitempty"`
-	DimensionsRequested     []string       `json:"dimensions_requested"`
-	DiscoveryContext        map[string]any `json:"discovery_context,omitempty"`
-	AssignedAnalysisAgentID string         `json:"assigned_analysis_agent_id,omitempty"`
-	ExcludedAnalysisAgentID string         `json:"excluded_analysis_agent_id,omitempty"`
-}
-
-type ScoringContestedPayload struct {
-	VerticalID string   `json:"vertical_id"`
-	Dimension  string   `json:"dimension"`
-	Scores     []int    `json:"scores"`
-	Evidence   []string `json:"evidence,omitempty"`
-	Spread     int      `json:"spread"`
-	Rubric     string   `json:"rubric,omitempty"`
-	Mode       string   `json:"mode,omitempty"`
-}
-
-type VerticalScoredPayload struct {
-	VerticalID     string                          `json:"vertical_id"`
-	Result         string                          `json:"result,omitempty"`
-	Reason         string                          `json:"reason,omitempty"`
-	CompositeScore float64                         `json:"composite_score"`
-	ViabilityScore float64                         `json:"viability_score"`
-	MarketScore    float64                         `json:"market_score"`
-	Dimensions     map[string]scoreDimensionResult `json:"dimensions"`
-	Rubric         string                          `json:"rubric,omitempty"`
-	Partial        bool                            `json:"partial"`
-	Mode           string                          `json:"mode,omitempty"`
-	VerticalName   string                          `json:"vertical_name,omitempty"`
-	Geography      string                          `json:"geography,omitempty"`
-}
-
-type VerticalShortlistedPayload struct {
-	VerticalID     string         `json:"vertical_id"`
-	CompositeScore float64        `json:"composite_score"`
-	ViabilityScore float64        `json:"viability_score"`
-	ScoringPayload map[string]any `json:"scoring_payload"`
-}
-
-type VerticalMarginalPayload struct {
-	VerticalID        string                          `json:"vertical_id"`
-	CompositeScore    float64                         `json:"composite_score"`
-	ViabilityScore    float64                         `json:"viability_score"`
-	Dimensions        map[string]scoreDimensionResult `json:"dimensions"`
-	PromotionEligible bool                            `json:"promotion_eligible"`
-}
-
-type VerticalRejectedPayload struct {
-	VerticalID string `json:"vertical_id"`
-	Reason     string `json:"reason"`
-}
-
-type PortfolioDigestTimerPayload struct {
-	Message                   string           `json:"message,omitempty"`
-	DigestText                string           `json:"digest_text,omitempty"`
-	TriggerReason             string           `json:"trigger_reason,omitempty"`
-	Snapshot                  map[string]any   `json:"snapshot,omitempty"`
-	Metadata                  map[string]any   `json:"metadata,omitempty"`
-	VerticalID                string           `json:"vertical_id,omitempty"`
-	TaskID                    string           `json:"task_id,omitempty"`
-	RecentRejections          []map[string]any `json:"recent_rejections,omitempty"`
-	RejectionCount            int              `json:"rejection_count,omitempty"`
-	ScoringRejectionsInjected bool             `json:"scoring_rejections_injected"`
-	ScoringRejectionsCount    int              `json:"scoring_rejections_count,omitempty"`
-	ScoringRejectionSummaries []map[string]any `json:"scoring_rejection_summaries,omitempty"`
-}
-
-type validationContextSnapshot struct {
-	Research    map[string]any
-	Spec        map[string]any
-	CTONotes    map[string]any
-	Brand       map[string]any
-	Scoring     map[string]any
-	SpecVersion int
-}
+type ScanCompletedPayload = empirepipeline.ScanCompletedPayload
+type ScoringRequestedPayload = empirepipeline.ScoringRequestedPayload
+type ScoringContestedPayload = empirepipeline.ScoringContestedPayload
+type VerticalScoredPayload = empirepipeline.VerticalScoredPayload
+type VerticalShortlistedPayload = empirepipeline.VerticalShortlistedPayload
+type VerticalMarginalPayload = empirepipeline.VerticalMarginalPayload
+type VerticalRejectedPayload = empirepipeline.VerticalRejectedPayload
+type PortfolioDigestTimerPayload = empirepipeline.PortfolioDigestTimerPayload
+type validationContextSnapshot = empirepipeline.ValidationContextSnapshot
+type scanCompletedBuildInput = empirepipeline.ScanCompletedBuildInput
 
 func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordinator {
 	if bus == nil {
@@ -490,6 +264,7 @@ func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordina
 		validationGate:  NewValidationGate(),
 		processed:       make(map[string]struct{}),
 	}
+	pc.stateStore = NewPipelineStateStore(db, &pc.mu)
 	pc.scanCoordinator.runtime = pc
 	pc.scoringState.runtime = pc
 	pc.validationGate.runtime = pc
