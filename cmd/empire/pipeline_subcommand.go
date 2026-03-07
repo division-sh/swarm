@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"empireai/internal/config"
+	"empireai/internal/events"
+	"empireai/internal/factory"
+	"empireai/internal/specaudit"
+	"github.com/google/uuid"
 )
 
 func runPipelineSubcommand(args []string) error {
@@ -347,4 +353,201 @@ func printPipelineDrops(ctx context.Context, db *sql.DB, window time.Duration, v
 		fmt.Println("- (none)")
 	}
 	return nil
+}
+
+func runScanSubcommand(args []string) error {
+	if len(args) > 0 {
+		switch strings.TrimSpace(args[0]) {
+		case "shards":
+			return runScanShardsSubcommand(args[1:])
+		case "shard":
+			return runScanShardSubcommand(args[1:])
+		}
+	}
+
+	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
+	cfgPath := fs.String("config", "configs/empire.yaml", "Path to empire config")
+	storeMode := fs.String("store", "postgres", "Storage mode")
+	migrate := fs.Bool("migrate", false, "Apply migrations")
+	migrationFile := fs.String("migration-file", defaultMigrationFilePath, "Migration file path")
+	geography := fs.String("geography", "", "Geography to scan")
+	depth := fs.String("depth", "full", "Scan depth: discovery|score|full")
+	count := fs.Int("count", 3, "How many candidate verticals to generate")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*geography) == "" {
+		return fmt.Errorf("--geography is required")
+	}
+	ctx := context.Background()
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	stores := buildStores(ctx, *storeMode, cfg, *migrate, *migrationFile)
+	if stores.SQLDB == nil {
+		return fmt.Errorf("scan requires persistent store mode (use -store postgres)")
+	}
+	p := factory.NewPipeline(stores.SQLDB, stores.EventStore, stores.MailboxStore)
+	sum, err := p.RunScan(ctx, *geography, *depth, *count)
+	if err != nil {
+		return err
+	}
+	fmt.Printf(
+		"scan completed geography=%s depth=%s discovered=%d scored=%d ready_for_review=%d killed=%d\n",
+		*geography, *depth, sum.Discovered, sum.Scored, sum.ReadyForReview, sum.Killed,
+	)
+	for _, id := range sum.VerticalIDs {
+		fmt.Printf("- vertical_id=%s\n", id)
+	}
+	return nil
+}
+
+func runFactorySubcommand(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: empire factory run [flags]")
+	}
+	switch args[0] {
+	case "run":
+		fs := flag.NewFlagSet("factory run", flag.ContinueOnError)
+		cfgPath := fs.String("config", "configs/empire.yaml", "Path to empire config")
+		storeMode := fs.String("store", "postgres", "Storage mode")
+		migrate := fs.Bool("migrate", false, "Apply migrations")
+		migrationFile := fs.String("migration-file", defaultMigrationFilePath, "Migration file path")
+		limit := fs.Int("limit", 20, "Max pending verticals to process")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		ctx := context.Background()
+		cfg, err := config.Load(*cfgPath)
+		if err != nil {
+			return err
+		}
+		stores := buildStores(ctx, *storeMode, cfg, *migrate, *migrationFile)
+		if stores.SQLDB == nil {
+			return fmt.Errorf("factory run requires persistent store mode (use -store postgres)")
+		}
+		p := factory.NewPipeline(stores.SQLDB, stores.EventStore, stores.MailboxStore)
+		sum, err := p.RunPending(ctx, *limit)
+		if err != nil {
+			return err
+		}
+		fmt.Printf(
+			"factory run completed processed=%d scored=%d ready_for_review=%d killed=%d\n",
+			len(sum.VerticalIDs), sum.Scored, sum.ReadyForReview, sum.Killed,
+		)
+		return nil
+	default:
+		return fmt.Errorf("unknown factory command: %s", args[0])
+	}
+}
+
+func runSpecAuditSubcommand(args []string) error {
+	fs := flag.NewFlagSet("spec-audit", flag.ContinueOnError)
+	cfgPath := fs.String("config", "configs/empire.yaml", "Path to empire config")
+	storeMode := fs.String("store", "postgres", "Storage mode")
+	migrate := fs.Bool("migrate", false, "Apply migrations")
+	migrationFile := fs.String("migration-file", defaultMigrationFilePath, "Migration file path")
+	specType := fs.String("spec-type", "vertical_spec", "Spec type: vertical_spec|template|technical_spec")
+	verticalID := fs.String("vertical-id", "", "Vertical ID for vertical spec audits")
+	specFile := fs.String("spec-file", "", "Path to JSON spec file")
+	requestedBy := fs.String("requested-by", "factory-cto", "Requesting agent id")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	stores := buildStores(ctx, *storeMode, cfg, *migrate, *migrationFile)
+	if stores.EventStore == nil {
+		return fmt.Errorf("spec-audit requires persistent store mode (use -store postgres)")
+	}
+
+	specRaw, err := loadAuditSpecInput(ctx, stores.SQLDB, strings.TrimSpace(*specType), strings.TrimSpace(*verticalID), strings.TrimSpace(*specFile))
+	if err != nil {
+		return err
+	}
+	requestPayload := mustJSON(map[string]any{
+		"spec_type":    *specType,
+		"vertical_id":  *verticalID,
+		"requested_by": *requestedBy,
+		"spec":         json.RawMessage(specRaw),
+	})
+	if err := appendTargetedEvent(ctx, stores, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("spec.validation_requested"),
+		SourceAgent: *requestedBy,
+		VerticalID:  strings.TrimSpace(*verticalID),
+		Payload:     requestPayload,
+		CreatedAt:   time.Now(),
+	}, []string{"spec-auditor"}); err != nil {
+		return err
+	}
+
+	result := specaudit.Validate(strings.TrimSpace(*specType), specRaw)
+	resultPayload := mustJSON(map[string]any{
+		"spec_type":   result.SpecType,
+		"vertical_id": strings.TrimSpace(*verticalID),
+		"passed":      result.Passed,
+		"issues":      result.Issues,
+	})
+	eventType := events.EventType("spec.validation_failed")
+	if result.Passed {
+		eventType = events.EventType("spec.validation_passed")
+	}
+	if err := appendTargetedEvent(ctx, stores, events.Event{
+		ID:          uuid.NewString(),
+		Type:        eventType,
+		SourceAgent: "spec-auditor",
+		VerticalID:  strings.TrimSpace(*verticalID),
+		Payload:     resultPayload,
+		CreatedAt:   time.Now(),
+	}, []string{strings.TrimSpace(*requestedBy)}); err != nil {
+		return err
+	}
+	if result.Passed {
+		fmt.Printf("spec-audit passed spec_type=%s vertical_id=%s\n", result.SpecType, strings.TrimSpace(*verticalID))
+		return nil
+	}
+	fmt.Printf("spec-audit failed spec_type=%s vertical_id=%s issues=%d\n", result.SpecType, strings.TrimSpace(*verticalID), len(result.Issues))
+	for _, issue := range result.Issues {
+		fmt.Printf("- [%s] %s at %s: %s\n", issue.Severity, issue.Code, issue.Location, issue.Message)
+	}
+	return nil
+}
+
+func loadAuditSpecInput(ctx context.Context, db *sql.DB, specType, verticalID, specFile string) ([]byte, error) {
+	specType = strings.ToLower(strings.TrimSpace(specType))
+	specType = strings.ReplaceAll(specType, "-", "_")
+	if specFile != "" {
+		b, err := os.ReadFile(specFile)
+		if err != nil {
+			return nil, fmt.Errorf("read spec file: %w", err)
+		}
+		return b, nil
+	}
+	if specType == "template" {
+		return nil, fmt.Errorf("--spec-file is required for template audits")
+	}
+	if db == nil {
+		return nil, fmt.Errorf("spec lookup requires postgres db")
+	}
+	if verticalID == "" {
+		return nil, fmt.Errorf("--vertical-id is required when --spec-file is not provided")
+	}
+	if specType == "technical_spec" {
+		var raw []byte
+		if err := db.QueryRowContext(ctx, `SELECT COALESCE(full_spec, '{}'::jsonb) FROM verticals WHERE id = $1::uuid`, verticalID).Scan(&raw); err != nil {
+			return nil, fmt.Errorf("load technical spec: %w", err)
+		}
+		return raw, nil
+	}
+	var raw []byte
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(mvp_spec, '{}'::jsonb) FROM verticals WHERE id = $1::uuid`, verticalID).Scan(&raw); err != nil {
+		return nil, fmt.Errorf("load vertical spec: %w", err)
+	}
+	return raw, nil
 }
