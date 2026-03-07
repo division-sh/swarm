@@ -1641,6 +1641,36 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 			"type": "object"
 		}
 	},
+	"opco.growth_stabilized": {
+		"Description": "Generated from contracts/event-catalog.yaml for opco.growth_stabilized.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"stabilization_metrics": {
+					"type": "object"
+				},
+				"vertical_id": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
+	"opco.growth_triggered": {
+		"Description": "Generated from contracts/event-catalog.yaml for opco.growth_triggered.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"trigger_reason": {
+					"type": "string"
+				},
+				"vertical_id": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
 	"opco.launched": {
 		"Description": "Generated from contracts/event-catalog.yaml for opco.launched.",
 		"Schema": {
@@ -3131,12 +3161,42 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 			"type": "object"
 		}
 	},
+	"timer.campaign_deadline": {
+		"Description": "Generated from contracts/event-catalog.yaml for timer.campaign_deadline.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"campaign_id": {
+					"type": "string"
+				},
+				"elapsed_hours": {
+					"type": "integer"
+				}
+			},
+			"type": "object"
+		}
+	},
 	"timer.infra_health_check": {
 		"Description": "Generated from contracts/event-catalog.yaml for timer.infra_health_check.",
 		"Schema": {
 			"additionalProperties": false,
 			"properties": {
 				"check_type": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
+	"timer.marginal_kill": {
+		"Description": "Generated from contracts/event-catalog.yaml for timer.marginal_kill.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"parked_days": {
+					"type": "integer"
+				},
+				"vertical_id": {
 					"type": "string"
 				}
 			},
@@ -3161,6 +3221,21 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 			"additionalProperties": false,
 			"properties": {
 				"trigger_reason": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
+	"timer.scan_timeout": {
+		"Description": "Generated from contracts/event-catalog.yaml for timer.scan_timeout.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"elapsed_minutes": {
+					"type": "integer"
+				},
+				"scan_id": {
 					"type": "string"
 				}
 			},

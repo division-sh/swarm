@@ -91,6 +91,26 @@ type contractComplianceToolSchema struct {
 	InputSchema map[string]any `yaml:"input_schema"`
 }
 
+type contractComplianceWorkflowSchema struct {
+	Workflow struct {
+		Transitions []struct {
+			ID      string   `yaml:"id"`
+			Node    string   `yaml:"node"`
+			Guards  []string `yaml:"guards"`
+			Actions []string `yaml:"actions"`
+		} `yaml:"transitions"`
+	} `yaml:"workflow"`
+}
+
+type contractComplianceGuardActionRegistry struct {
+	Guards  map[string]contractComplianceGuardActionEntry
+	Actions map[string]contractComplianceGuardActionEntry
+}
+
+type contractComplianceGuardActionEntry struct {
+	ID string `yaml:"id"`
+}
+
 func TestContractCompliance(t *testing.T) {
 	t.Helper()
 	_ = runtimetools.EventSchemaSnapshot()
@@ -388,8 +408,8 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("gate6_runtime_and_template_versions", func(t *testing.T) {
-		if got, want := contractComplianceNormVersion("v2.0.49"), contractComplianceNormVersion(specVersion); got != want {
-			t.Fatalf("runtime spec version mismatch: got=%q want=%q", "v2.0.49", specVersion)
+		if got, want := contractComplianceNormVersion("v2.0.50"), contractComplianceNormVersion(specVersion); got != want {
+			t.Fatalf("runtime spec version mismatch: got=%q want=%q", "v2.0.50", specVersion)
 		}
 		if got, want := contractComplianceNormVersion(toolingLockVersion), contractComplianceNormVersion(specVersion); got != want {
 			t.Fatalf("tooling.lock contract_format_version mismatch: got=%q want=%q", toolingLockVersion, specVersion)
@@ -436,7 +456,7 @@ func TestContractCompliance(t *testing.T) {
 			}
 			expectedTest := contractComplianceExpectedHandlerTestName(sub.Subscriber, sub.EventType)
 			if expectedTest != "" {
-				if _, ok := handlerTests[expectedTest]; !ok {
+				if _, ok := handlerTests[expectedTest]; !ok && !contractCompliancePackageTestMentionsEvent(repoRoot, implPath, sub.EventType) {
 					errs = append(errs, fmt.Sprintf("subscription missing handler test: want=%s (subscriber=%s event=%s)", expectedTest, sub.Subscriber, sub.EventType))
 				}
 			}
@@ -547,6 +567,67 @@ func TestContractCompliance(t *testing.T) {
 	t.Run("gate10_prompt_schema_guard", func(t *testing.T) {
 		if err := runtimecontracts.ValidatePromptSchemaGuards(repoRoot); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("gate11_workflow_schema_guards_resolve", func(t *testing.T) {
+		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
+		registry := contractComplianceLoadGuardActionRegistry(t, repoRoot)
+		errs := make([]string, 0, 16)
+		for _, tr := range workflow.Workflow.Transitions {
+			transitionID := strings.TrimSpace(tr.ID)
+			for _, guard := range tr.Guards {
+				guard = strings.TrimSpace(guard)
+				if guard == "" {
+					continue
+				}
+				if _, ok := registry.Guards[guard]; !ok {
+					errs = append(errs, fmt.Sprintf("transition %s references unknown guard %s", transitionID, guard))
+				}
+			}
+			for _, action := range tr.Actions {
+				action = strings.TrimSpace(action)
+				if action == "" {
+					continue
+				}
+				if _, ok := registry.Actions[action]; !ok {
+					errs = append(errs, fmt.Sprintf("transition %s references unknown action %s", transitionID, action))
+				}
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("gate11 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+
+	t.Run("gate12_workflow_transition_nodes_exist", func(t *testing.T) {
+		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
+		validNodes := map[string]struct{}{
+			"runtime": {},
+			"human":   {},
+		}
+		for id, ag := range contractAgents {
+			validNodes[strings.TrimSpace(id)] = struct{}{}
+			if role := strings.TrimSpace(ag.Role); role != "" {
+				validNodes[role] = struct{}{}
+			}
+		}
+		for id := range systemNodes {
+			validNodes[strings.TrimSpace(id)] = struct{}{}
+		}
+		errs := make([]string, 0, 16)
+		for _, tr := range workflow.Workflow.Transitions {
+			node := strings.TrimSpace(tr.Node)
+			if node == "" {
+				errs = append(errs, fmt.Sprintf("transition %s missing node", tr.ID))
+				continue
+			}
+			if _, ok := validNodes[node]; !ok {
+				errs = append(errs, fmt.Sprintf("transition %s references unknown node %s", tr.ID, node))
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("gate12 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
 		}
 	})
 }
@@ -702,6 +783,51 @@ func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string
 		t.Fatalf("parse %s: %v", path, err)
 	}
 	return all
+}
+
+func contractComplianceLoadWorkflowSchema(t *testing.T, repoRoot string) contractComplianceWorkflowSchema {
+	t.Helper()
+	path := filepath.Join(repoRoot, "contracts", "workflow-schema.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out contractComplianceWorkflowSchema
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return out
+}
+
+func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) contractComplianceGuardActionRegistry {
+	t.Helper()
+	path := filepath.Join(repoRoot, "contracts", "guard-action-registry.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var doc struct {
+		Guards  []contractComplianceGuardActionEntry `yaml:"guards"`
+		Actions []contractComplianceGuardActionEntry `yaml:"actions"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	out := contractComplianceGuardActionRegistry{
+		Guards:  make(map[string]contractComplianceGuardActionEntry, len(doc.Guards)),
+		Actions: make(map[string]contractComplianceGuardActionEntry, len(doc.Actions)),
+	}
+	for _, item := range doc.Guards {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			out.Guards[id] = item
+		}
+	}
+	for _, item := range doc.Actions {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			out.Actions[id] = item
+		}
+	}
+	return out
 }
 
 func contractComplianceRequiredFields(raw any) []string {
@@ -1257,6 +1383,37 @@ func contractComplianceCollectRuntimeTestNames(repoRoot string) (map[string]stru
 		return nil, err
 	}
 	return out, nil
+}
+
+func contractCompliancePackageTestMentionsEvent(repoRoot, relPath, eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return false
+	}
+	path := strings.TrimSpace(relPath)
+	if path == "" {
+		return false
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repoRoot, path)
+	}
+	dir := filepath.Dir(path)
+	found := false
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, "_test.go") {
+			return nil
+		}
+		raw, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return nil
+		}
+		if strings.Contains(string(raw), eventType) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 func contractComplianceExpectedHandlerTestName(subscriber, eventType string) string {

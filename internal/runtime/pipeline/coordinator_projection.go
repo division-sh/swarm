@@ -149,6 +149,29 @@ func (pc *FactoryPipelineCoordinator) validationStageForState(st *validationPipe
 	return string(StageBranding)
 }
 
+func workflowStateForVertical(verticalID, stage string, st *validationPipelineState) WorkflowState {
+	state := WorkflowState{
+		VerticalID: strings.TrimSpace(verticalID),
+		Stage:      NormalizePipelineStage(stage),
+	}
+	if st == nil {
+		return state
+	}
+	state.Status = strings.TrimSpace(st.Status)
+	state.Metadata = map[string]any{
+		"g1_research":            st.G1Research,
+		"g2_spec":                st.G2Spec,
+		"g3_cto":                 st.G3CTO,
+		"g4_brand":               st.G4Brand,
+		"revision_count":         st.RevisionCount,
+		"inner_revision_count":   st.InnerRevisionCount,
+		"packaging_requested":    st.PackagingRequested,
+		"packaging_retry_count":  st.PackagingRetries,
+		"spec_version":           st.SpecVersion,
+	}
+	return state
+}
+
 func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, verticalID, stage, sourceEvent string) {
 	if pc == nil || pc.db == nil {
 		return
@@ -165,7 +188,9 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 		FROM verticals
 		WHERE id = $1::uuid
 	`, verticalID).Scan(&currentStage)
-	if from, to := NormalizePipelineStage(currentStage), NormalizePipelineStage(stage); !CanTransitionPipelineStage(from, to) {
+	from, to := NormalizePipelineStage(currentStage), NormalizePipelineStage(stage)
+	workflowState := workflowStateForVertical(verticalID, currentStage, pc.validationGate.states[verticalID])
+	if _, ok := PipelineWorkflowTransition(from, to); !ok && !EmpirePipelineWorkflow().CanTransition(workflowState, to) {
 		runtimeWarn(
 			"pipeline-coordinator",
 			"non-canonical stage transition vertical_id=%s from=%s to=%s source_event=%s",

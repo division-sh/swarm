@@ -1,4 +1,4 @@
-# prompt-manifest.sha256 — v2.0.49
+# prompt-manifest.sha256 — v2.0.50
 # Run: cd contracts/prompts && sha256sum -c ../prompt-manifest.sha256
 
 6cf545358a78f589880047bb51407a7701b2c2a318f9cbc52ca61255c41f051a  analysis-agent.md

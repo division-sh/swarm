@@ -337,7 +337,7 @@ category.assessed:
   - geographic_scope
   notes: 'v2.0.40: Multi-signal model — MRA emits 0-N signals per subcategory. Each signal is one opportunity. automation_micro
     nested field removed. Runtime pre-filter applies ICP positive check, evidence completeness, and red flag filtering before
-    emitting vertical.discovered. geographic_scope indicates if opportunity is geography-locked or global. v2.0.49: opportunity_pattern,
+    emitting vertical.discovered. geographic_scope indicates if opportunity is geography-locked or global. v2.0.50: opportunity_pattern,
     signal_sources, and required_capabilities added. In corpus mode, category/subcategory may be null (MRA assigns from signal
     content). signal_sources tracks provenance for yield analysis.'
   emitter_type: agent
@@ -1687,7 +1687,7 @@ spec.revision_requested:
   emitter_type: runtime
 spec.validation_failed:
   emitter: spec-auditor
-  consumer: runtime
+  consumer: spec-auditor + factory-cto
   consumer_type: system_component
   intercepted: conditional
   routing: static
@@ -1702,7 +1702,7 @@ spec.validation_failed:
   emitter_type: agent
 spec.validation_passed:
   emitter: spec-auditor
-  consumer: runtime
+  consumer: spec-auditor + factory-cto
   consumer_type: system_component
   intercepted: conditional
   routing: static
@@ -2471,3 +2471,43 @@ pipeline.dead_letter:
 
     '
   emitter_type: system_node
+opco.growth_triggered:
+  emitter: opco-ceo
+  emitter_type: opco_agent
+  consumer: runtime
+  delivery_channel: eventbus_static
+  payload:
+    vertical_id: string
+    trigger_reason: string
+opco.growth_stabilized:
+  emitter: opco-ceo
+  emitter_type: opco_agent
+  consumer: runtime
+  delivery_channel: eventbus_static
+  payload:
+    vertical_id: string
+    stabilization_metrics: object
+timer.marginal_kill:
+  emitter: runtime
+  emitter_type: runtime
+  consumer: runtime
+  delivery_channel: internal
+  payload:
+    vertical_id: string
+    parked_days: integer
+timer.scan_timeout:
+  emitter: runtime
+  emitter_type: runtime
+  consumer: pipeline-coordinator
+  delivery_channel: internal
+  payload:
+    scan_id: string
+    elapsed_minutes: integer
+timer.campaign_deadline:
+  emitter: runtime
+  emitter_type: runtime
+  consumer: pipeline-coordinator
+  delivery_channel: internal
+  payload:
+    campaign_id: string
+    elapsed_hours: integer

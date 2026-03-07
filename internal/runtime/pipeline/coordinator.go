@@ -733,86 +733,36 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 		"research.completed",
 		"research.vertical_rejected",
 		"spec.approved",
+		"spec.validation_passed",
+		"spec.validation_failed",
+		"vertical.approved",
+		"vertical.killed",
+		"opco.ceo_ready",
 		"cto.spec_approved",
 		"cto.spec_revision_needed",
 		"cto.spec_vetoed",
 		"brand.candidates_ready",
+		"vertical.ready_for_review",
 		"vertical.needs_more_data",
-		"vertical.resumed":
-		return true, true
-	case "spec.revision_requested", "brand.revision_needed":
-		if strings.TrimSpace(evt.VerticalID) == "" {
+		"brand.revision_needed",
+		"spec.revision_requested",
+		"vertical.resumed",
+		"runtime.reset":
+		policy, ok := empirePipelineEventPolicy(eventType)
+		if !ok {
 			return false, false
 		}
-		// Runtime updates pipeline state, but event must still reach subscribed agents.
-		return false, true
-	case "spec.validation_passed", "spec.validation_failed":
-		if strings.TrimSpace(evt.VerticalID) == "" {
+		if policy.RequireVertical && strings.TrimSpace(evt.VerticalID) == "" {
 			return false, false
 		}
-		return true, true
-	case "vertical.approved", "vertical.killed":
-		if strings.TrimSpace(evt.VerticalID) == "" {
-			return false, false
-		}
-		// Keep event visible for downstream consumers while updating stage projection.
-		return false, true
-	case "opco.ceo_ready":
-		if strings.TrimSpace(evt.VerticalID) == "" {
-			return false, false
-		}
-		// Keep event visible for downstream consumers while updating stage projection.
-		return false, true
-	case "vertical.ready_for_review":
-		if strings.TrimSpace(evt.VerticalID) == "" {
-			return false, false
-		}
-		// Update state but keep event for audit visibility.
-		return false, true
-	case "runtime.reset":
-		return false, true
+		return policy.Consume, true
 	default:
 		return false, false
 	}
 }
 
 func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
-	return pc.bus.Subscribe("pipeline-coordinator",
-		events.EventType("timer.portfolio_digest"),
-		events.EventType("scan.requested"),
-		events.EventType("category.assessed"),
-		events.EventType("vertical.derived"),
-		events.EventType("trend.identified"),
-		events.EventType("source.scraped"),
-		events.EventType("market_research.scan_complete"),
-		events.EventType("trend_research.scan_complete"),
-		events.EventType("scanner.google_maps.scan_complete"),
-		events.EventType("scanner.instagram.scan_complete"),
-		events.EventType("scanner.reviews.scan_complete"),
-		events.EventType("scanner.directories.scan_complete"),
-		events.EventType("scanner.yelp.scan_complete"),
-		events.EventType("dedup.resolved"),
-		events.EventType("synthesis.resolved"),
-		events.EventType("vertical.shortlisted"),
-		events.EventType("research.completed"),
-		events.EventType("research.vertical_rejected"),
-		events.EventType("spec.revision_requested"),
-		events.EventType("spec.approved"),
-		events.EventType("spec.validation_passed"),
-		events.EventType("spec.validation_failed"),
-		events.EventType("vertical.approved"),
-		events.EventType("vertical.killed"),
-		events.EventType("opco.ceo_ready"),
-		events.EventType("cto.spec_approved"),
-		events.EventType("cto.spec_revision_needed"),
-		events.EventType("cto.spec_vetoed"),
-		events.EventType("brand.candidates_ready"),
-		events.EventType("vertical.ready_for_review"),
-		events.EventType("vertical.needs_more_data"),
-		events.EventType("brand.revision_needed"),
-		events.EventType("vertical.resumed"),
-		events.EventType("runtime.reset"),
-	)
+	return pc.bus.Subscribe("pipeline-coordinator", empirePipelineSubscriptions()...)
 }
 
 func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) {

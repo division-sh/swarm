@@ -4,12 +4,6 @@ import "strings"
 
 type PipelineStage string
 
-type PipelineTransition struct {
-	From   PipelineStage `json:"from"`
-	To     PipelineStage `json:"to"`
-	Reason string        `json:"reason,omitempty"`
-}
-
 const (
 	StageDiscovered     PipelineStage = "discovered"
 	StageScoring        PipelineStage = "scoring"
@@ -25,24 +19,8 @@ const (
 	StageKilled         PipelineStage = "killed"
 )
 
-var allowedStageTransitions = map[PipelineStage]map[PipelineStage]struct{}{
-	"": {
-		StageDiscovered:  {},
-		StageScoring:     {},
-		StageResearching: {},
-	},
-	StageDiscovered:     {StageScoring: {}, StageResearching: {}, StageKilled: {}},
-	StageScoring:        {StageShortlisted: {}, StageKilled: {}},
-	StageShortlisted:    {StageResearching: {}, StageReadyForReview: {}, StageKilled: {}},
-	StageResearching:    {StageMVPSpeccing: {}, StageReadyForReview: {}, StageKilled: {}},
-	StageMVPSpeccing:    {StageSpecReview: {}, StageCTOSpecReview: {}, StageBranding: {}, StageKilled: {}},
-	StageSpecReview:     {StageMVPSpeccing: {}, StageCTOSpecReview: {}, StageKilled: {}},
-	StageCTOSpecReview:  {StageMVPSpeccing: {}, StageBranding: {}, StageKilled: {}},
-	StageBranding:       {StageReadyForReview: {}, StageResearching: {}, StageKilled: {}},
-	StageReadyForReview: {StageApproved: {}, StageResearching: {}, StageKilled: {}},
-	StageApproved:       {StageOperating: {}, StageKilled: {}},
-	StageOperating:      {StageKilled: {}},
-	StageKilled:         {},
+func EmpirePipelineWorkflow() *WorkflowDefinition {
+	return empirePipelineWorkflow()
 }
 
 func NormalizePipelineStage(raw string) PipelineStage {
@@ -77,13 +55,17 @@ func NormalizePipelineStage(raw string) PipelineStage {
 }
 
 func CanTransitionPipelineStage(from, to PipelineStage) bool {
-	if from == to {
-		return true
+	workflow := EmpirePipelineWorkflow()
+	if workflow == nil {
+		return from == to
 	}
-	allowed, ok := allowedStageTransitions[from]
-	if !ok {
-		allowed = allowedStageTransitions[""]
+	return workflow.CanTransition(WorkflowState{Stage: NormalizePipelineStage(string(from))}, NormalizePipelineStage(string(to)))
+}
+
+func PipelineWorkflowTransition(from, to PipelineStage) (WorkflowTransition, bool) {
+	workflow := EmpirePipelineWorkflow()
+	if workflow == nil {
+		return WorkflowTransition{}, false
 	}
-	_, ok = allowed[to]
-	return ok
+	return workflow.Transition(WorkflowState{Stage: NormalizePipelineStage(string(from))}, NormalizePipelineStage(string(to)))
 }

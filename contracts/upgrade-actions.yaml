@@ -22,8 +22,8 @@
 #   verify_command:  Shell command that returns 0 on success
 #   depends_on:      List of action IDs that must complete first (null if none)
 
-spec_version: "2.0.49"
-previous_version: "2.0.48"
+spec_version: "2.0.50"
+previous_version: "2.0.49"
 generated_at: "2026-03-05"
 
 actions:
@@ -888,3 +888,42 @@ v2049-tool-schemas:
   priority: must
   action: "MCP tool gateway reads tool-schemas.yaml to generate tool definitions for Tier 2 tools (agent_message, mailbox_send, sql_execute, etc.). Same pattern as emit_* tools from EventSchemaRegistry. Agents see enum values in tool definitions — no prompt band-aids needed."
   verify: "go test ./internal/runtime -run TestContractCompliance/tool_schemas"
+
+# ============================================================================
+# v2.0.50 Upgrade Actions — Workflow Schema + Platform Abstraction
+# ============================================================================
+
+v2050-workflow-schema:
+  description: "Add workflow-schema.yaml — declarative state machine for vertical pipeline"
+  type: contract
+  priority: must
+  action: "New file. 19 stages, 26 transitions, 5 timers. Runtime workflow engine reads this to enforce transitions."
+  verify: "python3 -c \"import yaml; yaml.safe_load(open('contracts/workflow-schema.yaml'))\""
+
+v2050-guard-action-registry:
+  description: "Add guard-action-registry.yaml — named guards and actions for transitions"
+  type: contract
+  priority: must
+  action: "New file. 22 guards, 17 actions. Runtime resolves guard/action IDs from this registry."
+  verify: "python3 -c \"import yaml; yaml.safe_load(open('contracts/guard-action-registry.yaml'))\""
+
+v2050-pipeline-coordinator-system-node:
+  description: "Pipeline coordinator declared as system node in system-nodes.yaml"
+  type: contract
+  priority: must
+  action: "pipeline-coordinator now has owned_transitions, subscribes_to, produces. Cross-ref with workflow-schema.yaml."
+  verify: "python3 -c \"import yaml; sn=yaml.safe_load(open('contracts/system-nodes.yaml')); assert 'pipeline-coordinator' in sn\""
+
+v2050-event-catalog-required-fields:
+  description: "18 events gained explicit required field lists"
+  type: contract
+  priority: should
+  action: "event-catalog.yaml now has required: [...] on key events. Update EventSchemaRegistry to enforce."
+  verify: "go test ./internal/runtime -run TestContractCompliance/schema_payload"
+
+v2050-workflow-graph-gate:
+  description: "Add Gate 58: workflow graph traversal — verifies transition/event/node wiring completeness"
+  type: code
+  priority: must
+  action: "Implement TestContractCompliance/workflow_graph. Reads workflow-schema.yaml, event-catalog.yaml, agent-tools.yaml, system-nodes.yaml. Traverses the directed graph: validates triggers exist, emitters/consumers are wired, stages are reachable, no orphans. 12 checks per the gate definition."
+  verify: "go test ./internal/runtime -run TestContractCompliance/workflow_graph"

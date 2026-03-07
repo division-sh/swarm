@@ -197,6 +197,8 @@ var agentProducerEvents = map[string][]string{
 		"opco.founder_input",
 		"opco.steady_state_reached",
 		"mandate_updated",
+		"opco.growth_triggered",
+		"opco.growth_stabilized",
 	},
 	"chief-of-staff": {
 		"cross_domain_report",

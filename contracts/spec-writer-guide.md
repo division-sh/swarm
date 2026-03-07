@@ -6,7 +6,7 @@ This document contains everything a new spec writer agent needs to maintain and 
 
 ## 1. What You Are Maintaining
 
-EmpireAI is an autonomous AI holding company — a Go runtime that orchestrates 28 AI agents across a Factory (discovers and validates business verticals) and a Portfolio (operates companies via 13-agent OpCo teams). The system has 160+ event types, 37 database tables, and dual LLM runtime (Claude API + CLI).
+EmpireAI is an autonomous AI holding company — a Go runtime that orchestrates 28 AI agents across a Factory (discovers and validates business verticals) and a Portfolio (operates companies via 13-agent OpCo teams). The system has 172 event types, 37 database tables, and dual LLM runtime (Claude API + CLI).
 
 The specification is a three-layer system:
 
@@ -20,307 +20,201 @@ The specification is a three-layer system:
 
 When prose and contracts disagree, the contract wins. When the implementer builds from the spec, they read the contracts, not the prose. Prose errors are annoying; contract errors cause broken code.
 
+The platform is separating into three architectural layers:
+
+| Layer | Files | What it defines |
+|-------|-------|----------------|
+| **Platform** | workflow engine (Go) | Event routing, tool injection, state persistence, timer execution, schema validation |
+| **Workflow** | workflow-schema.yaml, guard-action-registry.yaml | Stages, transitions, guards, actions for the vertical pipeline |
+| **Policy** | prompt-variables.yaml, system-nodes.yaml scoring config | EmpireAI-specific thresholds, enum values, business rules |
+
 ---
 
-## 2. The Contract Files
+## 2. The Contract Files (16 files)
 
-### 2.1 agent-tools.yaml (~700 lines)
+### 2.1 agent-tools.yaml
 
-Defines every agent's wiring. Per agent:
-
-```yaml
-empire-coordinator:
-  id: empire-coordinator
-  type: holding                    # holding | factory | operating
-  role: empire_coordinator
-  model_tier: sonnet               # sonnet | haiku | haiku_or_sonnet
-  conversation_mode: session       # session | session_per_vertical | task | stateless
-  max_turns_per_task: 40
-  subscriptions:                   # Static EventBus subscriptions (holding/factory agents)
-    - vertical.shortlisted
-    - vertical.approved
-    # ...
-  subscriptions_bootstrap: []      # Routes via routing_rules table (OpCo workers only)
-  tools_tier2:                     # Domain-specific tools (agent_message and emit_* are universal, never list them here)
-    - mailbox_send
-    - schedule
-    - human_task_decide
-  emit_events:                     # Events this agent may emit
-    - board.directive
-    - vertical.resumed
-    # ...
-```
-
-System nodes (like `scoring-node`) are also in this file with `node_type: system`.
+Defines every agent's wiring: id, type, role, model_tier, conversation_mode, max_turns_per_task, subscriptions, tools, emit_events.
 
 **Critical rules:**
-- `agent_message` and `emit_*` tools are universal — injected into ALL agents. Never list them per-agent.
-- `subscriptions` = static EventBus delivery (holding/factory agents and OpCo leadership)
-- `subscriptions_bootstrap` = routing_rules table (OpCo worker agents only)
-- `emit_events` must match `agentProducerEvents` in `internal/commgraph/registry.go`
+- `agent_message`, `mailbox_send`, and `emit_*` tools are universal — injected into ALL agents. Never list them per-agent.
+- `subscriptions` = static EventBus delivery (holding/factory + OpCo leadership — static only, no bootstrap)
+- `subscriptions_bootstrap` = routing_rules table (OpCo worker agents ONLY — dynamic routing, REQUIRED)
+- `emit_events` must include every event the agent can emit. Gate 3 enforces this for ALL emitter types including `opco_agent`.
+- System nodes (like `scoring-node`) are also here with `node_type: system`
 
-### 2.2 event-catalog.yaml (~2100 lines)
+### 2.2 event-catalog.yaml
 
-Defines every event in the system. Per event:
-
-```yaml
-category.assessed:
-  emitter: market-research-agent
-  consumer: [scoring-node]
-  consumer_type: system_component
-  intercepted: false
-  passthrough: true
-  routing: static
-  delivery_channel: eventbus_static    # eventbus_static | eventbus_routing_table | runtime | agent_message | mailbox | audit
-  payload:
-    - scan_id
-    - category
-    - subcategory
-    - geography
-    - signal_strength
-    - opportunity_name
-    # ...
-```
+Defines every event: emitter, consumer, delivery_channel, payload with types. 172 events.
 
 **Critical rules:**
 - Every event in any agent's `emit_events` MUST have a catalog entry
 - Every event in any agent's `subscriptions` MUST have a catalog entry
-- Every event must have a `delivery_channel` — no exceptions
-- `intercepted: true` means PipelineCoordinator consumes the event before/instead of delivering to subscribers
-- `runtime_handling: projection` means runtime does work on the event but still delivers it (not intercepted)
-- Payload fields must match the Go `EventSchemaRegistry` properties
+- Payload fields have types (string, integer, object, array) and many have `required` lists
+- `consumer_type` values: `agent`, `system_component`, `dynamic` (runtime-resolved), `hybrid` (static + dynamic)
+- `score.dimension_complete.score` has `minimum: 0, maximum: 100`
 
-### 2.3 ddl-canonical.sql (~793 lines)
+### 2.3 ddl-canonical.sql
 
-Canonical database schema. 37 CREATE TABLE statements with indexes and constraints.
+Canonical database schema. 37 tables. `empire init` executes this directly. NEVER invent schemas — derive from Go structs (see Lesson 1).
 
-```sql
-CREATE TABLE verticals (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug            TEXT NOT NULL,
-    geography       TEXT NOT NULL DEFAULT 'global',
-    -- ...
-);
-CREATE UNIQUE INDEX idx_verticals_slug_geo ON verticals(slug, geography);
-```
+### 2.4 system-nodes.yaml
 
-**Critical rules:**
-- This file IS the schema. `empire init` executes it directly.
-- If prose disagrees, this file wins.
-- NEVER invent schemas. Derive from Go structs. See Lesson 1 below.
-- Column names must be EXACT — `g2_spec` is not `g2_spec_approved`. Go's `db.Scan()` reads by name.
-- `agents.id` is TEXT, not UUID. Any FK referencing agents must use TEXT.
+System node definitions. Each node declares: subscribes_to, produces, owned_transitions (from workflow-schema.yaml), execution_type, implementation path, state table, idempotency table.
 
-### 2.4 system-nodes.yaml (~400 lines)
+Current nodes: `scoring-node` (workflow_node), `pipeline-coordinator` (runtime_interceptor).
 
-Defines deterministic Go system nodes that participate in EventBus alongside agents. Currently only `scoring-node`.
+Also contains: universal scoring rubric (11 dimensions), derivation pre-filter, analyst anti-bias assignment.
 
-```yaml
-scoring-node:
-  subscribes_to: [vertical.discovered, vertical.derived, score.dimension_complete, scoring.contest_resolved]
-  produces: [scoring.requested, vertical.scored, vertical.shortlisted, vertical.marginal, vertical.rejected, scoring.contested, pipeline.dead_letter]
-  state_table: scoring_digest_buffer
-  implementation: internal/runtime/scoring_node.go
-```
+### 2.5 workflow-schema.yaml
 
-Contains the universal scoring rubric definition (11 dimensions, thresholds, rejection cascade).
-
-### 2.5 upgrade-actions.yaml (~700 lines)
-
-Typed migration actions per version. Per action:
-
-```yaml
-- id: v2044-category-assessed-new-fields
-  type: code                       # add | edit | drop | rename | migrate | grep_kill | code | test | prompt | contract
-  priority: must                   # must | should | optional
-  target: internal/runtime/event_emit_tools.go
-  description: "Add opportunity_pattern, signal_sources, required_capabilities to category.assessed schema"
-  verify: "go test ./internal/runtime/ -run TestCategoryAssessedSchema"
-```
-
-**Note:** The file has two structural formats due to historical evolution. Versions v2.0.35-41 use YAML list items (`- id: v2037-...`). Versions v2.0.42+ use top-level map keys (`v2042-mailbox-type-enum:`). Both are functionally equivalent but the file does not parse as valid YAML due to pre-existing quoting issues in grep verify strings. Treat as a human-readable checklist, not a machine-parseable contract. If reformatting, standardize on list-item syntax to match verification-gates.yaml.
-
-### 2.6 verification-gates.yaml (~730 lines)
-
-Test gate manifest. Per gate:
-
-```yaml
-- id: wiring-verifier-clean
-  name: "Wiring verifier passes cleanly"
-  priority: must_pass              # must_pass | should_pass | informational
-  category: wiring                 # ddl | wiring | events | agents | integration
-  command: "go test ./internal/runtime/ -run TestSpecRuntimeWiringVerification -v"
-  pass_criteria: "fail=0, warn=0"
-  introduced: "2.0.36"
-```
-
-**Gate priorities:**
-- `must_pass` — Failure = broken system. Blocks release.
-- `should_pass` — Expected green. Failure = tracked debt.
-- `informational` — Never blocks. Tracks trends.
-
-**Automation (v2.0.44):** Each gate has an `automated` field. If non-null, it names the Go test subfunction that implements the gate (e.g., `TestContractCompliance/agent_config`). Currently 17 of 50 gates are automated across 6 test functions in `internal/runtime/contract_compliance_test.go`. These run with `go test ./internal/runtime/ -run TestContractCompliance` and enforce contract-code consistency in CI. Manual gates (`automated: null`) are checked during audits.
-
-| Test Function | Gates Covered | What It Catches |
-|--------------|---------------|-----------------|
-| `agent_config` | 2 | model_tier, max_turns, conversation_mode, tools mismatch |
-| `subscriptions` | 3 | Subscription wiring drift (config, bootstrap, roster) |
-| `emit_events` | 3 | CommGraph emit_events ↔ contract mismatch |
-| `schema_payload` | 4 | EventSchemaRegistry missing catalog payload fields |
-| `ddl_tables` | 4 | Table count, column names, new DDL columns |
-| `version_constants` | 1 | Stale runtimeSpecVersion or TemplateVersion |
-
-### 2.7 agent-config-map.yaml (~112 lines)
-
-Maps contract agent IDs to config file paths. Authoritative for filename resolution.
-
-```yaml
-agents:
-  empire-coordinator: configs/agents/empire-coordinator.yaml
-  opco-ceo: configs/agents/templates/opco-ceo.yaml
-  opco-head-of-product: configs/agents/templates/vp-product.yaml   # Note: filename differs from ID
-  scanner-agent: null   # ephemeral, no config file
-```
-
-### 2.8 prompts/ directory (19 files) + prompt-variables.yaml
-
-Canonical system prompts. One markdown file per agent. Runtime loads directly from these files.
-
-- `{agent-id}.md` — default prompt
-- `{agent-id}.{mode}.md` — mode variant (e.g. `market-research-agent.corpus.md`)
-- `prompt-manifest.sha256` — hash manifest for verification
-- `prompt-variables.yaml` — single source of truth for all shared values (thresholds, enum lists, capability tiers). Prompts use `{{variable_name}}` syntax; runtime substitutes before sending to LLM.
+Declarative state machine for the vertical pipeline. 19 stages, 27 transitions, 5 timers.
 
 **Critical rules:**
-- Every agent in agent-tools.yaml must have a corresponding prompt file
-- Prompt must reference every event in the agent's `emit_events` list
-- Prompt must not describe payload structures inline — defer to tool schema ("see tool schema")
+- Every transition trigger event must exist in event-catalog.yaml
+- Every guard/action ID must resolve in guard-action-registry.yaml
+- Every transition node must exist in agent-tools.yaml or system-nodes.yaml
+- Terminal stages have no outgoing transitions (except explicit overrides)
+- **Transition triggers MUST match the actual runtime event names** (see Lesson 7)
+
+### 2.6 guard-action-registry.yaml
+
+Named guards (22) and actions (19) referenced by workflow-schema.yaml transitions. Each is categorized as `platform` (generic) or `empire` (business-specific). Empire guards reference prompt-variables.yaml via `policy_ref`.
+
+### 2.7 tool-schemas.yaml
+
+Input schemas for all 21 Tier 2 tools. MCP tool gateway generates tool definitions from this file. Enum values in schemas are the single source of truth — prompts must NOT repeat them.
+
+### 2.8 prompt-variables.yaml
+
+Single source of truth for all values appearing in multiple prompts. 42+ variables. Prompts use `{{variable_name}}` syntax; runtime substitutes before sending to LLM. When changing any threshold or enum list, update HERE — not individual prompts.
+
+### 2.9 prompts/ directory (20 files) + prompt-manifest.sha256
+
+One markdown file per agent. Runtime loads directly.
+
+**Critical rules:**
+- Prompts tell agents WHEN and WHY to use tools. Tool definitions (from tool-schemas.yaml and EventSchemaRegistry) tell them HOW.
+- Prompts must NOT describe payload structures inline — say "see tool schema"
 - When updating prompts, regenerate `prompt-manifest.sha256`
-- When changing any threshold, enum list, or capability, update `prompt-variables.yaml` — not individual prompts
-- `TestContractCompliance/agent_prompts` verifies hash parity
-- `TestPromptVariablesComplete` verifies all `{{}}` tokens resolve
 
-### 2.9 tool-schemas.yaml
+### 2.10 upgrade-actions.yaml
 
-Input schemas for all Tier 2 tools. The MCP tool gateway generates tool definitions from this file. 21 tools across 2 universal + 19 per-agent.
+Typed migration actions per version. Every implementation-impacting change needs an action with a `verify` command.
 
-**Critical rules:**
-- Every tool in any agent's `tools_tier2` list must have a schema here
-- Schemas follow JSON Schema draft 2020-12 with `additionalProperties: false`
-- Enum values in schemas are the single source of truth — prompts must NOT repeat them
-- `TestContractCompliance/tool_schemas` verifies every tools_tier2 entry has a matching schema
-- When adding a new tool: add schema here FIRST, then add to agent's tools_tier2 list
+### 2.11 verification-gates.yaml
 
-### 2.10 CHANGELOG-v2.0.XX.md
+57 gates. `must_pass` gates block release. ~20 are automated via `TestContractCompliance`.
 
-Standalone changelog per version. Required format:
+### 2.12 Other files
 
-```markdown
-# v2.0.XX — Title
-
-## Summary
-What changed and why.
-
-## Spec Changes
-- Bullet points of what was modified
-
-## Implementation Actions
-- Typed actions (ADD/EDIT/DROP/MIGRATE/VERIFY)
-
-## Touches
-- event-catalog.yaml: reason for change
-- agent-tools.yaml: no change needed (wiring unchanged)
-- ddl-canonical.sql: ADD 3 columns to verticals
-- system-nodes.yaml: reason for change
-- upgrade-actions.yaml: 10 new actions
-- verification-gates.yaml: 14 new gates
-```
-
-**Every contract file must appear in the Touches block** — either with a change reason or "no change needed" with explanation.
+- `agent-config-map.yaml` — agent ID → config file path mapping
+- `tooling.lock` — contract format version, required tooling versions
+- `CHANGELOG-v2.0.XX.md` — per-version changelogs (8 exist as of v2.0.50)
+- `spec-writer-guide.md` — this document
 
 ---
 
 ## 3. The Authority Hierarchy
 
-When sources conflict, this is the resolution order:
+When sources conflict:
 
-1. **contracts/*.yaml and contracts/*.sql** — always wins
-2. **§4 Runtime Architecture prose** — authoritative for design rationale
-3. **§5 Communication Model prose** — was historically authoritative for events, now defers to event-catalog.yaml
-4. **§3 Actor Hierarchy prose** — overview level, defers to agent-tools.yaml for specifics
-5. **§6/§8 Data Model prose** — defers to ddl-canonical.sql for schema
+1. **Implementer's runtime** — wins when the question is "what does the code actually do"
+2. **contracts/*.yaml and contracts/*.sql** — wins over prose for "what should the code do"
+3. **Prose spec** — explains why, defers to contracts for what
+
+**The implementer builds to the spec, not the other way around.** The spec defines event names, payload structures, transition triggers. The implementer implements them.
+
+**Exception — retroactive formalization:** When the spec is documenting behavior that already exists in the runtime (e.g. workflow-schema.yaml formalizing an existing pipeline), the contract must match reality. In this case, ask the implementer what the runtime uses. This is a one-time catch-up, not the ongoing process.
 
 **Within contracts:**
 - `ddl-canonical.sql` > any inline DDL in prose
 - `agent-tools.yaml` > any agent tables in prose
 - `event-catalog.yaml` > any event tables in prose
 - `system-nodes.yaml` > any system node descriptions in prose
+- `workflow-schema.yaml` > any stage/transition descriptions in prose
 
 ---
 
 ## 4. The Version Bump Process
 
-This is the mechanical process for every spec revision. Never skip steps.
+**Every batch of spec changes must include a version bump and a changelog entry. This is a hard requirement.**
 
 ### Step 1: Edit contracts FIRST
 
-If your changes affect structured data (events, agent wiring, DDL, thresholds, enums), edit the contract YAML/SQL file first. Then update prose to match. Not the other way around.
+If your changes affect structured data (events, agent wiring, DDL, thresholds, enums), edit the contract YAML/SQL file first. Then update prose to match.
 
 ### Step 2: Write the changelog
 
-Create `CHANGELOG-v2.0.XX.md` with all three sections: Summary, Implementation Actions, Touches. The Touches block must list every contract file.
+Create `CHANGELOG-v2.0.XX.md`. The Touches block must list every contract file — either changed or "no change needed."
 
 ### Step 3: Write upgrade-actions
 
-Add typed actions to `upgrade-actions.yaml` for every implementation-impacting change. Each action needs a `verify` command.
+Add typed actions to `upgrade-actions.yaml`. Each action needs a `verify` command.
 
 ### Step 4: Add verification gates if needed
 
-If the change introduces new invariants (new table, new event, new system node behavior), add gates to `verification-gates.yaml`.
+New invariants → new gates in `verification-gates.yaml`.
 
-### Step 5: Run cross-validation
+### Step 5: New File Checklist
+
+**When adding a new contract file, you MUST complete ALL of these:**
+- [ ] YAML parse gate entry in verification-gates.yaml (add to parse gate file list)
+- [ ] Cross-validation gate (if the file cross-references other contracts)
+- [ ] Prose section in spec (e.g. §5.9 for workflow architecture)
+- [ ] §16 directory listing updated
+- [ ] §17.1 contract file description added
+- [ ] spec-writer-guide section added (§2.X)
+- [ ] Archive template in Step 8 updated
+- [ ] File locations in §10 updated
+
+This checklist exists because every release from v2.0.47 to v2.0.50 added contract files without updating all documentation surfaces. The auditor found this pattern in every single review.
+
+### Step 6: Update version stamps
+
+Files that need version bumps every release:
+- All contract YAML file headers
+- `upgrade-actions.yaml` → `previous_version` field (must be exactly N-1)
+- `tooling.lock` → `contract_format_version`
+- `verification-gates.yaml` → `spec_version` on new gates
+- `version-field-consistency` gate → hardcoded version string
+
+This list exists because version stamps were wrong in v2.0.45, v2.0.48, v2.0.49, AND v2.0.50.
+
+### Step 7: Run cross-validation
 
 Before finalizing, verify:
 - Every `emit_events` entry has a catalog entry
 - Every `subscriptions` entry has a catalog entry
 - Every catalog emitter exists as an agent or system component
-- Every event has `delivery_channel`
-- All payload fields in catalog match EventSchemaRegistry
-- All numeric thresholds match between prose and contracts
-- All enum values match between prose and contracts
-- All version stamps in contract headers are bumped
+- Every workflow transition trigger exists in event-catalog.yaml
+- Every workflow guard/action resolves in guard-action-registry.yaml
+- All `{{variable}}` tokens in prompts resolve in prompt-variables.yaml
+- All version stamps are bumped
 
-### Step 6: Update version stamps
-
-Every contract file header must show the current spec version.
-
-### Step 7: Build the archive
+### Step 8: Package the archive
 
 ```
 empireai-v2_0_XX/
 ├── empireai-v2_0_XX.md
-├── CHANGELOG-v2.0.XX.md
 └── contracts-v20XX/
     ├── agent-tools.yaml
     ├── event-catalog.yaml
     ├── ddl-canonical.sql
     ├── system-nodes.yaml
+    ├── workflow-schema.yaml
+    ├── guard-action-registry.yaml
+    ├── tool-schemas.yaml
+    ├── prompt-variables.yaml
     ├── upgrade-actions.yaml
     ├── verification-gates.yaml
     ├── agent-config-map.yaml
     ├── prompt-manifest.sha256
-    ├── prompt-variables.yaml
-    ├── tool-schemas.yaml
     ├── tooling.lock
-    └── prompts/
-        ├── empire-coordinator.md
-        ├── market-research-agent.md
-        ├── market-research-agent.corpus.md
-        ├── analysis-agent.md
-        └── ... (19 prompt files total)
+    ├── spec-writer-guide.md
+    ├── CHANGELOG-v2.0.XX.md (all versions)
+    └── prompts/             (20 files)
 ```
-
-Package as `empireai-v2_0_XX.tar`. Spec filename uses underscores (some tools choke on dots).
 
 ---
 
@@ -328,201 +222,187 @@ Package as `empireai-v2_0_XX.tar`. Spec filename uses underscores (some tools ch
 
 ### Lesson 1: NEVER Invent Schemas — Derive from Go Structs
 
-In v2.0.33, the spec writer was asked to add 7 runtime tables to the DDL. Instead of reading the Go struct definitions, they designed idealized schemas from scratch. Every column name was wrong. Every query in the Go code would have failed.
+In v2.0.33, the spec writer designed DDL from scratch instead of reading Go struct definitions. Every column name was wrong.
 
-**When creating or modifying DDL:**
-1. Find the Go struct: `grep "type TableName struct" internal/**/*.go`
-2. Translate field-by-field: Go `bool` → `BOOLEAN`, `json.RawMessage` → `JSONB`, `uuid.UUID` → `UUID`, `string` → `TEXT`
-3. Check the code that reads/writes the table — the actual SQL queries tell you the real columns
-4. Never add columns the Go code doesn't reference
+**Rule:** Find the Go struct first. Translate field-by-field. Never add columns the Go code doesn't reference.
 
 ### Lesson 2: Ghost Removal Requires Grep-Level Thoroughness
 
-The Scoring Coordinator was removed in v2.0.19. It survived in ASCII diagrams, directory trees, and agent tables through SIX review cycles until v2.0.34.
+The Scoring Coordinator was removed in v2.0.19. It survived in ASCII diagrams and agent tables through SIX review cycles.
 
-**When removing anything (agent, event, table, field):**
-1. Grep the entire spec for every reference
-2. Classify as active (must remove) or historical (preserve in changelog)
-3. Remove all active references in one atomic version
-4. Add a VERIFY step proving zero remaining references
+**Rule:** Grep the entire spec. Remove all references atomically.
 
 ### Lesson 3: Prose Duplicating Contract Data Will Drift
 
-The spec historically contained:
-- Full EventSchemaRegistry with JSON Schema (~500 lines) — duplicated event-catalog.yaml AND Go code
-- Event tables with payload columns (~800 lines) — duplicated event-catalog.yaml
-- Inline DDL (~400 lines) — duplicated ddl-canonical.sql
-- Scoring threshold tables (~150 lines) — duplicated system-nodes.yaml
-
-Every audit found "prose says X, contract says Y." The fix: **remove structured data from prose, replace with pointers to contracts.** Prose should say "See contracts/event-catalog.yaml for complete event definitions" — not repeat the data.
+Every audit finds "prose says X, contract says Y." Remove structured data from prose. Replace with pointers to contracts.
 
 ### Lesson 4: The Event Catalog Is Built from Agent Configs, Not Prose
 
-When building the event catalog, start from:
-1. Every agent's `emit_events` → those events must exist
-2. Every agent's `subscriptions` → those events must exist
-3. PipelineCoordinator's interceptor cases → those events must exist
-4. Runtime's deferred emissions → those events must exist
-5. THEN check prose for anything missed
-
-Agent configs are closer to ground truth than prose tables.
+Start from agent emit_events + subscriptions → then check prose. Agent configs are closer to ground truth.
 
 ### Lesson 5: Empty `subscriptions_bootstrap` Is Almost Always Wrong
 
-OpCo worker agents that show `subscriptions_bootstrap: []` in the contract but have real subscriptions in their config YAML files are a common error. Cross-reference `configs/agents/templates/routes.yaml` when populating bootstrap subscriptions.
+OpCo workers with `subscriptions_bootstrap: []` but real subscriptions in config YAML are a common error.
 
 ### Lesson 6: Glob Patterns Don't Work
 
-The EventBus does not support `opco.*.escalation` or similar glob patterns. Every subscription must be a literal event name. If you write a wildcard, you're writing a bug.
+The EventBus does not support `opco.*.escalation`. Every subscription must be a literal event name.
+
+### Lesson 7: The Spec Defines Event Names — Except When Retroactively Documenting
+
+**Normal flow:** The spec defines a new event name → the implementer builds it. The spec is the authority on naming. If the runtime uses a different name, the runtime is wrong.
+
+**Exception:** When retroactively formalizing behavior that already exists in the runtime (like workflow-schema.yaml in v2.0.50), the contract must match the runtime. You cannot invent event names for transitions that are already built — you must discover what the runtime actually uses.
+
+In v2.0.50, the spec writer built workflow-schema.yaml top-down from prose. The prose said "spec review passes then CTO reviews" so the writer invented `spec_review.passed` as a transition trigger. **That event never existed in the runtime.** The actual event is `spec.approved` (emitted by the BRA). This class of bug — **spec-led fiction** — wasted an entire audit cycle.
+
+**Rules:**
+- For NEW features: spec defines the event name. Implementer builds to match.
+- For EXISTING behavior being formalized: ask the implementer what the runtime uses. Grep `case "..."` in the Go code.
+- Never guess. If you're unsure whether something is new or existing, ask.
+
+### Lesson 8: Prompts Describe WHEN/WHY, Tool Schemas Describe HOW
+
+When a prompt describes payload structure ("derivation_rationale: 1-2 sentences"), it competes with the tool schema and causes shape mismatches. The agent sent a string for a field the schema defined as an object.
+
+**Rule:** Prompts say "see tool schema." The MCP tool gateway serves the schema. Never repeat structure in prompts.
+
+### Lesson 9: Every New Contract File Needs the Full Checklist
+
+From v2.0.47 to v2.0.50, every release added contract files without updating all documentation surfaces. The auditor found it every time. Use Step 5.
+
+### Lesson 10: Version Stamps Drift Every Release
+
+Wrong in v2.0.45, v2.0.48, v2.0.49, v2.0.50. Use the checklist in Step 6. Push for CI automation.
 
 ---
 
 ## 6. The Codebase (What You Need to Know)
 
-You don't write code, but you need to understand what these files contain to write accurate contracts.
-
 | File | What It Contains | Contract It Maps To |
 |------|-----------------|-------------------|
-| `internal/commgraph/registry.go` | `agentProducerEvents` map — which agents emit which events | agent-tools.yaml `emit_events` |
-| `internal/runtime/event_emit_tools.go` | `EventSchemaRegistry` — JSON Schema per event | event-catalog.yaml `payload` |
-| `internal/runtime/pipeline_coordinator.go` | `interceptPolicy()` — which events are intercepted | event-catalog.yaml `intercepted` |
-| `internal/runtime/manager.go` | `defaultOpCoRoster()` and `defaultOpCoRoutes()` — hardcoded OpCo agents and routes | agent-tools.yaml subscriptions + subscriptions_bootstrap |
-| `internal/runtime/scoring_node.go` | ScoringNode subscriptions and emissions | system-nodes.yaml |
-| `configs/agents/*.yaml` | Agent config files (model_tier, subscriptions, tools, constraints, system_prompt) | agent-tools.yaml + agent-config-map.yaml |
-| `configs/agents/templates/routes.yaml` | Bootstrap and seeded routing rules | agent-tools.yaml `subscriptions_bootstrap` |
-| `migrations/*.sql` | Incremental database migrations | ddl-canonical.sql |
-| `contracts/` | In-repo copy of contract files | Your spec contracts |
+| `internal/commgraph/registry.go` | `agentProducerEvents` map | agent-tools.yaml `emit_events` |
+| `internal/runtime/event_emit_tools.go` | `EventSchemaRegistry` | event-catalog.yaml `payload` |
+| `internal/runtime/pipeline/coordinator.go` | Pipeline coordinator — stage transitions | system-nodes.yaml pipeline-coordinator |
+| `internal/runtime/pipeline/coordinator_validation.go` | Validation flow handlers | workflow-schema.yaml validation transitions |
+| `internal/runtime/pipeline/scoring_node.go` | ScoringNode | system-nodes.yaml scoring-node |
+| `internal/runtime/manager.go` | AgentManager — OpCo roster, routes | agent-tools.yaml |
+| `configs/agents/*.yaml` | Agent config files | agent-tools.yaml + agent-config-map.yaml |
+| `configs/agents/templates/routes.yaml` | Bootstrap routing rules | agent-tools.yaml `subscriptions_bootstrap` |
 
-### Key Runtime Constants
-- `runtimeSpecVersion` in manager.go — must match your spec version
-- `TemplateVersion` in `defaultOpCoRoster()` — must match your spec version
+### Key: The BRA orchestrates the validation middle
+
+The BRA (business-research-agent) is more than a research agent. It drives the validation pipeline:
+1. PC emits `validation.started` → BRA subscribes
+2. BRA does research, emits `research.completed`
+3. BRA emits `spec.requested` → lightweight-spec-agent
+4. LSA emits `spec.draft_ready` → BRA
+5. BRA emits `spec.approved` → PC does stage projection to cto_spec_review
+6. PC emits `cto.spec_review_requested` → factory-cto
+7. CTO emits `cto.spec_approved` or `cto.spec_revision_needed` or `cto.spec_vetoed`
+
+**The workflow-schema.yaml transition triggers must match these exact events.** This is why Lesson 7 exists.
 
 ---
 
 ## 7. The Review Process
 
-After you produce a spec revision, it goes through this cycle:
-
 ```
-You write spec → Reviewer audits contracts against code → You fix findings → Repeat until clean
+You write spec → Auditor checks contracts → You fix findings → Repeat
 ```
 
-**What the reviewer checks:**
+Three reviewers may audit:
+- **Claude auditor** — contract consistency, cross-validation, prose alignment
+- **Gemini reviewer** — naming mismatches, coverage gaps, structural issues
+- **Implementer** — the ultimate authority on what the runtime actually does
 
-*Note: Items 1-7 below are now partially automated by `TestContractCompliance` (§2.6). The reviewer focuses on what the automated tests don't cover: interceptor policy, ghost events, design rationale, and cross-contract semantic consistency.*
-1. Every agent config field matches agent-tools.yaml (model_tier, subscriptions, tools, max_turns, conversation_mode)
-2. CommGraph registry matches agent-tools.yaml emit_events
-3. EventSchemaRegistry payload fields match event-catalog.yaml
-4. DDL matches ddl-canonical.sql
-5. Pipeline coordinator intercept policy matches event-catalog.yaml
-6. Manager roster/routes match agent-tools.yaml
-7. Version constants match spec version
-8. No ghost events or agents in code
-9. No glob subscription patterns
-
-**What makes the reviewer's life easier:**
-- Fix ALL findings in one version, not incrementally
-- Add VERIFY steps for each fix
-- Never silently skip a finding — mark it DEFERRED with a reason if you can't fix it
-- The reviewer's time is expensive. Making them find the same issue three times erodes trust.
+**When the implementer says the runtime doesn't match the spec:** determine whether the spec is defining new behavior (implementer should update runtime) or retroactively documenting existing behavior (spec should update to match). This distinction matters.
 
 ---
 
-## 8. Common Mistakes and How to Avoid Them
+## 8. Common Mistakes and Prevention
 
-| Mistake | How It Manifests | Prevention |
-|---------|-----------------|------------|
-| Updating prose but not contracts | "Prose says X, contract says Y" in every audit | Edit contracts FIRST, then prose |
-| Inventing DDL from imagination | Every Go query fails against your schema | Always derive from Go structs |
-| Forgetting `delivery_channel` on new events | Wiring verifier flags it | Template every new event from an existing one |
-| Payload fields in prose but not catalog | Implementer builds wrong schema | Touches block forces explicit acknowledgment |
-| Version stamps not bumped | Stale metadata confuses tooling | Last step of every version bump |
-| `additionalProperties: false` in schemas | Future field additions rejected at runtime | Keep `false` as deliberate strict-schema policy, but ensure every contract payload field is registered in Go `EventSchemaRegistry`. The `TestContractCompliance/schema_payload` gate catches mismatches. |
-| Naming mismatches (`prebrand` vs `pre-brand`) | Config files not found | Always check agent-config-map.yaml |
-| Empty `subscriptions_bootstrap` for workers | Worker agents never receive events | Cross-reference routes.yaml |
-| Scoring thresholds differ between files | Marginal/shortlist boundaries wrong | Single source in system-nodes.yaml, prose points to it |
-| Changelog without Touches block | Contract drift goes undetected | Template enforces the block |
+| Mistake | Prevention |
+|---------|-----------|
+| Updating prose but not contracts | Edit contracts FIRST |
+| Inventing DDL from imagination | Derive from Go structs (Lesson 1) |
+| Inventing event names from prose | For new events: spec defines the name. For existing behavior: ask implementer (Lesson 7) |
+| Adding contract file without docs | New File Checklist (Step 5) |
+| Version stamps not bumped | Version Stamp Checklist (Step 6) |
+| Prompts describing payload structures | Say "see tool schema" (Lesson 8) |
+| Hardcoded thresholds in prompts | Use `{{variable}}` from prompt-variables.yaml |
+| Orphaned events in catalog | Gate 3 checks all emitter types including opco_agent |
+| Missing handler for subscription | Gate 8 checks subscription-handler coverage |
+| OpCo leadership using bootstrap | Leadership uses static subscriptions ONLY |
 
 ---
 
 ## 9. Quick Reference: Adding Common Things
 
 ### Adding a new event
-1. Add entry to `event-catalog.yaml` with all fields (emitter, consumer, intercepted, passthrough, routing, delivery_channel, payload)
-2. Add to emitter agent's `emit_events` in `agent-tools.yaml`
-3. If consumed via subscription, add to consumer agent's `subscriptions` or `subscriptions_bootstrap`
-4. Add upgrade action to `upgrade-actions.yaml`
-5. Update prose if it has an event summary table
-6. Note in changelog Touches block
+1. Add to `event-catalog.yaml` with all fields including `required` list
+2. Add to emitter's `emit_events` in `agent-tools.yaml`
+3. Add to consumer's `subscriptions` or `subscriptions_bootstrap`
+4. If it triggers a workflow transition, add to `workflow-schema.yaml`
+5. Add upgrade action, note in changelog
 
-### Adding a new agent
-1. Add full entry to `agent-tools.yaml`
-2. Add file path mapping to `agent-config-map.yaml`
-3. Add to event-catalog.yaml as emitter/consumer where applicable
-4. Add upgrade actions for config file creation and CommGraph registration
-5. Add verification gate for agent config compliance
+### Adding a workflow transition
+1. Add transition to `workflow-schema.yaml` — get trigger event name from implementer
+2. Add any new guards/actions to `guard-action-registry.yaml`
+3. Verify trigger event exists in `event-catalog.yaml`
+4. Verify node exists in `agent-tools.yaml` or `system-nodes.yaml`
 
-### Modifying DDL
-1. Edit `ddl-canonical.sql` — this is the canonical source
-2. Add a `migrate` type action to `upgrade-actions.yaml` with the ALTER/CREATE SQL
-3. Note the migration number the implementer should create
-4. If adding columns, verify the Go struct has corresponding fields
-5. If adding CHECK constraints, list the valid enum values
-
-### Changing scoring thresholds or rubric
-1. Edit `system-nodes.yaml` — this is the single source of truth
-2. Remove or update any threshold values in prose that duplicated the old values
-3. Prose should point to system-nodes.yaml, not repeat the numbers
+### Changing scoring thresholds
+1. Edit `prompt-variables.yaml` — single source of truth
+2. Prompts using `{{variable}}` auto-update at runtime
+3. If system-nodes.yaml has the same value, update there too
 
 ---
 
 ## 10. File Locations
 
 ```
-docs/specs/empireai-v2_0_XX/           # Spec archive per version
-  empireai-v2_0_XX.md                  # Main prose spec
-  contracts-v20XX/                     # Contract files for this version
-    agent-tools.yaml
-    event-catalog.yaml
-    ddl-canonical.sql
-    system-nodes.yaml
-    upgrade-actions.yaml
-    verification-gates.yaml
-    agent-config-map.yaml
-    prompt-variables.yaml
-    tool-schemas.yaml
-    tooling.lock
-    prompt-manifest.sha256
-    CHANGELOG-v2.0.XX.md
-    prompts/                           # 20 agent prompt files
-      empire-coordinator.md
-      market-research-agent.md
-      market-research-agent.corpus.md
-      analysis-agent.md
-      # ... (20 prompt files total)
-
-contracts/                              # In-repo live copy (implementer maintains)
-  agent-tools.yaml
-  event-catalog.yaml
-  ddl-canonical.sql
-  system-nodes.yaml
-  upgrade-actions.yaml
-  verification-gates.yaml
-  prompt-variables.yaml
-  tool-schemas.yaml
-  prompts/                             # Runtime loads prompts from here
-
-configs/agents/                         # Agent config files
-  empire-coordinator.yaml
-  factory-cto.yaml
-  # ... (16 holding/factory agents)
-  templates/
-    opco-ceo.yaml
-    chief-of-staff.yaml
-    vp-product.yaml
-    # ... (13 OpCo agents)
-    routes.yaml                        # Bootstrap + seeded routing rules
-
-docs/spec-template.md                  # Reusable spec template for other projects
-docs/spec-writer-guide.md              # This document
+contracts/                             # In-repo live copy (implementer maintains)
+  agent-tools.yaml                    # 28 agents
+  event-catalog.yaml                  # 172 events
+  ddl-canonical.sql                   # 37 tables
+  system-nodes.yaml                   # scoring-node, pipeline-coordinator
+  workflow-schema.yaml                # 19 stages, 27 transitions
+  guard-action-registry.yaml          # 22 guards, 19 actions
+  tool-schemas.yaml                   # 21 Tier 2 tool schemas
+  prompt-variables.yaml               # 42+ template variables
+  upgrade-actions.yaml                # migration actions per version
+  verification-gates.yaml             # 57 gates
+  agent-config-map.yaml               # agent → config path
+  prompt-manifest.sha256              # hash manifest for 20 prompts
+  tooling.lock                        # format version, tooling reqs
+  spec-writer-guide.md                # this document
+  CHANGELOG-v2.0.XX.md               # 8 changelogs (v2.0.43–v2.0.50)
+  prompts/                            # 20 agent prompt files
 ```
+
+---
+
+## 11. Current State (as of v2.0.50)
+
+**What's working:**
+- Full corpus discovery pipeline: signals → pre-filter → scoring → derivation loop → EC digest
+- SubDoc scored 70.75 — first vertical to clear all hard gates, pending human approval in mailbox
+- Two derived verticals (PayGate signal 73, Lite signal 61) proposed by derivation loop
+- 20 agent prompts with template variables, all `{{}}` tokens resolve
+- 57 verification gates, ~20 automated
+- Workflow state machine formalized (19 stages, 27 transitions matching actual runtime)
+
+**Known gaps (deferred, not blocking):**
+- 9 OpCo worker agent prompts missing — fix before OpCo spinup
+- Migration 026 for 4 DDL indexes — implementer task
+- EventSchemaRegistry not yet generated from event-catalog.yaml
+- Prompt-schema guard test not yet built
+
+**Pending implementer tasks:**
+- Wire MCP tool gateway to read tool-schemas.yaml
+- Wire prompt template renderer (`{{variable}}` substitution)
+- Create `empireai-current.md` symlink
+- Build Gate 8 (subscription-handler coverage)
+- Remove `opco_agent` from Gate 3 skip list
+- Generate emit tool schemas from event-catalog.yaml (eliminates dual source of truth)

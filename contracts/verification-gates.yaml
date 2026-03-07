@@ -1,4 +1,4 @@
-spec_version: 2.0.49
+spec_version: 2.0.50
 gates:
 - id: contracts-yaml-parse
   name: All YAML contracts parse without errors
@@ -7,15 +7,15 @@ gates:
   layer: local
   command: "python3 -c \"\nimport yaml, sys\nfiles = [\n  'contracts/agent-tools.yaml',\n  'contracts/event-catalog.yaml',\n\
     \  'contracts/agent-config-map.yaml',\n  'contracts/verification-gates.yaml',\n  'contracts/upgrade-actions.yaml',\n \
-    \ 'contracts/system-nodes.yaml',\n  'contracts/prompt-variables.yaml',\n  'contracts/tool-schemas.yaml',\n  'contracts/tooling.lock'\n\
-    ]\nfor f in files:\n  try:\n    with open(f) as fh:\n      data = yaml.safe_load(fh)\n    assert data is not None, f'{f}\
-    \ loaded as None'\n  except Exception as e:\n    print(f'FAIL: {f} — {e}')\n    sys.exit(1)\nprint(f'{len(files)} contracts\
-    \ parsed successfully')\n\""
+    \ 'contracts/system-nodes.yaml',\n  'contracts/prompt-variables.yaml',\n  'contracts/tool-schemas.yaml',\n  'contracts/tooling.lock',\n\
+    \  'contracts/workflow-schema.yaml',\n  'contracts/guard-action-registry.yaml'\n]\nfor f in files:\n  try:\n    with open(f)\
+    \ as fh:\n      data = yaml.safe_load(fh)\n    assert data is not None, f'{f} loaded as None'\n  except Exception as e:\n\
+    \    print(f'FAIL: {f} — {e}')\n    sys.exit(1)\nprint(f'{len(files)} contracts parsed successfully')\n\""
   pass_criteria: All YAML contract files parse without errors
   introduced: 2.0.36
   notes: Added per implementer feedback — malformed YAML causes silent verifier downgrade
   automated: null
-  description: All 9 contract YAML/lock files parse without errors
+  description: All 11 contract YAML/lock files parse without errors
 - id: ddl-fresh-install
   name: Canonical DDL creates all tables on fresh DB
   priority: must_pass
@@ -651,12 +651,41 @@ gates:
   description: Every tool in any agent tools_tier2 list has a matching schema in tool-schemas.yaml
   type: automated
   command: go test ./internal/runtime -run TestContractCompliance/tool_schemas -count=1
-  spec_version: 2.0.49
+  spec_version: 2.0.50
   added_in: v2.0.49
 - id: version-field-consistency
   description: All version fields across contracts match the current spec version
   type: automated
-  command: 'python3 -c "import yaml; v=''2.0.49''; files={''tooling.lock'': ''contract_format_version''}; [exit(1) for f,k
+  command: 'python3 -c "import yaml; v=''2.0.50''; files={''tooling.lock'': ''contract_format_version''}; [exit(1) for f,k
     in files.items() if yaml.safe_load(open(''contracts/''+f)).get(k) != v]"'
-  spec_version: 2.0.49
+  spec_version: 2.0.50
   added_in: v2.0.49
+- id: workflow-schema-guards-resolve
+  description: Every guard and action in workflow-schema.yaml resolves in guard-action-registry.yaml
+  type: automated
+  command: go test ./internal/runtime -run TestContractCompliance/workflow_schema
+  spec_version: 2.0.50
+  added_in: v2.0.50
+- id: workflow-transition-nodes-exist
+  description: Every transition node in workflow-schema.yaml exists in agent-tools.yaml or system-nodes.yaml
+  type: automated
+  command: go test ./internal/runtime -run TestContractCompliance/workflow_nodes
+  spec_version: 2.0.50
+  added_in: v2.0.50
+- id: workflow-graph-traversal
+  description: 'Graph traversal: every transition has valid trigger/emitter/consumer/node wiring, every stage is reachable,
+    no orphan events'
+  type: automated
+  command: go test ./internal/runtime -run TestContractCompliance/workflow_graph
+  spec_version: 2.0.50
+  added_in: v2.0.50
+  checks:
+  - trigger event exists in event-catalog.yaml
+  - trigger emitter exists in agent-tools.yaml or system-nodes.yaml
+  - transition node subscribes to OR produces the trigger event (or is runtime)
+  - every action-emitted event exists in catalog with a consumer
+  - every non-initial stage has at least one inbound transition
+  - every non-terminal stage has at least one outbound transition
+  - every stage is reachable from initial_stage
+  - every catalog event with agent emitter appears in that agent emit_events
+  - every catalog event with agent consumer appears in that agent subscriptions

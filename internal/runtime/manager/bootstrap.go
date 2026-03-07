@@ -22,7 +22,7 @@ func DefaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   OpCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.0.49",
+			TemplateVersion: "2.0.50",
 		}
 	}
 

@@ -1,5 +1,5 @@
 # ============================================================================
-# EmpireAI Agent Tools Contract — v2.0.49
+# EmpireAI Agent Tools Contract — v2.0.50
 # ============================================================================
 # Defines every agent's wiring: subscriptions, tools, emit_events, model config.
 #
@@ -50,7 +50,7 @@ scoring-node:
   - vertical.rejected
   - vertical.scored
   - vertical.shortlisted
-  implementation: internal/runtime/pipeline/scoring_node.go
+  implementation: internal/runtime/scoring_node.go
   state_table: scoring_digest_buffer
   idempotency_table: system_node_ledger
   _note: 'v2.0.37: Migrated from interceptor cases handleVerticalDiscovered and handleScoreDimensionComplete. Receives events
@@ -395,6 +395,8 @@ opco-ceo:
   - opco.deploy_review
   - opco.founder_input
   - opco.steady_state_reached
+  - opco.growth_triggered
+  - opco.growth_stabilized
   - mandate_updated
 opco-chief-of-staff:
   id: cos-{vertical_id}

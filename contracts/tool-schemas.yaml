@@ -1,5 +1,5 @@
 # ============================================================================
-# EmpireAI Tool Schemas Contract — v2.0.49
+# EmpireAI Tool Schemas Contract — v2.0.50
 # ============================================================================
 # Defines input schemas for all Tier 2 tools. The MCP tool gateway generates
 # tool definitions from this file. Agents see these schemas in their tool
