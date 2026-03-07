@@ -199,11 +199,14 @@ func TestRuntimeHotspotFilesStayBounded(t *testing.T) {
 	t.Helper()
 	repoRoot := projectRootFromArchitectureTest(t)
 	limits := map[string]int{
-		filepath.Join("internal", "runtime", "pipeline", "coordinator.go"):           950,
-		filepath.Join("internal", "runtime", "pipeline", "coordinator_discovery.go"): 1150,
-		filepath.Join("internal", "runtime", "pipeline", "coordinator_scoring.go"):   1050,
-		filepath.Join("internal", "runtime", "tools", "executor.go"):                 900,
-		filepath.Join("internal", "runtime", "tools", "executor_emit.go"):            850,
+		filepath.Join("internal", "runtime", "pipeline", "coordinator.go"):              950,
+		filepath.Join("internal", "runtime", "pipeline", "coordinator_projection.go"):   500,
+		filepath.Join("internal", "runtime", "pipeline", "coordinator_discovery.go"):    1150,
+		filepath.Join("internal", "runtime", "pipeline", "coordinator_scoring.go"):      1050,
+		filepath.Join("internal", "runtime", "tools", "executor.go"):                    900,
+		filepath.Join("internal", "runtime", "tools", "executor_emit.go"):               250,
+		filepath.Join("internal", "runtime", "tools", "executor_emit_normalization.go"): 450,
+		filepath.Join("internal", "runtime", "tools", "executor_emit_guardrails.go"):    250,
 	}
 	for rel, maxLines := range limits {
 		path := filepath.Join(repoRoot, rel)

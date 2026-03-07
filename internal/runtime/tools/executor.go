@@ -62,29 +62,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 			return exec.handleEmitTool(ctx, actor, name, input)
 		},
-		map[string]ToolHandler{
-			"agent_message":             exec.execAgentMessage,
-			"schedule":                  exec.execSchedule,
-			"configure_routing":         exec.execConfigureRouting,
-			"agent_hire":                func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execAgentHire(actor, input) },
-			"agent_fire":                func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execAgentFire(actor, input) },
-			"agent_reconfigure":         func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execAgentReconfigure(actor, input) },
-			"mailbox_send":              exec.execMailboxSend,
-			"human_task_request":        exec.execHumanTaskRequest,
-			"human_task_decide":         exec.execHumanTaskDecide,
-			"sql_execute":               exec.execSQLExecute,
-			"nginx_reload":              exec.execNginxReload,
-			"systemd_control":           exec.execSystemdControl,
-			"certbot_execute":           exec.execCertbotExecute,
-			"whatsapp_business_api":     func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "whatsapp_business_api", input) },
-			"email_api":                 exec.execEmailAPI,
-			"instagram_api":             func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "instagram_api", input) },
-			"domain_purchase":           func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "domain_purchase", input) },
-			"domain_availability_check": func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "domain_availability_check", input) },
-			"dns_configure":             func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "dns_configure", input) },
-			"instagram_handle_check":    exec.execInstagramHandleCheck,
-			"whatsapp_name_check":       func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "whatsapp_name_check", input) },
-		},
+		exec.buildToolHandlers(),
 	)
 	return exec
 }

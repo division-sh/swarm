@@ -7,12 +7,7 @@ import (
 	"empireai/internal/events"
 )
 
-type workflowNodeExecutor interface {
-	NodeID() string
-	Subscriptions() []events.EventType
-	InterceptPolicy(eventType string, evt events.Event) (consume bool, handled bool)
-	Handle(ctx context.Context, evt events.Event) bool
-}
+type workflowNodeExecutor = WorkflowNodeExecutor
 
 type scanWorkflowRuntime interface {
 	handlePortfolioDigestTimer(context.Context, events.Event)

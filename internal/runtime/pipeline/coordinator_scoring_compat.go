@@ -7,7 +7,27 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 )
+
+type scoringComposite = empirepipeline.ScoringComposite
+
+func expectedScoringDimensions(rubric string) []string {
+	return empirepipeline.ExpectedScoringDimensions(rubric)
+}
+
+func selectScoringRubric(mode string) string {
+	return empirepipeline.SelectScoringRubric(normalizeScanMode(mode))
+}
+
+func (ss *ScoringState) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
+	return empirepipeline.ComputeComposite(empirepipeline.ScoringAccumulatorInput{
+		Rubric:   acc.Rubric,
+		Expected: append([]string{}, acc.Expected...),
+		Received: acc.Received,
+		Partial:  partial,
+	})
+}
 
 func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
 	pc.scoringState.handleScoreDimensionComplete(ctx, evt)

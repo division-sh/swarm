@@ -11,9 +11,10 @@ func TestPipelineArchitecture_EmpireBoundary(t *testing.T) {
 	t.Helper()
 
 	allowed := map[string]struct{}{
-		"coordinator.go":       {},
-		"coordinator_scoring.go": {},
-		"payload_factory.go":   {},
+		"coordinator.go":                {},
+		"coordinator_discovery_compat.go": {},
+		"coordinator_scoring_compat.go": {},
+		"payload_factory.go":            {},
 	}
 
 	matches, err := filepath.Glob(filepath.Join(".", "*.go"))

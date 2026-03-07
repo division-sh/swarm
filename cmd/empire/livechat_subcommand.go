@@ -101,16 +101,21 @@ func runChatSubcommand(args []string) error {
 	}
 	scheduler := runtimepipeline.NewScheduler(func(runtimepipeline.Schedule) {})
 	defer scheduler.Stop()
-	toolExecutor := runtimetools.NewExecutor(bus, scheduler, nil, stores.ScheduleStore)
-	toolExecutor.SetConfig(cfg)
-	toolExecutor.SetMailboxStore(stores.MailboxStore)
-	toolExecutor.SetSQLDB(stores.SQLDB)
+	var managerRef *runtimemanager.AgentManager
+	toolExecutor := runtimetools.NewExecutorWithOptions(bus, scheduler, runtimetools.ExecutorOptions{
+		Config:       cfg,
+		MailboxStore: stores.MailboxStore,
+		SQLDB:        stores.SQLDB,
+		ManagerProvider: func() runtimetools.Manager {
+			return managerRef
+		},
+	}, stores.ScheduleStore)
 	factory := runtimeagents.NewLLMAgentFactory(modelRuntime, toolExecutor, toolExecutor.ToolDefinitions())
 	manager := runtimemanager.NewAgentManager(bus, factory, stores.ManagerStore)
 	manager.SetWorkspaceLifecycle(workspaceLifecycle)
 	manager.SetSessionRegistry(stores.SessionRegistry, cfg.LLM.RuntimeMode)
 	manager.SetBudgetTracker(budgetTracker)
-	toolExecutor.SetManager(manager)
+	managerRef = manager
 	if err := syncRuntimeGlobalAgents(ctx, stores.ManagerStore); err != nil {
 		log.Printf("chat command global agents sync failed (continuing): %v", err)
 	}

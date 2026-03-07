@@ -1,9 +1,0 @@
-# EmpireAI tooling.lock — v2.0.48
-# Tracks contract tooling versions for reproducibility.
-#
-# This file is referenced by the YAML parse gate and spec-writer-guide.
-# Currently minimal — expand as contract tooling grows.
-
-contract_format_version: "2.0.48"
-yaml_parser: "pyyaml >= 6.0"
-schema_validator: "jsonschema >= 4.0"
