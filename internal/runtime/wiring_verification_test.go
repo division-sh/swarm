@@ -191,7 +191,20 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	results = append(results, verifyEmitToolCompleteness(agents, schemas, toolToEvent)...)
 	results = append(results, verifySubscriptionCompleteness(agents, producersByEvent, contracts)...)
 	results = append(results, verifyPayloadContracts(agents, schemas, runtimeEmitted)...)
-	results = append(results, verifyInterceptorCoverage(interceptEvents, handleEvents, handlerCases, runtimeEmitted)...)
+	nonLocalIntercepts := map[string]struct{}{}
+	for id, node := range loadWiringSystemNodes(repoRoot) {
+		if strings.TrimSpace(id) == "pipeline-coordinator" {
+			continue
+		}
+		for _, evt := range node.SubscribesTo {
+			evt = strings.TrimSpace(evt)
+			if evt == "" {
+				continue
+			}
+			nonLocalIntercepts[evt] = struct{}{}
+		}
+	}
+	results = append(results, verifyInterceptorCoverage(interceptEvents, handleEvents, handlerCases, runtimeEmitted, nonLocalIntercepts)...)
 	results = append(results, verifyPipelinePathTracing(agents, producersByEvent, interceptEvents, runtimeManagedEvents)...)
 	results = append(results, verifyOrphanEmissions(agents, producersByEvent, interceptEvents, runtimeManagedEvents, contracts)...)
 	results = append(results, verifySchemaCatalogConsistency(agents, schemas, producersByEvent, interceptEvents, contracts)...)
@@ -454,10 +467,17 @@ func verifyPayloadContracts(agents []wiringAgent, schemas map[string]wiringSchem
 	return out
 }
 
-func verifyInterceptorCoverage(interceptEvents, handleEvents map[string]struct{}, handlerCases map[string]string, runtimeEmitted map[string][]wiringEmitSite) []wiringResult {
+func verifyInterceptorCoverage(interceptEvents, handleEvents map[string]struct{}, handlerCases map[string]string, runtimeEmitted map[string][]wiringEmitSite, nonLocalIntercepts map[string]struct{}) []wiringResult {
 	out := make([]wiringResult, 0, 128)
 
 	for evt := range interceptEvents {
+		if _, ok := nonLocalIntercepts[evt]; ok {
+			out = append(out, wiringResult{
+				Severity: wiringPass,
+				Message:  fmt.Sprintf("interceptor event %s is owned by another system node", evt),
+			})
+			continue
+		}
 		if _, ok := handleEvents[evt]; ok {
 			out = append(out, wiringResult{
 				Severity: wiringPass,
@@ -940,6 +960,19 @@ func loadWiringEventContracts(repoRoot string) map[string]wiringEventContract {
 		return map[string]wiringEventContract{}
 	}
 	return bestContracts
+}
+
+func loadWiringSystemNodes(repoRoot string) map[string]contractComplianceSystemNode {
+	path := filepath.Join(repoRoot, "contracts", "system-nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		panic(fmt.Sprintf("read %s: %v", path, err))
+	}
+	var nodes map[string]contractComplianceSystemNode
+	if err := yaml.Unmarshal(raw, &nodes); err != nil {
+		panic(fmt.Sprintf("parse %s: %v", path, err))
+	}
+	return nodes
 }
 
 func loadWiringEventContractsFromRoot(repoRoot string) (map[string]wiringEventContract, bool) {
@@ -1511,7 +1544,46 @@ func parsePipelineInterceptorCoverage(pipelinePath string) (map[string]struct{},
 		}
 	}
 
+	workflowNodesPath := filepath.Join(filepath.Dir(pipelinePath), "workflow_nodes.go")
+	workflowNodesFile, err := parser.ParseFile(fset, workflowNodesPath, nil, 0)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, decl := range workflowNodesFile.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || fn.Name == nil || fn.Name.Name != "workflowNodePolicyOverlay" {
+			continue
+		}
+		collectMapStringKeys(fn.Body, interceptEvents)
+	}
+
+	workflowExecutorsPath := filepath.Join(filepath.Dir(pipelinePath), "workflow_nodes_runtime.go")
+	workflowExecutorsFile, err := parser.ParseFile(fset, workflowExecutorsPath, nil, 0)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, decl := range workflowExecutorsFile.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || fn.Name == nil || fn.Name.Name != "Handle" {
+			continue
+		}
+		collectSwitchCases(fn.Body, handleEvents, handlerByEvent)
+	}
+
 	return interceptEvents, handleEvents, handlerByEvent, nil
+}
+
+func collectMapStringKeys(body *ast.BlockStmt, out map[string]struct{}) {
+	ast.Inspect(body, func(n ast.Node) bool {
+		kv, ok := n.(*ast.KeyValueExpr)
+		if !ok {
+			return true
+		}
+		if s, ok := stringLiteral(kv.Key); ok && strings.TrimSpace(s) != "" {
+			out[strings.TrimSpace(s)] = struct{}{}
+		}
+		return true
+	})
 }
 
 func collectSwitchCases(body *ast.BlockStmt, eventsOut map[string]struct{}, handlers map[string]string) {

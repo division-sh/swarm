@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, evt events.Event) {
+func (sc *ScanCoordinator) handleScanRequested(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
 	scanID := strings.TrimSpace(asString(payload["scan_id"]))
 	if scanID == "" {
@@ -39,7 +39,7 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		geography = strings.TrimSpace(asString(payload["geography_id"]))
 	}
 
-	plannedShardCount := pc.planAndPersistShards(ctx, evt, scanID, mode, payload)
+	plannedShardCount := sc.runtime.planAndPersistShards(ctx, evt, scanID, mode, payload)
 
 	acc := &scanAccumulator{
 		ScanID:      scanID,
@@ -54,11 +54,11 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 	if plannedShardCount > 0 {
 		acc.Expected = plannedShardCount
 	}
-	pc.mu.Lock()
-	pc.scanCoordinator.scans[scanID] = acc
-	pc.mu.Unlock()
+	sc.mu.Lock()
+	sc.scans[scanID] = acc
+	sc.mu.Unlock()
 
-	assigned := pc.payloadFactory.BuildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
+	assigned := sc.payloadFactory.BuildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
 	if plannedShardCount > 0 && (mode == "saas_gap" || mode == "saas_trend") {
 		// Assignment dispatch is owned by the shard dispatcher loop.
 		return
@@ -66,9 +66,9 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 
 	switch mode {
 	case "saas_gap":
-		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	case "saas_trend":
-		pc.publish(ctx, "trend_research.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "trend_research.scan_assigned", "", payloadMap(assigned))
 	case "corpus":
 		corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
 		assigned.CorpusPath = corpusPath
@@ -76,27 +76,27 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		if err != nil {
 			runtimeWarn("pipeline-coordinator", "corpus mode read failed path=%q err=%v", corpusPath, err)
 			assigned.CorpusSignals = []map[string]any{}
-			pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 			return
 		}
 		if len(batches) == 0 {
 			assigned.CorpusSignals = []map[string]any{}
-			pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 			return
 		}
 		for _, batch := range batches {
 			perBatch := assigned
 			perBatch.CorpusSignals = batch
-			pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(perBatch))
+			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(perBatch))
 		}
 	case "local_services":
-		pc.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(assigned))
-		pc.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
-		pc.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(assigned))
-		pc.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(assigned))
-		pc.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(assigned))
 	default:
-		pc.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+		sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
 	}
 }
 
@@ -282,7 +282,7 @@ func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
 	return out, nil
 }
 
-func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
+func (sc *ScanCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
 	scanID := strings.TrimSpace(asString(payload["scan_id"]))
 	if scanID == "" {
@@ -305,15 +305,15 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 		strings.HasSuffix(strings.TrimSpace(string(evt.Type)), ".scan_complete") {
 		completionKey = strings.TrimSpace(string(evt.Type))
 	}
-	if shardID := pc.markShardCompletedByAgent(ctx, strings.TrimSpace(evt.SourceAgent)); shardID != "" {
+	if shardID := sc.runtime.markShardCompletedByAgent(ctx, strings.TrimSpace(evt.SourceAgent)); shardID != "" {
 		completionKey = "shard:" + shardID
 	}
-	shardTotal, shardCompleted, shardFailed, hasShardProgress := pc.shardTerminalProgress(ctx, scanID)
+	shardTotal, shardCompleted, shardFailed, hasShardProgress := sc.runtime.shardTerminalProgress(ctx, scanID)
 
-	pc.mu.Lock()
-	acc := pc.scanCoordinator.scans[scanID]
+	sc.mu.Lock()
+	acc := sc.scans[scanID]
 	if acc == nil {
-		pc.mu.Unlock()
+		sc.mu.Unlock()
 		runtimeWarn(
 			"pipeline-coordinator",
 			"received scan completion for unknown accumulator scan_id=%s event_id=%s source=%s",
@@ -325,7 +325,7 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	}
 	acc.CompletedBy[completionKey] = struct{}{}
 	done := len(acc.CompletedBy) >= maxInt(acc.Expected, 1)
-	stats := pc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
+	stats := sc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
 		ScanID:          acc.ScanID,
 		CampaignID:      acc.CampaignID,
 		Mode:            acc.Mode,
@@ -335,7 +335,7 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 		Complete:        len(acc.CompletedBy),
 		Discovered:      acc.Discovered,
 		Skipped:         acc.Skipped,
-		PendingDedup:    pc.pendingDedupCountForScan(acc.ScanID),
+		PendingDedup:    sc.pendingDedupCountForScan(acc.ScanID),
 		TimedOut:        false,
 	})
 	if hasShardProgress {
@@ -348,12 +348,12 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 		done = terminal >= shardTotal && shardTotal > 0
 	}
 	if done {
-		delete(pc.scanCoordinator.scans, scanID)
+		delete(sc.scans, scanID)
 	}
-	pc.mu.Unlock()
+	sc.mu.Unlock()
 
 	if done {
-		pc.publish(ctx, "scan.completed", "", payloadMap(stats))
+		sc.runtime.publish(ctx, "scan.completed", "", payloadMap(stats))
 	}
 }
 
@@ -399,8 +399,8 @@ func (pc *FactoryPipelineCoordinator) shardTerminalProgress(ctx context.Context,
 	return total, completed, failed, total > 0
 }
 
-func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now time.Time) {
-	if pc == nil {
+func (sc *ScanCoordinator) checkTimeouts(ctx context.Context, now time.Time) {
+	if sc == nil {
 		return
 	}
 	if now.IsZero() {
@@ -420,8 +420,8 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 		shardScanID  string
 	}
 	expired := make([]timedOutScan, 0, 8)
-	pc.mu.Lock()
-	for scanID, acc := range pc.scanCoordinator.scans {
+	sc.mu.Lock()
+	for scanID, acc := range sc.scans {
 		if acc == nil {
 			continue
 		}
@@ -442,15 +442,15 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 			completed:    len(acc.CompletedBy),
 			discovered:   acc.Discovered,
 			skipped:      acc.Skipped,
-			pendingDedup: pc.pendingDedupCountForScan(scanID),
+			pendingDedup: sc.pendingDedupCountForScan(scanID),
 			shardScanID:  scanID,
 		})
-		delete(pc.scanCoordinator.scans, scanID)
+		delete(sc.scans, scanID)
 	}
-	pc.mu.Unlock()
+	sc.mu.Unlock()
 
 	for _, scan := range expired {
-		stats := pc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
+		stats := sc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
 			ScanID:          scan.scanID,
 			CampaignID:      scan.campaignID,
 			Mode:            scan.mode,
@@ -463,7 +463,7 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 			PendingDedup:    scan.pendingDedup,
 			TimedOut:        true,
 		})
-		shardTotal, shardCompleted, shardFailed, hasShardProgress := pc.shardTerminalProgress(ctx, scan.shardScanID)
+		shardTotal, shardCompleted, shardFailed, hasShardProgress := sc.runtime.shardTerminalProgress(ctx, scan.shardScanID)
 		if hasShardProgress {
 			terminal := shardCompleted + shardFailed
 			stats.Expected = shardTotal
@@ -472,6 +472,6 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 			stats.ShardsCompleted = shardCompleted
 			stats.ShardsFailed = shardFailed
 		}
-		pc.publish(ctx, "scan.completed", "", payloadMap(stats))
+		sc.runtime.publish(ctx, "scan.completed", "", payloadMap(stats))
 	}
 }

@@ -449,6 +449,17 @@ func TestContractCompliance(t *testing.T) {
 					errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", implPath, err))
 					continue
 				}
+				if strings.TrimSpace(sub.Subscriber) == "pipeline-coordinator" {
+					extraPath := filepath.Join("internal", "runtime", "pipeline", "workflow_nodes_runtime.go")
+					extraEvents, extraErr := contractComplianceParseHandledEventsFromFile(repoRoot, extraPath)
+					if extraErr != nil {
+						errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", extraPath, extraErr))
+						continue
+					}
+					for evt := range extraEvents {
+						handledEvents[evt] = struct{}{}
+					}
+				}
 				handledEventsCache[implPath] = handledEvents
 			}
 			if _, ok := handledEvents[sub.EventType]; !ok {
@@ -470,8 +481,33 @@ func TestContractCompliance(t *testing.T) {
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("parse interceptor coverage: %v", err))
 		} else {
+			workflowNodePath := filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_nodes_runtime.go")
+			nodeHandledEvents, nodeErr := contractComplianceParseHandledEventsFromFile(repoRoot, workflowNodePath)
+			if nodeErr != nil {
+				errs = append(errs, fmt.Sprintf("parse workflow node coverage: %v", nodeErr))
+			} else {
+				for evt := range nodeHandledEvents {
+					handleEvents[evt] = struct{}{}
+				}
+			}
+			nonLocalIntercepts := map[string]struct{}{}
+			for id, node := range systemNodes {
+				if strings.TrimSpace(id) == "pipeline-coordinator" {
+					continue
+				}
+				for _, evt := range node.SubscribesTo {
+					evt = strings.TrimSpace(evt)
+					if evt == "" {
+						continue
+					}
+					nonLocalIntercepts[evt] = struct{}{}
+				}
+			}
 			for evt := range interceptEvents {
 				if strings.TrimSpace(evt) == "spec.revision_needed" {
+					continue
+				}
+				if _, ok := nonLocalIntercepts[evt]; ok {
 					continue
 				}
 				if _, ok := handleEvents[evt]; !ok {

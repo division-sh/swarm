@@ -237,7 +237,7 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 		if st == nil {
 			continue
 		}
-		pc.updateVerticalStage(ctx, verticalID, pc.validationStageForState(st), "")
+		pc.updateVerticalStage(ctx, verticalID, pc.validationGate.stageForState(st), "")
 	}
 }
 

@@ -8,17 +8,17 @@ import (
 	"empireai/internal/events"
 )
 
-func (pc *FactoryPipelineCoordinator) handleValidationStarted(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleValidationStarted(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	scoringPayload := parsePayloadMap(evt.Payload)
-	pc.mu.Lock()
-	st := pc.validationGate.states[verticalID]
+	vg.mu.Lock()
+	st := vg.states[verticalID]
 	if st == nil {
 		st = &validationPipelineState{VerticalID: verticalID, Status: "active"}
-		pc.validationGate.states[verticalID] = st
+		vg.states[verticalID] = st
 	}
 	if st.Status == "" {
 		st.Status = "active"
@@ -32,26 +32,26 @@ func (pc *FactoryPipelineCoordinator) handleValidationStarted(ctx context.Contex
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	pc.mu.Unlock()
+	vg.mu.Unlock()
 
-	pc.updateVerticalStage(ctx, verticalID, "researching", "")
-	validationPayload := pc.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, nil)
-	pc.publish(ctx, "validation.started", verticalID, payloadMap(validationPayload))
-	brandPayload := pc.payloadFactory.BuildBrandRequestedPayload(ctx, verticalID, scoringPayload, nil)
-	pc.publish(ctx, "brand.requested", verticalID, payloadMap(brandPayload))
+	vg.runtime.updateVerticalStage(ctx, verticalID, "researching", "")
+	validationPayload := vg.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, nil)
+	vg.runtime.publish(ctx, "validation.started", verticalID, payloadMap(validationPayload))
+	brandPayload := vg.payloadFactory.BuildBrandRequestedPayload(ctx, verticalID, scoringPayload, nil)
+	vg.runtime.publish(ctx, "brand.requested", verticalID, payloadMap(brandPayload))
 }
 
-func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, evt events.Event, gate string) {
+func (vg *ValidationGate) handleValidationGate(ctx context.Context, evt events.Event, gate string) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
 
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	if st.Status == "rejected" || st.Status == "packaged" {
-		pc.mu.Unlock()
+		vg.mu.Unlock()
 		return
 	}
 	switch gate {
@@ -76,7 +76,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 	}
 	st.Status = "active"
 	shouldPackage := st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand && !st.PackagingRequested
-	stage := pc.validationStageForState(st)
+	stage := vg.stageForState(st)
 	var bundle ValidationPackageReadyPayload
 	hasBundle := false
 	if shouldPackage {
@@ -85,7 +85,7 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 		st.PackagingRetries = 0
 		st.PackagingRequested = true
 		hasBundle = true
-		bundle = pc.payloadFactory.BuildValidationPackageReadyPayload(ctx, verticalID, validationContextSnapshot{
+		bundle = vg.payloadFactory.BuildValidationPackageReadyPayload(ctx, verticalID, validationContextSnapshot{
 			Research:    parsePayloadMap(st.ResearchPayload),
 			Spec:        parsePayloadMap(st.SpecPayload),
 			CTONotes:    parsePayloadMap(st.CTOPayload),
@@ -94,47 +94,47 @@ func (pc *FactoryPipelineCoordinator) handleValidationGate(ctx context.Context, 
 			SpecVersion: st.SpecVersion,
 		})
 	}
-	pc.mu.Unlock()
+	vg.mu.Unlock()
 
-	pc.updateVerticalStage(ctx, verticalID, stage, "")
+	vg.runtime.updateVerticalStage(ctx, verticalID, stage, "")
 	if gate == "g2" {
-		pc.publish(ctx, "spec.validation_requested", verticalID, payloadMap(pc.payloadFactory.BuildSpecValidationRequestedPayload(ctx, verticalID, payload)))
+		vg.runtime.publish(ctx, "spec.validation_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecValidationRequestedPayload(ctx, verticalID, payload)))
 	}
 	if hasBundle {
-		pc.publish(ctx, "validation.package_ready", verticalID, payloadMap(bundle))
+		vg.runtime.publish(ctx, "validation.package_ready", verticalID, payloadMap(bundle))
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) handleSpecValidationPassed(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleSpecValidationPassed(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	if !pc.specVersionMatches(verticalID, payload) {
+	if !vg.runtime.specVersionMatches(verticalID, payload) {
 		return
 	}
-	pc.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(pc.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, payload)))
+	vg.runtime.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(vg.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, payload)))
 }
 
-func (pc *FactoryPipelineCoordinator) handleSpecValidationFailed(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleSpecValidationFailed(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	if !pc.specVersionMatches(verticalID, payload) {
+	if !vg.runtime.specVersionMatches(verticalID, payload) {
 		return
 	}
 	status := strings.ToLower(strings.TrimSpace(asString(payload["status"])))
 	passed := strings.EqualFold(strings.TrimSpace(asString(payload["passed"])), "true")
 	if status == "non-blocker" || passed {
-		pc.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(pc.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, payload)))
+		vg.runtime.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(vg.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, payload)))
 		return
 	}
 	escalate := false
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.G2Spec = false
 	st.G3CTO = false
 	st.SpecPayload = nil
@@ -147,23 +147,23 @@ func (pc *FactoryPipelineCoordinator) handleSpecValidationFailed(ctx context.Con
 		st.Status = "parked"
 		escalate = true
 	}
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
 	if escalate {
-		pc.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated spec-auditor blockers.", payload)
+		vg.runtime.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated spec-auditor blockers.", payload)
 		return
 	}
-	pc.publish(ctx, "spec.revision_requested", verticalID, payloadMap(pc.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "spec-auditor", payload)))
+	vg.runtime.publish(ctx, "spec.revision_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "spec-auditor", payload)))
 }
 
-func (pc *FactoryPipelineCoordinator) handleCTORevisionNeeded(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleCTORevisionNeeded(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	escalate := false
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.G2Spec = false
 	st.G3CTO = false
 	st.SpecPayload = nil
@@ -176,53 +176,53 @@ func (pc *FactoryPipelineCoordinator) handleCTORevisionNeeded(ctx context.Contex
 		st.Status = "parked"
 		escalate = true
 	}
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
 	if escalate {
-		pc.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated CTO revisions.", parsePayloadMap(evt.Payload))
+		vg.runtime.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated CTO revisions.", parsePayloadMap(evt.Payload))
 		return
 	}
-	pc.publish(ctx, "spec.revision_requested", verticalID, payloadMap(pc.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "factory-cto", parsePayloadMap(evt.Payload))))
+	vg.runtime.publish(ctx, "spec.revision_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "factory-cto", parsePayloadMap(evt.Payload))))
 }
 
-func (pc *FactoryPipelineCoordinator) handleValidationRejected(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleValidationRejected(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.Status = "rejected"
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
-	pc.publish(ctx, "vertical.killed", verticalID, payloadMap(pc.payloadFactory.BuildVerticalKilledPayload(ctx, verticalID, string(evt.Type), parsePayloadMap(evt.Payload))))
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	vg.runtime.publish(ctx, "vertical.killed", verticalID, payloadMap(vg.payloadFactory.BuildVerticalKilledPayload(ctx, verticalID, string(evt.Type), parsePayloadMap(evt.Payload))))
 }
 
-func (pc *FactoryPipelineCoordinator) handleValidationPackaged(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleValidationPackaged(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.Status = "packaged"
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
 }
 
-func (pc *FactoryPipelineCoordinator) handleValidationMoreData(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleValidationMoreData(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.Status = "active"
 	st.G1Research = false
 	st.ResearchPayload = nil
@@ -234,12 +234,12 @@ func (pc *FactoryPipelineCoordinator) handleValidationMoreData(ctx context.Conte
 		Spec:     parsePayloadMap(st.SpecPayload),
 		Scoring:  parsePayloadMap(st.ScoringPayload),
 	}
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "researching", "")
-	pc.publish(ctx, "validation.more_data_needed", verticalID, payloadMap(pc.payloadFactory.BuildValidationMoreDataPayload(ctx, verticalID, parsePayloadMap(evt.Payload), snap)))
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "researching", "")
+	vg.runtime.publish(ctx, "validation.more_data_needed", verticalID, payloadMap(vg.payloadFactory.BuildValidationMoreDataPayload(ctx, verticalID, parsePayloadMap(evt.Payload), snap)))
 }
 
-func (pc *FactoryPipelineCoordinator) handleBrandRevision(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleBrandRevision(ctx context.Context, evt events.Event) {
 	if strings.TrimSpace(evt.SourceAgent) == "pipeline-coordinator" {
 		return
 	}
@@ -248,8 +248,8 @@ func (pc *FactoryPipelineCoordinator) handleBrandRevision(ctx context.Context, e
 		return
 	}
 	feedback := parsePayloadMap(evt.Payload)
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	brand := parsePayloadMap(st.BrandPayload)
 	st.Status = "active"
 	st.G4Brand = false
@@ -257,18 +257,18 @@ func (pc *FactoryPipelineCoordinator) handleBrandRevision(ctx context.Context, e
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "branding", "")
-	pc.publish(ctx, "brand.revision_needed", verticalID, payloadMap(pc.payloadFactory.BuildBrandRevisionNeededPayload(ctx, verticalID, feedback, brand)))
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "branding", "")
+	vg.runtime.publish(ctx, "brand.revision_needed", verticalID, payloadMap(vg.payloadFactory.BuildBrandRevisionNeededPayload(ctx, verticalID, feedback, brand)))
 }
 
-func (pc *FactoryPipelineCoordinator) handleVerticalResumed(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleVerticalResumed(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.Status = "active"
 	st.RevisionCount = 0
 	st.PackagingRequested = false
@@ -279,14 +279,14 @@ func (pc *FactoryPipelineCoordinator) handleVerticalResumed(ctx context.Context,
 	missingG3 := !st.G3CTO
 	missingG4 := !st.G4Brand
 	all := st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand
-	stage := pc.validationStageForState(st)
+	stage := vg.stageForState(st)
 	scoringRaw := cloneRaw(st.ScoringPayload)
 	var bundle ValidationPackageReadyPayload
 	hasBundle := false
 	if all {
 		now := time.Now().UTC()
 		hasBundle = true
-		bundle = pc.payloadFactory.BuildValidationPackageReadyPayload(ctx, verticalID, validationContextSnapshot{
+		bundle = vg.payloadFactory.BuildValidationPackageReadyPayload(ctx, verticalID, validationContextSnapshot{
 			Research:    parsePayloadMap(st.ResearchPayload),
 			Spec:        parsePayloadMap(st.SpecPayload),
 			CTONotes:    parsePayloadMap(st.CTOPayload),
@@ -297,75 +297,75 @@ func (pc *FactoryPipelineCoordinator) handleVerticalResumed(ctx context.Context,
 		st.PackagingRequested = true
 		st.PackagingRequestedAt = &now
 	}
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, stage, "")
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, stage, "")
 
 	resumePayload := parsePayloadMap(evt.Payload)
-	snap := pc.payloadFactory.ValidationContext(verticalID)
+	snap := vg.payloadFactory.ValidationContext(verticalID)
 	if missingG1 {
 		scoringPayload := parsePayloadMap(scoringRaw)
 		if len(scoringPayload) == 0 {
 			scoringPayload = parsePayloadMap(evt.Payload)
 		}
-		pc.publish(ctx, "validation.started", verticalID, payloadMap(pc.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, resumePayload)))
+		vg.runtime.publish(ctx, "validation.started", verticalID, payloadMap(vg.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, resumePayload)))
 	}
 	if missingG2 {
-		pc.publish(ctx, "spec.revision_requested", verticalID, payloadMap(pc.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "resume", resumePayload)))
+		vg.runtime.publish(ctx, "spec.revision_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "resume", resumePayload)))
 	}
 	if missingG3 {
-		pc.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(pc.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, resumePayload)))
+		vg.runtime.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(vg.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, resumePayload)))
 	}
 	if missingG4 {
-		pc.publish(ctx, "brand.requested", verticalID, payloadMap(pc.payloadFactory.BuildBrandRequestedPayload(ctx, verticalID, snap.Scoring, snap.Research)))
+		vg.runtime.publish(ctx, "brand.requested", verticalID, payloadMap(vg.payloadFactory.BuildBrandRequestedPayload(ctx, verticalID, snap.Scoring, snap.Research)))
 	}
 	if hasBundle {
-		pc.publish(ctx, "validation.package_ready", verticalID, payloadMap(bundle))
+		vg.runtime.publish(ctx, "validation.package_ready", verticalID, payloadMap(bundle))
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) handleCTOApproved(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleCTOApproved(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	if !pc.specVersionMatches(verticalID, payload) {
+	if !vg.runtime.specVersionMatches(verticalID, payload) {
 		return
 	}
-	pc.handleValidationGate(ctx, evt, "g3")
+	vg.handleValidationGate(ctx, evt, "g3")
 }
 
-func (pc *FactoryPipelineCoordinator) handleVerticalApproved(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleVerticalApproved(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.Status = "approved"
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "approved", "")
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "approved", "")
 }
 
-func (pc *FactoryPipelineCoordinator) handleVerticalKilled(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleVerticalKilled(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	st.Status = "rejected"
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	pc.mu.Unlock()
-	pc.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	vg.mu.Unlock()
+	vg.runtime.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
 }
 
-func (pc *FactoryPipelineCoordinator) handleOpCoCEOReady(ctx context.Context, evt events.Event) {
+func (vg *ValidationGate) handleOpCoCEOReady(ctx context.Context, evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		payload := parsePayloadMap(evt.Payload)
@@ -374,19 +374,19 @@ func (pc *FactoryPipelineCoordinator) handleOpCoCEOReady(ctx context.Context, ev
 	if verticalID == "" {
 		return
 	}
-	pc.updateVerticalStage(ctx, verticalID, "operating", "")
+	vg.runtime.updateVerticalStage(ctx, verticalID, "operating", "")
 }
 
-func (pc *FactoryPipelineCoordinator) handleInnerSpecRevision(ctx context.Context, evt events.Event) bool {
+func (vg *ValidationGate) handleInnerSpecRevision(ctx context.Context, evt events.Event) bool {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return false
 	}
 	escalate := false
-	pc.mu.Lock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	st := vg.getStateLocked(verticalID)
 	if st.Status != "active" {
-		pc.mu.Unlock()
+		vg.mu.Unlock()
 		return false
 	}
 	st.InnerRevisionCount++
@@ -394,28 +394,28 @@ func (pc *FactoryPipelineCoordinator) handleInnerSpecRevision(ctx context.Contex
 		st.Status = "parked"
 		escalate = true
 	}
-	pc.mu.Unlock()
+	vg.mu.Unlock()
 	if escalate {
-		pc.parkVerticalWithMailbox(ctx, verticalID, "Spec creation stuck in revision loop after 5 cycles.", parsePayloadMap(evt.Payload))
+		vg.runtime.parkVerticalWithMailbox(ctx, verticalID, "Spec creation stuck in revision loop after 5 cycles.", parsePayloadMap(evt.Payload))
 	}
 	return escalate
 }
 
-func (pc *FactoryPipelineCoordinator) handleSpecRevisionRequested(evt events.Event) {
+func (vg *ValidationGate) handleSpecRevisionRequested(evt events.Event) {
 	verticalID := strings.TrimSpace(evt.VerticalID)
 	if verticalID == "" {
 		return
 	}
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	st := pc.getValidationStateLocked(verticalID)
+	vg.mu.Lock()
+	defer vg.mu.Unlock()
+	st := vg.getStateLocked(verticalID)
 	st.InnerRevisionCount = 0
 }
 
 func (pc *FactoryPipelineCoordinator) specVersionMatches(verticalID string, payload map[string]any) bool {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	st := pc.getValidationStateLocked(verticalID)
+	st := pc.validationGate.getStateLocked(verticalID)
 	if st.SpecVersion <= 0 {
 		return true
 	}

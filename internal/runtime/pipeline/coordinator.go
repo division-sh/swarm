@@ -490,7 +490,16 @@ func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordina
 		validationGate:  NewValidationGate(),
 		processed:       make(map[string]struct{}),
 	}
+	pc.scanCoordinator.runtime = pc
+	pc.scoringState.runtime = pc
+	pc.validationGate.runtime = pc
 	pc.payloadFactory = NewPipelinePayloadFactory(pc)
+	pc.scanCoordinator.payloadFactory = pc.payloadFactory
+	pc.scoringState.payloadFactory = pc.payloadFactory
+	pc.validationGate.payloadFactory = pc.payloadFactory
+	pc.scanCoordinator.mu = &pc.mu
+	pc.scoringState.mu = &pc.mu
+	pc.validationGate.mu = &pc.mu
 	if db != nil {
 		ctx := context.Background()
 		pc.statePersistenceEnabled = detectStatePersistence(ctx, db)
@@ -697,68 +706,13 @@ func (pc *FactoryPipelineCoordinator) interceptStateDropReason(eventType string,
 }
 
 func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt events.Event) (consume bool, handled bool) {
-	switch eventType {
-	case "timer.portfolio_digest":
-		payload := parsePayloadMap(evt.Payload)
-		if boolFromAny(payload["scoring_rejections_injected"]) {
-			return false, false
-		}
-		return true, true
-	case "vertical.scored":
-		payload := parsePayloadMap(evt.Payload)
-		result := strings.ToLower(strings.TrimSpace(asString(payload["result"])))
-		// Keep vertical.scored as an audit event but avoid waking EC for
-		// non-shortlisted outcomes. Marginals route via vertical.marginal.
-		switch result {
-		case "marginal", "rejected":
-			return true, true
-		default:
-			return false, true
-		}
-	case "scan.requested",
-		"category.assessed",
-		"vertical.derived",
-		"trend.identified",
-		"source.scraped",
-		"market_research.scan_complete",
-		"trend_research.scan_complete",
-		"scanner.google_maps.scan_complete",
-		"scanner.instagram.scan_complete",
-		"scanner.reviews.scan_complete",
-		"scanner.directories.scan_complete",
-		"scanner.yelp.scan_complete",
-		"dedup.resolved",
-		"synthesis.resolved",
-		"vertical.shortlisted",
-		"research.completed",
-		"research.vertical_rejected",
-		"spec.approved",
-		"spec.validation_passed",
-		"spec.validation_failed",
-		"vertical.approved",
-		"vertical.killed",
-		"opco.ceo_ready",
-		"cto.spec_approved",
-		"cto.spec_revision_needed",
-		"cto.spec_vetoed",
-		"brand.candidates_ready",
-		"vertical.ready_for_review",
-		"vertical.needs_more_data",
-		"brand.revision_needed",
-		"spec.revision_requested",
-		"vertical.resumed",
-		"runtime.reset":
-		policy, ok := empirePipelineEventPolicy(eventType)
-		if !ok {
-			return false, false
-		}
-		if policy.RequireVertical && strings.TrimSpace(evt.VerticalID) == "" {
-			return false, false
-		}
-		return policy.Consume, true
-	default:
+	if strings.TrimSpace(eventType) == "" {
 		return false, false
 	}
+	if consume, handled := pc.workflowNodeInterceptPolicy(eventType, evt); handled {
+		return consume, true
+	}
+	return false, false
 }
 
 func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
@@ -778,66 +732,8 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		pc.resetInMemoryState()
 		pc.clearPersistentState(ctx)
 		return
-	case "timer.portfolio_digest":
-		pc.handlePortfolioDigestTimer(ctx, evt)
-		return
-	case "scan.requested":
-		pc.handleScanRequested(ctx, evt)
-	case "vertical.scored":
-		// Delivery filtering for this event type is handled in interceptPolicy.
-		// Keep a no-op case for explicit coverage/traceability in switch audits.
-		return
-	case "vertical.derived":
-		pc.handleVerticalDerived(ctx, evt)
-	case "category.assessed", "trend.identified", "source.scraped":
-		pc.handleDiscoveryReport(ctx, evt)
-	case "market_research.scan_complete", "trend_research.scan_complete",
-		"scanner.google_maps.scan_complete", "scanner.instagram.scan_complete",
-		"scanner.reviews.scan_complete", "scanner.directories.scan_complete",
-		"scanner.yelp.scan_complete":
-		pc.handleScanCompletion(ctx, evt)
-	case "dedup.resolved":
-		pc.handleDedupResolved(ctx, evt)
-	case "synthesis.resolved":
-		// synthesis is a pure judgment refinement; discovery accumulation
-		// already consumed raw reports and does not need additional state here.
-		return
-	case "vertical.shortlisted":
-		pc.handleValidationStarted(ctx, evt)
-	case "research.completed":
-		pc.handleValidationGate(ctx, evt, "g1")
-	case "spec.revision_requested":
-		pc.handleSpecRevisionRequested(evt)
-	case "spec.revision_needed":
-		_ = pc.handleInnerSpecRevision(ctx, evt)
-	case "spec.approved":
-		pc.handleValidationGate(ctx, evt, "g2")
-	case "cto.spec_approved":
-		pc.handleCTOApproved(ctx, evt)
-	case "brand.candidates_ready":
-		pc.handleValidationGate(ctx, evt, "g4")
-	case "spec.validation_passed":
-		pc.handleSpecValidationPassed(ctx, evt)
-	case "spec.validation_failed":
-		pc.handleSpecValidationFailed(ctx, evt)
-	case "vertical.approved":
-		pc.handleVerticalApproved(ctx, evt)
-	case "vertical.killed":
-		pc.handleVerticalKilled(ctx, evt)
-	case "opco.ceo_ready":
-		pc.handleOpCoCEOReady(ctx, evt)
-	case "cto.spec_revision_needed":
-		pc.handleCTORevisionNeeded(ctx, evt)
-	case "research.vertical_rejected", "cto.spec_vetoed":
-		pc.handleValidationRejected(ctx, evt)
-	case "vertical.ready_for_review":
-		pc.handleValidationPackaged(ctx, evt)
-	case "vertical.needs_more_data":
-		pc.handleValidationMoreData(ctx, evt)
-	case "brand.revision_needed":
-		pc.handleBrandRevision(ctx, evt)
-	case "vertical.resumed":
-		pc.handleVerticalResumed(ctx, evt)
+	default:
+		_ = pc.dispatchWorkflowNodeEvent(ctx, evt)
 	}
 }
 

@@ -406,7 +406,7 @@ func (pc *FactoryPipelineCoordinator) countDerivedChildren(ctx context.Context, 
 	return count, nil
 }
 
-func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
+func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
 	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
 	if verticalID == "" {
@@ -420,8 +420,8 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 	evidence := strings.TrimSpace(asString(payload["evidence"]))
 	confidence := strings.TrimSpace(asString(payload["confidence"]))
 
-	pc.mu.Lock()
-	acc := pc.scoringState.accumulators[verticalID]
+	ss.mu.Lock()
+	acc := ss.accumulators[verticalID]
 	if acc == nil {
 		acc = &scoringAccumulator{
 			VerticalID:      verticalID,
@@ -432,7 +432,7 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 			ContestNotified: map[string]bool{},
 			RequestedAt:     time.Now().UTC(),
 		}
-		name, geo, mode := pc.loadScoringSeed(ctx, verticalID)
+		name, geo, mode := ss.runtime.loadScoringSeed(ctx, verticalID)
 		acc.VerticalName = name
 		acc.Geography = geo
 		acc.Mode = mode
@@ -441,7 +441,7 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 		}
 		acc.Rubric = selectScoringRubric(acc.Mode)
 		acc.Expected = expectedScoringDimensions(acc.Rubric)
-		pc.scoringState.accumulators[verticalID] = acc
+		ss.accumulators[verticalID] = acc
 	}
 	if acc.LastUpdatedAt.IsZero() {
 		acc.LastUpdatedAt = time.Now().UTC()
@@ -473,11 +473,11 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 		if !acc.ContestNotified[dim] {
 			acc.ContestNotified[dim] = true
 			acc.LastUpdatedAt = time.Now().UTC()
-			pc.mu.Unlock()
-			pc.publish(ctx, "scoring.contested", verticalID, payloadMap(pc.payloadFactory.BuildScoringContestedPayload(verticalID, dim, contest, acc)))
+			ss.mu.Unlock()
+			ss.runtime.publish(ctx, "scoring.contested", verticalID, payloadMap(ss.payloadFactory.BuildScoringContestedPayload(verticalID, dim, contest, acc)))
 			return
 		}
-		pc.mu.Unlock()
+		ss.mu.Unlock()
 		return
 	}
 
@@ -486,14 +486,14 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 	delete(acc.ContestNotified, dim)
 	acc.LastUpdatedAt = time.Now().UTC()
 	ready := len(acc.Contested) == 0 && hasAllExpectedDimensions(acc)
-	pc.mu.Unlock()
+	ss.mu.Unlock()
 
 	if ready {
-		pc.finalizeScoringAccumulator(ctx, verticalID, false)
+		ss.finalizeScoringAccumulator(ctx, verticalID, false)
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) handleScoringContestResolved(ctx context.Context, evt events.Event) {
+func (ss *ScoringState) handleScoringContestResolved(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
 	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
 	dimension := strings.TrimSpace(asString(payload["dimension"]))
@@ -502,10 +502,10 @@ func (pc *FactoryPipelineCoordinator) handleScoringContestResolved(ctx context.C
 	}
 	resolved := clampScore100(intFromAny(payload["resolved_score"]))
 	reasoning := strings.TrimSpace(asString(payload["reasoning"]))
-	pc.mu.Lock()
-	acc := pc.scoringState.accumulators[verticalID]
+	ss.mu.Lock()
+	acc := ss.accumulators[verticalID]
 	if acc == nil {
-		pc.mu.Unlock()
+		ss.mu.Unlock()
 		return
 	}
 	if acc.Received == nil {
@@ -523,9 +523,9 @@ func (pc *FactoryPipelineCoordinator) handleScoringContestResolved(ctx context.C
 	delete(acc.ContestNotified, dimension)
 	acc.LastUpdatedAt = time.Now().UTC()
 	ready := len(acc.Contested) == 0 && hasAllExpectedDimensions(acc)
-	pc.mu.Unlock()
+	ss.mu.Unlock()
 	if ready {
-		pc.finalizeScoringAccumulator(ctx, verticalID, false)
+		ss.finalizeScoringAccumulator(ctx, verticalID, false)
 	}
 }
 
@@ -552,7 +552,7 @@ type scoringComposite struct {
 	Partial        bool
 }
 
-func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
+func (ss *ScoringState) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
 	weights := rubricWeights[acc.Rubric]
 	if len(weights) == 0 {
 		weights = rubricWeights["universal"]
@@ -716,59 +716,42 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Context, verticalID string, partial bool) {
-	pc.mu.Lock()
-	acc := pc.scoringState.accumulators[verticalID]
+func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, verticalID string, partial bool) {
+	ss.mu.Lock()
+	acc := ss.accumulators[verticalID]
 	if acc == nil {
-		pc.mu.Unlock()
+		ss.mu.Unlock()
 		return
 	}
 	if len(acc.Contested) > 0 {
-		pc.mu.Unlock()
+		ss.mu.Unlock()
 		return
 	}
 	if partial && len(acc.Received) == 0 {
-		pc.mu.Unlock()
+		ss.mu.Unlock()
 		return
 	}
-	result := pc.computeComposite(acc, partial || len(acc.Received) < len(acc.Expected))
-	delete(pc.scoringState.accumulators, verticalID)
-	pc.mu.Unlock()
+	result := ss.computeComposite(acc, partial || len(acc.Received) < len(acc.Expected))
+	delete(ss.accumulators, verticalID)
+	ss.mu.Unlock()
 
-	scoredPayload := pc.payloadFactory.BuildVerticalScoredPayload(verticalID, result, acc)
+	scoredPayload := ss.payloadFactory.BuildVerticalScoredPayload(verticalID, result, acc)
 	scoredPayloadMap := payloadMap(scoredPayload)
-	pc.publish(ctx, "vertical.scored", verticalID, scoredPayloadMap)
+	ss.runtime.publish(ctx, "vertical.scored", verticalID, scoredPayloadMap)
 
 	stage := "marginal_review"
 	switch result.Result {
 	case "shortlisted":
 		stage = "shortlisted"
-		pc.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(pc.payloadFactory.BuildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayloadMap)))
+		ss.runtime.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(ss.payloadFactory.BuildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayloadMap)))
 	case "marginal":
-		pc.publish(ctx, "vertical.marginal", verticalID, payloadMap(pc.payloadFactory.BuildVerticalMarginalPayload(verticalID, result)))
+		ss.runtime.publish(ctx, "vertical.marginal", verticalID, payloadMap(ss.payloadFactory.BuildVerticalMarginalPayload(verticalID, result)))
 	case "rejected":
 		stage = "killed"
-		pc.appendScoringDigestBuffer(ctx, scoredPayload)
-		pc.publish(ctx, "vertical.rejected", verticalID, payloadMap(pc.payloadFactory.BuildVerticalRejectedPayload(verticalID, result)))
+		ss.runtime.appendScoringDigestBuffer(ctx, scoredPayload)
+		ss.runtime.publish(ctx, "vertical.rejected", verticalID, payloadMap(ss.payloadFactory.BuildVerticalRejectedPayload(verticalID, result)))
 	}
-	if pc.db != nil {
-		if _, err := dbExecContext(ctx, pc.db, `
-			UPDATE verticals
-			SET stage = $2,
-			    scores = $3::jsonb,
-			    parked_at = CASE
-					WHEN $2 = 'marginal_review' THEN COALESCE(parked_at, now())
-					ELSE NULL
-				END,
-			    kill_reason = CASE WHEN $2 = 'killed' THEN NULLIF($4,'') ELSE kill_reason END,
-			    updated_at = now()
-			WHERE id = $1::uuid
-			`, verticalID, stage, string(mustJSON(scoredPayloadMap)), strings.TrimSpace(result.Reason)); err != nil {
-			log.Printf("pipeline: update vertical score state failed vertical=%s err=%v", verticalID, err)
-		} else {
-			pc.notifyTestVerticalStageUpdated(verticalID, stage)
-		}
-	}
+	ss.runtime.updateScoredVerticalState(ctx, verticalID, stage, scoredPayloadMap, strings.TrimSpace(result.Reason))
 }
 
 func (pc *FactoryPipelineCoordinator) handlePortfolioDigestTimer(ctx context.Context, evt events.Event) {

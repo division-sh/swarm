@@ -1,118 +1,53 @@
 package pipeline
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"empireai/internal/events"
+	"gopkg.in/yaml.v3"
 )
 
 type WorkflowEventPolicy struct {
-	Consume          bool
-	RequireVertical  bool
+	Consume           bool
+	RequireVertical   bool
 	VisibleDownstream bool
 }
 
 type WorkflowNode struct {
-	ID           string
+	ID            string
 	Subscriptions []events.EventType
-	Policies     map[string]WorkflowEventPolicy
+	Policies      map[string]WorkflowEventPolicy
 }
 
+type systemNodeContractDocument map[string]struct {
+	ID           string   `yaml:"id"`
+	SubscribesTo []string `yaml:"subscribes_to"`
+}
+
+var (
+	empireWorkflowNodesOnce sync.Once
+	empireWorkflowNodes     []WorkflowNode
+	empireWorkflowNodesErr  error
+)
+
 func empirePipelineWorkflowNodes() []WorkflowNode {
-	return []WorkflowNode{
-		{
-			ID: "scan-coordinator",
-			Subscriptions: []events.EventType{
-				events.EventType("timer.portfolio_digest"),
-				events.EventType("scan.requested"),
-				events.EventType("category.assessed"),
-				events.EventType("trend.identified"),
-				events.EventType("source.scraped"),
-				events.EventType("market_research.scan_complete"),
-				events.EventType("trend_research.scan_complete"),
-				events.EventType("scanner.google_maps.scan_complete"),
-				events.EventType("scanner.instagram.scan_complete"),
-				events.EventType("scanner.reviews.scan_complete"),
-				events.EventType("scanner.directories.scan_complete"),
-				events.EventType("scanner.yelp.scan_complete"),
-				events.EventType("dedup.resolved"),
-				events.EventType("synthesis.resolved"),
-				events.EventType("runtime.reset"),
-			},
-			Policies: map[string]WorkflowEventPolicy{
-				"timer.portfolio_digest":            {Consume: true},
-				"scan.requested":                    {Consume: true},
-				"category.assessed":                 {Consume: true},
-				"trend.identified":                  {Consume: true},
-				"source.scraped":                    {Consume: true},
-				"market_research.scan_complete":     {Consume: true},
-				"trend_research.scan_complete":      {Consume: true},
-				"scanner.google_maps.scan_complete": {Consume: true},
-				"scanner.instagram.scan_complete":   {Consume: true},
-				"scanner.reviews.scan_complete":     {Consume: true},
-				"scanner.directories.scan_complete": {Consume: true},
-				"scanner.yelp.scan_complete":        {Consume: true},
-				"dedup.resolved":                    {Consume: true},
-				"synthesis.resolved":                {Consume: true},
-				"runtime.reset":                     {Consume: false},
-			},
-		},
-		{
-			ID: "scoring-coordinator",
-			Subscriptions: []events.EventType{
-				events.EventType("vertical.derived"),
-				events.EventType("vertical.scored"),
-			},
-			Policies: map[string]WorkflowEventPolicy{
-				"vertical.derived": {Consume: true},
-				"vertical.scored":  {Consume: false},
-			},
-		},
-		{
-			ID: "validation-gate",
-			Subscriptions: []events.EventType{
-				events.EventType("vertical.shortlisted"),
-				events.EventType("research.completed"),
-				events.EventType("research.vertical_rejected"),
-				events.EventType("spec.revision_requested"),
-				events.EventType("spec.approved"),
-				events.EventType("spec.validation_passed"),
-				events.EventType("spec.validation_failed"),
-				events.EventType("vertical.approved"),
-				events.EventType("vertical.killed"),
-				events.EventType("opco.ceo_ready"),
-				events.EventType("cto.spec_approved"),
-				events.EventType("cto.spec_revision_needed"),
-				events.EventType("cto.spec_vetoed"),
-				events.EventType("brand.candidates_ready"),
-				events.EventType("vertical.ready_for_review"),
-				events.EventType("vertical.needs_more_data"),
-				events.EventType("brand.revision_needed"),
-				events.EventType("vertical.resumed"),
-			},
-			Policies: map[string]WorkflowEventPolicy{
-				"vertical.shortlisted":     {Consume: true, RequireVertical: true},
-				"research.completed":       {Consume: true, RequireVertical: true},
-				"research.vertical_rejected": {Consume: true, RequireVertical: true},
-				"spec.revision_requested":  {Consume: false, RequireVertical: true, VisibleDownstream: true},
-				"spec.approved":            {Consume: true, RequireVertical: true},
-				"spec.validation_passed":   {Consume: true, RequireVertical: true},
-				"spec.validation_failed":   {Consume: true, RequireVertical: true},
-				"vertical.approved":        {Consume: false, RequireVertical: true, VisibleDownstream: true},
-				"vertical.killed":          {Consume: false, RequireVertical: true, VisibleDownstream: true},
-				"opco.ceo_ready":           {Consume: false, RequireVertical: true, VisibleDownstream: true},
-				"cto.spec_approved":        {Consume: true, RequireVertical: true},
-				"cto.spec_revision_needed": {Consume: true, RequireVertical: true},
-				"cto.spec_vetoed":          {Consume: true, RequireVertical: true},
-				"brand.candidates_ready":   {Consume: true, RequireVertical: true},
-				"vertical.ready_for_review": {Consume: false, RequireVertical: true, VisibleDownstream: true},
-				"vertical.needs_more_data": {Consume: true, RequireVertical: true},
-				"brand.revision_needed":    {Consume: false, RequireVertical: true, VisibleDownstream: true},
-				"vertical.resumed":         {Consume: true, RequireVertical: true},
-			},
-		},
+	empireWorkflowNodesOnce.Do(func() {
+		empireWorkflowNodes, empireWorkflowNodesErr = loadWorkflowNodesFromContracts()
+	})
+	if empireWorkflowNodesErr != nil {
+		panic(empireWorkflowNodesErr)
 	}
+	out := make([]WorkflowNode, 0, len(empireWorkflowNodes))
+	for _, node := range empireWorkflowNodes {
+		nodeCopy := node
+		out = append(out, nodeCopy)
+	}
+	return out
 }
 
 func empirePipelineSubscriptions() []events.EventType {
@@ -133,10 +68,119 @@ func empirePipelineSubscriptions() []events.EventType {
 
 func empirePipelineEventPolicy(eventType string) (WorkflowEventPolicy, bool) {
 	eventType = strings.TrimSpace(eventType)
+	return workflowNodeEventPolicy("", eventType)
+}
+
+func workflowNodeSubscriptions(nodeID string) []events.EventType {
+	nodeID = strings.TrimSpace(nodeID)
 	for _, node := range empirePipelineWorkflowNodes() {
+		if strings.TrimSpace(node.ID) != nodeID {
+			continue
+		}
+		return append([]events.EventType{}, node.Subscriptions...)
+	}
+	return nil
+}
+
+func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, bool) {
+	eventType = strings.TrimSpace(eventType)
+	nodeID = strings.TrimSpace(nodeID)
+	for _, node := range empirePipelineWorkflowNodes() {
+		if nodeID != "" && strings.TrimSpace(node.ID) != nodeID {
+			continue
+		}
 		if policy, ok := node.Policies[eventType]; ok {
 			return policy, true
 		}
 	}
 	return WorkflowEventPolicy{}, false
+}
+
+func loadWorkflowNodesFromContracts() ([]WorkflowNode, error) {
+	path := filepath.Join(workflowRepoRoot(), "contracts", "system-nodes.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var doc systemNodeContractDocument
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	// Current runtime execution still groups scan/discovery and validation-gate
+	// behavior under the pipeline-coordinator implementation, while scoring is a
+	// separate workflow node. Consume/visibility semantics remain runtime policy.
+	wantIDs := []string{"pipeline-coordinator", "scoring-node"}
+	out := make([]WorkflowNode, 0, len(wantIDs))
+	for _, nodeID := range wantIDs {
+		entry, ok := doc[nodeID]
+		if !ok {
+			return nil, fmt.Errorf("system node %q missing from %s", nodeID, path)
+		}
+		subscriptions := make([]events.EventType, 0, len(entry.SubscribesTo))
+		for _, evt := range entry.SubscribesTo {
+			evt = strings.TrimSpace(evt)
+			if evt == "" {
+				continue
+			}
+			subscriptions = append(subscriptions, events.EventType(evt))
+		}
+		out = append(out, WorkflowNode{
+			ID:            nodeID,
+			Subscriptions: subscriptions,
+			Policies:      workflowNodePolicyOverlay(nodeID),
+		})
+	}
+	return out, nil
+}
+
+func workflowNodePolicyOverlay(nodeID string) map[string]WorkflowEventPolicy {
+	switch strings.TrimSpace(nodeID) {
+	case "pipeline-coordinator":
+		return map[string]WorkflowEventPolicy{
+			"timer.portfolio_digest":            {Consume: true},
+			"runtime.reset":                     {Consume: false},
+			"scan.requested":                    {Consume: true},
+			"category.assessed":                 {Consume: true},
+			"trend.identified":                  {Consume: true},
+			"source.scraped":                    {Consume: true},
+			"market_research.scan_complete":     {Consume: true},
+			"trend_research.scan_complete":      {Consume: true},
+			"scanner.google_maps.scan_complete": {Consume: true},
+			"scanner.instagram.scan_complete":   {Consume: true},
+			"scanner.reviews.scan_complete":     {Consume: true},
+			"scanner.directories.scan_complete": {Consume: true},
+			"scanner.yelp.scan_complete":        {Consume: true},
+			"dedup.resolved":                    {Consume: true},
+			"synthesis.resolved":                {Consume: true},
+			"vertical.shortlisted":              {Consume: true, RequireVertical: true},
+			"research.completed":                {Consume: true, RequireVertical: true},
+			"research.vertical_rejected":        {Consume: true, RequireVertical: true},
+			"spec.revision_requested":           {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"spec.approved":                     {Consume: true, RequireVertical: true},
+			"spec.validation_passed":            {Consume: true, RequireVertical: true},
+			"spec.validation_failed":            {Consume: true, RequireVertical: true},
+			"cto.spec_approved":                 {Consume: true, RequireVertical: true},
+			"cto.spec_revision_needed":          {Consume: true, RequireVertical: true},
+			"cto.spec_vetoed":                   {Consume: true, RequireVertical: true},
+			"brand.candidates_ready":            {Consume: true, RequireVertical: true},
+			"vertical.ready_for_review":         {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"vertical.needs_more_data":          {Consume: true, RequireVertical: true},
+			"brand.revision_needed":             {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"vertical.approved":                 {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"vertical.killed":                   {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"vertical.resumed":                  {Consume: true, RequireVertical: true},
+			"opco.ceo_ready":                    {Consume: false, RequireVertical: true, VisibleDownstream: true},
+		}
+	case "scoring-node":
+		return map[string]WorkflowEventPolicy{
+			"vertical.discovered":      {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"vertical.derived":         {Consume: true},
+			"score.dimension_complete": {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"scoring.contest_resolved": {Consume: false, RequireVertical: true, VisibleDownstream: true},
+			"vertical.scored":          {Consume: false},
+		}
+	default:
+		return nil
+	}
 }

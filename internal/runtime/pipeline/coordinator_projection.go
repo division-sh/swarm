@@ -105,11 +105,11 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) getValidationStateLocked(verticalID string) *validationPipelineState {
-	st := pc.validationGate.states[verticalID]
+func (vg *ValidationGate) getStateLocked(verticalID string) *validationPipelineState {
+	st := vg.states[verticalID]
 	if st == nil {
 		st = &validationPipelineState{VerticalID: verticalID, Status: "active"}
-		pc.validationGate.states[verticalID] = st
+		vg.states[verticalID] = st
 	}
 	if st.Status == "" {
 		st.Status = "active"
@@ -117,7 +117,7 @@ func (pc *FactoryPipelineCoordinator) getValidationStateLocked(verticalID string
 	return st
 }
 
-func (pc *FactoryPipelineCoordinator) validationStageForState(st *validationPipelineState) string {
+func (vg *ValidationGate) stageForState(st *validationPipelineState) string {
 	if st == nil {
 		return string(StageResearching)
 	}

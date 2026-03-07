@@ -29,7 +29,7 @@ func (pf *PipelinePayloadFactory) ValidationContext(verticalID string) validatio
 	}
 	pf.coordinator.mu.Lock()
 	defer pf.coordinator.mu.Unlock()
-	st := pf.coordinator.getValidationStateLocked(verticalID)
+	st := pf.coordinator.validationGate.getStateLocked(verticalID)
 	return validationContextSnapshot{
 		Research:    parsePayloadMap(st.ResearchPayload),
 		Spec:        parsePayloadMap(st.SpecPayload),

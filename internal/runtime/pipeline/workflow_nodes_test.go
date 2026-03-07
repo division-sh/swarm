@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"testing"
 
 	"empireai/internal/events"
@@ -70,5 +71,15 @@ func TestEmpirePipelineWorkflowNodes_CoverValidationAndScanEdgeEvents(t *testing
 				t.Fatalf("%s should be consumed by workflow node", eventType)
 			}
 		}
+	}
+}
+
+func TestFactoryPipelineCoordinator_DispatchWorkflowNodeEvent(t *testing.T) {
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
+	if handled := pc.dispatchWorkflowNodeEvent(context.Background(), events.Event{Type: events.EventType("synthesis.resolved")}); !handled {
+		t.Fatal("expected synthesis.resolved to be handled by workflow node executor")
+	}
+	if handled := pc.dispatchWorkflowNodeEvent(context.Background(), events.Event{Type: events.EventType("unknown.event")}); handled {
+		t.Fatal("expected unknown.event to remain unhandled")
 	}
 }
