@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"empireai/internal/models"
-	"empireai/internal/runtime"
 	"empireai/internal/runtime/sessions"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -60,7 +60,7 @@ func TestTemplateMigrationApply_EndToEnd_WithMailboxApproval(t *testing.T) {
 	}
 
 	// Approved mailbox item required to execute.
-	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
+	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "factory-cto",
 		Type:       "migration_approval",
@@ -189,7 +189,7 @@ func TestTemplateMigrationApply_RejectsUnapprovedMailbox(t *testing.T) {
 	`, verticalID); err != nil {
 		t.Fatalf("seed vertical: %v", err)
 	}
-	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
+	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "factory-cto",
 		Type:       "migration_approval",

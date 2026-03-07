@@ -110,12 +110,12 @@ func TestService_executeOperationTX_CoversAllOps(t *testing.T) {
 
 	agentID := "opco-ceo-" + verticalID
 	addCfg := models.AgentConfig{
-		ID:        agentID,
-		Role:      "opco-ceo",
-		Type:      "sonnet",
-		Mode:      "operating",
+		ID:         agentID,
+		Role:       "opco-ceo",
+		Type:       "sonnet",
+		Mode:       "operating",
 		VerticalID: verticalID,
-		Config:    json.RawMessage(`{"system_prompt":"hi","tools":[]}`),
+		Config:     json.RawMessage(`{"system_prompt":"hi","tools":[]}`),
 	}
 	if err := svc.executeOperationTX(ctx, tx, verticalID, "v2", "tester", migrationOperation{
 		Type:    "ADD_AGENT",
@@ -137,20 +137,20 @@ func TestService_executeOperationTX_CoversAllOps(t *testing.T) {
 
 	// ADD_ROUTE
 	if err := svc.executeOperationTX(ctx, tx, verticalID, "v2", "tester", migrationOperation{
-		Type:        "ADD_ROUTE",
+		Type:         "ADD_ROUTE",
 		EventPattern: "board.*",
 		SubscriberID: agentID,
-		Reason:      "tests",
-		Source:      "seeded",
+		Reason:       "tests",
+		Source:       "seeded",
 	}); err != nil {
 		t.Fatalf("ADD_ROUTE: %v", err)
 	}
 
 	// REMOVE_ROUTE: allowed for non-bootstrap routes.
 	if err := svc.executeOperationTX(ctx, tx, verticalID, "v2", "tester", migrationOperation{
-		Type:         "REMOVE_ROUTE",
-		EventPattern: "board.*",
-		SubscriberID: agentID,
+		Type:          "REMOVE_ROUTE",
+		EventPattern:  "board.*",
+		SubscriberID:  agentID,
 		AllowedRemove: true,
 	}); err != nil {
 		t.Fatalf("REMOVE_ROUTE: %v", err)
@@ -164,9 +164,9 @@ func TestService_executeOperationTX_CoversAllOps(t *testing.T) {
 		t.Fatalf("seed bootstrap route: %v", err)
 	}
 	if err := svc.executeOperationTX(ctx, tx, verticalID, "v2", "tester", migrationOperation{
-		Type:         "REMOVE_ROUTE",
-		EventPattern: "bootstrap.only",
-		SubscriberID: agentID,
+		Type:          "REMOVE_ROUTE",
+		EventPattern:  "bootstrap.only",
+		SubscriberID:  agentID,
 		AllowedRemove: true,
 	}); err == nil {
 		t.Fatal("expected REMOVE_ROUTE to be blocked for bootstrap")
@@ -234,9 +234,9 @@ func (e errTest) Error() string { return string(e) }
 
 func TestHelpers_marshalAgentConfig(t *testing.T) {
 	cfg := models.AgentConfig{
-		Role: "r",
-		Mode: "m",
-		Config: json.RawMessage(`{"system_prompt":"p","tools":["a"],"constraints":{"k":"v"}}`),
+		Role:          "r",
+		Mode:          "m",
+		Config:        json.RawMessage(`{"system_prompt":"p","tools":["a"],"constraints":{"k":"v"}}`),
 		Subscriptions: []string{"a", "a", "b"},
 	}
 	out := marshalAgentConfig(cfg)

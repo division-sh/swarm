@@ -604,7 +604,7 @@ type e2eCampaignStore struct {
 	db *sql.DB
 }
 
-func (s *e2eCampaignStore) CreateScanCampaign(ctx context.Context, in CreateScanCampaignInput) (ScanCampaign, error) {
+func (s *e2eCampaignStore) CreateScanCampaign(ctx context.Context, in runtimepipeline.CreateScanCampaignInput) (runtimepipeline.ScanCampaign, error) {
 	id := uuid.NewString()
 	priority := strings.TrimSpace(in.Priority)
 	if priority == "" {
@@ -625,9 +625,9 @@ func (s *e2eCampaignStore) CreateScanCampaign(ctx context.Context, in CreateScan
 			$1::uuid, $2::uuid, NULLIF($3,'')::uuid, $4, $5::text[], $6, $7, $8::jsonb, $9, now()
 		)
 	`, id, in.GeographyID, strings.TrimSpace(in.DirectiveID), in.Mode, pq.Array(in.Categories), priority, status, strategic, in.DeadlineAt); err != nil {
-		return ScanCampaign{}, err
+		return runtimepipeline.ScanCampaign{}, err
 	}
-	return ScanCampaign{
+	return runtimepipeline.ScanCampaign{
 		ID:               id,
 		GeographyID:      in.GeographyID,
 		DirectiveID:      strings.TrimSpace(in.DirectiveID),
@@ -641,11 +641,11 @@ func (s *e2eCampaignStore) CreateScanCampaign(ctx context.Context, in CreateScan
 	}, nil
 }
 
-func (s *e2eCampaignStore) ListScanCampaigns(context.Context, ScanCampaignFilter) ([]ScanCampaign, error) {
+func (s *e2eCampaignStore) ListScanCampaigns(context.Context, runtimepipeline.ScanCampaignFilter) ([]runtimepipeline.ScanCampaign, error) {
 	return nil, nil
 }
 
-func (s *e2eCampaignStore) ClaimNextDueScanCampaign(ctx context.Context) (ScanCampaign, bool, error) {
+func (s *e2eCampaignStore) ClaimNextDueScanCampaign(ctx context.Context) (runtimepipeline.ScanCampaign, bool, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			id::text,
@@ -660,19 +660,19 @@ func (s *e2eCampaignStore) ClaimNextDueScanCampaign(ctx context.Context) (ScanCa
 		ORDER BY created_at ASC
 		LIMIT 1
 	`)
-	var c ScanCampaign
+	var c runtimepipeline.ScanCampaign
 	if err := row.Scan(&c.ID, &c.GeographyID, &c.DirectiveID, &c.Mode, pq.Array(&c.Categories), &c.Priority, &c.StrategicContext); err != nil {
 		if err == sql.ErrNoRows {
-			return ScanCampaign{}, false, nil
+			return runtimepipeline.ScanCampaign{}, false, nil
 		}
-		return ScanCampaign{}, false, err
+		return runtimepipeline.ScanCampaign{}, false, err
 	}
 	if _, err := s.db.ExecContext(ctx, `
 		UPDATE scan_campaigns
 		SET status = 'active', started_at = now()
 		WHERE id = $1::uuid
 	`, c.ID); err != nil {
-		return ScanCampaign{}, false, err
+		return runtimepipeline.ScanCampaign{}, false, err
 	}
 	c.Status = "active"
 	return c, true, nil
@@ -729,7 +729,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	eventStore := &threadSafeEventStore{}
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
-	pc := NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	stageSignals := make(chan string, 8)
 	pc.SetTestVerticalStageHook(func(_ string, stage string) {
 		select {
@@ -764,7 +764,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	}
 
 	scanMgr := runtimepipeline.NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, newScanCampaignHooksForTest(), db)
-	scoringNode := NewScoringNode(bus, pc, nil)
+	scoringNode := runtimepipeline.NewScoringNode(bus, pc, nil)
 	if scoringNode == nil {
 		t.Fatal("expected scoring node")
 	}

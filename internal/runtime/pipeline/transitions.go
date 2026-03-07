@@ -20,12 +20,12 @@ type DeferredPipelineTransition struct {
 type pipelineTransitionCollectorKey struct{}
 
 type PipelineTransitionInput struct {
-	EventID      string
-	EventType    string
-	Handler      string
-	PipelineType string
-	PipelineID   string
-	Action       string
+	EventID       string
+	EventType     string
+	Handler       string
+	PipelineType  string
+	PipelineID    string
+	Action        string
 	StateBefore   any
 	StateAfter    any
 	EventsEmitted []string
@@ -48,22 +48,34 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 		return errors.New("pipeline transition requires valid pipeline_id")
 	}
 	handler := strings.TrimSpace(in.Handler)
-	if handler == "" { handler = "unknown" }
+	if handler == "" {
+		handler = "unknown"
+	}
 	pipelineType := strings.TrimSpace(in.PipelineType)
-	if pipelineType == "" { pipelineType = "validation" }
+	if pipelineType == "" {
+		pipelineType = "validation"
+	}
 	action := strings.TrimSpace(in.Action)
-	if action == "" { action = "consumed" }
+	if action == "" {
+		action = "consumed"
+	}
 	before := marshalJSONOrNil(in.StateBefore)
 	after := marshalJSONOrNil(in.StateAfter)
 	eventsEmitted := sanitizeStringSlice(in.EventsEmitted)
 	durationUS := int(in.Duration / time.Microsecond)
-	if durationUS <= 0 { durationUS = 0 }
+	if durationUS <= 0 {
+		durationUS = 0
+	}
 	var eventExists bool
 	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id = $1::uuid)`, eventID).Scan(&eventExists); err != nil {
-		if isMissingDiagnosticsTable(err) { return nil }
+		if isMissingDiagnosticsTable(err) {
+			return nil
+		}
 		return err
 	}
-	if !eventExists { return nil }
+	if !eventExists {
+		return nil
+	}
 	_, err := db.ExecContext(ctx, `
 		INSERT INTO pipeline_transitions (
 			event_id, event_type, handler, pipeline_type, pipeline_id, action,
@@ -74,19 +86,27 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 			$7::jsonb, $8::jsonb, $9, NULLIF($10,''), NULLIF($11,''), NULLIF($12,0)
 		)
 	`, eventID, strings.TrimSpace(in.EventType), handler, pipelineType, pipelineID, action, maybeJSONString(before), maybeJSONString(after), pq.Array(eventsEmitted), strings.TrimSpace(in.DropReason), strings.TrimSpace(in.Error), durationUS)
-	if err != nil && isMissingDiagnosticsTable(err) { return nil }
+	if err != nil && isMissingDiagnosticsTable(err) {
+		return nil
+	}
 	return err
 }
 
 func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition) context.Context {
-	if collector == nil { return ctx }
+	if collector == nil {
+		return ctx
+	}
 	return context.WithValue(ctx, pipelineTransitionCollectorKey{}, collector)
 }
 
 func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipelineTransition) bool {
-	if item.db == nil { return false }
+	if item.db == nil {
+		return false
+	}
 	collector, ok := ctx.Value(pipelineTransitionCollectorKey{}).(*[]DeferredPipelineTransition)
-	if !ok || collector == nil { return false }
+	if !ok || collector == nil {
+		return false
+	}
 	*collector = append(*collector, item)
 	return true
 }
@@ -100,14 +120,20 @@ func FlushDeferredPipelineTransitions(ctx context.Context, deferred []DeferredPi
 }
 
 func marshalJSONOrNil(v any) []byte {
-	if v == nil { return nil }
+	if v == nil {
+		return nil
+	}
 	b, err := json.Marshal(v)
-	if err != nil || len(b) == 0 { return nil }
+	if err != nil || len(b) == 0 {
+		return nil
+	}
 	return b
 }
 
 func maybeJSONString(v []byte) any {
-	if len(v) == 0 { return nil }
+	if len(v) == 0 {
+		return nil
+	}
 	return string(v)
 }
 
@@ -116,8 +142,12 @@ func sanitizeStringSlice(in []string) []string {
 	seen := make(map[string]struct{}, len(in))
 	for _, raw := range in {
 		v := strings.TrimSpace(raw)
-		if v == "" { continue }
-		if _, ok := seen[v]; ok { continue }
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
 		seen[v] = struct{}{}
 		out = append(out, v)
 	}
@@ -125,7 +155,9 @@ func sanitizeStringSlice(in []string) []string {
 }
 
 func isMissingDiagnosticsTable(err error) bool {
-	if err == nil { return false }
+	if err == nil {
+		return false
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "does not exist") && (strings.Contains(msg, "runtime_log") || strings.Contains(msg, "pipeline_transitions"))
 }

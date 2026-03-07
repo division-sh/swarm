@@ -8,16 +8,16 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
 type Service struct {
 	DB      *sql.DB
-	Mailbox runtime.MailboxPersistence
+	Mailbox runtimetools.MailboxPersistence
 }
 
-func NewService(db *sql.DB, mailbox runtime.MailboxPersistence) *Service {
+func NewService(db *sql.DB, mailbox runtimetools.MailboxPersistence) *Service {
 	return &Service{DB: db, Mailbox: mailbox}
 }
 
@@ -152,13 +152,13 @@ func (s *Service) evaluateKillCriteria(ctx context.Context) (int, error) {
 			"users_new":      usersNew,
 			"recommendation": "consider_kill_or_pivot",
 		})
-			if _, err := s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
-				VerticalID: verticalID,
-				FromAgent:  "empire-coordinator",
-				Type:       "vertical_approval",
-				Priority:   "critical",
-				Status:     "pending",
-				Context:    ctxPayload,
+		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+			VerticalID: verticalID,
+			FromAgent:  "empire-coordinator",
+			Type:       "vertical_approval",
+			Priority:   "critical",
+			Status:     "pending",
+			Context:    ctxPayload,
 			Summary:    fmt.Sprintf("Kill criteria warning: %s (users=%d mrr=%d)", name, users, mrr),
 		}); err != nil {
 			return count, fmt.Errorf("create kill criteria mailbox item: %w", err)
@@ -220,7 +220,7 @@ func (s *Service) evaluateBudgetPressure(ctx context.Context) (int, error) {
 			"window_days":    30,
 			"recommendation": "throttle_growth_spend",
 		})
-		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
+		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			VerticalID: verticalID,
 			FromAgent:  "empire-coordinator",
 			Type:       "budget_increase",
@@ -279,7 +279,7 @@ func (s *Service) analyzeRoutingPatterns(ctx context.Context, minVerticals int) 
 			"verticals": verticals,
 			"proposal":  "promote to bootstrap route",
 		})
-		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
+		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			FromAgent: "operations-analyst",
 			Type:      "escalation",
 			Priority:  "normal",

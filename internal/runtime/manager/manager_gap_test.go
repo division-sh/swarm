@@ -74,7 +74,7 @@ func (r *rotateStubRegistry) Rotate(_ context.Context, agentID, runtimeMode, loc
 }
 
 func (r *rotateStubRegistry) IncrementTurn(_ context.Context, _, _, _, _ string) error { return nil }
-func (r *rotateStubRegistry) ResetAll(string) error                                     { return nil }
+func (r *rotateStubRegistry) ResetAll(string) error                                    { return nil }
 
 type managerStoreStub struct {
 	mu sync.Mutex

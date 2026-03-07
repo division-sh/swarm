@@ -8,16 +8,16 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 )
 
 type loadAgentsErrStore struct {
-	runtime.ManagerPersistence
+	runtimemanager.ManagerPersistence
 }
 
-func (s loadAgentsErrStore) LoadAgents(context.Context) ([]runtime.PersistedAgent, error) {
+func (s loadAgentsErrStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return nil, errors.New("load failed")
 }
 
@@ -189,4 +189,3 @@ func TestRequireSystemStarted_Branches(t *testing.T) {
 		t.Fatalf("requireSystemStarted after seed: %v", err)
 	}
 }
-

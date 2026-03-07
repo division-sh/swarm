@@ -13,25 +13,28 @@ import (
 	runtimeactor "empireai/internal/runtime/actorctx"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
 )
 
 type MailboxItem = runtimetools.MailboxItem
-type Schedule = rt.Schedule
-type InMemoryEventStore = rt.InMemoryEventStore
+type Schedule = runtimepipeline.Schedule
+type InMemoryEventStore = runtimebus.InMemoryEventStore
 type EventBus = rt.EventBus
 type AgentManager = runtimemanager.AgentManager
-type Scheduler = rt.Scheduler
+type Scheduler = runtimepipeline.Scheduler
 type MailboxPersistence = runtimetools.MailboxPersistence
 type SchedulePersistence = runtimetools.SchedulePersistence
-type Agent = rt.Agent
+type Agent = runtimemanager.Agent
 
-func NewEventBus(store rt.EventStore) *rt.EventBus { return rt.NewEventBus(store) }
-func NewAgentManager(bus *rt.EventBus, factory rt.AgentFactory, stores ...rt.ManagerPersistence) *runtimemanager.AgentManager {
+func NewEventBus(store runtimebus.EventStore) *rt.EventBus { return rt.NewEventBus(store) }
+func NewAgentManager(bus *rt.EventBus, factory runtimemanager.AgentFactory, stores ...runtimemanager.ManagerPersistence) *runtimemanager.AgentManager {
 	return runtimemanager.NewAgentManager(bus, factory, stores...)
 }
-func NewScheduler(callbacks ...func(Schedule)) *rt.Scheduler { return rt.NewScheduler(callbacks...) }
-func NewRuntimeToolExecutor(bus *rt.EventBus, scheduler *rt.Scheduler, manager *runtimemanager.AgentManager, stores ...SchedulePersistence) *runtimetools.Executor {
+func NewScheduler(callbacks ...func(Schedule)) *runtimepipeline.Scheduler {
+	return runtimepipeline.NewScheduler(callbacks...)
+}
+func NewRuntimeToolExecutor(bus *rt.EventBus, scheduler *runtimepipeline.Scheduler, manager *runtimemanager.AgentManager, stores ...SchedulePersistence) *runtimetools.Executor {
 	var publisher runtimetools.EventPublisher
 	if bus != nil {
 		publisher = bus
@@ -54,35 +57,57 @@ func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
 }
 
 type stubAgent struct {
-    id   string
-    typ  string
-    subs []events.EventType
+	id   string
+	typ  string
+	subs []events.EventType
 }
 
-func (s *stubAgent) ID() string { return s.id }
-func (s *stubAgent) Type() string { return s.typ }
-func (s *stubAgent) Subscriptions() []events.EventType { return s.subs }
+func (s *stubAgent) ID() string                                                    { return s.id }
+func (s *stubAgent) Type() string                                                  { return s.typ }
+func (s *stubAgent) Subscriptions() []events.EventType                             { return s.subs }
 func (s *stubAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) { return nil, nil }
 
 type managerStoreStub struct{}
 
-func (m *managerStoreStub) UpsertAgent(context.Context, rt.PersistedAgent) error { return nil }
-func (m *managerStoreStub) LoadAgents(context.Context) ([]rt.PersistedAgent, error) { return nil, nil }
-func (m *managerStoreStub) MarkAgentTerminated(context.Context, string) error { return nil }
+func (m *managerStoreStub) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
+	return nil
+}
+func (m *managerStoreStub) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return nil, nil
+}
+func (m *managerStoreStub) MarkAgentTerminated(context.Context, string) error  { return nil }
 func (m *managerStoreStub) EnsureVerticalSchema(context.Context, string) error { return nil }
-func (m *managerStoreStub) LoadLatestOrgTemplate(context.Context) (rt.OrgTemplateRecord, error) { return rt.OrgTemplateRecord{}, nil }
-func (m *managerStoreStub) LoadOrgTemplate(context.Context, string) (rt.OrgTemplateRecord, error) { return rt.OrgTemplateRecord{}, nil }
-func (m *managerStoreStub) SetVerticalTemplateVersion(context.Context, string, string) error { return nil }
-func (m *managerStoreStub) UpsertRoutingRule(context.Context, rt.PersistedRoutingRule) error { return nil }
-func (m *managerStoreStub) LoadRoutingRules(context.Context) ([]rt.PersistedRoutingRule, error) { return nil, nil }
-func (m *managerStoreStub) DeactivateRoutingRulesByVertical(context.Context, string) error { return nil }
-func (m *managerStoreStub) UpsertEventReceipt(context.Context, string, string, string, string) error { return nil }
-func (m *managerStoreStub) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) { return nil, nil }
-func (m *managerStoreStub) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) { return nil, nil }
+func (m *managerStoreStub) LoadLatestOrgTemplate(context.Context) (runtimemanager.OrgTemplateRecord, error) {
+	return runtimemanager.OrgTemplateRecord{}, nil
+}
+func (m *managerStoreStub) LoadOrgTemplate(context.Context, string) (runtimemanager.OrgTemplateRecord, error) {
+	return runtimemanager.OrgTemplateRecord{}, nil
+}
+func (m *managerStoreStub) SetVerticalTemplateVersion(context.Context, string, string) error {
+	return nil
+}
+func (m *managerStoreStub) UpsertRoutingRule(context.Context, runtimemanager.PersistedRoutingRule) error {
+	return nil
+}
+func (m *managerStoreStub) LoadRoutingRules(context.Context) ([]runtimemanager.PersistedRoutingRule, error) {
+	return nil, nil
+}
+func (m *managerStoreStub) DeactivateRoutingRulesByVertical(context.Context, string) error {
+	return nil
+}
+func (m *managerStoreStub) UpsertEventReceipt(context.Context, string, string, string, string) error {
+	return nil
+}
+func (m *managerStoreStub) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (m *managerStoreStub) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
 
-func SafeTelemetryText(v any) string { return runtimetools.SafeTelemetryText(v) }
+func SafeTelemetryText(v any) string               { return runtimetools.SafeTelemetryText(v) }
 func TruncateTelemetry(s string, limit int) string { return runtimetools.TruncateTelemetry(s, limit) }
-func DefaultExternalMethod(name string) string { return runtimetools.DefaultExternalMethod(name) }
+func DefaultExternalMethod(name string) string     { return runtimetools.DefaultExternalMethod(name) }
 func ApplyExternalHeaders(req *http.Request, headers map[string]any) {
 	runtimetools.ApplyExternalHeaders(req, headers)
 }

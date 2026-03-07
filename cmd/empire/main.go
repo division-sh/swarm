@@ -33,6 +33,7 @@ import (
 	runtimeagents "empireai/internal/runtime/agents"
 	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
+	runtimellm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
@@ -200,7 +201,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		log.Printf("global agents sync failed (continuing): %v", err)
 	}
 
-	scheduler := runtime.NewScheduler(func(sc runtime.Schedule) {
+	scheduler := runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		payload := sc.Payload
@@ -256,7 +257,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		go budgetHeartbeatLoop(ctx, budgetTracker)
 	}
 
-	llm, err := runtime.RuntimeFactory{
+	llm, err := runtimellm.RuntimeFactory{
 		Cfg:           cfg,
 		Sessions:      stores.SessionRegistry,
 		Turns:         stores.TurnStore,
@@ -328,7 +329,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 				if len(ctxPayload) == 0 {
 					ctxPayload = []byte("{}")
 				}
-				if _, mailboxErr := stores.MailboxStore.InsertMailboxItem(ctx, runtime.MailboxItem{
+				if _, mailboxErr := stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					FromAgent: "runtime",
 					Type:      "runtime.recovery_failed",
 					Priority:  "critical",
@@ -364,7 +365,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		go runtime.StartMCPStallDiagnosticLoop(ctx, stores.SQLDB, runtimeLogger, runtime.DefaultMCPStallDiagnosticConfig())
 	}
 	if stores.SQLDB != nil {
-		if shardDispatcher := runtime.NewShardDispatcher(stores.SQLDB, bus, manager, cfg.Sharding); shardDispatcher != nil {
+		if shardDispatcher := runtimepipeline.NewShardDispatcher(stores.SQLDB, bus, manager, cfg.Sharding); shardDispatcher != nil {
 			go shardDispatcher.Run(ctx)
 		}
 	}
@@ -2987,7 +2988,7 @@ func runChatSubcommand(args []string) error {
 	}
 
 	workspaceLifecycle := buildWorkspaceLifecycle(ctx, stores.SQLDB)
-	llm, err := runtime.RuntimeFactory{
+	llm, err := runtimellm.RuntimeFactory{
 		Cfg:           cfg,
 		Sessions:      stores.SessionRegistry,
 		Turns:         stores.TurnStore,
@@ -3002,7 +3003,7 @@ func runChatSubcommand(args []string) error {
 	if stores.SQLDB != nil {
 		budgetTracker = runtime.NewBudgetTracker(stores.SQLDB, bus, cfg, stores.MailboxStore)
 	}
-	scheduler := runtime.NewScheduler(func(runtime.Schedule) {})
+	scheduler := runtimepipeline.NewScheduler(func(runtimepipeline.Schedule) {})
 	defer scheduler.Stop()
 	toolExecutor := runtimetools.NewExecutor(bus, scheduler, nil, stores.ScheduleStore)
 	toolExecutor.SetConfig(cfg)
@@ -3213,7 +3214,7 @@ func ensureTargetAgentRegistered(ctx context.Context, stores storeBundle, target
 	if !hasSystemPrompt(target.Config) {
 		return fmt.Errorf("target agent %q is not registered with a valid system_prompt; run `empire init` or seed org before sending directives", target.ID)
 	}
-	return stores.ManagerStore.UpsertAgent(ctx, runtime.PersistedAgent{
+	return stores.ManagerStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config:          target.Config,
 		Status:          "active",
 		HiredBy:         "human-interface",
@@ -3251,7 +3252,7 @@ func ensureChatTargetAgentRegistered(ctx context.Context, stores storeBundle, ta
 		})
 		cfg.Subscriptions = []string{"board.chat", "board.directive"}
 	}
-	return stores.ManagerStore.UpsertAgent(ctx, runtime.PersistedAgent{
+	return stores.ManagerStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config:          cfg,
 		Status:          "active",
 		HiredBy:         "human-interface",
@@ -3293,7 +3294,7 @@ func hasSystemStarted(ctx context.Context, db *sql.DB) (bool, error) {
 	return exists, nil
 }
 
-func syncRuntimeGlobalAgents(ctx context.Context, managerStore runtime.ManagerPersistence) error {
+func syncRuntimeGlobalAgents(ctx context.Context, managerStore runtimemanager.ManagerPersistence) error {
 	if managerStore == nil {
 		return nil
 	}
@@ -3309,7 +3310,7 @@ func syncRuntimeGlobalAgents(ctx context.Context, managerStore runtime.ManagerPe
 	return seedGlobalAgentsFromYAML(ctx, managerStore, agentsDir)
 }
 
-func rotateGlobalAgentSessions(ctx context.Context, managerStore runtime.ManagerPersistence, sessions sessions.Registry, runtimeMode string) error {
+func rotateGlobalAgentSessions(ctx context.Context, managerStore runtimemanager.ManagerPersistence, sessions sessions.Registry, runtimeMode string) error {
 	if managerStore == nil || sessions == nil {
 		return nil
 	}
@@ -3513,16 +3514,16 @@ func dispatchSystemDirectiveViaDashboard(ctx context.Context, target targetAgent
 
 type storeBundle struct {
 	SQLDB             *sql.DB
-	EventStore        runtime.EventStore
+	EventStore        runtimebus.EventStore
 	SessionRegistry   sessions.Registry
-	ConversationStore runtime.ConversationPersistence
-	ManagerStore      runtime.ManagerPersistence
-	ScheduleStore     runtime.SchedulePersistence
-	MailboxStore      runtime.MailboxPersistence
+	ConversationStore runtimellm.ConversationPersistence
+	ManagerStore      runtimemanager.ManagerPersistence
+	ScheduleStore     runtimepipeline.SchedulePersistence
+	MailboxStore      runtimetools.MailboxPersistence
 	InboundStore      runtime.InboundPersistence
 	DigestStore       runtime.DigestPersistence
-	TurnStore         runtime.TurnPersistence
-	ScanCampaignStore runtime.ScanCampaignPersistence
+	TurnStore         runtimellm.TurnPersistence
+	ScanCampaignStore runtimepipeline.ScanCampaignPersistence
 }
 
 func buildStores(
@@ -3570,7 +3571,7 @@ func buildStores(
 		fallthrough
 	default:
 		return storeBundle{
-			EventStore:      runtime.InMemoryEventStore{},
+			EventStore:      runtimebus.InMemoryEventStore{},
 			SessionRegistry: sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
 		}
 	}
@@ -3912,7 +3913,7 @@ func runOperatorActions(ctx context.Context, stores storeBundle, opts operatorOp
 func emitMailboxDecisionSideEffects(
 	ctx context.Context,
 	stores storeBundle,
-	item runtime.MailboxItem,
+	item runtimetools.MailboxItem,
 	outcome mailbox.DecisionOutcome,
 	notes string,
 ) error {
@@ -4123,7 +4124,7 @@ func mailboxReviewType(raw json.RawMessage) string {
 	return ""
 }
 
-func isGeographyExpansionMailbox(item runtime.MailboxItem) bool {
+func isGeographyExpansionMailbox(item runtimetools.MailboxItem) bool {
 	t := strings.ToLower(strings.TrimSpace(item.Type))
 	if t == "" {
 		return false
@@ -4145,7 +4146,7 @@ func isGeographyExpansionMailbox(item runtime.MailboxItem) bool {
 	return false
 }
 
-func isFounderInputMailbox(item runtime.MailboxItem) bool {
+func isFounderInputMailbox(item runtimetools.MailboxItem) bool {
 	t := strings.ToLower(strings.TrimSpace(item.Type))
 	if t == "founder_input" {
 		return true
@@ -4156,8 +4157,8 @@ func isFounderInputMailbox(item runtime.MailboxItem) bool {
 func queueGeographyExpansionValidation(
 	ctx context.Context,
 	db *sql.DB,
-	scanStore runtime.ScanCampaignPersistence,
-	item runtime.MailboxItem,
+	scanStore runtimepipeline.ScanCampaignPersistence,
+	item runtimetools.MailboxItem,
 ) (string, geographyExpansionRequest, string, error) {
 	req := parseGeographyExpansionRequest(item.Context)
 	if strings.TrimSpace(req.Geography) == "" {
@@ -4173,7 +4174,7 @@ func queueGeographyExpansionValidation(
 	if scanStore == nil {
 		return geoID, req, "", fmt.Errorf("scan campaign store is unavailable")
 	}
-	campaign, err := scanStore.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{
+	campaign, err := scanStore.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
 		GeographyID: geoID,
 		Mode:        req.Mode,
 		Categories:  req.Categories,
@@ -4386,7 +4387,7 @@ func mustJSON(v any) []byte {
 	return b
 }
 
-func mailboxTimeoutLoop(ctx context.Context, store runtime.MailboxPersistence) {
+func mailboxTimeoutLoop(ctx context.Context, store runtimetools.MailboxPersistence) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
@@ -4411,7 +4412,7 @@ func mailboxTimeoutLoop(ctx context.Context, store runtime.MailboxPersistence) {
 	}
 }
 
-func mailboxCriticalNotifyLoop(ctx context.Context, store runtime.MailboxPersistence, notifier mailbox.CriticalNotifier, bus *runtime.EventBus) {
+func mailboxCriticalNotifyLoop(ctx context.Context, store runtimetools.MailboxPersistence, notifier mailbox.CriticalNotifier, bus *runtime.EventBus) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

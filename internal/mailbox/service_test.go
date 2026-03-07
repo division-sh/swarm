@@ -5,28 +5,28 @@ import (
 	"context"
 	"testing"
 
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type fakeStore struct{}
 
-func (fakeStore) InsertMailboxItem(context.Context, runtime.MailboxItem) (string, error) {
+func (fakeStore) InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error) {
 	return "m1", nil
 }
 func (fakeStore) DecideMailboxItem(context.Context, string, string, string, string) error { return nil }
 func (fakeStore) CountMailboxItems(context.Context, string) (int, error)                  { return 2, nil }
-func (fakeStore) GetMailboxItem(_ context.Context, id string) (runtime.MailboxItem, error) {
-	return runtime.MailboxItem{ID: id, Type: "spend_request", Status: "pending"}, nil
+func (fakeStore) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
+	return runtimetools.MailboxItem{ID: id, Type: "spend_request", Status: "pending"}, nil
 }
-func (fakeStore) ExpireMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (fakeStore) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-func (fakeStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (fakeStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 func (fakeStore) MarkMailboxItemNotified(context.Context, string) error { return nil }
-func (fakeStore) ListMailboxItems(context.Context, string, int) ([]runtime.MailboxItem, error) {
-	return []runtime.MailboxItem{
+func (fakeStore) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
+	return []runtimetools.MailboxItem{
 		{ID: "m1", Priority: "critical", Type: "product_spec_review"},
 		{ID: "m2", Priority: "normal", Type: "spend_request"},
 	}, nil

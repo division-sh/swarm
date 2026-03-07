@@ -9,15 +9,6 @@ import (
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
-func coalesce(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func asFloat64(v any) (float64, bool) {
 	return runtimesharedjson.AsFloat64(v)
 }
@@ -63,15 +54,6 @@ func parsePayloadMap(raw []byte) map[string]any {
 
 func mustJSON(v any) []byte {
 	return runtimesharedjson.MustJSON(v)
-}
-
-func firstNonEmptyString(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func asInt(v any) int {
@@ -140,13 +122,6 @@ func toStringList(raw any) []string {
 	default:
 		return []string{strings.TrimSpace(fmt.Sprintf("%v", raw))}
 	}
-}
-
-func absInt(n int) int {
-	if n < 0 {
-		return -n
-	}
-	return n
 }
 
 func WeekStartUTC(now time.Time, resetDay string) time.Time {

@@ -6,9 +6,9 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
 	rt "empireai/internal/runtime"
 	runtimemanager "empireai/internal/runtime/manager"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"encoding/json"
@@ -233,7 +233,7 @@ func TestDashboard_ControlChat_LiveAndAsyncPaths(t *testing.T) {
 	}
 
 	bus := rt.NewEventBus(pg)
-	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (rt.Agent, error) {
+	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		return &chatStubAgent{id: cfg.ID}, nil
 	}, pg)
 	manager.Run(ctx)
@@ -365,7 +365,7 @@ func TestDashboardServer_ControlPlane_MoreBranches(t *testing.T) {
 	}
 
 	bus := rt.NewEventBus(pg)
-	factory := func(cfg models.AgentConfig) (rt.Agent, error) {
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		return &controlStubAgent{id: cfg.ID}, nil
 	}
 	manager := runtimemanager.NewAgentManager(bus, factory, pg)
@@ -899,7 +899,7 @@ func TestDashboard_ControlMailboxDecide_EmitsSideEffects(t *testing.T) {
 		t.Fatalf("seed opco ceo agent: %v", err)
 	}
 
-	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
+	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "operations-analyst",
 		Type:       "escalation",
@@ -975,7 +975,7 @@ func TestDashboard_ControlMailboxDecide_GeographyExpansionQueuesCampaign(t *test
 		t.Fatalf("seed empire coordinator: %v", err)
 	}
 
-	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
+	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "opco-ceo-" + verticalID,
 		Type:       "domain_approval",
@@ -1042,7 +1042,7 @@ func TestDashboard_ControlMailboxDecide_VerticalApprovalEmitsLifecycleEvents(t *
 	}
 
 	makeMailbox := func(summary string) string {
-		id, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
+		id, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			VerticalID: verticalID,
 			FromAgent:  "validation-coordinator",
 			Type:       "vertical_approval",

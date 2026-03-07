@@ -54,7 +54,7 @@ func TestHandleControlSeedOrg_LoadErrorFromYAML(t *testing.T) {
 	agentsDir := t.TempDir()
 	t.Setenv("EMPIREAI_GLOBAL_AGENTS_DIR", agentsDir)
 
-	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+	bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
 
@@ -110,7 +110,7 @@ func TestHandleControlSeedOrg_SuccessFromYAML(t *testing.T) {
 		t.Fatalf("write factory-cto: %v", err)
 	}
 
-	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+	bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
 
@@ -161,7 +161,7 @@ func TestHandleControlRuntime_ResetDB_LoadErrorFromYAML(t *testing.T) {
 	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM org_templates\)`).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
-	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+	bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(db, nil, nil, nil, manager)
 
@@ -199,7 +199,7 @@ func TestHandleControlRuntime_InvalidAction(t *testing.T) {
 func TestHandleControlRuntime_PauseResume(t *testing.T) {
 	runtimebus.ResumeRuntimeIngress()
 	defer runtimebus.ResumeRuntimeIngress()
-	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+	bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 	manager := runtimemanager.NewAgentManager(bus, nil)
 	s := NewServer(nil, nil, nil, nil, manager)
 
@@ -248,8 +248,8 @@ func TestHandleControlChat_LiveMarksReceiptProcessed(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "empire-coordinator", "processed", "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
-	factory := func(cfg models.AgentConfig) (runtime.Agent, error) {
+	bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		return &stubBoardAgent{id: cfg.ID}, nil
 	}
 	manager := runtimemanager.NewAgentManager(bus, factory)

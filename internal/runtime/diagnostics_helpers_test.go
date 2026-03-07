@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -109,7 +110,7 @@ func TestRuntimeLogger_IntegrationAndMissingTableTolerance(t *testing.T) {
 	}
 
 	logger := NewRuntimeLogger(db)
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	bus.SetRuntimeLogger(logger)
 	if err := bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),

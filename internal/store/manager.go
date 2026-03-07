@@ -12,11 +12,12 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
-	llm "empireai/internal/runtime/llm"
+	runtimellm "empireai/internal/runtime/llm"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
-func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtime.PersistedAgent) error {
+func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
 	if rec.Config.ID == "" {
 		return fmt.Errorf("agent id is required")
 	}
@@ -76,7 +77,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtime.PersistedAg
 	return nil
 }
 
-func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtime.PersistedAgent, error) {
+func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	const q = `
 		SELECT
 			id, type, role, mode,
@@ -99,9 +100,9 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtime.PersistedAgen
 	}
 	defer rows.Close()
 
-	var out []runtime.PersistedAgent
+	var out []runtimemanager.PersistedAgent
 	for rows.Next() {
-		var rec runtime.PersistedAgent
+		var rec runtimemanager.PersistedAgent
 		var cfgRaw []byte
 		if err := rows.Scan(
 			&rec.Config.ID,
@@ -215,8 +216,8 @@ func (s *PostgresStore) EnsureVerticalSchema(ctx context.Context, verticalID str
 	return nil
 }
 
-func (s *PostgresStore) LoadLatestOrgTemplate(ctx context.Context) (runtime.OrgTemplateRecord, error) {
-	var rec runtime.OrgTemplateRecord
+func (s *PostgresStore) LoadLatestOrgTemplate(ctx context.Context) (runtimemanager.OrgTemplateRecord, error) {
+	var rec runtimemanager.OrgTemplateRecord
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT
 			version,
@@ -238,16 +239,16 @@ func (s *PostgresStore) LoadLatestOrgTemplate(ctx context.Context) (runtime.OrgT
 		&rec.Description,
 		&rec.CreatedAt,
 	); err != nil {
-		return runtime.OrgTemplateRecord{}, err
+		return runtimemanager.OrgTemplateRecord{}, err
 	}
 	return rec, nil
 }
 
-func (s *PostgresStore) LoadOrgTemplate(ctx context.Context, version string) (runtime.OrgTemplateRecord, error) {
-	var rec runtime.OrgTemplateRecord
+func (s *PostgresStore) LoadOrgTemplate(ctx context.Context, version string) (runtimemanager.OrgTemplateRecord, error) {
+	var rec runtimemanager.OrgTemplateRecord
 	version = strings.TrimSpace(version)
 	if version == "" {
-		return runtime.OrgTemplateRecord{}, fmt.Errorf("template version is required")
+		return runtimemanager.OrgTemplateRecord{}, fmt.Errorf("template version is required")
 	}
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT
@@ -269,7 +270,7 @@ func (s *PostgresStore) LoadOrgTemplate(ctx context.Context, version string) (ru
 		&rec.Description,
 		&rec.CreatedAt,
 	); err != nil {
-		return runtime.OrgTemplateRecord{}, err
+		return runtimemanager.OrgTemplateRecord{}, err
 	}
 	return rec, nil
 }
@@ -334,7 +335,7 @@ func (s *PostgresStore) ResolveBootstrapVersion(ctx context.Context, templateVer
 	return latest, nil
 }
 
-func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtime.PersistedRoutingRule) error {
+func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanager.PersistedRoutingRule) error {
 	if rule.VerticalID == "" || rule.EventPattern == "" || rule.SubscriberID == "" || rule.InstalledBy == "" {
 		return fmt.Errorf("vertical_id, event_pattern, subscriber_id, and installed_by are required")
 	}
@@ -429,7 +430,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtime.Pers
 	return nil
 }
 
-func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtime.PersistedRoutingRule, error) {
+func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.PersistedRoutingRule, error) {
 	const q = `
 		SELECT
 			vertical_id::text, event_pattern, subscriber_id, installed_by,
@@ -444,9 +445,9 @@ func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtime.Persist
 	}
 	defer rows.Close()
 
-	out := make([]runtime.PersistedRoutingRule, 0)
+	out := make([]runtimemanager.PersistedRoutingRule, 0)
 	for rows.Next() {
-		var r runtime.PersistedRoutingRule
+		var r runtimemanager.PersistedRoutingRule
 		if err := rows.Scan(
 			&r.VerticalID,
 			&r.EventPattern,
@@ -673,13 +674,13 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	return out, nil
 }
 
-func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID string) (runtime.EventReceipt, bool, error) {
+func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
-		return runtime.EventReceipt{}, false, fmt.Errorf("event_id and agent_id are required")
+		return runtimemanager.EventReceipt{}, false, fmt.Errorf("event_id and agent_id are required")
 	}
-	var r runtime.EventReceipt
+	var r runtimemanager.EventReceipt
 	r.EventID = eventID
 	r.AgentID = agentID
 	if err := s.DB.QueryRowContext(ctx, `
@@ -688,14 +689,14 @@ func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID st
 		WHERE event_id = $1::uuid AND agent_id = $2
 	`, eventID, agentID).Scan(&r.Status, &r.RetryCount, &r.Error); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return runtime.EventReceipt{}, false, nil
+			return runtimemanager.EventReceipt{}, false, nil
 		}
-		return runtime.EventReceipt{}, false, fmt.Errorf("get event receipt: %w", err)
+		return runtimemanager.EventReceipt{}, false, fmt.Errorf("get event receipt: %w", err)
 	}
 	return r, true, nil
 }
 
-func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtime.AgentTurnRecord) error {
+func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
 	if rec.AgentID == "" || rec.RuntimeMode == "" || rec.SessionID == "" {
 		return fmt.Errorf("agent_id, runtime_mode, and session_id are required")
 	}
@@ -769,7 +770,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtime.AgentTu
 	return nil
 }
 
-func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.ConversationRecord) error {
+func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
 	if strings.TrimSpace(rec.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
@@ -782,9 +783,9 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtime.Conv
 		status = "active"
 	}
 	scopeKey := strings.TrimSpace(rec.ScopeKey)
-	msgs := make([]llm.Message, 0, len(rec.Messages))
+	msgs := make([]runtimellm.Message, 0, len(rec.Messages))
 	for _, m := range rec.Messages {
-		msgs = append(msgs, llm.Message{
+		msgs = append(msgs, runtimellm.Message{
 			Role:    strings.TrimSpace(m.Role),
 			Content: redactText(m.Content),
 		})
@@ -916,10 +917,10 @@ func shouldFallbackConversationScope(err error) bool {
 	return strings.Contains(msg, "scope_key") && strings.Contains(msg, "does not exist")
 }
 
-func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (runtime.ConversationRecord, bool, error) {
+func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return runtime.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
+		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
 	}
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if mode == "" {
@@ -942,7 +943,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 		ORDER BY updated_at DESC
 		LIMIT 1
 	`
-	var rec runtime.ConversationRecord
+	var rec runtimellm.ConversationRecord
 	rec.AgentID = agentID
 	rec.Mode = mode
 
@@ -981,12 +982,12 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return runtime.ConversationRecord{}, false, nil
+			return runtimellm.ConversationRecord{}, false, nil
 		}
-		return runtime.ConversationRecord{}, false, fmt.Errorf("load active conversation: %w", err)
+		return runtimellm.ConversationRecord{}, false, fmt.Errorf("load active conversation: %w", err)
 	}
 	if len(rawMessages) > 0 {
-		var msgs []llm.Message
+		var msgs []runtimellm.Message
 		if json.Unmarshal(rawMessages, &msgs) == nil {
 			rec.Messages = msgs
 		}
@@ -1170,7 +1171,7 @@ func isPaymentKey(k string) bool {
 	return false
 }
 
-func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtime.Schedule) error {
+func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
@@ -1242,7 +1243,7 @@ func (s *PostgresStore) CancelSchedule(ctx context.Context, agentID, eventType s
 	return nil
 }
 
-func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtime.Schedule, error) {
+func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			agent_id,
@@ -1260,9 +1261,9 @@ func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtime.Sche
 	}
 	defer rows.Close()
 
-	out := make([]runtime.Schedule, 0)
+	out := make([]runtimepipeline.Schedule, 0)
 	for rows.Next() {
-		var sc runtime.Schedule
+		var sc runtimepipeline.Schedule
 		var at sql.NullTime
 		if err := rows.Scan(
 			&sc.AgentID,
@@ -1286,7 +1287,7 @@ func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtime.Sche
 	return out, nil
 }
 
-func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtime.Schedule) error {
+func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtimepipeline.Schedule) error {
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return nil
 	}

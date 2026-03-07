@@ -15,7 +15,9 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -54,8 +56,8 @@ func TestDashboardServer_ControlRuntime_ResetDB_SeedsOrgAndTemplate(t *testing.T
 		},
 	}
 
-	bus := rt.NewEventBus(rt.InMemoryEventStore{})
-	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (rt.Agent, error) {
+	bus := rt.NewEventBus(runtimebus.InMemoryEventStore{})
+	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		return &stubAgent{id: cfg.ID, subs: []events.EventType{"*"}}, nil
 	}, pg)
 	manager.Run(context.Background())
@@ -278,11 +280,11 @@ func TestDashboardServer_ControlRuntime_ResetDB_ClearsPipelineInMemoryState(t *t
 		},
 	}
 
-	bus := rt.NewEventBus(rt.InMemoryEventStore{})
-	pc := rt.NewFactoryPipelineCoordinator(bus, db)
+	bus := rt.NewEventBus(runtimebus.InMemoryEventStore{})
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
 
-	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (rt.Agent, error) {
+	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		return &stubAgent{id: cfg.ID, subs: []events.EventType{"*"}}, nil
 	}, pg)
 	manager.Run(context.Background())

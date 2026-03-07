@@ -132,11 +132,11 @@ func sanitizeOptionalUUIDForTest(raw string) string {
 type sqlMailboxStore struct {
 	db       *sql.DB
 	mu       sync.Mutex
-	items    []MailboxItem
+	items    []runtimetools.MailboxItem
 	notifyCh chan struct{}
 }
 
-func (s *sqlMailboxStore) InsertMailboxItem(ctx context.Context, item MailboxItem) (string, error) {
+func (s *sqlMailboxStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
 	if s == nil || s.db == nil {
 		return "", errors.New("mailbox db is nil")
 	}
@@ -230,7 +230,7 @@ func (s *sqlMailboxStore) WaitForLatestMailboxItem(mailboxType string, timeout t
 	}
 }
 
-func (s *sqlMailboxStore) ListMailboxItems(context.Context, string, int) ([]MailboxItem, error) {
+func (s *sqlMailboxStore) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 
@@ -238,19 +238,19 @@ func (s *sqlMailboxStore) CountMailboxItems(context.Context, string) (int, error
 	return 0, nil
 }
 
-func (s *sqlMailboxStore) GetMailboxItem(context.Context, string) (MailboxItem, error) {
-	return MailboxItem{}, sql.ErrNoRows
+func (s *sqlMailboxStore) GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error) {
+	return runtimetools.MailboxItem{}, sql.ErrNoRows
 }
 
 func (s *sqlMailboxStore) DecideMailboxItem(context.Context, string, string, string, string) error {
 	return nil
 }
 
-func (s *sqlMailboxStore) ExpireMailboxItems(context.Context, int) ([]MailboxItem, error) {
+func (s *sqlMailboxStore) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 
-func (s *sqlMailboxStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]MailboxItem, error) {
+func (s *sqlMailboxStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 
@@ -785,7 +785,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	eventStore := &postgresEventStore{db: db}
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
-	pc := NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
 
 	fixturesDir := projectPathFromThisFile("contracts", "test-vectors", "e2e-happy-path")
@@ -799,9 +799,9 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	exec := runtimetools.NewExecutor(bus, nil, nil)
 	exec.SetMailboxStore(mailboxStore)
 	baseFactory := runtimeagents.NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
-	factory := func(cfg models.AgentConfig) (Agent, error) {
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPromptForTest(cfg)) == "" {
-			cfg.Config = withSystemPrompt(cfg.Config, "Canned runtime prompt for "+strings.TrimSpace(cfg.Role))
+			cfg.Config = runtimemanager.WithSystemPrompt(cfg.Config, "Canned runtime prompt for "+strings.TrimSpace(cfg.Role))
 		}
 		return baseFactory(cfg)
 	}
@@ -832,7 +832,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	spawn("empire-coordinator", "empire-coordinator", "holding", "vertical.approved")
 
 	scanMgr := runtimepipeline.NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, newScanCampaignHooksForTest(), db)
-	scoringNode := NewScoringNode(bus, pc, nil)
+	scoringNode := runtimepipeline.NewScoringNode(bus, pc, nil)
 	if scoringNode == nil {
 		t.Fatal("expected scoring node")
 	}
@@ -1134,7 +1134,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 		"devops-agent",
 	}
 	for _, role := range opcoRoles {
-		agentID := opCoAgentID(role, shortlistedVerticalID)
+		agentID := runtimemanager.OpCoAgentID(role, shortlistedVerticalID)
 		if _, ok := am.GetAgentConfig(agentID); !ok {
 			t.Fatalf("expected spawned opco agent config for %s", agentID)
 		}

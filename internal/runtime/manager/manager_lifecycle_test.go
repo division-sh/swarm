@@ -253,8 +253,12 @@ type budgetGuardStub struct {
 	throttle  map[string]bool
 }
 
-func (b *budgetGuardStub) IsEmergency(verticalID string) bool { return b != nil && b.emergency[verticalID] }
-func (b *budgetGuardStub) IsThrottle(verticalID string) bool  { return b != nil && b.throttle[verticalID] }
+func (b *budgetGuardStub) IsEmergency(verticalID string) bool {
+	return b != nil && b.emergency[verticalID]
+}
+func (b *budgetGuardStub) IsThrottle(verticalID string) bool {
+	return b != nil && b.throttle[verticalID]
+}
 
 func (a *budgetPolicyAgent) ID() string { return a.id }
 

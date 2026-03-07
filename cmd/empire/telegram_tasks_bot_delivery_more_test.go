@@ -104,4 +104,3 @@ func TestTelegramTaskDelivery_DeliverApprovedAndEventDriven(t *testing.T) {
 	}
 	t.Fatalf("expected event-driven delivery to call telegram, calls=%d", calls)
 }
-

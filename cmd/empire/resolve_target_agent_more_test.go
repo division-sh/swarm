@@ -7,7 +7,7 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -34,7 +34,7 @@ func TestResolveTargetAgent_CoversIDRoleAmbiguityAndFallback(t *testing.T) {
 	}
 
 	// Seed a few agents for resolution.
-	if err := stores.ManagerStore.UpsertAgent(context.Background(), runtime.PersistedAgent{
+	if err := stores.ManagerStore.UpsertAgent(context.Background(), runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:     "empire-coordinator",
 			Role:   "empire-coordinator",
@@ -49,7 +49,7 @@ func TestResolveTargetAgent_CoversIDRoleAmbiguityAndFallback(t *testing.T) {
 	}
 	// Two vp-growth agents makes "vp-growth" ambiguous.
 	for _, id := range []string{"vp-growth-a", "vp-growth-b"} {
-		if err := stores.ManagerStore.UpsertAgent(context.Background(), runtime.PersistedAgent{
+		if err := stores.ManagerStore.UpsertAgent(context.Background(), runtimemanager.PersistedAgent{
 			Config: models.AgentConfig{
 				ID:         id,
 				Role:       "vp-growth",
@@ -65,7 +65,7 @@ func TestResolveTargetAgent_CoversIDRoleAmbiguityAndFallback(t *testing.T) {
 		}
 	}
 	// One opco-ceo in v1.
-	if err := stores.ManagerStore.UpsertAgent(context.Background(), runtime.PersistedAgent{
+	if err := stores.ManagerStore.UpsertAgent(context.Background(), runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         "opco-ceo-" + v1,
 			Role:       "opco-ceo",

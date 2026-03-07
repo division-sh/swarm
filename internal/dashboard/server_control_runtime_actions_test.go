@@ -65,7 +65,7 @@ func TestDashboardServer_ControlRuntime_Actions(t *testing.T) {
 	}
 
 	bus := rt.NewEventBus(pg)
-	factory := func(cfg models.AgentConfig) (rt.Agent, error) { //nolint:revive
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) { //nolint:revive
 		return &controlStubAgent{id: cfg.ID}, nil
 	}
 	manager := runtimemanager.NewAgentManager(bus, factory, pg)

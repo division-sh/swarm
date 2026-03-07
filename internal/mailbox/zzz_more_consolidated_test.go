@@ -3,7 +3,7 @@ package mailbox
 import (
 	"bytes"
 	"context"
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,10 +16,10 @@ type notifierStub2 struct {
 	err error
 }
 
-func (n notifierStub2) NotifyCritical(context.Context, runtime.MailboxItem) error { return n.err }
+func (n notifierStub2) NotifyCritical(context.Context, runtimetools.MailboxItem) error { return n.err }
 
 func TestNotify_Multi_Webhook_Telegram_Email(t *testing.T) {
-	item := runtime.MailboxItem{ID: "m1", Type: "spend_request", VerticalID: "v", Summary: "x", TimeoutAt: time.Now()}
+	item := runtimetools.MailboxItem{ID: "m1", Type: "spend_request", VerticalID: "v", Summary: "x", TimeoutAt: time.Now()}
 	ctx := context.Background()
 
 	if NewMultiCriticalNotifier(nil) != nil {
@@ -105,24 +105,24 @@ func TestEmailNotifier_ContextCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := n.NotifyCritical(ctx, runtime.MailboxItem{ID: "m1", Type: "critical"}); err == nil {
+	if err := n.NotifyCritical(ctx, runtimetools.MailboxItem{ID: "m1", Type: "critical"}); err == nil {
 		t.Fatal("expected context cancellation error")
 	}
 }
 
 type fakeMailboxStore struct {
-	items map[string]runtime.MailboxItem
+	items map[string]runtimetools.MailboxItem
 }
 
-func newFakeMailbox(items ...runtime.MailboxItem) *fakeMailboxStore {
-	m := &fakeMailboxStore{items: map[string]runtime.MailboxItem{}}
+func newFakeMailbox(items ...runtimetools.MailboxItem) *fakeMailboxStore {
+	m := &fakeMailboxStore{items: map[string]runtimetools.MailboxItem{}}
 	for _, it := range items {
 		m.items[it.ID] = it
 	}
 	return m
 }
 
-func (m *fakeMailboxStore) InsertMailboxItem(_ context.Context, item runtime.MailboxItem) (string, error) {
+func (m *fakeMailboxStore) InsertMailboxItem(_ context.Context, item runtimetools.MailboxItem) (string, error) {
 	if strings.TrimSpace(item.ID) == "" {
 		item.ID = "id-" + strings.TrimSpace(item.Type)
 	}
@@ -133,14 +133,14 @@ func (m *fakeMailboxStore) InsertMailboxItem(_ context.Context, item runtime.Mai
 	return item.ID, nil
 }
 
-func (m *fakeMailboxStore) ListMailboxItems(_ context.Context, status string, limit int) ([]runtime.MailboxItem, error) {
+func (m *fakeMailboxStore) ListMailboxItems(_ context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if strings.TrimSpace(status) == "" {
 		status = "pending"
 	}
-	out := make([]runtime.MailboxItem, 0, len(m.items))
+	out := make([]runtimetools.MailboxItem, 0, len(m.items))
 	for _, it := range m.items {
 		if it.Status == status {
 			out = append(out, it)
@@ -165,10 +165,10 @@ func (m *fakeMailboxStore) CountMailboxItems(_ context.Context, status string) (
 	return n, nil
 }
 
-func (m *fakeMailboxStore) GetMailboxItem(_ context.Context, id string) (runtime.MailboxItem, error) {
+func (m *fakeMailboxStore) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
 	it, ok := m.items[id]
 	if !ok {
-		return runtime.MailboxItem{}, context.Canceled
+		return runtimetools.MailboxItem{}, context.Canceled
 	}
 	return it, nil
 }
@@ -182,11 +182,11 @@ func (m *fakeMailboxStore) DecideMailboxItem(_ context.Context, id, status, deci
 	return nil
 }
 
-func (m *fakeMailboxStore) ExpireMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (m *fakeMailboxStore) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 
-func (m *fakeMailboxStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (m *fakeMailboxStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 
@@ -221,7 +221,7 @@ func TestMailbox_NormalizeDecisionAction(t *testing.T) {
 
 func TestMailbox_DecideAndPrints(t *testing.T) {
 	ctx := context.Background()
-	store := newFakeMailbox(runtime.MailboxItem{
+	store := newFakeMailbox(runtimetools.MailboxItem{
 		ID:         "m1",
 		Type:       "product_spec_review",
 		Priority:   "critical",
@@ -256,7 +256,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 		t.Fatalf("expected no pending items after approve, got %q", buf.String())
 	}
 
-	_, _ = store.InsertMailboxItem(ctx, runtime.MailboxItem{
+	_, _ = store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		ID:         "m2",
 		Type:       "deploy_review",
 		Priority:   "normal",
@@ -283,7 +283,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 }
 
 func TestMailbox_FilterHelpers(t *testing.T) {
-	items := []runtime.MailboxItem{
+	items := []runtimetools.MailboxItem{
 		{ID: "1", Priority: "critical", Type: "escalation"},
 		{ID: "2", Priority: "normal", Type: "product_spec_review"},
 		{ID: "3", Priority: "normal", Type: "deploy_review"},

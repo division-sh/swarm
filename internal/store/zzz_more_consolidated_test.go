@@ -4,8 +4,11 @@ import (
 	"context"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
 	llm "empireai/internal/runtime/llm"
+	runtimellm "empireai/internal/runtime/llm"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"encoding/json"
 	"github.com/google/uuid"
@@ -417,7 +420,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		t.Fatalf("seed vertical: %v", err)
 	}
 
-	id, err := s.InsertMailboxItem(ctx, runtime.MailboxItem{
+	id, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "empire-coordinator",
 		Type:       "spend_request",
@@ -453,7 +456,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		t.Fatal("expected invalid status error")
 	}
 
-	expID, err := s.InsertMailboxItem(ctx, runtime.MailboxItem{
+	expID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "empire-coordinator",
 		Type:       "review",
@@ -482,7 +485,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		t.Fatalf("expected expired item in result")
 	}
 
-	critID, err := s.InsertMailboxItem(ctx, runtime.MailboxItem{
+	critID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
 		FromAgent:  "empire-coordinator",
 		Type:       "spend_request",
@@ -598,7 +601,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 		t.Fatalf("seed agent: %v", err)
 	}
 
-	once := runtime.Schedule{
+	once := runtimepipeline.Schedule{
 		AgentID:   "a1",
 		EventType: "system.directive",
 		Mode:      "once",
@@ -629,7 +632,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 		}
 	}
 
-	recurring := runtime.Schedule{
+	recurring := runtimepipeline.Schedule{
 		AgentID:   "a1",
 		EventType: "system.started",
 		Mode:      "cron",
@@ -857,7 +860,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("seed agents: %v", err)
 	}
 
-	if err := pg.UpsertRoutingRule(ctx, runtime.PersistedRoutingRule{
+	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
 		VerticalID:   verticalID,
 		EventPattern: "x.*",
 		SubscriberID: "sub",
@@ -867,7 +870,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertRoutingRule: %v", err)
 	}
-	if err := pg.UpsertRoutingRule(ctx, runtime.PersistedRoutingRule{
+	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
 		VerticalID:   verticalID,
 		EventPattern: "y.*",
 		SubscriberID: "sub",
@@ -969,7 +972,7 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 		t.Fatalf("seed agents: %v", err)
 	}
 
-	r := runtime.PersistedRoutingRule{
+	r := runtimemanager.PersistedRoutingRule{
 		VerticalID:       verticalID,
 		EventPattern:     "inbound.*",
 		SubscriberID:     "sub",
@@ -1017,7 +1020,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		t.Fatalf("seed agent: %v", err)
 	}
 
-	if err := pg.UpsertConversation(ctx, runtime.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		AgentID: "a1",
 		Messages: []llm.Message{
 			{Role: "user", Content: "reach me at a@example.com"},
@@ -1037,7 +1040,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		t.Fatalf("expected redacted email, got %#v", rec.Messages)
 	}
 
-	if err := pg.AppendAgentTurn(ctx, runtime.AgentTurnRecord{AgentID: "a1", RuntimeMode: "cli_test", SessionID: "s1"}); err == nil {
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{AgentID: "a1", RuntimeMode: "cli_test", SessionID: "s1"}); err == nil {
 		t.Fatalf("expected missing session row error")
 	}
 	var sessionRowID string
@@ -1049,7 +1052,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		t.Fatalf("seed agent_sessions: %v", err)
 	}
 	_ = sessionRowID
-	if err := pg.AppendAgentTurn(ctx, runtime.AgentTurnRecord{
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		RuntimeMode:    "cli_test",
 		SessionID:      "s1",
@@ -1068,7 +1071,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	rec := runtime.PersistedAgent{
+	rec := runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:            "a1",
 			Type:          "sonnet",
@@ -1100,7 +1103,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 		t.Fatalf("expected agent loaded")
 	}
 
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{Config: models.AgentConfig{}}); err == nil {
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: models.AgentConfig{}}); err == nil {
 		t.Fatalf("expected agent id required error")
 	}
 
@@ -1146,7 +1149,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("SetVerticalTemplateVersion: %v", err)
 	}
 
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         "a1",
 			Role:       "role",
@@ -1165,7 +1168,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err := pg.MarkAgentTerminated(ctx, "a1"); err != nil {
 		t.Fatalf("MarkAgentTerminated: %v", err)
 	}
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         "ephemeral-shard-1",
 			Role:       "market-research-agent",
@@ -1195,7 +1198,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	ceoID := "opco-ceo-" + verticalID
-	_ = pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         ceoID,
 			Role:       "opco-ceo",
@@ -1209,7 +1212,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		StartedAt:       time.Now().UTC(),
 		TemplateVersion: "v2",
 	})
-	if err := pg.UpsertRoutingRule(ctx, runtime.PersistedRoutingRule{
+	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
 		VerticalID:   verticalID,
 		EventPattern: "board.*",
 		SubscriberID: ceoID,
@@ -1261,7 +1264,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	`, ceoID); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	if err := pg.AppendAgentTurn(ctx, runtime.AgentTurnRecord{
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        ceoID,
 		RuntimeMode:    "cli_test",
 		SessionID:      "s1",
@@ -1276,7 +1279,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
 
-	if err := pg.UpsertConversation(ctx, runtime.ConversationRecord{
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		AgentID:   ceoID,
 		TaskID:    "",
 		Mode:      "session",
@@ -1291,7 +1294,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v rec=%+v", ok, err, rec)
 	}
 
-	sc := runtime.Schedule{
+	sc := runtimepipeline.Schedule{
 		AgentID:   ceoID,
 		EventType: "timer.test",
 		Mode:      "cron",
@@ -1317,7 +1320,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:   "agent-cleanup-1",
 			Role: "market-research-agent",
@@ -1436,7 +1439,7 @@ func TestScanCampaigns_CRUDAndTransitions(t *testing.T) {
 	}
 
 	next := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
-	c1, err := s.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{
+	c1, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
 		GeographyID:    geoID,
 		Mode:           "factory",
 		Categories:     []string{"saas", "b2b"},
@@ -1458,7 +1461,7 @@ func TestScanCampaigns_CRUDAndTransitions(t *testing.T) {
 		t.Fatalf("expected next_rescan_at=%s got=%v", next.Format(time.RFC3339), c1.NextRescanAt)
 	}
 
-	c2, err := s.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{
+	c2, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
 		GeographyID: geoID,
 		Mode:        "factory",
 		Priority:    "high",
@@ -1471,7 +1474,7 @@ func TestScanCampaigns_CRUDAndTransitions(t *testing.T) {
 		t.Fatalf("expected high priority, got %q", c2.Priority)
 	}
 
-	list, err := s.ListScanCampaigns(ctx, runtime.ScanCampaignFilter{Status: "queued", Limit: 10})
+	list, err := s.ListScanCampaigns(ctx, runtimepipeline.ScanCampaignFilter{Status: "queued", Limit: 10})
 	if err != nil {
 		t.Fatalf("ListScanCampaigns: %v", err)
 	}
@@ -1571,12 +1574,12 @@ func TestParseRescanInterval(t *testing.T) {
 
 func TestCreateScanCampaign_Validations(t *testing.T) {
 	ctx := context.Background()
-	if _, err := (*PostgresStore)(nil).CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{}); err == nil {
+	if _, err := (*PostgresStore)(nil).CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{}); err == nil {
 		t.Fatalf("expected store required error")
 	}
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
-	if _, err := s.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{GeographyID: "", Mode: ""}); err == nil {
+	if _, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{GeographyID: "", Mode: ""}); err == nil {
 		t.Fatalf("expected required fields error")
 	}
 }
@@ -1598,10 +1601,10 @@ func TestScanCampaigns_MoreBranches(t *testing.T) {
 		t.Fatalf("expected no claim ok=%v err=%v", ok, err)
 	}
 
-	if _, err := s.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{GeographyID: geoID, Mode: "factory"}); err != nil {
+	if _, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{GeographyID: geoID, Mode: "factory"}); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	list, err := s.ListScanCampaigns(ctx, runtime.ScanCampaignFilter{})
+	list, err := s.ListScanCampaigns(ctx, runtimepipeline.ScanCampaignFilter{})
 	if err != nil || len(list) == 0 {
 		t.Fatalf("ListScanCampaigns default err=%v len=%d", err, len(list))
 	}
@@ -1610,7 +1613,7 @@ func TestScanCampaigns_MoreBranches(t *testing.T) {
 		t.Fatalf("expected campaign_id required")
 	}
 
-	c, err := s.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{GeographyID: geoID, Mode: "factory", Status: "queued", RescanInterval: "bad"})
+	c, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{GeographyID: geoID, Mode: "factory", Status: "queued", RescanInterval: "bad"})
 	if err != nil {
 		t.Fatalf("create bad interval: %v", err)
 	}

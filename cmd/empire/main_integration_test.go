@@ -15,7 +15,7 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/mailbox"
-	"empireai/internal/runtime"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -274,19 +274,21 @@ func TestTelegramHelpers_RenderAndDeliver(t *testing.T) {
 }
 
 type stubScheduleStore struct {
-	last runtime.Schedule
+	last runtimepipeline.Schedule
 }
 
-func (s *stubScheduleStore) UpsertSchedule(ctx context.Context, sc runtime.Schedule) error {
+func (s *stubScheduleStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
 	_ = ctx
 	s.last = sc
 	return nil
 }
 func (s *stubScheduleStore) CancelSchedule(context.Context, string, string) error { return nil }
-func (s *stubScheduleStore) LoadActiveSchedules(context.Context) ([]runtime.Schedule, error) {
+func (s *stubScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
 	return nil, nil
 }
-func (s *stubScheduleStore) MarkScheduleFired(context.Context, runtime.Schedule) error { return nil }
+func (s *stubScheduleStore) MarkScheduleFired(context.Context, runtimepipeline.Schedule) error {
+	return nil
+}
 
 func TestOpsMonitors_EnsureDigestScheduleAndCompactRender(t *testing.T) {
 	st := &stubScheduleStore{}

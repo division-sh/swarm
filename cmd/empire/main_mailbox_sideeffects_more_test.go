@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"empireai/internal/mailbox"
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -39,7 +39,7 @@ func TestEmitMailboxDecisionSideEffects_Branches(t *testing.T) {
 	stores := storeBundle{SQLDB: db, EventStore: pg, ScanCampaignStore: pg}
 
 	// more_data -> vertical.needs_more_data targeted to empire-coordinator.
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "product_spec_review",
@@ -49,7 +49,7 @@ func TestEmitMailboxDecisionSideEffects_Branches(t *testing.T) {
 	}
 
 	// spend approved -> spend.approved targeted to opco-ceo.
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "budget_increase",
@@ -59,7 +59,7 @@ func TestEmitMailboxDecisionSideEffects_Branches(t *testing.T) {
 	}
 
 	// spend rejected with holding FromAgent routes back to requester.
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:        uuid.NewString(),
 		Type:      "devops.capacity_warning",
 		FromAgent: "holding-devops",
@@ -69,7 +69,7 @@ func TestEmitMailboxDecisionSideEffects_Branches(t *testing.T) {
 	}
 
 	// founder_input.response -> opco-ceo recipient.
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "review",
@@ -79,7 +79,7 @@ func TestEmitMailboxDecisionSideEffects_Branches(t *testing.T) {
 	}
 
 	// escalation response -> opco-ceo recipient.
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "escalation",
@@ -89,7 +89,7 @@ func TestEmitMailboxDecisionSideEffects_Branches(t *testing.T) {
 	}
 
 	// geography expansion approval -> geography + scan campaign + coordinator event.
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "domain_approval",
@@ -171,7 +171,7 @@ func TestEmitMailboxDecisionSideEffects_VerticalApprovalRoutesToCoordinator(t *t
 	}
 
 	stores := storeBundle{SQLDB: db, EventStore: pg}
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "vertical_approval",
@@ -179,7 +179,7 @@ func TestEmitMailboxDecisionSideEffects_VerticalApprovalRoutesToCoordinator(t *t
 	}, mailbox.DecisionOutcome{Status: "approved", Decision: "approve"}, "ship"); err != nil {
 		t.Fatalf("approved side effects: %v", err)
 	}
-	if err := emitMailboxDecisionSideEffects(ctx, stores, runtime.MailboxItem{
+	if err := emitMailboxDecisionSideEffects(ctx, stores, runtimetools.MailboxItem{
 		ID:         uuid.NewString(),
 		VerticalID: verticalID,
 		Type:       "vertical_approval",
@@ -215,7 +215,7 @@ func TestRunOperatorActions_FlagValidation(t *testing.T) {
 	// Mailbox decide requires decision.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	mbID, _ := pg.InsertMailboxItem(context.Background(), runtime.MailboxItem{Type: "budget_increase", Status: "pending", Context: []byte(`{}`)})
+	mbID, _ := pg.InsertMailboxItem(context.Background(), runtimetools.MailboxItem{Type: "budget_increase", Status: "pending", Context: []byte(`{}`)})
 	if err := runOperatorActions(context.Background(), storeBundle{SQLDB: db, MailboxStore: pg, EventStore: pg}, operatorOptions{mailboxDecideID: mbID}); err == nil {
 		t.Fatalf("expected mailbox decision required error")
 	}

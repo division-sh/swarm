@@ -8,7 +8,9 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -49,18 +51,18 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Upsert agent + load agents.
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
-			ID:        "empire-coordinator",
-			Role:      "empire-coordinator",
-			Mode:      "holding",
+			ID:         "empire-coordinator",
+			Role:       "empire-coordinator",
+			Mode:       "holding",
 			VerticalID: "",
 			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
 			Config: json.RawMessage(`{"system_prompt":"You are empire coordinator.","tools":[],"subscriptions":["system.started"]}`),
 		},
-		Status:    "active",
-		HiredBy:    "test",
-		StartedAt:  time.Now().UTC(),
+		Status:          "active",
+		HiredBy:         "test",
+		StartedAt:       time.Now().UTC(),
 		TemplateVersion: "2.0.1",
 	}); err != nil {
 		t.Fatalf("upsert agent: %v", err)
@@ -72,31 +74,31 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Seed an OpCo CEO agent id so routing_rules FK constraints are satisfied.
 	ceoID := "opco-ceo-" + verticalID
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
-			ID:        ceoID,
-			Role:      "opco-ceo",
-			Mode:      "operating",
+			ID:         ceoID,
+			Role:       "opco-ceo",
+			Mode:       "operating",
 			VerticalID: verticalID,
 			Config:     json.RawMessage(`{"system_prompt":"You are an OpCo CEO.","tools":[],"subscriptions":["board.*"]}`),
 		},
-		Status:    "active",
-		HiredBy:    "test",
-		StartedAt:  time.Now().UTC(),
+		Status:          "active",
+		HiredBy:         "test",
+		StartedAt:       time.Now().UTC(),
 		TemplateVersion: "2.0.1",
 	}); err != nil {
 		t.Fatalf("upsert ceo agent: %v", err)
 	}
 
 	// Routing rules.
-	rule := runtime.PersistedRoutingRule{
-		VerticalID:   verticalID,
-		EventPattern: "board.*",
-		SubscriberID: ceoID,
-		InstalledBy:  "empire-coordinator",
-		Reason:       "tests",
-		Status:       "active",
-		Source:       "bootstrap",
+	rule := runtimemanager.PersistedRoutingRule{
+		VerticalID:       verticalID,
+		EventPattern:     "board.*",
+		SubscriberID:     ceoID,
+		InstalledBy:      "empire-coordinator",
+		Reason:           "tests",
+		Status:           "active",
+		Source:           "bootstrap",
 		BootstrapVersion: 1,
 	}
 	if err := pg.UpsertRoutingRule(ctx, rule); err != nil {
@@ -126,7 +128,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Mailbox.
-	mbID, err := pg.InsertMailboxItem(ctx, runtime.MailboxItem{
+	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EventID:    evt.ID,
 		VerticalID: verticalID,
 		FromAgent:  "empire-coordinator",
@@ -174,7 +176,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Scan campaigns.
-	camp, err := pg.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{
+	camp, err := pg.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
 		GeographyID: geoID,
 		Mode:        "seed",
 		Categories:  []string{"local"},
@@ -184,7 +186,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if err != nil || camp.ID == "" {
 		t.Fatalf("create scan campaign err=%v camp=%+v", err, camp)
 	}
-	if got, err := pg.ListScanCampaigns(ctx, runtime.ScanCampaignFilter{Status: "queued", Limit: 10}); err != nil || len(got) == 0 {
+	if got, err := pg.ListScanCampaigns(ctx, runtimepipeline.ScanCampaignFilter{Status: "queued", Limit: 10}); err != nil || len(got) == 0 {
 		t.Fatalf("list scan campaigns err=%v len=%d", err, len(got))
 	}
 	claimed, ok, err := pg.ClaimNextDueScanCampaign(ctx)

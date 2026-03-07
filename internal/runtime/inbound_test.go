@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
 )
 
 type inboundStoreStub struct {
@@ -43,16 +44,16 @@ func (s *inboundStoreStub) PurgeInboundEventsBefore(context.Context, time.Time, 
 }
 
 func TestInboundGatewayPublishesEvent(t *testing.T) {
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &inboundStoreStub{}
 	g := NewInboundGateway(bus, store)
 
-		_ = bus.SetRoutingTable("v1", &RoutingTable{
-			VerticalID: "v1",
-			Routes: []Route{
-				{EventPattern: "inbound.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
-			},
-		})
+	_ = bus.SetRoutingTable("v1", &runtimebus.RoutingTable{
+		VerticalID: "v1",
+		Routes: []runtimebus.Route{
+			{EventPattern: "inbound.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
+		},
+	})
 	ch := bus.Subscribe("test-agent")
 	body := `{"id":"evt-1","text":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/v1/whatsapp", strings.NewReader(body))
@@ -78,12 +79,12 @@ func TestInboundGatewayPublishesEvent(t *testing.T) {
 }
 
 func TestInboundGatewayDeduplicates(t *testing.T) {
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &inboundStoreStub{}
 	g := NewInboundGateway(bus, store)
-	_ = bus.SetRoutingTable("v1", &RoutingTable{
+	_ = bus.SetRoutingTable("v1", &runtimebus.RoutingTable{
 		VerticalID: "v1",
-		Routes: []Route{
+		Routes: []runtimebus.Route{
 			{EventPattern: "inbound.whatsapp_message", SubscriberID: "test-agent", Status: "active"},
 		},
 	})

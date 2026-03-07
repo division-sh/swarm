@@ -10,8 +10,9 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimeagents "empireai/internal/runtime/agents"
 	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimeagents "empireai/internal/runtime/agents"
+	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
@@ -24,7 +25,7 @@ func TestRuntimeToolExecutor_HumanTaskRequest_InsertsAndEmits(t *testing.T) {
 	}
 	defer db.Close()
 
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	reqCh := bus.Subscribe("coordinator", events.EventType("human_task.requested"))
 
 	exec := runtimetools.NewExecutor(bus, nil, nil)
@@ -102,7 +103,7 @@ func TestRuntimeToolExecutor_HumanTaskDecide_ApprovalBudgetExhaustedForcesDeferr
 	}
 	defer db.Close()
 
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	// Create channel for requesting agent without subscribing to any patterns.
 	reqAgentCh := bus.Subscribe("agent-req")
 	coordCh := bus.Subscribe("coordinator", events.EventType("human_task.*"))

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type Snapshot struct {
@@ -15,7 +16,7 @@ type Snapshot struct {
 	TopVerticals    []runtime.VerticalDigestRow
 }
 
-func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mailbox runtime.MailboxPersistence, topN int) (Snapshot, error) {
+func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mailbox runtimetools.MailboxPersistence, topN int) (Snapshot, error) {
 	if portfolio == nil {
 		return Snapshot{}, fmt.Errorf("portfolio digest source is required")
 	}

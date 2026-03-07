@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -123,6 +123,5 @@ func TestTelegramTaskCommands_EndToEndAgainstPostgres(t *testing.T) {
 	}
 
 	// Touch runtime symbol for imports (storeBundle uses runtime interfaces).
-	_ = runtime.MailboxItem{}
+	_ = runtimetools.MailboxItem{}
 }
-

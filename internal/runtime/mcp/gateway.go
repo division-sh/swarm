@@ -10,8 +10,8 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	llm "empireai/internal/runtime/llm"
 	runtimebus "empireai/internal/runtime/bus"
+	llm "empireai/internal/runtime/llm"
 )
 
 type GatewayHooks struct {
@@ -155,7 +155,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 	case "initialize":
 		WriteRPCResult(w, req.ID, map[string]any{
 			"protocolVersion": "2025-03-26",
-			"capabilities": map[string]any{"tools": map[string]any{}},
+			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo": map[string]any{
 				"name":    "empire-tool-gateway",
 				"version": "1.0.0",

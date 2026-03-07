@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 func TestWebhookNotifier(t *testing.T) {
@@ -18,7 +18,7 @@ func TestWebhookNotifier(t *testing.T) {
 	defer srv.Close()
 
 	n := &WebhookNotifier{URL: srv.URL, Client: srv.Client()}
-	if err := n.NotifyCritical(context.Background(), runtime.MailboxItem{ID: "m1", Type: "escalation"}); err != nil {
+	if err := n.NotifyCritical(context.Background(), runtimetools.MailboxItem{ID: "m1", Type: "escalation"}); err != nil {
 		t.Fatalf("notify webhook: %v", err)
 	}
 	if !called {
@@ -40,7 +40,7 @@ func TestTelegramNotifier(t *testing.T) {
 		BaseURL:  srv.URL,
 		Client:   srv.Client(),
 	}
-	if err := n.NotifyCritical(context.Background(), runtime.MailboxItem{ID: "m1", Type: "escalation"}); err != nil {
+	if err := n.NotifyCritical(context.Background(), runtimetools.MailboxItem{ID: "m1", Type: "escalation"}); err != nil {
 		t.Fatalf("notify telegram: %v", err)
 	}
 	if !called {
@@ -52,7 +52,7 @@ type notifierStub struct {
 	err error
 }
 
-func (n notifierStub) NotifyCritical(context.Context, runtime.MailboxItem) error { return n.err }
+func (n notifierStub) NotifyCritical(context.Context, runtimetools.MailboxItem) error { return n.err }
 
 func TestMultiCriticalNotifier(t *testing.T) {
 	m := NewMultiCriticalNotifier(
@@ -62,7 +62,7 @@ func TestMultiCriticalNotifier(t *testing.T) {
 	if m == nil {
 		t.Fatal("expected notifier")
 	}
-	if err := m.NotifyCritical(context.Background(), runtime.MailboxItem{ID: "m1"}); err != nil {
+	if err := m.NotifyCritical(context.Background(), runtimetools.MailboxItem{ID: "m1"}); err != nil {
 		t.Fatalf("expected at least one notifier success: %v", err)
 	}
 }

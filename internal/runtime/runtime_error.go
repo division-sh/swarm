@@ -10,7 +10,7 @@ func NewRuntimeError(code, component, operation string, retryable bool, format s
 	return runtimerterr.NewRuntimeError(code, component, operation, retryable, format, args...)
 }
 
-func AsRuntimeError(err error) (*RuntimeError, bool) {
+func AsRuntimeError(err error) (*runtimerterr.RuntimeError, bool) {
 	return runtimerterr.AsRuntimeError(err)
 }
 

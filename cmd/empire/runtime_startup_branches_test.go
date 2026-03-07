@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -15,10 +15,10 @@ import (
 // managerStoreFailLoad forces AgentManager.Recover to fail early so runRuntime
 // exercises the recovery error hardening path.
 type managerStoreFailLoad struct {
-	runtime.ManagerPersistence
+	runtimemanager.ManagerPersistence
 }
 
-func (m managerStoreFailLoad) LoadAgents(context.Context) ([]runtime.PersistedAgent, error) {
+func (m managerStoreFailLoad) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return nil, context.Canceled
 }
 

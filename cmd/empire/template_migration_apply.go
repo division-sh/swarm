@@ -12,6 +12,7 @@ import (
 	"empireai/internal/models"
 	"empireai/internal/runtime"
 	runtimemanager "empireai/internal/runtime/manager"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
@@ -233,7 +234,7 @@ func executeMigrationOp(
 		if src == "bootstrap" || src == "seeded" {
 			bv = resolveBootstrapVersionForTemplate(ctx, db, toVersion)
 		}
-		rule := runtime.PersistedRoutingRule{
+		rule := runtimemanager.PersistedRoutingRule{
 			VerticalID:       verticalID,
 			EventPattern:     strings.TrimSpace(op.EventPattern),
 			SubscriberID:     strings.TrimSpace(op.SubscriberID),
@@ -253,7 +254,7 @@ func executeMigrationOp(
 		if src == "bootstrap" || src == "seeded" {
 			bv = resolveBootstrapVersionForTemplate(ctx, db, toVersion)
 		}
-		rule := runtime.PersistedRoutingRule{
+		rule := runtimemanager.PersistedRoutingRule{
 			VerticalID:       verticalID,
 			EventPattern:     strings.TrimSpace(op.EventPattern),
 			SubscriberID:     strings.TrimSpace(op.SubscriberID),
@@ -330,14 +331,14 @@ func failTemplateMigration(ctx context.Context, stores storeBundle, migrationID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
 	})
-		if stores.MailboxStore != nil {
-			_, _ = stores.MailboxStore.InsertMailboxItem(ctx, runtime.MailboxItem{
-				VerticalID: verticalID,
-				FromAgent:  executedBy,
-				Type:       "digest",
-				Priority:   "normal",
-				Status:     "pending",
-				Context:    payload,
+	if stores.MailboxStore != nil {
+		_, _ = stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+			VerticalID: verticalID,
+			FromAgent:  executedBy,
+			Type:       "digest",
+			Priority:   "normal",
+			Status:     "pending",
+			Context:    payload,
 			Summary:    fmt.Sprintf("Template migration failed: %s", migrationID),
 		})
 	}

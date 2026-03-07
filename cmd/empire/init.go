@@ -17,6 +17,8 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/specaudit"
 	"empireai/internal/templateops"
 	"github.com/google/uuid"
@@ -94,7 +96,7 @@ func runInitSubcommand(args []string) error {
 	return runRuntime(ctx, cfg, stores, opts.SelfCheck)
 }
 
-func ensureInitialTemplateCLI(ctx context.Context, db *sql.DB, mailbox runtime.MailboxPersistence, version, agentsDir, routesYAML string) error {
+func ensureInitialTemplateCLI(ctx context.Context, db *sql.DB, mailbox runtimetools.MailboxPersistence, version, agentsDir, routesYAML string) error {
 	if db == nil {
 		return fmt.Errorf("db unavailable")
 	}
@@ -126,7 +128,7 @@ func ensureInitialTemplateCLI(ctx context.Context, db *sql.DB, mailbox runtime.M
 	return nil
 }
 
-func seedGlobalAgentsFromYAML(ctx context.Context, store runtime.ManagerPersistence, agentsDir string) error {
+func seedGlobalAgentsFromYAML(ctx context.Context, store runtimemanager.ManagerPersistence, agentsDir string) error {
 	agents, err := templateops.LoadGlobalAgentsFromYAML(strings.TrimSpace(agentsDir))
 	if err != nil {
 		return err
@@ -137,8 +139,8 @@ func seedGlobalAgentsFromYAML(ctx context.Context, store runtime.ManagerPersiste
 			desired[id] = struct{}{}
 		}
 	}
-	existingByID := make(map[string]runtime.PersistedAgent, len(agents))
-	existingAll := make([]runtime.PersistedAgent, 0, len(agents))
+	existingByID := make(map[string]runtimemanager.PersistedAgent, len(agents))
+	existingAll := make([]runtimemanager.PersistedAgent, 0, len(agents))
 	if existing, loadErr := store.LoadAgents(ctx); loadErr == nil {
 		existingAll = existing
 		for _, rec := range existing {
@@ -153,7 +155,7 @@ func seedGlobalAgentsFromYAML(ctx context.Context, store runtime.ManagerPersiste
 		if cfg.ID == "" {
 			continue
 		}
-		rec := runtime.PersistedAgent{
+		rec := runtimemanager.PersistedAgent{
 			Config:    cfg,
 			Status:    "active",
 			HiredBy:   "runtime-sync",

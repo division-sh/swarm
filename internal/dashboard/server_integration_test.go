@@ -103,7 +103,7 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 	}
 
 	bus := rt.NewEventBus(pg)
-	factory := func(cfg models.AgentConfig) (rt.Agent, error) {
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		// Use configured subscriptions when present.
 		subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 		for _, s := range cfg.Subscriptions {

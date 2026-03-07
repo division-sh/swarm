@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 )
 
-func (s *PostgresStore) GetPromptOverride(ctx context.Context, agentID string) (runtime.PromptOverrideRecord, bool, error) {
+func (s *PostgresStore) GetPromptOverride(ctx context.Context, agentID string) (runtimemanager.PromptOverrideRecord, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return runtime.PromptOverrideRecord{}, false, fmt.Errorf("agent_id is required")
+		return runtimemanager.PromptOverrideRecord{}, false, fmt.Errorf("agent_id is required")
 	}
-	var rec runtime.PromptOverrideRecord
+	var rec runtimemanager.PromptOverrideRecord
 	rec.AgentID = agentID
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT
@@ -36,14 +36,14 @@ func (s *PostgresStore) GetPromptOverride(ctx context.Context, agentID string) (
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return runtime.PromptOverrideRecord{}, false, nil
+			return runtimemanager.PromptOverrideRecord{}, false, nil
 		}
-		return runtime.PromptOverrideRecord{}, false, fmt.Errorf("get prompt override: %w", err)
+		return runtimemanager.PromptOverrideRecord{}, false, fmt.Errorf("get prompt override: %w", err)
 	}
 	return rec, true, nil
 }
 
-func (s *PostgresStore) UpsertPromptOverride(ctx context.Context, rec runtime.PromptOverrideRecord) error {
+func (s *PostgresStore) UpsertPromptOverride(ctx context.Context, rec runtimemanager.PromptOverrideRecord) error {
 	rec.AgentID = strings.TrimSpace(rec.AgentID)
 	rec.Prompt = strings.TrimSpace(rec.Prompt)
 	rec.PreviousPrompt = strings.TrimSpace(rec.PreviousPrompt)

@@ -6,15 +6,15 @@ import (
 	"fmt"
 	"strings"
 
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 )
 
-func (s *PostgresStore) GetVerticalInfo(ctx context.Context, verticalID string) (runtime.VerticalInfo, bool, error) {
+func (s *PostgresStore) GetVerticalInfo(ctx context.Context, verticalID string) (runtimemanager.VerticalInfo, bool, error) {
 	verticalID = strings.TrimSpace(verticalID)
 	if verticalID == "" {
-		return runtime.VerticalInfo{}, false, fmt.Errorf("vertical_id is required")
+		return runtimemanager.VerticalInfo{}, false, fmt.Errorf("vertical_id is required")
 	}
-	var v runtime.VerticalInfo
+	var v runtimemanager.VerticalInfo
 	v.ID = verticalID
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT name, COALESCE(slug,''), COALESCE(geography,''), COALESCE(stage,'')
@@ -22,9 +22,9 @@ func (s *PostgresStore) GetVerticalInfo(ctx context.Context, verticalID string) 
 		WHERE id = $1::uuid
 	`, verticalID).Scan(&v.Name, &v.Slug, &v.Geography, &v.Stage); err != nil {
 		if err == sql.ErrNoRows {
-			return runtime.VerticalInfo{}, false, nil
+			return runtimemanager.VerticalInfo{}, false, nil
 		}
-		return runtime.VerticalInfo{}, false, fmt.Errorf("get vertical info: %w", err)
+		return runtimemanager.VerticalInfo{}, false, fmt.Errorf("get vertical info: %w", err)
 	}
 	return v, true, nil
 }

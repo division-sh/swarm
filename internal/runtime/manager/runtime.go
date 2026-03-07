@@ -680,7 +680,7 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 				VerticalID:  verticalID,
 				Payload: mustJSON(map[string]any{
 					"vertical_id": verticalID,
-				"reason":      FirstNonEmptyString(strings.TrimSpace(payload.Reason), "opco teardown requested"),
+					"reason":      FirstNonEmptyString(strings.TrimSpace(payload.Reason), "opco teardown requested"),
 					"source":      "opco.teardown_requested",
 				}),
 				CreatedAt: time.Now(),

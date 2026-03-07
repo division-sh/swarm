@@ -15,8 +15,9 @@ import (
 	"empireai/internal/events"
 	mailboxsvc "empireai/internal/mailbox"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/specaudit"
 	"empireai/internal/store"
 	"empireai/internal/templateops"
@@ -996,7 +997,7 @@ func (s *Server) hasSystemStarted(ctx context.Context) (bool, error) {
 
 func (s *Server) emitMailboxDecisionSideEffects(
 	ctx context.Context,
-	item runtime.MailboxItem,
+	item runtimetools.MailboxItem,
 	outcome mailboxsvc.DecisionOutcome,
 	notes string,
 ) error {
@@ -1161,7 +1162,7 @@ func (s *Server) emitMailboxDecisionSideEffects(
 
 func (s *Server) queueGeographyExpansionValidation(
 	ctx context.Context,
-	item runtime.MailboxItem,
+	item runtimetools.MailboxItem,
 ) (string, geographyExpansionRequest, string, error) {
 	req := parseGeographyExpansionRequest(item.Context)
 	if strings.TrimSpace(req.Geography) == "" {
@@ -1175,7 +1176,7 @@ func (s *Server) queueGeographyExpansionValidation(
 		return "", req, "", err
 	}
 	pg := &store.PostgresStore{DB: s.db}
-	campaign, err := pg.CreateScanCampaign(ctx, runtime.CreateScanCampaignInput{
+	campaign, err := pg.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
 		GeographyID: geoID,
 		Mode:        req.Mode,
 		Categories:  req.Categories,

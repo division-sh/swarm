@@ -9,8 +9,8 @@ import (
 	"time"
 
 	runtimeactor "empireai/internal/runtime/actorctx"
-	runtimecorpus "empireai/internal/runtime/corpusobs"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimecorpus "empireai/internal/runtime/corpusobs"
 	llm "empireai/internal/runtime/llm"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimetools "empireai/internal/runtime/tools"
@@ -221,18 +221,18 @@ func runtimeMCPLogCorpusFirstEmit(logger *RuntimeLogger, ctx context.Context, r 
 	})
 }
 
-func DefaultMCPStallDiagnosticConfig() MCPStallDiagnosticConfig {
+func DefaultMCPStallDiagnosticConfig() runtimemcp.StallDiagnosticConfig {
 	return runtimemcp.DefaultStallDiagnosticConfig()
 }
 
-func StartMCPStallDiagnosticLoop(ctx context.Context, db *sql.DB, logger *RuntimeLogger, cfg MCPStallDiagnosticConfig) {
+func StartMCPStallDiagnosticLoop(ctx context.Context, db *sql.DB, logger *RuntimeLogger, cfg runtimemcp.StallDiagnosticConfig) {
 	if logger == nil {
 		return
 	}
 	runtimemcp.StartStallDiagnosticLoop(ctx, db, runtimeMCPDiagnosticLogger(logger), cfg)
 }
 
-func runMCPStallDiagnosticsPass(ctx context.Context, db *sql.DB, logger *RuntimeLogger, cfg MCPStallDiagnosticConfig) {
+func runMCPStallDiagnosticsPass(ctx context.Context, db *sql.DB, logger *RuntimeLogger, cfg runtimemcp.StallDiagnosticConfig) {
 	runtimemcp.ResetStallDiagnosticsForTest()
 	mcpStallDiagSeen = sync.Map{}
 	if logger == nil {

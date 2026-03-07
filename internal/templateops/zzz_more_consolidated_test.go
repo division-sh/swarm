@@ -2,7 +2,7 @@ package templateops
 
 import (
 	"context"
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"encoding/json"
@@ -16,7 +16,7 @@ type countingMailbox struct {
 	inserted int
 }
 
-func (m *countingMailbox) InsertMailboxItem(ctx context.Context, item runtime.MailboxItem) (string, error) {
+func (m *countingMailbox) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
 	m.inserted++
 	return m.PostgresStore.InsertMailboxItem(ctx, item)
 }

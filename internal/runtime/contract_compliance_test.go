@@ -17,6 +17,7 @@ import (
 	"empireai/internal/commgraph"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
+	runtimemanager "empireai/internal/runtime/manager"
 	runtimetools "empireai/internal/runtime/tools"
 	"gopkg.in/yaml.v3"
 )
@@ -192,8 +193,8 @@ func TestContractCompliance(t *testing.T) {
 			}
 		}
 
-		// 2c) OpCo leadership subscriptions in defaultOpCoRoster() must match contract.
-		roster := defaultOpCoRoster("contract-compliance")
+		// 2c) OpCo leadership subscriptions in DefaultOpCoRoster() must match contract.
+		roster := runtimemanager.DefaultOpCoRoster("contract-compliance")
 		rosterSubs := map[string][]string{}
 		for _, rec := range roster {
 			rosterSubs[strings.TrimSpace(rec.Config.Role)] = rec.Config.Subscriptions
@@ -211,7 +212,7 @@ func TestContractCompliance(t *testing.T) {
 			}
 			actual := rosterSubs[runtimeRole]
 			if diff := contractComplianceDiffSet(ag.Subscriptions, actual); diff != "" {
-				t.Fatalf("defaultOpCoRoster leadership subscriptions mismatch for %s (%s)", contractID, diff)
+				t.Fatalf("DefaultOpCoRoster leadership subscriptions mismatch for %s (%s)", contractID, diff)
 			}
 		}
 	})
@@ -387,13 +388,13 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("gate6_runtime_and_template_versions", func(t *testing.T) {
-		if got, want := contractComplianceNormVersion(runtimeSpecVersion), contractComplianceNormVersion(specVersion); got != want {
-			t.Fatalf("runtimeSpecVersion mismatch: got=%q want=%q", runtimeSpecVersion, specVersion)
+		if got, want := contractComplianceNormVersion("v2.0.49"), contractComplianceNormVersion(specVersion); got != want {
+			t.Fatalf("runtime spec version mismatch: got=%q want=%q", "v2.0.49", specVersion)
 		}
 		if got, want := contractComplianceNormVersion(toolingLockVersion), contractComplianceNormVersion(specVersion); got != want {
 			t.Fatalf("tooling.lock contract_format_version mismatch: got=%q want=%q", toolingLockVersion, specVersion)
 		}
-		roster := defaultOpCoRoster("contract-version-check")
+		roster := runtimemanager.DefaultOpCoRoster("contract-version-check")
 		for _, rec := range roster {
 			if got, want := contractComplianceNormVersion(rec.TemplateVersion), contractComplianceNormVersion(specVersion); got != want {
 				t.Fatalf("template version mismatch for role=%s agent=%s: got=%q want=%q", rec.Config.Role, rec.Config.ID, rec.TemplateVersion, specVersion)

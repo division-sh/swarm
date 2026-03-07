@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type Status struct {
@@ -27,7 +27,7 @@ type DecisionOutcome struct {
 	Decision string
 }
 
-func GetStatus(ctx context.Context, store runtime.MailboxPersistence) (Status, error) {
+func GetStatus(ctx context.Context, store runtimetools.MailboxPersistence) (Status, error) {
 	if store == nil {
 		return Status{}, fmt.Errorf("mailbox store is required")
 	}
@@ -51,7 +51,7 @@ func GetStatus(ctx context.Context, store runtime.MailboxPersistence) (Status, e
 	}, nil
 }
 
-func PrintStatus(ctx context.Context, store runtime.MailboxPersistence, out io.Writer) error {
+func PrintStatus(ctx context.Context, store runtimetools.MailboxPersistence, out io.Writer) error {
 	if out == nil {
 		out = os.Stdout
 	}
@@ -63,11 +63,11 @@ func PrintStatus(ctx context.Context, store runtime.MailboxPersistence, out io.W
 	return err
 }
 
-func PrintPending(ctx context.Context, store runtime.MailboxPersistence, out io.Writer, limit int) error {
+func PrintPending(ctx context.Context, store runtimetools.MailboxPersistence, out io.Writer, limit int) error {
 	return PrintPendingWithOptions(ctx, store, out, ListOptions{Limit: limit})
 }
 
-func PrintPendingWithOptions(ctx context.Context, store runtime.MailboxPersistence, out io.Writer, opts ListOptions) error {
+func PrintPendingWithOptions(ctx context.Context, store runtimetools.MailboxPersistence, out io.Writer, opts ListOptions) error {
 	if store == nil {
 		return fmt.Errorf("mailbox store is required")
 	}
@@ -109,7 +109,7 @@ func PrintPendingWithOptions(ctx context.Context, store runtime.MailboxPersisten
 	return nil
 }
 
-func PrintItem(ctx context.Context, store runtime.MailboxPersistence, out io.Writer, id string) error {
+func PrintItem(ctx context.Context, store runtimetools.MailboxPersistence, out io.Writer, id string) error {
 	if store == nil {
 		return fmt.Errorf("mailbox store is required")
 	}
@@ -131,7 +131,7 @@ func PrintItem(ctx context.Context, store runtime.MailboxPersistence, out io.Wri
 	return err
 }
 
-func Decide(ctx context.Context, store runtime.MailboxPersistence, id, action, notes string) (DecisionOutcome, error) {
+func Decide(ctx context.Context, store runtimetools.MailboxPersistence, id, action, notes string) (DecisionOutcome, error) {
 	if store == nil {
 		return DecisionOutcome{}, fmt.Errorf("mailbox store is required")
 	}
@@ -166,8 +166,8 @@ func NormalizeDecisionAction(action string) (DecisionOutcome, error) {
 	}
 }
 
-func filterPending(items []runtime.MailboxItem, opts ListOptions) []runtime.MailboxItem {
-	out := make([]runtime.MailboxItem, 0, len(items))
+func filterPending(items []runtimetools.MailboxItem, opts ListOptions) []runtimetools.MailboxItem {
+	out := make([]runtimetools.MailboxItem, 0, len(items))
 	for _, item := range items {
 		if opts.CriticalOnly && strings.TrimSpace(item.Priority) != "critical" {
 			continue

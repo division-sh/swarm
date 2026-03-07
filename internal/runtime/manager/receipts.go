@@ -103,7 +103,7 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 	}
 	if corpusMode {
 		duration := time.Since(corpusStartedAt)
-	am.logCorpusTurnLifecycle(ctx, "corpus.turn_completed", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), "")
+		am.logCorpusTurnLifecycle(ctx, "corpus.turn_completed", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), "")
 	}
 	am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "")
 	return nil

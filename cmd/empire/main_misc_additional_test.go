@@ -73,4 +73,3 @@ func TestEditPromptInEditor_SuccessPath(t *testing.T) {
 		t.Fatalf("unexpected edited content: %q", out)
 	}
 }
-

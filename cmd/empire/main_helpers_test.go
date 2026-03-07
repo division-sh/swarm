@@ -10,6 +10,8 @@ import (
 	"empireai/internal/config"
 	"empireai/internal/mailbox"
 	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -29,7 +31,7 @@ func (s *stubInboundStore) PurgeInboundEventsBefore(context.Context, time.Time, 
 
 type stubCriticalNotifier struct{ calls int }
 
-func (s *stubCriticalNotifier) NotifyCritical(context.Context, runtime.MailboxItem) error {
+func (s *stubCriticalNotifier) NotifyCritical(context.Context, runtimetools.MailboxItem) error {
 	s.calls++
 	return nil
 }
@@ -165,7 +167,7 @@ func TestMainHelpers_CoversRuntimeLoopsTasksMailboxAliases(t *testing.T) {
 	{
 		stubMB := &mailboxStoreStub{}
 		notifier := &stubCriticalNotifier{}
-		bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+		bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 		loopCtx, cancel := context.WithCancel(ctx)
 		go mailboxTimeoutLoop(loopCtx, stubMB)
 		go mailboxCriticalNotifyLoop(loopCtx, stubMB, notifier, bus)
@@ -176,7 +178,7 @@ func TestMainHelpers_CoversRuntimeLoopsTasksMailboxAliases(t *testing.T) {
 
 	// Self check (event bus publish/subscribe).
 	{
-		bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+		bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 		if err := runSelfCheck(nil, bus); err != nil {
 			t.Fatalf("runSelfCheck: %v", err)
 		}
@@ -209,21 +211,21 @@ func TestMainHelpers_CoversRuntimeLoopsTasksMailboxAliases(t *testing.T) {
 // mailboxStoreStub is defined in internal/runtime tests; re-define a minimal one here.
 type mailboxStoreStub struct{}
 
-func (m *mailboxStoreStub) InsertMailboxItem(context.Context, runtime.MailboxItem) (string, error) {
+func (m *mailboxStoreStub) InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error) {
 	return "m-1", nil
 }
-func (m *mailboxStoreStub) ListMailboxItems(context.Context, string, int) ([]runtime.MailboxItem, error) {
+func (m *mailboxStoreStub) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 func (m *mailboxStoreStub) CountMailboxItems(context.Context, string) (int, error) { return 0, nil }
-func (m *mailboxStoreStub) GetMailboxItem(context.Context, string) (runtime.MailboxItem, error) {
-	return runtime.MailboxItem{}, nil
+func (m *mailboxStoreStub) GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error) {
+	return runtimetools.MailboxItem{}, nil
 }
-func (m *mailboxStoreStub) ExpireMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (m *mailboxStoreStub) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-func (m *mailboxStoreStub) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
-	return []runtime.MailboxItem{{ID: "m", Type: "t", Priority: "critical", Status: "pending"}}, nil
+func (m *mailboxStoreStub) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
+	return []runtimetools.MailboxItem{{ID: "m", Type: "t", Priority: "critical", Status: "pending"}}, nil
 }
 func (m *mailboxStoreStub) MarkMailboxItemNotified(context.Context, string) error { return nil }
 func (m *mailboxStoreStub) DecideMailboxItem(context.Context, string, string, string, string) error {

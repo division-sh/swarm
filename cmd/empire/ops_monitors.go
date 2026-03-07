@@ -15,10 +15,12 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/mailbox"
 	"empireai/internal/runtime"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
-func ensurePortfolioDigestSchedule(ctx context.Context, store runtime.SchedulePersistence) error {
+func ensurePortfolioDigestSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
 	if store == nil {
 		return nil
 	}
@@ -28,7 +30,7 @@ func ensurePortfolioDigestSchedule(ctx context.Context, store runtime.SchedulePe
 		cron = "0 9 * * *"
 	}
 	payload := []byte(`{"trigger":"daily"}`)
-	return store.UpsertSchedule(ctx, runtime.Schedule{
+	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
 		AgentID:   "empire-coordinator",
 		EventType: "timer.portfolio_digest",
 		Mode:      "cron",
@@ -37,7 +39,7 @@ func ensurePortfolioDigestSchedule(ctx context.Context, store runtime.SchedulePe
 	})
 }
 
-func ensureMarginalReviewSchedule(ctx context.Context, store runtime.SchedulePersistence) error {
+func ensureMarginalReviewSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
 	if store == nil {
 		return nil
 	}
@@ -47,7 +49,7 @@ func ensureMarginalReviewSchedule(ctx context.Context, store runtime.SchedulePer
 		cron = "0 9 */14 * *"
 	}
 	payload := []byte(`{"trigger":"marginal_review"}`)
-	return store.UpsertSchedule(ctx, runtime.Schedule{
+	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
 		AgentID:   "empire-coordinator",
 		EventType: "timer.marginal_review",
 		Mode:      "cron",
@@ -56,7 +58,7 @@ func ensureMarginalReviewSchedule(ctx context.Context, store runtime.SchedulePer
 	})
 }
 
-func ensureInfraHealthCheckSchedule(ctx context.Context, store runtime.SchedulePersistence) error {
+func ensureInfraHealthCheckSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
 	if store == nil {
 		return nil
 	}
@@ -66,7 +68,7 @@ func ensureInfraHealthCheckSchedule(ctx context.Context, store runtime.ScheduleP
 		cron = "0 * * * *"
 	}
 	payload := []byte(`{"trigger":"infra_health_check"}`)
-	return store.UpsertSchedule(ctx, runtime.Schedule{
+	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
 		AgentID:   "holding-devops",
 		EventType: "timer.infra_health_check",
 		Mode:      "cron",
@@ -79,7 +81,7 @@ func portfolioDigestLoop(
 	ctx context.Context,
 	bus *runtime.EventBus,
 	digestStore runtime.DigestPersistence,
-	mailboxStore runtime.MailboxPersistence,
+	mailboxStore runtimetools.MailboxPersistence,
 ) {
 	if bus == nil || digestStore == nil || mailboxStore == nil {
 		return
@@ -200,7 +202,7 @@ func renderCompactDigest(trigger string, snap digest.Snapshot) string {
 	return b.String()
 }
 
-func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *sql.DB, mailboxStore runtime.MailboxPersistence) {
+func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *sql.DB, mailboxStore runtimetools.MailboxPersistence) {
 	if bus == nil || db == nil {
 		return
 	}
@@ -270,7 +272,7 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 					priority = "critical"
 				}
 				summary := fmt.Sprintf("Vertical health %s: %s", strings.ToUpper(w.Severity), w.Recommendation)
-				if _, err := mailboxStore.InsertMailboxItem(ctx, runtime.MailboxItem{
+				if _, err := mailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					ID:         uuid.NewString(),
 					VerticalID: verticalID,
 					FromAgent:  "empire-coordinator",

@@ -86,9 +86,15 @@ func (s *directiveCampaignStore) MarkScanCampaignCompleted(ctx context.Context, 
 	`, campaignID, discoveries)
 	return err
 }
-func (s *directiveCampaignStore) RequeueDueRescans(context.Context, time.Time) (int, error) { return 0, nil }
-func (s *directiveCampaignStore) PauseQueuedScanCampaigns(context.Context) (int, error) { return 0, nil }
-func (s *directiveCampaignStore) ResumePausedScanCampaigns(context.Context) (int, error) { return 0, nil }
+func (s *directiveCampaignStore) RequeueDueRescans(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+func (s *directiveCampaignStore) PauseQueuedScanCampaigns(context.Context) (int, error) {
+	return 0, nil
+}
+func (s *directiveCampaignStore) ResumePausedScanCampaigns(context.Context) (int, error) {
+	return 0, nil
+}
 
 func TestSemanticFull30PipelineMatrix(t *testing.T) {
 	repoRoot := contractComplianceRepoRoot(t)
@@ -138,10 +144,10 @@ func TestSemanticFull30PipelineMatrix(t *testing.T) {
 	}
 
 	integrationCases := map[string]struct{}{
-		"opco_org_creation_13_agents":        {},
-		"opco_routes_and_template_version":   {},
-		"cycle_counter_circuit_breaker":      {},
-		"budget_human_mailbox_contracts":     {},
+		"opco_org_creation_13_agents":      {},
+		"opco_routes_and_template_version": {},
+		"cycle_counter_circuit_breaker":    {},
+		"budget_human_mailbox_contracts":   {},
 	}
 
 	for _, tc := range matrix.Cases {
@@ -550,12 +556,22 @@ func checkCampaignCompletionRequiresEmptyQueue(t *testing.T) {
 		t.Fatalf("insert geography: %v", err)
 	}
 	completed, err := store.CreateScanCampaign(ctx, CreateScanCampaignInput{GeographyID: geoID, Mode: "corpus", Categories: []string{"ops"}, Priority: "normal", Status: "completed"})
-	if err != nil { t.Fatalf("create completed campaign: %v", err) }
+	if err != nil {
+		t.Fatalf("create completed campaign: %v", err)
+	}
 	active, err := store.CreateScanCampaign(ctx, CreateScanCampaignInput{GeographyID: geoID, Mode: "saas_trend", Categories: []string{"ops"}, Priority: "normal", Status: "queued"})
-	if err != nil { t.Fatalf("create active campaign: %v", err) }
-	if emitted := manager.emitCampaignCompletedIfDone(ctx, completed.ID, 2, uuid.NewString()); emitted { t.Fatal("campaign.completed should not emit while queued campaigns remain") }
-	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET status='completed' WHERE id=$1::uuid`, active.ID); err != nil { t.Fatalf("complete active campaign: %v", err) }
+	if err != nil {
+		t.Fatalf("create active campaign: %v", err)
+	}
+	if emitted := manager.emitCampaignCompletedIfDone(ctx, completed.ID, 2, uuid.NewString()); emitted {
+		t.Fatal("campaign.completed should not emit while queued campaigns remain")
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET status='completed' WHERE id=$1::uuid`, active.ID); err != nil {
+		t.Fatalf("complete active campaign: %v", err)
+	}
 	ch := bus.Subscribe("matrix-campaign-completed", events.EventType("campaign.completed"))
-	if emitted := manager.emitCampaignCompletedIfDone(ctx, completed.ID, 2, uuid.NewString()); !emitted { t.Fatal("campaign.completed should emit once queue is empty") }
+	if emitted := manager.emitCampaignCompletedIfDone(ctx, completed.ID, 2, uuid.NewString()); !emitted {
+		t.Fatal("campaign.completed should emit once queue is empty")
+	}
 	waitForEventType(t, ch, "campaign.completed")
 }

@@ -9,7 +9,7 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/mailbox"
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -95,7 +95,7 @@ func TestMain_LoadAuditSpecInput_And_ManagedMigrations_And_MailboxSideEffects(t 
 		}
 	}
 
-	items := []runtime.MailboxItem{
+	items := []runtimetools.MailboxItem{
 		{ID: uuid.NewString(), Type: "spend_request", VerticalID: verticalID, FromAgent: "empire-coordinator", Context: []byte(`{}`)},
 		{ID: uuid.NewString(), Type: "budget_increase", VerticalID: verticalID, FromAgent: "empire-coordinator", Context: []byte(`{}`)},
 		{ID: uuid.NewString(), Type: "review", VerticalID: verticalID, FromAgent: "empire-coordinator", Context: []byte(`{"review_type":"founder_input"}`)},

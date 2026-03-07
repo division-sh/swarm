@@ -39,7 +39,7 @@ func TestSeedGlobalAgentsFromYAML_Persists(t *testing.T) {
 	ctx := context.Background()
 
 	dir := t.TempDir()
-if err := os.WriteFile(filepath.Join(dir, "roster.yaml"), []byte(`
+	if err := os.WriteFile(filepath.Join(dir, "roster.yaml"), []byte(`
 agents:
   empire-coordinator:
     config_path: empire-coordinator.yaml

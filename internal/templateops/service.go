@@ -9,16 +9,16 @@ import (
 	"time"
 
 	"empireai/internal/models"
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
 type Service struct {
 	DB      *sql.DB
-	Mailbox runtime.MailboxPersistence
+	Mailbox runtimetools.MailboxPersistence
 }
 
-func NewService(db *sql.DB, mailbox runtime.MailboxPersistence) *Service {
+func NewService(db *sql.DB, mailbox runtimetools.MailboxPersistence) *Service {
 	return &Service{DB: db, Mailbox: mailbox}
 }
 
@@ -223,13 +223,13 @@ func (s *Service) PlanMigrations(ctx context.Context, toVersion, requestedBy str
 
 		var mailboxID string
 		if s.Mailbox != nil {
-				id, err := s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
-					VerticalID: verticalID,
-					FromAgent:  requestedBy,
-					Type:       "migration_approval",
-					Priority:   "normal",
-					Status:     "pending",
-					Context:    planJSON,
+			id, err := s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+				VerticalID: verticalID,
+				FromAgent:  requestedBy,
+				Type:       "migration_approval",
+				Priority:   "normal",
+				Status:     "pending",
+				Context:    planJSON,
 				Summary:    fmt.Sprintf("Template migration approval: %s -> %s", fromVersion, toVersion),
 			})
 			if err != nil {
@@ -698,14 +698,14 @@ func (s *Service) failMigration(
 	// Spec v2.0: failures must surface to the human. Migration review items may
 	// already exist (approved), but we create a new pending mailbox item so the
 	// failure can't be missed.
-		if s.Mailbox != nil {
-			_, _ = s.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
-				VerticalID: verticalID,
-				FromAgent:  executedBy,
-				Type:       "digest",
-				Priority:   "normal",
-				Status:     "pending",
-				Context:    payload,
+	if s.Mailbox != nil {
+		_, _ = s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+			VerticalID: verticalID,
+			FromAgent:  executedBy,
+			Type:       "digest",
+			Priority:   "normal",
+			Status:     "pending",
+			Context:    payload,
 			Summary:    fmt.Sprintf("Template migration failed: %s", migrationID),
 		})
 	}

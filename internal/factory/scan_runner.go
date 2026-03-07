@@ -10,6 +10,8 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
@@ -18,12 +20,12 @@ import (
 // scan campaigns can run without relying on LLM behavior.
 type ScanRequestedRunner struct {
 	db      *sql.DB
-	events  runtime.EventStore
-	mailbox runtime.MailboxPersistence
+	events  runtimebus.EventStore
+	mailbox runtimetools.MailboxPersistence
 	bus     *runtime.EventBus
 }
 
-func NewScanRequestedRunner(db *sql.DB, eventStore runtime.EventStore, mailbox runtime.MailboxPersistence, bus *runtime.EventBus) *ScanRequestedRunner {
+func NewScanRequestedRunner(db *sql.DB, eventStore runtimebus.EventStore, mailbox runtimetools.MailboxPersistence, bus *runtime.EventBus) *ScanRequestedRunner {
 	return &ScanRequestedRunner{db: db, events: eventStore, mailbox: mailbox, bus: bus}
 }
 

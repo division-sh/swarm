@@ -30,4 +30,3 @@ func TestPipeline_RunScanAndPending(t *testing.T) {
 		t.Fatalf("RunPending: %v", err)
 	}
 }
-

@@ -198,7 +198,7 @@ func TestHandlePipelineGraph_DesignIncludesStageAndRubricMetadata(t *testing.T) 
 	}
 
 	var resp struct {
-		Meta map[string]any `json:"meta"`
+		Meta  map[string]any `json:"meta"`
 		Edges []struct {
 			EventType string   `json:"event_type"`
 			Stages    []string `json:"stages"`

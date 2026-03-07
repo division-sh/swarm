@@ -13,15 +13,16 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/specaudit"
 	"github.com/google/uuid"
 )
 
 type Pipeline struct {
 	DB       *sql.DB
-	Events   runtime.EventStore
-	Mailbox  runtime.MailboxPersistence
+	Events   runtimebus.EventStore
+	Mailbox  runtimetools.MailboxPersistence
 	Scanners []Scanner
 	Scoring  ScoringEngine
 }
@@ -49,7 +50,7 @@ type ScoringEngine interface {
 
 type RulesScoringEngine struct{}
 
-func NewPipeline(db *sql.DB, eventStore runtime.EventStore, mailbox runtime.MailboxPersistence) *Pipeline {
+func NewPipeline(db *sql.DB, eventStore runtimebus.EventStore, mailbox runtimetools.MailboxPersistence) *Pipeline {
 	return &Pipeline{
 		DB:      db,
 		Events:  eventStore,
@@ -674,13 +675,13 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	}, nil)
 
 	if p.Mailbox != nil {
-			_, err := p.Mailbox.InsertMailboxItem(ctx, runtime.MailboxItem{
-				VerticalID: verticalID,
-				FromAgent:  "validation-coordinator",
-				Type:       "vertical_approval",
-				Priority:   "normal",
-				Status:     "pending",
-				Context:    kit,
+		_, err := p.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+			VerticalID: verticalID,
+			FromAgent:  "validation-coordinator",
+			Type:       "vertical_approval",
+			Priority:   "normal",
+			Status:     "pending",
+			Context:    kit,
 			Summary:    fmt.Sprintf("Factory validation ready: %s (%s)", name, geography),
 			TimeoutAt:  time.Now().UTC().Add(48 * time.Hour),
 		})

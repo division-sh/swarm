@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"strings"
 
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
-func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtime.MailboxItem) (string, error) {
+func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
 	if strings.TrimSpace(item.Type) == "" {
 		return "", fmt.Errorf("mailbox item type is required")
 	}
@@ -68,7 +68,7 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtime.Mail
 	return item.ID, nil
 }
 
-func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]runtime.MailboxItem, error) {
+func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -104,9 +104,9 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 	}
 	defer rows.Close()
 
-	out := make([]runtime.MailboxItem, 0)
+	out := make([]runtimetools.MailboxItem, 0)
 	for rows.Next() {
-		var it runtime.MailboxItem
+		var it runtimetools.MailboxItem
 		var timeout sql.NullTime
 		if err := rows.Scan(
 			&it.ID,
@@ -150,12 +150,12 @@ func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (i
 	return n, nil
 }
 
-func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtime.MailboxItem, error) {
+func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
 	if strings.TrimSpace(id) == "" {
-		return runtime.MailboxItem{}, fmt.Errorf("mailbox id is required")
+		return runtimetools.MailboxItem{}, fmt.Errorf("mailbox id is required")
 	}
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return runtime.MailboxItem{}, err
+		return runtimetools.MailboxItem{}, err
 	}
 
 	const q = `
@@ -176,7 +176,7 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtime.
 		FROM mailbox
 		WHERE id = $1::uuid
 	`
-	var it runtime.MailboxItem
+	var it runtimetools.MailboxItem
 	var timeout sql.NullTime
 	if err := s.DB.QueryRowContext(ctx, q, id).Scan(
 		&it.ID,
@@ -194,9 +194,9 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtime.
 		&it.DecisionNotes,
 	); err != nil {
 		if err == sql.ErrNoRows {
-			return runtime.MailboxItem{}, fmt.Errorf("mailbox item not found: %s", id)
+			return runtimetools.MailboxItem{}, fmt.Errorf("mailbox item not found: %s", id)
 		}
-		return runtime.MailboxItem{}, fmt.Errorf("get mailbox item: %w", err)
+		return runtimetools.MailboxItem{}, fmt.Errorf("get mailbox item: %w", err)
 	}
 	if timeout.Valid {
 		it.TimeoutAt = timeout.Time
@@ -235,7 +235,7 @@ func (s *PostgresStore) DecideMailboxItem(ctx context.Context, id, status, decis
 	return nil
 }
 
-func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtime.MailboxItem, error) {
+func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if limit <= 0 {
 		limit = 200
 	}
@@ -277,9 +277,9 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 	}
 	defer rows.Close()
 
-	out := make([]runtime.MailboxItem, 0)
+	out := make([]runtimetools.MailboxItem, 0)
 	for rows.Next() {
-		var it runtime.MailboxItem
+		var it runtimetools.MailboxItem
 		var timeout sql.NullTime
 		if err := rows.Scan(
 			&it.ID,
@@ -309,7 +309,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 	return out, nil
 }
 
-func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtime.MailboxItem, error) {
+func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -344,9 +344,9 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 	}
 	defer rows.Close()
 
-	out := make([]runtime.MailboxItem, 0)
+	out := make([]runtimetools.MailboxItem, 0)
 	for rows.Next() {
-		var it runtime.MailboxItem
+		var it runtimetools.MailboxItem
 		var timeout sql.NullTime
 		if err := rows.Scan(
 			&it.ID,

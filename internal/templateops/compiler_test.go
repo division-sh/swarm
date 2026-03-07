@@ -98,4 +98,3 @@ func TestDefaultParentRole_TableCoverage(t *testing.T) {
 	_ = defaultParentRole("backend-agent")
 	_ = defaultParentRole("unknown")
 }
-

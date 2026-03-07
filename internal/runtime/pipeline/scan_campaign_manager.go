@@ -22,25 +22,25 @@ type ScanCampaignBus interface {
 }
 
 type ScanCampaignTransitionInput struct {
-	EventID      string
-	EventType    string
-	Handler      string
-	PipelineType string
-	PipelineID   string
-	Action       string
-	StateBefore  any
-	StateAfter   any
+	EventID       string
+	EventType     string
+	Handler       string
+	PipelineType  string
+	PipelineID    string
+	Action        string
+	StateBefore   any
+	StateAfter    any
 	EventsEmitted []string
-	DropReason   string
-	Error        string
-	Duration     time.Duration
+	DropReason    string
+	Error         string
+	Duration      time.Duration
 }
 
 type ScanCampaignHooks struct {
-	Warnf                   func(component, format string, args ...any)
-	RecordTransition        func(ctx context.Context, db *sql.DB, in ScanCampaignTransitionInput) error
+	Warnf                    func(component, format string, args ...any)
+	RecordTransition         func(ctx context.Context, db *sql.DB, in ScanCampaignTransitionInput) error
 	EnsureDirectiveGeography func(ctx context.Context, db *sql.DB, name, country, region string) (string, error)
-	Now                     func() time.Time
+	Now                      func() time.Time
 }
 
 // ScanCampaignManager maintains the scan_campaigns queue.
@@ -122,9 +122,9 @@ func (m *ScanCampaignManager) ShouldPauseForBackpressureForTest(ctx context.Cont
 	return m.shouldPauseForBackpressure(ctx)
 }
 
-func (m *ScanCampaignManager) ResetFlagsForTest() { m.resetFlags() }
-func (m *ScanCampaignManager) SetBudgetPausedForTest(v bool) { m.budgetPaused = v }
-func (m *ScanCampaignManager) BudgetPausedForTest() bool { return m.budgetPaused }
+func (m *ScanCampaignManager) ResetFlagsForTest()              { m.resetFlags() }
+func (m *ScanCampaignManager) SetBudgetPausedForTest(v bool)   { m.budgetPaused = v }
+func (m *ScanCampaignManager) BudgetPausedForTest() bool       { return m.budgetPaused }
 func (m *ScanCampaignManager) BackpressurePausedForTest() bool { return m.backpressurePaused }
 
 func (m *ScanCampaignManager) subscribe() <-chan events.Event {
@@ -184,7 +184,7 @@ func (m *ScanCampaignManager) onEvent(ctx context.Context, evt events.Event) {
 			m.recordTransition(ctx, ScanCampaignTransitionInput{
 				EventID: evt.ID, EventType: string(evt.Type), Handler: "scanCampaign.onScanCompleted",
 				PipelineType: "campaign", PipelineID: campaignID, Action: "consumed",
-				StateAfter: map[string]any{"status": "completed", "discoveries_count": discoveries},
+				StateAfter:    map[string]any{"status": "completed", "discoveries_count": discoveries},
 				EventsEmitted: emitted, Duration: m.now().Sub(start),
 			})
 		} else {
@@ -233,7 +233,7 @@ func (m *ScanCampaignManager) emitCampaignCompletedIfDone(ctx context.Context, c
 	if remaining > 0 {
 		return false
 	}
-		payload := map[string]any{
+	payload := map[string]any{
 		"campaign_id":       campaignID,
 		"geography_id":      geographyID,
 		"completed_mode":    strings.TrimSpace(mode),
@@ -633,7 +633,9 @@ func SanitizeGeographyPhrase(v string) string {
 	}
 	parts := strings.Fields(strings.ToLower(v))
 	for i := range parts {
-		if len(parts[i]) == 0 { continue }
+		if len(parts[i]) == 0 {
+			continue
+		}
 		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
 	}
 	return strings.Join(parts, " ")
@@ -646,8 +648,12 @@ func EnsureDirectiveGeography(ctx context.Context, db *sql.DB, name, country, re
 	name = strings.TrimSpace(name)
 	country = strings.TrimSpace(country)
 	region = strings.TrimSpace(region)
-	if name == "" { name = "unspecified" }
-	if country == "" { country = name }
+	if name == "" {
+		name = "unspecified"
+	}
+	if country == "" {
+		country = name
+	}
 	var id string
 	err := db.QueryRowContext(ctx, `
 		SELECT id::text FROM geographies WHERE lower(name) = lower($1) ORDER BY created_at DESC LIMIT 1
@@ -735,7 +741,9 @@ func asIntLocal(v any) int {
 		if t == "" {
 			return 0
 		}
-		if n, err := strconv.Atoi(t); err == nil { return n }
+		if n, err := strconv.Atoi(t); err == nil {
+			return n
+		}
 	}
 	return 0
 }

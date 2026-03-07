@@ -78,8 +78,8 @@ func TestRuntimeRootFileCountStaysBounded(t *testing.T) {
 	if prodCount > 15 {
 		t.Fatalf("runtime root has too many production files: got=%d want<=15", prodCount)
 	}
-	if testCount > 25 {
-		t.Fatalf("runtime root has too many test files: got=%d want<=25", testCount)
+	if testCount > 20 {
+		t.Fatalf("runtime root has too many test files: got=%d want<=20", testCount)
 	}
 }
 
@@ -101,7 +101,6 @@ func TestRuntimeRootWrapperFilesStayThin(t *testing.T) {
 
 	root := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime")
 	limits := map[string]int{
-		"aliases.go":   140,
 		"eventbus.go":  140,
 		"helpers.go":   320,
 		"mcp_hooks.go": 320,
@@ -141,6 +140,16 @@ func TestRuntimeRootNoLegacyAgentLLM(t *testing.T) {
 	path := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime", "agent_llm.go")
 	if _, err := os.Stat(path); err == nil {
 		t.Fatalf("legacy root agent_llm.go still present: %s", path)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+}
+
+func TestRuntimeRootHasNoAliasesShim(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(projectRootFromArchitectureTest(t), "internal", "runtime", "aliases.go")
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("legacy root aliases.go still present: %s", path)
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("stat %s: %v", path, err)
 	}

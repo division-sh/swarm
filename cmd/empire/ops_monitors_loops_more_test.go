@@ -104,7 +104,7 @@ func TestVerticalHealthMonitorLoop_EmitsWarningAndSteadyState(t *testing.T) {
 		var steady int
 		_ = db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE type='opco.steady_state_reached' AND vertical_id=$1::uuid`, verticalID).Scan(&steady)
 		var mb int
-			_ = db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM mailbox WHERE type='escalation' AND vertical_id=$1::uuid`, verticalID).Scan(&mb)
+		_ = db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM mailbox WHERE type='escalation' AND vertical_id=$1::uuid`, verticalID).Scan(&mb)
 		if warn > 0 && steady > 0 && mb > 0 {
 			return
 		}

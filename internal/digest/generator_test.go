@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type fakePortfolio struct{}
@@ -27,16 +28,16 @@ func (fakePortfolio) ListVerticalDigestRows(context.Context, int) ([]runtime.Ver
 
 type fakeMailbox struct{}
 
-func (fakeMailbox) InsertMailboxItem(context.Context, runtime.MailboxItem) (string, error) {
+func (fakeMailbox) InsertMailboxItem(context.Context, runtimetools.MailboxItem) (string, error) {
 	return "m1", nil
 }
-func (fakeMailbox) GetMailboxItem(context.Context, string) (runtime.MailboxItem, error) {
-	return runtime.MailboxItem{}, nil
+func (fakeMailbox) GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error) {
+	return runtimetools.MailboxItem{}, nil
 }
-func (fakeMailbox) ExpireMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (fakeMailbox) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-func (fakeMailbox) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtime.MailboxItem, error) {
+func (fakeMailbox) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 func (fakeMailbox) MarkMailboxItemNotified(context.Context, string) error { return nil }
@@ -44,8 +45,8 @@ func (fakeMailbox) DecideMailboxItem(context.Context, string, string, string, st
 	return nil
 }
 func (fakeMailbox) CountMailboxItems(context.Context, string) (int, error) { return 3, nil }
-func (fakeMailbox) ListMailboxItems(context.Context, string, int) ([]runtime.MailboxItem, error) {
-	return []runtime.MailboxItem{
+func (fakeMailbox) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
+	return []runtimetools.MailboxItem{
 		{ID: "m1", Priority: "critical"},
 		{ID: "m2", Priority: "normal"},
 	}, nil

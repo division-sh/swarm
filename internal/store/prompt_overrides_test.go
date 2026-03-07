@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/models"
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 )
 
@@ -30,7 +30,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 		t.Fatalf("ensure prompt_overrides table: %v", err)
 	}
 
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:     "empire-coordinator",
 			Role:   "empire-coordinator",
@@ -54,7 +54,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 		t.Fatal("expected no initial override")
 	}
 
-	if err := pg.UpsertPromptOverride(ctx, runtime.PromptOverrideRecord{
+	if err := pg.UpsertPromptOverride(ctx, runtimemanager.PromptOverrideRecord{
 		AgentID:        "empire-coordinator",
 		Prompt:         "override prompt",
 		PreviousPrompt: "base prompt",

@@ -7,6 +7,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -31,7 +32,7 @@ func TestScanners_SynthesizeSignals_NoAPIKeys(t *testing.T) {
 
 func TestScanRequestedRunner_Run_EndToEnd(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	store := runtime.InMemoryEventStore{}
+	store := runtimebus.InMemoryEventStore{}
 	bus := runtime.NewEventBus(store)
 
 	r := NewScanRequestedRunner(db, store, nil, bus)

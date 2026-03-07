@@ -9,18 +9,23 @@ import (
 	"empireai/internal/digest"
 	"empireai/internal/events"
 	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
 
-type scheduleStub struct{ last runtime.Schedule }
+type scheduleStub struct{ last runtimepipeline.Schedule }
 
-func (s *scheduleStub) UpsertSchedule(_ context.Context, sc runtime.Schedule) error { s.last = sc; return nil }
-func (s *scheduleStub) CancelSchedule(context.Context, string, string) error        { return nil }
-func (s *scheduleStub) LoadActiveSchedules(context.Context) ([]runtime.Schedule, error) {
+func (s *scheduleStub) UpsertSchedule(_ context.Context, sc runtimepipeline.Schedule) error {
+	s.last = sc
+	return nil
+}
+func (s *scheduleStub) CancelSchedule(context.Context, string, string) error { return nil }
+func (s *scheduleStub) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
 	return nil, nil
 }
-func (s *scheduleStub) MarkScheduleFired(context.Context, runtime.Schedule) error { return nil }
+func (s *scheduleStub) MarkScheduleFired(context.Context, runtimepipeline.Schedule) error { return nil }
 
 func TestEnsurePortfolioDigestSchedule_DefaultCron(t *testing.T) {
 	if err := ensurePortfolioDigestSchedule(context.Background(), nil); err != nil {
@@ -83,7 +88,7 @@ func TestEvaluateVerticalHealth_And_SteadyState(t *testing.T) {
 	}
 
 	// Steady state: publish event when weeks >=4 and users/mrr positive.
-	bus := runtime.NewEventBus(runtime.InMemoryEventStore{})
+	bus := runtime.NewEventBus(runtimebus.InMemoryEventStore{})
 	ch := bus.Subscribe("t", events.EventType("opco.steady_state_reached"))
 
 	// Adjust metrics to positive for steady-state.

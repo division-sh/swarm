@@ -46,7 +46,7 @@ func TestDashboardServer_ErrorBranches(t *testing.T) {
 	}
 
 	bus := rt.NewEventBus(pg)
-	factory := func(cfg models.AgentConfig) (rt.Agent, error) {
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		return &stubAgent{id: cfg.ID, subs: nil}, nil
 	}
 	manager := runtimemanager.NewAgentManager(bus, factory, pg)

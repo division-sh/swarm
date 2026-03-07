@@ -106,7 +106,7 @@ func TestDashboardServer_APIAliases_Work(t *testing.T) {
 	seedAgentRow(t, db, "empire-coordinator", "empire-coordinator", "holding", "active", "")
 
 	bus := rt.NewEventBus(pg)
-	factory := func(cfg models.AgentConfig) (rt.Agent, error) { //nolint:revive
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) { //nolint:revive
 		return &aliasStubAgent{id: cfg.ID}, nil
 	}
 	manager := runtimemanager.NewAgentManager(bus, factory, pg)

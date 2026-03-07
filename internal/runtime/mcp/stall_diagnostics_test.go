@@ -1,18 +1,19 @@
-package runtime
+package mcp_test
 
 import (
 	"context"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	rt "empireai/internal/runtime"
+	runtimemcp "empireai/internal/runtime/mcp"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestMCPStallDiagnosticsPass_EmitsRuntimeLogForStalledAgent(t *testing.T) {
-	mcpStallDiagSeen = sync.Map{}
+	runtimemcp.ResetStallDiagnosticsForTest()
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 
@@ -123,12 +124,22 @@ func TestMCPStallDiagnosticsPass_EmitsRuntimeLogForStalledAgent(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 
-	logger := NewRuntimeLogger(db)
-	cfg := DefaultMCPStallDiagnosticConfig()
+	logger := rt.NewRuntimeLogger(db)
+	cfg := runtimemcp.DefaultStallDiagnosticConfig()
 	cfg.MinPending = 1
 	cfg.PendingAge = 2 * time.Minute
 	cfg.ArtifactLines = 5
-	runMCPStallDiagnosticsPass(ctx, db, logger, cfg)
+	runtimemcp.RunStallDiagnosticsPass(ctx, db, func(ctx context.Context, level, component, action, agentID, verticalID string, detail map[string]any, errText string) {
+		logger.Log(ctx, rt.RuntimeLogEntry{
+			Level:      strings.ToLower(strings.TrimSpace(level)),
+			Component:  strings.TrimSpace(component),
+			Action:     strings.TrimSpace(action),
+			AgentID:    strings.TrimSpace(agentID),
+			VerticalID: strings.TrimSpace(verticalID),
+			Detail:     detail,
+			Error:      strings.TrimSpace(errText),
+		})
+	}, cfg)
 
 	var (
 		action string
@@ -147,13 +158,13 @@ func TestMCPStallDiagnosticsPass_EmitsRuntimeLogForStalledAgent(t *testing.T) {
 	if action != "auto_diagnostic_stall" {
 		t.Fatalf("unexpected action: %q", action)
 	}
-	if !strings.Contains(errTxt, "code="+ErrCodeMCPStallDetected) {
+	if !strings.Contains(errTxt, "code="+runtimemcp.ErrCodeStallDetected) {
 		t.Fatalf("expected stall code in error envelope, got %q", errTxt)
 	}
 }
 
 func TestMCPStallDiagnosticsPass_SkipsWhenSessionLeaseIsActive(t *testing.T) {
-	mcpStallDiagSeen = sync.Map{}
+	runtimemcp.ResetStallDiagnosticsForTest()
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 
@@ -269,11 +280,21 @@ func TestMCPStallDiagnosticsPass_SkipsWhenSessionLeaseIsActive(t *testing.T) {
 		t.Fatalf("insert session: %v", err)
 	}
 
-	logger := NewRuntimeLogger(db)
-	cfg := DefaultMCPStallDiagnosticConfig()
+	logger := rt.NewRuntimeLogger(db)
+	cfg := runtimemcp.DefaultStallDiagnosticConfig()
 	cfg.MinPending = 1
 	cfg.PendingAge = 2 * time.Minute
-	runMCPStallDiagnosticsPass(ctx, db, logger, cfg)
+	runtimemcp.RunStallDiagnosticsPass(ctx, db, func(ctx context.Context, level, component, action, agentID, verticalID string, detail map[string]any, errText string) {
+		logger.Log(ctx, rt.RuntimeLogEntry{
+			Level:      strings.ToLower(strings.TrimSpace(level)),
+			Component:  strings.TrimSpace(component),
+			Action:     strings.TrimSpace(action),
+			AgentID:    strings.TrimSpace(agentID),
+			VerticalID: strings.TrimSpace(verticalID),
+			Detail:     detail,
+			Error:      strings.TrimSpace(errText),
+		})
+	}, cfg)
 
 	var count int
 	if err := db.QueryRowContext(ctx, `

@@ -7,7 +7,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/runtime"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -18,7 +18,7 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	ctx := context.Background()
 
 	// UpsertAgent: missing id.
-	if err := pg.UpsertAgent(ctx, runtime.PersistedAgent{Config: models.AgentConfig{}}); err == nil {
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: models.AgentConfig{}}); err == nil {
 		t.Fatal("expected missing agent id error")
 	}
 
@@ -56,13 +56,13 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	}
 
 	// Routing rule required fields.
-	if err := pg.UpsertRoutingRule(ctx, runtime.PersistedRoutingRule{}); err == nil {
+	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{}); err == nil {
 		t.Fatal("expected UpsertRoutingRule validation error")
 	}
 
 	// UpsertEventReceipt should accept empty errText; also exercise invalid status guardrails indirectly.
 	aid := "a1"
-	_ = pg.UpsertAgent(ctx, runtime.PersistedAgent{
+	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{ID: aid, Role: "r", Mode: "holding", Type: "stub", Config: []byte(`{"subscriptions":["*"]}`)},
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})

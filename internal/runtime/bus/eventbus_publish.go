@@ -121,9 +121,9 @@ func (eb *EventBus) publishTransactional(
 		}
 	}
 
-		if err := txStore.AppendEventTx(ctx, tx, evt); err != nil {
-			return fmt.Errorf("persist event: %w", err)
-		}
+	if err := txStore.AppendEventTx(ctx, tx, evt); err != nil {
+		return fmt.Errorf("persist event: %w", err)
+	}
 	receiptTableExists := txTableExists(ctx, tx, "pipeline_receipts")
 	if passthrough && len(inboundPlan.PersistedRecipients) > 0 {
 		if err := txStore.InsertEventDeliveriesTx(ctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {

@@ -17,7 +17,7 @@ type EventBus struct {
 	*runtimebus.EventBus
 }
 
-func NewEventBus(store EventStore) *EventBus {
+func NewEventBus(store runtimebus.EventStore) *EventBus {
 	return &EventBus{EventBus: runtimebus.NewEventBus(store)}
 }
 
@@ -32,7 +32,7 @@ func (eb *EventBus) SetRuntimeLogger(logger *RuntimeLogger) {
 	eb.EventBus.SetLoggerHook(runtimeLoggerHook{logger: logger})
 }
 
-func (eb *EventBus) Store() EventStore {
+func (eb *EventBus) Store() runtimebus.EventStore {
 	if eb == nil || eb.EventBus == nil {
 		return nil
 	}

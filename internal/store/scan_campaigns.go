@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/runtime"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/lib/pq"
 )
 
-func (s *PostgresStore) CreateScanCampaign(ctx context.Context, in runtime.CreateScanCampaignInput) (runtime.ScanCampaign, error) {
+func (s *PostgresStore) CreateScanCampaign(ctx context.Context, in runtimepipeline.CreateScanCampaignInput) (runtimepipeline.ScanCampaign, error) {
 	if s == nil || s.DB == nil {
-		return runtime.ScanCampaign{}, fmt.Errorf("postgres store is required")
+		return runtimepipeline.ScanCampaign{}, fmt.Errorf("postgres store is required")
 	}
 	in.GeographyID = strings.TrimSpace(in.GeographyID)
 	in.Mode = strings.TrimSpace(in.Mode)
@@ -22,7 +22,7 @@ func (s *PostgresStore) CreateScanCampaign(ctx context.Context, in runtime.Creat
 	in.Status = strings.TrimSpace(in.Status)
 	in.RescanInterval = strings.TrimSpace(in.RescanInterval)
 	if in.GeographyID == "" || in.Mode == "" {
-		return runtime.ScanCampaign{}, fmt.Errorf("geography_id and mode are required")
+		return runtimepipeline.ScanCampaign{}, fmt.Errorf("geography_id and mode are required")
 	}
 	if in.Priority == "" {
 		in.Priority = "normal"
@@ -40,7 +40,7 @@ func (s *PostgresStore) CreateScanCampaign(ctx context.Context, in runtime.Creat
 		cats = pq.Array(in.Categories)
 	}
 
-	var out runtime.ScanCampaign
+	var out runtimepipeline.ScanCampaign
 	var catsOut pq.StringArray
 	var started, completed, deadline, next sql.NullTime
 	err := s.DB.QueryRowContext(ctx, `
@@ -83,7 +83,7 @@ func (s *PostgresStore) CreateScanCampaign(ctx context.Context, in runtime.Creat
 		&next,
 	)
 	if err != nil {
-		return runtime.ScanCampaign{}, fmt.Errorf("create scan campaign: %w", err)
+		return runtimepipeline.ScanCampaign{}, fmt.Errorf("create scan campaign: %w", err)
 	}
 	out.Categories = []string(catsOut)
 	if started.Valid {
@@ -105,7 +105,7 @@ func (s *PostgresStore) CreateScanCampaign(ctx context.Context, in runtime.Creat
 	return out, nil
 }
 
-func (s *PostgresStore) ListScanCampaigns(ctx context.Context, filter runtime.ScanCampaignFilter) ([]runtime.ScanCampaign, error) {
+func (s *PostgresStore) ListScanCampaigns(ctx context.Context, filter runtimepipeline.ScanCampaignFilter) ([]runtimepipeline.ScanCampaign, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -151,9 +151,9 @@ func (s *PostgresStore) ListScanCampaigns(ctx context.Context, filter runtime.Sc
 	}
 	defer rows.Close()
 
-	out := make([]runtime.ScanCampaign, 0, 16)
+	out := make([]runtimepipeline.ScanCampaign, 0, 16)
 	for rows.Next() {
-		var c runtime.ScanCampaign
+		var c runtimepipeline.ScanCampaign
 		var cats pq.StringArray
 		var started, completed, deadline, next sql.NullTime
 		if err := rows.Scan(
@@ -200,13 +200,13 @@ func (s *PostgresStore) ListScanCampaigns(ctx context.Context, filter runtime.Sc
 	return out, nil
 }
 
-func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtime.ScanCampaign, bool, error) {
+func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtimepipeline.ScanCampaign, bool, error) {
 	if s == nil || s.DB == nil {
-		return runtime.ScanCampaign{}, false, fmt.Errorf("postgres store is required")
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("postgres store is required")
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return runtime.ScanCampaign{}, false, fmt.Errorf("begin claim tx: %w", err)
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("begin claim tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -214,10 +214,10 @@ func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtime.S
 	if err := tx.QueryRowContext(ctx, `
 		SELECT EXISTS(SELECT 1 FROM scan_campaigns WHERE status = 'active' LIMIT 1)
 	`).Scan(&active); err != nil {
-		return runtime.ScanCampaign{}, false, fmt.Errorf("check active scan campaigns: %w", err)
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("check active scan campaigns: %w", err)
 	}
 	if active {
-		return runtime.ScanCampaign{}, false, nil
+		return runtimepipeline.ScanCampaign{}, false, nil
 	}
 
 	var id string
@@ -237,9 +237,9 @@ func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtime.S
 		LIMIT 1
 	`).Scan(&id); err != nil {
 		if err == sql.ErrNoRows {
-			return runtime.ScanCampaign{}, false, nil
+			return runtimepipeline.ScanCampaign{}, false, nil
 		}
-		return runtime.ScanCampaign{}, false, fmt.Errorf("select next scan campaign: %w", err)
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("select next scan campaign: %w", err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -249,10 +249,10 @@ func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtime.S
 		    next_rescan_at = NULL
 		WHERE id = $1::uuid
 	`, id); err != nil {
-		return runtime.ScanCampaign{}, false, fmt.Errorf("mark scan campaign active: %w", err)
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("mark scan campaign active: %w", err)
 	}
 
-	var out runtime.ScanCampaign
+	var out runtimepipeline.ScanCampaign
 	var cats pq.StringArray
 	var started, completed, deadline, next sql.NullTime
 	if err := tx.QueryRowContext(ctx, `
@@ -291,7 +291,7 @@ func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtime.S
 		&deadline,
 		&next,
 	); err != nil {
-		return runtime.ScanCampaign{}, false, fmt.Errorf("load claimed scan campaign: %w", err)
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("load claimed scan campaign: %w", err)
 	}
 	out.Categories = []string(cats)
 	if started.Valid {
@@ -312,7 +312,7 @@ func (s *PostgresStore) ClaimNextDueScanCampaign(ctx context.Context) (runtime.S
 	}
 
 	if err := tx.Commit(); err != nil {
-		return runtime.ScanCampaign{}, false, fmt.Errorf("commit claim tx: %w", err)
+		return runtimepipeline.ScanCampaign{}, false, fmt.Errorf("commit claim tx: %w", err)
 	}
 	return out, true, nil
 }

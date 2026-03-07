@@ -43,10 +43,10 @@ type cannedE2EExpected struct {
 
 type captureScheduleStore struct {
 	mu        sync.Mutex
-	schedules []Schedule
+	schedules []runtimepipeline.Schedule
 }
 
-func (s *captureScheduleStore) UpsertSchedule(_ context.Context, sc Schedule) error {
+func (s *captureScheduleStore) UpsertSchedule(_ context.Context, sc runtimepipeline.Schedule) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.schedules = append(s.schedules, sc)
@@ -56,7 +56,7 @@ func (s *captureScheduleStore) UpsertSchedule(_ context.Context, sc Schedule) er
 func (s *captureScheduleStore) CancelSchedule(_ context.Context, agentID, eventType string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Schedule, 0, len(s.schedules))
+	out := make([]runtimepipeline.Schedule, 0, len(s.schedules))
 	for _, sc := range s.schedules {
 		if strings.TrimSpace(sc.AgentID) == strings.TrimSpace(agentID) &&
 			strings.TrimSpace(sc.EventType) == strings.TrimSpace(eventType) {
@@ -68,22 +68,22 @@ func (s *captureScheduleStore) CancelSchedule(_ context.Context, agentID, eventT
 	return nil
 }
 
-func (s *captureScheduleStore) LoadActiveSchedules(context.Context) ([]Schedule, error) {
+func (s *captureScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Schedule, len(s.schedules))
+	out := make([]runtimepipeline.Schedule, len(s.schedules))
 	copy(out, s.schedules)
 	return out, nil
 }
 
-func (s *captureScheduleStore) MarkScheduleFired(context.Context, Schedule) error {
+func (s *captureScheduleStore) MarkScheduleFired(context.Context, runtimepipeline.Schedule) error {
 	return nil
 }
 
-func (s *captureScheduleStore) Snapshot() []Schedule {
+func (s *captureScheduleStore) Snapshot() []runtimepipeline.Schedule {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]Schedule, len(s.schedules))
+	out := make([]runtimepipeline.Schedule, len(s.schedules))
 	copy(out, s.schedules)
 	return out
 }
@@ -95,11 +95,11 @@ type e2eScenarioRig struct {
 	bus           *EventBus
 	eventStore    *postgresEventStore
 	mailboxStore  *sqlMailboxStore
-	pc            *FactoryPipelineCoordinator
+	pc            *runtimepipeline.FactoryPipelineCoordinator
 	am            *runtimemanager.AgentManager
 	scanMgr       *runtimepipeline.ScanCampaignManager
-	scoringNode   *ScoringNode
-	scheduler     *Scheduler
+	scoringNode   *runtimepipeline.ScoringNode
+	scheduler     *runtimepipeline.Scheduler
 	scheduleStore *captureScheduleStore
 	canned        *yamlCannedRuntime
 }
@@ -127,7 +127,7 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	eventStore := &postgresEventStore{db: db}
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
-	pc := NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
 
 	fixtures := make(map[string]cannedRoleFixture, len(sc.Agents))
@@ -143,10 +143,10 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	}
 	canned := newYAMLCannedRuntime(fixtures)
 
-	var scheduler *Scheduler
+	var scheduler *runtimepipeline.Scheduler
 	scheduleStore := &captureScheduleStore{}
 	if withScheduler {
-		scheduler = NewScheduler(func(sc Schedule) {
+		scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 			payload := parsePayloadMap(sc.Payload)
 			_ = bus.Publish(context.Background(), events.Event{
 				ID:          uuid.NewString(),
@@ -164,9 +164,9 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	exec := runtimetools.NewExecutor(bus, scheduler, nil, scheduleStore)
 	exec.SetMailboxStore(mailboxStore)
 	baseFactory := runtimeagents.NewLLMAgentFactory(canned, exec, exec.ToolDefinitions())
-	factory := func(cfg models.AgentConfig) (Agent, error) {
+	factory := func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPromptForTest(cfg)) == "" {
-			cfg.Config = withSystemPrompt(cfg.Config, "Canned scenario prompt for "+strings.TrimSpace(cfg.Role))
+			cfg.Config = runtimemanager.WithSystemPrompt(cfg.Config, "Canned scenario prompt for "+strings.TrimSpace(cfg.Role))
 		}
 		return baseFactory(cfg)
 	}
@@ -186,7 +186,7 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	}
 
 	scanMgr := runtimepipeline.NewScanCampaignManager(bus, &e2eCampaignStore{db: db}, newScanCampaignHooksForTest(), db)
-	scoringNode := NewScoringNode(bus, pc, nil)
+	scoringNode := runtimepipeline.NewScoringNode(bus, pc, nil)
 	if scoringNode == nil {
 		t.Fatal("expected scoring node")
 	}
@@ -855,7 +855,7 @@ func TestCannedLLME2E_Scenario10_OpCoTeardown(t *testing.T) {
 		"qa-agent",
 		"devops-agent",
 	} {
-		if _, ok := rig.am.GetAgentConfig(opCoAgentID(role, verticalID)); ok {
+		if _, ok := rig.am.GetAgentConfig(runtimemanager.OpCoAgentID(role, verticalID)); ok {
 			t.Fatalf("expected opco agent %s to be removed after teardown", role)
 		}
 	}

@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	llm "empireai/internal/runtime/llm"
 	rt "empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/testutil"
@@ -52,7 +53,7 @@ func TestResetRuntimeState_PostgresSessions_AfterCLIRunRotatesAndUnlocks(t *test
 	}
 
 	sessions := sessions.NewPostgresRegistry(db, 15*time.Second)
-	cli := rt.NewClaudeCLIRuntime(cfg, sessions, "reset-integration-owner", nil, nil, nil, nil)
+	cli := llm.NewClaudeCLIRuntime(cfg, sessions, "reset-integration-owner", nil, nil, nil, nil)
 
 	s, err := cli.StartSession(ctx, agentID, "reset smoke prompt", nil)
 	if err != nil {
@@ -76,7 +77,7 @@ func TestResetRuntimeState_PostgresSessions_AfterCLIRunRotatesAndUnlocks(t *test
 		t.Fatalf("expected active session before reset, got %q", beforeStatus)
 	}
 
-	mgr := runtimemanager.NewAgentManager(rt.NewEventBus(rt.InMemoryEventStore{}), nil)
+	mgr := runtimemanager.NewAgentManager(rt.NewEventBus(runtimebus.InMemoryEventStore{}), nil)
 	mgr.SetSessionRegistry(sessions, "cli_test")
 	if err := mgr.ResetRuntimeState(); err != nil {
 		t.Fatalf("reset runtime state: %v", err)

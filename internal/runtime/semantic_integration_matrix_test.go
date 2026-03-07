@@ -121,7 +121,7 @@ func TestSemanticFull30IntegrationMatrix(t *testing.T) {
 }
 
 func checkOpCoOrgCreation13Agents(t *testing.T) {
-	roster := defaultOpCoRoster("v1")
+	roster := runtimemanager.DefaultOpCoRoster("v1")
 	if len(roster) != 13 {
 		t.Fatalf("expected 13-agent default opco roster, got %d", len(roster))
 	}
@@ -138,7 +138,7 @@ func checkOpCoOrgCreation13Agents(t *testing.T) {
 }
 
 func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
-	routes := defaultOpCoRoutes("v1")
+	routes := runtimemanager.DefaultOpCoRoutes("v1")
 	if len(routes) != 20 {
 		t.Fatalf("expected 20 default opco routes, got %d", len(routes))
 	}
@@ -156,7 +156,7 @@ func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 		t.Fatalf("expected bootstrap=20 and seeded=0 routes, got bootstrap=%d seeded=%d", bootstrap, seeded)
 	}
 
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	store := &semanticTemplateStoreStub{bootstrapVersion: 7, info: runtimemanager.VerticalInfo{ID: "v1", Name: "Acme Vertical", Slug: "acme", Geography: "US"}}
 	am := runtimemanager.NewAgentManager(bus, nil, store)
 	if err := am.SpawnOpCo("v1", models.MandateDocument{VerticalID: "v1"}); err != nil {

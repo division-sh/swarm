@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 )
 
 func TestDispatchSystemDirectiveViaDashboard_Success(t *testing.T) {
@@ -81,7 +81,7 @@ func TestDispatchSystemDirective_FallbackToEventStore(t *testing.T) {
 
 	eventID, err := dispatchSystemDirective(
 		context.Background(),
-		storeBundle{EventStore: runtime.InMemoryEventStore{}},
+		storeBundle{EventStore: runtimebus.InMemoryEventStore{}},
 		targetAgent{ID: "empire-coordinator"},
 		"SaaS in Argentina",
 	)

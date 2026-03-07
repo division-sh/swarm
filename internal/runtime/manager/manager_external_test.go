@@ -9,6 +9,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
 	storepkg "empireai/internal/store"
 	"empireai/internal/testutil"
@@ -88,7 +89,7 @@ func TestAgentManager_PromptOverrideLifecycle(t *testing.T) {
 }
 
 func TestAgentManager_PublishEvent(t *testing.T) {
-	bus := rt.NewEventBus(rt.InMemoryEventStore{})
+	bus := rt.NewEventBus(runtimebus.InMemoryEventStore{})
 	am := runtimemanager.NewAgentManager(bus, nil, nil)
 	ch := bus.Subscribe("watch-publish", events.EventType("system.directive"))
 

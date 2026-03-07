@@ -8,15 +8,18 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/events"
+	runtimebus "empireai/internal/runtime/bus"
+	llm "empireai/internal/runtime/llm"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
 type mailboxCapture struct {
 	calls int
-	last  MailboxItem
+	last  runtimetools.MailboxItem
 }
 
-func (m *mailboxCapture) InsertMailboxItem(_ context.Context, item MailboxItem) (string, error) {
+func (m *mailboxCapture) InsertMailboxItem(_ context.Context, item runtimetools.MailboxItem) (string, error) {
 	m.calls++
 	m.last = item
 	if item.ID != "" {
@@ -24,20 +27,20 @@ func (m *mailboxCapture) InsertMailboxItem(_ context.Context, item MailboxItem) 
 	}
 	return "mail-1", nil
 }
-func (m *mailboxCapture) ListMailboxItems(context.Context, string, int) ([]MailboxItem, error) {
+func (m *mailboxCapture) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 func (m *mailboxCapture) CountMailboxItems(context.Context, string) (int, error) { return 0, nil }
-func (m *mailboxCapture) GetMailboxItem(context.Context, string) (MailboxItem, error) {
-	return MailboxItem{}, nil
+func (m *mailboxCapture) GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error) {
+	return runtimetools.MailboxItem{}, nil
 }
 func (m *mailboxCapture) DecideMailboxItem(context.Context, string, string, string, string) error {
 	return nil
 }
-func (m *mailboxCapture) ExpireMailboxItems(context.Context, int) ([]MailboxItem, error) {
+func (m *mailboxCapture) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
-func (m *mailboxCapture) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]MailboxItem, error) {
+func (m *mailboxCapture) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
 	return nil, nil
 }
 func (m *mailboxCapture) MarkMailboxItemNotified(context.Context, string) error { return nil }
@@ -49,7 +52,7 @@ func TestBudgetTracker_TransitionsAndEmergencyMailbox(t *testing.T) {
 	}
 	defer db.Close()
 
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	// Subscribe watcher using wildcard so budget broadcast can resolve recipients.
 	ch := bus.Subscribe("watcher", events.EventType("budget.*"))
 
@@ -149,7 +152,7 @@ func TestBudgetTracker_RecordSpend_And_RecordLLMUsage(t *testing.T) {
 	}
 	defer db.Close()
 
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	_ = bus.Subscribe("watcher", events.EventType("budget.*"))
 	cfg := &config.Config{
 		Budget: config.BudgetConfig{
@@ -217,7 +220,7 @@ func TestBudgetTracker_RecordSpend_And_RecordLLMUsage(t *testing.T) {
 		WithArgs("v1", sqlmock.AnyArg()).
 		WillReturnRows(sqlmock.NewRows([]string{"sum"}).AddRow(0))
 
-	if err := bt.RecordLLMUsage(ctx, "v1", "agent-1", "api", UsageTokens{
+	if err := bt.RecordLLMUsage(ctx, "v1", "agent-1", "api", llm.UsageTokens{
 		InputTokens:  1_000_000,
 		OutputTokens: 1_000_000,
 		Model:        "claude-haiku-4-5",
@@ -270,7 +273,7 @@ func TestBudgetTracker_EvaluateAll_IteratesVerticals(t *testing.T) {
 	}
 	defer db.Close()
 
-	bus := NewEventBus(InMemoryEventStore{})
+	bus := NewEventBus(runtimebus.InMemoryEventStore{})
 	cfg := &config.Config{
 		Budget: config.BudgetConfig{
 			PortfolioMonthlyCap:   10_000,

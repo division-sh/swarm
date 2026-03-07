@@ -13,6 +13,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
@@ -43,7 +44,7 @@ type BudgetTracker struct {
 	db          *sql.DB
 	bus         *EventBus
 	cfg         *config.Config
-	mailbox     MailboxPersistence
+	mailbox     runtimetools.MailboxPersistence
 	mailboxFrom string
 
 	mu        sync.Mutex
@@ -51,7 +52,7 @@ type BudgetTracker struct {
 	scopeMu   sync.Map          // key(scope) => *sync.Mutex
 }
 
-func NewBudgetTracker(db *sql.DB, bus *EventBus, cfg *config.Config, mailbox MailboxPersistence) *BudgetTracker {
+func NewBudgetTracker(db *sql.DB, bus *EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence) *BudgetTracker {
 	return &BudgetTracker{
 		db:          db,
 		bus:         bus,
@@ -452,7 +453,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		summary := fmt.Sprintf("Budget emergency: scope=%s spent=%d cap=%d (%.0f%%)",
 			scope, spent, capCents, ratio*100.0)
 		// Best-effort: avoid breaking spend path if mailbox insert fails.
-		if _, err := t.mailbox.InsertMailboxItem(ctx, MailboxItem{
+		if _, err := t.mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			EventID:    evtID,
 			VerticalID: verticalID,
 			FromAgent:  t.mailboxFrom,

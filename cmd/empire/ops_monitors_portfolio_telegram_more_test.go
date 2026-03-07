@@ -111,4 +111,3 @@ func TestMaybeEmitSteadyState_OnlyOnce(t *testing.T) {
 		t.Fatalf("expected exactly 1 steady_state event, got %d", n)
 	}
 }
-

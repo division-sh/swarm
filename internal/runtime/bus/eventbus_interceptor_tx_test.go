@@ -1,4 +1,4 @@
-package runtime_test
+package bus_test
 
 import (
 	"context"
@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	rt "empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ func (i consumeWithDeferred) Intercept(_ context.Context, _ events.Event) (bool,
 func TestEventBusTransactionalPublish_RollsBackWhenDeferredPersistFails(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
+	bus := runtimebus.NewEventBus(pg)
 
 	bus.SetInterceptors(consumeWithDeferred{
 		deferred: events.Event{
@@ -91,8 +92,8 @@ func TestFactoryPipelineInterceptor_DeduplicatesRepeatedInboundEventID(t *testin
 		t.Fatalf("create pipeline_transitions: %v", err)
 	}
 	pg := &store.PostgresStore{DB: db}
-	bus := rt.NewEventBus(pg)
-	pc := rt.NewFactoryPipelineCoordinator(bus, db)
+	bus := runtimebus.NewEventBus(pg)
+	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
 
 	watch := bus.Subscribe("watcher", events.EventType("market_research.scan_assigned"))

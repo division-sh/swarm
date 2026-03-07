@@ -13,4 +13,3 @@ func TestScanners_Name(t *testing.T) {
 		t.Fatalf("unexpected review scanner name")
 	}
 }
-

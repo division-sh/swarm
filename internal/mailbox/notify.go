@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/runtime"
+	runtimetools "empireai/internal/runtime/tools"
 )
 
 type CriticalNotifier interface {
-	NotifyCritical(ctx context.Context, item runtime.MailboxItem) error
+	NotifyCritical(ctx context.Context, item runtimetools.MailboxItem) error
 }
 
 type MultiCriticalNotifier struct {
@@ -37,7 +37,7 @@ func NewMultiCriticalNotifier(notifiers ...CriticalNotifier) *MultiCriticalNotif
 	return &MultiCriticalNotifier{notifiers: filtered}
 }
 
-func (n *MultiCriticalNotifier) NotifyCritical(ctx context.Context, item runtime.MailboxItem) error {
+func (n *MultiCriticalNotifier) NotifyCritical(ctx context.Context, item runtimetools.MailboxItem) error {
 	if n == nil || len(n.notifiers) == 0 {
 		return nil
 	}
@@ -61,7 +61,7 @@ type WebhookNotifier struct {
 	Client *http.Client
 }
 
-func (n *WebhookNotifier) NotifyCritical(ctx context.Context, item runtime.MailboxItem) error {
+func (n *WebhookNotifier) NotifyCritical(ctx context.Context, item runtimetools.MailboxItem) error {
 	if strings.TrimSpace(n.URL) == "" {
 		return fmt.Errorf("webhook url is required")
 	}
@@ -102,7 +102,7 @@ type TelegramNotifier struct {
 	Client   *http.Client
 }
 
-func (n *TelegramNotifier) NotifyCritical(ctx context.Context, item runtime.MailboxItem) error {
+func (n *TelegramNotifier) NotifyCritical(ctx context.Context, item runtimetools.MailboxItem) error {
 	if strings.TrimSpace(n.BotToken) == "" || strings.TrimSpace(n.ChatID) == "" {
 		return fmt.Errorf("telegram token and chat id are required")
 	}
@@ -201,7 +201,7 @@ type EmailNotifier struct {
 	Timeout  time.Duration
 }
 
-func (n *EmailNotifier) NotifyCritical(ctx context.Context, item runtime.MailboxItem) error {
+func (n *EmailNotifier) NotifyCritical(ctx context.Context, item runtimetools.MailboxItem) error {
 	if strings.TrimSpace(n.SMTPAddr) == "" || strings.TrimSpace(n.From) == "" || len(n.To) == 0 {
 		return fmt.Errorf("smtp addr, from, and to are required")
 	}

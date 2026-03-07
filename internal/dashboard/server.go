@@ -22,8 +22,9 @@ import (
 	"empireai/internal/digest"
 	"empireai/internal/events"
 	mailboxsvc "empireai/internal/mailbox"
-	"empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/specaudit"
 	"empireai/internal/store"
 	"empireai/internal/templateops"
@@ -54,16 +55,16 @@ type Server struct {
 	db           *sql.DB
 	cfg          *config.Config
 	now          func() time.Time
-	eventStore   runtime.EventStore
-	mailboxStore runtime.MailboxPersistence
+	eventStore   runtimebus.EventStore
+	mailboxStore runtimetools.MailboxPersistence
 	manager      *runtimemanager.AgentManager
 }
 
 func NewServer(
 	db *sql.DB,
 	cfg *config.Config,
-	eventStore runtime.EventStore,
-	mailboxStore runtime.MailboxPersistence,
+	eventStore runtimebus.EventStore,
+	mailboxStore runtimetools.MailboxPersistence,
 	manager *runtimemanager.AgentManager,
 ) *Server {
 	return &Server{
@@ -526,8 +527,8 @@ func (s *Server) clearTemplatePromptDrafts(ctx context.Context) error {
 	return err
 }
 
-func (s *Server) loadLatestTemplateRecord(ctx context.Context) (runtime.OrgTemplateRecord, error) {
-	var rec runtime.OrgTemplateRecord
+func (s *Server) loadLatestTemplateRecord(ctx context.Context) (runtimemanager.OrgTemplateRecord, error) {
+	var rec runtimemanager.OrgTemplateRecord
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT
 			version,
@@ -549,7 +550,7 @@ func (s *Server) loadLatestTemplateRecord(ctx context.Context) (runtime.OrgTempl
 		&rec.Description,
 		&rec.CreatedAt,
 	); err != nil {
-		return runtime.OrgTemplateRecord{}, err
+		return runtimemanager.OrgTemplateRecord{}, err
 	}
 	return rec, nil
 }
@@ -3790,7 +3791,7 @@ func mailboxReviewType(raw json.RawMessage) string {
 	return ""
 }
 
-func isGeographyExpansionMailbox(item runtime.MailboxItem) bool {
+func isGeographyExpansionMailbox(item runtimetools.MailboxItem) bool {
 	t := strings.ToLower(strings.TrimSpace(item.Type))
 	if t == "" {
 		return false
@@ -3812,7 +3813,7 @@ func isGeographyExpansionMailbox(item runtime.MailboxItem) bool {
 	return false
 }
 
-func isFounderInputMailbox(item runtime.MailboxItem) bool {
+func isFounderInputMailbox(item runtimetools.MailboxItem) bool {
 	t := strings.ToLower(strings.TrimSpace(item.Type))
 	if t == "founder_input" {
 		return true
