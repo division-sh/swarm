@@ -133,11 +133,7 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	inboundAddr := os.Getenv("EMPIREAI_INBOUND_ADDR")
 	if inboundAddr != "" {
 		gateway := rt.InboundGateway
-		go func() {
-			if err := http.ListenAndServe(inboundAddr, gateway.Handler()); err != nil {
-				log.Printf("inbound gateway stopped: %v", err)
-			}
-		}()
+		goServeHTTP("inbound gateway", func() error { return http.ListenAndServe(inboundAddr, gateway.Handler()) })
 		if stores.InboundStore != nil {
 			go inboundCleanupLoop(ctx, stores.InboundStore)
 		}
@@ -165,20 +161,12 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	// Spec v2.0: bidirectional Telegram bot for human tasks (Phase 1 uses long polling).
 	startTelegramHumanTaskBot(ctx, stores, cfg, bus)
 	if toolGatewayAddr != "" && rt.ToolGateway != nil {
-		go func() {
-			if err := http.ListenAndServe(toolGatewayAddr, rt.ToolGateway.Handler()); err != nil {
-				log.Printf("tool gateway stopped: %v", err)
-			}
-		}()
+		goServeHTTP("tool gateway", func() error { return http.ListenAndServe(toolGatewayAddr, rt.ToolGateway.Handler()) })
 	}
 	dashboardAddr := strings.TrimSpace(os.Getenv("EMPIREAI_DASHBOARD_ADDR"))
 	if dashboardAddr != "" && stores.SQLDB != nil {
 		dashboardServer := dashboard.NewServer(stores.SQLDB, cfg, stores.EventStore, stores.MailboxStore, rt.Manager)
-		go func() {
-			if err := http.ListenAndServe(dashboardAddr, dashboardServer.Handler()); err != nil {
-				log.Printf("dashboard server stopped: %v", err)
-			}
-		}()
+		goServeHTTP("dashboard server", func() error { return http.ListenAndServe(dashboardAddr, dashboardServer.Handler()) })
 	}
 	if err := rt.Start(ctx); err != nil {
 		return err
@@ -202,6 +190,19 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	fmt.Println("empire runtime bootstrap ready")
 	rt.Wait(ctx)
 	return nil
+}
+
+func goServeHTTP(name string, serve func() error) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("%s panic: %v", name, r)
+			}
+		}()
+		if err := serve(); err != nil {
+			log.Printf("%s stopped: %v", name, err)
+		}
+	}()
 }
 
 func tryRunSubcommand() (bool, error) {
@@ -809,7 +810,7 @@ func mailboxCriticalNotifyLoop(ctx context.Context, store runtimetools.MailboxPe
 
 			// Spec v2.0 digest trigger: critical mailbox items prompt an immediate digest compilation/push.
 			if bus != nil {
-				payload, _ := json.Marshal(map[string]any{
+				payload := mustJSON(map[string]any{
 					"mailbox_id":  item.ID,
 					"type":        item.Type,
 					"vertical_id": item.VerticalID,
@@ -942,7 +943,7 @@ func runSelfCheck(modelRuntime llm.Runtime, bus *runtime.EventBus) error {
 	// Minimal event path check.
 	t := events.EventType("runtime.boot")
 	ch := bus.Subscribe("bootstrap-self-check", t)
-	payload, _ := json.Marshal(map[string]string{"status": "ok"})
+	payload := mustJSON(map[string]string{"status": "ok"})
 	evt := events.Event{
 		ID:          uuid.NewString(),
 		Type:        t,

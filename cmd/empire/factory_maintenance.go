@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"log"
 	"time"
 
@@ -44,7 +43,7 @@ func marginalMaintenanceLoop(ctx context.Context, db *sql.DB, bus *runtime.Event
 				for rows.Next() {
 					var id string
 					if err := rows.Scan(&id); err == nil && bus != nil {
-						payload, _ := json.Marshal(map[string]any{
+						payload := mustJSON(map[string]any{
 							"vertical_id": id,
 							"reason":      "stale_marginal",
 						})
@@ -83,7 +82,7 @@ func marginalMaintenanceLoop(ctx context.Context, db *sql.DB, bus *runtime.Event
 			for rows.Next() {
 				var id string
 				if err := rows.Scan(&id); err == nil && bus != nil {
-					payload, _ := json.Marshal(map[string]any{
+					payload := mustJSON(map[string]any{
 						"vertical_id": id,
 						"reason":      "scheduled_14d_review",
 					})

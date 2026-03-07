@@ -119,7 +119,7 @@ func portfolioDigestLoop(
 		}
 		text := digest.RenderText(snap)
 
-		payload, _ := json.Marshal(map[string]any{
+		payload := mustJSON(map[string]any{
 			"digest_text":           text,
 			"trigger_reason":        trigger,
 			"trigger_event_id":      triggerEvent.ID,
@@ -248,7 +248,7 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 				continue
 			}
 
-			payload, _ := json.Marshal(map[string]any{
+			payload := mustJSON(map[string]any{
 				"vertical_id":      verticalID,
 				"severity":         w.Severity,
 				"breached_metrics": w.BreachedMetrics,
@@ -467,7 +467,7 @@ func maybeEmitSteadyState(ctx context.Context, bus *runtime.EventBus, db *sql.DB
 		  AND created_at >= now() - interval '30 days'
 	`, verticalID).Scan(&spend30d)
 
-	payload, _ := json.Marshal(map[string]any{
+	payload := mustJSON(map[string]any{
 		"vertical_id":        verticalID,
 		"weeks_since_launch": weeks,
 		"current_metrics": map[string]any{

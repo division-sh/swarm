@@ -396,7 +396,7 @@ func TestFactoryPipelineCoordinator_ValidationResumedPayloadEnrichedFromVertical
 	}
 
 	pc.mu.Lock()
-	pc.validations[verticalID] = &validationPipelineState{
+	pc.validationGate.states[verticalID] = &validationPipelineState{
 		VerticalID:     verticalID,
 		Status:         "active",
 		G1Research:     false,
@@ -436,7 +436,7 @@ func TestFactoryPipelineCoordinator_InnerRevisionAndPackagedState(t *testing.T) 
 	verticalID := uuid.NewString()
 
 	pc.mu.Lock()
-	pc.validations[verticalID] = &validationPipelineState{
+	pc.validationGate.states[verticalID] = &validationPipelineState{
 		VerticalID: verticalID,
 		Status:     "active",
 	}
@@ -468,7 +468,7 @@ func TestFactoryPipelineCoordinator_InnerRevisionAndPackagedState(t *testing.T) 
 		VerticalID: verticalID,
 	})
 	pc.mu.Lock()
-	gotInner := pc.validations[verticalID].InnerRevisionCount
+	gotInner := pc.validationGate.states[verticalID].InnerRevisionCount
 	pc.mu.Unlock()
 	if gotInner != 0 {
 		t.Fatalf("expected inner revision count reset to 0, got %d", gotInner)
@@ -480,7 +480,7 @@ func TestFactoryPipelineCoordinator_InnerRevisionAndPackagedState(t *testing.T) 
 		VerticalID: verticalID,
 	})
 	pc.mu.Lock()
-	gotStatus := pc.validations[verticalID].Status
+	gotStatus := pc.validationGate.states[verticalID].Status
 	pc.mu.Unlock()
 	if gotStatus != "packaged" {
 		t.Fatalf("expected packaged status, got %q", gotStatus)
@@ -684,7 +684,7 @@ func TestFactoryPipelineCoordinator_PersistAndLoadState(t *testing.T) {
 	}
 
 	pc.mu.Lock()
-	pc.scans[scanID] = &scanAccumulator{
+	pc.scanCoordinator.scans[scanID] = &scanAccumulator{
 		ScanID:      scanID,
 		CampaignID:  campaignID,
 		Mode:        "saas_gap",
@@ -701,7 +701,7 @@ func TestFactoryPipelineCoordinator_PersistAndLoadState(t *testing.T) {
 		Skipped:    1,
 		CreatedAt:  now.Add(-15 * time.Minute),
 	}
-	pc.pendingDedup[dedupID] = pendingCandidate{
+	pc.scanCoordinator.pendingDedup[dedupID] = pendingCandidate{
 		DedupEventID: dedupID,
 		ExistingID:   existingVerticalID,
 		ScanID:       scanID,
@@ -712,7 +712,7 @@ func TestFactoryPipelineCoordinator_PersistAndLoadState(t *testing.T) {
 		Signal:       79,
 		Payload:      map[string]any{"scan_id": scanID, "campaign_id": campaignID, "name": "Payroll Ops"},
 	}
-	pc.validations[verticalID] = &validationPipelineState{
+	pc.validationGate.states[verticalID] = &validationPipelineState{
 		VerticalID:           verticalID,
 		Status:               "active",
 		G1Research:           true,
@@ -752,7 +752,7 @@ func TestFactoryPipelineCoordinator_PersistAndLoadState(t *testing.T) {
 
 	_ = len(pcLoaded.SnapshotScans())
 	_ = pcLoaded.pendingDedupCountForScan(scanID)
-	loaded := pcLoaded.validationContext(verticalID)
+	loaded := pcLoaded.payloadFactory.ValidationContext(verticalID)
 	if loaded.SpecVersion != 3 {
 		t.Fatalf("unexpected loaded validation context: %+v", loaded)
 	}
@@ -791,7 +791,7 @@ func TestFactoryPipelineCoordinator_CheckPackagingTimeoutsRetryAndPark(t *testin
 
 	old := time.Now().UTC().Add(-(packagingTimeout + 2*time.Minute))
 	pc.mu.Lock()
-	pc.validations[verticalRetry] = &validationPipelineState{
+	pc.validationGate.states[verticalRetry] = &validationPipelineState{
 		VerticalID:           verticalRetry,
 		Status:               "active",
 		G1Research:           true,
@@ -808,7 +808,7 @@ func TestFactoryPipelineCoordinator_CheckPackagingTimeoutsRetryAndPark(t *testin
 		PackagingRequestedAt: runtimetestkit.PtrTime(old),
 		PackagingRetries:     0,
 	}
-	pc.validations[verticalPark] = &validationPipelineState{
+	pc.validationGate.states[verticalPark] = &validationPipelineState{
 		VerticalID:           verticalPark,
 		Status:               "active",
 		G1Research:           true,
@@ -847,8 +847,8 @@ func TestFactoryPipelineCoordinator_CheckPackagingTimeoutsRetryAndPark(t *testin
 	}
 
 	pc.mu.Lock()
-	retryState := pc.validations[verticalRetry]
-	parkState := pc.validations[verticalPark]
+	retryState := pc.validationGate.states[verticalRetry]
+	parkState := pc.validationGate.states[verticalPark]
 	pc.mu.Unlock()
 	if retryState == nil || retryState.PackagingRetries != 1 || retryState.Status != "active" {
 		t.Fatalf("unexpected retry state after timeout handling: %+v", retryState)

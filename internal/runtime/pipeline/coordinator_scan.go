@@ -3,6 +3,7 @@ package pipeline
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -54,10 +55,10 @@ func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, e
 		acc.Expected = plannedShardCount
 	}
 	pc.mu.Lock()
-	pc.scans[scanID] = acc
+	pc.scanCoordinator.scans[scanID] = acc
 	pc.mu.Unlock()
 
-	assigned := pc.buildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
+	assigned := pc.payloadFactory.BuildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
 	if plannedShardCount > 0 && (mode == "saas_gap" || mode == "saas_trend") {
 		// Assignment dispatch is owned by the shard dispatcher loop.
 		return
@@ -207,14 +208,16 @@ func (pc *FactoryPipelineCoordinator) isShardsTableEnabled(ctx context.Context) 
 	}
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	if pc.shardsTableChecked {
-		return pc.shardsTableEnabled
+	return pc.shardsTableEnabled
+}
+
+func detectShardsTable(ctx context.Context, db *sql.DB) bool {
+	if db == nil {
+		return false
 	}
 	var ok bool
-	_ = dbQueryRowContext(ctx, pc.db, `SELECT to_regclass('public.shards') IS NOT NULL`).Scan(&ok)
-	pc.shardsTableChecked = true
-	pc.shardsTableEnabled = ok
-	return pc.shardsTableEnabled
+	_ = dbQueryRowContext(ctx, db, `SELECT to_regclass('public.shards') IS NOT NULL`).Scan(&ok)
+	return ok
 }
 
 func shardStageForScanMode(mode string) string {
@@ -308,7 +311,7 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	shardTotal, shardCompleted, shardFailed, hasShardProgress := pc.shardTerminalProgress(ctx, scanID)
 
 	pc.mu.Lock()
-	acc := pc.scans[scanID]
+	acc := pc.scanCoordinator.scans[scanID]
 	if acc == nil {
 		pc.mu.Unlock()
 		runtimeWarn(
@@ -322,7 +325,7 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 	}
 	acc.CompletedBy[completionKey] = struct{}{}
 	done := len(acc.CompletedBy) >= maxInt(acc.Expected, 1)
-	stats := pc.buildScanCompletedPayload(scanCompletedBuildInput{
+	stats := pc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
 		ScanID:          acc.ScanID,
 		CampaignID:      acc.CampaignID,
 		Mode:            acc.Mode,
@@ -345,7 +348,7 @@ func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, 
 		done = terminal >= shardTotal && shardTotal > 0
 	}
 	if done {
-		delete(pc.scans, scanID)
+		delete(pc.scanCoordinator.scans, scanID)
 	}
 	pc.mu.Unlock()
 
@@ -418,7 +421,7 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 	}
 	expired := make([]timedOutScan, 0, 8)
 	pc.mu.Lock()
-	for scanID, acc := range pc.scans {
+	for scanID, acc := range pc.scanCoordinator.scans {
 		if acc == nil {
 			continue
 		}
@@ -442,12 +445,12 @@ func (pc *FactoryPipelineCoordinator) checkScanTimeouts(ctx context.Context, now
 			pendingDedup: pc.pendingDedupCountForScan(scanID),
 			shardScanID:  scanID,
 		})
-		delete(pc.scans, scanID)
+		delete(pc.scanCoordinator.scans, scanID)
 	}
 	pc.mu.Unlock()
 
 	for _, scan := range expired {
-		stats := pc.buildScanCompletedPayload(scanCompletedBuildInput{
+		stats := pc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
 			ScanID:          scan.scanID,
 			CampaignID:      scan.campaignID,
 			Mode:            scan.mode,

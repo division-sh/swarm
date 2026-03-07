@@ -22,28 +22,71 @@ import (
 type Executor struct {
 	mu            sync.RWMutex
 	manager       Manager
+	managerProvider ManagerProvider
 	sqlDB         *sql.DB
 	bus           EventPublisher
 	scheduler     Scheduler
 	scheduleStore SchedulePersistence
 	mailboxStore  MailboxPersistence
 	cfg           *config.Config
+	authorizer    *ToolAuthorizer
+	validator     *ToolInputValidator
+	dispatcher    *ToolDispatcher
 	oneShotMu     sync.Mutex
 	oneShotEmits  map[string]struct{}
 }
 
 func NewExecutor(bus EventPublisher, scheduler Scheduler, manager Manager, stores ...SchedulePersistence) *Executor {
+	return NewExecutorWithOptions(bus, scheduler, ExecutorOptions{Manager: manager}, stores...)
+}
+
+func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts ExecutorOptions, stores ...SchedulePersistence) *Executor {
 	var scheduleStore SchedulePersistence
 	if len(stores) > 0 {
 		scheduleStore = stores[0]
 	}
-	return &Executor{
-		manager:       manager,
+	exec := &Executor{
+		manager:       opts.Manager,
+		managerProvider: opts.ManagerProvider,
 		bus:           bus,
 		scheduler:     scheduler,
 		scheduleStore: scheduleStore,
+		mailboxStore:  opts.MailboxStore,
+		sqlDB:         opts.SQLDB,
+		cfg:           opts.Config,
 		oneShotEmits:  make(map[string]struct{}),
 	}
+	exec.authorizer = NewToolAuthorizer(bus)
+	exec.validator = NewToolInputValidator(ContractDefinitions)
+	exec.dispatcher = NewToolDispatcher(
+		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
+			return exec.handleEmitTool(ctx, actor, name, input)
+		},
+		map[string]ToolHandler{
+			"agent_message":             exec.execAgentMessage,
+			"schedule":                  exec.execSchedule,
+			"configure_routing":         exec.execConfigureRouting,
+			"agent_hire":                func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execAgentHire(actor, input) },
+			"agent_fire":                func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execAgentFire(actor, input) },
+			"agent_reconfigure":         func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execAgentReconfigure(actor, input) },
+			"mailbox_send":              exec.execMailboxSend,
+			"human_task_request":        exec.execHumanTaskRequest,
+			"human_task_decide":         exec.execHumanTaskDecide,
+			"sql_execute":               exec.execSQLExecute,
+			"nginx_reload":              exec.execNginxReload,
+			"systemd_control":           exec.execSystemdControl,
+			"certbot_execute":           exec.execCertbotExecute,
+			"whatsapp_business_api":     func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "whatsapp_business_api", input) },
+			"email_api":                 exec.execEmailAPI,
+			"instagram_api":             func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "instagram_api", input) },
+			"domain_purchase":           func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "domain_purchase", input) },
+			"domain_availability_check": func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "domain_availability_check", input) },
+			"dns_configure":             func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "dns_configure", input) },
+			"instagram_handle_check":    exec.execInstagramHandleCheck,
+			"whatsapp_name_check":       func(ctx context.Context, actor models.AgentConfig, input any) (any, error) { return exec.execExternalProxy(ctx, actor, "whatsapp_name_check", input) },
+		},
+	)
+	return exec
 }
 
 func (e *Executor) SetManager(manager Manager) {
@@ -54,6 +97,7 @@ func (e *Executor) SetManager(manager Manager) {
 		return
 	}
 	e.manager = manager
+	e.managerProvider = nil
 }
 
 func (e *Executor) SetConfig(cfg *config.Config) {
@@ -92,35 +136,16 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 	}
 	input = normalizeRuntimeToolInput(name, input)
 	start := time.Now()
-	out, err := e.executeTool(ctx, actor, name, input)
+	out, err := e.dispatchTool(ctx, actor, name, input)
 	e.emitToolExecutionEvent(ctx, actor, name, input, out, err, time.Since(start))
 	return out, err
 }
 
 func (e *Executor) validateRuntimeToolInput(name string, input any) error {
-	name = strings.TrimSpace(name)
-	if name == "" || strings.HasPrefix(name, "emit_") {
+	if e.validator == nil {
 		return nil
 	}
-	input = normalizeRuntimeToolInput(name, input)
-	payload := map[string]any{}
-	if err := decodeToolInput(input, &payload); err != nil {
-		return err
-	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-
-	defs, defsErr := ContractDefinitions()
-	if defsErr != nil {
-		return defsErr
-	}
-
-	contractSchema, foundContract := runtimeToolSchemaForName(defs, name)
-	if foundContract && contractSchema != nil {
-		return ValidatePayloadAgainstSchema(contractSchema, pruneSchemaUnknownKeys(payload, contractSchema))
-	}
-	return nil
+	return e.validator.Validate(name, input)
 }
 
 func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
@@ -437,58 +462,6 @@ func normalizeRuntimeToolInput(name string, input any) any {
 	return payload
 }
 
-func (e *Executor) executeTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
-	if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
-		return e.handleEmitTool(ctx, actor, name, input)
-	}
-	switch name {
-	case "agent_message":
-		return e.execAgentMessage(ctx, actor, input)
-	case "schedule":
-		return e.execSchedule(ctx, actor, input)
-	case "configure_routing":
-		return e.execConfigureRouting(ctx, actor, input)
-	case "agent_hire":
-		return e.execAgentHire(actor, input)
-	case "agent_fire":
-		return e.execAgentFire(actor, input)
-	case "agent_reconfigure":
-		return e.execAgentReconfigure(actor, input)
-	case "mailbox_send":
-		return e.execMailboxSend(ctx, actor, input)
-	case "human_task_request":
-		return e.execHumanTaskRequest(ctx, actor, input)
-	case "human_task_decide":
-		return e.execHumanTaskDecide(ctx, actor, input)
-	case "sql_execute":
-		return e.execSQLExecute(ctx, actor, input)
-	case "nginx_reload":
-		return e.execNginxReload(ctx, actor, input)
-	case "systemd_control":
-		return e.execSystemdControl(ctx, actor, input)
-	case "certbot_execute":
-		return e.execCertbotExecute(ctx, actor, input)
-	case "whatsapp_business_api":
-		return e.execExternalProxy(ctx, actor, "whatsapp_business_api", input)
-	case "email_api":
-		return e.execEmailAPI(ctx, actor, input)
-	case "instagram_api":
-		return e.execExternalProxy(ctx, actor, "instagram_api", input)
-	case "domain_purchase":
-		return e.execExternalProxy(ctx, actor, "domain_purchase", input)
-	case "domain_availability_check":
-		return e.execExternalProxy(ctx, actor, "domain_availability_check", input)
-	case "dns_configure":
-		return e.execExternalProxy(ctx, actor, "dns_configure", input)
-	case "instagram_handle_check":
-		return e.execInstagramHandleCheck(ctx, actor, input)
-	case "whatsapp_name_check":
-		return e.execExternalProxy(ctx, actor, "whatsapp_name_check", input)
-	default:
-		return nil, fmt.Errorf("unsupported runtime tool: %s", name)
-	}
-}
-
 func (e *Executor) emitToolExecutionEvent(
 	ctx context.Context,
 	actor models.AgentConfig,
@@ -539,47 +512,17 @@ func toolExecErrorText(err error) string {
 }
 
 func (e *Executor) authorizeToolUsage(ctx context.Context, actor models.AgentConfig, toolName string) error {
-	if IsUniversal(toolName) {
+	if e.authorizer == nil {
 		return nil
 	}
-	if IsEmitToolAllowedForRole(actor.Role, toolName) {
-		return nil
+	return e.authorizer.Authorize(ctx, actor, toolName)
+}
+
+func (e *Executor) dispatchTool(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
+	if e.dispatcher == nil {
+		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
-	allowed, constrained := extractAllowedTools(actor)
-	if !constrained {
-		return nil
-	}
-	if _, ok := allowed[toolName]; ok {
-		return nil
-	}
-	err := fmt.Errorf("tool %s is not allowed for agent %s", toolName, actor.ID)
-	if e.bus != nil {
-		payload, _ := json.Marshal(map[string]any{
-			"reason":       "tool_not_allowed",
-			"agent_id":     actor.ID,
-			"agent_role":   actor.Role,
-			"tool_name":    toolName,
-			"vertical_id":  actor.VerticalID,
-			"runtime_tool": true,
-		})
-		if pubErr := e.bus.Publish(ctx, events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("spec.contradiction_detected"),
-			SourceAgent: "runtime",
-			VerticalID:  actor.VerticalID,
-			Payload:     payload,
-			CreatedAt:   time.Now(),
-		}); pubErr != nil {
-			runtimeWarn(
-				"tool-executor",
-				"failed to publish spec.contradiction_detected actor=%s tool=%s: %v",
-				strings.TrimSpace(actor.ID),
-				strings.TrimSpace(toolName),
-				pubErr,
-			)
-		}
-	}
-	return err
+	return e.dispatcher.Dispatch(ctx, actor, name, input)
 }
 
 func extractAllowedTools(actor models.AgentConfig) (map[string]struct{}, bool) {
@@ -615,8 +558,16 @@ func extractAllowedTools(actor models.AgentConfig) (map[string]struct{}, bool) {
 
 func (e *Executor) getManager() Manager {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.manager
+	manager := e.manager
+	provider := e.managerProvider
+	e.mu.RUnlock()
+	if manager != nil {
+		return manager
+	}
+	if provider != nil {
+		return provider()
+	}
+	return nil
 }
 
 func decodeToolInput(input any, out any) error {

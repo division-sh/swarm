@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -64,6 +63,10 @@ const (
 )
 
 func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
+	return NewAgentManagerWithOptions(bus, factory, AgentManagerOptions{}, stores...)
+}
+
+func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
 	var store ManagerPersistence
 	if len(stores) > 0 {
 		store = stores[0]
@@ -76,6 +79,10 @@ func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence
 		bus:               bus,
 		factory:           factory,
 		store:             store,
+		workspaces:        opts.Workspaces,
+		sessions:          opts.Sessions,
+		runtimeMode:       strings.TrimSpace(opts.RuntimeMode),
+		budget:            opts.Budget,
 		inFlight:          make(map[string]struct{}),
 		loopCancel:        make(map[string]context.CancelFunc),
 		poisonPanicCounts: make(map[string]int),
@@ -201,7 +208,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	runCtx := am.runCtx
 	am.runMu.Unlock()
 	if persist {
-		payload, _ := json.Marshal(map[string]any{
+		payload := mustJSON(map[string]any{
 			"agent_id":    rec.Config.ID,
 			"agent_type":  rec.Config.Type,
 			"role":        rec.Config.Role,
@@ -209,14 +216,16 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			"vertical_id": rec.Config.VerticalID,
 			"hired_by":    rec.HiredBy,
 		})
-		_ = am.bus.Publish(am.runtimeContext(), events.Event{
+		if err := am.bus.Publish(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("agent.started"),
 			SourceAgent: rec.Config.ID,
 			VerticalID:  rec.Config.VerticalID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		})
+		}); err != nil {
+			RuntimeWarn("agent-manager", "agent.started publish failed agent=%s err=%v", rec.Config.ID, err)
+		}
 	}
 	if isRunning {
 		am.startAgentLoop(runCtx, a)

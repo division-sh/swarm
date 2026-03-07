@@ -176,7 +176,7 @@ func TestPipelineCoordinatorContractSemantics_ValidationGateVectors(t *testing.T
 				}
 			}
 			pc.mu.Lock()
-			st := pc.validations[verticalID]
+			st := pc.validationGate.states[verticalID]
 			pc.mu.Unlock()
 			if st == nil {
 				t.Fatal("missing validation state")
@@ -682,7 +682,7 @@ func TestPipelineCoordinatorContractSemantics_ValidationGateAndInterceptPolicy(t
 	pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("brand.candidates_ready"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"ok": true})}, "g4")
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || !st.G1Research || !st.G2Spec || !st.G3CTO || !st.G4Brand || !st.PackagingRequested {
 		t.Fatalf("expected all validation gates completed and packaging requested, state=%+v", st)
@@ -767,7 +767,7 @@ func TestPipelineCoordinatorContractSemantics_DedupQueueDrains(t *testing.T) {
 	waitForEventType(t, ch, "vertical.discovered")
 
 	pc.mu.Lock()
-	_, stillPending := pc.pendingDedup[dedupEventID]
+	_, stillPending := pc.scanCoordinator.pendingDedup[dedupEventID]
 	pc.mu.Unlock()
 	if stillPending {
 		t.Fatal("expected pending dedup queue to drain after dedup.resolved")

@@ -726,13 +726,15 @@ func (d *ShardDispatcher) emitTerminalShardCompletion(ctx context.Context, row s
 			"error":       truncateForDB(reason, 400),
 		},
 	}
-	_ = d.bus.Publish(ctx, events.Event{
+	if err := d.bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        completionEventFor(meta.AssignEvent),
 		SourceAgent: source,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		log.Printf("shard completion publish failed shard=%s err=%v", row.ID, err)
+	}
 }
 
 func (d *ShardDispatcher) availableAssignmentSlots(ctx context.Context) int {

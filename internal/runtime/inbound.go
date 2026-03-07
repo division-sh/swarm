@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -123,17 +124,19 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	pubPayload["headers"] = map[string]any{
 		"user_agent": r.UserAgent(),
 	}
-	envelopeBytes, _ := json.Marshal(pubPayload)
+	envelopeBytes := mustJSON(pubPayload)
 	if g.bus != nil {
 		pubCtx := runtimebus.WithCurrentRuntimeEpoch(r.Context())
-		_ = g.bus.Publish(pubCtx, events.Event{
+		if err := g.bus.Publish(pubCtx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        pubType,
 			SourceAgent: "inbound-gateway",
 			VerticalID:  target.VerticalID,
 			Payload:     envelopeBytes,
 			CreatedAt:   now,
-		})
+		}); err != nil {
+			log.Printf("inbound publish failed provider=%s vertical=%s err=%v", provider, target.VerticalID, err)
+		}
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{

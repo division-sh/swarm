@@ -284,7 +284,7 @@ func checkScanCompletionUniqueKeys(t *testing.T) {
 		pc.handleScanCompletion(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("scanner.google_maps.scan_complete"), SourceAgent: "scanner-agent", Payload: mustJSON(map[string]any{"scan_id": scanID})})
 	}
 	pc.mu.Lock()
-	acc := pc.scans[scanID]
+	acc := pc.scanCoordinator.scans[scanID]
 	pc.mu.Unlock()
 	if acc == nil {
 		t.Fatal("scan accumulator should still exist for local_services partial completion")
@@ -324,11 +324,11 @@ func checkDedupResolutionDrain(t *testing.T) {
 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
 	dedupID := "dedup-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	pc.mu.Lock()
-	pc.pendingDedup[dedupID] = pendingCandidate{DedupEventID: dedupID, ScanID: "scan-1", CampaignID: "campaign-1", Mode: "saas_gap", Name: "Candidate", Geography: "us", Signal: 72, Payload: map[string]any{"opportunity_name": "Candidate"}, ExistingID: "existing-1"}
+	pc.scanCoordinator.pendingDedup[dedupID] = pendingCandidate{DedupEventID: dedupID, ScanID: "scan-1", CampaignID: "campaign-1", Mode: "saas_gap", Name: "Candidate", Geography: "us", Signal: 72, Payload: map[string]any{"opportunity_name": "Candidate"}, ExistingID: "existing-1"}
 	pc.mu.Unlock()
 	pc.handleDedupResolved(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("dedup.resolved"), Payload: mustJSON(map[string]any{"dedup_event_id": dedupID, "action": "keep_existing"})})
 	pc.mu.Lock()
-	_, exists := pc.pendingDedup[dedupID]
+	_, exists := pc.scanCoordinator.pendingDedup[dedupID]
 	pc.mu.Unlock()
 	if exists {
 		t.Fatalf("expected pending dedup candidate drained for %s", dedupID)
@@ -451,7 +451,7 @@ func checkScoringContestEmitAndResolve(t *testing.T) {
 	acc := newUniversalAccumulator(verticalID, "Contest Matrix", "us", "saas_gap")
 	setScores(acc, map[string]int{"icp_crispness": 40})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 	contested := bus.Subscribe("matrix-contested", events.EventType("scoring.contested"))
 	scored := bus.Subscribe("matrix-scored", events.EventType("vertical.scored"))
@@ -471,7 +471,7 @@ func checkValidationGateTracking(t *testing.T) {
 	pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("cto.spec_approved"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"ok": true})}, "g3")
 	pc.handleValidationGate(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("brand.candidates_ready"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"ok": true})}, "g4")
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || !(st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand) {
 		t.Fatalf("expected all validation gates true, state=%+v", st)
@@ -503,7 +503,7 @@ func checkRevisionRoutingOnValidationFailed(t *testing.T) {
 	pc.handleSpecValidationFailed(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("spec.validation_failed"), VerticalID: verticalID, Payload: mustJSON(map[string]any{"status": "blocker"})})
 	waitForEventType(t, ch, "spec.revision_requested")
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || st.RevisionCount != 1 {
 		t.Fatalf("expected revision_count=1, state=%+v", st)
@@ -524,7 +524,7 @@ func checkInnerRevisionLimit(t *testing.T) {
 		t.Fatal("expected escalation after max inner revision cycles")
 	}
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || st.Status != "parked" {
 		t.Fatalf("expected parked validation state after inner revision limit, state=%+v", st)

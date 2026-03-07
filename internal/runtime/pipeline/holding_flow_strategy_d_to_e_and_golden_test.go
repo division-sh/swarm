@@ -77,7 +77,7 @@ func TestHoldingFlow_C6_CTOApprovedSetsGate3(t *testing.T) {
 	})
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || !st.G3CTO {
 		t.Fatalf("expected G3 true after CTO approval, got %+v", st)
@@ -111,7 +111,7 @@ func TestHoldingFlow_C7_BrandCandidatesSetGate4(t *testing.T) {
 	})
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || !st.G4Brand {
 		t.Fatalf("expected G4 true after brand candidates, got %+v", st)
@@ -289,7 +289,7 @@ func TestHoldingFlow_D1_CTORevisionNeededResetsSpecAndLoops(t *testing.T) {
 	waitForEventType(t, ch, "spec.revision_requested")
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || st.G2Spec || st.G3CTO {
 		t.Fatalf("expected G2/G3 reset after CTO revision, got %+v", st)
@@ -345,7 +345,7 @@ loop:
 	}
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || strings.TrimSpace(st.Status) != "parked" {
 		t.Fatalf("expected parked status after max revisions, got %+v", st)
@@ -389,7 +389,7 @@ func TestHoldingFlow_D3_SpecReviewerIssuesIncrementInnerRevisionCount(t *testing
 	})
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || st.InnerRevisionCount != 1 || strings.TrimSpace(st.Status) != "active" {
 		t.Fatalf("expected active state with inner revision count=1, got %+v", st)
@@ -425,7 +425,7 @@ func TestHoldingFlow_D4_ResearchRejectedKillsPipeline(t *testing.T) {
 	waitForEventType(t, ch, "vertical.killed")
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || strings.TrimSpace(st.Status) != "rejected" {
 		t.Fatalf("expected rejected status, got %+v", st)
@@ -561,7 +561,7 @@ func TestHoldingFlow_E3_BrandRevisionResetsG4AndCanBeRegenerated(t *testing.T) {
 	})
 	waitForEventType(t, ch, "brand.revision_needed")
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	g4 := st != nil && st.G4Brand
 	pc.mu.Unlock()
 	if g4 {
@@ -577,7 +577,7 @@ func TestHoldingFlow_E3_BrandRevisionResetsG4AndCanBeRegenerated(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 	})
 	pc.mu.Lock()
-	g4 = pc.validations[verticalID].G4Brand
+	g4 = pc.validationGate.states[verticalID].G4Brand
 	pc.mu.Unlock()
 	if !g4 {
 		t.Fatal("expected G4 true after regenerated brand candidates")
@@ -620,7 +620,7 @@ func TestHoldingFlow_E4_NeedsMoreDataResetsG1ThenAllowsReseal(t *testing.T) {
 	})
 	waitForEventType(t, ch, "validation.more_data_needed")
 	pc.mu.Lock()
-	g1 := pc.validations[verticalID].G1Research
+	g1 := pc.validationGate.states[verticalID].G1Research
 	pc.mu.Unlock()
 	if g1 {
 		t.Fatal("expected G1 reset after vertical.needs_more_data")
@@ -634,7 +634,7 @@ func TestHoldingFlow_E4_NeedsMoreDataResetsG1ThenAllowsReseal(t *testing.T) {
 		CreatedAt:   time.Now().UTC(),
 	})
 	pc.mu.Lock()
-	g1 = pc.validations[verticalID].G1Research
+	g1 = pc.validationGate.states[verticalID].G1Research
 	pc.mu.Unlock()
 	if !g1 {
 		t.Fatal("expected G1 re-set after follow-up research.completed")
@@ -658,7 +658,7 @@ func TestHoldingFlow_E5_ScanTimeoutEmitsTimedOutCompletion(t *testing.T) {
 		}),
 	})
 	pc.mu.Lock()
-	acc := pc.scans["scan-timeout-e5"]
+	acc := pc.scanCoordinator.scans["scan-timeout-e5"]
 	acc.Reports = 3
 	acc.Discovered = 1
 	acc.Skipped = 2

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -66,6 +65,9 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 					}
 					due = append(due, r)
 				}
+				if err := rows.Err(); err != nil {
+					log.Printf("human task requeue rows failed: %v", err)
+				}
 				_ = rows.Close()
 			}
 			for _, r := range due {
@@ -80,7 +82,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				`, r.ID); err != nil {
 					continue
 				}
-				b, _ := json.Marshal(map[string]any{
+				b := mustJSON(map[string]any{
 					"task_id":          strings.TrimSpace(r.ID),
 					"requesting_agent": strings.TrimSpace(r.Requester),
 					"vertical_id":      strings.TrimSpace(r.Vertical),
@@ -90,14 +92,16 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 					"requeued":         true,
 					"requeue_reason":   "budget_cycle_reset",
 				})
-				_ = bus.Publish(ctx, events.Event{
+				if err := bus.Publish(ctx, events.Event{
 					ID:          uuid.NewString(),
 					Type:        events.EventType("human_task.requested"),
 					SourceAgent: "runtime",
 					VerticalID:  strings.TrimSpace(r.Vertical),
 					Payload:     b,
 					CreatedAt:   time.Now(),
-				})
+				}); err != nil {
+					log.Printf("human_task.requested publish failed task=%s err=%v", strings.TrimSpace(r.ID), err)
+				}
 			}
 		}
 
@@ -173,15 +177,17 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				"vertical_id":      strings.TrimSpace(tr.Vertical),
 				"expiry_reason":    reason,
 			}
-			b, _ := json.Marshal(payload)
-			_ = bus.Publish(ctx, events.Event{
+			b := mustJSON(payload)
+			if err := bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("human_task.expired"),
 				SourceAgent: "runtime",
 				VerticalID:  strings.TrimSpace(tr.Vertical),
 				Payload:     b,
 				CreatedAt:   time.Now(),
-			})
+			}); err != nil {
+				log.Printf("human_task.expired publish failed task=%s err=%v", strings.TrimSpace(tr.ID), err)
+			}
 
 			// Spec v2.0 expiry behavior:
 			// - If stale (deadline passed): expire permanently.
@@ -237,7 +243,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				"decided_by":   "runtime",
 				"decided_at":   time.Now().UTC().Format(time.RFC3339),
 			}
-			decisionJSON, _ := json.Marshal(decisionObj)
+			decisionJSON := mustJSON(decisionObj)
 			if _, err := db.ExecContext(ctx, `
 				UPDATE human_tasks
 				SET status = 'deferred',
@@ -248,7 +254,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				    completed_at = NULL
 				WHERE id = $1::uuid
 			`, tr.ID, string(decisionJSON)); err == nil {
-				_ = bus.Publish(ctx, events.Event{
+				if err := bus.Publish(ctx, events.Event{
 					ID:          uuid.NewString(),
 					Type:        events.EventType("human_task.deferred"),
 					SourceAgent: "runtime",
@@ -261,7 +267,9 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 						"requeue_date":     requeueAt,
 					}),
 					CreatedAt: time.Now(),
-				})
+				}); err != nil {
+					log.Printf("human_task.deferred publish failed task=%s err=%v", strings.TrimSpace(tr.ID), err)
+				}
 			}
 		}
 	}

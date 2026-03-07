@@ -44,7 +44,7 @@ func TestRuntimeToolExecutor_DeployMigrationGuardrailRejectsDestructiveSQL(t *te
 	store := &captureStore{}
 	bus := NewEventBus(store)
 	exec := runtimetools.NewExecutor(bus, nil, nil)
-	mb := &mailboxStoreStub{}
+	mb := &testMailboxStore{}
 	exec.SetMailboxStore(mb)
 	actor := models.AgentConfig{
 		ID:         "devops-agent-11111111-1111-1111-1111-111111111111",

@@ -18,6 +18,14 @@ import (
 	"github.com/google/uuid"
 )
 
+type verticalInfoReader interface {
+	GetVerticalInfo(ctx context.Context, verticalID string) (VerticalInfo, bool, error)
+}
+
+type bootstrapVersionResolver interface {
+	ResolveBootstrapVersion(ctx context.Context, templateVersion string) (int, error)
+}
+
 func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocument) error {
 	if verticalID == "" {
 		return errors.New("verticalID is required")
@@ -56,7 +64,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		if err := am.bus.SetRoutingTable(verticalID, rt); err != nil {
 			return err
 		}
-		payload, _ := json.Marshal(map[string]any{
+		payload := mustJSON(map[string]any{
 			"vertical_id":      verticalID,
 			"ceo_agent_id":     opCoAgentID("opco-ceo", verticalID),
 			"agent_count":      len(agents),
@@ -64,14 +72,16 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 			"priority":         "normal",
 			"mandate":          mandate,
 		})
-		_ = am.bus.Publish(am.runtimeContext(), events.Event{
+		if err := am.bus.Publish(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("opco.ceo_ready"),
 			SourceAgent: "agent-manager",
 			VerticalID:  verticalID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		})
+		}); err != nil {
+			RuntimeWarn("agent-manager", "opco.ceo_ready publish failed vertical=%s err=%v", verticalID, err)
+		}
 		return nil
 	}
 
@@ -90,7 +100,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 	verticalName := ""
 	verticalGeography := ""
 	verticalSlug := ""
-	if reader, ok := am.store.(VerticalInfoReader); ok && reader != nil {
+	if reader, ok := am.store.(verticalInfoReader); ok && reader != nil {
 		if info, found, err := reader.GetVerticalInfo(am.runtimeContext(), verticalID); err == nil && found {
 			verticalName = strings.TrimSpace(info.Name)
 			verticalGeography = strings.TrimSpace(info.Geography)
@@ -235,7 +245,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		}
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	payload := mustJSON(map[string]any{
 		"vertical_id":      verticalID,
 		"ceo_agent_id":     ceoID,
 		"agent_count":      len(agents),
@@ -243,14 +253,16 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocum
 		"priority":         "normal",
 		"mandate":          mandate,
 	})
-	_ = am.bus.Publish(am.runtimeContext(), events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("opco.ceo_ready"),
 		SourceAgent: "agent-manager",
 		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		RuntimeWarn("agent-manager", "opco.ceo_ready publish failed vertical=%s err=%v", verticalID, err)
+	}
 
 	return nil
 }
@@ -373,7 +385,7 @@ func (am *AgentManager) resolveBootstrapVersion(ctx context.Context, templateVer
 	if am == nil || am.store == nil {
 		return 1
 	}
-	resolver, ok := am.store.(BootstrapVersionResolver)
+	resolver, ok := am.store.(bootstrapVersionResolver)
 	if !ok || resolver == nil {
 		return 1
 	}
@@ -451,14 +463,16 @@ func (am *AgentManager) TeardownOpCo(verticalID string) error {
 			WorkspaceStopped: am.workspaces != nil,
 			Priority:         "normal",
 		}
-		_ = am.bus.Publish(am.runtimeContext(), events.Event{
+		if err := am.bus.Publish(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("opco.teardown_complete"),
 			SourceAgent: "agent-manager",
 			VerticalID:  strings.TrimSpace(verticalID),
 			Payload:     mustJSON(payload),
 			CreatedAt:   time.Now(),
-		})
+		}); err != nil {
+			RuntimeWarn("agent-manager", "opco.teardown_complete publish failed vertical=%s err=%v", strings.TrimSpace(verticalID), err)
+		}
 	}
 	return nil
 }

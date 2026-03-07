@@ -129,13 +129,15 @@ func (r *ScanRequestedRunner) handle(ctx context.Context, evt events.Event) {
 		"killed_count":       sum.Killed,
 		"latency_ms":         int(latency / time.Millisecond),
 	}
-	_ = r.bus.Publish(ctx, events.Event{
+	if err := r.bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scan.completed"),
 		SourceAgent: "discovery-coordinator",
 		Payload:     mustJSON(out),
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		log.Printf("scan.completed publish failed campaign=%s err=%v", strings.TrimSpace(asString(payload["campaign_id"])), err)
+	}
 }
 
 func asString(v any) string {

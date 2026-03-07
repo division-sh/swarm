@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -270,7 +271,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 		LastUpdatedAt:    now,
 		ContestNotified:  make(map[string]bool),
 	}
-	if existing := pc.scoring[verticalID]; existing != nil {
+	if existing := pc.scoringState.accumulators[verticalID]; existing != nil {
 		// Keep existing progress but refresh metadata when discovery details improve.
 		acc = existing
 		acc.VerticalName = firstNonEmptyString(name, acc.VerticalName)
@@ -294,13 +295,13 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 			acc.ContestNotified = make(map[string]bool)
 		}
 	}
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
-	scoringPayload := pc.buildScoringRequestedPayload(verticalID, acc)
-	if excluded := pc.derivedScoringGeneratorAgent(ctx, acc); excluded != "" {
+	scoringPayload := pc.payloadFactory.BuildScoringRequestedPayload(verticalID, acc)
+	if excluded := pc.payloadFactory.DerivedScoringGeneratorAgent(ctx, acc); excluded != "" {
 		scoringPayload.ExcludedAnalysisAgentID = excluded
-		if assigned := pc.selectScoringAnalysisRecipient(excluded); assigned != "" {
+		if assigned := pc.payloadFactory.SelectScoringAnalysisRecipient(excluded); assigned != "" {
 			scoringPayload.AssignedAnalysisAgentID = assigned
 			pc.publishDirect(ctx, "scoring.requested", verticalID, payloadMap(scoringPayload), []string{assigned})
 			return
@@ -376,7 +377,7 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 		log.Printf("scoring-node: ensure derived vertical failed parent=%s name=%s err=%v", parentID, name, err)
 		return
 	}
-	discoveredPayload := payloadMap(pc.buildVerticalDiscoveredPayload(
+	discoveredPayload := payloadMap(pc.payloadFactory.BuildVerticalDiscoveredPayload(
 		verticalID,
 		name,
 		geography,
@@ -420,7 +421,7 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 	confidence := strings.TrimSpace(asString(payload["confidence"]))
 
 	pc.mu.Lock()
-	acc := pc.scoring[verticalID]
+	acc := pc.scoringState.accumulators[verticalID]
 	if acc == nil {
 		acc = &scoringAccumulator{
 			VerticalID:      verticalID,
@@ -440,7 +441,7 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 		}
 		acc.Rubric = selectScoringRubric(acc.Mode)
 		acc.Expected = expectedScoringDimensions(acc.Rubric)
-		pc.scoring[verticalID] = acc
+		pc.scoringState.accumulators[verticalID] = acc
 	}
 	if acc.LastUpdatedAt.IsZero() {
 		acc.LastUpdatedAt = time.Now().UTC()
@@ -473,7 +474,7 @@ func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.C
 			acc.ContestNotified[dim] = true
 			acc.LastUpdatedAt = time.Now().UTC()
 			pc.mu.Unlock()
-			pc.publish(ctx, "scoring.contested", verticalID, payloadMap(pc.buildScoringContestedPayload(verticalID, dim, contest, acc)))
+			pc.publish(ctx, "scoring.contested", verticalID, payloadMap(pc.payloadFactory.BuildScoringContestedPayload(verticalID, dim, contest, acc)))
 			return
 		}
 		pc.mu.Unlock()
@@ -502,7 +503,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringContestResolved(ctx context.C
 	resolved := clampScore100(intFromAny(payload["resolved_score"]))
 	reasoning := strings.TrimSpace(asString(payload["reasoning"]))
 	pc.mu.Lock()
-	acc := pc.scoring[verticalID]
+	acc := pc.scoringState.accumulators[verticalID]
 	if acc == nil {
 		pc.mu.Unlock()
 		return
@@ -717,7 +718,7 @@ func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, 
 
 func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Context, verticalID string, partial bool) {
 	pc.mu.Lock()
-	acc := pc.scoring[verticalID]
+	acc := pc.scoringState.accumulators[verticalID]
 	if acc == nil {
 		pc.mu.Unlock()
 		return
@@ -731,10 +732,10 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 		return
 	}
 	result := pc.computeComposite(acc, partial || len(acc.Received) < len(acc.Expected))
-	delete(pc.scoring, verticalID)
+	delete(pc.scoringState.accumulators, verticalID)
 	pc.mu.Unlock()
 
-	scoredPayload := pc.buildVerticalScoredPayload(verticalID, result, acc)
+	scoredPayload := pc.payloadFactory.BuildVerticalScoredPayload(verticalID, result, acc)
 	scoredPayloadMap := payloadMap(scoredPayload)
 	pc.publish(ctx, "vertical.scored", verticalID, scoredPayloadMap)
 
@@ -742,13 +743,13 @@ func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Con
 	switch result.Result {
 	case "shortlisted":
 		stage = "shortlisted"
-		pc.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(pc.buildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayloadMap)))
+		pc.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(pc.payloadFactory.BuildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayloadMap)))
 	case "marginal":
-		pc.publish(ctx, "vertical.marginal", verticalID, payloadMap(pc.buildVerticalMarginalPayload(verticalID, result)))
+		pc.publish(ctx, "vertical.marginal", verticalID, payloadMap(pc.payloadFactory.BuildVerticalMarginalPayload(verticalID, result)))
 	case "rejected":
 		stage = "killed"
 		pc.appendScoringDigestBuffer(ctx, scoredPayload)
-		pc.publish(ctx, "vertical.rejected", verticalID, payloadMap(pc.buildVerticalRejectedPayload(verticalID, result)))
+		pc.publish(ctx, "vertical.rejected", verticalID, payloadMap(pc.payloadFactory.BuildVerticalRejectedPayload(verticalID, result)))
 	}
 	if pc.db != nil {
 		if _, err := dbExecContext(ctx, pc.db, `
@@ -951,31 +952,26 @@ func (pc *FactoryPipelineCoordinator) isScoringDigestBufferEnabled(ctx context.C
 		return false
 	}
 	pc.mu.Lock()
-	if pc.scoringDigestBufferChecked {
-		enabled := pc.scoringDigestBufferEnabled
-		pc.mu.Unlock()
-		return enabled
-	}
-	pc.mu.Unlock()
-
-	var ok bool
-	if err := dbQueryRowContext(ctx, pc.db, `SELECT to_regclass('public.scoring_digest_buffer') IS NOT NULL`).Scan(&ok); err != nil {
-		ok = false
-	}
-	pc.mu.Lock()
-	if !pc.scoringDigestBufferChecked {
-		pc.scoringDigestBufferEnabled = ok
-		pc.scoringDigestBufferChecked = true
-	}
 	enabled := pc.scoringDigestBufferEnabled
 	pc.mu.Unlock()
 	return enabled
 }
 
+func detectScoringDigestBuffer(ctx context.Context, db *sql.DB) bool {
+	if db == nil {
+		return false
+	}
+	var ok bool
+	if err := dbQueryRowContext(ctx, db, `SELECT to_regclass('public.scoring_digest_buffer') IS NOT NULL`).Scan(&ok); err != nil {
+		return false
+	}
+	return ok
+}
+
 func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, now time.Time) {
 	pc.mu.Lock()
-	stale := make([]string, 0, len(pc.scoring))
-	for verticalID, acc := range pc.scoring {
+	stale := make([]string, 0, len(pc.scoringState.accumulators))
+	for verticalID, acc := range pc.scoringState.accumulators {
 		if acc == nil {
 			continue
 		}

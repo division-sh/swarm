@@ -23,9 +23,17 @@ type EventBus struct {
 	subscriptions map[string][]events.EventType
 	routingTable  map[string]*RoutingTable
 	interceptors  []EventInterceptor
+	interceptorProvider func() []EventInterceptor
 	cycleTracker  *OpCoCycleTracker
 	store         EventStore
 	logger        LoggerHook
+}
+
+type EventBusOptions struct {
+	Logger              LoggerHook
+	CycleTracker        *OpCoCycleTracker
+	Interceptors        []EventInterceptor
+	InterceptorProvider func() []EventInterceptor
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -43,8 +51,18 @@ type eventDeliveryPlan struct {
 }
 
 func NewEventBus(store EventStore) *EventBus {
+	return NewEventBusWithOptions(store, EventBusOptions{})
+}
+
+func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 	if store == nil {
 		store = InMemoryEventStore{}
+	}
+	filtered := make([]EventInterceptor, 0, len(opts.Interceptors))
+	for _, it := range opts.Interceptors {
+		if it != nil {
+			filtered = append(filtered, it)
+		}
 	}
 	return &EventBus{
 		channels:      make(map[events.EventType]map[string]chan events.Event),
@@ -52,6 +70,10 @@ func NewEventBus(store EventStore) *EventBus {
 		subscriptions: make(map[string][]events.EventType),
 		routingTable:  make(map[string]*RoutingTable),
 		store:         store,
+		logger:        opts.Logger,
+		cycleTracker:  opts.CycleTracker,
+		interceptors:  filtered,
+		interceptorProvider: opts.InterceptorProvider,
 	}
 }
 
@@ -83,6 +105,7 @@ func (eb *EventBus) SetInterceptors(interceptors ...EventInterceptor) {
 	}
 	eb.mu.Lock()
 	eb.interceptors = filtered
+	eb.interceptorProvider = nil
 	eb.mu.Unlock()
 }
 

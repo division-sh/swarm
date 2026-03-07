@@ -215,16 +215,16 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 		return
 	}
 	if len(scans) > 0 {
-		pc.scans = scans
+		pc.scanCoordinator.scans = scans
 	}
-	if pc.scoring == nil {
-		pc.scoring = make(map[string]*scoringAccumulator)
+	if pc.scoringState.accumulators == nil {
+		pc.scoringState.accumulators = make(map[string]*scoringAccumulator)
 	}
 	if len(pending) > 0 {
-		pc.pendingDedup = pending
+		pc.scanCoordinator.pendingDedup = pending
 	}
 	if len(validations) > 0 {
-		pc.validations = validations
+		pc.validationGate.states = validations
 	}
 	if len(processed) > 0 {
 		pc.processed = processed
@@ -290,7 +290,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM pending_dedup_candidates`)
 	_, _ = dbExecContext(ctx, pc.db, `DELETE FROM validation_pipelines`)
 
-	for _, acc := range pc.scans {
+	for _, acc := range pc.scanCoordinator.scans {
 		if acc == nil {
 			continue
 		}
@@ -313,7 +313,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 		}
 		timeoutAt := startedAt.Add(scanTimeout)
 		pendingCount := 0
-		for _, cand := range pc.pendingDedup {
+		for _, cand := range pc.scanCoordinator.pendingDedup {
 			if cand.ScanID == acc.ScanID {
 				pendingCount++
 			}
@@ -344,7 +344,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 		`, acc.ScanID, acc.CampaignID, acc.Mode, acc.Geography, acc.Expected, len(acc.CompletedBy), string(mustJSON(completedByMap)), maxInt(acc.Reports, len(completedBy)), acc.Discovered, acc.Skipped, pendingCount, timeoutAt, startedAt)
 	}
 
-	for _, cand := range pc.pendingDedup {
+	for _, cand := range pc.scanCoordinator.pendingDedup {
 		dedupEventID := strings.TrimSpace(cand.DedupEventID)
 		if dedupEventID == "" {
 			dedupEventID = stableUUID(cand.ScanID + ":" + cand.Name + ":" + cand.Geography).String()
@@ -372,7 +372,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 		`, dedupEventID, cand.ScanID, strings.TrimSpace(cand.CampaignID), strings.TrimSpace(cand.Mode), candidateName, cand.Geography, cand.Mode, cand.Signal, string(mustJSON(cand.Payload)), strings.TrimSpace(cand.ExistingID))
 	}
 
-	for _, st := range pc.validations {
+	for _, st := range pc.validationGate.states {
 		if st == nil {
 			continue
 		}
@@ -446,30 +446,23 @@ func (pc *FactoryPipelineCoordinator) isStatePersistenceEnabled(ctx context.Cont
 		return false
 	}
 	pc.mu.Lock()
-	if pc.statePersistenceChecked {
-		enabled := pc.statePersistenceEnabled
-		pc.mu.Unlock()
-		return enabled
-	}
-	pc.mu.Unlock()
+	defer pc.mu.Unlock()
+	return pc.statePersistenceEnabled
+}
 
+func detectStatePersistence(ctx context.Context, db *sql.DB) bool {
+	if db == nil {
+		return false
+	}
 	var (
 		scansOK       bool
 		pendingOK     bool
 		validationsOK bool
 		processedOK   bool
 	)
-	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.scan_accumulators') IS NOT NULL`).Scan(&scansOK)
-	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.pending_dedup_candidates') IS NOT NULL`).Scan(&pendingOK)
-	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.validation_pipelines') IS NOT NULL`).Scan(&validationsOK)
-	_ = pc.db.QueryRowContext(ctx, `SELECT to_regclass('public.pipeline_processed_events') IS NOT NULL`).Scan(&processedOK)
-	enabled := scansOK && pendingOK && validationsOK && processedOK
-
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	if !pc.statePersistenceChecked {
-		pc.statePersistenceEnabled = enabled
-		pc.statePersistenceChecked = true
-	}
-	return pc.statePersistenceEnabled
+	_ = db.QueryRowContext(ctx, `SELECT to_regclass('public.scan_accumulators') IS NOT NULL`).Scan(&scansOK)
+	_ = db.QueryRowContext(ctx, `SELECT to_regclass('public.pending_dedup_candidates') IS NOT NULL`).Scan(&pendingOK)
+	_ = db.QueryRowContext(ctx, `SELECT to_regclass('public.validation_pipelines') IS NOT NULL`).Scan(&validationsOK)
+	_ = db.QueryRowContext(ctx, `SELECT to_regclass('public.pipeline_processed_events') IS NOT NULL`).Scan(&processedOK)
+	return scansOK && pendingOK && validationsOK && processedOK
 }

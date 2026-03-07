@@ -32,5 +32,8 @@ func TestDashboardArchitecture_ServerLineCountCeilings(t *testing.T) {
 	check("server_control_mailbox.go", 400)
 	check("server_control_seed.go", 400)
 	check("server_graph_handlers.go", 350)
-	check("server_graph_builders.go", 700)
+	check("server_graph_shared.go", 250)
+	check("server_graph_holding.go", 200)
+	check("server_graph_template.go", 220)
+	check("server_graph_opco.go", 220)
 }

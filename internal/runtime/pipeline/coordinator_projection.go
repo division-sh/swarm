@@ -106,10 +106,10 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 }
 
 func (pc *FactoryPipelineCoordinator) getValidationStateLocked(verticalID string) *validationPipelineState {
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	if st == nil {
 		st = &validationPipelineState{VerticalID: verticalID, Status: "active"}
-		pc.validations[verticalID] = st
+		pc.validationGate.states[verticalID] = st
 	}
 	if st.Status == "" {
 		st.Status = "active"
@@ -119,34 +119,34 @@ func (pc *FactoryPipelineCoordinator) getValidationStateLocked(verticalID string
 
 func (pc *FactoryPipelineCoordinator) validationStageForState(st *validationPipelineState) string {
 	if st == nil {
-		return "researching"
+		return string(StageResearching)
 	}
 	switch strings.TrimSpace(st.Status) {
 	case "packaged":
-		return "ready_for_review"
+		return string(StageReadyForReview)
 	case "parked":
-		return "ready_for_review"
+		return string(StageReadyForReview)
 	case "approved":
-		return "approved"
+		return string(StageApproved)
 	case "rejected":
-		return "killed"
+		return string(StageKilled)
 	}
 	if !st.G1Research {
-		return "researching"
+		return string(StageResearching)
 	}
 	if !st.G2Spec {
 		if st.InnerRevisionCount > 0 {
-			return "spec_review"
+			return string(StageSpecReview)
 		}
-		return "mvp_speccing"
+		return string(StageMVPSpeccing)
 	}
 	if !st.G3CTO {
-		return "cto_spec_review"
+		return string(StageCTOSpecReview)
 	}
 	if !st.G4Brand {
-		return "branding"
+		return string(StageBranding)
 	}
-	return "branding"
+	return string(StageBranding)
 }
 
 func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, verticalID, stage, sourceEvent string) {
@@ -154,10 +154,26 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 		return
 	}
 	verticalID = strings.TrimSpace(verticalID)
-	stage = strings.TrimSpace(stage)
+	stage = strings.TrimSpace(string(NormalizePipelineStage(stage)))
 	sourceEvent = strings.TrimSpace(sourceEvent)
 	if verticalID == "" || stage == "" {
 		return
+	}
+	var currentStage string
+	_ = dbQueryRowContext(ctx, pc.db, `
+		SELECT COALESCE(stage, '')
+		FROM verticals
+		WHERE id = $1::uuid
+	`, verticalID).Scan(&currentStage)
+	if from, to := NormalizePipelineStage(currentStage), NormalizePipelineStage(stage); !CanTransitionPipelineStage(from, to) {
+		runtimeWarn(
+			"pipeline-coordinator",
+			"non-canonical stage transition vertical_id=%s from=%s to=%s source_event=%s",
+			verticalID,
+			strings.TrimSpace(currentStage),
+			stage,
+			sourceEvent,
+		)
 	}
 	if stage == "ready_for_review" {
 		_, _ = dbExecContext(ctx, pc.db, `
@@ -335,13 +351,13 @@ func (pc *FactoryPipelineCoordinator) transitionStateSnapshot(eventType string, 
 	}
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	out["scans_active"] = len(pc.scans)
-	out["scoring_active"] = len(pc.scoring)
-	out["pending_dedup"] = len(pc.pendingDedup)
-	out["validations"] = len(pc.validations)
+	out["scans_active"] = len(pc.scanCoordinator.scans)
+	out["scoring_active"] = len(pc.scoringState.accumulators)
+	out["pending_dedup"] = len(pc.scanCoordinator.pendingDedup)
+	out["validations"] = len(pc.validationGate.states)
 	out["processed_count"] = len(pc.processed)
 	if verticalID != "" {
-		if st := pc.validations[verticalID]; st != nil {
+		if st := pc.validationGate.states[verticalID]; st != nil {
 			out["validation_state"] = map[string]any{
 				"vertical_id":          st.VerticalID,
 				"status":               st.Status,
@@ -358,7 +374,7 @@ func (pc *FactoryPipelineCoordinator) transitionStateSnapshot(eventType string, 
 		}
 	}
 	if scanID != "" {
-		if acc := pc.scans[scanID]; acc != nil {
+		if acc := pc.scanCoordinator.scans[scanID]; acc != nil {
 			out["scan_state"] = map[string]any{
 				"scan_id":              acc.ScanID,
 				"campaign_id":          acc.CampaignID,
@@ -389,14 +405,14 @@ func isUUID(raw string) bool {
 func (pc *FactoryPipelineCoordinator) SnapshotScans() []map[string]any {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	out := make([]map[string]any, 0, len(pc.scans))
-	ids := make([]string, 0, len(pc.scans))
-	for id := range pc.scans {
+	out := make([]map[string]any, 0, len(pc.scanCoordinator.scans))
+	ids := make([]string, 0, len(pc.scanCoordinator.scans))
+	for id := range pc.scanCoordinator.scans {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		acc := pc.scans[id]
+		acc := pc.scanCoordinator.scans[id]
 		out = append(out, map[string]any{
 			"scan_id":              acc.ScanID,
 			"campaign_id":          acc.CampaignID,

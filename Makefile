@@ -1,4 +1,4 @@
-.PHONY: test test-cover test-cover-runtime check-runtime-cover \
+.PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
 	dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
 	sync-current-spec
 
@@ -6,6 +6,10 @@ COMPOSE ?= docker compose
 
 COVER_DIR ?= coverage
 MIN_RUNTIME_COVER ?= 74
+MIN_PIPELINE_COVER ?= 74
+MIN_TOOLS_COVER ?= 71
+MIN_MANAGER_COVER ?= 74
+MIN_DASHBOARD_COVER ?= 74
 
 test:
 	go test ./...
@@ -26,6 +30,17 @@ test-cover-runtime:
 
 check-runtime-cover: test-cover-runtime
 	./scripts/check_coverage.sh $(COVER_DIR)/runtime.out $(MIN_RUNTIME_COVER)
+
+check-key-package-cover:
+	mkdir -p $(COVER_DIR)
+	go test ./internal/runtime/pipeline -coverprofile=$(COVER_DIR)/pipeline.out
+	./scripts/check_coverage.sh $(COVER_DIR)/pipeline.out $(MIN_PIPELINE_COVER)
+	go test ./internal/runtime/tools -coverprofile=$(COVER_DIR)/tools.out
+	./scripts/check_coverage.sh $(COVER_DIR)/tools.out $(MIN_TOOLS_COVER)
+	go test ./internal/runtime/manager -coverprofile=$(COVER_DIR)/manager.out
+	./scripts/check_coverage.sh $(COVER_DIR)/manager.out $(MIN_MANAGER_COVER)
+	go test ./internal/dashboard -coverprofile=$(COVER_DIR)/dashboard.out
+	./scripts/check_coverage.sh $(COVER_DIR)/dashboard.out $(MIN_DASHBOARD_COVER)
 
 dashboard-build:
 	$(COMPOSE) build dashboard

@@ -128,7 +128,11 @@ func ensureInitialTemplateCLI(ctx context.Context, db *sql.DB, mailbox runtimeto
 	return nil
 }
 
-func seedGlobalAgentsFromYAML(ctx context.Context, store runtimemanager.ManagerPersistence, agentsDir string) error {
+type globalAgentSyncStore interface {
+	runtimemanager.AgentPersistence
+}
+
+func seedGlobalAgentsFromYAML(ctx context.Context, store globalAgentSyncStore, agentsDir string) error {
 	agents, err := templateops.LoadGlobalAgentsFromYAML(strings.TrimSpace(agentsDir))
 	if err != nil {
 		return err
@@ -244,7 +248,7 @@ func emitSystemStarted(ctx context.Context, stores storeBundle, bus *runtime.Eve
 		"is_cold_start":    previousStarts == 0 && verticalCount == 0 && geoCount == 0,
 		"startup_count":    previousStarts + 1,
 	}
-	b, _ := json.Marshal(payload)
+	b := mustJSON(payload)
 	return bus.Publish(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("system.started"),
@@ -261,6 +265,11 @@ func initHTTPServer(addr string, handler http.Handler, name string) {
 		return
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("%s panic: %v", name, r)
+			}
+		}()
 		if err := http.ListenAndServe(addr, handler); err != nil {
 			log.Printf("%s stopped: %v", name, err)
 		}

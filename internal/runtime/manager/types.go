@@ -9,6 +9,8 @@ import (
 	"empireai/internal/models"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/sessions"
+	workspace "empireai/internal/runtime/workspace"
 )
 
 type Agent interface {
@@ -57,24 +59,12 @@ type PersistedRoutingRule struct {
 	BootstrapVersion int
 }
 
-type BootstrapVersionResolver interface {
-	ResolveBootstrapVersion(ctx context.Context, templateVersion string) (int, error)
-}
-
-type VerticalInfoReader interface {
-	GetVerticalInfo(ctx context.Context, verticalID string) (VerticalInfo, bool, error)
-}
-
 type VerticalInfo struct {
 	ID        string
 	Name      string
 	Slug      string
 	Geography string
 	Stage     string
-}
-
-type EventReceiptReader interface {
-	GetEventReceipt(ctx context.Context, eventID, agentID string) (EventReceipt, bool, error)
 }
 
 type EventReceipt struct {
@@ -153,3 +143,10 @@ type BudgetGuard interface {
 }
 
 type StrategicContext = json.RawMessage
+
+type AgentManagerOptions struct {
+	Workspaces  workspace.Lifecycle
+	Sessions    sessions.Registry
+	RuntimeMode string
+	Budget      BudgetGuard
+}

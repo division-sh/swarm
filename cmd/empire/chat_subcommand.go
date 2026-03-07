@@ -205,7 +205,11 @@ func hasSystemStarted(ctx context.Context, db *sql.DB) (bool, error) {
 	return exists, nil
 }
 
-func syncRuntimeGlobalAgents(ctx context.Context, managerStore runtimemanager.ManagerPersistence) error {
+type globalAgentStore interface {
+	runtimemanager.AgentPersistence
+}
+
+func syncRuntimeGlobalAgents(ctx context.Context, managerStore globalAgentStore) error {
 	if managerStore == nil {
 		return nil
 	}
@@ -220,7 +224,11 @@ func syncRuntimeGlobalAgents(ctx context.Context, managerStore runtimemanager.Ma
 	return seedGlobalAgentsFromYAML(ctx, managerStore, agentsDir)
 }
 
-func rotateGlobalAgentSessions(ctx context.Context, managerStore runtimemanager.ManagerPersistence, sessionRegistry sessions.Registry, runtimeMode string) error {
+type loadedAgentStore interface {
+	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
+}
+
+func rotateGlobalAgentSessions(ctx context.Context, managerStore loadedAgentStore, sessionRegistry sessions.Registry, runtimeMode string) error {
 	if managerStore == nil || sessionRegistry == nil {
 		return nil
 	}
@@ -293,7 +301,7 @@ func dispatchBoardMessage(ctx context.Context, stores storeBundle, target target
 	if msg == "" {
 		return "", fmt.Errorf("message is required")
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payload := mustJSON(map[string]any{
 		"target_agent_id": target.ID,
 		"role":            target.Role,
 		"vertical_id":     target.VerticalID,
@@ -336,7 +344,7 @@ func dispatchSystemDirectiveDirect(ctx context.Context, stores storeBundle, targ
 	if stores.EventStore == nil {
 		return "", fmt.Errorf("directive dispatch unavailable: event store is not configured")
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payload := mustJSON(map[string]any{
 		"directive_text": strings.TrimSpace(message),
 		"sent_by":        "cli",
 		"timestamp":      time.Now().UTC().Format(time.RFC3339),

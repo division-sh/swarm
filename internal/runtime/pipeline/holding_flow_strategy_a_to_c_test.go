@@ -473,7 +473,7 @@ func TestHoldingFlow_B2_HighScoreShortlistedTriggersValidationPipeline(t *testin
 	runtimetestkit.WaitForEventTypes(t, ch, []string{"validation.started", "brand.requested"}, 0)
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil || strings.TrimSpace(st.Status) != "active" {
 		t.Fatalf("expected active validation pipeline state, got %+v", st)
@@ -523,7 +523,7 @@ func TestHoldingFlow_C1_ShortlistedCreatesValidationPipelineAndEnrichedPayloads(
 	got := runtimetestkit.WaitForEventTypes(t, ch, []string{"validation.started", "brand.requested"}, 0)
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 	if st == nil {
 		t.Fatal("expected validation pipeline state")
@@ -605,7 +605,7 @@ func TestHoldingFlow_C2_BusinessResearchReceivesValidationContextAndCanContinue(
 		t.Fatalf("business research continuation failed: %v", err)
 	}
 	pc.mu.Lock()
-	g1 := pc.validations[verticalID].G1Research
+	g1 := pc.validationGate.states[verticalID].G1Research
 	pc.mu.Unlock()
 	if !g1 {
 		t.Fatal("expected G1 set after research.completed")
@@ -650,7 +650,7 @@ func TestHoldingFlow_C3_ResearchCompletedSetsG1AndSpecRequestedPassthrough(t *te
 
 	waitForEventType(t, lsaCh, "spec.requested")
 	pc.mu.Lock()
-	g1 := pc.validations[verticalID].G1Research
+	g1 := pc.validationGate.states[verticalID].G1Research
 	pc.mu.Unlock()
 	if !g1 {
 		t.Fatal("expected G1 gate true after research.completed")
@@ -742,7 +742,7 @@ func TestHoldingFlow_C5_SpecApprovedTriggersAuditorThenCTO(t *testing.T) {
 	waitForEventType(t, ch, "cto.spec_review_requested")
 
 	pc.mu.Lock()
-	g2 := pc.validations[verticalID].G2Spec
+	g2 := pc.validationGate.states[verticalID].G2Spec
 	pc.mu.Unlock()
 	if !g2 {
 		t.Fatal("expected G2 gate true after spec.approved")

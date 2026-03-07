@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"strings"
@@ -15,6 +14,10 @@ import (
 	runtimerterr "empireai/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
+
+type eventReceiptReader interface {
+	GetEventReceipt(ctx context.Context, eventID, agentID string) (EventReceipt, bool, error)
+}
 
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
 	if !am.markEventInFlight(agent.ID(), evt.ID) {
@@ -236,7 +239,7 @@ func (am *AgentManager) unmarkEventInFlight(agentID, eventID string) {
 }
 
 func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {
-	reader, ok := am.store.(EventReceiptReader)
+	reader, ok := am.store.(eventReceiptReader)
 	if !ok || reader == nil {
 		return false
 	}
@@ -319,23 +322,22 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 
 	runtimebus.PauseRuntimeIngress()
 	log.Printf("runtime pause breaker tripped: reason=%s agent=%s event=%s err=%v", reason, agentID, eventID, err)
-	payload, _ := json.Marshal(map[string]any{
+	payload := mustJSON(map[string]any{
 		"agent_id":     strings.TrimSpace(agentID),
 		"event_id":     strings.TrimSpace(eventID),
 		"reason":       reason,
 		"instruction":  instruction,
 		"spec_version": runtimeSpecVersion,
 	})
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
-	_ = am.bus.Publish(am.runtimeContext(), events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        eventType,
 		SourceAgent: "runtime",
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		RuntimeWarn("agent-manager", "%s publish failed agent=%s event=%s err=%v", eventType, strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
+	}
 	if running {
 		_ = am.Shutdown()
 	}
@@ -382,7 +384,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID, stat
 }
 
 func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, agentID string) {
-	reader, ok := am.store.(EventReceiptReader)
+	reader, ok := am.store.(eventReceiptReader)
 	if !ok || reader == nil {
 		return
 	}
@@ -412,7 +414,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		verticalID = strings.TrimSpace(cfg.VerticalID)
 	}
 
-	payload, _ := json.Marshal(map[string]any{
+	payload := mustJSON(map[string]any{
 		"event_id":     eventID,
 		"agent_id":     agentID,
 		"manager_id":   managerID,
@@ -422,18 +424,17 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		"instruction":  "Event delivery dead-lettered after 3 retries. Decide: retry (requeue), skip, or escalate.",
 		"spec_version": runtimeSpecVersion,
 	})
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
 
-	_ = am.bus.PublishDirect(am.runtimeContext(), events.Event{
+	if err := am.bus.PublishDirect(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.dead_letter_escalation"),
 		SourceAgent: "runtime",
 		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}, []string{managerID})
+	}, []string{managerID}); err != nil {
+		RuntimeWarn("agent-manager", "ops.dead_letter_escalation publish failed agent=%s manager=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(managerID), strings.TrimSpace(eventID), err)
+	}
 }
 
 func (am *AgentManager) resolveManagerAgentID(agentID string) string {

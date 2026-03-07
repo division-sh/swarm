@@ -21,6 +21,18 @@ func NewEventBus(store runtimebus.EventStore) *EventBus {
 	return &EventBus{EventBus: runtimebus.NewEventBus(store)}
 }
 
+func NewEventBusWithOptions(store runtimebus.EventStore, logger *RuntimeLogger, cycleTracker *runtimebus.OpCoCycleTracker, interceptorProvider func() []runtimebus.EventInterceptor) *EventBus {
+	var hook runtimebus.LoggerHook
+	if logger != nil {
+		hook = runtimeLoggerHook{logger: logger}
+	}
+	return &EventBus{EventBus: runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		Logger:              hook,
+		CycleTracker:        cycleTracker,
+		InterceptorProvider: interceptorProvider,
+	})}
+}
+
 func (eb *EventBus) SetRuntimeLogger(logger *RuntimeLogger) {
 	if eb == nil || eb.EventBus == nil {
 		return

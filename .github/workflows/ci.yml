@@ -32,3 +32,8 @@ jobs:
 
       - name: Run tests
         run: go test ./... -count=1
+
+      - name: Coverage gates
+        run: |
+          make check-runtime-cover
+          make check-key-package-cover

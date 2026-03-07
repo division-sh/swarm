@@ -550,7 +550,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		verticalID = strings.TrimSpace(cfg.VerticalID)
 	}
 
-	_ = am.bus.Publish(am.runtimeContext(), events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
@@ -563,7 +563,9 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
 		}),
 		CreatedAt: time.Now(),
-	})
+	}); err != nil {
+		RuntimeWarn("agent-manager", "ops.agent_panic publish failed agent=%s err=%v", agent.ID(), err)
+	}
 
 	if consecutivePanics < 5 {
 		return
@@ -586,7 +588,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		managerID = "empire-coordinator"
 	}
 	if managerID != agent.ID() {
-		_ = am.bus.PublishDirect(am.runtimeContext(), events.Event{
+		if err := am.bus.PublishDirect(am.runtimeContext(), events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("ops.agent_failed"),
 			SourceAgent: "runtime",
@@ -600,7 +602,9 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 				"instruction":        "Agent loop failed after repeated panics. Decide: reconfigure, restart, or replace agent.",
 			}),
 			CreatedAt: time.Now(),
-		}, []string{managerID})
+		}, []string{managerID}); err != nil {
+			RuntimeWarn("agent-manager", "ops.agent_failed publish failed agent=%s manager=%s err=%v", agent.ID(), managerID, err)
+		}
 	}
 }
 
@@ -673,7 +677,7 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 			return
 		}
 		if am.bus != nil {
-			_ = am.bus.Publish(am.runtimeContext(), events.Event{
+			if err := am.bus.Publish(am.runtimeContext(), events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("vertical.killed"),
 				SourceAgent: "agent-manager",
@@ -684,7 +688,9 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 					"source":      "opco.teardown_requested",
 				}),
 				CreatedAt: time.Now(),
-			})
+			}); err != nil {
+				RuntimeWarn("agent-manager", "vertical.killed publish failed vertical=%s err=%v", verticalID, err)
+			}
 		}
 	}
 }

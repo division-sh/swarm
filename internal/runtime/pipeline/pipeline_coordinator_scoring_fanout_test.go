@@ -21,7 +21,7 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_RejectedDoesNotPublishVertic
 	acc := newUniversalAccumulator(verticalID, "Paraguay Ecommerce", "paraguay", "saas_gap")
 	acc.Received["build_complexity"] = scoreDimensionResult{Score: 40, Evidence: "heavy enterprise integration required"}
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
 	ecCh := bus.Subscribe("empire-coordinator", events.EventType("vertical.scored"), events.EventType("vertical.rejected"))
@@ -61,7 +61,7 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_MarginalDoesNotPublishVertic
 		"expansion_potential":     60,
 	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
 	ecCh := bus.Subscribe("empire-coordinator", events.EventType("vertical.scored"), events.EventType("vertical.marginal"))
@@ -101,7 +101,7 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_ShortlistedPublishesVertical
 		"expansion_potential":     90,
 	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
 	ecCh := bus.Subscribe("empire-coordinator", events.EventType("vertical.scored"), events.EventType("vertical.shortlisted"))
@@ -138,7 +138,7 @@ func TestFactoryPipelineCoordinator_UniversalGateRejectsLowBuildComplexity(t *te
 		"expansion_potential":     70,
 	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
 	pc.finalizeScoringAccumulator(context.Background(), verticalID, false)
@@ -168,7 +168,7 @@ func TestFactoryPipelineCoordinator_UniversalGateRejectsLowAutomationCompletenes
 		"expansion_potential":     70,
 	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
 	pc.finalizeScoringAccumulator(context.Background(), verticalID, false)
@@ -221,7 +221,7 @@ func TestFactoryPipelineCoordinator_RejectedScoringBufferedAndInjectedIntoPortfo
 		"expansion_potential":     70,
 	})
 	pc.mu.Lock()
-	pc.scoring[verticalID] = acc
+	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 	pc.finalizeScoringAccumulator(ctx, verticalID, false)
 

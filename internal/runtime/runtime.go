@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -65,11 +64,17 @@ type Runtime struct {
 	ShardDispatcher *runtimepipeline.ShardDispatcher
 }
 
+func cycleTrackerForDB(db *sql.DB) *runtimebus.OpCoCycleTracker {
+	if db == nil {
+		return nil
+	}
+	return runtimebus.NewOpCoCycleTracker(db)
+}
+
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
-	bus := NewEventBus(stores.EventStore)
 	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
 		if runtimeEnvBool("EMPIREAI_EMIT_SCHEMA_STRICT", true) {
 			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
@@ -85,18 +90,23 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		Config:    cfg,
 		Stores:    stores,
 		Options:   opts,
-		Bus:       bus,
 		Workspace: opts.WorkspaceLifecycle,
 	}
 
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
-		rt.Bus.SetRuntimeLogger(rt.Logger)
-		rt.Bus.SetCycleTracker(runtimebus.NewOpCoCycleTracker(stores.SQLDB))
-		rt.Pipeline = runtimepipeline.NewFactoryPipelineCoordinator(rt.Bus, stores.SQLDB)
+	}
+	rt.Bus = NewEventBusWithOptions(stores.EventStore, rt.Logger, cycleTrackerForDB(stores.SQLDB), func() []runtimebus.EventInterceptor {
+		if rt.Pipeline == nil {
+			return nil
+		}
+		return []runtimebus.EventInterceptor{rt.Pipeline}
+	})
+	if stores.SQLDB != nil {
+		rt.Pipeline = runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.FactoryPipelineCoordinatorOptions{
+			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding),
+		})
 		if rt.Pipeline != nil {
-			rt.Pipeline.SetShardPlanner(runtimepipeline.NewShardPlanner(cfg.Sharding))
-			rt.Bus.SetInterceptors(rt.Pipeline)
 			rt.ScoringNode = runtimepipeline.NewScoringNode(rt.Bus, rt.Pipeline, stores.SQLDB)
 		}
 	}
@@ -169,17 +179,24 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 	rt.LLM = modelRuntime
 
-	rt.ToolExecutor = runtimetools.NewExecutor(rt.Bus, rt.Scheduler, nil, stores.ScheduleStore)
-	rt.ToolExecutor.SetConfig(cfg)
-	rt.ToolExecutor.SetMailboxStore(stores.MailboxStore)
-	rt.ToolExecutor.SetSQLDB(stores.SQLDB)
+	var managerRef *runtimemanager.AgentManager
+	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
+		Config:       cfg,
+		MailboxStore: stores.MailboxStore,
+		SQLDB:        stores.SQLDB,
+		ManagerProvider: func() runtimetools.Manager {
+			return managerRef
+		},
+	}, stores.ScheduleStore)
 
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions())
-	rt.Manager = runtimemanager.NewAgentManager(rt.Bus, factory, stores.ManagerStore)
-	rt.Manager.SetWorkspaceLifecycle(rt.Workspace)
-	rt.Manager.SetSessionRegistry(stores.SessionRegistry, cfg.LLM.RuntimeMode)
-	rt.Manager.SetBudgetTracker(rt.Budget)
-	rt.ToolExecutor.SetManager(rt.Manager)
+	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
+		Workspaces:  rt.Workspace,
+		Sessions:    stores.SessionRegistry,
+		RuntimeMode: cfg.LLM.RuntimeMode,
+		Budget:      rt.Budget,
+	}, stores.ManagerStore)
+	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, stores.InboundStore)
@@ -234,14 +251,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				log.Printf("runtime state reset after recovery failure also failed: %v", resetErr)
 			}
 			if rt.Stores.MailboxStore != nil {
-				ctxPayload, _ := json.Marshal(map[string]any{
+				ctxPayload := mustJSON(map[string]any{
 					"error":        err.Error(),
 					"instruction":  "Runtime recovery failed. Use dashboard control actions (reset_db + seed-org) to reinitialize, or fix persisted config and restart.",
 					"spec_version": "v2.0.15",
 				})
-				if len(ctxPayload) == 0 {
-					ctxPayload = []byte("{}")
-				}
 				if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					FromAgent: "runtime",
 					Type:      "runtime.recovery_failed",
@@ -253,13 +267,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 					log.Printf("runtime recovery mailbox insert failed: %v", mailboxErr)
 				}
 			}
-			payload, _ := json.Marshal(map[string]any{
+			payload := mustJSON(map[string]any{
 				"error":        err.Error(),
 				"spec_version": "v2.0.15",
 			})
-			if len(payload) == 0 {
-				payload = []byte("{}")
-			}
 			if publishErr := rt.Bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("runtime.recovery_failed"),
@@ -312,7 +323,7 @@ func (rt *Runtime) selfCheck() error {
 	ctx := context.Background()
 	t := events.EventType("runtime.boot")
 	ch := rt.Bus.Subscribe("bootstrap-self-check", t)
-	payload, _ := json.Marshal(map[string]string{"status": "ok"})
+	payload := mustJSON(map[string]string{"status": "ok"})
 	evt := events.Event{
 		ID:          uuid.NewString(),
 		Type:        t,

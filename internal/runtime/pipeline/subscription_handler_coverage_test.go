@@ -130,7 +130,7 @@ func TestHandler_scoring_node_score_dimension_complete(t *testing.T) {
 	node.ProcessEventForTest(context.Background(), evt)
 
 	pc.mu.Lock()
-	acc := pc.scoring[verticalID]
+	acc := pc.scoringState.accumulators[verticalID]
 	pc.mu.Unlock()
 	if acc == nil {
 		t.Fatal("expected scoring accumulator to be created")
@@ -152,7 +152,7 @@ func TestHandler_scoring_node_scoring_contest_resolved(t *testing.T) {
 
 	verticalID := uuid.NewString()
 	pc.mu.Lock()
-	pc.scoring[verticalID] = &scoringAccumulator{
+	pc.scoringState.accumulators[verticalID] = &scoringAccumulator{
 		VerticalID: verticalID,
 		Rubric:     "universal",
 		Expected:   expectedScoringDimensions("universal"),
@@ -189,7 +189,7 @@ func TestHandler_scoring_node_scoring_contest_resolved(t *testing.T) {
 	node.ProcessEventForTest(context.Background(), evt)
 
 	pc.mu.Lock()
-	acc := pc.scoring[verticalID]
+	acc := pc.scoringState.accumulators[verticalID]
 	_, stillContested := acc.Contested["competition_gap"]
 	got := acc.Received["competition_gap"]
 	pc.mu.Unlock()

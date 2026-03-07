@@ -58,17 +58,17 @@ type FactoryPipelineCoordinator struct {
 
 	mu sync.Mutex
 
-	scans        map[string]*scanAccumulator
-	scoring      map[string]*scoringAccumulator
-	pendingDedup map[string]pendingCandidate
-	validations  map[string]*validationPipelineState
-	processed    map[string]struct{}
-	stateLoaded  bool
+	scanCoordinator *ScanCoordinator
+	scoringState    *ScoringState
+	validationGate  *ValidationGate
+	processed       map[string]struct{}
+	stateLoaded     bool
 
 	statePersistenceChecked bool
 	statePersistenceEnabled bool
 
 	shardPlanner       *ShardPlanner
+	payloadFactory     *PipelinePayloadFactory
 	shardsTableChecked bool
 	shardsTableEnabled bool
 
@@ -78,6 +78,19 @@ type FactoryPipelineCoordinator struct {
 
 	testSubscribeHook     func()
 	testVerticalStageHook func(verticalID, stage string)
+}
+
+type FactoryPipelineCoordinatorOptions struct {
+	ShardPlanner *ShardPlanner
+}
+
+func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryPipelineCoordinatorOptions) *FactoryPipelineCoordinator {
+	pc := NewFactoryPipelineCoordinator(bus, db)
+	if pc == nil {
+		return nil
+	}
+	pc.shardPlanner = opts.ShardPlanner
+	return pc
 }
 
 func (pc *FactoryPipelineCoordinator) OnVerticalDiscovered(ctx context.Context, evt events.Event) {
@@ -469,15 +482,25 @@ func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordina
 	if bus == nil {
 		return nil
 	}
-	return &FactoryPipelineCoordinator{
-		bus:          bus,
-		db:           db,
-		scans:        make(map[string]*scanAccumulator),
-		scoring:      make(map[string]*scoringAccumulator),
-		pendingDedup: make(map[string]pendingCandidate),
-		validations:  make(map[string]*validationPipelineState),
-		processed:    make(map[string]struct{}),
+	pc := &FactoryPipelineCoordinator{
+		bus:             bus,
+		db:              db,
+		scanCoordinator: NewScanCoordinator(),
+		scoringState:    NewScoringState(),
+		validationGate:  NewValidationGate(),
+		processed:       make(map[string]struct{}),
 	}
+	pc.payloadFactory = NewPipelinePayloadFactory(pc)
+	if db != nil {
+		ctx := context.Background()
+		pc.statePersistenceEnabled = detectStatePersistence(ctx, db)
+		pc.statePersistenceChecked = true
+		pc.shardsTableEnabled = detectShardsTable(ctx, db)
+		pc.shardsTableChecked = true
+		pc.scoringDigestBufferEnabled = detectScoringDigestBuffer(ctx, db)
+		pc.scoringDigestBufferChecked = true
+	}
+	return pc
 }
 
 func (pc *FactoryPipelineCoordinator) SetShardPlanner(planner *ShardPlanner) {
@@ -637,7 +660,7 @@ func (pc *FactoryPipelineCoordinator) interceptStateDropReason(eventType string,
 	}
 
 	pc.mu.Lock()
-	st := pc.validations[verticalID]
+	st := pc.validationGate.states[verticalID]
 	pc.mu.Unlock()
 
 	switch eventType {
@@ -871,10 +894,10 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 func (pc *FactoryPipelineCoordinator) resetInMemoryState() {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	pc.scans = make(map[string]*scanAccumulator)
-	pc.scoring = make(map[string]*scoringAccumulator)
-	pc.pendingDedup = make(map[string]pendingCandidate)
-	pc.validations = make(map[string]*validationPipelineState)
+	pc.scanCoordinator.scans = make(map[string]*scanAccumulator)
+	pc.scoringState.accumulators = make(map[string]*scoringAccumulator)
+	pc.scanCoordinator.pendingDedup = make(map[string]pendingCandidate)
+	pc.validationGate.states = make(map[string]*validationPipelineState)
 	pc.processed = make(map[string]struct{})
 	pc.stateLoaded = true
 }

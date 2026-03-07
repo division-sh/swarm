@@ -9,8 +9,16 @@ import (
 	"time"
 )
 
-func (pc *FactoryPipelineCoordinator) validationContext(verticalID string) validationContextSnapshot {
-	if pc == nil || strings.TrimSpace(verticalID) == "" {
+type PipelinePayloadFactory struct {
+	coordinator *FactoryPipelineCoordinator
+}
+
+func NewPipelinePayloadFactory(coordinator *FactoryPipelineCoordinator) *PipelinePayloadFactory {
+	return &PipelinePayloadFactory{coordinator: coordinator}
+}
+
+func (pf *PipelinePayloadFactory) ValidationContext(verticalID string) validationContextSnapshot {
+	if pf == nil || pf.coordinator == nil || strings.TrimSpace(verticalID) == "" {
 		return validationContextSnapshot{
 			Research: map[string]any{},
 			Spec:     map[string]any{},
@@ -19,9 +27,9 @@ func (pc *FactoryPipelineCoordinator) validationContext(verticalID string) valid
 			Scoring:  map[string]any{},
 		}
 	}
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	st := pc.getValidationStateLocked(verticalID)
+	pf.coordinator.mu.Lock()
+	defer pf.coordinator.mu.Unlock()
+	st := pf.coordinator.getValidationStateLocked(verticalID)
 	return validationContextSnapshot{
 		Research:    parsePayloadMap(st.ResearchPayload),
 		Spec:        parsePayloadMap(st.SpecPayload),
@@ -32,8 +40,8 @@ func (pc *FactoryPipelineCoordinator) validationContext(verticalID string) valid
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) identityForPayload(ctx context.Context, verticalID string) (string, string) {
-	name, geography, err := pc.loadVerticalIdentity(ctx, verticalID)
+func (pf *PipelinePayloadFactory) identityForPayload(ctx context.Context, verticalID string) (string, string) {
+	name, geography, err := pf.coordinator.loadVerticalIdentity(ctx, verticalID)
 	if err != nil {
 		log.Printf("pipeline: identity lookup failed vertical=%s err=%v", verticalID, err)
 		return "", ""
@@ -41,7 +49,7 @@ func (pc *FactoryPipelineCoordinator) identityForPayload(ctx context.Context, ve
 	return strings.TrimSpace(name), strings.TrimSpace(geography)
 }
 
-func (pc *FactoryPipelineCoordinator) buildScanAssignedPayload(
+func (pf *PipelinePayloadFactory) BuildScanAssignedPayload(
 	scanID, campaignID, mode, geography string,
 	source map[string]any,
 	plannedShards int,
@@ -67,7 +75,7 @@ func (pc *FactoryPipelineCoordinator) buildScanAssignedPayload(
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildSynthesisNeededPayload(scanID string, acc *scanAccumulator, raw map[string]any) SynthesisNeededPayload {
+func (pf *PipelinePayloadFactory) BuildSynthesisNeededPayload(scanID string, acc *scanAccumulator, raw map[string]any) SynthesisNeededPayload {
 	if raw == nil {
 		raw = map[string]any{}
 	}
@@ -87,7 +95,7 @@ func (pc *FactoryPipelineCoordinator) buildSynthesisNeededPayload(scanID string,
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) buildDedupAmbiguousPayload(
+func (pf *PipelinePayloadFactory) BuildDedupAmbiguousPayload(
 	scanID, dedupEventID string,
 	similarity float64,
 	candidateName, geography string,
@@ -112,7 +120,7 @@ func (pc *FactoryPipelineCoordinator) buildDedupAmbiguousPayload(
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildVerticalDiscoveredPayload(
+func (pf *PipelinePayloadFactory) BuildVerticalDiscoveredPayload(
 	verticalID, name, geography, mode, scanID, campaignID string,
 	signal float64,
 	discoverySource string,
@@ -156,7 +164,7 @@ type scanCompletedBuildInput struct {
 	TimedOut        bool
 }
 
-func (pc *FactoryPipelineCoordinator) buildScanCompletedPayload(in scanCompletedBuildInput) ScanCompletedPayload {
+func (pf *PipelinePayloadFactory) BuildScanCompletedPayload(in scanCompletedBuildInput) ScanCompletedPayload {
 	return ScanCompletedPayload{
 		ScanID:          strings.TrimSpace(in.ScanID),
 		CampaignID:      strings.TrimSpace(in.CampaignID),
@@ -172,7 +180,7 @@ func (pc *FactoryPipelineCoordinator) buildScanCompletedPayload(in scanCompleted
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) ScoringRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) ScoringRequestedPayload {
 	if acc == nil {
 		return ScoringRequestedPayload{
 			VerticalID:          strings.TrimSpace(verticalID),
@@ -199,7 +207,7 @@ func (pc *FactoryPipelineCoordinator) buildScoringRequestedPayload(verticalID st
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) derivedScoringGeneratorAgent(ctx context.Context, acc *scoringAccumulator) string {
+func (pf *PipelinePayloadFactory) DerivedScoringGeneratorAgent(ctx context.Context, acc *scoringAccumulator) string {
 	if acc == nil {
 		return ""
 	}
@@ -223,13 +231,13 @@ func (pc *FactoryPipelineCoordinator) derivedScoringGeneratorAgent(ctx context.C
 	if strings.Contains(strings.ToLower(raw), "analysis-agent") {
 		return raw
 	}
-	if pc == nil || pc.db == nil {
+	if pf == nil || pf.coordinator == nil || pf.coordinator.db == nil {
 		return raw
 	}
 
 	// In derived flows the generator can arrive as session ID; resolve to agent_id when possible.
 	var agentID string
-	_ = dbQueryRowContext(ctx, pc.db, `
+	_ = dbQueryRowContext(ctx, pf.coordinator.db, `
 		SELECT COALESCE(agent_id, '')
 		FROM agent_sessions
 		WHERE id = $1
@@ -243,12 +251,12 @@ func (pc *FactoryPipelineCoordinator) derivedScoringGeneratorAgent(ctx context.C
 	return agentID
 }
 
-func (pc *FactoryPipelineCoordinator) selectScoringAnalysisRecipient(excludedAgent string) string {
-	if pc == nil || pc.bus == nil {
+func (pf *PipelinePayloadFactory) SelectScoringAnalysisRecipient(excludedAgent string) string {
+	if pf == nil || pf.coordinator == nil || pf.coordinator.bus == nil {
 		return ""
 	}
 	excludedAgent = strings.TrimSpace(excludedAgent)
-	recipients := uniqueStrings(pc.bus.ResolveSubscribedRecipients("scoring.requested"))
+	recipients := uniqueStrings(pf.coordinator.bus.ResolveSubscribedRecipients("scoring.requested"))
 	if len(recipients) == 0 {
 		return ""
 	}
@@ -383,7 +391,7 @@ func normalizeGeographicScope(raw string) string {
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildScoringContestedPayload(verticalID, dimension string, contest contestedDimension, acc *scoringAccumulator) ScoringContestedPayload {
+func (pf *PipelinePayloadFactory) BuildScoringContestedPayload(verticalID, dimension string, contest contestedDimension, acc *scoringAccumulator) ScoringContestedPayload {
 	out := ScoringContestedPayload{
 		VerticalID: strings.TrimSpace(verticalID),
 		Dimension:  strings.TrimSpace(dimension),
@@ -398,7 +406,7 @@ func (pc *FactoryPipelineCoordinator) buildScoringContestedPayload(verticalID, d
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) buildVerticalScoredPayload(verticalID string, result scoringComposite, acc *scoringAccumulator) VerticalScoredPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalScoredPayload(verticalID string, result scoringComposite, acc *scoringAccumulator) VerticalScoredPayload {
 	out := VerticalScoredPayload{
 		VerticalID:     strings.TrimSpace(verticalID),
 		Result:         strings.TrimSpace(result.Result),
@@ -421,7 +429,7 @@ func (pc *FactoryPipelineCoordinator) buildVerticalScoredPayload(verticalID stri
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) buildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload {
 	if scoringPayload == nil {
 		scoringPayload = map[string]any{}
 	}
@@ -433,7 +441,7 @@ func (pc *FactoryPipelineCoordinator) buildVerticalShortlistedPayload(verticalID
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildVerticalMarginalPayload(verticalID string, result scoringComposite) VerticalMarginalPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalMarginalPayload(verticalID string, result scoringComposite) VerticalMarginalPayload {
 	dim := result.Dimensions
 	if dim == nil {
 		dim = map[string]scoreDimensionResult{}
@@ -447,21 +455,21 @@ func (pc *FactoryPipelineCoordinator) buildVerticalMarginalPayload(verticalID st
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildVerticalRejectedPayload(verticalID string, result scoringComposite) VerticalRejectedPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalRejectedPayload(verticalID string, result scoringComposite) VerticalRejectedPayload {
 	return VerticalRejectedPayload{
 		VerticalID: strings.TrimSpace(verticalID),
 		Reason:     strings.TrimSpace(result.Reason),
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildBrandRequestedPayload(ctx context.Context, verticalID string, scoring map[string]any, brief map[string]any) BrandRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildBrandRequestedPayload(ctx context.Context, verticalID string, scoring map[string]any, brief map[string]any) BrandRequestedPayload {
 	if scoring == nil {
 		scoring = map[string]any{}
 	}
 	if brief == nil {
 		brief = map[string]any{}
 	}
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	return BrandRequestedPayload{
 		VerticalID:    strings.TrimSpace(verticalID),
 		VerticalName:  name,
@@ -472,8 +480,8 @@ func (pc *FactoryPipelineCoordinator) buildBrandRequestedPayload(ctx context.Con
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildValidationPackageReadyPayload(ctx context.Context, verticalID string, snap validationContextSnapshot) ValidationPackageReadyPayload {
-	name, geography := pc.identityForPayload(ctx, verticalID)
+func (pf *PipelinePayloadFactory) BuildValidationPackageReadyPayload(ctx context.Context, verticalID string, snap validationContextSnapshot) ValidationPackageReadyPayload {
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	if snap.Research == nil {
 		snap.Research = map[string]any{}
 	}
@@ -502,7 +510,7 @@ func (pc *FactoryPipelineCoordinator) buildValidationPackageReadyPayload(ctx con
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any) SpecValidationRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any) SpecValidationRequestedPayload {
 	if spec == nil {
 		spec = map[string]any{}
 	}
@@ -520,12 +528,12 @@ func (pc *FactoryPipelineCoordinator) buildSpecValidationRequestedPayload(ctx co
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildCTOSpecReviewRequestedPayload(ctx context.Context, verticalID string, specValidation map[string]any) CTOSpecReviewRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildCTOSpecReviewRequestedPayload(ctx context.Context, verticalID string, specValidation map[string]any) CTOSpecReviewRequestedPayload {
 	if specValidation == nil {
 		specValidation = map[string]any{}
 	}
-	snap := pc.validationContext(verticalID)
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	snap := pf.ValidationContext(verticalID)
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	specVersion := asInt(specValidation["spec_version"])
 	if specVersion == 0 {
 		specVersion = snap.SpecVersion
@@ -557,12 +565,12 @@ func (pc *FactoryPipelineCoordinator) buildCTOSpecReviewRequestedPayload(ctx con
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildSpecRevisionRequestedPayload(ctx context.Context, verticalID, source string, feedback map[string]any) SpecRevisionRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildSpecRevisionRequestedPayload(ctx context.Context, verticalID, source string, feedback map[string]any) SpecRevisionRequestedPayload {
 	if feedback == nil {
 		feedback = map[string]any{}
 	}
-	snap := pc.validationContext(verticalID)
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	snap := pf.ValidationContext(verticalID)
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	return SpecRevisionRequestedPayload{
 		VerticalID:   strings.TrimSpace(verticalID),
 		CTOFeedback:  summarizeContractPayload(feedback),
@@ -576,11 +584,11 @@ func (pc *FactoryPipelineCoordinator) buildSpecRevisionRequestedPayload(ctx cont
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildValidationMoreDataPayload(ctx context.Context, verticalID string, request map[string]any, snap validationContextSnapshot) ValidationMoreDataNeededPayload {
+func (pf *PipelinePayloadFactory) BuildValidationMoreDataPayload(ctx context.Context, verticalID string, request map[string]any, snap validationContextSnapshot) ValidationMoreDataNeededPayload {
 	if request == nil {
 		request = map[string]any{}
 	}
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	return ValidationMoreDataNeededPayload{
 		VerticalID:   strings.TrimSpace(verticalID),
 		Questions:    summarizeContractPayload(request),
@@ -593,14 +601,14 @@ func (pc *FactoryPipelineCoordinator) buildValidationMoreDataPayload(ctx context
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildBrandRevisionNeededPayload(ctx context.Context, verticalID string, feedback map[string]any, brand map[string]any) BrandRevisionNeededPayload {
+func (pf *PipelinePayloadFactory) BuildBrandRevisionNeededPayload(ctx context.Context, verticalID string, feedback map[string]any, brand map[string]any) BrandRevisionNeededPayload {
 	if feedback == nil {
 		feedback = map[string]any{}
 	}
 	if brand == nil {
 		brand = map[string]any{}
 	}
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	return BrandRevisionNeededPayload{
 		VerticalID:   strings.TrimSpace(verticalID),
 		VerticalName: name,
@@ -610,11 +618,11 @@ func (pc *FactoryPipelineCoordinator) buildBrandRevisionNeededPayload(ctx contex
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildVerticalKilledPayload(ctx context.Context, verticalID, sourceEvent string, reason map[string]any) VerticalKilledPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalKilledPayload(ctx context.Context, verticalID, sourceEvent string, reason map[string]any) VerticalKilledPayload {
 	if reason == nil {
 		reason = map[string]any{}
 	}
-	name, geography := pc.identityForPayload(ctx, verticalID)
+	name, geography := pf.identityForPayload(ctx, verticalID)
 	return VerticalKilledPayload{
 		VerticalID:   strings.TrimSpace(verticalID),
 		VerticalName: name,
@@ -625,7 +633,7 @@ func (pc *FactoryPipelineCoordinator) buildVerticalKilledPayload(ctx context.Con
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) buildValidationStartedPayload(ctx context.Context, verticalID string, scoring map[string]any, seed map[string]any) ValidationStartedPayload {
+func (pf *PipelinePayloadFactory) BuildValidationStartedPayload(ctx context.Context, verticalID string, scoring map[string]any, seed map[string]any) ValidationStartedPayload {
 	if scoring == nil {
 		scoring = map[string]any{}
 	}
@@ -647,7 +655,7 @@ func (pc *FactoryPipelineCoordinator) buildValidationStartedPayload(ctx context.
 		asString(seed["geography"]),
 		asString(scoring["geography"]),
 	)
-	dbName, dbGeography, err := pc.loadVerticalIdentity(ctx, verticalID)
+	dbName, dbGeography, err := pf.coordinator.loadVerticalIdentity(ctx, verticalID)
 	if err != nil {
 		log.Printf("pipeline: validation payload enrichment failed vertical=%s err=%v", verticalID, err)
 	} else {

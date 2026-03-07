@@ -220,7 +220,15 @@ func txTableExists(ctx context.Context, tx *sql.Tx, table string) bool {
 func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
 	eb.mu.RLock()
 	interceptors := append([]EventInterceptor(nil), eb.interceptors...)
+	provider := eb.interceptorProvider
 	eb.mu.RUnlock()
+	if provider != nil {
+		for _, it := range provider() {
+			if it != nil {
+				interceptors = append(interceptors, it)
+			}
+		}
+	}
 	if len(interceptors) == 0 {
 		return true, nil, nil
 	}

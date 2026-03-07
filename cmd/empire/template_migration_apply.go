@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -107,22 +108,26 @@ func applyTemplateMigrationWithPrimitives(ctx context.Context, cfgRuntimeMode st
 		"warnings":     plan.Warnings,
 		"executed_at":  time.Now().UTC().Format(time.RFC3339),
 	})
-	_ = stores.EventStore.AppendEvent(ctx, events.Event{
+	if err := stores.EventStore.AppendEvent(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("template.migration_complete"),
 		SourceAgent: executedBy,
 		VerticalID:  verticalID,
 		Payload:     completePayload,
 		CreatedAt:   time.Now(),
-	})
-	_ = stores.EventStore.AppendEvent(ctx, events.Event{
+	}); err != nil {
+		log.Printf("template.migration_complete append failed migration=%s err=%v", migrationID, err)
+	}
+	if err := stores.EventStore.AppendEvent(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("template.migration_completed"),
 		SourceAgent: executedBy,
 		VerticalID:  verticalID,
 		Payload:     completePayload,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		log.Printf("template.migration_completed append failed migration=%s err=%v", migrationID, err)
+	}
 
 	if _, err := stores.SQLDB.ExecContext(ctx, `
 		UPDATE template_migrations
@@ -323,16 +328,18 @@ func failTemplateMigration(ctx context.Context, stores storeBundle, migrationID,
 		"error":        msg,
 		"failed_at":    time.Now().UTC().Format(time.RFC3339),
 	})
-	_ = stores.EventStore.AppendEvent(ctx, events.Event{
+	if err := stores.EventStore.AppendEvent(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("template.migration_failed"),
 		SourceAgent: executedBy,
 		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	})
+	}); err != nil {
+		log.Printf("template.migration_failed append failed migration=%s err=%v", migrationID, err)
+	}
 	if stores.MailboxStore != nil {
-		_, _ = stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		if _, err := stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			VerticalID: verticalID,
 			FromAgent:  executedBy,
 			Type:       "digest",
@@ -340,7 +347,9 @@ func failTemplateMigration(ctx context.Context, stores storeBundle, migrationID,
 			Status:     "pending",
 			Context:    payload,
 			Summary:    fmt.Sprintf("Template migration failed: %s", migrationID),
-		})
+		}); err != nil {
+			log.Printf("template migration failure mailbox insert failed migration=%s err=%v", migrationID, err)
+		}
 	}
 	return fmt.Errorf("template migration failed: %s", msg)
 }
