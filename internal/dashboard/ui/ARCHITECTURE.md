@@ -11,6 +11,7 @@
   - `DashboardRuntimeViews.jsx` for runtime-facing tabs
   - `DashboardOpsViews.jsx` for ops/control-facing tabs
   - `useDashboardCoordinator.js` for global composition and hook wiring
+  - `useDashboardCoreSources.js`, `useDashboardRuntimeSources.js`, and `useDashboardPipelineSources.js` for app-layer data source composition
   - `useDashboardDerivedState.js` for global badge/tab derivation only
   - `useDashboardStateBuckets.js` for grouped local state buckets
   - `dashboardTabs.js` for tab definitions and badges
@@ -46,6 +47,9 @@
 - No umbrella action hook.
   - Do not recreate `useDashboardActions.js`.
   - Compose specific action hooks directly in the coordinator or in feature controllers.
+- No umbrella data-source hook.
+  - Do not recreate `useDashboardDataSources.js`.
+  - Keep app-layer source composition split by core, runtime, and pipeline domains.
 - Feature views should accept predictable contracts.
   - Default shape is `state` and `actions`.
   - If a third prop is needed, prefer `ui` and keep it narrow.

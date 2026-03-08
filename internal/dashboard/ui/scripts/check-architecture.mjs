@@ -34,6 +34,7 @@ expect(!read(runtimeRouterPath).includes("{ app }"), `${runtimeRouterPath} must 
 expect(!read(opsRouterPath).includes("{ app }"), `${opsRouterPath} must not accept an app bag`);
 expect(read(architectureDoc).includes("No `app` bag props."), `${architectureDoc} must document the no-app-bag rule`);
 expectMissing("src/hooks/useDashboardActions.js", "src/hooks/useDashboardActions.js must not exist");
+expectMissing("src/app/useDashboardDataSources.js", "src/app/useDashboardDataSources.js must not exist");
 
 if (failures.length > 0) {
   console.error("Architecture check failed:");
