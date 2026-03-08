@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import AgentChatPanel from "./AgentChatPanel.jsx";
 import AgentConversationPanel from "./AgentConversationPanel.jsx";
 import AgentDirectivePanel from "./AgentDirectivePanel.jsx";
@@ -7,9 +7,13 @@ import AgentSummaryPanel from "./AgentSummaryPanel.jsx";
 import AgentTurnsPanel from "./AgentTurnsPanel.jsx";
 import { useAgentConsole } from "./useAgentConsole.js";
 
-export default function AgentDropdown({ agent, addToast, onNavigate, onAction, onOpenMessage, onCopyConversation }) {
+export default function AgentDropdown({ agent, addToast, defaultSection = "context", onNavigate, onAction, onOpenControl, onNavigateTask, onOpenMessage, onCopyConversation }) {
   const consoleState = useAgentConsole({ agent, addToast, onAction });
-  const [section, setSection] = useState("context");
+  const [section, setSection] = useState(defaultSection);
+
+  useEffect(() => {
+    setSection(defaultSection || "context");
+  }, [defaultSection]);
 
   return (
     <div className="agent-drop">
@@ -20,7 +24,14 @@ export default function AgentDropdown({ agent, addToast, onNavigate, onAction, o
       </div>
       {section === "context" ? (
         <div>
-          <AgentSummaryPanel agent={agent} onNavigate={onNavigate} />
+          <AgentSummaryPanel
+            agent={agent}
+            promptState={consoleState.prompt.state}
+            onNavigate={onNavigate}
+            onOpenControl={onOpenControl}
+            onNavigateTask={onNavigateTask}
+            onSelectSection={setSection}
+          />
           <AgentPromptPanel agent={agent} prompt={consoleState.prompt} busy={consoleState.busy} addToast={addToast} />
           <AgentTurnsPanel turns={consoleState.conversation.turns} />
         </div>

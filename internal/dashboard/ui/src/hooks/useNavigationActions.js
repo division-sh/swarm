@@ -5,15 +5,18 @@ export function useNavigationActions({
   addToast,
   loadAgents,
   loadTargets,
+  activeSubview,
   setActiveView,
   setViewRoute,
   setModalContent,
   setControlTarget,
   setSelectedAgentID,
   setSelectedTaskID,
+  setTaskStatus,
   setSelectedEventID,
   setSelectedConv,
   setEventsFilter,
+  setEventsIncludeRuntime,
   setEventsRuntimeErrorsOnly,
   setLogsFilter,
   setLogsRuntimeErrorsOnly,
@@ -39,10 +42,17 @@ export function useNavigationActions({
   }, []);
 
   const handleAgentNavigate = useCallback((view, opts) => {
-    if (opts && opts.eventID) setSelectedEventID(opts.eventID);
+    let forcedSubview = "";
+    if (opts && opts.eventID) {
+      setSelectedEventID(opts.eventID);
+      setEventsFilter({ type: "", source: "", vertical: "", component: "", level: "", subscriber: "" });
+      setEventsIncludeRuntime(true);
+      setEventsRuntimeErrorsOnly(false);
+    }
     if (opts && opts.convID) {
       setSelectedConv(opts.convID);
       setSelectedAgentID(opts.agentID || opts.convID);
+      if (view === "agents") forcedSubview = "conversation";
     }
     if (opts && opts.agentID) setSelectedAgentID(opts.agentID);
     if (opts && opts.eventsSubscriber) {
@@ -54,7 +64,8 @@ export function useNavigationActions({
       setLogsRuntimeErrorsOnly(false);
     }
     const route = routeForView(view);
-    if (route.subview) setViewRoute(route.tab, route.subview);
+    if (forcedSubview) setViewRoute(route.tab, forcedSubview);
+    else if (route.subview) setViewRoute(route.tab, route.subview);
     else setActiveView(route.tab);
   }, [
     setActiveView,
@@ -99,21 +110,25 @@ export function useNavigationActions({
   }, [setActiveView, setSelectedAgentID]);
 
   const navigateToTask = useCallback((taskID) => {
+    setTaskStatus("all");
     setSelectedTaskID(taskID);
     setViewRoute("operations", "tasks");
-  }, [setSelectedTaskID, setViewRoute]);
+  }, [setSelectedTaskID, setTaskStatus, setViewRoute]);
 
   const renderAgentDropdown = useCallback((agent) => React.createElement(AgentDropdown, {
     agent,
     addToast,
+    defaultSection: activeSubview === "conversation" || activeSubview === "actions" ? activeSubview : "context",
     onNavigate: handleAgentNavigate,
+    onOpenControl: openControl,
+    onNavigateTask: navigateToTask,
     onOpenMessage: (message) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
     onCopyConversation: copyConversation,
     onAction: () => {
       loadAgents().catch(() => {});
       loadTargets().catch(() => {});
     },
-  }), [addToast, copyConversation, handleAgentNavigate, loadAgents, loadTargets, setModalContent]);
+  }), [activeSubview, addToast, copyConversation, handleAgentNavigate, loadAgents, loadTargets, navigateToTask, openControl, setModalContent]);
 
   const openLogsForAgent = useCallback((agentID) => {
     setLogsFilter({ type: "", source: agentID, vertical: "", component: "", level: "", subscriber: "" });
@@ -124,7 +139,7 @@ export function useNavigationActions({
   const openConvoForAgent = useCallback((agentID) => {
     setSelectedConv(agentID);
     setSelectedAgentID(agentID);
-    setViewRoute("agents");
+    setViewRoute("agents", "conversation");
   }, [setSelectedAgentID, setSelectedConv, setViewRoute]);
 
   return {

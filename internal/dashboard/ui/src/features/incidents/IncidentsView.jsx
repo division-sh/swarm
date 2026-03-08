@@ -11,40 +11,49 @@ export default function IncidentsView({ state, actions }) {
       <section>
         <div className="head">
           <h2>Incident Response</h2>
-          <div className="stack">
-            <select
-              value={String(incidentsFilter.sinceHours)}
-              onChange={(e) => setIncidentsFilter((p) => ({ ...p, sinceHours: Number(e.target.value || "24") }))}
-            >
-              <option value="1">1h</option>
-              <option value="6">6h</option>
-              <option value="24">24h</option>
-              <option value="72">72h</option>
-              <option value="168">7d</option>
-            </select>
-            <select
-              value={incidentsFilter.level}
-              onChange={(e) => setIncidentsFilter((p) => ({ ...p, level: e.target.value }))}
-            >
-              <option value="warn">warn+</option>
-              <option value="error">error only</option>
-              <option value="info">info+</option>
-            </select>
-            <input
-              placeholder="component"
-              value={incidentsFilter.component}
-              onChange={(e) => setIncidentsFilter((p) => ({ ...p, component: e.target.value }))}
-            />
-            <label className="tiny" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <div className="obs-filterbar">
+            <div className="obs-filtergroup">
+              <div className="obs-filterlabel">Window</div>
+              <select
+                value={String(incidentsFilter.sinceHours)}
+                onChange={(e) => setIncidentsFilter((p) => ({ ...p, sinceHours: Number(e.target.value || "24") }))}
+              >
+                <option value="1">Last 1h</option>
+                <option value="6">Last 6h</option>
+                <option value="24">Last 24h</option>
+                <option value="72">Last 72h</option>
+                <option value="168">Last 7d</option>
+              </select>
+              <select
+                value={incidentsFilter.level}
+                onChange={(e) => setIncidentsFilter((p) => ({ ...p, level: e.target.value }))}
+              >
+                <option value="warn">warn+</option>
+                <option value="error">error only</option>
+                <option value="info">info+</option>
+              </select>
+            </div>
+            <div className="obs-filtergroup">
+              <div className="obs-filterlabel">Scope</div>
               <input
-                type="checkbox"
-                checked={incidentsFilter.mcpOnly}
-                onChange={(e) => setIncidentsFilter((p) => ({ ...p, mcpOnly: e.target.checked }))}
+                placeholder="component"
+                value={incidentsFilter.component}
+                onChange={(e) => setIncidentsFilter((p) => ({ ...p, component: e.target.value }))}
               />
-              mcp only
-            </label>
-            <button onClick={() => refresh().catch(() => {})}>Refresh</button>
-            <button className="btn-secondary" onClick={resetFilters}>Reset</button>
+              <label className="obs-toggle">
+                <input
+                  type="checkbox"
+                  checked={incidentsFilter.mcpOnly}
+                  onChange={(e) => setIncidentsFilter((p) => ({ ...p, mcpOnly: e.target.checked }))}
+                />
+                mcp only
+              </label>
+            </div>
+            <div className="obs-filtergroup obs-filtergroup-actions">
+              <div className="obs-filterlabel">Actions</div>
+              <button onClick={() => refresh().catch(() => {})}>Apply</button>
+              <button className="btn-secondary" onClick={resetFilters}>Reset</button>
+            </div>
           </div>
         </div>
         <div className="body scroll">
@@ -92,6 +101,11 @@ export default function IncidentsView({ state, actions }) {
                 <div className="health-kv"><span>Root Cause</span><span>{selectedIncident.root_cause || "-"}</span></div>
                 <div className="health-kv"><span>Components</span><span>{(selectedIncident.components || []).join(", ") || "-"}</span></div>
                 <div className="health-kv"><span>Actions</span><span>{(selectedIncident.actions || []).join(", ") || "-"}</span></div>
+              </div>
+              <div className="stack" style={{ marginBottom: 10 }}>
+                <button className="btn-secondary" disabled={!selectedIncidentAgent} onClick={() => actions.focusAgentEvents?.(selectedIncidentAgent)}>Agent Events</button>
+                <button className="btn-secondary" disabled={!selectedIncidentAgent} onClick={() => openLogs(selectedIncidentAgent)}>Agent Logs</button>
+                <button className="btn-secondary" disabled={!(selectedIncident.components || []).length} onClick={() => actions.focusIncidentComponent?.((selectedIncident.components || [])[0] || "")}>Component Logs</button>
               </div>
 
               <div className="tiny" style={{ marginBottom: 6 }}>Impacted Agents</div>

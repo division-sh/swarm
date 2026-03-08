@@ -12,6 +12,12 @@
   .agent-drop-grid {
     grid-template-columns: 1fr;
   }
+  .obs-filterbar {
+    grid-template-columns: 1fr;
+  }
+  .obs-filtergroup-actions {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
   .kanban-board {
     grid-template-columns: repeat(3, 1fr);
   }

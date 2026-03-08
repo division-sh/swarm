@@ -1,12 +1,24 @@
 import React from "react";
 import StatusDot from "./StatusDot.jsx";
+import { formatDurationMs } from "../lib/format.js";
+import { attentionScore } from "../features/agents/triage.js";
 
-export default function AgentTable({ agents, selectedAgentID, onSelectAgent, renderDropdown, onNavigateTask, formatDurationMs }) {
+export default function AgentTable({ agents, selectedAgentID, onSelectAgent, renderDropdown, onNavigateTask, pinnedAgentIDs, onTogglePinned, sortMode = "state" }) {
   if (!agents || agents.length === 0) {
     return <div className="empty-state">No agents in this group.</div>;
   }
   const stateOrder = { stuck: 0, running: 1, idle: 2, terminated: 3 };
-  const sorted = [...agents].sort((a, b) => (stateOrder[a.state] ?? 9) - (stateOrder[b.state] ?? 9) || (a.id || "").localeCompare(b.id || ""));
+  const pinnedSet = new Set(pinnedAgentIDs || []);
+  const sorted = [...agents].sort((a, b) => {
+    const pinnedDelta = Number(pinnedSet.has(b.id)) - Number(pinnedSet.has(a.id));
+    if (pinnedDelta !== 0) return pinnedDelta;
+    if (sortMode === "attention") {
+      return attentionScore(b) - attentionScore(a)
+        || (stateOrder[a.state] ?? 9) - (stateOrder[b.state] ?? 9)
+        || (a.id || "").localeCompare(b.id || "");
+    }
+    return (stateOrder[a.state] ?? 9) - (stateOrder[b.state] ?? 9) || (a.id || "").localeCompare(b.id || "");
+  });
   return (
     <table>
       <thead>
@@ -26,11 +38,28 @@ export default function AgentTable({ agents, selectedAgentID, onSelectAgent, ren
           const fillClass = pct >= 95 ? "turnfill bad" : pct >= 85 ? "turnfill warn" : "turnfill";
           const tool = a.last_tool && a.last_tool.name ? `${a.last_tool.name}${a.last_tool.ok === false ? " (fail)" : ""}` : "-";
           const active = selectedAgentID === a.id;
+          const pinned = pinnedSet.has(a.id);
           return (
             <React.Fragment key={a.id}>
               <tr className={`agent-row ${active ? "active" : ""}`} onClick={() => onSelectAgent(active ? "" : a.id)}>
                 <td>
-                  <div><strong>{a.id}</strong></div>
+                  <div className="stack" style={{ justifyContent: "space-between", gap: 8 }}>
+                    <strong>{a.id}</strong>
+                    {onTogglePinned ? (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: "2px 6px", fontSize: 11 }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTogglePinned(a.id);
+                        }}
+                        title={pinned ? "Unpin agent" : "Pin agent"}
+                      >
+                        {pinned ? "Pinned" : "Pin"}
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="tiny">{a.role || "-"}</div>
                 </td>
                 <td>

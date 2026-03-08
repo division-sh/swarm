@@ -6,28 +6,38 @@ export default function EventsView({ state, actions }) {
   const { filteredEvents, filteredRuntimeLogs, eventDetail, eventsFilter, eventsIncludeRuntime, eventsRuntimeErrorsOnly, selectedEventID } = state;
   const { refresh, clear } = actions;
   const { setEventsFilter, setEventsIncludeRuntime, setEventsRuntimeErrorsOnly, setSelectedEventID } = actions;
+  const selectedEvent = eventDetail && eventDetail.event ? eventDetail.event : null;
 
   return (
     <section>
       <div className="head">
         <h2>Event Flow</h2>
-        <div className="stack">
-          <input placeholder="type (prefix*)" value={eventsFilter.type} onChange={(e) => setEventsFilter((p) => ({ ...p, type: e.target.value }))} />
-          <input placeholder="source" value={eventsFilter.source} onChange={(e) => setEventsFilter((p) => ({ ...p, source: e.target.value }))} />
-          <input placeholder="subscriber (agent)" value={eventsFilter.subscriber} onChange={(e) => setEventsFilter((p) => ({ ...p, subscriber: e.target.value }))} />
-          <input placeholder="vertical slug/id" value={eventsFilter.vertical} onChange={(e) => setEventsFilter((p) => ({ ...p, vertical: e.target.value }))} />
-          <input placeholder="component (runtime)" value={eventsFilter.component} onChange={(e) => setEventsFilter((p) => ({ ...p, component: e.target.value }))} />
-          <input placeholder="level (debug|info|warn|error)" value={eventsFilter.level} onChange={(e) => setEventsFilter((p) => ({ ...p, level: e.target.value }))} />
-          <label className="tiny" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-            <input type="checkbox" checked={eventsIncludeRuntime} onChange={(e) => setEventsIncludeRuntime(e.target.checked)} />
-            include runtime logs
-          </label>
-          <label className="tiny" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-            <input type="checkbox" checked={eventsRuntimeErrorsOnly} onChange={(e) => setEventsRuntimeErrorsOnly(e.target.checked)} />
-            runtime errors only
-          </label>
-          <button onClick={() => refresh().catch(() => {})}>Filter</button>
-          <button className="btn-secondary" onClick={clear}>Clear</button>
+        <div className="obs-filterbar">
+          <div className="obs-filtergroup">
+            <div className="obs-filterlabel">Trace</div>
+            <input placeholder="type prefix" value={eventsFilter.type} onChange={(e) => setEventsFilter((p) => ({ ...p, type: e.target.value }))} />
+            <input placeholder="source" value={eventsFilter.source} onChange={(e) => setEventsFilter((p) => ({ ...p, source: e.target.value }))} />
+            <input placeholder="agent subscriber" value={eventsFilter.subscriber} onChange={(e) => setEventsFilter((p) => ({ ...p, subscriber: e.target.value }))} />
+            <input placeholder="vertical slug/id" value={eventsFilter.vertical} onChange={(e) => setEventsFilter((p) => ({ ...p, vertical: e.target.value }))} />
+          </div>
+          <div className="obs-filtergroup">
+            <div className="obs-filterlabel">Runtime</div>
+            <input placeholder="component" value={eventsFilter.component} onChange={(e) => setEventsFilter((p) => ({ ...p, component: e.target.value }))} />
+            <input placeholder="level" value={eventsFilter.level} onChange={(e) => setEventsFilter((p) => ({ ...p, level: e.target.value }))} />
+            <label className="obs-toggle">
+              <input type="checkbox" checked={eventsIncludeRuntime} onChange={(e) => setEventsIncludeRuntime(e.target.checked)} />
+              include runtime logs
+            </label>
+            <label className="obs-toggle">
+              <input type="checkbox" checked={eventsRuntimeErrorsOnly} onChange={(e) => setEventsRuntimeErrorsOnly(e.target.checked)} />
+              runtime errors only
+            </label>
+          </div>
+          <div className="obs-filtergroup obs-filtergroup-actions">
+            <div className="obs-filterlabel">Actions</div>
+            <button onClick={() => refresh().catch(() => {})}>Apply</button>
+            <button className="btn-secondary" onClick={clear}>Reset</button>
+          </div>
         </div>
       </div>
       <div className="row3 body">
@@ -44,7 +54,14 @@ export default function EventsView({ state, actions }) {
         </div>
         <div>
           <div className="tiny" style={{ marginBottom: 6 }}>Selected Event</div>
-          <div className="tiny">{eventDetail && eventDetail.event ? `${eventDetail.event.type} by ${eventDetail.event.source_agent} at ${fmtTime(eventDetail.event.created_at)}` : "Select event"}</div>
+          <div className="tiny">{selectedEvent ? `${selectedEvent.type} by ${selectedEvent.source_agent} at ${fmtTime(selectedEvent.created_at)}` : "Select event"}</div>
+          {selectedEvent ? (
+            <div className="stack" style={{ margin: "8px 0" }}>
+              <button className="btn-secondary" onClick={() => actions.openLogsForAgent?.(selectedEvent.source_agent || "")}>Open Logs</button>
+              <button className="btn-secondary" onClick={() => actions.focusEventType?.(selectedEvent.type || "")}>Same Type</button>
+              <button className="btn-secondary" onClick={() => actions.focusEventVertical?.(selectedEvent.vertical_slug || selectedEvent.vertical_id || "")}>Same Vertical</button>
+            </div>
+          ) : null}
           <JsonBlock data={(eventDetail && eventDetail.payload) || {}} defaultOpen={2} />
           <div className="tiny" style={{ margin: "8px 0 4px" }}>Deliveries</div>
           <div className="body scroll" style={{ maxHeight: 240, padding: 0 }}>

@@ -1074,6 +1074,54 @@ section:hover {
   border-bottom: none;
 }
 
+.obs-filterbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.8fr) auto;
+  gap: 8px;
+  width: 100%;
+}
+
+.obs-filtergroup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.obs-filtergroup-actions {
+  grid-template-columns: 1fr;
+  align-content: start;
+  min-width: 112px;
+}
+
+.obs-filterlabel {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.obs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+}
+
+.obs-toggle input {
+  flex-shrink: 0;
+}
+
 .health-good {
   color: var(--good);
   font-weight: 600;
@@ -1103,4 +1151,3 @@ section:hover {
   white-space: pre-wrap;
   word-break: break-word;
 }
-
