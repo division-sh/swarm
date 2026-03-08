@@ -86,6 +86,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		}
 		log.Printf("emit schema hardening warning: %d agent-emitted event schemas are missing explicit definitions; add explicit schemas (sample: %s)", len(generated), strings.Join(sample, ", "))
 	}
+	if err := runtimepipeline.ValidateEmpireWorkflowContracts(); err != nil {
+		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
+	}
 
 	rt := &Runtime{
 		Config:    cfg,
@@ -216,6 +219,11 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
+	}
+	if rt.Pipeline != nil {
+		if err := rt.Pipeline.ValidateWorkflowContracts(); err != nil {
+			return fmt.Errorf("workflow contract validation failed: %w", err)
+		}
 	}
 	if rt.Pipeline != nil {
 		go rt.Pipeline.RunMaintenance(ctx)

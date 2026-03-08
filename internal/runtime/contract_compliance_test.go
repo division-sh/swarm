@@ -64,10 +64,11 @@ type contractComplianceCatalogEvent struct {
 }
 
 type contractComplianceSystemNode struct {
-	ID             string   `yaml:"id"`
-	SubscribesTo   []string `yaml:"subscribes_to"`
-	Produces       []string `yaml:"produces"`
-	Implementation string   `yaml:"implementation"`
+	ID               string   `yaml:"id"`
+	SubscribesTo     []string `yaml:"subscribes_to"`
+	Produces         []string `yaml:"produces"`
+	OwnedTransitions []string `yaml:"owned_transitions"`
+	Implementation   string   `yaml:"implementation"`
 }
 
 type contractComplianceRoutes struct {
@@ -93,32 +94,34 @@ type contractComplianceToolSchema struct {
 
 type contractComplianceWorkflowSchema struct {
 	Workflow struct {
-		Name          string   `yaml:"name"`
-		Version       string   `yaml:"version"`
-		Entity        string   `yaml:"entity"`
-		EntityTable   string   `yaml:"entity_table"`
-		StateField    string   `yaml:"state_field"`
-		InitialStage  string   `yaml:"initial_stage"`
-		Stages        []struct {
+		Name         string `yaml:"name"`
+		Version      string `yaml:"version"`
+		Entity       string `yaml:"entity"`
+		EntityTable  string `yaml:"entity_table"`
+		StateField   string `yaml:"state_field"`
+		InitialStage string `yaml:"initial_stage"`
+		Stages       []struct {
 			ID string `yaml:"id"`
 		} `yaml:"stages"`
-		TerminalStages []string `yaml:"terminal_stages"`
-		Transitions []struct {
-			ID      string   `yaml:"id"`
-			From    any      `yaml:"from"`
-			To      string   `yaml:"to"`
-			Trigger string   `yaml:"trigger"`
-			Node    string   `yaml:"node"`
-			Guards  []string `yaml:"guards"`
-			Actions []string `yaml:"actions"`
-		} `yaml:"transitions"`
-		Timers []struct {
+		TerminalStages []string                                     `yaml:"terminal_stages"`
+		Transitions    []contractComplianceWorkflowSchemaTransition `yaml:"transitions"`
+		Timers         []struct {
 			ID    string `yaml:"id"`
 			Stage string `yaml:"stage"`
 			Event string `yaml:"event"`
 			Owner string `yaml:"owner"`
 		} `yaml:"timers"`
 	} `yaml:"workflow"`
+}
+
+type contractComplianceWorkflowSchemaTransition struct {
+	ID      string   `yaml:"id"`
+	From    any      `yaml:"from"`
+	To      string   `yaml:"to"`
+	Trigger string   `yaml:"trigger"`
+	Node    string   `yaml:"node"`
+	Guards  []string `yaml:"guards"`
+	Actions []string `yaml:"actions"`
 }
 
 type contractComplianceGuardActionRegistry struct {
@@ -159,7 +162,7 @@ type contractCompliancePlatformSpec struct {
 		ID string `yaml:"id"`
 	} `yaml:"compliance_rules"`
 	FileLayout struct {
-	MigrationNote string `yaml:"migration_note"`
+		MigrationNote string `yaml:"migration_note"`
 	} `yaml:"file_layout"`
 }
 
@@ -436,7 +439,7 @@ func TestContractCompliance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse canonical ddl: %v", err)
 		}
-		if got, want := len(tables), 37; got != want {
+		if got, want := len(tables), 38; got != want {
 			errs = append(errs, fmt.Sprintf("canonical DDL table count mismatch: got=%d want=%d", got, want))
 		}
 
@@ -446,6 +449,7 @@ func TestContractCompliance(t *testing.T) {
 			"scan_accumulators":         {"scan_id", "campaign_id", "mode", "geography", "expected", "complete", "completed_by", "reports", "discovered", "skipped", "pending_dedup", "timeout_at", "started_at", "completed_at", "created_at", "updated_at"},
 			"pending_dedup_candidates":  {"dedup_event_id", "scan_id", "campaign_id", "mode", "name", "geography", "discovery_mode", "signal_strength", "payload", "existing_id", "status", "created_at", "resolved_at"},
 			"validation_pipelines":      {"vertical_id", "status", "g1_research", "g2_spec", "g3_cto", "g4_brand", "research_payload", "spec_payload", "cto_payload", "brand_payload", "scoring_payload", "revision_count", "inner_revision_count", "spec_version", "packaging_requested", "packaging_requested_at", "packaging_retries", "created_at", "updated_at"},
+			"workflow_instances":        {"instance_id", "workflow_name", "workflow_version", "current_stage", "entered_stage_at", "transition_history", "accumulator_state", "timer_state", "metadata", "created_at", "updated_at"},
 			"pipeline_processed_events": {"event_id", "processed_at"},
 			"template_prompt_drafts":    {"role", "prompt", "source", "notes", "created_at", "updated_at"},
 		}
@@ -721,10 +725,10 @@ func TestContractCompliance(t *testing.T) {
 		builtinGuards := contractComplianceBuiltinIDs(platformSpec.BuiltinHooks.Guards)
 		builtinActions := contractComplianceBuiltinIDs(platformSpec.BuiltinHooks.Actions)
 		implicitPlatformActions := map[string]struct{}{
-			"record_transition":  {},
-			"update_stage":       {},
+			"record_transition":   {},
+			"update_stage":        {},
 			"cancel_stage_timers": {},
-			"start_stage_timers": {},
+			"start_stage_timers":  {},
 		}
 		errs := make([]string, 0, 16)
 		guardAliases := map[string]string{}
@@ -845,6 +849,49 @@ func TestContractCompliance(t *testing.T) {
 		}
 	})
 
+	t.Run("workflow_node_coverage", func(t *testing.T) {
+		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
+		transitionByID := make(map[string]contractComplianceWorkflowSchemaTransition, len(workflow.Workflow.Transitions))
+		for _, tr := range workflow.Workflow.Transitions {
+			if id := strings.TrimSpace(tr.ID); id != "" {
+				transitionByID[id] = tr
+			}
+		}
+		errs := make([]string, 0, 16)
+		for nodeID, node := range systemNodes {
+			nodeID = strings.TrimSpace(nodeID)
+			subs := contractComplianceNormalizeSet(node.SubscribesTo)
+			produces := contractComplianceNormalizeSet(node.Produces)
+			for _, transitionID := range node.OwnedTransitions {
+				transitionID = strings.TrimSpace(transitionID)
+				if transitionID == "" {
+					continue
+				}
+				tr, ok := transitionByID[transitionID]
+				if !ok {
+					errs = append(errs, fmt.Sprintf("system node %s owns unknown transition %s", nodeID, transitionID))
+					continue
+				}
+				if owner := strings.TrimSpace(tr.Node); owner != nodeID {
+					errs = append(errs, fmt.Sprintf("system node %s owns transition %s but workflow owner is %s", nodeID, transitionID, owner))
+				}
+				trigger := strings.TrimSpace(tr.Trigger)
+				if trigger == "" {
+					errs = append(errs, fmt.Sprintf("owned transition %s for node %s is missing trigger", transitionID, nodeID))
+					continue
+				}
+				if _, ok := subs[trigger]; !ok {
+					if _, emitted := produces[trigger]; !emitted {
+						errs = append(errs, fmt.Sprintf("system node %s cannot see owned transition trigger %s for %s", nodeID, trigger, transitionID))
+					}
+				}
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("workflow_node_coverage failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+
 	t.Run("workflow_graph", func(t *testing.T) {
 		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
 		registry := contractComplianceLoadGuardActionRegistry(t, repoRoot)
@@ -943,6 +990,55 @@ func TestContractCompliance(t *testing.T) {
 				errs = append(errs, fmt.Sprintf("timer %s event %s missing from event catalog", timer.ID, timer.Event))
 			}
 		}
+		covered := map[string]string{}
+		for nodeID, node := range systemNodes {
+			nodeSubs := make(map[string]struct{}, len(node.SubscribesTo))
+			nodeProduces := make(map[string]struct{}, len(node.Produces))
+			for _, evt := range node.SubscribesTo {
+				if evt = strings.TrimSpace(evt); evt != "" {
+					nodeSubs[evt] = struct{}{}
+				}
+			}
+			for _, evt := range node.Produces {
+				if evt = strings.TrimSpace(evt); evt != "" {
+					nodeProduces[evt] = struct{}{}
+				}
+			}
+			for _, transitionID := range node.OwnedTransitions {
+				transitionID = strings.TrimSpace(transitionID)
+				if transitionID == "" {
+					continue
+				}
+				tr, ok := contractComplianceWorkflowTransitionByID(workflow.Workflow.Transitions, transitionID)
+				if !ok {
+					errs = append(errs, fmt.Sprintf("system node %s owns unknown transition %s", nodeID, transitionID))
+					continue
+				}
+				if owner := strings.TrimSpace(tr.Node); owner != strings.TrimSpace(nodeID) {
+					errs = append(errs, fmt.Sprintf("transition %s is owned by %s in workflow but listed under %s", transitionID, owner, nodeID))
+				}
+				trigger := strings.TrimSpace(tr.Trigger)
+				if _, ok := nodeSubs[trigger]; !ok {
+					if _, ok := nodeProduces[trigger]; !ok {
+						errs = append(errs, fmt.Sprintf("system node %s owns transition %s but neither subscribes to nor emits %s", nodeID, transitionID, trigger))
+					}
+				}
+				covered[transitionID] = nodeID
+			}
+		}
+		for _, tr := range workflow.Workflow.Transitions {
+			transitionID := strings.TrimSpace(tr.ID)
+			owner := strings.TrimSpace(tr.Node)
+			if owner == "runtime" {
+				continue
+			}
+			if _, systemNode := systemNodes[owner]; !systemNode {
+				continue
+			}
+			if _, ok := covered[transitionID]; !ok {
+				errs = append(errs, fmt.Sprintf("system-node transition %s missing owned_transitions coverage", transitionID))
+			}
+		}
 		if len(errs) > 0 {
 			t.Fatalf("workflow_graph failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 60))
 		}
@@ -965,7 +1061,7 @@ func contractComplianceRepoRoot(t *testing.T) string {
 
 func contractComplianceLoadAgentTools(t *testing.T, repoRoot string) map[string]contractComplianceAgent {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "agent-tools.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).AgentRegistryFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1000,7 +1096,7 @@ func contractComplianceLoadAgentConfigMap(t *testing.T, repoRoot string) contrac
 
 func contractComplianceLoadEventCatalog(t *testing.T, repoRoot string) map[string]contractComplianceCatalogEvent {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "event-catalog.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).EventCatalogFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1021,7 +1117,7 @@ func contractComplianceLoadEventCatalog(t *testing.T, repoRoot string) map[strin
 
 func contractComplianceLoadSystemNodes(t *testing.T, repoRoot string) map[string]contractComplianceSystemNode {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "system-nodes.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).SystemNodesFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1090,7 +1186,7 @@ func contractComplianceLoadToolingLockVersion(t *testing.T, repoRoot string) str
 
 func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string]contractComplianceToolSchema {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "tool-schemas.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).ToolSchemasFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1104,7 +1200,7 @@ func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string
 
 func contractComplianceLoadWorkflowSchema(t *testing.T, repoRoot string) contractComplianceWorkflowSchema {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "workflow-schema.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).WorkflowSchemaFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1118,7 +1214,7 @@ func contractComplianceLoadWorkflowSchema(t *testing.T, repoRoot string) contrac
 
 func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) contractComplianceGuardActionRegistry {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "guard-action-registry.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).GuardRegistryFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1149,7 +1245,7 @@ func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) co
 
 func contractComplianceLoadPlatformSpec(t *testing.T, repoRoot string) contractCompliancePlatformSpec {
 	t.Helper()
-	path := filepath.Join(repoRoot, "contracts", "platform", "platform-spec.yaml")
+	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).PlatformSpecFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1549,6 +1645,27 @@ func contractComplianceNormalizeList(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func contractComplianceNormalizeSet(in []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			out[v] = struct{}{}
+		}
+	}
+	return out
+}
+
+func contractComplianceWorkflowTransitionByID(in []contractComplianceWorkflowSchemaTransition, wantID string) (contractComplianceWorkflowSchemaTransition, bool) {
+	wantID = strings.TrimSpace(wantID)
+	for _, item := range in {
+		if strings.TrimSpace(item.ID) == wantID {
+			return item, true
+		}
+	}
+	return contractComplianceWorkflowSchemaTransition{}, false
 }
 
 func contractComplianceSetSubtract(a, b []string) []string {

@@ -159,15 +159,15 @@ func workflowStateForVertical(verticalID, stage string, st *validationPipelineSt
 	}
 	state.Status = strings.TrimSpace(st.Status)
 	state.Metadata = map[string]any{
-		"g1_research":            st.G1Research,
-		"g2_spec":                st.G2Spec,
-		"g3_cto":                 st.G3CTO,
-		"g4_brand":               st.G4Brand,
-		"revision_count":         st.RevisionCount,
-		"inner_revision_count":   st.InnerRevisionCount,
-		"packaging_requested":    st.PackagingRequested,
-		"packaging_retry_count":  st.PackagingRetries,
-		"spec_version":           st.SpecVersion,
+		"g1_research":           st.G1Research,
+		"g2_spec":               st.G2Spec,
+		"g3_cto":                st.G3CTO,
+		"g4_brand":              st.G4Brand,
+		"revision_count":        st.RevisionCount,
+		"inner_revision_count":  st.InnerRevisionCount,
+		"packaging_requested":   st.PackagingRequested,
+		"packaging_retry_count": st.PackagingRetries,
+		"spec_version":          st.SpecVersion,
 	}
 	return state
 }
@@ -209,6 +209,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 			    updated_at = now()
 			WHERE id = $1::uuid
 		`, verticalID, stage)
+		pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
 		return
 	}
 	if stage == "approved" {
@@ -220,6 +221,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 			    updated_at = now()
 			WHERE id = $1::uuid
 		`, verticalID, stage)
+		pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
 		return
 	}
 	if stage == "killed" {
@@ -237,6 +239,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 			    updated_at = now()
 			WHERE id = $1::uuid
 		`, verticalID, stage, sourceEvent)
+		pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
 		return
 	}
 	_, _ = dbExecContext(ctx, pc.db, `
@@ -245,6 +248,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 		    updated_at = now()
 		WHERE id = $1::uuid
 	`, verticalID, stage)
+	pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
 }
 
 func expectedAgents(mode string) int {

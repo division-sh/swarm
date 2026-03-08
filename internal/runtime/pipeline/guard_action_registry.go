@@ -1,24 +1,12 @@
 package pipeline
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
-	"gopkg.in/yaml.v3"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
-
-type guardActionRegistryDocument struct {
-	Guards []struct {
-		ID string `yaml:"id"`
-	} `yaml:"guards"`
-	Actions []struct {
-		ID string `yaml:"id"`
-	} `yaml:"actions"`
-}
 
 type contractIDRegistry struct {
 	ids map[string]struct{}
@@ -43,18 +31,30 @@ func (r contractIDRegistry) sortedIDs() []string {
 }
 
 type contractGuardRegistry struct {
-	registry contractIDRegistry
+	registry    contractIDRegistry
+	definitions map[string]runtimecontracts.GuardActionEntry
 }
 
 func (r contractGuardRegistry) HasGuard(id string) bool { return r.registry.has(id) }
 func (r contractGuardRegistry) GuardIDs() []string      { return r.registry.sortedIDs() }
+func (r contractGuardRegistry) Guard(id string) (runtimecontracts.GuardActionEntry, bool) {
+	id = strings.TrimSpace(id)
+	def, ok := r.definitions[id]
+	return def, ok
+}
 
 type contractActionRegistry struct {
-	registry contractIDRegistry
+	registry    contractIDRegistry
+	definitions map[string]runtimecontracts.GuardActionEntry
 }
 
 func (r contractActionRegistry) HasAction(id string) bool { return r.registry.has(id) }
 func (r contractActionRegistry) ActionIDs() []string      { return r.registry.sortedIDs() }
+func (r contractActionRegistry) Action(id string) (runtimecontracts.GuardActionEntry, bool) {
+	id = strings.TrimSpace(id)
+	def, ok := r.definitions[id]
+	return def, ok
+}
 
 var (
 	workflowGuardRegistryOnce sync.Once
@@ -81,32 +81,32 @@ func empireActionRegistry() ActionRegistry {
 
 func loadWorkflowGuardActionRegistries() {
 	workflowGuardRegistryOnce.Do(func() {
-		path := filepath.Join(workflowRepoRoot(), "contracts", "guard-action-registry.yaml")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			workflowRegistryErr = fmt.Errorf("read %s: %w", path, err)
-			return
-		}
-		var doc guardActionRegistryDocument
-		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			workflowRegistryErr = fmt.Errorf("parse %s: %w", path, err)
-			return
-		}
-		guards := make(map[string]struct{}, len(doc.Guards))
-		for _, guard := range doc.Guards {
+		bundle := empireContractBundle()
+		guards := make(map[string]struct{}, len(bundle.Hooks.Guards))
+		guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Guards))
+		for _, guard := range bundle.Hooks.Guards {
 			id := strings.TrimSpace(guard.ID)
 			if id != "" {
 				guards[id] = struct{}{}
+				guardDefs[id] = guard
 			}
 		}
-		actions := make(map[string]struct{}, len(doc.Actions))
-		for _, action := range doc.Actions {
+		actions := make(map[string]struct{}, len(bundle.Hooks.Actions))
+		actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Actions))
+		for _, action := range bundle.Hooks.Actions {
 			id := strings.TrimSpace(action.ID)
 			if id != "" {
 				actions[id] = struct{}{}
+				actionDefs[id] = action
 			}
 		}
-		workflowGuardRegistry = contractGuardRegistry{registry: contractIDRegistry{ids: guards}}
-		workflowActionRegistry = contractActionRegistry{registry: contractIDRegistry{ids: actions}}
+		workflowGuardRegistry = contractGuardRegistry{
+			registry:    contractIDRegistry{ids: guards},
+			definitions: guardDefs,
+		}
+		workflowActionRegistry = contractActionRegistry{
+			registry:    contractIDRegistry{ids: actions},
+			definitions: actionDefs,
+		}
 	})
 }

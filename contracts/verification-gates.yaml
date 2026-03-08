@@ -24,13 +24,13 @@ gates:
   category: ddl
   layer: integration
   command: psql -v ON_ERROR_STOP=1 -f contracts/ddl-canonical.sql
-  pass_criteria: Exit 0, 37 tables created, no errors
+  pass_criteria: Exit 0, 38 tables created, no errors
   introduced: 2.0.29
   notes: Validates FK ordering, constraint syntax, type correctness
   automated: null
   type: automated
 - id: ddl-table-count
-  name: Canonical DDL has exactly 37 tables
+  name: Canonical DDL has exactly 38 tables
   priority: must_pass
   category: ddl
   layer: integration

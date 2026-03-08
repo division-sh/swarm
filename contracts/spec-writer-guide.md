@@ -56,7 +56,7 @@ Defines every event: emitter, consumer, delivery_channel, payload with types. 17
 
 ### 2.3 ddl-canonical.sql
 
-Canonical database schema. 37 tables. `empire init` executes this directly. NEVER invent schemas — derive from Go structs (see Lesson 1).
+Canonical database schema. 38 tables. `empire init` executes this directly. NEVER invent schemas — derive from Go structs (see Lesson 1).
 
 ### 2.4 system-nodes.yaml
 
@@ -377,7 +377,7 @@ Three reviewers may audit:
 contracts/                             # In-repo live copy (implementer maintains)
   agent-tools.yaml                    # 28 agents
   event-catalog.yaml                  # 172 events
-  ddl-canonical.sql                   # 37 tables
+  ddl-canonical.sql                   # 38 tables
   system-nodes.yaml                   # scoring-node, pipeline-coordinator
   workflow-schema.yaml                # 18 stages, 27 transitions
   guard-action-registry.yaml          # 22 guards, 13 actions

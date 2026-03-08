@@ -2,22 +2,28 @@ package pipeline
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 
-	"gopkg.in/yaml.v3"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 type WorkflowStage struct {
-	Name     PipelineStage `json:"name"`
-	Terminal bool          `json:"terminal,omitempty"`
+	Name        PipelineStage `json:"name"`
+	Phase       string        `json:"phase,omitempty"`
+	Description string        `json:"description,omitempty"`
+	Terminal    bool          `json:"terminal,omitempty"`
 }
 
 type WorkflowAction struct {
-	Name string `json:"name"`
+	Name            string `json:"name"`
+	Category        string `json:"category,omitempty"`
+	Description     string `json:"description,omitempty"`
+	Effect          string `json:"effect,omitempty"`
+	Emits           string `json:"emits,omitempty"`
+	PlatformBuiltin string `json:"platform_builtin,omitempty"`
 }
 
 type WorkflowState struct {
@@ -30,39 +36,21 @@ type WorkflowState struct {
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool
 
 type WorkflowTransition struct {
-	Name    string           `json:"name"`
-	From    []PipelineStage  `json:"from"`
-	To      PipelineStage    `json:"to"`
-	Reason  string           `json:"reason,omitempty"`
-	Guard   WorkflowGuard    `json:"-"`
-	Actions []WorkflowAction `json:"actions,omitempty"`
+	Name     string           `json:"name"`
+	From     []PipelineStage  `json:"from"`
+	To       PipelineStage    `json:"to"`
+	Reason   string           `json:"reason,omitempty"`
+	Trigger  string           `json:"trigger,omitempty"`
+	Node     string           `json:"node,omitempty"`
+	GuardIDs []string         `json:"guard_ids,omitempty"`
+	Guard    WorkflowGuard    `json:"-"`
+	Actions  []WorkflowAction `json:"actions,omitempty"`
 }
 
 type WorkflowDefinition struct {
 	Name        string
 	stages      map[PipelineStage]WorkflowStage
 	transitions []WorkflowTransition
-}
-
-type workflowContractDocument struct {
-	Workflow struct {
-		Name          string `yaml:"name"`
-		Version       string `yaml:"version"`
-		InitialStage  string `yaml:"initial_stage"`
-		Stages        []struct {
-			ID string `yaml:"id"`
-		} `yaml:"stages"`
-		TerminalStages []string `yaml:"terminal_stages"`
-		Transitions    []struct {
-			ID      string   `yaml:"id"`
-			From    any      `yaml:"from"`
-			To      string   `yaml:"to"`
-			Trigger string   `yaml:"trigger"`
-			Node    string   `yaml:"node"`
-			Guards  []string `yaml:"guards"`
-			Actions []string `yaml:"actions"`
-		} `yaml:"transitions"`
-	} `yaml:"workflow"`
 }
 
 var (
@@ -150,6 +138,36 @@ func (wd *WorkflowDefinition) Transition(state WorkflowState, to PipelineStage) 
 	return WorkflowTransition{}, false
 }
 
+func (wd *WorkflowDefinition) TransitionByTrigger(
+	state WorkflowState,
+	trigger string,
+	guardEvaluator func(WorkflowTransition) bool,
+) (WorkflowTransition, bool) {
+	if wd == nil {
+		return WorkflowTransition{}, false
+	}
+	state.Stage = wd.NormalizeStage(string(state.Stage))
+	trigger = strings.TrimSpace(trigger)
+	if trigger == "" {
+		return WorkflowTransition{}, false
+	}
+	for _, transition := range wd.transitions {
+		if strings.TrimSpace(transition.Trigger) != trigger {
+			continue
+		}
+		if !containsPipelineStage(transition.From, state.Stage) {
+			continue
+		}
+		if guardEvaluator != nil && !guardEvaluator(transition) {
+			continue
+		}
+		if transition.Guard == nil || transition.Guard(state, transition) {
+			return transition, true
+		}
+	}
+	return WorkflowTransition{}, false
+}
+
 func (wd *WorkflowDefinition) CanTransition(state WorkflowState, to PipelineStage) bool {
 	_, ok := wd.Transition(state, to)
 	return ok
@@ -178,15 +196,9 @@ func empirePipelineWorkflow() *WorkflowDefinition {
 }
 
 func loadWorkflowDefinitionFromContracts() (*WorkflowDefinition, error) {
-	path := filepath.Join(workflowRepoRoot(), "contracts", "workflow-schema.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var doc workflowContractDocument
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
+	bundle := empireContractBundle()
+	path := bundle.Paths.WorkflowSchemaFile
+	doc := bundle.Workflow
 	name := strings.TrimSpace(doc.Workflow.Name)
 	if name == "" {
 		return nil, fmt.Errorf("workflow.name missing in %s", path)
@@ -206,9 +218,19 @@ func loadWorkflowDefinitionFromContracts() (*WorkflowDefinition, error) {
 		}
 		_, isTerminal := terminal[stageID]
 		stages = append(stages, WorkflowStage{
-			Name:     PipelineStage(stageID),
-			Terminal: isTerminal,
+			Name:        PipelineStage(stageID),
+			Phase:       strings.TrimSpace(stage.Phase),
+			Description: strings.TrimSpace(stage.Description),
+			Terminal:    isTerminal,
 		})
+	}
+	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Actions))
+	for _, action := range bundle.Hooks.Actions {
+		id := strings.TrimSpace(action.ID)
+		if id == "" {
+			continue
+		}
+		actionDefs[id] = action
 	}
 	transitions := make([]WorkflowTransition, 0, len(doc.Workflow.Transitions))
 	for _, transition := range doc.Workflow.Transitions {
@@ -223,15 +245,34 @@ func loadWorkflowDefinitionFromContracts() (*WorkflowDefinition, error) {
 			if action == "" {
 				continue
 			}
-			actions = append(actions, WorkflowAction{Name: action})
+			def := actionDefs[action]
+			actions = append(actions, WorkflowAction{
+				Name:            action,
+				Category:        strings.TrimSpace(def.Category),
+				Description:     strings.TrimSpace(def.Description),
+				Effect:          strings.TrimSpace(def.Effect),
+				Emits:           strings.TrimSpace(def.Emits),
+				PlatformBuiltin: strings.TrimSpace(def.PlatformBuiltin),
+			})
+		}
+		guardIDs := make([]string, 0, len(transition.Guards))
+		for _, guard := range transition.Guards {
+			guard = strings.TrimSpace(guard)
+			if guard == "" {
+				continue
+			}
+			guardIDs = append(guardIDs, guard)
 		}
 		transitions = append(transitions, WorkflowTransition{
-			Name:    id,
-			From:    workflowTransitionFromStages(transition.From),
-			To:      PipelineStage(to),
-			Reason:  strings.TrimSpace(transition.Trigger),
-			Guard:   alwaysWorkflowGuard,
-			Actions: actions,
+			Name:     id,
+			From:     workflowTransitionFromStages(transition.From),
+			To:       PipelineStage(to),
+			Reason:   strings.TrimSpace(transition.Trigger),
+			Trigger:  strings.TrimSpace(transition.Trigger),
+			Node:     strings.TrimSpace(transition.Node),
+			GuardIDs: guardIDs,
+			Guard:    alwaysWorkflowGuard,
+			Actions:  actions,
 		})
 	}
 	// Current runtime still projects the OpCo handoff as approved -> operating.

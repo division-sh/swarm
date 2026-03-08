@@ -109,6 +109,24 @@ CREATE INDEX idx_verticals_parent ON verticals(parent_id) WHERE parent_id IS NOT
 CREATE INDEX idx_verticals_depth ON verticals(generation_depth);
 ALTER TABLE verticals ADD CONSTRAINT chk_generation_depth CHECK (generation_depth >= 0 AND generation_depth <= 2);
 
+-- Platform workflow instances: generic workflow engine source of truth
+CREATE TABLE workflow_instances (
+    instance_id         UUID PRIMARY KEY,
+    workflow_name       TEXT NOT NULL,
+    workflow_version    TEXT NOT NULL,
+    current_stage       TEXT NOT NULL,
+    entered_stage_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    transition_history  JSONB NOT NULL DEFAULT '[]',
+    accumulator_state   JSONB NOT NULL DEFAULT '{}',
+    timer_state         JSONB NOT NULL DEFAULT '[]',
+    metadata            JSONB NOT NULL DEFAULT '{}',
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_workflow_instances_workflow_stage ON workflow_instances(workflow_name, current_stage);
+CREATE INDEX idx_workflow_instances_stage ON workflow_instances(current_stage);
+
 -- Events: full audit trail + recovery source
 CREATE TABLE events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

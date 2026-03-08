@@ -201,6 +201,10 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 
+	if _, ok := pc.applyWorkflowEventTransition(ctx, evt); !ok {
+		pc.updateVerticalStage(ctx, verticalID, "scoring", string(evt.Type))
+	}
+
 	scoringPayload := pc.payloadFactory.BuildScoringRequestedPayload(verticalID, acc)
 	if excluded := pc.payloadFactory.DerivedScoringGeneratorAgent(ctx, acc); excluded != "" {
 		scoringPayload.ExcludedAnalysisAgentID = excluded
@@ -501,6 +505,19 @@ func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, vertical
 	scoredPayload := ss.payloadFactory.BuildVerticalScoredPayload(verticalID, result, acc)
 	scoredPayloadMap := payloadMap(scoredPayload)
 	ss.runtime.publish(ctx, "vertical.scored", verticalID, scoredPayloadMap)
+	if outcome, ok := ss.runtime.applyWorkflowEventTransition(ctx, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("vertical.scored"),
+		SourceAgent: "scoring-node",
+		VerticalID:  verticalID,
+		Payload:     mustJSON(scoredPayloadMap),
+		CreatedAt:   time.Now().UTC(),
+	}); ok {
+		if strings.TrimSpace(string(outcome.Transition.To)) == "killed" {
+			ss.runtime.appendScoringDigestBuffer(ctx, scoredPayload)
+		}
+		return
+	}
 
 	stage := "marginal_review"
 	switch result.Result {

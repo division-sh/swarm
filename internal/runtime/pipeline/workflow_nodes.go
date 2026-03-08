@@ -2,14 +2,11 @@ package pipeline
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 
 	"empireai/internal/events"
-	"gopkg.in/yaml.v3"
 )
 
 type WorkflowEventPolicy struct {
@@ -19,14 +16,16 @@ type WorkflowEventPolicy struct {
 }
 
 type WorkflowNode struct {
-	ID            string
-	Subscriptions []events.EventType
-	Policies      map[string]WorkflowEventPolicy
-}
-
-type systemNodeContractDocument map[string]struct {
-	ID           string   `yaml:"id"`
-	SubscribesTo []string `yaml:"subscribes_to"`
+	ID               string
+	Subscriptions    []events.EventType
+	Produces         []events.EventType
+	OwnedTransitions []string
+	Timers           []string
+	ExecutionType    string
+	Implementation   string
+	StateTable       string
+	IdempotencyTable string
+	Policies         map[string]WorkflowEventPolicy
 }
 
 var (
@@ -97,15 +96,8 @@ func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, boo
 }
 
 func loadWorkflowNodesFromContracts() ([]WorkflowNode, error) {
-	path := filepath.Join(workflowRepoRoot(), "contracts", "system-nodes.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	var doc systemNodeContractDocument
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
+	bundle := empireContractBundle()
+	path := bundle.Paths.SystemNodesFile
 
 	// Current runtime execution still groups scan/discovery and validation-gate
 	// behavior under the pipeline-coordinator implementation, while scoring is a
@@ -113,7 +105,7 @@ func loadWorkflowNodesFromContracts() ([]WorkflowNode, error) {
 	wantIDs := []string{"pipeline-coordinator", "scoring-node"}
 	out := make([]WorkflowNode, 0, len(wantIDs))
 	for _, nodeID := range wantIDs {
-		entry, ok := doc[nodeID]
+		entry, ok := bundle.Nodes[nodeID]
 		if !ok {
 			return nil, fmt.Errorf("system node %q missing from %s", nodeID, path)
 		}
@@ -125,10 +117,25 @@ func loadWorkflowNodesFromContracts() ([]WorkflowNode, error) {
 			}
 			subscriptions = append(subscriptions, events.EventType(evt))
 		}
+		produces := make([]events.EventType, 0, len(entry.Produces))
+		for _, evt := range entry.Produces {
+			evt = strings.TrimSpace(evt)
+			if evt == "" {
+				continue
+			}
+			produces = append(produces, events.EventType(evt))
+		}
 		out = append(out, WorkflowNode{
-			ID:            nodeID,
-			Subscriptions: subscriptions,
-			Policies:      workflowNodePolicyOverlay(nodeID),
+			ID:               nodeID,
+			Subscriptions:    subscriptions,
+			Produces:         produces,
+			OwnedTransitions: append([]string{}, entry.OwnedTransitions...),
+			Timers:           append([]string{}, entry.Timers...),
+			ExecutionType:    strings.TrimSpace(entry.ExecutionType),
+			Implementation:   strings.TrimSpace(entry.Implementation),
+			StateTable:       strings.TrimSpace(entry.StateTable),
+			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
+			Policies:         workflowNodePolicyOverlay(nodeID),
 		})
 	}
 	return out, nil

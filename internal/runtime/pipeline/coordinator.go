@@ -66,6 +66,7 @@ type FactoryPipelineCoordinator struct {
 	payloads        PayloadFactory
 	processed       map[string]struct{}
 	stateStore      *PipelineStateStore
+	workflowStore   *WorkflowInstanceStore
 	stateLoaded     bool
 
 	statePersistenceChecked bool
@@ -116,6 +117,7 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 		shardPlanner:    opts.ShardPlanner,
 	}
 	pc.stateStore = NewPipelineStateStore(db, &pc.mu)
+	pc.workflowStore = NewWorkflowInstanceStore(db)
 	pc.scanCoordinator.runtime = pc
 	pc.scanCoordinator.discovery = discoveryPolicy
 	pc.scoringState.runtime = pc

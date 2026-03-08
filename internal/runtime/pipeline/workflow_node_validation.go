@@ -9,6 +9,7 @@ import (
 
 type validationWorkflowRuntime interface {
 	updateVerticalStage(context.Context, string, string, string)
+	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
 	publish(context.Context, string, string, map[string]any)
 	parkVerticalWithMailbox(context.Context, string, string, map[string]any)
 	specVersionMatches(string, map[string]any) bool

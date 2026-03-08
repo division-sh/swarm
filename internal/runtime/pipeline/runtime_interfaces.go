@@ -4,12 +4,15 @@ import (
 	"context"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 type WorkflowRuntime interface {
+	ContractBundle() *runtimecontracts.WorkflowContractBundle
 	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
 	WorkflowStateStore() WorkflowStateStore
+	WorkflowInstanceStore() WorkflowInstancePersistence
 	TransitionEvaluator() TransitionEvaluator
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
@@ -30,6 +33,13 @@ type WorkflowStateStore interface {
 	Clear(ctx context.Context, clearScoringDigest bool)
 }
 
+type WorkflowInstancePersistence interface {
+	Enabled() bool
+	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
+	Upsert(ctx context.Context, instance WorkflowInstance) error
+	Delete(ctx context.Context, instanceID string) error
+}
+
 type TransitionEvaluator interface {
 	Transition(state WorkflowState, to PipelineStage) (WorkflowTransition, bool)
 	CanTransition(state WorkflowState, to PipelineStage) bool
@@ -38,11 +48,17 @@ type TransitionEvaluator interface {
 type GuardRegistry interface {
 	HasGuard(id string) bool
 	GuardIDs() []string
+	Guard(id string) (runtimecontracts.GuardActionEntry, bool)
 }
 
 type ActionRegistry interface {
 	HasAction(id string) bool
 	ActionIDs() []string
+	Action(id string) (runtimecontracts.GuardActionEntry, bool)
+}
+
+func (pc *FactoryPipelineCoordinator) ContractBundle() *runtimecontracts.WorkflowContractBundle {
+	return empireContractBundle()
 }
 
 func (pc *FactoryPipelineCoordinator) WorkflowDefinition() *WorkflowDefinition {
@@ -58,6 +74,13 @@ func (pc *FactoryPipelineCoordinator) WorkflowStateStore() WorkflowStateStore {
 		return nil
 	}
 	return pc.stateStore
+}
+
+func (pc *FactoryPipelineCoordinator) WorkflowInstanceStore() WorkflowInstancePersistence {
+	if pc == nil {
+		return nil
+	}
+	return pc.workflowStore
 }
 
 func (pc *FactoryPipelineCoordinator) TransitionEvaluator() TransitionEvaluator {

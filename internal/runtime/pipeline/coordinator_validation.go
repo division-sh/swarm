@@ -34,9 +34,11 @@ func (vg *ValidationGate) handleValidationStarted(ctx context.Context, evt event
 	st.PackagingRetries = 0
 	vg.mu.Unlock()
 
-	vg.runtime.updateVerticalStage(ctx, verticalID, "researching", "")
-	validationPayload := vg.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, nil)
-	vg.runtime.publish(ctx, "validation.started", verticalID, payloadMap(validationPayload))
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "researching", "")
+		validationPayload := vg.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, nil)
+		vg.runtime.publish(ctx, "validation.started", verticalID, payloadMap(validationPayload))
+	}
 	brandPayload := vg.payloadFactory.BuildBrandRequestedPayload(ctx, verticalID, scoringPayload, nil)
 	vg.runtime.publish(ctx, "brand.requested", verticalID, payloadMap(brandPayload))
 }
@@ -96,7 +98,9 @@ func (vg *ValidationGate) handleValidationGate(ctx context.Context, evt events.E
 	}
 	vg.mu.Unlock()
 
-	vg.runtime.updateVerticalStage(ctx, verticalID, stage, "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, stage, "")
+	}
 	if gate == "g2" {
 		vg.runtime.publish(ctx, "spec.validation_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecValidationRequestedPayload(ctx, verticalID, payload)))
 	}
@@ -133,6 +137,7 @@ func (vg *ValidationGate) handleSpecValidationFailed(ctx context.Context, evt ev
 		return
 	}
 	escalate := false
+	applied := false
 	vg.mu.Lock()
 	st := vg.getStateLocked(verticalID)
 	st.G2Spec = false
@@ -142,16 +147,25 @@ func (vg *ValidationGate) handleSpecValidationFailed(ctx context.Context, evt ev
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	st.RevisionCount++
-	if st.RevisionCount > maxRevisionCycles {
-		st.Status = "parked"
-		escalate = true
-	}
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); ok {
+		applied = true
+	} else {
+		vg.mu.Lock()
+		st := vg.getStateLocked(verticalID)
+		st.RevisionCount++
+		if st.RevisionCount > maxRevisionCycles {
+			st.Status = "parked"
+			escalate = true
+		}
+		vg.mu.Unlock()
+	}
 	if escalate {
 		vg.runtime.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated spec-auditor blockers.", payload)
 		return
+	}
+	if !applied {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
 	}
 	vg.runtime.publish(ctx, "spec.revision_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "spec-auditor", payload)))
 }
@@ -162,6 +176,7 @@ func (vg *ValidationGate) handleCTORevisionNeeded(ctx context.Context, evt event
 		return
 	}
 	escalate := false
+	applied := false
 	vg.mu.Lock()
 	st := vg.getStateLocked(verticalID)
 	st.G2Spec = false
@@ -171,16 +186,25 @@ func (vg *ValidationGate) handleCTORevisionNeeded(ctx context.Context, evt event
 	st.PackagingRequested = false
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
-	st.RevisionCount++
-	if st.RevisionCount > maxRevisionCycles {
-		st.Status = "parked"
-		escalate = true
-	}
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); ok {
+		applied = true
+	} else {
+		vg.mu.Lock()
+		st := vg.getStateLocked(verticalID)
+		st.RevisionCount++
+		if st.RevisionCount > maxRevisionCycles {
+			st.Status = "parked"
+			escalate = true
+		}
+		vg.mu.Unlock()
+	}
 	if escalate {
 		vg.runtime.parkVerticalWithMailbox(ctx, verticalID, "Vertical stuck in revision loop after repeated CTO revisions.", parsePayloadMap(evt.Payload))
 		return
+	}
+	if !applied {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "mvp_speccing", "")
 	}
 	vg.runtime.publish(ctx, "spec.revision_requested", verticalID, payloadMap(vg.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "factory-cto", parsePayloadMap(evt.Payload))))
 }
@@ -197,7 +221,9 @@ func (vg *ValidationGate) handleValidationRejected(ctx context.Context, evt even
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	}
 	vg.runtime.publish(ctx, "vertical.killed", verticalID, payloadMap(vg.payloadFactory.BuildVerticalKilledPayload(ctx, verticalID, string(evt.Type), parsePayloadMap(evt.Payload))))
 }
 
@@ -213,7 +239,9 @@ func (vg *ValidationGate) handleValidationPackaged(ctx context.Context, evt even
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
+	}
 }
 
 func (vg *ValidationGate) handleValidationMoreData(ctx context.Context, evt events.Event) {
@@ -235,7 +263,9 @@ func (vg *ValidationGate) handleValidationMoreData(ctx context.Context, evt even
 		Scoring:  parsePayloadMap(st.ScoringPayload),
 	}
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "researching", "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "researching", "")
+	}
 	vg.runtime.publish(ctx, "validation.more_data_needed", verticalID, payloadMap(vg.payloadFactory.BuildValidationMoreDataPayload(ctx, verticalID, parsePayloadMap(evt.Payload), snap)))
 }
 
@@ -298,7 +328,9 @@ func (vg *ValidationGate) handleVerticalResumed(ctx context.Context, evt events.
 		st.PackagingRequestedAt = &now
 	}
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, stage, "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, stage, "")
+	}
 
 	resumePayload := parsePayloadMap(evt.Payload)
 	snap := vg.payloadFactory.ValidationContext(verticalID)
@@ -347,7 +379,9 @@ func (vg *ValidationGate) handleVerticalApproved(ctx context.Context, evt events
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "approved", "")
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "approved", "")
+	}
 }
 
 func (vg *ValidationGate) handleVerticalKilled(ctx context.Context, evt events.Event) {
@@ -362,7 +396,9 @@ func (vg *ValidationGate) handleVerticalKilled(ctx context.Context, evt events.E
 	st.PackagingRequestedAt = nil
 	st.PackagingRetries = 0
 	vg.mu.Unlock()
-	vg.runtime.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	if _, ok := vg.runtime.applyWorkflowEventTransition(ctx, evt); !ok {
+		vg.runtime.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	}
 }
 
 func (vg *ValidationGate) handleOpCoCEOReady(ctx context.Context, evt events.Event) {
