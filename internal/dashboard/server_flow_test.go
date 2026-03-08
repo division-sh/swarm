@@ -217,6 +217,15 @@ func TestHandlePipelineGraph_DesignIncludesStageAndRubricMetadata(t *testing.T) 
 	if _, ok := resp.Meta["rubrics"]; !ok {
 		t.Fatalf("expected rubrics metadata")
 	}
+	if got, _ := resp.Meta["workflow_version"].(string); strings.TrimSpace(got) != "2.1.0" {
+		t.Fatalf("expected workflow_version 2.1.0, got %q", got)
+	}
+	if got, _ := resp.Meta["platform_version"].(string); strings.TrimSpace(got) == "" {
+		t.Fatalf("expected platform_version metadata")
+	}
+	if _, ok := resp.Meta["event_stage_map"]; !ok {
+		t.Fatalf("expected event_stage_map metadata")
+	}
 
 	found := false
 	for _, e := range resp.Edges {
@@ -234,5 +243,52 @@ func TestHandlePipelineGraph_DesignIncludesStageAndRubricMetadata(t *testing.T) 
 	}
 	if !found {
 		t.Fatalf("expected scoring.requested edge in design graph")
+	}
+}
+
+func TestHandlePipelineGraph_DesignIncludesTransitionAndTimerMetadata(t *testing.T) {
+	s := NewServer(nil, nil, nil, nil, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/pipeline/graph?view=design", nil)
+	w := httptest.NewRecorder()
+
+	s.handlePipelineGraph(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Edges []struct {
+			EventType         string           `json:"event_type"`
+			TransitionIDs     []string         `json:"transition_ids"`
+			TransitionDetails []map[string]any `json:"transition_details"`
+			TimerIDs          []string         `json:"timer_ids"`
+			TimerDetails      []map[string]any `json:"timer_details"`
+		} `json:"edges"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	foundTransitionEdge := false
+	foundTimerEdge := false
+	for _, edge := range resp.Edges {
+		switch strings.TrimSpace(edge.EventType) {
+		case "vertical.shortlisted":
+			foundTransitionEdge = true
+			if len(edge.TransitionIDs) == 0 || len(edge.TransitionDetails) == 0 {
+				t.Fatalf("expected transition metadata on vertical.shortlisted edge, got ids=%v details=%v", edge.TransitionIDs, edge.TransitionDetails)
+			}
+		case "timer.portfolio_digest":
+			foundTimerEdge = true
+			if len(edge.TimerIDs) == 0 || len(edge.TimerDetails) == 0 {
+				t.Fatalf("expected timer metadata on timer.portfolio_digest edge, got ids=%v details=%v", edge.TimerIDs, edge.TimerDetails)
+			}
+		}
+	}
+	if !foundTransitionEdge {
+		t.Fatalf("expected vertical.shortlisted edge in design graph")
+	}
+	if !foundTimerEdge {
+		t.Fatalf("expected timer.portfolio_digest edge in design graph")
 	}
 }

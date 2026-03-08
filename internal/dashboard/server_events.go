@@ -600,7 +600,10 @@ func (s *Server) queryFlowEvents(ctx context.Context, since, until time.Time, ve
 
 		intercepted, passthrough := flowInterceptPolicy(eventType, payloadRaw)
 		if intercepted && len(targets) == 0 {
-			targets = append(targets, "pipeline-coordinator")
+			targets = append(targets, defaultFlowTargetNodes(eventType)...)
+			if len(targets) == 0 {
+				targets = append(targets, "pipeline-coordinator")
+			}
 		}
 		sourceNode := strings.TrimSpace(sourceAgent)
 		if sourceNode == "" {

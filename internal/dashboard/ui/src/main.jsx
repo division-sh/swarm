@@ -183,13 +183,38 @@ function StatusDot({ state }) {
   return <span className={cls} />;
 }
 
-const VALIDATION_GATES = ["researching", "mvp_speccing", "spec_review", "cto_spec_review", "branding"];
-const GATE_LABELS = ["G1 Research", "G2 Spec", "G3 CTO", "G4 Brand"];
+const DEFAULT_VALIDATION_GATES = ["researching", "mvp_speccing", "cto_spec_review", "branding"];
+const VALIDATION_GATE_LABELS = {
+  researching: "G1 Research",
+  mvp_speccing: "G2 Spec",
+  cto_spec_review: "G3 CTO",
+  branding: "G4 Brand",
+};
 const FLOW_STAGE_OPTIONS = ["all", "discovery", "scoring", "validation", "mailbox", "opco", "system"];
 const FLOW_RUBRIC_OPTIONS = ["all", "universal"];
 
-function flowStageForEvent(eventType) {
+function validationGateModel(contractsData) {
+  const workflow = contractsData && typeof contractsData === "object" ? contractsData.workflow || {} : {};
+  const fromContracts = Array.isArray(workflow.validation_stages) ? workflow.validation_stages.filter(Boolean) : [];
+  const stages = fromContracts.length > 0 ? fromContracts : DEFAULT_VALIDATION_GATES;
+  const labels = stages.map((stage, idx) => {
+    if (VALIDATION_GATE_LABELS[stage]) return VALIDATION_GATE_LABELS[stage];
+    return `G${idx + 1} ${String(stage || "").replaceAll("_", " ")}`;
+  });
+  return { stages, labels };
+}
+
+function validationGateIndex(stage, stages) {
+  const current = String(stage || "").trim();
+  if (!current) return -1;
+  if (current === "ready_for_review") return stages.length;
+  return stages.indexOf(current);
+}
+
+function flowStageForEvent(eventType, eventStageMap) {
   const t = String(eventType || "").toLowerCase().trim();
+  const contractStages = eventStageMap && typeof eventStageMap === "object" ? eventStageMap[t] || eventStageMap[eventType] : null;
+  if (Array.isArray(contractStages) && contractStages.length > 0) return contractStages[0];
   if (!t) return "system";
   if (
     t.startsWith("scan.") ||
@@ -209,6 +234,8 @@ function flowStageForEvent(eventType) {
     t === "vertical.shortlisted" ||
     t === "vertical.marginal" ||
     t === "vertical.rejected" ||
+    t === "timer.marginal_review" ||
+    t === "timer.marginal_kill" ||
     t === "timer.portfolio_digest"
   ) return "scoring";
   if (
@@ -239,11 +266,12 @@ function flowStageForEvent(eventType) {
     t.startsWith("launch.") ||
     t === "mandate_updated"
   ) return "opco";
+  if (t === "timer.scan_timeout" || t === "timer.campaign_deadline") return "discovery";
   return "system";
 }
 
-function flowEventMatchesFilters(eventType, stageFilter, rubricFilter) {
-  const stage = flowStageForEvent(eventType);
+function flowEventMatchesFilters(eventType, stageFilter, rubricFilter, eventStageMap) {
+  const stage = flowStageForEvent(eventType, eventStageMap);
   if (stageFilter && stageFilter !== "all" && stage !== stageFilter) return false;
   if (rubricFilter && rubricFilter !== "all") {
     const t = String(eventType || "").toLowerCase().trim();
@@ -260,12 +288,17 @@ function flowEventMatchesFilters(eventType, stageFilter, rubricFilter) {
   return true;
 }
 
-function GateIndicator({ stage }) {
-  const idx = VALIDATION_GATES.indexOf(stage);
+function GateIndicator({ stage, stages, labels }) {
+  const gateStages = Array.isArray(stages) && stages.length > 0 ? stages : DEFAULT_VALIDATION_GATES;
+  const gateLabels = Array.isArray(labels) && labels.length === gateStages.length
+    ? labels
+    : gateStages.map((item, idx) => VALIDATION_GATE_LABELS[item] || `G${idx + 1}`);
+  const idx = validationGateIndex(stage, gateStages);
+  const allDone = idx >= gateLabels.length;
   return (
     <div className="gate-row">
-      {GATE_LABELS.map((label, i) => {
-        const cls = i < idx ? "gate gate-done" : i === idx ? "gate gate-active" : "gate gate-pending";
+      {gateLabels.map((label, i) => {
+        const cls = allDone || i < idx ? "gate gate-done" : i === idx ? "gate gate-active" : "gate gate-pending";
         return <span key={i} className={cls}><span className="gate-dot" /><span className="gate-label">{label}</span></span>;
       })}
     </div>
@@ -727,6 +760,10 @@ function renderArtifactPayload(label, payload) {
 function HoldingVerticalDetail({ detail }) {
   if (!detail || typeof detail !== "object") return <div className="empty-state">No detail available</div>;
   const v = detail.vertical || {};
+  const workflowState = detail.workflow_state && typeof detail.workflow_state === "object" ? detail.workflow_state : null;
+  const workflowActiveTimers = Array.isArray(workflowState && workflowState.timer_state)
+    ? workflowState.timer_state.filter((timer) => !timer.cancelled)
+    : [];
   const businessModel = firstNonEmptyText([
     readPath(v, ["business_brief", "business_model"]),
     readPath(v, ["business_brief", "revenue_model"]),
@@ -788,6 +825,93 @@ function HoldingVerticalDetail({ detail }) {
             {v.human_notes ? <div className="holding-detail-text"><strong>Notes:</strong> {v.human_notes}</div> : null}
           </div>
         </div>
+      </div>
+
+      <div className="holding-detail-section">
+        <div className="tiny" style={{ marginBottom: 6 }}>Workflow State</div>
+        {detail.workflow_state_error ? (
+          <div className="health-warn" style={{ marginBottom: 8 }}>{detail.workflow_state_error}</div>
+        ) : null}
+        {!workflowState ? (
+          <div className="empty-state">No persisted workflow instance</div>
+        ) : (
+          <>
+            <div className="row">
+              <div className="health-card">
+                <div className="tiny">Runtime State</div>
+                <div className="health-kv"><span>Workflow</span><span>{workflowState.workflow_name || "-"}</span></div>
+                <div className="health-kv"><span>Version</span><span className="mono">{workflowState.workflow_version || "-"}</span></div>
+                <div className="health-kv"><span>Current Stage</span><span>{workflowState.current_stage || "-"}</span></div>
+                <div className="health-kv"><span>Entered Stage</span><span title={fmtTime(workflowState.entered_stage_at)}>{relTime(workflowState.entered_stage_at)}</span></div>
+                <div className="health-kv"><span>Transitions</span><span className="mono">{workflowState.transition_count || 0}</span></div>
+                <div className="health-kv"><span>Active Timers</span><span className="mono">{workflowState.active_timer_count || 0}</span></div>
+              </div>
+              <div className="health-card">
+                <div className="tiny">Workflow Metadata</div>
+                <div className="health-kv"><span>Instance</span><span className="mono">{workflowState.instance_id || "-"}</span></div>
+                <div className="health-kv"><span>Created</span><span>{fmtTime(workflowState.created_at)}</span></div>
+                <div className="health-kv"><span>Updated</span><span>{fmtTime(workflowState.updated_at)}</span></div>
+                <div className="health-kv"><span>Revision Count</span><span className="mono">{readPath(workflowState, ["metadata", "revision_count"]) || "0"}</span></div>
+                <div className="health-kv"><span>Metadata Keys</span><span className="mono">{workflowState.metadata && typeof workflowState.metadata === "object" ? Object.keys(workflowState.metadata).length : 0}</span></div>
+                <div className="health-kv"><span>Accumulator Buckets</span><span className="mono">{workflowState.accumulator_state && typeof workflowState.accumulator_state === "object" ? Object.keys(workflowState.accumulator_state).length : 0}</span></div>
+              </div>
+            </div>
+
+            <div className="row">
+              <div className="holding-detail-section">
+                <div className="tiny" style={{ marginBottom: 6 }}>Transition History</div>
+                {!Array.isArray(workflowState.transition_history) || workflowState.transition_history.length === 0 ? (
+                  <div className="empty-state">No transitions recorded</div>
+                ) : (
+                  <table>
+                    <thead><tr><th>When</th><th>Transition</th><th>From</th><th>To</th></tr></thead>
+                    <tbody>
+                      {workflowState.transition_history.slice(-20).reverse().map((item, idx) => (
+                        <tr key={`${item.transition_id || "transition"}-${idx}`}>
+                          <td title={fmtTime(item.fired_at)}>{relTime(item.fired_at)}</td>
+                          <td className="mono">{item.transition_id || "-"}</td>
+                          <td>{item.from || "-"}</td>
+                          <td>{item.to || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <div className="holding-detail-section">
+                <div className="tiny" style={{ marginBottom: 6 }}>Timers</div>
+                {workflowActiveTimers.length === 0 ? (
+                  <div className="empty-state">No active timers</div>
+                ) : (
+                  <table>
+                    <thead><tr><th>Timer</th><th>Created</th><th>Fires</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {workflowActiveTimers.slice(0, 20).map((timer, idx) => (
+                        <tr key={`${timer.timer_id || "timer"}-${idx}`}>
+                          <td className="mono">{timer.timer_id || "-"}</td>
+                          <td title={fmtTime(timer.created_at)}>{relTime(timer.created_at)}</td>
+                          <td title={fmtTime(timer.fires_at)}>{relTime(timer.fires_at)}</td>
+                          <td>{timer.cancelled ? "cancelled" : "active"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
+            <div className="row">
+              <div className="holding-detail-section">
+                <div className="tiny" style={{ marginBottom: 6 }}>Accumulator State</div>
+                <JsonBlock data={workflowState.accumulator_state || {}} defaultOpen={2} />
+              </div>
+              <div className="holding-detail-section">
+                <div className="tiny" style={{ marginBottom: 6 }}>Workflow Metadata JSON</div>
+                <JsonBlock data={workflowState.metadata || {}} defaultOpen={2} />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="holding-detail-section">
@@ -2181,7 +2305,10 @@ function App() {
   const [flowReplayOn, setFlowReplayOn] = useState(false);
   const [flowReplayIndex, setFlowReplayIndex] = useState(0);
 
-  const [holdingData, setHoldingData] = useState({ campaigns: [], verticals: [], agent_counts: {}, summary: {} });
+  const [holdingData, setHoldingData] = useState({ campaigns: [], verticals: [], agent_counts: {}, summary: {}, workflow_summary: {} });
+  const [holdingSearch, setHoldingSearch] = useState("");
+  const [holdingWorkflowFilter, setHoldingWorkflowFilter] = useState("all");
+  const [holdingSort, setHoldingSort] = useState("updated_desc");
   const [holdingDetailModal, setHoldingDetailModal] = useState({
     open: false,
     loading: false,
@@ -2407,7 +2534,7 @@ function App() {
 
   const loadHolding = useCallback(async () => {
     const d = await fetchJSON("/dashboard/api/holding");
-    setHoldingData({ campaigns: d.campaigns || [], verticals: d.verticals || [], agent_counts: d.agent_counts || {}, summary: d.summary || {} });
+    setHoldingData({ campaigns: d.campaigns || [], verticals: d.verticals || [], agent_counts: d.agent_counts || {}, summary: d.summary || {}, workflow_summary: d.workflow_summary || {} });
   }, []);
 
   const openHoldingVerticalDetail = useCallback(async (verticalID) => {
@@ -2787,14 +2914,79 @@ function App() {
     return Array.from(merged);
   }, [flowGraphMeta]);
 
+  const flowEventStageMap = useMemo(() => {
+    if (!flowGraphMeta || typeof flowGraphMeta !== "object") return {};
+    const raw = flowGraphMeta.event_stage_map;
+    return raw && typeof raw === "object" ? raw : {};
+  }, [flowGraphMeta]);
+
   const visibleFlowEvents = useMemo(() => {
-    const rows = (flowEvents || []).filter((ev) => flowEventMatchesFilters(ev && ev.event_type, flowStage, flowRubric));
+    const rows = (flowEvents || []).filter((ev) => flowEventMatchesFilters(ev && ev.event_type, flowStage, flowRubric, flowEventStageMap));
     if (flowView === "replay") {
       const n = Math.max(0, Math.min(rows.length, flowReplayIndex));
       return rows.slice(0, n);
     }
     return rows;
-  }, [flowEvents, flowView, flowReplayIndex, flowStage, flowRubric]);
+  }, [flowEvents, flowView, flowReplayIndex, flowStage, flowRubric, flowEventStageMap]);
+
+  const holdingVisibleVerticals = useMemo(() => {
+    const query = String(holdingSearch || "").trim().toLowerCase();
+    let rows = [...(holdingData.verticals || [])];
+    if (query) {
+      rows = rows.filter((v) => `${v.slug || ""} ${v.name || ""} ${v.geography || ""} ${v.stage || ""} ${v.workflow_current_stage || ""}`.toLowerCase().includes(query));
+    }
+    rows = rows.filter((v) => {
+      switch (holdingWorkflowFilter) {
+      case "drift":
+        return !!(v.workflow_current_stage && v.workflow_current_stage !== v.stage);
+      case "timers":
+        return Number(v.active_timer_count || 0) > 0;
+      case "revisions":
+        return Number(v.revision_count || 0) > 0;
+      case "stale":
+        return !!v.stage_entered_at;
+      default:
+        return true;
+      }
+    });
+    rows.sort((a, b) => {
+      switch (holdingSort) {
+      case "stage_age_desc":
+        return new Date(a.stage_entered_at || 0).getTime() - new Date(b.stage_entered_at || 0).getTime();
+      case "revisions_desc":
+        return Number(b.revision_count || 0) - Number(a.revision_count || 0);
+      case "timers_desc":
+        return Number(b.active_timer_count || 0) - Number(a.active_timer_count || 0);
+      case "score_desc":
+        return Number(b.composite_score || 0) - Number(a.composite_score || 0);
+      default:
+        return new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime();
+      }
+    });
+    return rows;
+  }, [holdingData.verticals, holdingSearch, holdingSort, holdingWorkflowFilter]);
+
+  const holdingWorkflowSummary = useMemo(() => ({
+    drift: holdingVisibleVerticals.filter((v) => v.workflow_current_stage && v.workflow_current_stage !== v.stage).length,
+    timers: holdingVisibleVerticals.filter((v) => Number(v.active_timer_count || 0) > 0).length,
+    revisions: holdingVisibleVerticals.filter((v) => Number(v.revision_count || 0) > 0).length,
+  }), [holdingVisibleVerticals]);
+
+  const selectedFlowSummary = useMemo(() => {
+    const rows = visibleFlowEvents || [];
+    const stageCounts = {};
+    for (const ev of rows) {
+      const stage = flowStageForEvent(ev && ev.event_type, flowEventStageMap);
+      stageCounts[stage] = (stageCounts[stage] || 0) + 1;
+    }
+    return {
+      total: rows.length,
+      first: rows.length > 0 ? rows[rows.length - 1] : null,
+      last: rows.length > 0 ? rows[0] : null,
+      byStage: stageCounts,
+      recent: rows.slice(0, 12),
+    };
+  }, [flowEventStageMap, visibleFlowEvents]);
 
   const flowActiveEdgeKeys = useMemo(() => {
     const rows = visibleFlowEvents.slice(0, 150);
@@ -2932,24 +3124,35 @@ function App() {
   }
 
   const resetOK = (resetConfirm || "").trim() === "RESET";
+  const contractsData = health && typeof health === "object" ? health.contracts || {} : {};
+  const contractWorkflow = contractsData.workflow || {};
+  const contractPlatform = contractsData.platform || {};
+  const contractVerification = contractsData.verification_gates || {};
+  const validationGateData = useMemo(() => validationGateModel(contractsData), [contractsData]);
+  const approvedHoldingStages = useMemo(() => {
+    const phaseMap = contractWorkflow && typeof contractWorkflow.stage_phase_map === "object" ? contractWorkflow.stage_phase_map : {};
+    const stageIDs = Array.isArray(contractWorkflow.stage_ids) ? contractWorkflow.stage_ids : [];
+    const derived = ["approved", ...stageIDs.filter((stage) => phaseMap[stage] === "operating")];
+    return [...new Set(derived.filter(Boolean))];
+  }, [contractWorkflow]);
 
   const holdingColumns = useMemo(() => {
     const cols = [
       { key: "discovery", label: "Discovery", stages: ["discovered"], items: [] },
       { key: "scoring", label: "Scoring", stages: ["scoring", "shortlisted", "marginal_review"], items: [] },
-      { key: "validation", label: "Validation", stages: ["researching", "mvp_speccing", "spec_review", "cto_spec_review", "branding"], items: [] },
+      { key: "validation", label: "Validation", stages: validationGateData.stages, items: [] },
       { key: "mailbox", label: "Mailbox", stages: ["ready_for_review"], items: [] },
-      { key: "approved", label: "Approved", stages: ["approved", "full_speccing", "building", "pre_launch", "launched", "operating", "expanding"], items: [] },
+      { key: "approved", label: "Approved", stages: approvedHoldingStages.length > 0 ? approvedHoldingStages : ["approved", "full_speccing", "building", "pre_launch", "launched", "operating", "expanding"], items: [] },
       { key: "killed", label: "Killed", stages: ["killed"], items: [] },
     ];
     const stageMap = {};
     for (const c of cols) for (const s of c.stages) stageMap[s] = c;
-    for (const v of holdingData.verticals || []) {
+    for (const v of holdingVisibleVerticals) {
       const col = stageMap[v.stage];
       if (col) col.items.push(v);
     }
     return cols;
-  }, [holdingData.verticals]);
+  }, [approvedHoldingStages, holdingVisibleVerticals, validationGateData.stages]);
 
   /* ---- Tab definitions with badge counts ---- */
 
@@ -3549,11 +3752,51 @@ function App() {
             <section>
               <div className="head">
                 <h2>Flow Detail</h2>
-                <span className="tiny mono">
-                  {(flowGraphMeta && flowGraphMeta.node_count) || (flowGraph.nodes || []).length} nodes / {(flowGraphMeta && flowGraphMeta.edge_count) || (flowGraph.edges || []).length} edges
-                </span>
+                <div className="stack tiny mono">
+                  <span>
+                    {(flowGraphMeta && flowGraphMeta.node_count) || (flowGraph.nodes || []).length} nodes / {(flowGraphMeta && flowGraphMeta.edge_count) || (flowGraph.edges || []).length} edges
+                  </span>
+                  {(flowGraphMeta && (flowGraphMeta.workflow_version || flowGraphMeta.platform_version)) ? (
+                    <span>
+                      {(flowGraphMeta.workflow_name || "workflow")} {flowGraphMeta.workflow_version || "-"} | platform {flowGraphMeta.platform_version || "-"}
+                    </span>
+                  ) : null}
+                </div>
               </div>
               <div className="body scroll">
+                {(flowGraphMeta && (flowGraphMeta.workflow_version || flowGraphMeta.platform_version)) ? (
+                  <>
+                    <div className="tiny">Design Metadata</div>
+                    <JsonBlock
+                      data={{
+                        workflow_name: flowGraphMeta.workflow_name || "",
+                        workflow_version: flowGraphMeta.workflow_version || "",
+                        platform_version: flowGraphMeta.platform_version || "",
+                        workflow_stages: flowGraphMeta.workflow_stages || [],
+                        timer_events: flowGraphMeta.timer_events || [],
+                        sources: flowGraphMeta.sources || [],
+                      }}
+                      defaultOpen={2}
+                    />
+                  </>
+                ) : null}
+                {(flowView === "runtime" || flowView === "replay") && flowVertical ? (
+                  <>
+                    <div className="tiny" style={{ marginTop: 10 }}>Selected Vertical Flow Summary</div>
+                    <div className="row">
+                      <div className="health-card">
+                        <div className="tiny">Event Summary</div>
+                        <div className="health-kv"><span>Total Events</span><span className="mono">{selectedFlowSummary.total || 0}</span></div>
+                        <div className="health-kv"><span>Latest</span><span title={fmtTime(selectedFlowSummary.last && selectedFlowSummary.last.timestamp)}>{selectedFlowSummary.last ? relTime(selectedFlowSummary.last.timestamp) : "-"}</span></div>
+                        <div className="health-kv"><span>Earliest</span><span title={fmtTime(selectedFlowSummary.first && selectedFlowSummary.first.timestamp)}>{selectedFlowSummary.first ? relTime(selectedFlowSummary.first.timestamp) : "-"}</span></div>
+                      </div>
+                      <div className="holding-detail-section">
+                        <div className="tiny" style={{ marginBottom: 6 }}>Stage Counts</div>
+                        <JsonBlock data={selectedFlowSummary.byStage || {}} defaultOpen={2} />
+                      </div>
+                    </div>
+                  </>
+                ) : null}
                 {(() => {
                   const g = flowViewGraph || flowGraph;
                   const node = (g.nodes || []).find((n) => n.id === selectedFlowNodeID) || null;
@@ -3565,6 +3808,52 @@ function App() {
                         <>
                           <div className="tiny">Selected Edge</div>
                           <JsonBlock data={edge} defaultOpen={2} />
+                          {(Array.isArray(edge.transition_details) && edge.transition_details.length > 0) || (Array.isArray(edge.timer_details) && edge.timer_details.length > 0) ? (
+                            <div className="row" style={{ marginTop: 10 }}>
+                              <div className="holding-detail-section">
+                                <div className="tiny" style={{ marginBottom: 6 }}>Workflow Transitions</div>
+                                {!Array.isArray(edge.transition_details) || edge.transition_details.length === 0 ? (
+                                  <div className="empty-state">No workflow transition attached to this event</div>
+                                ) : (
+                                  <table>
+                                    <thead><tr><th>ID</th><th>From</th><th>To</th><th>Owner</th><th>Guards</th><th>Actions</th></tr></thead>
+                                    <tbody>
+                                      {edge.transition_details.map((item) => (
+                                        <tr key={item.id}>
+                                          <td className="mono">{item.id}</td>
+                                          <td>{Array.isArray(item.from) ? item.from.join(", ") : "-"}</td>
+                                          <td>{item.to || "-"}</td>
+                                          <td className="mono">{item.node || "-"}</td>
+                                          <td className="tiny">{Array.isArray(item.guards) ? item.guards.join(", ") || "-" : "-"}</td>
+                                          <td className="tiny">{Array.isArray(item.actions) ? item.actions.join(", ") || "-" : "-"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                              <div className="holding-detail-section">
+                                <div className="tiny" style={{ marginBottom: 6 }}>Timers</div>
+                                {!Array.isArray(edge.timer_details) || edge.timer_details.length === 0 ? (
+                                  <div className="empty-state">No timer metadata attached to this event</div>
+                                ) : (
+                                  <table>
+                                    <thead><tr><th>ID</th><th>Stage</th><th>Owner</th><th>Recurring</th></tr></thead>
+                                    <tbody>
+                                      {edge.timer_details.map((item) => (
+                                        <tr key={item.id}>
+                                          <td className="mono">{item.id}</td>
+                                          <td>{item.stage || "-"}</td>
+                                          <td className="mono">{item.owner || "-"}</td>
+                                          <td>{item.recurring ? "yes" : "no"}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
                         </>
                       ) : null}
                       {!node ? (
@@ -4324,9 +4613,29 @@ function App() {
           <section>
             <div className="head">
               <h2>Holding</h2>
-              <span className="tiny">
-                {holdingData.summary.total || 0} total &middot; {holdingData.summary.in_pipeline || 0} in pipeline &middot; {holdingData.summary.killed || 0} killed
-              </span>
+              <div className="stack tiny">
+                <span>
+                  {holdingData.summary.total || 0} total &middot; {holdingData.summary.in_pipeline || 0} in pipeline &middot; {holdingData.summary.killed || 0} killed
+                </span>
+                <span>visible {holdingVisibleVerticals.length} &middot; drift {holdingWorkflowSummary.drift} &middot; timers {holdingWorkflowSummary.timers} &middot; revisions {holdingWorkflowSummary.revisions}</span>
+              </div>
+              <div className="stack">
+                <input className="agent-search" placeholder="Search verticals…" value={holdingSearch} onChange={(e) => setHoldingSearch(e.target.value)} />
+                <select value={holdingWorkflowFilter} onChange={(e) => setHoldingWorkflowFilter(e.target.value)}>
+                  <option value="all">all workflow states</option>
+                  <option value="drift">drift only</option>
+                  <option value="timers">with timers</option>
+                  <option value="revisions">with revisions</option>
+                  <option value="stale">entered stage set</option>
+                </select>
+                <select value={holdingSort} onChange={(e) => setHoldingSort(e.target.value)}>
+                  <option value="updated_desc">sort: updated</option>
+                  <option value="stage_age_desc">sort: oldest stage</option>
+                  <option value="revisions_desc">sort: revisions</option>
+                  <option value="timers_desc">sort: timers</option>
+                  <option value="score_desc">sort: score</option>
+                </select>
+              </div>
             </div>
 
             {/* Campaign Status Bar */}
@@ -4353,6 +4662,37 @@ function App() {
               </table>
             </div>
 
+            <div className="row" style={{ marginBottom: 12 }}>
+              <div className="health-card">
+                <div className="tiny">Workflow Triage</div>
+                <div className="health-kv"><span>Drift</span><span className={Number(holdingData.workflow_summary?.drift || 0) > 0 ? "health-warn mono" : "mono"}>{holdingData.workflow_summary?.drift || 0}</span></div>
+                <div className="health-kv"><span>With Timers</span><span className="mono">{holdingData.workflow_summary?.active_timers || 0}</span></div>
+                <div className="health-kv"><span>Revisioned</span><span className="mono">{holdingData.workflow_summary?.revisioned || 0}</span></div>
+                <div className="health-kv"><span>Stage Tracked</span><span className="mono">{holdingData.workflow_summary?.stage_entered_set || 0}</span></div>
+              </div>
+              <div className="holding-detail-section">
+                <div className="tiny" style={{ marginBottom: 6 }}>Workflow Triage Preview</div>
+                {holdingVisibleVerticals.length === 0 ? (
+                  <div className="empty-state">No visible verticals</div>
+                ) : (
+                  <table>
+                    <thead><tr><th>Vertical</th><th>Stage Age</th><th>Revisions</th><th>Timers</th><th>Drift</th></tr></thead>
+                    <tbody>
+                      {holdingVisibleVerticals.slice(0, 12).map((v) => (
+                        <tr key={v.id} style={{ cursor: "pointer" }} onClick={() => openHoldingVerticalDetail(v.id)}>
+                          <td>{v.slug || v.name || v.id}</td>
+                          <td>{v.stage_entered_at ? relTime(v.stage_entered_at) : "-"}</td>
+                          <td className="mono">{readPath(v, ["revision_count"]) || "0"}</td>
+                          <td className="mono">{v.active_timer_count || 0}</td>
+                          <td>{v.workflow_current_stage && v.workflow_current_stage !== v.stage ? "yes" : "no"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+
             {/* Kanban Board */}
             <div className="kanban-board">
               {holdingColumns.map((col) => (
@@ -4368,6 +4708,7 @@ function App() {
                       const score = parseFloat(v.composite_score);
                       const scoreClass = !isNaN(score) ? (score >= 75 ? "tag-good" : score >= 50 ? "tag-warn" : "tag-bad") : "";
                       const ac = (holdingData.agent_counts || {})[v.id];
+                      const workflowDrift = v.workflow_current_stage && v.workflow_current_stage !== v.stage;
                       return (
                         <div
                           key={v.id}
@@ -4383,15 +4724,29 @@ function App() {
                             {v.geography ? <span className="tiny">{v.geography}</span> : null}
                             <span className="tiny">{relTime(v.updated_at)}</span>
                           </div>
+                          {(v.workflow_version || v.stage_entered_at || v.revision_count || v.active_timer_count || workflowDrift) ? (
+                            <div className="stack" style={{ marginTop: 4, gap: 4 }}>
+                              {v.workflow_version ? <span className="badge mono">wf {v.workflow_version}</span> : null}
+                              {v.stage_entered_at ? <span className="badge">stage {relTime(v.stage_entered_at)}</span> : null}
+                              {v.revision_count ? <span className="badge mono">rev {readPath(v, ["revision_count"])}</span> : null}
+                              {(v.active_timer_count || 0) > 0 ? <span className="badge mono">timers {v.active_timer_count}</span> : null}
+                              {workflowDrift ? <span className="badge b-stuck">state drift</span> : null}
+                            </div>
+                          ) : null}
                           {ac ? (
                             <div className="tiny" style={{ marginTop: 4 }}>
                               agents {ac.active}/{ac.total}
                             </div>
                           ) : null}
+                          {workflowDrift ? (
+                            <div className="tiny health-warn" style={{ marginTop: 4 }}>
+                              db stage {v.stage} vs workflow {v.workflow_current_stage}
+                            </div>
+                          ) : null}
                           {v.stage === "killed" && v.kill_reason ? (
                             <div className="vertical-card-kill tiny">{v.kill_reason}</div>
                           ) : null}
-                          {col.key === "validation" ? <GateIndicator stage={v.stage} /> : null}
+                          {col.key === "validation" ? <GateIndicator stage={v.stage} stages={validationGateData.stages} labels={validationGateData.labels} /> : null}
                           <div className="tiny" style={{ marginTop: 4, color: "var(--info)" }}>Click for full details</div>
                         </div>
                       );
@@ -4405,7 +4760,7 @@ function App() {
 
         {activeView === "health" ? (
           <section>
-            <div className="head"><h2>Health</h2><span className="tiny">ops telemetry</span></div>
+            <div className="head"><h2>Health</h2><span className="tiny">ops telemetry + contract summary</span></div>
             <div className="body scroll">
               <div className="row" style={{ marginBottom: 10 }}>
                 <div className="health-card">
@@ -4468,6 +4823,83 @@ function App() {
                     </div>
                   ))}
                   {health.container_error ? <div className="health-bad mono" style={{ marginTop: 4 }}>{health.container_error}</div> : null}
+                </div>
+              </div>
+              <div className="row" style={{ marginBottom: 10 }}>
+                <div className="health-card">
+                  <div className="tiny">Contract Versions</div>
+                  <div className="health-kv">
+                    <span>Workflow</span>
+                    <span>{contractWorkflow.name || "-"}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Workflow Version</span>
+                    <span className="mono">{contractWorkflow.version || "-"}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Platform Version</span>
+                    <span className="mono">{contractPlatform.version || "-"}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Stages</span>
+                    <span className="mono">{Array.isArray(contractWorkflow.stage_ids) ? contractWorkflow.stage_ids.length : 0}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Transitions</span>
+                    <span className="mono">{contractWorkflow.transition_count || 0}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Timers</span>
+                    <span className="mono">{contractWorkflow.timer_count || 0}</span>
+                  </div>
+                </div>
+                <div className="health-card">
+                  <div className="tiny">Verification Summary</div>
+                  <div className="health-kv">
+                    <span>Verification Gates</span>
+                    <span className="mono">{contractVerification.count || 0}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Compliance Rules</span>
+                    <span className="mono">{contractPlatform.compliance_rule_count || 0}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Must Pass Gates</span>
+                    <span className="mono">{readPath(contractVerification, ["priority_counts", "must_pass"]) || "0"}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Status</span>
+                    <span>{contractVerification.status || "-"}</span>
+                  </div>
+                  <div className="health-kv">
+                    <span>Latest Gate Results</span>
+                    <span>{contractVerification.latest_results || "-"}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="row" style={{ marginBottom: 10 }}>
+                <div className="holding-detail-section">
+                  <div className="tiny" style={{ marginBottom: 6 }}>Workflow Audit Warnings</div>
+                  {contractsData.error ? (
+                    <div className="health-bad">{contractsData.error}</div>
+                  ) : !Array.isArray(health.workflow_audit?.warnings) || health.workflow_audit.warnings.length === 0 ? (
+                    <div className="empty-state">No workflow audit warnings</div>
+                  ) : (
+                    <table>
+                      <thead><tr><th>Warning</th></tr></thead>
+                      <tbody>
+                        {health.workflow_audit.warnings.map((item, idx) => (
+                          <tr key={`${item}-${idx}`}>
+                            <td>{item}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div className="holding-detail-section">
+                  <div className="tiny" style={{ marginBottom: 6 }}>Contract Paths</div>
+                  <JsonBlock data={contractsData.paths || {}} defaultOpen={2} />
                 </div>
               </div>
               <div className="health-card">

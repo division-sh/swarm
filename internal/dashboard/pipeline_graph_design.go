@@ -22,6 +22,38 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 	edges := make([]graphEdge, 0, 320)
 	seenNodes := map[string]struct{}{}
 	seenEdges := map[string]struct{}{}
+	contractBundle, _, _ := dashboardContractBundle()
+	workflowTransitions, workflowTransitionsByTrigger := workflowTransitionSummaries(contractBundle)
+	timerDetailsByEvent := map[string][]map[string]any{}
+	stagePhaseMap := map[string]string{}
+	if contractBundle != nil {
+		for _, stage := range contractBundle.Workflow.Workflow.Stages {
+			stageID := strings.TrimSpace(stage.ID)
+			if stageID == "" {
+				continue
+			}
+			stagePhaseMap[stageID] = strings.TrimSpace(stage.Phase)
+		}
+		for _, timer := range contractBundle.Workflow.Workflow.Timers {
+			eventType := strings.TrimSpace(timer.Event)
+			if eventType == "" {
+				continue
+			}
+			timerDetailsByEvent[eventType] = append(timerDetailsByEvent[eventType], map[string]any{
+				"id":            strings.TrimSpace(timer.ID),
+				"stage":         strings.TrimSpace(timer.Stage),
+				"event":         eventType,
+				"owner":         strings.TrimSpace(timer.Owner),
+				"action":        strings.TrimSpace(timer.Action),
+				"cancellation":  strings.TrimSpace(timer.Cancellation),
+				"delay_seconds": timer.DelaySeconds,
+				"delay_minutes": timer.DelayMinutes,
+				"delay_hours":   timer.DelayHours,
+				"delay_days":    timer.DelayDays,
+				"recurring":     timer.Recurring,
+			})
+		}
+	}
 
 	addNode := func(n graphNode) {
 		n.ID = strings.TrimSpace(n.ID)
@@ -205,9 +237,20 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 				Source:    "pipeline",
 			})
 		} else {
+			targetID := "runtime:pipeline-coordinator"
+			if targets := defaultFlowTargetNodes(evt); len(targets) > 0 {
+				switch targets[0] {
+				case "empire-coordinator":
+					targetID = "empire-coordinator"
+				case "runtime":
+					targetID = commgraph.RuntimeProducerID
+				case "pipeline-coordinator":
+					targetID = "runtime:pipeline-coordinator"
+				}
+			}
 			addEdge(graphEdge{
 				From:      evtID,
-				To:        "runtime:pipeline-coordinator",
+				To:        targetID,
 				Kind:      "routing",
 				Label:     evt,
 				EventType: evt,
@@ -262,8 +305,18 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 		edges[i].Intercepted = intercepted
 		edges[i].Passthrough = passthrough
 		edges[i].InterceptorHandle = pipelineHandlerRef(eventType)
-		edges[i].Stages = pipelineStagesForEvent(eventType)
+		edges[i].Stages = pipelineStagesForEventWithContracts(eventType, workflowTransitionsByTrigger, timerDetailsByEvent, stagePhaseMap)
 		edges[i].Rubrics = pipelineRubricsForEvent(eventType)
+		if entries := workflowTransitionsByTrigger[eventType]; len(entries) > 0 {
+			edges[i].TransitionDetails = cloneMapSlice(entries)
+			edges[i].TransitionIDs = collectStringField(entries, "id")
+			edges[i].TransitionOwners = collectStringField(entries, "node")
+		}
+		if timers := timerDetailsByEvent[eventType]; len(timers) > 0 {
+			edges[i].TimerDetails = cloneMapSlice(timers)
+			edges[i].TimerIDs = collectStringField(timers, "id")
+			edges[i].TimerOwners = collectStringField(timers, "owner")
+		}
 		for _, stage := range edges[i].Stages {
 			stageSet[stage] = struct{}{}
 		}
@@ -288,20 +341,47 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 		return edges[i].From < edges[j].From
 	})
 
+	contractSummary := dashboardContractSummary()
+	workflowMeta, _ := contractSummary["workflow"].(map[string]any)
+	platformMeta, _ := contractSummary["platform"].(map[string]any)
+	pathsMeta, _ := contractSummary["paths"].(map[string]any)
+	eventStageMap := map[string][]string{}
+	for _, edge := range edges {
+		eventType := strings.TrimSpace(edge.EventType)
+		if eventType == "" || len(edge.Stages) == 0 {
+			continue
+		}
+		eventStageMap[eventType] = appendUniqueStrings(eventStageMap[eventType], edge.Stages...)
+	}
+
+	sources := []string{
+		"configs/agents/roster.yaml",
+		"configs/agents/templates/*.yaml",
+		"internal/commgraph/registry.go",
+		"internal/dashboard/server_graph_shared.go",
+	}
+	for _, key := range []string{"workflow_schema", "platform_spec", "event_catalog", "agent_registry", "system_nodes", "guard_registry"} {
+		if path := strings.TrimSpace(asString(pathsMeta[key])); path != "" {
+			sources = append(sources, path)
+		}
+	}
+
 	meta := map[string]any{
-		"design_version": "2.0.26",
-		"lanes":          []string{"human", "factory", "opco"},
-		"node_count":     len(nodes),
-		"edge_count":     len(edges),
-		"rubrics":        sortedStringKeys(rubricSet),
-		"stages":         sortedStringKeys(stageSet),
-		"sources": []string{
-			"configs/agents/roster.yaml",
-			"configs/agents/templates/*.yaml",
-			"internal/commgraph/registry.go",
-			"internal/runtime/event_emit_tools.go",
-			"internal/dashboard/server.go:flowInterceptPolicy",
-		},
+		"design_version":       strings.TrimSpace(asString(workflowMeta["version"])),
+		"workflow_name":        strings.TrimSpace(asString(workflowMeta["name"])),
+		"workflow_version":     strings.TrimSpace(asString(workflowMeta["version"])),
+		"platform_version":     strings.TrimSpace(asString(platformMeta["version"])),
+		"lanes":                []string{"human", "factory", "opco"},
+		"node_count":           len(nodes),
+		"edge_count":           len(edges),
+		"rubrics":              sortedStringKeys(rubricSet),
+		"stages":               sortedStringKeys(stageSet),
+		"workflow_stages":      workflowMeta["stage_ids"],
+		"stage_phase_map":      workflowMeta["stage_phase_map"],
+		"workflow_transitions": workflowTransitions,
+		"timer_events":         workflowMeta["timer_events"],
+		"event_stage_map":      eventStageMap,
+		"sources":              sources,
 	}
 	return nodes, edges, meta, nil
 }
@@ -501,6 +581,8 @@ func pipelineStagesForEvent(eventType string) []string {
 		eventType == "vertical.shortlisted",
 		eventType == "vertical.marginal",
 		eventType == "vertical.rejected",
+		eventType == "timer.marginal_review",
+		eventType == "timer.marginal_kill",
 		eventType == "timer.portfolio_digest":
 		return []string{"scoring"}
 	case strings.HasPrefix(eventType, "validation."),
@@ -527,9 +609,37 @@ func pipelineStagesForEvent(eventType string) []string {
 		strings.HasPrefix(eventType, "support."),
 		strings.HasPrefix(eventType, "launch."):
 		return []string{"opco"}
+	case eventType == "timer.scan_timeout",
+		eventType == "timer.campaign_deadline":
+		return []string{"discovery"}
 	default:
 		return []string{"system"}
 	}
+}
+
+func pipelineStagesForEventWithContracts(eventType string, workflowTransitionsByTrigger map[string][]map[string]any, timerDetailsByEvent map[string][]map[string]any, stagePhaseMap map[string]string) []string {
+	eventType = strings.TrimSpace(eventType)
+	stageBuckets := make([]string, 0, 4)
+	if entries := workflowTransitionsByTrigger[eventType]; len(entries) > 0 {
+		for _, entry := range entries {
+			if fromStages, ok := entry["from"].([]string); ok {
+				for _, stage := range fromStages {
+					stageBuckets = appendIfMissing(stageBuckets, flowBucketForStage(stage, stagePhaseMap))
+				}
+			}
+			stageBuckets = appendIfMissing(stageBuckets, flowBucketForStage(asString(entry["to"]), stagePhaseMap))
+		}
+	}
+	if timers := timerDetailsByEvent[eventType]; len(timers) > 0 {
+		for _, timer := range timers {
+			stageBuckets = appendIfMissing(stageBuckets, flowBucketForStage(asString(timer["stage"]), stagePhaseMap))
+		}
+	}
+	stageBuckets = compactStrings(stageBuckets)
+	if len(stageBuckets) > 0 {
+		return stageBuckets
+	}
+	return pipelineStagesForEvent(eventType)
 }
 
 func pipelineRubricsForEvent(eventType string) []string {
@@ -559,6 +669,101 @@ func sortedStringKeys(m map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func collectStringField(items []map[string]any, key string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		value := strings.TrimSpace(asString(item[key]))
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func cloneMapSlice(items []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		copyItem := map[string]any{}
+		for k, v := range item {
+			copyItem[k] = v
+		}
+		out = append(out, copyItem)
+	}
+	return out
+}
+
+func appendUniqueStrings(dst []string, values ...string) []string {
+	for _, value := range values {
+		dst = appendIfMissing(dst, value)
+	}
+	return compactStrings(dst)
+}
+
+func appendIfMissing(dst []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return dst
+	}
+	for _, existing := range dst {
+		if existing == value {
+			return dst
+		}
+	}
+	return append(dst, value)
+}
+
+func compactStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func flowBucketForStage(stage string, stagePhaseMap map[string]string) string {
+	stage = strings.TrimSpace(stage)
+	switch stage {
+	case "", "*":
+		return ""
+	case "discovered":
+		return "discovery"
+	case "scoring", "shortlisted", "marginal_review":
+		return "scoring"
+	case "researching", "mvp_speccing", "cto_spec_review", "branding":
+		return "validation"
+	case "ready_for_review", "approved", "killed":
+		return "mailbox"
+	case "full_speccing", "building", "pre_launch", "launched", "operating", "expanding", "winding_down":
+		return "opco"
+	}
+	switch strings.TrimSpace(stagePhaseMap[stage]) {
+	case "factory":
+		return "validation"
+	case "decision", "terminal":
+		return "mailbox"
+	case "operating":
+		return "opco"
+	default:
+		return ""
+	}
 }
 
 func modelGroupForDesign(spec models.AgentConfig) string {

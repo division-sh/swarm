@@ -8,10 +8,10 @@ import (
 
 func flowInterceptPolicy(eventType string, payloadRaw []byte) (intercepted bool, passthrough bool) {
 	switch strings.TrimSpace(eventType) {
-	case "timer.portfolio_digest":
+	case "timer.portfolio_digest", "timer.marginal_review", "timer.marginal_kill", "timer.scan_timeout", "timer.campaign_deadline":
 		var payload map[string]any
 		_ = json.Unmarshal(payloadRaw, &payload)
-		if boolFromAny(payload["scoring_rejections_injected"]) {
+		if strings.TrimSpace(eventType) == "timer.portfolio_digest" && boolFromAny(payload["scoring_rejections_injected"]) {
 			return false, false
 		}
 		return true, true
@@ -62,6 +62,22 @@ func flowInterceptPolicy(eventType string, payloadRaw []byte) (intercepted bool,
 		return false, true
 	default:
 		return false, false
+	}
+}
+
+func defaultFlowTargetNodes(eventType string) []string {
+	switch strings.TrimSpace(eventType) {
+	case "timer.portfolio_digest", "timer.marginal_review":
+		return []string{"empire-coordinator"}
+	case "timer.scan_timeout", "timer.campaign_deadline":
+		return []string{"pipeline-coordinator"}
+	case "timer.marginal_kill":
+		return []string{"runtime"}
+	default:
+		if handler := strings.TrimSpace(pipelineHandlerRef(eventType)); handler != "" {
+			return []string{"pipeline-coordinator"}
+		}
+		return nil
 	}
 }
 
