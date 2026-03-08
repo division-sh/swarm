@@ -26,7 +26,7 @@ llm:
   claude_cli:
     command: claude
     timeout: 120s
-    output_format: json
+    output_format: stream-json
     retries: 3
     no_session_persistence: false
     use_tmux: false

@@ -250,6 +250,8 @@ func tryRunSubcommand() (bool, error) {
 		return true, runDirectiveSubcommand(os.Args[2:])
 	case "chat":
 		return true, runChatSubcommand(os.Args[2:])
+	case "monitor":
+		return true, runMonitorSubcommand(os.Args[2:])
 	case "agent":
 		return true, runAgentSubcommand(os.Args[2:])
 	default:

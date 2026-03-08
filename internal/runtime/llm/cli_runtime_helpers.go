@@ -1,12 +1,14 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
 	"os"
 	"strings"
 
+	"empireai/internal/config"
 	"empireai/internal/models"
 	"empireai/internal/runtime/sessions"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
@@ -295,6 +297,22 @@ func jsonBytes(v any) []byte {
 	return runtimesharedjson.MustJSON(v)
 }
 
+func configuredCLIOutputFormat(cfg *config.Config) string {
+	if cfg == nil {
+		return "json"
+	}
+	switch strings.TrimSpace(cfg.LLM.ClaudeCLI.OutputFormat) {
+	case "stream-json":
+		return "stream-json"
+	default:
+		return "json"
+	}
+}
+
+func shouldIncludePartialMessages(cfg *config.Config) bool {
+	return configuredCLIOutputFormat(cfg) == "stream-json"
+}
+
 func permissionModeArgs() []string {
 	args := make([]string, 0, 3)
 	if mode := strings.TrimSpace(os.Getenv("EMPIREAI_CLAUDE_PERMISSION_MODE")); mode != "" {
@@ -305,4 +323,20 @@ func permissionModeArgs() []string {
 		args = append(args, "--dangerously-skip-permissions")
 	}
 	return args
+}
+
+func joinRawLines(lines [][]byte) []byte {
+	if len(lines) == 0 {
+		return nil
+	}
+	var b bytes.Buffer
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	return bytes.TrimSpace(b.Bytes())
 }

@@ -163,8 +163,10 @@ func (c *Config) Validate() error {
 		if c.LLM.ClaudeCLI.Command == "" {
 			return errors.New("llm.claude_cli.command is required in cli_test mode")
 		}
-		if c.LLM.ClaudeCLI.OutputFormat != "json" {
-			return errors.New("llm.claude_cli.output_format must be json in cli_test mode")
+		switch strings.TrimSpace(c.LLM.ClaudeCLI.OutputFormat) {
+		case "json", "stream-json":
+		default:
+			return errors.New("llm.claude_cli.output_format must be json or stream-json in cli_test mode")
 		}
 		if c.LLM.ClaudeCLI.NoSessionPersistence {
 			return errors.New("llm.claude_cli.no_session_persistence must be false for continuity")

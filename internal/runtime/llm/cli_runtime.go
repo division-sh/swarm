@@ -22,6 +22,7 @@ type ClaudeCLIRuntime struct {
 	budget        BudgetGuard
 	lockOwner     string
 	workspaces    workspace.Resolver
+	monitor       MonitorSink
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
@@ -48,6 +49,7 @@ func NewClaudeCLIRuntime(
 		budget:        budget,
 		lockOwner:     lockOwner,
 		workspaces:    workspaces,
+		monitor:       NewFileMonitorSink(DefaultMonitorDir()),
 	}
 }
 
@@ -72,6 +74,10 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 
 func (r *ClaudeCLIRuntime) SetWorkspaceResolver(resolver workspace.Resolver) {
 	r.workspaces = resolver
+}
+
+func (r *ClaudeCLIRuntime) SetMonitorSink(sink MonitorSink) {
+	r.monitor = sink
 }
 
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
@@ -170,7 +176,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		args = []string{
 			"-p",
 			"--session-id", s.ID,
-			"--output-format", "json",
+			"--output-format", configuredCLIOutputFormat(r.cfg),
+		}
+		if shouldIncludePartialMessages(r.cfg) {
+			args = append(args, "--include-partial-messages")
 		}
 		args = append(args, permissionModeArgs()...)
 		if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
@@ -185,7 +194,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		args = []string{
 			"-p",
 			"-r", s.ID,
-			"--output-format", "json",
+			"--output-format", configuredCLIOutputFormat(r.cfg),
+		}
+		if shouldIncludePartialMessages(r.cfg) {
+			args = append(args, "--include-partial-messages")
 		}
 		args = append(args, permissionModeArgs()...)
 		if mcpEnabled {
@@ -194,20 +206,37 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 
 	start := time.Now()
-	resp, fallback, err := r.runWithPromptTransportFallback(ctx, args, target, prompt)
+	monitorMeta := MonitorTurnMeta{
+		AgentID:   s.AgentID,
+		Runtime:   "cli_test",
+		SessionID: s.ID,
+		ScopeKey:  s.ScopeKey,
+		InputRole: message.Role,
+		InputText: prompt,
+		TargetName: func() string {
+			if target == nil {
+				return ""
+			}
+			return target.Container
+		}(),
+	}
+	resp, fallback, err := r.runWithPromptTransportFallback(ctx, args, target, prompt, monitorMeta)
 	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 	transportFallback.Used = transportFallback.Used || fallback.Used
 	if err != nil && s.TurnCount == 0 && isUnsupportedCLIFlagError(err) {
 		args = []string{
 			"-p",
 			"--session-id", s.ID,
-			"--output-format", "json",
+			"--output-format", configuredCLIOutputFormat(r.cfg),
+		}
+		if shouldIncludePartialMessages(r.cfg) {
+			args = append(args, "--include-partial-messages")
 		}
 		args = append(args, permissionModeArgs()...)
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
-		resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, prompt))
+		resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, prompt), monitorMeta)
 		transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 		transportFallback.Used = transportFallback.Used || fallback.Used
 	}
@@ -237,7 +266,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			args = []string{
 				"-p",
 				"--session-id", s.ID,
-				"--output-format", "json",
+				"--output-format", configuredCLIOutputFormat(r.cfg),
+			}
+			if shouldIncludePartialMessages(r.cfg) {
+				args = append(args, "--include-partial-messages")
 			}
 			args = append(args, permissionModeArgs()...)
 			if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
@@ -248,20 +280,24 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			} else if tools := claudeToolsArg(s.Tools); tools != "" {
 				args = append(args, "--tools", tools)
 			}
-			resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content)
+			monitorMeta.SessionID = s.ID
+			resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
 			transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 			transportFallback.Used = transportFallback.Used || fallback.Used
 			if err != nil && isUnsupportedCLIFlagError(err) {
 				args = []string{
 					"-p",
 					"--session-id", s.ID,
-					"--output-format", "json",
+					"--output-format", configuredCLIOutputFormat(r.cfg),
+				}
+				if shouldIncludePartialMessages(r.cfg) {
+					args = append(args, "--include-partial-messages")
 				}
 				args = append(args, permissionModeArgs()...)
 				if mcpEnabled {
 					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 				}
-				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content))
+				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content), monitorMeta)
 				transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 				transportFallback.Used = transportFallback.Used || fallback.Used
 			}

@@ -1,10 +1,12 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -16,10 +18,10 @@ import (
 )
 
 func (r *ClaudeCLIRuntime) run(ctx context.Context, args []string, target *workspace.Target) (*Response, error) {
-	return r.runWithInput(ctx, args, target, "")
+	return r.runWithInput(ctx, args, target, "", MonitorTurnMeta{})
 }
 
-func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *workspace.Target, input string) (*Response, error) {
+func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
 	if target != nil && target.Enabled() {
 		if strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) == "" {
@@ -31,6 +33,10 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	defer cancel()
 
 	cmd := r.buildCommand(runCtx, args, target)
+	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
+		return r.runStreaming(runCtx, cmd, timeout, input, meta)
+	}
+
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -76,6 +82,115 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	resp := parseCLIResponse(raw)
 	resp.Raw = raw
 	return resp, nil
+}
+
+func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, timeout time.Duration, input string, meta MonitorTurnMeta) (*Response, error) {
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create claude stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create claude stderr pipe: %w", err)
+	}
+	if strings.TrimSpace(input) != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
+
+	monitor, monitorErr := r.openMonitorTurn(ctx, meta)
+	if monitorErr != nil {
+		return nil, monitorErr
+	}
+	if monitor != nil {
+		defer func() { _ = monitor.Close() }()
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("claude cli run failed: %w", err)
+	}
+
+	stdoutCh := make(chan [][]byte, 1)
+	stderrCh := make(chan [][]byte, 1)
+	go func() { stdoutCh <- readStreamLines(stdout, monitor, false) }()
+	go func() { stderrCh <- readStreamLines(stderr, monitor, true) }()
+
+	waitErr := cmd.Wait()
+	stdoutLines := <-stdoutCh
+	stderrLines := <-stderrCh
+	if waitErr != nil {
+		stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+		stdoutText := strings.TrimSpace(string(joinRawLines(stdoutLines)))
+		if monitor != nil {
+			monitor.WriteNotice("turn.end ok=false")
+		}
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			errOut := summarizeCLIErrorOutput(stderrText)
+			if errOut == "" {
+				errOut = summarizeCLIErrorOutput(stdoutText)
+			}
+			if errOut == "" {
+				return nil, fmt.Errorf("claude cli timeout after %s", timeout)
+			}
+			return nil, fmt.Errorf("claude cli timeout after %s: %s", timeout, errOut)
+		}
+		if isClaudeAuthOutput(stderrText) || isClaudeAuthOutput(stdoutText) {
+			msg := summarizeCLIErrorOutput(stderrText)
+			if msg == "" {
+				msg = summarizeCLIErrorOutput(stdoutText)
+			}
+			if msg == "" {
+				msg = "not logged in"
+			}
+			return nil, fmt.Errorf("%w: %s", ErrClaudeAuthRequired, msg)
+		}
+		errOut := summarizeCLIErrorOutput(stderrText)
+		if errOut == "" {
+			errOut = summarizeCLIErrorOutput(stdoutText)
+		}
+		if errOut == "" {
+			return nil, fmt.Errorf("claude cli run failed: %w", waitErr)
+		}
+		return nil, fmt.Errorf("claude cli run failed: %w, stderr=%s", waitErr, errOut)
+	}
+
+	acc := newCLIStreamAccumulator()
+	for _, line := range stdoutLines {
+		acc.AddLine(line)
+	}
+	resp := acc.Response()
+	if monitor != nil {
+		monitor.WriteNotice("turn.end ok=true session=%s", strings.TrimSpace(coalesce(resp.SessionID, meta.SessionID)))
+	}
+	return resp, nil
+}
+
+func (r *ClaudeCLIRuntime) openMonitorTurn(ctx context.Context, meta MonitorTurnMeta) (MonitorTurnWriter, error) {
+	if r == nil || r.monitor == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(meta.AgentID) == "" {
+		return nil, nil
+	}
+	return r.monitor.OpenTurn(ctx, meta)
+}
+
+func readStreamLines(rc io.ReadCloser, monitor MonitorTurnWriter, stderr bool) [][]byte {
+	defer rc.Close()
+	scanner := bufio.NewScanner(rc)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lines := make([][]byte, 0, 16)
+	for scanner.Scan() {
+		line := append([]byte(nil), scanner.Bytes()...)
+		lines = append(lines, line)
+		if monitor != nil {
+			if stderr {
+				monitor.WriteStderr(line)
+			} else {
+				monitor.WriteStdout(line)
+			}
+		}
+	}
+	return lines
 }
 
 func (r *ClaudeCLIRuntime) effectiveCLITimeout(ctx context.Context) time.Duration {

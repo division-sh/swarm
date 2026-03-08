@@ -15,13 +15,13 @@ import (
 	workspace "empireai/internal/runtime/workspace"
 )
 
-func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string) (*Response, error) {
+func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, errors.New("prompt argument fallback requires non-empty prompt")
 	}
 	runArgs := append(append([]string{}, args...), "--", prompt)
-	return r.runWithInput(ctx, runArgs, target, "")
+	return r.runWithInput(ctx, runArgs, target, "", meta)
 }
 
 func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
@@ -169,13 +169,13 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	return strings.TrimSpace(u.String())
 }
 
-func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string) (*Response, promptTransportFallback, error) {
-	resp, err := r.runWithInput(ctx, args, target, prompt)
+func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
+	resp, err := r.runWithInput(ctx, args, target, prompt, meta)
 	if err == nil || !isPromptArgRequiredError(err) {
 		return resp, promptTransportFallback{}, err
 	}
 	used := promptTransportFallback{Attempted: true}
-	resp, err = r.runWithPromptArg(ctx, args, target, prompt)
+	resp, err = r.runWithPromptArg(ctx, args, target, prompt, meta)
 	if err == nil {
 		used.Used = true
 		log.Printf("claude cli transport fallback: switched to prompt argument mode")
