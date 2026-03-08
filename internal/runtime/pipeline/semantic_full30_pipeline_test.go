@@ -111,12 +111,6 @@ func TestSemanticFull30PipelineMatrix(t *testing.T) {
 	}
 
 	checks := map[string]func(*testing.T){
-		"prefilter_passthrough":                    checkPrefilterPassthrough,
-		"prefilter_blocking_red_flag":              checkPrefilterBlockingRedFlag,
-		"prefilter_co_occurrence":                  checkPrefilterCoOccurrence,
-		"prefilter_signal_floor":                   checkPrefilterSignalFloor,
-		"prefilter_evidence_gate":                  checkPrefilterEvidenceGate,
-		"prefilter_retention_gate":                 checkPrefilterRetentionGate,
 		"corpus_jsonl_batching":                    checkCorpusJSONLBatching,
 		"scan_expected_agents_modes":               checkScanExpectedAgentsModes,
 		"scan_completion_unique_keys":              checkScanCompletionUniqueKeys,
@@ -128,8 +122,6 @@ func TestSemanticFull30PipelineMatrix(t *testing.T) {
 		"derivation_anti_bias_fallback":            checkDerivationAntiBiasFallback,
 		"derivation_depth_cap":                     checkDerivationDepthCap,
 		"derivation_branch_cap":                    checkDerivationBranchCap,
-		"composite_shortlisted":                    checkCompositeShortlisted,
-		"rejection_cascade_order":                  checkRejectionCascadeOrder,
 		"scoring_contest_emit_and_resolve":         checkScoringContestEmitAndResolve,
 		"validation_gate_tracking":                 checkValidationGateTracking,
 		"validation_staleness_drop":                checkValidationStalenessDrop,
@@ -139,7 +131,7 @@ func TestSemanticFull30PipelineMatrix(t *testing.T) {
 		"campaign_completion_requires_empty_queue": checkCampaignCompletionRequiresEmptyQueue,
 	}
 
-	if got, want := len(checks), 26; got != want {
+	if got, want := len(checks), 18; got != want {
 		t.Fatalf("pipeline semantic check count mismatch: got=%d want=%d", got, want)
 	}
 
@@ -148,6 +140,16 @@ func TestSemanticFull30PipelineMatrix(t *testing.T) {
 		"opco_routes_and_template_version": {},
 		"cycle_counter_circuit_breaker":    {},
 		"budget_human_mailbox_contracts":   {},
+	}
+	empirePolicyCases := map[string]struct{}{
+		"prefilter_passthrough":       {},
+		"prefilter_blocking_red_flag": {},
+		"prefilter_co_occurrence":     {},
+		"prefilter_signal_floor":      {},
+		"prefilter_evidence_gate":     {},
+		"prefilter_retention_gate":    {},
+		"composite_shortlisted":       {},
+		"rejection_cascade_order":     {},
 	}
 
 	for _, tc := range matrix.Cases {
@@ -162,83 +164,12 @@ func TestSemanticFull30PipelineMatrix(t *testing.T) {
 				t.Skip("covered by runtime integration semantic matrix")
 				return
 			}
+			if _, ok := empirePolicyCases[strings.TrimSpace(tc.ID)]; ok {
+				t.Skip("covered by pipeline/empire semantic policy tests")
+				return
+			}
 			t.Fatalf("missing semantic check for %q", tc.ID)
 		})
-	}
-}
-
-func checkPrefilterPassthrough(t *testing.T) {
-	tc := prefilterContractCase{Name: "matrix_passthrough", Expected: "pass"}
-	tc.Input.SignalStrength = 68
-	tc.Input.RedFlags = []string{"accuracy_liability", "one_time_setup"}
-	tc.Input.EvidenceURLs = 3
-	tc.Input.RetentionPrimitives = []string{"workflow_embedding"}
-	payload := buildPrefilterFixturePayload(tc)
-	ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
-	if !ok || reason != "" {
-		t.Fatalf("expected pass, got ok=%v reason=%q", ok, reason)
-	}
-}
-
-func checkPrefilterBlockingRedFlag(t *testing.T) {
-	tc := prefilterContractCase{Name: "matrix_blocking_flag", Expected: "reject", ExpectedReason: "blocking_red_flag"}
-	tc.Input.SignalStrength = 75
-	tc.Input.RedFlags = []string{"phone_led_sales"}
-	tc.Input.EvidenceURLs = 3
-	tc.Input.RetentionPrimitives = []string{"recurring_data"}
-	payload := buildPrefilterFixturePayload(tc)
-	ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
-	if ok || reason != "blocking_red_flag" {
-		t.Fatalf("expected blocking red flag reject, got ok=%v reason=%q", ok, reason)
-	}
-}
-
-func checkPrefilterCoOccurrence(t *testing.T) {
-	tc := prefilterContractCase{Name: "matrix_co_occurrence"}
-	tc.Input.SignalStrength = 80
-	tc.Input.RedFlags = []string{"complex_integration", "high_feature_count"}
-	tc.Input.EvidenceURLs = 4
-	tc.Input.RetentionPrimitives = []string{"integration_lock_in"}
-	payload := buildPrefilterFixturePayload(tc)
-	ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
-	if ok || reason != "co_occurrence_block" {
-		t.Fatalf("expected co_occurrence_block reject, got ok=%v reason=%q", ok, reason)
-	}
-}
-
-func checkPrefilterSignalFloor(t *testing.T) {
-	tc := prefilterContractCase{Name: "matrix_signal_floor"}
-	tc.Input.SignalStrength = 54
-	tc.Input.EvidenceURLs = 3
-	tc.Input.RetentionPrimitives = []string{"recurring_data"}
-	payload := buildPrefilterFixturePayload(tc)
-	ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
-	if ok || reason != "signal_below_threshold" {
-		t.Fatalf("expected signal_below_threshold reject, got ok=%v reason=%q", ok, reason)
-	}
-}
-
-func checkPrefilterEvidenceGate(t *testing.T) {
-	tc := prefilterContractCase{Name: "matrix_evidence_gate"}
-	tc.Input.SignalStrength = 70
-	tc.Input.EvidenceURLs = 1
-	tc.Input.RetentionPrimitives = []string{"workflow_embedding"}
-	payload := buildPrefilterFixturePayload(tc)
-	ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
-	if ok || reason != "evidence_insufficient" {
-		t.Fatalf("expected evidence_insufficient reject, got ok=%v reason=%q", ok, reason)
-	}
-}
-
-func checkPrefilterRetentionGate(t *testing.T) {
-	tc := prefilterContractCase{Name: "matrix_retention_gate"}
-	tc.Input.SignalStrength = 70
-	tc.Input.EvidenceURLs = 3
-	tc.Input.RetentionPrimitives = []string{}
-	payload := buildPrefilterFixturePayload(tc)
-	ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
-	if ok || reason != "no_retention_primitive" {
-		t.Fatalf("expected no_retention_primitive reject, got ok=%v reason=%q", ok, reason)
 	}
 }
 
@@ -348,8 +279,8 @@ func checkScoringDispatchRubricDimensions(t *testing.T) {
 		t.Fatalf("expected rubric=universal, got %q", got)
 	}
 	dims, _ := payload["dimensions_requested"].([]any)
-	if len(dims) != len(expectedScoringDimensions("universal")) {
-		t.Fatalf("dimensions mismatch: got=%d want=%d", len(dims), len(expectedScoringDimensions("universal")))
+	if len(dims) != len(ExpectedScoringDimensionsForTest("universal")) {
+		t.Fatalf("dimensions mismatch: got=%d want=%d", len(dims), len(ExpectedScoringDimensionsForTest("universal")))
 	}
 }
 
@@ -416,32 +347,6 @@ func checkDerivationBranchCap(t *testing.T) {
 	assertNoEventType(t, discovered, "vertical.discovered", 150*time.Millisecond)
 }
 
-func checkCompositeShortlisted(t *testing.T) {
-	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
-	acc := newUniversalAccumulator(uuid.NewString(), "Composite Matrix", "us", "saas_gap")
-	setScores(acc, map[string]int{"build_complexity": 78, "automation_completeness": 78, "icp_crispness": 78, "distribution_leverage": 78, "time_to_value": 78, "operational_drag": 78, "pain_severity": 78, "competition_gap": 78, "monetization_clarity": 78, "retention_architecture": 78, "expansion_potential": 78})
-	res := pc.computeComposite(acc, false)
-	if res.Result != "shortlisted" {
-		t.Fatalf("expected shortlisted, got %+v", res)
-	}
-	if res.CompositeScore < 77.9 || res.CompositeScore > 78.1 {
-		t.Fatalf("expected composite ~78, got %.3f", res.CompositeScore)
-	}
-}
-
-func checkRejectionCascadeOrder(t *testing.T) {
-	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
-	gate := newUniversalAccumulator(uuid.NewString(), "Gate", "us", "saas_gap")
-	setScores(gate, map[string]int{"build_complexity": 40, "automation_completeness": 80, "icp_crispness": 80, "distribution_leverage": 80, "time_to_value": 80, "operational_drag": 80, "pain_severity": 80, "competition_gap": 80, "monetization_clarity": 80, "retention_architecture": 80, "expansion_potential": 80})
-	if got := pc.computeComposite(gate, false).Reason; got != "gate_build_complexity" {
-		t.Fatalf("expected first cascade reject gate_build_complexity, got %q", got)
-	}
-	tier1 := newUniversalAccumulator(uuid.NewString(), "Tier1", "us", "saas_gap")
-	setScores(tier1, map[string]int{"build_complexity": 80, "automation_completeness": 80, "icp_crispness": 40, "distribution_leverage": 80, "time_to_value": 80, "operational_drag": 80, "pain_severity": 80, "competition_gap": 80, "monetization_clarity": 80, "retention_architecture": 80, "expansion_potential": 80})
-	if got := pc.computeComposite(tier1, false).Reason; got != "tier1_dimension_floor_icp_crispness" {
-		t.Fatalf("expected tier1 floor reject, got %q", got)
-	}
-}
 
 func checkScoringContestEmitAndResolve(t *testing.T) {
 	ctx := context.Background()

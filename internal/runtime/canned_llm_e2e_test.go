@@ -20,6 +20,7 @@ import (
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -729,7 +730,7 @@ func TestCannedLLME2E_CorpusDirectiveHappyPath(t *testing.T) {
 	eventStore := &threadSafeEventStore{}
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
-	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(bus, db, runtimepipeline.FactoryPipelineCoordinatorOptions{Module: empirepipeline.NewModule()})
 	stageSignals := make(chan string, 8)
 	pc.SetTestVerticalStageHook(func(_ string, stage string) {
 		select {

@@ -1,5 +1,5 @@
 # ============================================================================
-# EmpireAI Prompt Variables — v2.0.50
+# EmpireAI Prompt Variables — v2.1.0
 # ============================================================================
 # Single source of truth for values that appear in multiple files.
 # Prompt templates use {{variable_name}} syntax.

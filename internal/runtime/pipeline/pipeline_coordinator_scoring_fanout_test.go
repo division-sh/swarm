@@ -289,7 +289,7 @@ func TestFactoryPipelineCoordinator_RejectedScoringBufferedAndInjectedIntoPortfo
 }
 
 func newUniversalAccumulator(verticalID, name, geography, mode string) *scoringAccumulator {
-	dims := expectedScoringDimensions("universal")
+	dims := ExpectedScoringDimensionsForTest("universal")
 	received := make(map[string]scoreDimensionResult, len(dims))
 	for _, dim := range dims {
 		received[dim] = scoreDimensionResult{

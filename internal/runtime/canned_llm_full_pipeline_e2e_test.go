@@ -22,6 +22,7 @@ import (
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -785,7 +786,7 @@ func TestCannedLLME2E_FullPipelineDirectiveToOpCo(t *testing.T) {
 	eventStore := &postgresEventStore{db: db}
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
-	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(bus, db, runtimepipeline.FactoryPipelineCoordinatorOptions{Module: empirepipeline.NewModule()})
 	bus.SetInterceptors(pc)
 
 	fixturesDir := projectPathFromThisFile("contracts", "test-vectors", "e2e-happy-path")

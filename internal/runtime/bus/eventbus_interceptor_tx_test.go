@@ -10,6 +10,7 @@ import (
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -93,7 +94,7 @@ func TestFactoryPipelineInterceptor_DeduplicatesRepeatedInboundEventID(t *testin
 	}
 	pg := &store.PostgresStore{DB: db}
 	bus := runtimebus.NewEventBus(pg)
-	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(bus, db, runtimepipeline.FactoryPipelineCoordinatorOptions{Module: empirepipeline.NewModule()})
 	bus.SetInterceptors(pc)
 
 	watch := bus.Subscribe("watcher", events.EventType("market_research.scan_assigned"))

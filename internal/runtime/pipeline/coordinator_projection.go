@@ -182,6 +182,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 	if verticalID == "" || stage == "" {
 		return
 	}
+	defer pc.notifyTestVerticalStageUpdated(verticalID, stage)
 	var currentStage string
 	_ = dbQueryRowContext(ctx, pc.db, `
 		SELECT COALESCE(stage, '')
@@ -200,7 +201,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 			sourceEvent,
 		)
 	}
-	if stage == "ready_for_review" {
+	if stage == "ready_for_review" || stage == "marginal_review" {
 		_, _ = dbExecContext(ctx, pc.db, `
 			UPDATE verticals
 			SET stage = $2,

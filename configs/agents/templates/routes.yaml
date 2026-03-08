@@ -2,6 +2,9 @@
 # Used by: `empire template publish` (YAML mode).
 
 bootstrap_routes:
+  - event_pattern: "spec.approved"
+    subscriber_role: "cto-agent"
+    reason: "bootstrap"
   - event_pattern: "product_spec_ready"
     subscriber_role: "cto-agent"
     reason: "bootstrap"

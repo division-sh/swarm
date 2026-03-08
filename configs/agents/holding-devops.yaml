@@ -5,7 +5,9 @@ model_tier: haiku
 subscriptions:
   - devops.deploy_requested
   - devops.health_check_failed
+  - devops.infra_change_needed
   - devops.rollback_requested
+  - devops.rollback_failed
   - ops.agent_failed
   - spend.approved
   - spend.rejected

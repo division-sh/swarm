@@ -7,8 +7,8 @@ func TestParseInitOptions_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse defaults: %v", err)
 	}
-	if opts.TemplateVersion != "2.0.50" {
-		t.Fatalf("expected template version 2.0.50, got %q", opts.TemplateVersion)
+	if opts.TemplateVersion != "2.1.0" {
+		t.Fatalf("expected template version 2.1.0, got %q", opts.TemplateVersion)
 	}
 	if opts.AgentsDir != "configs/agents" {
 		t.Fatalf("unexpected agents dir: %q", opts.AgentsDir)

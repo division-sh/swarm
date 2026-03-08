@@ -70,7 +70,6 @@ empire-coordinator:
   - campaign.completed
   - vertical.scored
   - vertical.marginal
-  - vertical.rejected
   - vertical.approved
   - vertical.killed
   - template.version_published
@@ -217,8 +216,7 @@ discovery-coordinator:
   subscriptions:
   - dedup.ambiguous
   - synthesis.needed
-  tools_tier2:
-  - sql_execute
+  tools_tier2: []
   emit_events:
   - dedup.resolved
   - synthesis.resolved
@@ -505,7 +503,6 @@ opco-cto:
   conversation_mode: session
   max_turns_per_task: 30
   subscriptions_bootstrap:
-  - spec.approved
   - product_spec_ready
   - technical_spec_ready
   - qa.validation_passed

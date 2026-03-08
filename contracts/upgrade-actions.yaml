@@ -22,8 +22,8 @@
 #   verify_command:  Shell command that returns 0 on success
 #   depends_on:      List of action IDs that must complete first (null if none)
 
-spec_version: "2.0.50"
-previous_version: "2.0.49"
+spec_version: "2.1.0"
+previous_version: "2.0.50"
 generated_at: "2026-03-05"
 
 actions:
@@ -289,7 +289,7 @@ v2037-remove-scoring-interceptor-cases:
   type: code
   priority: must
   action: "Delete handleVerticalDiscovered and handleScoreDimensionComplete interceptor cases; events now pass through to ScoringNode subscriber"
-  verify: 'grep -c 'handleVerticalDiscovered\\|handleScoreDimensionComplete' internal/runtime/pipeline_coordinator.go returns 0 for interceptor paths'
+  verify: "grep -c handleVerticalDiscovered internal/runtime/pipeline_coordinator.go returns 0"
   depends_on: v2037-register-scoring-node
 
 v2037-scoring-parity-test:
@@ -927,3 +927,21 @@ v2050-workflow-graph-gate:
   priority: must
   action: "Implement TestContractCompliance/workflow_graph. Reads workflow-schema.yaml, event-catalog.yaml, agent-tools.yaml, system-nodes.yaml. Traverses the directed graph: validates triggers exist, emitters/consumers are wired, stages are reachable, no orphans. 12 checks per the gate definition."
   verify: "go test ./internal/runtime -run TestContractCompliance/workflow_graph"
+
+# ============================================================================
+# v2.1.0 Upgrade Actions — Platform Abstraction Phase A
+# ============================================================================
+
+v210-platform-spec:
+  description: "Add platform-spec.yaml — MAS orchestration platform specification"
+  type: contract
+  priority: must
+  action: "New file at contracts/platform/platform-spec.yaml. Defines contract formats, vocabulary, compliance rules, built-in hooks."
+  verify: "python3 -c \"import yaml; yaml.safe_load(open('contracts/platform/platform-spec.yaml'))\""
+
+v210-platform-directory:
+  description: "Create contracts/platform/ directory for platform-level specs"
+  type: code
+  priority: must
+  action: "mkdir -p contracts/platform && cp platform-spec.yaml contracts/platform/"
+  verify: "test -f contracts/platform/platform-spec.yaml"

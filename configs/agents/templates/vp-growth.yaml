@@ -8,6 +8,7 @@ subscriptions:
   - user_onboarded
   - prelaunch_ready
   - spend_needed
+  - mandate_updated
   - channel_update
   - market_signals
 tools:

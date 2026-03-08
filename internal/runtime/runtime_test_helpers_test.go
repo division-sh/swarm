@@ -13,6 +13,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -73,15 +74,15 @@ func (failingDeliveryStore) InsertEventDeliveries(_ context.Context, _ string, _
 }
 
 func expectedScoringDimensions(rubric string) []string {
-	return runtimepipeline.ExpectedScoringDimensionsForTest(rubric)
+	return empirepipeline.NewModule().ScoringPolicy().ExpectedScoringDimensions(rubric)
 }
 
 func evaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string) {
-	return runtimepipeline.EvaluateDiscoveryPreFilterForTest(payload, rawSignal)
+	return empirepipeline.NewModule().DiscoveryPolicy().EvaluateDiscoveryPreFilter(payload, rawSignal)
 }
 
 func buildPrefilterSkipDetail(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
-	return runtimepipeline.BuildPrefilterSkipDetailForTest(payload, rawSignal, adjustedSignal, reason, mode)
+	return empirepipeline.NewModule().DiscoveryPolicy().BuildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
 }
 
 func cloneMap(in map[string]any) map[string]any {

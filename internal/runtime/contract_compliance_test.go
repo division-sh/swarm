@@ -93,12 +93,31 @@ type contractComplianceToolSchema struct {
 
 type contractComplianceWorkflowSchema struct {
 	Workflow struct {
+		Name          string   `yaml:"name"`
+		Version       string   `yaml:"version"`
+		Entity        string   `yaml:"entity"`
+		EntityTable   string   `yaml:"entity_table"`
+		StateField    string   `yaml:"state_field"`
+		InitialStage  string   `yaml:"initial_stage"`
+		Stages        []struct {
+			ID string `yaml:"id"`
+		} `yaml:"stages"`
+		TerminalStages []string `yaml:"terminal_stages"`
 		Transitions []struct {
 			ID      string   `yaml:"id"`
+			From    any      `yaml:"from"`
+			To      string   `yaml:"to"`
+			Trigger string   `yaml:"trigger"`
 			Node    string   `yaml:"node"`
 			Guards  []string `yaml:"guards"`
 			Actions []string `yaml:"actions"`
 		} `yaml:"transitions"`
+		Timers []struct {
+			ID    string `yaml:"id"`
+			Stage string `yaml:"stage"`
+			Event string `yaml:"event"`
+			Owner string `yaml:"owner"`
+		} `yaml:"timers"`
 	} `yaml:"workflow"`
 }
 
@@ -108,6 +127,43 @@ type contractComplianceGuardActionRegistry struct {
 }
 
 type contractComplianceGuardActionEntry struct {
+	ID              string `yaml:"id"`
+	Category        string `yaml:"category"`
+	PlatformBuiltin string `yaml:"platform_builtin"`
+	Emits           string `yaml:"emits"`
+}
+
+type contractCompliancePlatformSpec struct {
+	Platform struct {
+		Name    string `yaml:"name"`
+		Version string `yaml:"version"`
+	} `yaml:"platform"`
+	Vocabulary struct {
+		Participant struct {
+			Types map[string]struct {
+				Execution string `yaml:"execution"`
+			} `yaml:"types"`
+		} `yaml:"participant"`
+	} `yaml:"vocabulary"`
+	ContractFormats map[string]any `yaml:"contract_formats"`
+	WorkflowState   struct {
+		Fields map[string]struct {
+			Type string `yaml:"type"`
+		} `yaml:"fields"`
+	} `yaml:"workflow_state"`
+	BuiltinHooks struct {
+		Guards  []contractComplianceBuiltinHook `yaml:"guards"`
+		Actions []contractComplianceBuiltinHook `yaml:"actions"`
+	} `yaml:"builtin_hooks"`
+	ComplianceRules map[string][]struct {
+		ID string `yaml:"id"`
+	} `yaml:"compliance_rules"`
+	FileLayout struct {
+	MigrationNote string `yaml:"migration_note"`
+	} `yaml:"file_layout"`
+}
+
+type contractComplianceBuiltinHook struct {
 	ID string `yaml:"id"`
 }
 
@@ -124,6 +180,7 @@ func TestContractCompliance(t *testing.T) {
 	specVersion := contractComplianceLoadSpecVersion(t, repoRoot)
 	toolingLockVersion := contractComplianceLoadToolingLockVersion(t, repoRoot)
 	toolSchemas := contractComplianceLoadToolSchemas(t, repoRoot)
+	platformSpec := contractComplianceLoadPlatformSpec(t, repoRoot)
 
 	t.Run("gate1_agent_config_fields_match_contract", func(t *testing.T) {
 		ids := make([]string, 0, len(contractAgents))
@@ -408,8 +465,8 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("gate6_runtime_and_template_versions", func(t *testing.T) {
-		if got, want := contractComplianceNormVersion("v2.0.50"), contractComplianceNormVersion(specVersion); got != want {
-			t.Fatalf("runtime spec version mismatch: got=%q want=%q", "v2.0.50", specVersion)
+		if got, want := contractComplianceNormVersion("v2.1.0"), contractComplianceNormVersion(specVersion); got != want {
+			t.Fatalf("runtime spec version mismatch: got=%q want=%q", "v2.1.0", specVersion)
 		}
 		if got, want := contractComplianceNormVersion(toolingLockVersion), contractComplianceNormVersion(specVersion); got != want {
 			t.Fatalf("tooling.lock contract_format_version mismatch: got=%q want=%q", toolingLockVersion, specVersion)
@@ -450,14 +507,20 @@ func TestContractCompliance(t *testing.T) {
 					continue
 				}
 				if strings.TrimSpace(sub.Subscriber) == "pipeline-coordinator" {
-					extraPath := filepath.Join("internal", "runtime", "pipeline", "workflow_nodes_runtime.go")
-					extraEvents, extraErr := contractComplianceParseHandledEventsFromFile(repoRoot, extraPath)
+					extraPaths, extraErr := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node*.go"))
 					if extraErr != nil {
-						errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", extraPath, extraErr))
+						errs = append(errs, fmt.Sprintf("glob workflow node coverage: %v", extraErr))
 						continue
 					}
-					for evt := range extraEvents {
-						handledEvents[evt] = struct{}{}
+					for _, extraPath := range extraPaths {
+						extraEvents, parseErr := contractComplianceParseHandledEventsFromFile(repoRoot, extraPath)
+						if parseErr != nil {
+							errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", extraPath, parseErr))
+							continue
+						}
+						for evt := range extraEvents {
+							handledEvents[evt] = struct{}{}
+						}
 					}
 				}
 				handledEventsCache[implPath] = handledEvents
@@ -481,13 +544,19 @@ func TestContractCompliance(t *testing.T) {
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("parse interceptor coverage: %v", err))
 		} else {
-			workflowNodePath := filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_nodes_runtime.go")
-			nodeHandledEvents, nodeErr := contractComplianceParseHandledEventsFromFile(repoRoot, workflowNodePath)
+			workflowNodePaths, nodeErr := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node*.go"))
 			if nodeErr != nil {
-				errs = append(errs, fmt.Sprintf("parse workflow node coverage: %v", nodeErr))
+				errs = append(errs, fmt.Sprintf("glob workflow node coverage: %v", nodeErr))
 			} else {
-				for evt := range nodeHandledEvents {
-					handleEvents[evt] = struct{}{}
+				for _, workflowNodePath := range workflowNodePaths {
+					nodeHandledEvents, parseErr := contractComplianceParseHandledEventsFromFile(repoRoot, workflowNodePath)
+					if parseErr != nil {
+						errs = append(errs, fmt.Sprintf("parse workflow node coverage %s: %v", workflowNodePath, parseErr))
+						continue
+					}
+					for evt := range nodeHandledEvents {
+						handleEvents[evt] = struct{}{}
+					}
 				}
 			}
 			nonLocalIntercepts := map[string]struct{}{}
@@ -606,10 +675,87 @@ func TestContractCompliance(t *testing.T) {
 		}
 	})
 
-	t.Run("gate11_workflow_schema_guards_resolve", func(t *testing.T) {
+	t.Run("platform_spec", func(t *testing.T) {
+		if strings.TrimSpace(platformSpec.Platform.Name) == "" {
+			t.Fatal("platform.name missing")
+		}
+		if strings.TrimSpace(platformSpec.Platform.Version) == "" {
+			t.Fatal("platform.version missing")
+		}
+		if len(platformSpec.Vocabulary.Participant.Types) == 0 {
+			t.Fatal("vocabulary.participant.types missing")
+		}
+		for _, participant := range []string{"system_node", "agent", "runtime"} {
+			if _, ok := platformSpec.Vocabulary.Participant.Types[participant]; !ok {
+				t.Fatalf("participant type %q missing from platform spec", participant)
+			}
+		}
+		if len(platformSpec.ContractFormats) == 0 {
+			t.Fatal("contract_formats missing")
+		}
+		if len(platformSpec.WorkflowState.Fields) == 0 {
+			t.Fatal("workflow_state.fields missing")
+		}
+		for _, field := range []string{"instance_id", "workflow_name", "workflow_version", "current_stage", "transition_history", "accumulator_state", "timer_state", "metadata"} {
+			if _, ok := platformSpec.WorkflowState.Fields[field]; !ok {
+				t.Fatalf("workflow_state field %q missing", field)
+			}
+		}
+		if len(platformSpec.BuiltinHooks.Guards) == 0 {
+			t.Fatal("builtin_hooks.guards missing")
+		}
+		if len(platformSpec.BuiltinHooks.Actions) == 0 {
+			t.Fatal("builtin_hooks.actions missing")
+		}
+		if len(platformSpec.ComplianceRules) == 0 {
+			t.Fatal("compliance_rules missing")
+		}
+		if strings.TrimSpace(platformSpec.FileLayout.MigrationNote) == "" {
+			t.Fatal("file_layout.migration_note missing")
+		}
+	})
+
+	t.Run("workflow_schema", func(t *testing.T) {
 		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
 		registry := contractComplianceLoadGuardActionRegistry(t, repoRoot)
+		builtinGuards := contractComplianceBuiltinIDs(platformSpec.BuiltinHooks.Guards)
+		builtinActions := contractComplianceBuiltinIDs(platformSpec.BuiltinHooks.Actions)
+		implicitPlatformActions := map[string]struct{}{
+			"record_transition":  {},
+			"update_stage":       {},
+			"cancel_stage_timers": {},
+			"start_stage_timers": {},
+		}
 		errs := make([]string, 0, 16)
+		guardAliases := map[string]string{}
+		for id, entry := range registry.Guards {
+			if builtin := strings.TrimSpace(entry.PlatformBuiltin); builtin != "" {
+				if _, ok := builtinGuards[builtin]; !ok {
+					errs = append(errs, fmt.Sprintf("guard %s aliases unknown platform builtin %s", id, builtin))
+				}
+				if prev, ok := guardAliases[builtin]; ok && prev != id {
+					errs = append(errs, fmt.Sprintf("platform guard builtin %s is aliased by both %s and %s", builtin, prev, id))
+				} else {
+					guardAliases[builtin] = id
+				}
+			}
+		}
+		actionAliases := map[string]string{}
+		for id, entry := range registry.Actions {
+			if builtin := strings.TrimSpace(entry.PlatformBuiltin); builtin != "" {
+				if _, ok := builtinActions[builtin]; !ok {
+					errs = append(errs, fmt.Sprintf("action %s aliases unknown platform builtin %s", id, builtin))
+				}
+				if _, implicit := implicitPlatformActions[builtin]; implicit {
+					errs = append(errs, fmt.Sprintf("action %s aliases implicit platform action %s", id, builtin))
+				}
+				if prev, ok := actionAliases[builtin]; ok && prev != id {
+					errs = append(errs, fmt.Sprintf("platform action builtin %s is aliased by both %s and %s", builtin, prev, id))
+				} else {
+					actionAliases[builtin] = id
+				}
+			}
+		}
 		for _, tr := range workflow.Workflow.Transitions {
 			transitionID := strings.TrimSpace(tr.ID)
 			for _, guard := range tr.Guards {
@@ -618,6 +764,9 @@ func TestContractCompliance(t *testing.T) {
 					continue
 				}
 				if _, ok := registry.Guards[guard]; !ok {
+					if _, builtin := builtinGuards[guard]; builtin {
+						continue
+					}
 					errs = append(errs, fmt.Sprintf("transition %s references unknown guard %s", transitionID, guard))
 				}
 			}
@@ -627,29 +776,42 @@ func TestContractCompliance(t *testing.T) {
 					continue
 				}
 				if _, ok := registry.Actions[action]; !ok {
+					if _, builtin := builtinActions[action]; builtin {
+						if _, implicit := implicitPlatformActions[action]; implicit {
+							errs = append(errs, fmt.Sprintf("transition %s references implicit platform action %s", transitionID, action))
+						}
+						continue
+					}
 					errs = append(errs, fmt.Sprintf("transition %s references unknown action %s", transitionID, action))
 				}
 			}
 		}
 		if len(errs) > 0 {
-			t.Fatalf("gate11 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+			t.Fatalf("workflow_schema failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
 		}
 	})
 
-	t.Run("gate12_workflow_transition_nodes_exist", func(t *testing.T) {
+	t.Run("workflow_nodes", func(t *testing.T) {
 		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
 		validNodes := map[string]struct{}{
 			"runtime": {},
 			"human":   {},
 		}
+		participantTypes := map[string]string{
+			"runtime": "runtime",
+			"human":   "runtime",
+		}
 		for id, ag := range contractAgents {
 			validNodes[strings.TrimSpace(id)] = struct{}{}
+			participantTypes[strings.TrimSpace(id)] = "agent"
 			if role := strings.TrimSpace(ag.Role); role != "" {
 				validNodes[role] = struct{}{}
+				participantTypes[role] = "agent"
 			}
 		}
 		for id := range systemNodes {
 			validNodes[strings.TrimSpace(id)] = struct{}{}
+			participantTypes[strings.TrimSpace(id)] = "system_node"
 		}
 		errs := make([]string, 0, 16)
 		for _, tr := range workflow.Workflow.Transitions {
@@ -660,10 +822,129 @@ func TestContractCompliance(t *testing.T) {
 			}
 			if _, ok := validNodes[node]; !ok {
 				errs = append(errs, fmt.Sprintf("transition %s references unknown node %s", tr.ID, node))
+				continue
+			}
+			if participantType, ok := participantTypes[node]; !ok {
+				errs = append(errs, fmt.Sprintf("transition %s node %s has unknown participant type", tr.ID, node))
+			} else if _, allowed := platformSpec.Vocabulary.Participant.Types[participantType]; !allowed {
+				errs = append(errs, fmt.Sprintf("transition %s node %s resolves to unsupported participant type %s", tr.ID, node, participantType))
+			}
+		}
+		for _, timer := range workflow.Workflow.Timers {
+			owner := strings.TrimSpace(timer.Owner)
+			if owner == "" {
+				errs = append(errs, fmt.Sprintf("timer %s missing owner", timer.ID))
+				continue
+			}
+			if _, ok := validNodes[owner]; !ok {
+				errs = append(errs, fmt.Sprintf("timer %s references unknown owner %s", timer.ID, owner))
 			}
 		}
 		if len(errs) > 0 {
-			t.Fatalf("gate12 failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+			t.Fatalf("workflow_nodes failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+
+	t.Run("workflow_graph", func(t *testing.T) {
+		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
+		registry := contractComplianceLoadGuardActionRegistry(t, repoRoot)
+		stageIDs := map[string]struct{}{}
+		for _, stage := range workflow.Workflow.Stages {
+			if id := strings.TrimSpace(stage.ID); id != "" {
+				stageIDs[id] = struct{}{}
+			}
+		}
+		errs := make([]string, 0, 32)
+		initialStage := strings.TrimSpace(workflow.Workflow.InitialStage)
+		if _, ok := stageIDs[initialStage]; !ok {
+			errs = append(errs, fmt.Sprintf("initial_stage %s is not declared in workflow.stages", initialStage))
+		}
+		terminal := map[string]struct{}{}
+		for _, stageID := range workflow.Workflow.TerminalStages {
+			stageID = strings.TrimSpace(stageID)
+			if _, ok := stageIDs[stageID]; !ok {
+				errs = append(errs, fmt.Sprintf("terminal stage %s is not declared in workflow.stages", stageID))
+			}
+			terminal[stageID] = struct{}{}
+		}
+		outbound := map[string]int{}
+		adj := map[string][]string{}
+		validParticipants := map[string]struct{}{"runtime": {}, "human": {}}
+		for id := range systemNodes {
+			validParticipants[strings.TrimSpace(id)] = struct{}{}
+		}
+		for id, ag := range contractAgents {
+			validParticipants[strings.TrimSpace(id)] = struct{}{}
+			if role := strings.TrimSpace(ag.Role); role != "" {
+				validParticipants[role] = struct{}{}
+			}
+		}
+		for _, tr := range workflow.Workflow.Transitions {
+			to := strings.TrimSpace(tr.To)
+			if _, ok := stageIDs[to]; !ok {
+				errs = append(errs, fmt.Sprintf("transition %s references unknown to-stage %s", tr.ID, to))
+			}
+			for _, from := range contractComplianceWorkflowFromStages(tr.From) {
+				if from != "*" {
+					if _, ok := stageIDs[from]; !ok {
+						errs = append(errs, fmt.Sprintf("transition %s references unknown from-stage %s", tr.ID, from))
+						continue
+					}
+					outbound[from]++
+					if _, terminalStage := terminal[from]; terminalStage {
+						errs = append(errs, fmt.Sprintf("terminal stage %s has outgoing transition %s", from, tr.ID))
+					}
+					adj[from] = append(adj[from], to)
+				}
+			}
+			if _, ok := eventCatalog[strings.TrimSpace(tr.Trigger)]; !ok {
+				errs = append(errs, fmt.Sprintf("transition %s trigger %s missing from event catalog", tr.ID, tr.Trigger))
+			}
+			if _, ok := validParticipants[strings.TrimSpace(tr.Node)]; !ok {
+				errs = append(errs, fmt.Sprintf("transition %s node %s missing from participants", tr.ID, tr.Node))
+			} else if !contractComplianceTransitionNodeCanSeeTrigger(strings.TrimSpace(tr.Node), strings.TrimSpace(tr.Trigger), contractAgents, systemNodes, eventCatalog) {
+				errs = append(errs, fmt.Sprintf("transition %s node %s is neither subscribed to nor emitter of %s", tr.ID, tr.Node, tr.Trigger))
+			}
+			for _, actionID := range tr.Actions {
+				entry, ok := registry.Actions[strings.TrimSpace(actionID)]
+				if !ok {
+					continue
+				}
+				if emits := strings.TrimSpace(entry.Emits); emits != "" {
+					if _, ok := eventCatalog[emits]; !ok {
+						errs = append(errs, fmt.Sprintf("transition %s action %s emits missing catalog event %s", tr.ID, actionID, emits))
+					}
+				}
+			}
+		}
+		for _, stage := range workflow.Workflow.Stages {
+			id := strings.TrimSpace(stage.ID)
+			if id == "" || id == initialStage {
+				continue
+			}
+			if _, terminalStage := terminal[id]; terminalStage {
+				continue
+			}
+			if !contractComplianceStageReachable(initialStage, id, adj) {
+				errs = append(errs, fmt.Sprintf("stage %s is unreachable from initial stage %s", id, initialStage))
+			}
+			if outbound[id] == 0 {
+				errs = append(errs, fmt.Sprintf("non-terminal stage %s has no outbound transitions", id))
+			}
+		}
+		for _, timer := range workflow.Workflow.Timers {
+			stage := strings.TrimSpace(timer.Stage)
+			if stage != "" && stage != "*" {
+				if _, ok := stageIDs[stage]; !ok {
+					errs = append(errs, fmt.Sprintf("timer %s references unknown stage %s", timer.ID, stage))
+				}
+			}
+			if _, ok := eventCatalog[strings.TrimSpace(timer.Event)]; !ok {
+				errs = append(errs, fmt.Sprintf("timer %s event %s missing from event catalog", timer.ID, timer.Event))
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("workflow_graph failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 60))
 		}
 	})
 }
@@ -866,6 +1147,30 @@ func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) co
 	return out
 }
 
+func contractComplianceLoadPlatformSpec(t *testing.T, repoRoot string) contractCompliancePlatformSpec {
+	t.Helper()
+	path := filepath.Join(repoRoot, "contracts", "platform", "platform-spec.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var out contractCompliancePlatformSpec
+	if err := yaml.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return out
+}
+
+func contractComplianceBuiltinIDs(items []contractComplianceBuiltinHook) map[string]struct{} {
+	out := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if id := strings.TrimSpace(item.ID); id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	return out
+}
+
 func contractComplianceRequiredFields(raw any) []string {
 	arr, ok := raw.([]any)
 	if !ok {
@@ -970,6 +1275,107 @@ func contractComplianceBuildSchemaValue(schema map[string]any) (any, error) {
 	default:
 		return nil, fmt.Errorf("unsupported schema type %q", schema["type"])
 	}
+}
+
+func contractComplianceWorkflowFromStages(raw any) []string {
+	switch typed := raw.(type) {
+	case string:
+		if v := strings.TrimSpace(typed); v != "" {
+			return []string{v}
+		}
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s, ok := item.(string); ok {
+				if v := strings.TrimSpace(s); v != "" {
+					out = append(out, v)
+				}
+			}
+		}
+		return out
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if v := strings.TrimSpace(item); v != "" {
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func contractComplianceTransitionNodeCanSeeTrigger(node, trigger string, contractAgents map[string]contractComplianceAgent, systemNodes map[string]contractComplianceSystemNode, catalog map[string]contractComplianceCatalogEvent) bool {
+	if node == "" || trigger == "" {
+		return false
+	}
+	if node == "runtime" || node == "human" {
+		return true
+	}
+	if evt, ok := catalog[trigger]; ok {
+		emitter := strings.TrimSpace(evt.Emitter)
+		if emitter == node {
+			return true
+		}
+		if ag, ok := contractAgents[emitter]; ok {
+			if strings.TrimSpace(ag.Role) == node {
+				return true
+			}
+		}
+	}
+	if sn, ok := systemNodes[node]; ok {
+		for _, sub := range sn.SubscribesTo {
+			if strings.TrimSpace(sub) == trigger {
+				return true
+			}
+		}
+		return false
+	}
+	if ag, ok := contractAgents[node]; ok {
+		for _, sub := range append(append([]string{}, ag.Subscriptions...), append(ag.SubscriptionsBootstrap, ag.SubscribesTo...)...) {
+			if strings.TrimSpace(sub) == trigger {
+				return true
+			}
+		}
+		return false
+	}
+	for _, ag := range contractAgents {
+		if strings.TrimSpace(ag.Role) != node {
+			continue
+		}
+		for _, sub := range append(append([]string{}, ag.Subscriptions...), append(ag.SubscriptionsBootstrap, ag.SubscribesTo...)...) {
+			if strings.TrimSpace(sub) == trigger {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func contractComplianceStageReachable(initial, target string, adj map[string][]string) bool {
+	if initial == "" || target == "" {
+		return false
+	}
+	if initial == target {
+		return true
+	}
+	seen := map[string]struct{}{initial: {}}
+	queue := []string{initial}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, next := range adj[cur] {
+			if _, ok := seen[next]; ok {
+				continue
+			}
+			if next == target {
+				return true
+			}
+			seen[next] = struct{}{}
+			queue = append(queue, next)
+		}
+	}
+	return false
 }
 
 func contractComplianceConfigPathForAgent(id string, cfgMap contractComplianceAgentConfigMap) (string, bool) {

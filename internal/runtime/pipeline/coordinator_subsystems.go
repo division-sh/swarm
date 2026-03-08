@@ -6,6 +6,7 @@ type ScanCoordinator struct {
 	scans        map[string]*scanAccumulator
 	pendingDedup map[string]pendingCandidate
 	runtime      scanWorkflowRuntime
+	discovery    DiscoveryPolicy
 	payloadFactory *PipelinePayloadFactory
 	mu           *sync.Mutex
 }
@@ -20,6 +21,7 @@ func NewScanCoordinator() *ScanCoordinator {
 type ScoringState struct {
 	accumulators map[string]*scoringAccumulator
 	runtime      scoringWorkflowRuntime
+	scoring      ScoringPolicy
 	payloadFactory *PipelinePayloadFactory
 	mu           *sync.Mutex
 }

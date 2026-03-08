@@ -14,7 +14,21 @@ import (
 )
 
 func ExpectedScoringDimensionsForTest(rubric string) []string {
-	return expectedScoringDimensions(rubric)
+	module := defaultWorkflowModuleFactory()
+	return module.ScoringPolicy().ExpectedScoringDimensions(rubric)
+}
+
+func (ss *ScoringState) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
+	return ss.scoring.ComputeComposite(scoringAccumulatorInput{
+		Rubric:   acc.Rubric,
+		Expected: append([]string{}, acc.Expected...),
+		Received: acc.Received,
+		Partial:  partial,
+	})
+}
+
+func (pc *FactoryPipelineCoordinator) computeComposite(acc *scoringAccumulator, partial bool) scoringComposite {
+	return pc.scoringState.computeComposite(acc, partial)
 }
 
 func clampScore100(v int) int {
@@ -113,8 +127,8 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	if mode == "" {
 		mode = "saas_gap"
 	}
-	rubric := selectScoringRubric(mode)
-	expected := expectedScoringDimensions(rubric)
+	rubric := pc.scoringState.scoring.SelectScoringRubric(mode)
+	expected := pc.scoringState.scoring.ExpectedScoringDimensions(rubric)
 	if len(expected) == 0 {
 		return
 	}
@@ -141,9 +155,9 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	discoveryContext, _ := asObject(payload["discovery_context"])
 	discoveryContext = cloneMap(discoveryContext)
 	if len(discoveryContext) == 0 {
-		discoveryContext = buildDiscoveryContextPayload(payload)
+		discoveryContext = pc.scoringState.scoring.BuildDiscoveryContextPayload(payload)
 	}
-	geographicScope := normalizeGeographicScope(asString(payload["geographic_scope"]))
+	geographicScope := pc.scoringState.scoring.NormalizeGeographicScope(asString(payload["geographic_scope"]))
 	pc.mu.Lock()
 	acc := &scoringAccumulator{
 		VerticalID:       verticalID,
@@ -230,7 +244,7 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 		// Keep compatibility with emit payloads using integer encoding.
 		signal = float64(intFromAny(payload["signal_strength"]))
 	}
-	allowed, adjustedSignal, reason := evaluateDiscoveryPreFilter(payload, signal)
+	allowed, adjustedSignal, reason := pc.discoveryPolicy.EvaluateDiscoveryPreFilter(payload, signal)
 	if !allowed {
 		runtimeWarn("scoring-node", "dropping vertical.derived prefilter reject parent=%s reason=%s", parentID, reason)
 		return
@@ -295,6 +309,41 @@ func (pc *FactoryPipelineCoordinator) countDerivedChildren(ctx context.Context, 
 	return count, nil
 }
 
+func (pc *FactoryPipelineCoordinator) updateScoredVerticalState(ctx context.Context, verticalID, stage string, payload map[string]any, reason string) {
+	if pc == nil {
+		return
+	}
+	pc.updateVerticalStage(ctx, verticalID, stage, "vertical.scored")
+}
+
+func (pc *FactoryPipelineCoordinator) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scoringState == nil {
+		return
+	}
+	pc.scoringState.handleScoreDimensionComplete(ctx, evt)
+}
+
+func (pc *FactoryPipelineCoordinator) handleScoringContestResolved(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scoringState == nil {
+		return
+	}
+	pc.scoringState.handleScoringContestResolved(ctx, evt)
+}
+
+func (pc *FactoryPipelineCoordinator) finalizeScoringAccumulator(ctx context.Context, verticalID string, partial bool) {
+	if pc == nil || pc.scoringState == nil {
+		return
+	}
+	pc.scoringState.finalizeScoringAccumulator(ctx, verticalID, partial)
+}
+
+func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, now time.Time) {
+	if pc == nil || pc.scoringState == nil {
+		return
+	}
+	pc.scoringState.checkTimeouts(ctx, now)
+}
+
 func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
 	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
@@ -315,7 +364,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 		acc = &scoringAccumulator{
 			VerticalID:      verticalID,
 			Rubric:          "universal",
-			Expected:        expectedScoringDimensions("universal"),
+			Expected:        ss.scoring.ExpectedScoringDimensions("universal"),
 			Received:        map[string]scoreDimensionResult{},
 			Contested:       map[string]contestedDimension{},
 			ContestNotified: map[string]bool{},
@@ -328,8 +377,8 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 		if acc.Mode == "" {
 			acc.Mode = "saas_gap"
 		}
-		acc.Rubric = selectScoringRubric(acc.Mode)
-		acc.Expected = expectedScoringDimensions(acc.Rubric)
+		acc.Rubric = ss.scoring.SelectScoringRubric(acc.Mode)
+		acc.Expected = ss.scoring.ExpectedScoringDimensions(acc.Rubric)
 		ss.accumulators[verticalID] = acc
 	}
 	if acc.LastUpdatedAt.IsZero() {

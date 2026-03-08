@@ -62,7 +62,6 @@ workflow:
     description: Sunset in progress
   terminal_stages:
   - killed
-  - winding_down
   transitions:
   - id: discovered_to_scoring
     from: discovered

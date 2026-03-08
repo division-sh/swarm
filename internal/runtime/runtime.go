@@ -17,6 +17,7 @@ import (
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -105,6 +106,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Pipeline = runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.FactoryPipelineCoordinatorOptions{
 			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding),
+			Module:       empirepipeline.NewModule(),
 		})
 		if rt.Pipeline != nil {
 			rt.ScoringNode = runtimepipeline.NewScoringNode(rt.Bus, rt.Pipeline, stores.SQLDB)

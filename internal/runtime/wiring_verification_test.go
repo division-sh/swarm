@@ -1557,17 +1557,22 @@ func parsePipelineInterceptorCoverage(pipelinePath string) (map[string]struct{},
 		collectMapStringKeys(fn.Body, interceptEvents)
 	}
 
-	workflowExecutorsPath := filepath.Join(filepath.Dir(pipelinePath), "workflow_nodes_runtime.go")
-	workflowExecutorsFile, err := parser.ParseFile(fset, workflowExecutorsPath, nil, 0)
+	workflowRuntimePaths, err := filepath.Glob(filepath.Join(filepath.Dir(pipelinePath), "workflow_node*.go"))
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	for _, decl := range workflowExecutorsFile.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil || fn.Name == nil || fn.Name.Name != "Handle" {
-			continue
+	for _, runtimePath := range workflowRuntimePaths {
+		workflowExecutorsFile, err := parser.ParseFile(fset, runtimePath, nil, 0)
+		if err != nil {
+			return nil, nil, nil, err
 		}
-		collectSwitchCases(fn.Body, handleEvents, handlerByEvent)
+		for _, decl := range workflowExecutorsFile.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Name == nil || fn.Name.Name != "Handle" {
+				continue
+			}
+			collectSwitchCases(fn.Body, handleEvents, handlerByEvent)
+		}
 	}
 
 	return interceptEvents, handleEvents, handlerByEvent, nil

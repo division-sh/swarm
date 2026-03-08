@@ -18,6 +18,7 @@ import (
 	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -281,7 +282,7 @@ func TestDashboardServer_ControlRuntime_ResetDB_ClearsPipelineInMemoryState(t *t
 	}
 
 	bus := rt.NewEventBus(runtimebus.InMemoryEventStore{})
-	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(bus, db, runtimepipeline.FactoryPipelineCoordinatorOptions{Module: empirepipeline.NewModule()})
 	bus.SetInterceptors(pc)
 
 	manager := runtimemanager.NewAgentManager(bus, func(cfg models.AgentConfig) (runtimemanager.Agent, error) {

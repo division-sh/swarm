@@ -139,9 +139,9 @@ func checkOpCoOrgCreation13Agents(t *testing.T) {
 
 func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 	routes := runtimemanager.DefaultOpCoRoutes("v1")
-	if len(routes) != 20 {
-		t.Fatalf("expected 20 default opco routes, got %d", len(routes))
-	}
+		if len(routes) != 21 {
+			t.Fatalf("expected 21 default opco routes, got %d", len(routes))
+		}
 	bootstrap := 0
 	seeded := 0
 	for _, rt := range routes {
@@ -152,8 +152,8 @@ func checkOpCoRoutesAndTemplateVersion(t *testing.T) {
 			seeded++
 		}
 	}
-	if bootstrap != 20 || seeded != 0 {
-		t.Fatalf("expected bootstrap=20 and seeded=0 routes, got bootstrap=%d seeded=%d", bootstrap, seeded)
+	if bootstrap != 21 || seeded != 0 {
+		t.Fatalf("expected bootstrap=21 and seeded=0 routes, got bootstrap=%d seeded=%d", bootstrap, seeded)
 	}
 
 	bus := NewEventBus(runtimebus.InMemoryEventStore{})

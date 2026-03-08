@@ -155,7 +155,7 @@ func TestHandler_scoring_node_scoring_contest_resolved(t *testing.T) {
 	pc.scoringState.accumulators[verticalID] = &scoringAccumulator{
 		VerticalID: verticalID,
 		Rubric:     "universal",
-		Expected:   expectedScoringDimensions("universal"),
+		Expected:   ExpectedScoringDimensionsForTest("universal"),
 		Received:   map[string]scoreDimensionResult{},
 		Contested: map[string]contestedDimension{
 			"competition_gap": {

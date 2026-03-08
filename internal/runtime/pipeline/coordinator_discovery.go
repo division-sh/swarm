@@ -119,7 +119,7 @@ func (pc *FactoryPipelineCoordinator) logPrefilterSkip(ctx context.Context, evt 
 		AgentID:    strings.TrimSpace(evt.SourceAgent),
 		CampaignID: strings.TrimSpace(campaignID),
 		ScanID:     strings.TrimSpace(scanID),
-		Detail:     buildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode),
+		Detail:     pc.discoveryPolicy.BuildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode),
 	})
 }
 
@@ -135,11 +135,13 @@ func cloneMap(in map[string]any) map[string]any {
 }
 
 func EvaluateDiscoveryPreFilterForTest(payload map[string]any, rawSignal float64) (bool, float64, string) {
-	return evaluateDiscoveryPreFilter(payload, rawSignal)
+	module := defaultWorkflowModuleFactory()
+	return module.DiscoveryPolicy().EvaluateDiscoveryPreFilter(payload, rawSignal)
 }
 
 func BuildPrefilterSkipDetailForTest(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
-	return buildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
+	module := defaultWorkflowModuleFactory()
+	return module.DiscoveryPolicy().BuildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
 }
 
 func CloneMapForTest(in map[string]any) map[string]any {
@@ -154,7 +156,7 @@ func (sc *ScanCoordinator) processDiscoveryCandidate(
 	candidate discoveryCandidate,
 ) {
 	signal := candidate.Signal
-	allowed, adjustedSignal, reason := evaluateDiscoveryPreFilter(candidate.Payload, signal)
+	allowed, adjustedSignal, reason := sc.discovery.EvaluateDiscoveryPreFilter(candidate.Payload, signal)
 	if !allowed {
 		sc.runtime.logPrefilterSkip(ctx, evt, scanID, acc.CampaignID, reason, candidate.Mode, candidate.Payload, signal, adjustedSignal)
 		sc.mu.Lock()
@@ -380,7 +382,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 	if discoveryMode == "" {
 		discoveryMode = "saas_gap"
 	}
-	opportunityPattern := normalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
+	opportunityPattern := pc.discoveryPolicy.NormalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
 	if opportunityPattern == "" {
 		opportunityPattern = "unknown"
 	}

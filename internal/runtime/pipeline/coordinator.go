@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	empirepipeline "empireai/internal/runtime/pipeline/empire"
 )
 
 const (
@@ -62,6 +61,9 @@ type FactoryPipelineCoordinator struct {
 	scanCoordinator *ScanCoordinator
 	scoringState    *ScoringState
 	validationGate  *ValidationGate
+	discoveryPolicy DiscoveryPolicy
+	scoringPolicy   ScoringPolicy
+	payloads        PayloadFactory
 	processed       map[string]struct{}
 	stateStore      *PipelineStateStore
 	stateLoaded     bool
@@ -84,14 +86,57 @@ type FactoryPipelineCoordinator struct {
 
 type FactoryPipelineCoordinatorOptions struct {
 	ShardPlanner *ShardPlanner
+	Module       WorkflowModule
 }
 
 func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryPipelineCoordinatorOptions) *FactoryPipelineCoordinator {
-	pc := NewFactoryPipelineCoordinator(bus, db)
-	if pc == nil {
+	if bus == nil {
 		return nil
 	}
-	pc.shardPlanner = opts.ShardPlanner
+	module := opts.Module
+	if module == nil && defaultWorkflowModuleFactory != nil {
+		module = defaultWorkflowModuleFactory()
+	}
+	if module == nil {
+		panic("pipeline: workflow module is required; pass FactoryPipelineCoordinatorOptions.Module")
+	}
+	discoveryPolicy := module.DiscoveryPolicy()
+	scoringPolicy := module.ScoringPolicy()
+	payloads := module.PayloadFactory()
+	pc := &FactoryPipelineCoordinator{
+		bus:             bus,
+		db:              db,
+		scanCoordinator: NewScanCoordinator(),
+		scoringState:    NewScoringState(),
+		validationGate:  NewValidationGate(),
+		discoveryPolicy: discoveryPolicy,
+		scoringPolicy:   scoringPolicy,
+		payloads:        payloads,
+		processed:       make(map[string]struct{}),
+		shardPlanner:    opts.ShardPlanner,
+	}
+	pc.stateStore = NewPipelineStateStore(db, &pc.mu)
+	pc.scanCoordinator.runtime = pc
+	pc.scanCoordinator.discovery = discoveryPolicy
+	pc.scoringState.runtime = pc
+	pc.scoringState.scoring = scoringPolicy
+	pc.validationGate.runtime = pc
+	pc.payloadFactory = NewPipelinePayloadFactory(payloads, scoringPolicy, pc)
+	pc.scanCoordinator.payloadFactory = pc.payloadFactory
+	pc.scoringState.payloadFactory = pc.payloadFactory
+	pc.validationGate.payloadFactory = pc.payloadFactory
+	pc.scanCoordinator.mu = &pc.mu
+	pc.scoringState.mu = &pc.mu
+	pc.validationGate.mu = &pc.mu
+	if db != nil {
+		ctx := context.Background()
+		pc.statePersistenceEnabled = detectStatePersistence(ctx, db)
+		pc.statePersistenceChecked = true
+		pc.shardsTableEnabled = detectShardsTable(ctx, db)
+		pc.shardsTableChecked = true
+		pc.scoringDigestBufferEnabled = detectScoringDigestBuffer(ctx, db)
+		pc.scoringDigestBufferChecked = true
+	}
 	return pc
 }
 
@@ -142,10 +187,6 @@ type scanAccumulator struct {
 	Skipped     int
 	CreatedAt   time.Time
 }
-
-type scoreDimensionResult = empirepipeline.ScoreDimensionResult
-
-type contestedDimension = empirepipeline.ContestedDimension
 
 type scoringAccumulator struct {
 	VerticalID       string
@@ -206,20 +247,6 @@ type DedupCandidatePayload struct {
 	ID             string  `json:"id,omitempty"`
 }
 
-type ValidationStartedPayload = empirepipeline.ValidationStartedPayload
-type BrandRequestedPayload = empirepipeline.BrandRequestedPayload
-type ValidationPackageReadyPayload = empirepipeline.ValidationPackageReadyPayload
-type SpecValidationRequestedPayload = empirepipeline.SpecValidationRequestedPayload
-type CTOSpecReviewRequestedPayload = empirepipeline.CTOSpecReviewRequestedPayload
-type SpecRevisionRequestedPayload = empirepipeline.SpecRevisionRequestedPayload
-type ValidationMoreDataNeededPayload = empirepipeline.ValidationMoreDataNeededPayload
-type BrandRevisionNeededPayload = empirepipeline.BrandRevisionNeededPayload
-type VerticalKilledPayload = empirepipeline.VerticalKilledPayload
-type ScanAssignedPayload = empirepipeline.ScanAssignedPayload
-type SynthesisNeededPayload = empirepipeline.SynthesisNeededPayload
-type DedupAmbiguousPayload = empirepipeline.DedupAmbiguousPayload
-type VerticalDiscoveredPayload = empirepipeline.VerticalDiscoveredPayload
-
 type VerticalDerivedPayload struct {
 	OpportunityID         string         `json:"opportunity_id,omitempty"`
 	ParentID              string         `json:"parent_id"`
@@ -241,50 +268,8 @@ type VerticalDerivedPayload struct {
 	RequiredCapabilities  any            `json:"required_capabilities,omitempty"`
 }
 
-type ScanCompletedPayload = empirepipeline.ScanCompletedPayload
-type ScoringRequestedPayload = empirepipeline.ScoringRequestedPayload
-type ScoringContestedPayload = empirepipeline.ScoringContestedPayload
-type VerticalScoredPayload = empirepipeline.VerticalScoredPayload
-type VerticalShortlistedPayload = empirepipeline.VerticalShortlistedPayload
-type VerticalMarginalPayload = empirepipeline.VerticalMarginalPayload
-type VerticalRejectedPayload = empirepipeline.VerticalRejectedPayload
-type PortfolioDigestTimerPayload = empirepipeline.PortfolioDigestTimerPayload
-type validationContextSnapshot = empirepipeline.ValidationContextSnapshot
-type scanCompletedBuildInput = empirepipeline.ScanCompletedBuildInput
-
 func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordinator {
-	if bus == nil {
-		return nil
-	}
-	pc := &FactoryPipelineCoordinator{
-		bus:             bus,
-		db:              db,
-		scanCoordinator: NewScanCoordinator(),
-		scoringState:    NewScoringState(),
-		validationGate:  NewValidationGate(),
-		processed:       make(map[string]struct{}),
-	}
-	pc.stateStore = NewPipelineStateStore(db, &pc.mu)
-	pc.scanCoordinator.runtime = pc
-	pc.scoringState.runtime = pc
-	pc.validationGate.runtime = pc
-	pc.payloadFactory = NewPipelinePayloadFactory(pc)
-	pc.scanCoordinator.payloadFactory = pc.payloadFactory
-	pc.scoringState.payloadFactory = pc.payloadFactory
-	pc.validationGate.payloadFactory = pc.payloadFactory
-	pc.scanCoordinator.mu = &pc.mu
-	pc.scoringState.mu = &pc.mu
-	pc.validationGate.mu = &pc.mu
-	if db != nil {
-		ctx := context.Background()
-		pc.statePersistenceEnabled = detectStatePersistence(ctx, db)
-		pc.statePersistenceChecked = true
-		pc.shardsTableEnabled = detectShardsTable(ctx, db)
-		pc.shardsTableChecked = true
-		pc.scoringDigestBufferEnabled = detectScoringDigestBuffer(ctx, db)
-		pc.scoringDigestBufferChecked = true
-	}
-	return pc
+	return NewFactoryPipelineCoordinatorWithOptions(bus, db, FactoryPipelineCoordinatorOptions{})
 }
 
 func (pc *FactoryPipelineCoordinator) SetShardPlanner(planner *ShardPlanner) {

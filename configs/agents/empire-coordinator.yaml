@@ -10,6 +10,7 @@ subscriptions:
   - campaign.completed
   - vertical.scored
   - vertical.marginal
+  - vertical.rejected
   - scoring.contested
   - vertical.approved
   - vertical.killed

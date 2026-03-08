@@ -475,7 +475,7 @@ func runPrefilterContractVectorChecks(t *testing.T, repoRoot string) {
 		tc := tc
 		t.Run(tc.Name, func(t *testing.T) {
 			payload := buildPrefilterFixturePayload(tc)
-			ok, _, reason := evaluateDiscoveryPreFilter(payload, tc.Input.SignalStrength)
+			ok, _, reason := EvaluateDiscoveryPreFilterForTest(payload, tc.Input.SignalStrength)
 			switch strings.ToLower(strings.TrimSpace(tc.Expected)) {
 			case "pass":
 				if !ok {

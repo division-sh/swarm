@@ -47,13 +47,6 @@ var rubricGates = map[string][]scoringHardGate{
 	},
 }
 
-type ScoringAccumulatorInput struct {
-	Rubric   string
-	Expected []string
-	Received map[string]ScoreDimensionResult
-	Partial  bool
-}
-
 func ExpectedScoringDimensions(rubric string) []string {
 	dims := rubricDimensions[strings.TrimSpace(rubric)]
 	if len(dims) == 0 {

@@ -16,6 +16,7 @@ import (
 	runtimeagents "empireai/internal/runtime/agents"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -127,7 +128,7 @@ func startE2EScenarioRig(t *testing.T, sc cannedE2EScenario, withScheduler bool)
 	eventStore := &postgresEventStore{db: db}
 	bus := NewEventBus(eventStore)
 	bus.SetRuntimeLogger(NewRuntimeLogger(db))
-	pc := runtimepipeline.NewFactoryPipelineCoordinator(bus, db)
+	pc := runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(bus, db, runtimepipeline.FactoryPipelineCoordinatorOptions{Module: empirepipeline.NewModule()})
 	bus.SetInterceptors(pc)
 
 	fixtures := make(map[string]cannedRoleFixture, len(sc.Agents))

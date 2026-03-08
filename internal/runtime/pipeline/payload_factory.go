@@ -4,16 +4,16 @@ import (
 	"context"
 	"log"
 	"strings"
-
-	empirepipeline "empireai/internal/runtime/pipeline/empire"
 )
 
 type PipelinePayloadFactory struct {
+	module      PayloadFactory
+	scoring     ScoringPolicy
 	coordinator *FactoryPipelineCoordinator
 }
 
-func NewPipelinePayloadFactory(coordinator *FactoryPipelineCoordinator) *PipelinePayloadFactory {
-	return &PipelinePayloadFactory{coordinator: coordinator}
+func NewPipelinePayloadFactory(module PayloadFactory, scoring ScoringPolicy, coordinator *FactoryPipelineCoordinator) *PipelinePayloadFactory {
+	return &PipelinePayloadFactory{module: module, scoring: scoring, coordinator: coordinator}
 }
 
 func (pf *PipelinePayloadFactory) ValidationContext(verticalID string) validationContextSnapshot {
@@ -53,7 +53,7 @@ func (pf *PipelinePayloadFactory) BuildScanAssignedPayload(
 	source map[string]any,
 	plannedShards int,
 ) ScanAssignedPayload {
-	return empirepipeline.BuildScanAssignedPayload(scanID, campaignID, mode, geography, source, plannedShards)
+	return pf.module.BuildScanAssignedPayload(scanID, campaignID, mode, geography, source, plannedShards)
 }
 
 func (pf *PipelinePayloadFactory) BuildSynthesisNeededPayload(scanID string, acc *scanAccumulator, raw map[string]any) SynthesisNeededPayload {
@@ -63,7 +63,7 @@ func (pf *PipelinePayloadFactory) BuildSynthesisNeededPayload(scanID string, acc
 		mode = acc.Mode
 		geography = acc.Geography
 	}
-	out := empirepipeline.BuildSynthesisNeededPayload(scanID, campaignID, mode, geography, raw)
+	out := pf.module.BuildSynthesisNeededPayload(scanID, campaignID, mode, geography, raw)
 	if acc != nil {
 		out.Geography = firstNonEmptyString(strings.TrimSpace(out.Geography), strings.TrimSpace(acc.Geography))
 	}
@@ -77,7 +77,7 @@ func (pf *PipelinePayloadFactory) BuildDedupAmbiguousPayload(
 	signal float64,
 	existingID, existingName string,
 ) DedupAmbiguousPayload {
-	return empirepipeline.BuildDedupAmbiguousPayload(scanID, dedupEventID, similarity, candidateName, geography, signal, existingID, existingName)
+	return pf.module.BuildDedupAmbiguousPayload(scanID, dedupEventID, similarity, candidateName, geography, signal, existingID, existingName)
 }
 
 func (pf *PipelinePayloadFactory) BuildVerticalDiscoveredPayload(
@@ -86,18 +86,18 @@ func (pf *PipelinePayloadFactory) BuildVerticalDiscoveredPayload(
 	discoverySource string,
 	rawSignals map[string]any,
 ) VerticalDiscoveredPayload {
-	return empirepipeline.BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID, signal, discoverySource, rawSignals)
+	return pf.module.BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID, signal, discoverySource, rawSignals)
 }
 
 func (pf *PipelinePayloadFactory) BuildScanCompletedPayload(in scanCompletedBuildInput) ScanCompletedPayload {
-	return empirepipeline.BuildScanCompletedPayload(in)
+	return pf.module.BuildScanCompletedPayload(in)
 }
 
 func (pf *PipelinePayloadFactory) BuildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) ScoringRequestedPayload {
 	if acc == nil {
-		return empirepipeline.BuildScoringRequestedPayload(strings.TrimSpace(verticalID), "", "", "", "", nil, nil)
+		return pf.module.BuildScoringRequestedPayload(strings.TrimSpace(verticalID), "", "", "", "", nil, nil)
 	}
-	return empirepipeline.BuildScoringRequestedPayload(
+	return pf.module.BuildScoringRequestedPayload(
 		strings.TrimSpace(verticalID),
 		acc.VerticalName,
 		acc.Geography,
@@ -155,7 +155,7 @@ func (pf *PipelinePayloadFactory) SelectScoringAnalysisRecipient(excludedAgent s
 	if pf == nil || pf.coordinator == nil || pf.coordinator.bus == nil {
 		return ""
 	}
-	return empirepipeline.ResolveScoringAnalysisRecipient(
+	return pf.scoring.ResolveScoringAnalysisRecipient(
 		uniqueStrings(pf.coordinator.bus.ResolveSubscribedRecipients("scoring.requested")),
 		excludedAgent,
 	)
@@ -167,7 +167,7 @@ func (pf *PipelinePayloadFactory) BuildScoringContestedPayload(verticalID, dimen
 		rubric = acc.Rubric
 		mode = acc.Mode
 	}
-	return empirepipeline.BuildScoringContestedPayload(verticalID, dimension, contest, rubric, mode)
+	return pf.module.BuildScoringContestedPayload(verticalID, dimension, contest, rubric, mode)
 }
 
 func (pf *PipelinePayloadFactory) BuildVerticalScoredPayload(verticalID string, result scoringComposite, acc *scoringAccumulator) VerticalScoredPayload {
@@ -177,60 +177,60 @@ func (pf *PipelinePayloadFactory) BuildVerticalScoredPayload(verticalID string, 
 		geography = acc.Geography
 		mode = acc.Mode
 	}
-	return empirepipeline.BuildVerticalScoredPayload(verticalID, result, verticalName, geography, mode)
+	return pf.module.BuildVerticalScoredPayload(verticalID, result, verticalName, geography, mode)
 }
 
 func (pf *PipelinePayloadFactory) BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload {
-	return empirepipeline.BuildVerticalShortlistedPayload(verticalID, composite, viability, scoringPayload)
+	return pf.module.BuildVerticalShortlistedPayload(verticalID, composite, viability, scoringPayload)
 }
 
 func (pf *PipelinePayloadFactory) BuildVerticalMarginalPayload(verticalID string, result scoringComposite) VerticalMarginalPayload {
-	return empirepipeline.BuildVerticalMarginalPayload(verticalID, result)
+	return pf.module.BuildVerticalMarginalPayload(verticalID, result)
 }
 
 func (pf *PipelinePayloadFactory) BuildVerticalRejectedPayload(verticalID string, result scoringComposite) VerticalRejectedPayload {
-	return empirepipeline.BuildVerticalRejectedPayload(verticalID, result)
+	return pf.module.BuildVerticalRejectedPayload(verticalID, result)
 }
 
 func (pf *PipelinePayloadFactory) BuildBrandRequestedPayload(ctx context.Context, verticalID string, scoring map[string]any, brief map[string]any) BrandRequestedPayload {
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildBrandRequestedPayload(verticalID, name, geography, scoring, brief)
+	return pf.module.BuildBrandRequestedPayload(verticalID, name, geography, scoring, brief)
 }
 
 func (pf *PipelinePayloadFactory) BuildValidationPackageReadyPayload(ctx context.Context, verticalID string, snap validationContextSnapshot) ValidationPackageReadyPayload {
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildValidationPackageReadyPayload(verticalID, name, geography, snap)
+	return pf.module.BuildValidationPackageReadyPayload(verticalID, name, geography, snap)
 }
 
 func (pf *PipelinePayloadFactory) BuildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any) SpecValidationRequestedPayload {
-	return empirepipeline.BuildSpecValidationRequestedPayload(verticalID, spec)
+	return pf.module.BuildSpecValidationRequestedPayload(verticalID, spec)
 }
 
 func (pf *PipelinePayloadFactory) BuildCTOSpecReviewRequestedPayload(ctx context.Context, verticalID string, specValidation map[string]any) CTOSpecReviewRequestedPayload {
 	snap := pf.ValidationContext(verticalID)
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildCTOSpecReviewRequestedPayload(verticalID, name, geography, specValidation, snap)
+	return pf.module.BuildCTOSpecReviewRequestedPayload(verticalID, name, geography, specValidation, snap)
 }
 
 func (pf *PipelinePayloadFactory) BuildSpecRevisionRequestedPayload(ctx context.Context, verticalID, source string, feedback map[string]any) SpecRevisionRequestedPayload {
 	snap := pf.ValidationContext(verticalID)
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildSpecRevisionRequestedPayload(verticalID, source, name, geography, feedback, snap)
+	return pf.module.BuildSpecRevisionRequestedPayload(verticalID, source, name, geography, feedback, snap)
 }
 
 func (pf *PipelinePayloadFactory) BuildValidationMoreDataPayload(ctx context.Context, verticalID string, request map[string]any, snap validationContextSnapshot) ValidationMoreDataNeededPayload {
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildValidationMoreDataPayload(verticalID, name, geography, request, snap)
+	return pf.module.BuildValidationMoreDataPayload(verticalID, name, geography, request, snap)
 }
 
 func (pf *PipelinePayloadFactory) BuildBrandRevisionNeededPayload(ctx context.Context, verticalID string, feedback map[string]any, brand map[string]any) BrandRevisionNeededPayload {
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildBrandRevisionNeededPayload(verticalID, name, geography, feedback, brand)
+	return pf.module.BuildBrandRevisionNeededPayload(verticalID, name, geography, feedback, brand)
 }
 
 func (pf *PipelinePayloadFactory) BuildVerticalKilledPayload(ctx context.Context, verticalID, sourceEvent string, reason map[string]any) VerticalKilledPayload {
 	name, geography := pf.identityForPayload(ctx, verticalID)
-	return empirepipeline.BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent, reason)
+	return pf.module.BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent, reason)
 }
 
 func (pf *PipelinePayloadFactory) BuildValidationStartedPayload(ctx context.Context, verticalID string, scoring map[string]any, seed map[string]any) ValidationStartedPayload {
@@ -255,17 +255,5 @@ func (pf *PipelinePayloadFactory) BuildValidationStartedPayload(ctx context.Cont
 			geography = dbGeography
 		}
 	}
-	return empirepipeline.BuildValidationStartedPayload(verticalID, name, geography, scoring)
-}
-
-func buildDiscoveryContextPayload(raw map[string]any) map[string]any {
-	return empirepipeline.BuildDiscoveryContextPayload(raw)
-}
-
-func normalizeOpportunityPattern(raw string) string {
-	return empirepipeline.NormalizeOpportunityPattern(raw)
-}
-
-func normalizeGeographicScope(raw string) string {
-	return empirepipeline.NormalizeGeographicScope(raw)
+	return pf.module.BuildValidationStartedPayload(verticalID, name, geography, scoring)
 }
