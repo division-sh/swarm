@@ -1,0 +1,134 @@
+diff --git a/internal/runtime/pipeline/coordinator_state.go b/internal/runtime/pipeline/coordinator_state.go
+index becef67..b52258b 100644
+--- a/internal/runtime/pipeline/coordinator_state.go
++++ b/internal/runtime/pipeline/coordinator_state.go
+@@ -22,47 +22,67 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
+ 	if loaded {
+ 		return
+ 	}
+-	workflowValidations := map[string]*validationPipelineState{}
+-	workflowScoring := map[string]*scoringAccumulator{}
+-	workflowStages := map[string]string{}
+-	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+-		if instances, err := pc.workflowStore.List(ctx); err == nil {
+-			for _, instance := range instances {
+-				if st, ok := restoreValidationStateFromInstance(instance); ok {
+-					workflowValidations[strings.TrimSpace(instance.InstanceID)] = st
+-				}
+-				if acc, ok := restoreScoringAccumulatorFromInstance(instance); ok {
+-					workflowScoring[strings.TrimSpace(instance.InstanceID)] = acc
+-				}
+-				if verticalID := strings.TrimSpace(instance.InstanceID); verticalID != "" {
+-					workflowStages[verticalID] = strings.TrimSpace(instance.CurrentStage)
+-				}
+-			}
+-		}
+-	}
+ 	snapshot := pc.stateStore.Load(ctx)
++	workflowProjection := pc.workflowRuntimeProjectionSnapshot(ctx)
+ 
+ 	pc.mu.Lock()
+ 	if pc.stateLoaded {
+ 		pc.mu.Unlock()
+ 		return
+ 	}
+-	if len(snapshot.Scans) > 0 {
+-		pc.scanCoordinator.scans = snapshot.Scans
++	if pc.scanCoordinator.scans == nil {
++		pc.scanCoordinator.scans = make(map[string]*scanAccumulator)
++	}
++	for scanID, acc := range workflowProjection.Scans {
++		if acc != nil {
++			pc.scanCoordinator.scans[scanID] = acc
++		}
++	}
++	for scanID, acc := range snapshot.Scans {
++		if acc == nil {
++			continue
++		}
++		if _, ok := pc.scanCoordinator.scans[scanID]; ok {
++			continue
++		}
++		pc.scanCoordinator.scans[scanID] = acc
+ 	}
+ 	if pc.scoringState.accumulators == nil {
+ 		pc.scoringState.accumulators = make(map[string]*scoringAccumulator)
+ 	}
+-	for verticalID, acc := range workflowScoring {
+-		pc.scoringState.accumulators[verticalID] = acc
++	for verticalID, acc := range workflowProjection.Scoring {
++		if acc != nil {
++			pc.scoringState.accumulators[verticalID] = acc
++		}
++	}
++	if pc.scanCoordinator.pendingDedup == nil {
++		pc.scanCoordinator.pendingDedup = make(map[string]pendingCandidate)
+ 	}
+-	if len(snapshot.PendingDedup) > 0 {
+-		pc.scanCoordinator.pendingDedup = snapshot.PendingDedup
++	for dedupEventID, cand := range workflowProjection.PendingDedup {
++		pc.scanCoordinator.pendingDedup[dedupEventID] = cand
++	}
++	for dedupEventID, cand := range snapshot.PendingDedup {
++		if _, ok := pc.scanCoordinator.pendingDedup[dedupEventID]; ok {
++			continue
++		}
++		pc.scanCoordinator.pendingDedup[dedupEventID] = cand
+ 	}
+-	if len(workflowValidations) > 0 {
+-		pc.validationGate.states = workflowValidations
+-	} else if len(snapshot.Validations) > 0 {
+-		pc.validationGate.states = snapshot.Validations
++	if pc.validationGate.states == nil {
++		pc.validationGate.states = make(map[string]*validationPipelineState)
++	}
++	for verticalID, st := range workflowProjection.Validations {
++		if st != nil {
++			pc.validationGate.states[verticalID] = st
++		}
++	}
++	for verticalID, st := range snapshot.Validations {
++		if st == nil {
++			continue
++		}
++		if _, ok := pc.validationGate.states[verticalID]; ok {
++			continue
++		}
++		pc.validationGate.states[verticalID] = st
+ 	}
+ 	if len(snapshot.Processed) > 0 {
+ 		pc.processed = snapshot.Processed
+@@ -70,17 +90,17 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
+ 	pc.stateLoaded = true
+ 	pc.mu.Unlock()
+ 
+-	// Ensure dashboard-facing stage projection is consistent with recovered validation state.
+-	if len(workflowStages) > 0 {
+-		for verticalID, stage := range workflowStages {
+-			if strings.TrimSpace(stage) == "" {
+-				continue
+-			}
+-			pc.updateVerticalStage(ctx, verticalID, stage, "")
++	// Ensure dashboard-facing stage projection is consistent with recovered workflow state.
++	for verticalID, stage := range workflowProjection.Stages {
++		if strings.TrimSpace(stage) == "" {
++			continue
+ 		}
+-		return
++		pc.updateVerticalStage(ctx, verticalID, stage, "")
+ 	}
+ 	for verticalID, st := range snapshot.Validations {
++		if _, ok := workflowProjection.Stages[verticalID]; ok {
++			continue
++		}
+ 		if st == nil {
+ 			continue
+ 		}
+@@ -117,6 +137,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
+ 	validations := pc.validationGate.states
+ 	defer pc.mu.Unlock()
+ 	pc.stateStore.Persist(ctx, scans, pending, validations)
++	pc.syncOperationalWorkflowProjection(ctx, scans, pending)
+ }
+ 
+ func (pc *FactoryPipelineCoordinator) clearPersistentState(ctx context.Context) {

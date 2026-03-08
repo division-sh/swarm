@@ -1,0 +1,7 @@
+role: opco-ceo
+responses:
+  - when_event: launch_ready
+    tool_calls:
+      - name: emit_opco_steady_state_reached
+        arguments:
+          vertical_id: "{{vertical_id}}"

@@ -1,0 +1,359 @@
+diff --git a/internal/runtime/pipeline/workflow_transition_engine_test.go b/internal/runtime/pipeline/workflow_transition_engine_test.go
+index 42e63cc..7e4f1d5 100644
+--- a/internal/runtime/pipeline/workflow_transition_engine_test.go
++++ b/internal/runtime/pipeline/workflow_transition_engine_test.go
+@@ -3,6 +3,7 @@ package pipeline
+ import (
+ 	"context"
+ 	"database/sql"
++	"strings"
+ 	"testing"
+ 
+ 	"empireai/internal/events"
+@@ -48,6 +49,8 @@ func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_IncrementsRevis
+ 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+ 	ctx := context.Background()
+ 	verticalID := uuid.NewString()
++	emitted := []events.Event{}
++	ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
+ 
+ 	if _, err := db.ExecContext(ctx, `
+ 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+@@ -89,6 +92,8 @@ func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_RequiresHumanAp
+ 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+ 	ctx := context.Background()
+ 	verticalID := uuid.NewString()
++	emitted := []events.Event{}
++	ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
+ 
+ 	if _, err := db.ExecContext(ctx, `
+ 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+@@ -122,6 +127,9 @@ func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_RequiresHumanAp
+ 		t.Fatalf("unexpected transition: %+v", outcome.Transition)
+ 	}
+ 	assertVerticalStage(t, ctx, db, verticalID, "approved")
++	if len(emitted) != 1 || string(emitted[0].Type) != "opco.spinup_requested" {
++		t.Fatalf("expected opco.spinup_requested emit, got %+v", emitted)
++	}
+ }
+ 
+ func TestFactoryPipelineCoordinator_HandleScoringRequested_ProjectsScoringStage(t *testing.T) {
+@@ -147,6 +155,309 @@ func TestFactoryPipelineCoordinator_HandleScoringRequested_ProjectsScoringStage(
+ 	assertVerticalStage(t, ctx, db, verticalID, "scoring")
+ }
+ 
++func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_OpCoReadyMovesToFullSpeccing(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
++	ctx := context.Background()
++	verticalID := uuid.NewString()
++
++	if _, err := db.ExecContext(ctx, `
++		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
++		VALUES ($1::uuid, 'Recovery Ops', 'recovery-ops', 'us', 'approved', 'operating', now(), now())
++	`, verticalID); err != nil {
++		t.Fatalf("insert vertical: %v", err)
++	}
++
++	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
++		ID:         uuid.NewString(),
++		Type:       events.EventType("opco.ceo_ready"),
++		VerticalID: verticalID,
++		Payload:    mustJSON(map[string]any{"vertical_id": verticalID}),
++	})
++	if !ok {
++		t.Fatal("expected opco.ceo_ready transition")
++	}
++	if outcome.Transition.Name != "approved_to_full_speccing" {
++		t.Fatalf("unexpected transition: %+v", outcome.Transition)
++	}
++	assertVerticalStage(t, ctx, db, verticalID, "full_speccing")
++	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
++	if err != nil || !ok {
++		t.Fatalf("load workflow instance: ok=%v err=%v", ok, err)
++	}
++	if !truthyMetadataFlag(instance.Metadata["action_spinup_opco_org_executed"]) {
++		t.Fatalf("expected spinup_opco_org metadata, got %+v", instance.Metadata)
++	}
++}
++
++func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_OperatingLifecycle(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
++	ctx := context.Background()
++	verticalID := uuid.NewString()
++
++	if _, err := db.ExecContext(ctx, `
++		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
++		VALUES ($1::uuid, 'Clinic OS', 'clinic-os', 'us', 'full_speccing', 'operating', now(), now())
++	`, verticalID); err != nil {
++		t.Fatalf("insert vertical: %v", err)
++	}
++
++	for _, tc := range []struct {
++		eventType events.EventType
++		payload   map[string]any
++		wantID    string
++		wantStage string
++	}{
++		{eventType: events.EventType("spec.approved"), payload: map[string]any{"status": "passed"}, wantID: "full_speccing_to_building", wantStage: "building"},
++		{eventType: events.EventType("build_complete"), payload: map[string]any{"qa_passed": true}, wantID: "building_to_pre_launch", wantStage: "pre_launch"},
++		{eventType: events.EventType("launch_ready"), payload: map[string]any{"decision": "approved"}, wantID: "pre_launch_to_launched", wantStage: "launched"},
++		{eventType: events.EventType("opco.steady_state_reached"), payload: map[string]any{}, wantID: "launched_to_operating", wantStage: "operating"},
++		{eventType: events.EventType("opco.growth_triggered"), payload: map[string]any{}, wantID: "operating_to_expanding", wantStage: "expanding"},
++		{eventType: events.EventType("opco.growth_stabilized"), payload: map[string]any{}, wantID: "expanding_to_operating", wantStage: "operating"},
++	} {
++		payload := tc.payload
++		if payload == nil {
++			payload = map[string]any{}
++		}
++		payload["vertical_id"] = verticalID
++		outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
++			ID:         uuid.NewString(),
++			Type:       tc.eventType,
++			VerticalID: verticalID,
++			Payload:    mustJSON(payload),
++		})
++		if !ok {
++			t.Fatalf("expected %s transition", tc.eventType)
++		}
++		if outcome.Transition.Name != tc.wantID {
++			t.Fatalf("unexpected transition for %s: %+v", tc.eventType, outcome.Transition)
++		}
++		assertVerticalStage(t, ctx, db, verticalID, tc.wantStage)
++	}
++}
++
++func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_TeardownRequiresHumanDecision(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
++	ctx := context.Background()
++	verticalID := uuid.NewString()
++
++	if _, err := db.ExecContext(ctx, `
++		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
++		VALUES ($1::uuid, 'Teardown Ops', 'teardown-ops', 'us', 'operating', 'operating', now(), now())
++	`, verticalID); err != nil {
++		t.Fatalf("insert vertical: %v", err)
++	}
++
++	if _, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
++		ID:         uuid.NewString(),
++		Type:       events.EventType("opco.teardown_requested"),
++		VerticalID: verticalID,
++		Payload:    mustJSON(map[string]any{"vertical_id": verticalID}),
++	}); ok {
++		t.Fatal("expected non-human opco.teardown_requested to fail guard evaluation")
++	}
++	assertVerticalStage(t, ctx, db, verticalID, "operating")
++
++	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
++		ID:          uuid.NewString(),
++		Type:        events.EventType("opco.teardown_requested"),
++		SourceAgent: "human",
++		VerticalID:  verticalID,
++		Payload:     mustJSON(map[string]any{"vertical_id": verticalID, "mailbox_decision_id": uuid.NewString()}),
++	})
++	if !ok {
++		t.Fatal("expected human opco.teardown_requested to transition")
++	}
++	if outcome.Transition.Name != "operating_to_winding_down" {
++		t.Fatalf("unexpected transition: %+v", outcome.Transition)
++	}
++	assertVerticalStage(t, ctx, db, verticalID, "winding_down")
++	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
++	if err != nil || !ok {
++		t.Fatalf("load workflow instance: ok=%v err=%v", ok, err)
++	}
++	if !truthyMetadataFlag(instance.Metadata["action_begin_teardown_executed"]) {
++		t.Fatalf("expected begin_teardown metadata, got %+v", instance.Metadata)
++	}
++}
++
++func TestFactoryPipelineCoordinator_EvaluateWorkflowGuard_UnknownGuardFailsClosed(t *testing.T) {
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
++	if pc.evaluateWorkflowGuard(workflowTriggerContext{
++		Event: events.Event{
++			Type:       events.EventType("vertical.scored"),
++			VerticalID: uuid.NewString(),
++		},
++		State: WorkflowState{Stage: StageScoring},
++	}, "unknown_guard_id") {
++		t.Fatal("expected unknown workflow guard to fail closed")
++	}
++}
++
++func TestFactoryPipelineCoordinator_EvaluateWorkflowGuard_NoBlockingRedFlags(t *testing.T) {
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), nil)
++	if pc.evaluateWorkflowGuard(workflowTriggerContext{
++		Event: events.Event{
++			Type: events.EventType("research.completed"),
++			Payload: mustJSON(map[string]any{
++				"build_sketch": map[string]any{
++					"red_flags": []map[string]any{
++						{"type": "complex_integration", "detail": "requires deep ERP coupling"},
++					},
++				},
++			}),
++		},
++		State: WorkflowState{Stage: StageResearching},
++	}, "no_blocking_red_flags") {
++		t.Fatal("expected blocking red flag to fail guard")
++	}
++}
++
++func TestFactoryPipelineCoordinator_ExecuteWorkflowAction_EmitSpecValidationRequested(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
++	ctx := context.Background()
++	verticalID := uuid.NewString()
++	emitted := []events.Event{}
++	ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
++
++	if _, err := db.ExecContext(ctx, `
++		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
++		VALUES ($1::uuid, 'Spec Validation', 'spec-validation', 'us', 'branding', 'factory', now(), now())
++	`, verticalID); err != nil {
++		t.Fatalf("insert vertical: %v", err)
++	}
++
++	ok := pc.executeWorkflowAction(ctx, workflowTriggerContext{
++		Event: events.Event{
++			Type:       events.EventType("brand.candidates_ready"),
++			VerticalID: verticalID,
++			Payload: mustJSON(map[string]any{
++				"vertical_id": verticalID,
++				"final_spec": map[string]any{
++					"name":        "Spec Validation",
++					"description": "Automates appeal packaging",
++				},
++			}),
++		},
++		State: WorkflowState{VerticalID: verticalID, Stage: StageBranding},
++	}, "emit_spec_validation_requested")
++	if !ok {
++		t.Fatal("expected emit_spec_validation_requested action to execute")
++	}
++	if len(emitted) != 1 || string(emitted[0].Type) != "spec.validation_requested" {
++		t.Fatalf("expected spec.validation_requested emit, got %+v", emitted)
++	}
++	payload := parsePayloadMap(emitted[0].Payload)
++	spec := parsePayloadMap(mustJSON(payload["spec_content"]))
++	if strings.TrimSpace(asString(payload["vertical_id"])) != verticalID {
++		t.Fatalf("expected vertical_id=%s, got payload=%v", verticalID, payload)
++	}
++	finalSpec := parsePayloadMap(mustJSON(spec["final_spec"]))
++	if strings.TrimSpace(asString(finalSpec["name"])) != "Spec Validation" {
++		t.Fatalf("expected final spec payload to be forwarded, got %v", payload)
++	}
++}
++
++func TestFactoryPipelineCoordinator_ExecuteWorkflowAction_EmitValidationPackageReady(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
++	ctx := context.Background()
++	verticalID := uuid.NewString()
++	emitted := []events.Event{}
++	ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
++
++	if _, err := db.ExecContext(ctx, `
++		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
++		VALUES ($1::uuid, 'Validation Package', 'validation-package', 'us', 'branding', 'factory', now(), now())
++	`, verticalID); err != nil {
++		t.Fatalf("insert vertical: %v", err)
++	}
++	pc.validationGate.states[verticalID] = &validationPipelineState{
++		VerticalID:      verticalID,
++		Status:          "active",
++		G1Research:      true,
++		G2Spec:          true,
++		G3CTO:           true,
++		G4Brand:         true,
++		ResearchPayload: mustJSON(map[string]any{"market": "healthcare"}),
++		SpecPayload:     mustJSON(map[string]any{"final_spec": map[string]any{"name": "Validation Package"}}),
++		CTOPayload:      mustJSON(map[string]any{"cto_status": "approved"}),
++		BrandPayload:    mustJSON(map[string]any{"brand_system": "ready"}),
++	}
++
++	ok := pc.executeWorkflowAction(ctx, workflowTriggerContext{
++		Event: events.Event{
++			Type:       events.EventType("brand.candidates_ready"),
++			VerticalID: verticalID,
++			Payload:    mustJSON(map[string]any{"vertical_id": verticalID}),
++		},
++		State: WorkflowState{VerticalID: verticalID, Stage: StageBranding},
++	}, "emit_validation_package_ready")
++	if !ok {
++		t.Fatal("expected emit_validation_package_ready action to execute")
++	}
++	if len(emitted) != 1 || string(emitted[0].Type) != "validation.package_ready" {
++		t.Fatalf("expected validation.package_ready emit, got %+v", emitted)
++	}
++	payload := parsePayloadMap(emitted[0].Payload)
++	if strings.TrimSpace(asString(payload["vertical_id"])) != verticalID {
++		t.Fatalf("expected vertical_id=%s, got payload=%v", verticalID, payload)
++	}
++	if strings.TrimSpace(asString(payload["vertical_name"])) != "Validation Package" {
++		t.Fatalf("expected validation package name from context, got payload=%v", payload)
++	}
++}
++
++func TestFactoryPipelineCoordinator_OperatingGuardsAcceptPersistedEvidence(t *testing.T) {
++	_, db, _ := testutil.StartPostgres(t)
++	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
++	ctx := context.Background()
++	verticalID := uuid.NewString()
++
++	if _, err := db.ExecContext(ctx, `
++		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
++		VALUES ($1::uuid, 'Evidence Ops', 'evidence-ops', 'us', 'full_speccing', 'operating', now(), now())
++	`, verticalID); err != nil {
++		t.Fatalf("insert vertical: %v", err)
++	}
++
++	pc.recordWorkflowEvidence(ctx, verticalID, "spec_validation_passed", map[string]any{"validation_notes": "approved"})
++	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
++		ID:         uuid.NewString(),
++		Type:       events.EventType("spec.approved"),
++		VerticalID: verticalID,
++		Payload:    mustJSON(map[string]any{"vertical_id": verticalID}),
++	})
++	if !ok || outcome.Transition.Name != "full_speccing_to_building" {
++		t.Fatalf("expected persisted spec evidence transition, got ok=%v outcome=%+v", ok, outcome)
++	}
++
++	pc.recordWorkflowEvidence(ctx, verticalID, "qa_validation_passed", map[string]any{"test_summary": "green"})
++	outcome, ok = pc.applyWorkflowEventTransition(ctx, events.Event{
++		ID:         uuid.NewString(),
++		Type:       events.EventType("build_complete"),
++		VerticalID: verticalID,
++		Payload:    mustJSON(map[string]any{"vertical_id": verticalID}),
++	})
++	if !ok || outcome.Transition.Name != "building_to_pre_launch" {
++		t.Fatalf("expected persisted qa evidence transition, got ok=%v outcome=%+v", ok, outcome)
++	}
++
++	pc.recordWorkflowEvidence(ctx, verticalID, "deploy_approved", map[string]any{"feedback": "approved"})
++	outcome, ok = pc.applyWorkflowEventTransition(ctx, events.Event{
++		ID:         uuid.NewString(),
++		Type:       events.EventType("launch_ready"),
++		VerticalID: verticalID,
++		Payload:    mustJSON(map[string]any{"vertical_id": verticalID}),
++	})
++	if !ok || outcome.Transition.Name != "pre_launch_to_launched" {
++		t.Fatalf("expected persisted deploy evidence transition, got ok=%v outcome=%+v", ok, outcome)
++	}
++}
++
+ func TestFactoryPipelineCoordinator_FinalizeScoringAccumulator_UsesWorkflowTransition(t *testing.T) {
+ 	_, db, _ := testutil.StartPostgres(t)
+ 	store := &captureStore{}
+@@ -183,7 +494,7 @@ func TestFactoryPipelineCoordinator_FinalizeScoringAccumulator_UsesWorkflowTrans
+ 
+ 	pc.finalizeScoringAccumulator(ctx, verticalID, false)
+ 
+-	assertVerticalStage(t, ctx, db, verticalID, "shortlisted")
++	assertVerticalStage(t, ctx, db, verticalID, "researching")
+ 	if !hasPersistedEventType(store.events, "vertical.shortlisted") {
+ 		t.Fatalf("expected vertical.shortlisted emit, got %+v", store.events)
+ 	}
