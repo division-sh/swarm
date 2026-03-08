@@ -226,6 +226,12 @@ func TestHandlePipelineGraph_DesignIncludesStageAndRubricMetadata(t *testing.T) 
 	if _, ok := resp.Meta["event_stage_map"]; !ok {
 		t.Fatalf("expected event_stage_map metadata")
 	}
+	if _, ok := resp.Meta["stage_phase_map"]; !ok {
+		t.Fatalf("expected stage_phase_map metadata")
+	}
+	if sources, ok := resp.Meta["sources"].([]any); !ok || len(sources) == 0 {
+		t.Fatalf("expected sources metadata, got %#v", resp.Meta["sources"])
+	}
 
 	found := false
 	for _, e := range resp.Edges {

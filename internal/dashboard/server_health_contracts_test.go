@@ -35,6 +35,9 @@ func TestDashboard_Health_IncludesContractSummary(t *testing.T) {
 	if contracts == nil {
 		t.Fatalf("expected contracts summary in health payload: %s", w.Body.String())
 	}
+	if paths, _ := contracts["paths"].(map[string]any); len(paths) == 0 {
+		t.Fatalf("expected contract paths in contracts payload: %#v", contracts["paths"])
+	}
 	workflow, _ := contracts["workflow"].(map[string]any)
 	if workflow == nil {
 		t.Fatalf("expected workflow metadata in contracts payload: %#v", contracts)
@@ -65,5 +68,8 @@ func TestDashboard_Health_IncludesContractSummary(t *testing.T) {
 	}
 	if _, ok := workflowAudit["warnings"].([]any); !ok {
 		t.Fatalf("expected workflow_audit warnings list, got %#v", workflowAudit["warnings"])
+	}
+	if _, ok := workflowAudit["instances_total"]; !ok {
+		t.Fatalf("expected workflow_audit counters, got %#v", workflowAudit)
 	}
 }

@@ -1845,51 +1845,6 @@ button.btn-danger:hover {
   fill: var(--text-3);
 }
 
-/* --- React Flow Dark Theme Overrides --- */
-.react-flow__nodes {
-  z-index: 1 !important;
-}
-.react-flow__edges {
-  z-index: 0 !important;
-}
-
-.react-flow__background {
-  background: var(--base) !important;
-}
-
-.react-flow__controls {
-  box-shadow: var(--shadow-md) !important;
-  border-radius: var(--r-md) !important;
-  overflow: hidden;
-  border: 1px solid var(--border-mid) !important;
-}
-
-.react-flow__controls-button {
-  background: var(--elevated) !important;
-  border: none !important;
-  border-bottom: 1px solid var(--border) !important;
-  color: var(--text-2) !important;
-  fill: var(--text-2) !important;
-  width: 28px !important;
-  height: 28px !important;
-}
-
-.react-flow__controls-button:hover {
-  background: var(--hover) !important;
-}
-
-.react-flow__controls-button svg {
-  fill: var(--text-2) !important;
-}
-
-.react-flow__minimap {
-  background: var(--surface) !important;
-}
-
-.react-flow__edge-path {
-  stroke-opacity: 0.8;
-}
-
 /* --- Toast Notifications --- */
 .toast-container {
   position: fixed;
@@ -2315,6 +2270,51 @@ section:hover {
   color: var(--text-1);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* --- React Flow Dark Theme Overrides --- */
+.react-flow__nodes {
+  z-index: 1 !important;
+}
+.react-flow__edges {
+  z-index: 0 !important;
+}
+
+.react-flow__background {
+  background: var(--base) !important;
+}
+
+.react-flow__controls {
+  box-shadow: var(--shadow-md) !important;
+  border-radius: var(--r-md) !important;
+  overflow: hidden;
+  border: 1px solid var(--border-mid) !important;
+}
+
+.react-flow__controls-button {
+  background: var(--elevated) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border) !important;
+  color: var(--text-2) !important;
+  fill: var(--text-2) !important;
+  width: 28px !important;
+  height: 28px !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--hover) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: var(--text-2) !important;
+}
+
+.react-flow__minimap {
+  background: var(--surface) !important;
+}
+
+.react-flow__edge-path {
+  stroke-opacity: 0.8;
 }
 
 /* --- Enhanced Graph Nodes --- */
@@ -3201,65 +3201,3 @@ section:hover {
 }
 
 /* --- Prompt Editor --- */
-.prompt-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-3);
-  border: 1px solid var(--border);
-  margin-left: 6px;
-  vertical-align: middle;
-}
-
-.prompt-badge-override {
-  background: var(--accent-glow);
-  color: var(--accent);
-  border-color: var(--accent-border);
-}
-
-.prompt-editor {
-  width: 100%;
-  min-height: 180px;
-  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
-  font-size: 11px;
-  line-height: 1.55;
-  resize: vertical;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-mid);
-  border-radius: var(--r-sm);
-  padding: 10px 12px;
-  color: var(--text-1);
-}
-
-.prompt-editor:focus {
-  outline: none;
-  border-color: var(--accent-border);
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: 0 0 0 3px var(--accent-glow);
-}
-
-.diff-line-add {
-  color: var(--good);
-  background: rgba(52, 211, 153, 0.08);
-}
-
-.diff-line-del {
-  color: var(--bad);
-  background: rgba(248, 113, 113, 0.08);
-}
-
-.diff-line-hunk {
-  color: var(--info);
-  background: rgba(96, 165, 250, 0.06);
-  font-weight: 600;
-}
-
-.diff-line-ctx {
-  color: var(--text-3);
-}

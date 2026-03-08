@@ -1,0 +1,319 @@
+/* --- Kanban Board (Holding tab) --- */
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.kanban-col {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  min-width: 0;
+}
+.kanban-col-killed {
+  opacity: 0.65;
+}
+.kanban-col-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2);
+}
+.kanban-col-body {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.vertical-card {
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.vertical-card:hover {
+  border-color: var(--accent-border);
+}
+.vertical-card-killed {
+  opacity: 0.6;
+}
+.vertical-card-expanded {
+  border-color: var(--accent-dim);
+}
+.vertical-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+.vertical-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.vertical-card-score {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.vertical-card-score.tag-good { background: var(--good-bg); color: var(--good); }
+.vertical-card-score.tag-warn { background: var(--warn-bg); color: var(--warn); }
+.vertical-card-score.tag-bad  { background: var(--bad-bg);  color: var(--bad); }
+.vertical-card-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.vertical-card-kill {
+  margin-top: 4px;
+  color: var(--bad);
+  font-style: italic;
+}
+.vertical-card-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gate-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+.gate-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-4);
+  flex-shrink: 0;
+}
+.gate-label {
+  white-space: nowrap;
+}
+
+.holding-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.holding-detail-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.holding-detail-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.holding-detail-title strong {
+  font-size: 16px;
+}
+
+.holding-detail-text {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.holding-detail-section {
+  background: var(--elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px;
+}
+
+.holding-artifact-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.holding-artifact-card > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.holding-artifact-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+.artifact-generic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifact-kv-list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.artifact-kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.artifact-kv-row span:first-child {
+  color: var(--text-3);
+}
+
+.artifact-kv-row span:last-child {
+  color: var(--text-1);
+  text-align: right;
+  max-width: 68%;
+  word-break: break-word;
+}
+
+.artifact-kv-row:last-child {
+  border-bottom: none;
+}
+
+.artifact-text-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.artifact-text-block {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.artifact-subsection {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.015);
+  padding: 8px;
+}
+
+.artifact-subsection > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.artifact-subsection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.artifact-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: auto;
+  max-height: 280px;
+}
+
+.artifact-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.artifact-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--base);
+  color: var(--text-2);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+}
+
+.artifact-table tbody td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  vertical-align: top;
+}
+
+.artifact-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.artifact-table tbody td:nth-child(2) {
+  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.artifact-table tbody td:nth-child(3) {
+  color: var(--text-2);
+}
+
+.gate-active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+.gate-active .gate-dot {
+  background: var(--accent);
+}
+.gate-done {
+  border-color: rgba(52, 211, 153, 0.2);
+  color: var(--good);
+}
+.gate-done .gate-dot {
+  background: var(--good);
+}
+.gate-pending {
+  color: var(--text-4);
+}
+
+/* --- Responsive --- */

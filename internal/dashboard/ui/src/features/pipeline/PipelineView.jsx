@@ -1,0 +1,149 @@
+import React from "react";
+import CopyID from "../../components/CopyID.jsx";
+
+export default function PipelineView({
+  domain,
+  controls,
+  actions,
+  helpers,
+}) {
+  const { funnel, shardScans, shardScanDetails, traceRows } = domain;
+  const { traceVertical, setTraceVertical, selectedShardScanID, setSelectedShardScanID } = controls;
+  const { traceVerticalFlow, loadShardScanDetail, shardAction } = actions;
+  const { fmtTime, relTime, formatDollars, formatDurationMs, shardScopeSummary } = helpers;
+
+  return (
+    <section>
+      <div className="head">
+        <h2>Pipeline Funnel</h2>
+        <div className="stack">
+          <input placeholder="trace vertical slug/id" value={traceVertical} onChange={(e) => setTraceVertical(e.target.value)} />
+          <button onClick={() => traceVerticalFlow(traceVertical.trim()).catch(() => {})}>Trace</button>
+        </div>
+      </div>
+      <div className="body">
+        <div className="row3">
+          <div><div className="tiny">Discoveries (14d)</div><div><strong>{funnel.throughput.discoveries_14d || 0}</strong></div></div>
+          <div><div className="tiny">Scoring Completion</div><div><strong>{Math.round((funnel.throughput.scoring_completion_rate || 0) * 100)}%</strong></div></div>
+          <div><div className="tiny">Approved/Live vs Killed</div><div><strong>{funnel.throughput.specs_approved_or_live || 0} / {funnel.throughput.specs_killed_total || 0}</strong></div></div>
+        </div>
+        <div className="tiny" style={{ margin: "8px 0 4px" }}>Shard Scan Progress</div>
+        <div className="body scroll" style={{ maxHeight: 210, padding: 0 }}>
+          <table>
+            <thead><tr><th>Scan</th><th>Mode</th><th>Geo</th><th>Progress</th><th>Active</th><th>Failed</th><th>Stuck</th><th>Spend</th></tr></thead>
+            <tbody>
+              {(shardScans || []).length === 0 ? (
+                <tr><td colSpan={8} className="empty-state">No shard scans found</td></tr>
+              ) : (shardScans || []).map((s) => {
+                const expanded = selectedShardScanID === s.scan_id;
+                const shards = shardScanDetails[s.scan_id] || [];
+                const reportsTotal = shards.reduce((sum, sh) => sum + Number(sh.reports_count || 0), 0);
+                const highSignalTotal = shards.reduce((sum, sh) => sum + Number(sh.high_signal_count || 0), 0);
+                return (
+                  <React.Fragment key={s.scan_id}>
+                    <tr style={{ cursor: "pointer" }} onClick={() => {
+                      const next = expanded ? "" : s.scan_id;
+                      setSelectedShardScanID(next);
+                      if (!expanded) {
+                        loadShardScanDetail(s.scan_id).catch(() => {});
+                      }
+                    }}>
+                      <td><CopyID id={s.scan_id} len={10} /></td>
+                      <td>{s.mode || "-"}</td>
+                      <td>{s.geography || "-"}</td>
+                      <td>{Math.round((s.progress || 0) * 100)}% ({s.shards_completed || 0}/{s.shards_total || 0})</td>
+                      <td>{(s.shards_assigned || 0) + (s.shards_pending || 0)}</td>
+                      <td>{s.shards_failed || 0}</td>
+                      <td className={(s.shards_stuck || 0) > 0 ? "health-warn" : ""}>{s.shards_stuck || 0}</td>
+                      <td className="mono">{formatDollars(s.spend_cents || 0)}</td>
+                    </tr>
+                    {expanded ? (
+                      <tr>
+                        <td colSpan={8} className="agent-drop-cell">
+                          <div style={{ padding: "10px 12px" }}>
+                            <div className="stack" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+                              <div className="tiny">Shard Details ({shards.length}) • Reports {reportsTotal} • High-signal {highSignalTotal}</div>
+                              <button
+                                className="btn-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  loadShardScanDetail(s.scan_id).catch(() => {});
+                                }}
+                              >
+                                Refresh
+                              </button>
+                            </div>
+                            <div className="body scroll" style={{ maxHeight: 260, padding: 0 }}>
+                              <table>
+                                <thead><tr><th>Shard</th><th>Scope</th><th>Status</th><th>Reports</th><th>High</th><th>Duration</th><th>Spend</th><th>Agent</th><th>Action</th></tr></thead>
+                                <tbody>
+                                  {shards.length === 0 ? (
+                                    <tr><td colSpan={9} className="empty-state">No shard details loaded</td></tr>
+                                  ) : shards.map((sh) => {
+                                    const stuckClass = sh.stuck_state === "critical" ? "health-bad" : sh.stuck_state === "warning" ? "health-warn" : "";
+                                    return (
+                                      <tr key={sh.id}>
+                                        <td><CopyID id={sh.id} len={10} /></td>
+                                        <td className="tiny">{shardScopeSummary(sh.scope)}</td>
+                                        <td className={stuckClass || ""}>{sh.status || "-"}</td>
+                                        <td className="mono">{sh.reports_count || 0}</td>
+                                        <td className="mono">{sh.high_signal_count || 0}</td>
+                                        <td className="mono">{formatDurationMs(sh.duration_ms)}</td>
+                                        <td className="mono">{formatDollars(sh.spend_cents || 0)}</td>
+                                        <td className="mono">{sh.agent_id || "-"}</td>
+                                        <td>
+                                          <div className="stack">
+                                            {(sh.status === "failed" || sh.status === "timed_out") ? (
+                                              <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); shardAction(s.scan_id, sh.id, "retry").catch(() => {}); }}>retry</button>
+                                            ) : null}
+                                            {(sh.status === "pending" || sh.status === "assigned") ? (
+                                              <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); shardAction(s.scan_id, sh.id, "cancel").catch(() => {}); }}>cancel</button>
+                                            ) : null}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="tiny" style={{ margin: "8px 0 4px" }}>Stuck Verticals</div>
+        <div className="body scroll" style={{ maxHeight: 180, padding: 0 }}>
+          <table>
+            <thead><tr><th>Vertical</th><th>Stage</th><th>Idle hrs</th></tr></thead>
+            <tbody>
+              {(funnel.stuck || []).length === 0 ? (
+                <tr><td colSpan={3} className="empty-state">No stuck verticals</td></tr>
+              ) : (funnel.stuck || []).map((v) => (
+                <tr key={v.id || v.slug} style={{ cursor: "pointer" }} onClick={() => { const s = v.slug || v.id; setTraceVertical(s); traceVerticalFlow(s).catch(() => {}); }} title="Click to trace"><td style={{ color: "var(--info)" }}>{v.slug || v.id}</td><td>{v.stage}</td><td>{v.idle_hours}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="tiny" style={{ margin: "8px 0 4px" }}>Lifecycle Trace</div>
+        <div className="body scroll" style={{ maxHeight: 250, padding: 0 }}>
+          <table>
+            <thead><tr><th>At</th><th>Type</th><th>Source</th><th>Pending</th></tr></thead>
+            <tbody>
+              {traceRows.length === 0 ? (
+                <tr><td colSpan={4} className="empty-state">Enter a vertical and click Trace</td></tr>
+              ) : traceRows.slice(-120).map((e) => (
+                <tr key={e.id}><td><span title={fmtTime(e.created_at)}>{relTime(e.created_at)}</span></td><td>{e.type}</td><td>{e.source_agent}</td><td>{e.pending_count}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
