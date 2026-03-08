@@ -1,16 +1,10 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 
-export default function IncidentsView({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { incidentsData, selectedIncident, incidentArtifacts, incidentLogs } = domain;
-  const { incidentsFilter, setIncidentsFilter, selectedIncidentCode, setSelectedIncidentCode, selectedIncidentAgent, setSelectedIncidentAgent } = controls;
-  const { refreshIncidents, resetFilters, openLogs, openConvo } = actions;
-  const { fmtTime, relTime } = helpers;
+export default function IncidentsView({ state, actions }) {
+  const { incidentsData, selectedIncident, incidentArtifacts, incidentLogs, incidentsFilter, selectedIncidentCode, selectedIncidentAgent } = state;
+  const { refresh, resetFilters, openLogs, openConvo, setIncidentsFilter, setSelectedIncidentCode, setSelectedIncidentAgent } = actions;
 
   return (
     <div className="layout-two">
@@ -49,7 +43,7 @@ export default function IncidentsView({
               />
               mcp only
             </label>
-            <button onClick={() => refreshIncidents().catch(() => {})}>Refresh</button>
+            <button onClick={() => refresh().catch(() => {})}>Refresh</button>
             <button className="btn-secondary" onClick={resetFilters}>Reset</button>
           </div>
         </div>

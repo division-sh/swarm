@@ -1,46 +1,44 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 
-export default function ControlView({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { targets, mailbox, controlOutput } = domain;
+export default function ControlView({ state, actions }) {
   const {
+    targets,
+    mailbox,
+    controlOutput,
     controlTarget,
-    setControlTarget,
     directiveMessage,
-    setDirectiveMessage,
     chatMessage,
-    setChatMessage,
     chatMode,
-    setChatMode,
     verticalName,
-    setVerticalName,
     verticalGeo,
-    setVerticalGeo,
     verticalSlug,
-    setVerticalSlug,
     requeueEventID,
-    setRequeueEventID,
     requeueAgentID,
-    setRequeueAgentID,
     resetConfirm,
-    setResetConfirm,
     mailStatus,
-    setMailStatus,
     mailboxID,
-    setMailboxID,
     mailboxAction,
-    setMailboxAction,
     mailboxNotes,
-    setMailboxNotes,
     selectedMailboxItem,
-    setSelectedMailboxItem,
-  } = controls;
+  } = state;
   const {
+    setControlTarget,
+    setDirectiveMessage,
+    setChatMessage,
+    setChatMode,
+    setVerticalName,
+    setVerticalGeo,
+    setVerticalSlug,
+    setRequeueEventID,
+    setRequeueAgentID,
+    setResetConfirm,
+    setMailStatus,
+    setMailboxID,
+    setMailboxAction,
+    setMailboxNotes,
+    setSelectedMailboxItem,
     sendDirective,
     sendChat,
     restartControlTarget,
@@ -55,7 +53,6 @@ export default function ControlView({
     decideMailbox,
     quickMailboxDecide,
   } = actions;
-  const { fmtTime, relTime } = helpers;
   const resetOK = (resetConfirm || "").trim() === "RESET";
 
   return (

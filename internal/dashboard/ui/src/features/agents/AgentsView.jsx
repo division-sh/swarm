@@ -1,4 +1,5 @@
 import React from "react";
+import AgentTable from "../../components/AgentTable.jsx";
 import StatusDot from "../../components/StatusDot.jsx";
 
 function counts(agents) {
@@ -9,15 +10,9 @@ function counts(agents) {
   }, {});
 }
 
-export default function AgentsView({
-  domain,
-  controls,
-  actions,
-  AgentTable,
-}) {
-  const { agentsResp, groupedAgents } = domain;
-  const { agentSearch, setAgentSearch, selectedAgentID, setSelectedAgentID } = controls;
-  const { renderAgentDropdown, navigateToTask } = actions;
+export default function AgentsView({ state, actions }) {
+  const { agentsResp, groupedAgents, agentSearch, selectedAgentID } = state;
+  const { setAgentSearch, setSelectedAgentID, renderAgentDropdown, navigateToTask } = actions;
 
   return (
     <section>

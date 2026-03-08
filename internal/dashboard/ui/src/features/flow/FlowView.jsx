@@ -1,49 +1,51 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
 import GraphView from "../graph/GraphView.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 
-export default function FlowView({
-  domain,
-  controls,
-  loadPipelineFlow,
-  addToast,
-  inspector,
-  fmtTime,
-  relTime,
-}) {
-  const { verticals, visibleFlowEvents, flowEvents, flowGraph, flowGraphMeta, flowActiveEdgeKeys, selectedFlowSummary, agents } = domain;
+export default function FlowView({ state, actions }) {
   const {
+    verticals,
+    visibleFlowEvents,
+    flowEvents,
+    flowGraph,
+    flowGraphMeta,
+    flowActiveEdgeKeys,
+    selectedFlowSummary,
+    agents,
     flowView,
-    setFlowView,
     flowStage,
-    setFlowStage,
     flowStageOptions,
     flowRubric,
-    setFlowRubric,
     flowRubricOptions,
     flowVertical,
-    setFlowVertical,
     flowStart,
-    setFlowStart,
     flowEnd,
-    setFlowEnd,
     flowReplaySpeed,
-    setFlowReplaySpeed,
     flowReplayOn,
-    setFlowReplayOn,
     flowReplayIndex,
-    setFlowReplayIndex,
-  } = controls;
-  const {
     selectedFlowNodeID,
-    setSelectedFlowNodeID,
     selectedFlowEdgeID,
-    setSelectedFlowEdgeID,
     flowViewGraph,
-    setFlowViewGraph,
     graphFullscreen,
+  } = state;
+  const {
+    setFlowView,
+    setFlowStage,
+    setFlowRubric,
+    setFlowVertical,
+    setFlowStart,
+    setFlowEnd,
+    setFlowReplaySpeed,
+    setFlowReplayOn,
+    setFlowReplayIndex,
+    refresh,
+    addToast,
+    setSelectedFlowNodeID,
+    setSelectedFlowEdgeID,
+    setFlowViewGraph,
     setGraphFullscreen,
-  } = inspector;
+  } = actions;
 
   return (
     <div className="layout-graph">
@@ -101,7 +103,7 @@ export default function FlowView({
                 <button className="btn-secondary" onClick={() => { setFlowReplayOn(false); setFlowReplayIndex(0); }}>Reset</button>
               </>
             ) : null}
-            <button onClick={() => loadPipelineFlow().catch((err) => addToast(err.message, "error"))}>Refresh</button>
+            <button onClick={() => refresh().catch((err) => addToast(err.message, "error"))}>Refresh</button>
           </div>
         </div>
         <div className="body">

@@ -1,14 +1,9 @@
 import React from "react";
+import ChatMessages from "../../components/ChatMessages.jsx";
 
-export default function ConversationsView({
-  domain,
-  controls,
-  actions,
-  ChatMessages,
-}) {
-  const { conversations, conversationDetail } = domain;
-  const { selectedConv, setSelectedConv } = controls;
-  const { openConversation, copyConversation, openMessage } = actions;
+export default function ConversationsView({ state, actions }) {
+  const { conversations, conversationDetail, selectedConv } = state;
+  const { setSelectedConv, openConversation, copyConversation, openMessage } = actions;
 
   return (
     <section>

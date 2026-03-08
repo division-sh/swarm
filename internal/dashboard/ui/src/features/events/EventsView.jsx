@@ -1,16 +1,11 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 
-export default function EventsView({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { filteredEvents, filteredRuntimeLogs, eventDetail } = domain;
-  const { eventsFilter, setEventsFilter, eventsIncludeRuntime, setEventsIncludeRuntime, eventsRuntimeErrorsOnly, setEventsRuntimeErrorsOnly, selectedEventID, setSelectedEventID } = controls;
+export default function EventsView({ state, actions }) {
+  const { filteredEvents, filteredRuntimeLogs, eventDetail, eventsFilter, eventsIncludeRuntime, eventsRuntimeErrorsOnly, selectedEventID } = state;
   const { refresh, clear } = actions;
-  const { fmtTime, relTime } = helpers;
+  const { setEventsFilter, setEventsIncludeRuntime, setEventsRuntimeErrorsOnly, setSelectedEventID } = actions;
 
   return (
     <section>

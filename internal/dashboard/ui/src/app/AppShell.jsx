@@ -6,30 +6,24 @@ import DashboardViewRouter from "./DashboardViewRouter.jsx";
 import { useDashboardCoordinator } from "./useDashboardCoordinator.js";
 
 export default function AppShell() {
-  const app = useDashboardCoordinator();
+  const { header, views, modals, toasts } = useDashboardCoordinator();
 
   return (
     <>
-      <DashboardHeader
-        initialLoading={app.initialLoading}
-        statusText={app.statusText}
-        apiKey={app.apiKey}
-        setApiKey={app.setApiKey}
-        overview={app.overview}
-        stuckAgents={app.agentsResp.states.stuck || 0}
-        tabs={app.tabs}
-        tabBadges={app.tabBadges}
-        activeView={app.activeView}
-        setActiveView={app.setActiveView}
+      <DashboardHeader {...header} />
+      <DashboardViewRouter
+        activeView={header.activeView}
+        runtime={views.runtime}
+        pipeline={views.pipeline}
+        ops={views.ops}
       />
-      <DashboardViewRouter app={app} />
       <DashboardModals
-        modalContent={app.modalContent}
-        setModalContent={app.setModalContent}
-        holdingDetailModal={app.holdingDetailModal}
-        setHoldingDetailModal={app.setHoldingDetailModal}
+        modalContent={modals.modalContent}
+        setModalContent={modals.setModalContent}
+        holdingDetailModal={modals.holdingDetailModal}
+        setHoldingDetailModal={modals.setHoldingDetailModal}
       />
-      <Toasts items={app.toasts} />
+      <Toasts items={toasts} />
     </>
   );
 }

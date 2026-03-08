@@ -1,13 +1,16 @@
 import React from "react";
 import { fmtTime } from "../../lib/format.js";
 
-export default function DigestView({ digestResp, onRefresh }) {
+export default function DigestView({ state, actions }) {
+  const { digestResp } = state;
+  const { refresh } = actions;
+
   return (
     <section>
       <div className="head">
         <h2>Portfolio Digest</h2>
         <div className="stack">
-          <button onClick={onRefresh}>Refresh</button>
+          <button onClick={refresh}>Refresh</button>
         </div>
       </div>
       <div className="body scroll">

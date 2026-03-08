@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/components.css src/styles/features/graph.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css"
+    "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/components.css src/styles/features/graph.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css",
+    "check:architecture": "node scripts/check-architecture.mjs"
   },
   "dependencies": {
     "@xyflow/react": "12.8.4",

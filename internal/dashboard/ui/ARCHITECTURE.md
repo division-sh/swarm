@@ -11,11 +11,13 @@
   - `DashboardRuntimeViews.jsx` for runtime-facing tabs
   - `DashboardOpsViews.jsx` for ops/control-facing tabs
   - `useDashboardCoordinator.js` for global composition and hook wiring
-  - `useDashboardDerivedState.js` for cross-feature selectors and cleanup effects
+  - `useDashboardDerivedState.js` for global badge/tab derivation only
   - `useDashboardStateBuckets.js` for grouped local state buckets
   - `dashboardTabs.js` for tab definitions and badges
 - `src/api/`
   - domain request wrappers
+- `src/features/**/use*Controller.js`
+  - feature-owned controller hooks that shape `state` and `actions`
 - `src/features/graph/`
   - `GraphView.jsx` as the graph orchestrator
   - `graphLayout.js`, `graphPersistence.js`, `GraphNodes.jsx`, `GraphEdges.jsx`, `GraphToolbar.jsx`
@@ -36,18 +38,35 @@
 - `src/styles/`
   - ordered CSS slices concatenated at build time
 
+## Guardrails
+
+- No `app` bag props.
+  - App-layer routers must pass explicit feature controllers or explicit `state` / `actions` props.
+  - `DashboardViewRouter.jsx`, `DashboardRuntimeViews.jsx`, and `DashboardOpsViews.jsx` must not accept a single catch-all `app` object.
+- No umbrella action hook.
+  - Do not recreate `useDashboardActions.js`.
+  - Compose specific action hooks directly in the coordinator or in feature controllers.
+- Feature views should accept predictable contracts.
+  - Default shape is `state` and `actions`.
+  - If a third prop is needed, prefer `ui` and keep it narrow.
+- Shared helpers belong in imports, not prop chains.
+  - Import formatting helpers from `src/lib/format.js` inside the view that uses them.
+  - Do not pass `fmtTime`, `relTime`, `formatDollars`, or similar down through routers.
+- `useDashboardDerivedState.js` must stay global-only.
+  - It should not own feature-local selection cleanup, filtering, or feature-specific selectors.
+- Prefer feature controller hooks over app-layer object shaping.
+  - If a feature needs nontrivial state assembly, add or extend `src/features/<feature>/use<Feature>Controller.js`.
+
 ## God-Submodule Watchlist
 
 - `src/app/useDashboardCoordinator.js`
   - still the heaviest remaining coordinator module
-- `src/app/DashboardRuntimeViews.jsx`
-  - still the largest grouped router
 - `src/features/graph/GraphPage.jsx`
   - node and edge inspector detail is still dense
 - `src/features/flow/FlowView.jsx`
   - still owns both controls and inspector composition
-- `src/features/agents/AgentDropdown.jsx`
-  - still mixes several action affordances in one component
+- `src/features/control/ControlView.jsx`
+  - still renders a lot of action surface in one place
 
 File-size thresholds for this repo:
 
@@ -74,5 +93,6 @@ Until then, prefer:
 
 1. feature-local hooks
 2. thin API modules
-3. shared presentational components
-4. a thin shell plus explicit coordinator and derived-state hooks
+3. feature controller hooks
+4. shared presentational components
+5. a thin shell plus explicit coordinator and minimal derived-state hooks

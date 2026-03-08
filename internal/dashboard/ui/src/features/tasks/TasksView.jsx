@@ -1,29 +1,10 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 
-export default function TasksView({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { tasksResp, tasksStats, selectedTask } = domain;
-  const {
-    taskStatus,
-    setTaskStatus,
-    selectedTaskID,
-    setSelectedTaskID,
-    taskResultText,
-    setTaskResultText,
-    taskOutcome,
-    setTaskOutcome,
-    taskFollowUpNeeded,
-    setTaskFollowUpNeeded,
-    taskRejectReason,
-    setTaskRejectReason,
-  } = controls;
-  const { refreshTasks, loadTaskStats, claimSelectedTask, completeSelectedTask, rejectSelectedTask } = actions;
-  const { fmtTime, relTime } = helpers;
+export default function TasksView({ state, actions }) {
+  const { tasksResp, tasksStats, selectedTask, taskStatus, selectedTaskID, taskResultText, taskOutcome, taskFollowUpNeeded, taskRejectReason } = state;
+  const { setTaskStatus, setSelectedTaskID, setTaskResultText, setTaskOutcome, setTaskFollowUpNeeded, setTaskRejectReason, refreshTasks, loadTaskStats, claimSelectedTask, completeSelectedTask, rejectSelectedTask } = actions;
 
   return (
     <section>

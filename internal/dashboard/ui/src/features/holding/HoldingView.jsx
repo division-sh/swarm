@@ -1,17 +1,20 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
+import GateIndicator from "../../components/GateIndicator.jsx";
+import { formatDollars, readPath, relTime } from "../../lib/format.js";
 
-export default function HoldingView({
-  domain,
-  controls,
-  openHoldingVerticalDetail,
-  relTime,
-  readPath,
-  formatDollars,
-  GateIndicator,
-}) {
-  const { holdingData, holdingVisibleVerticals, holdingWorkflowSummary, holdingColumns, validationGateData } = domain;
-  const { holdingSearch, setHoldingSearch, holdingWorkflowFilter, setHoldingWorkflowFilter, holdingSort, setHoldingSort } = controls;
+export default function HoldingView({ state, actions }) {
+  const {
+    holdingData,
+    holdingVisibleVerticals,
+    holdingWorkflowSummary,
+    holdingColumns,
+    validationGateData,
+    holdingSearch,
+    holdingWorkflowFilter,
+    holdingSort,
+  } = state;
+  const { setHoldingSearch, setHoldingWorkflowFilter, setHoldingSort, openHoldingVerticalDetail } = actions;
 
   return (
     <section>

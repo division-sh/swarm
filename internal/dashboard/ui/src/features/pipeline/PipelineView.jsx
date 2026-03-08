@@ -1,16 +1,10 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
+import { fmtTime, formatDollars, formatDurationMs, relTime, shardScopeSummary } from "../../lib/format.js";
 
-export default function PipelineView({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { funnel, shardScans, shardScanDetails, traceRows } = domain;
-  const { traceVertical, setTraceVertical, selectedShardScanID, setSelectedShardScanID } = controls;
-  const { traceVerticalFlow, loadShardScanDetail, shardAction } = actions;
-  const { fmtTime, relTime, formatDollars, formatDurationMs, shardScopeSummary } = helpers;
+export default function PipelineView({ state, actions }) {
+  const { funnel, shardScans, shardScanDetails, traceRows, traceVertical, selectedShardScanID } = state;
+  const { setTraceVertical, setSelectedShardScanID, traceVerticalFlow, loadShardScanDetail, shardAction } = actions;
 
   return (
     <section>

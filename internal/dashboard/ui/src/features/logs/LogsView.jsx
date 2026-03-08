@@ -1,16 +1,10 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 
-export default function LogsView({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { filteredLogsData, selectedLog } = domain;
-  const { logsFilter, setLogsFilter, logsRuntimeErrorsOnly, setLogsRuntimeErrorsOnly, logsOrder, setLogsOrder, selectedLogID, setSelectedLogID } = controls;
-  const { loadLogs, clear } = actions;
-  const { fmtTime, relTime } = helpers;
+export default function LogsView({ state, actions }) {
+  const { filteredLogsData, selectedLog, logsFilter, logsRuntimeErrorsOnly, logsOrder, selectedLogID } = state;
+  const { refresh, clear, setLogsFilter, setLogsRuntimeErrorsOnly, setLogsOrder, setSelectedLogID } = actions;
 
   return (
     <div className="layout-two">
@@ -29,7 +23,7 @@ export default function LogsView({
               runtime errors only
             </label>
             <button className="btn-secondary" onClick={() => setLogsOrder((o) => o === "desc" ? "asc" : "desc")}>{logsOrder === "desc" ? "Newest" : "Oldest"}</button>
-            <button onClick={() => loadLogs().catch(() => {})}>Filter</button>
+            <button onClick={() => refresh().catch(() => {})}>Filter</button>
             <button className="btn-secondary" onClick={clear}>Clear</button>
           </div>
         </div>

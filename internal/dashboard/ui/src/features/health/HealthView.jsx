@@ -1,15 +1,9 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
+import { formatDollars, readPath } from "../../lib/format.js";
 
-export default function HealthView({
-  health,
-  contractsData,
-  contractWorkflow,
-  contractPlatform,
-  contractVerification,
-  formatDollars,
-  readPath,
-}) {
+export default function HealthView({ state }) {
+  const { health, contractsData, contractWorkflow, contractPlatform, contractVerification } = state;
   return (
     <section>
       <div className="head"><h2>Health</h2><span className="tiny">ops telemetry + contract summary</span></div>

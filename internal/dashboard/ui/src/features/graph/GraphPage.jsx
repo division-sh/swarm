@@ -1,30 +1,13 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
 import StatusDot from "../../components/StatusDot.jsx";
+import { fmtTime, relTime } from "../../lib/format.js";
 import GraphView from "./GraphView.jsx";
 import { isEventLinkedEdgeKind } from "./graphTypes.js";
 
-export default function GraphPage({
-  domain,
-  controls,
-  actions,
-  helpers,
-}) {
-  const { verticals, graph, graphViewGraph, agents } = domain;
-  const {
-    graphMode,
-    setGraphMode,
-    graphVertical,
-    setGraphVertical,
-    selectedGraphNodeID,
-    setSelectedGraphNodeID,
-    selectedGraphEdgeID,
-    setSelectedGraphEdgeID,
-    graphFullscreen,
-    setGraphFullscreen,
-  } = controls;
-  const { refreshGraph, setGraphViewGraph, restartAgent, openControl, inspectAgent, navigateToTask } = actions;
-  const { fmtTime, relTime } = helpers;
+export default function GraphPage({ state, actions }) {
+  const { verticals, graph, graphViewGraph, agents, graphMode, graphVertical, selectedGraphNodeID, selectedGraphEdgeID, graphFullscreen } = state;
+  const { setGraphMode, setGraphVertical, setSelectedGraphNodeID, setSelectedGraphEdgeID, setGraphFullscreen, refreshGraph, setGraphViewGraph, restartAgent, openControl, inspectAgent, navigateToTask } = actions;
 
   return (
     <div className="layout-graph">
