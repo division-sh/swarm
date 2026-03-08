@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { edgeSelectionID } from "./graphInspectorUtils.jsx";
 
 export function useGraphSelection({
   graph,
@@ -18,7 +19,8 @@ export function useGraphSelection({
   useEffect(() => {
     if (!selectedGraphEdgeID) return;
     const currentGraph = graphViewGraph || graph;
-    const exists = ((currentGraph && currentGraph.edges) || []).some((edge, index) => `${edge.kind}:${edge.from}->${edge.to}:${index}` === selectedGraphEdgeID);
+    const currentEdges = ((currentGraph && currentGraph.edges) || []);
+    const exists = currentEdges.some((edge) => edgeSelectionID(edge, currentEdges) === selectedGraphEdgeID);
     if (!exists) setSelectedGraphEdgeID("");
   }, [graph, graphViewGraph, selectedGraphEdgeID, setSelectedGraphEdgeID]);
 }

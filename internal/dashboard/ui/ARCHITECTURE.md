@@ -21,7 +21,9 @@
 - `src/features/**/use*Controller.js`
   - feature-owned controller hooks that shape `state` and `actions`
 - `src/features/graph/`
-  - `GraphView.jsx` as the graph orchestrator
+  - `GraphPage.jsx` as the graph workspace orchestrator
+  - `GraphInspector.jsx`, `GraphWorkspaceSidebar.jsx`, and `GraphContextDrawer.jsx` for the workspace panes
+  - `GraphView.jsx` as the canvas orchestrator
   - `graphLayout.js`, `graphPersistence.js`, `GraphNodes.jsx`, `GraphEdges.jsx`, `GraphToolbar.jsx`
 - `src/features/holding/`
   - `HoldingView.jsx`
@@ -66,8 +68,8 @@
 
 - `src/app/useDashboardCoordinator.js`
   - still the heaviest remaining coordinator module
-- `src/features/graph/GraphPage.jsx`
-  - node and edge inspector detail is still dense
+- `src/features/graph/GraphInspector.jsx`
+  - still the densest graph workspace module after the split
 - `src/features/flow/FlowView.jsx`
   - still owns both controls and inspector composition
 - `src/features/control/ControlView.jsx`

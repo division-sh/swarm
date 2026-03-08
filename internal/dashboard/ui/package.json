@@ -4,13 +4,19 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/components.css src/styles/features/graph.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css",
-    "check:architecture": "node scripts/check-architecture.mjs"
+    "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/dockview/dist/styles/dockview.css node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/components.css src/styles/features/graph.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "test:graph": "node --test src/features/graph/*.test.js"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@tanstack/react-query": "^5.90.21",
+    "@tanstack/react-table": "^8.21.3",
     "@xyflow/react": "12.8.4",
+    "dagre": "^0.8.5",
+    "dockview": "^5.1.0",
+    "monaco-editor": "^0.55.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },

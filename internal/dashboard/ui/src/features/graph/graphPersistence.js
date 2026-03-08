@@ -24,3 +24,20 @@ export function writeSavedPositions(storageKey, nodes) {
     localStorage.setItem(storageKey, JSON.stringify(serialized));
   } catch {}
 }
+
+export function readSavedView(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey) || "";
+    if (!raw) return {};
+    const data = JSON.parse(raw);
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeSavedView(storageKey, value) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value || {}));
+  } catch {}
+}

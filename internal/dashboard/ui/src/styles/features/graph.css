@@ -43,11 +43,123 @@
   stroke-opacity: 0.8;
 }
 
+.rf-edge-dimmed .react-flow__edge-path {
+  stroke-opacity: 0.16;
+}
+
+.rf-edge-active .react-flow__edge-path {
+  filter: drop-shadow(0 0 6px rgba(212, 162, 74, 0.18));
+}
+
+.graph-band-layer {
+  position: relative;
+  z-index: -1;
+}
+
+.graph-band {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 22px;
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+
+.graph-band-holding {
+  background: rgba(251, 113, 133, 0.05);
+  border-color: rgba(251, 113, 133, 0.12);
+}
+
+.graph-band-template {
+  background: rgba(96, 165, 250, 0.05);
+  border-color: rgba(96, 165, 250, 0.12);
+}
+
+.graph-band-opco {
+  background: rgba(52, 211, 153, 0.05);
+  border-color: rgba(52, 211, 153, 0.12);
+}
+
+.graph-band-system,
+.graph-band-events {
+  background: rgba(255, 255, 255, 0.025);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.graph-band-system {
+  background: rgba(244, 114, 182, 0.05);
+  border-color: rgba(244, 114, 182, 0.14);
+}
+
+.graph-band-label {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
 /* --- Enhanced Graph Nodes --- */
 .rf-stuck {
   border-color: rgba(248, 113, 113, 0.5) !important;
   box-shadow: 0 0 16px rgba(248, 113, 113, 0.2), var(--shadow-md) !important;
   animation: stuckPulse 2.5s ease-in-out infinite;
+}
+
+.rf-dimmed {
+  opacity: 0.28;
+}
+
+.rf-highlighted {
+  box-shadow: 0 0 0 1px rgba(212, 162, 74, 0.22), 0 0 16px rgba(212, 162, 74, 0.14), var(--shadow-md) !important;
+}
+
+.rf-node-meta {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.rf-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rf-chip-soft {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rf-chip-warn {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--warn);
+  border-color: rgba(251, 191, 36, 0.18);
+}
+
+.rf-control-system {
+  border-color: rgba(244, 114, 182, 0.18) !important;
+  box-shadow: inset 0 0 0 1px rgba(244, 114, 182, 0.08);
+}
+
+.rf-control-mailbox {
+  border-color: rgba(96, 165, 250, 0.18) !important;
+  box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.08);
+}
+
+.rf-control-human {
+  border-color: rgba(52, 211, 153, 0.18) !important;
+  box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.08);
 }
 
 .rf-stats {
@@ -170,6 +282,176 @@
   font-weight: 700;
 }
 
+.graph-view-slots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.graph-view-slot {
+  min-width: 34px;
+  padding: 6px 8px;
+}
+
+.graph-view-slot.filled {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+/* --- Workflow Dockview --- */
+.workflow-workbench-shell {
+  min-height: 76vh;
+}
+
+.workflow-workbench-body {
+  height: 76vh;
+  padding: 0;
+}
+
+.workflow-dockview {
+  height: 100%;
+  width: 100%;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  overflow: hidden;
+}
+
+.workflow-dock-panel {
+  height: 100%;
+  overflow: auto;
+  background: var(--surface);
+}
+
+.workflow-dockview .dv-groupview {
+  background: var(--surface);
+}
+
+.workflow-dockview .dv-groupview .dv-content-container {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 120px), var(--surface);
+}
+
+.workflow-dockview .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-dockview .dv-tab {
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workflow-dockview .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 0 var(--accent-border);
+}
+
+.workflow-dockview .dv-sash:not(.disabled)::after {
+  opacity: 0.6;
+}
+
+/* --- Graph Workspace --- */
+.graph-workspace {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 360px;
+  gap: 14px;
+  align-items: start;
+}
+
+.graph-workspace-main,
+.graph-workspace-sidebar,
+.graph-workspace-inspector {
+  min-width: 0;
+}
+
+.graph-workspace-main {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+.graph-workspace-sidebar,
+.graph-workspace-inspector {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.graph-sidebar-intro,
+.graph-sidebar-selection {
+  display: grid;
+  gap: 6px;
+}
+
+.graph-sidebar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.graph-sidebar-stats {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.graph-sidebar-group {
+  margin-top: 10px;
+}
+
+.graph-sidebar-actions {
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.graph-canvas-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.graph-inline-actions,
+.graph-inline-detail {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.graph-drawer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.graph-drawer-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.graph-card-stack {
+  margin-top: 4px;
+}
+
+.graph-inner-health-card {
+  margin-bottom: 0;
+}
+
+.graph-detail-label-spacer {
+  margin-top: 4px;
+}
+
+.graph-linklike {
+  cursor: pointer;
+  color: var(--info);
+}
+
+.graph-link-small {
+  font-size: 11px;
+}
+
+.graph-linklike:hover {
+  color: var(--accent);
+}
+
 /* --- Node Detail Cards --- */
 .node-detail-card {
   border: 1px solid var(--border);
@@ -256,6 +538,35 @@
 
 .node-detail-card[open] > summary::before {
   transform: rotate(90deg);
+}
+
+@media (max-width: 1440px) {
+  .graph-workspace {
+    grid-template-columns: 250px minmax(0, 1fr) 330px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .graph-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-workspace-main {
+    order: 1;
+  }
+
+  .graph-workspace-sidebar {
+    order: 2;
+  }
+
+  .graph-workspace-inspector {
+    order: 3;
+  }
+
+  .graph-drawer-grid,
+  .graph-drawer-columns {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* --- Modal --- */
@@ -430,4 +741,3 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
-

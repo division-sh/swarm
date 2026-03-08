@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { edgeSelectionID } from "../graph/graphInspectorUtils.jsx";
 import {
   getFlowActiveEdgeKeys,
   getFlowEventStageMap,
@@ -45,7 +46,8 @@ export function useFlowDerivedState({
   useEffect(() => {
     if (!selectedFlowEdgeID) return;
     const currentGraph = flowViewGraph || flowGraph;
-    const exists = ((currentGraph && currentGraph.edges) || []).some((edge, index) => `${edge.kind}:${edge.from}->${edge.to}:${index}` === selectedFlowEdgeID);
+    const currentEdges = ((currentGraph && currentGraph.edges) || []);
+    const exists = currentEdges.some((edge) => edgeSelectionID(edge, currentEdges) === selectedFlowEdgeID);
     if (!exists) setSelectedFlowEdgeID("");
   }, [flowGraph, flowViewGraph, selectedFlowEdgeID, setSelectedFlowEdgeID]);
 

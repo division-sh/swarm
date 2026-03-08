@@ -18,12 +18,17 @@ export function AgentNode({ data, selected }) {
         : "var(--graph-opco)";
 
   return (
-    <div className={`rf-node rf-agent ${selected ? "selected" : ""} ${isStuck ? "rf-stuck" : ""}`} style={{ background: fill }}>
+    <div className={`rf-node rf-agent ${selected ? "selected" : ""} ${isStuck ? "rf-stuck" : ""} ${data.dimmed ? "rf-dimmed" : ""} ${data.highlighted ? "rf-highlighted" : ""}`} style={{ background: fill }}>
       <Handle type="target" position={centered ? Position.Top : (isLR ? Position.Left : Position.Top)} className={`rf-handle ${centered ? "rf-handle-center" : ""}`} />
       <Handle type="source" position={centered ? Position.Bottom : (isLR ? Position.Right : Position.Bottom)} className={`rf-handle ${centered ? "rf-handle-center" : ""}`} />
       <div className="rf-top">
         <div className="rf-role">{state ? <StatusDot state={state} /> : null}{role}</div>
         <div className="rf-status">{data.status || "-"}</div>
+      </div>
+      <div className="rf-node-meta">
+        <span className="rf-chip">{data.group || "graph"}</span>
+        {data.vertical_slug ? <span className="rf-chip rf-chip-soft">{data.vertical_slug}</span> : null}
+        {runtime?.near_breaker ? <span className="rf-chip rf-chip-warn">breaker</span> : null}
       </div>
       <div className="rf-id mono">{data.id}</div>
       {runtime ? (
@@ -47,9 +52,12 @@ export function EventNode({ data, selected }) {
   const isLR = data.layoutDir !== "TB";
   const centered = data.forceLayout;
   return (
-    <div className={`rf-node rf-event ${selected ? "selected" : ""}`} style={{ background: "var(--graph-event)" }}>
+    <div className={`rf-node rf-event ${selected ? "selected" : ""} ${data.dimmed ? "rf-dimmed" : ""} ${data.highlighted ? "rf-highlighted" : ""}`} style={{ background: "var(--graph-event)" }}>
       <Handle type="target" position={centered ? Position.Top : (isLR ? Position.Left : Position.Top)} className={`rf-handle ${centered ? "rf-handle-center" : ""}`} />
       <Handle type="source" position={centered ? Position.Bottom : (isLR ? Position.Right : Position.Bottom)} className={`rf-handle ${centered ? "rf-handle-center" : ""}`} />
+      <div className="rf-node-meta">
+        <span className="rf-chip rf-chip-soft">event</span>
+      </div>
       <div className="rf-event-label mono">{data.label || data.id}</div>
       {data.subscriberCount > 0 ? <div className="rf-event-count">{data.subscriberCount} sub{data.subscriberCount !== 1 ? "s" : ""}</div> : null}
     </div>
@@ -59,11 +67,16 @@ export function EventNode({ data, selected }) {
 export function ControlNode({ data, selected }) {
   const isLR = data.layoutDir !== "TB";
   const centered = data.forceLayout;
+  const kind = data.kind || "system";
+  const systemClass = kind === "system" ? "rf-control-system" : kind === "mailbox" ? "rf-control-mailbox" : kind === "human" ? "rf-control-human" : "";
   return (
-    <div className={`rf-node rf-control ${selected ? "selected" : ""}`}>
+    <div className={`rf-node rf-control ${systemClass} ${selected ? "selected" : ""} ${data.dimmed ? "rf-dimmed" : ""} ${data.highlighted ? "rf-highlighted" : ""}`}>
       <Handle type="target" position={centered ? Position.Top : (isLR ? Position.Left : Position.Top)} className={`rf-handle ${centered ? "rf-handle-center" : ""}`} />
       <Handle type="source" position={centered ? Position.Bottom : (isLR ? Position.Right : Position.Bottom)} className={`rf-handle ${centered ? "rf-handle-center" : ""}`} />
-      <div className="rf-control-kind">{(data.kind || "system").toUpperCase()}</div>
+      <div className="rf-node-meta">
+        <span className="rf-chip rf-chip-soft">{kind.toUpperCase()}</span>
+      </div>
+      <div className="rf-control-kind">{kind.toUpperCase()}</div>
       <div className="rf-control-label">{data.label || data.id}</div>
       <div className="rf-id mono">{data.id}</div>
     </div>

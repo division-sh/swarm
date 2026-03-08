@@ -83,23 +83,29 @@ export function getEdgeType(forceLayout, edge) {
   return edge.kind === "management" ? "smoothstep" : "default";
 }
 
-export function buildEdgePresentation(edge, index, activeEdgeKeys, hoverNodeID, selectedEdgeID, forceLayout) {
+export function buildEdgePresentation(edge, edgeID, activeEdgeKeys, hoverNodeID, selectedEdgeID, forceLayout, allowAnimation = true) {
   const stroke = edgeStroke(edge);
   const dash = edgeDash(edge);
-  const edgeID = `${edge.kind}:${edge.from}->${edge.to}:${index}`;
   const edgeKey = `${edge.from}->${edge.to}|${edge.label || ""}`;
   const hoverActive = !!hoverNodeID && (edge.from === hoverNodeID || edge.to === hoverNodeID);
   const isSelected = selectedEdgeID === edgeID;
   const isActive = !!(activeEdgeKeys && activeEdgeKeys.has(edgeKey)) || hoverActive || isSelected;
+  const isDimmed = !!edge.dimmed;
   return {
     id: edgeID,
     source: edge.from,
     target: edge.to,
     type: getEdgeType(forceLayout, edge),
-    animated: isActive,
+    animated: allowAnimation && isActive,
     data: edge,
     selected: isSelected,
-    style: { stroke, strokeWidth: isActive ? 2.8 : 1.8, strokeDasharray: dash || undefined },
+    className: `${isDimmed ? "rf-edge-dimmed" : ""} ${isActive ? "rf-edge-active" : ""}`.trim(),
+    style: {
+      stroke,
+      strokeWidth: isSelected ? 3.6 : (isActive ? 2.8 : 1.8),
+      strokeDasharray: dash || undefined,
+      opacity: isDimmed ? 0.18 : (isActive ? 0.98 : 0.72),
+    },
     markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
   };
 }

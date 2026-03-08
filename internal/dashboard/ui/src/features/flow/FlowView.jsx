@@ -1,6 +1,7 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
 import GraphView from "../graph/GraphView.jsx";
+import { findEdgeBySelectionID } from "../graph/graphInspectorUtils.jsx";
 import { fmtTime, relTime } from "../../lib/format.js";
 
 export default function FlowView({ state, actions }) {
@@ -51,59 +52,80 @@ export default function FlowView({ state, actions }) {
     <div className="layout-graph">
       <section>
         <div className="head">
-          <h2>Pipeline Flow Visualizer</h2>
-          <div className="stack">
-            <select value={flowView} onChange={(e) => { setFlowView(e.target.value); setFlowReplayOn(false); setFlowReplayIndex(0); setSelectedFlowEdgeID(""); }}>
-              <option value="design">design</option>
-              <option value="runtime">runtime</option>
-              <option value="replay">replay</option>
-            </select>
-            <select value={flowStage} onChange={(e) => { setFlowStage(e.target.value); setSelectedFlowEdgeID(""); }}>
-              {flowStageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select value={flowRubric} onChange={(e) => { setFlowRubric(e.target.value); setSelectedFlowEdgeID(""); }}>
-              {flowRubricOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-            {(flowView === "runtime" || flowView === "replay") ? (
-              <select value={flowVertical} onChange={(e) => { setFlowVertical(e.target.value); setSelectedFlowEdgeID(""); }}>
-                <option value="">all verticals</option>
-                {(verticals || []).map((v) => (
-                  <option key={v.id || v.slug} value={v.slug || v.id}>
-                    {(v.slug || (v.id || "").slice(0, 8))} | {v.stage || "-"} | {v.geography || "-"}
-                  </option>
-                ))}
+          <h2>Workflow Trace</h2>
+          <div className="obs-filterbar">
+            <div className="obs-filtergroup">
+              <div className="obs-filterlabel">View</div>
+              <select value={flowView} onChange={(e) => { setFlowView(e.target.value); setFlowReplayOn(false); setFlowReplayIndex(0); setSelectedFlowEdgeID(""); }}>
+                <option value="design">design map</option>
+                <option value="runtime">live runtime</option>
+                <option value="replay">historical replay</option>
               </select>
-            ) : null}
-            {flowView === "replay" ? (
-              <>
-                <input
-                  type="datetime-local"
-                  value={flowStart}
-                  onChange={(e) => setFlowStart(e.target.value)}
-                  title="start (local time)"
-                />
-                <input
-                  type="datetime-local"
-                  value={flowEnd}
-                  onChange={(e) => setFlowEnd(e.target.value)}
-                  title="end (local time)"
-                />
-                <select value={String(flowReplaySpeed)} onChange={(e) => setFlowReplaySpeed(Number(e.target.value || "10"))}>
-                  <option value="10">10x</option>
-                  <option value="50">50x</option>
-                  <option value="100">100x</option>
+              <select value={flowStage} onChange={(e) => { setFlowStage(e.target.value); setSelectedFlowEdgeID(""); }}>
+                {flowStageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={flowRubric} onChange={(e) => { setFlowRubric(e.target.value); setSelectedFlowEdgeID(""); }}>
+                {flowRubricOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="obs-filtergroup">
+              <div className="obs-filterlabel">Scope</div>
+              {(flowView === "runtime" || flowView === "replay") ? (
+                <select value={flowVertical} onChange={(e) => { setFlowVertical(e.target.value); setSelectedFlowEdgeID(""); }}>
+                  <option value="">all verticals</option>
+                  {(verticals || []).map((v) => (
+                    <option key={v.id || v.slug} value={v.slug || v.id}>
+                      {(v.slug || (v.id || "").slice(0, 8))} | {v.stage || "-"} | {v.geography || "-"}
+                    </option>
+                  ))}
                 </select>
-                <button
-                  className="btn-secondary"
-                  onClick={() => setFlowReplayOn((v) => !v)}
-                  disabled={visibleFlowEvents.length >= (flowEvents || []).length && flowReplayOn}
-                >
-                  {flowReplayOn ? "Pause" : "Play"}
-                </button>
-                <button className="btn-secondary" onClick={() => { setFlowReplayOn(false); setFlowReplayIndex(0); }}>Reset</button>
-              </>
-            ) : null}
-            <button onClick={() => refresh().catch((err) => addToast(err.message, "error"))}>Refresh</button>
+              ) : (
+                <div className="obs-toggle">Design mode uses workflow contract scope</div>
+              )}
+              {flowView === "replay" ? (
+                <>
+                  <input
+                    type="datetime-local"
+                    value={flowStart}
+                    onChange={(e) => setFlowStart(e.target.value)}
+                    title="start (local time)"
+                  />
+                  <input
+                    type="datetime-local"
+                    value={flowEnd}
+                    onChange={(e) => setFlowEnd(e.target.value)}
+                    title="end (local time)"
+                  />
+                </>
+              ) : null}
+            </div>
+            <div className="obs-filtergroup">
+              <div className="obs-filterlabel">Replay</div>
+              {flowView === "replay" ? (
+                <>
+                  <select value={String(flowReplaySpeed)} onChange={(e) => setFlowReplaySpeed(Number(e.target.value || "10"))}>
+                    <option value="10">10x</option>
+                    <option value="50">50x</option>
+                    <option value="100">100x</option>
+                  </select>
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setFlowReplayOn((v) => !v)}
+                    disabled={visibleFlowEvents.length >= (flowEvents || []).length && flowReplayOn}
+                  >
+                    {flowReplayOn ? "Pause" : "Play"}
+                  </button>
+                  <button className="btn-secondary" onClick={() => { setFlowReplayOn(false); setFlowReplayIndex(0); }}>Reset Replay</button>
+                </>
+              ) : (
+                <div className="obs-toggle">Replay controls activate in historical replay mode</div>
+              )}
+            </div>
+            <div className="obs-filtergroup obs-filtergroup-actions">
+              <div className="obs-filterlabel">Actions</div>
+              <button onClick={() => refresh().catch((err) => addToast(err.message, "error"))}>Refresh</button>
+              <button className="btn-secondary" disabled={!flowVertical} onClick={() => actions.openTopologyForVertical?.(flowVertical)}>Open Topology</button>
+            </div>
           </div>
         </div>
         <div className="body">
@@ -164,10 +186,14 @@ export default function FlowView({ state, actions }) {
               <div className="tiny" style={{ marginTop: 10 }}>Selected Vertical Flow Summary</div>
               <div className="row">
                 <div className="health-card">
+                  <div className="health-kv"><span>Vertical</span><span className="mono">{flowVertical}</span></div>
                   <div className="tiny">Event Summary</div>
                   <div className="health-kv"><span>Total Events</span><span className="mono">{selectedFlowSummary.total || 0}</span></div>
                   <div className="health-kv"><span>Latest</span><span title={fmtTime(selectedFlowSummary.last && selectedFlowSummary.last.timestamp)}>{selectedFlowSummary.last ? relTime(selectedFlowSummary.last.timestamp) : "-"}</span></div>
                   <div className="health-kv"><span>Earliest</span><span title={fmtTime(selectedFlowSummary.first && selectedFlowSummary.first.timestamp)}>{selectedFlowSummary.first ? relTime(selectedFlowSummary.first.timestamp) : "-"}</span></div>
+                  <div className="stack" style={{ marginTop: 8 }}>
+                    <button className="btn-secondary" onClick={() => actions.openTopologyForVertical?.(flowVertical)}>Open Topology</button>
+                  </div>
                 </div>
                 <div className="holding-detail-section">
                   <div className="tiny" style={{ marginBottom: 6 }}>Stage Counts</div>
@@ -179,12 +205,19 @@ export default function FlowView({ state, actions }) {
           {(() => {
             const g = flowViewGraph || flowGraph;
             const node = (g.nodes || []).find((n) => n.id === selectedFlowNodeID) || null;
-            const edge = (g.edges || []).find((e, i) => `${e.kind}:${e.from}->${e.to}:${i}` === selectedFlowEdgeID) || null;
+            const edge = findEdgeBySelectionID(g.edges, selectedFlowEdgeID);
             const nodeEdges = node ? (g.edges || []).filter((e) => e.from === node.id || e.to === node.id) : [];
             return (
               <>
                 {edge ? (
                   <>
+                    <div className="health-card" style={{ marginBottom: 10 }}>
+                      <div className="tiny">Selected Transition</div>
+                      <div className="health-kv"><span>Kind</span><span>{edge.kind || "-"}</span></div>
+                      <div className="health-kv"><span>From</span><span className="mono">{edge.from || "-"}</span></div>
+                      <div className="health-kv"><span>To</span><span className="mono">{edge.to || "-"}</span></div>
+                      <div className="health-kv"><span>Label</span><span>{edge.label || "-"}</span></div>
+                    </div>
                     <div className="tiny">Selected Edge</div>
                     <JsonBlock data={edge} defaultOpen={2} />
                     {(Array.isArray(edge.transition_details) && edge.transition_details.length > 0) || (Array.isArray(edge.timer_details) && edge.timer_details.length > 0) ? (

@@ -1,192 +1,126 @@
-import { isEventLinkedEdgeKind } from "./graphTypes.js";
+import dagre from "dagre";
 
-function forceDirectedLayout(nodes, edges, cx, cy) {
-  const count = nodes.length;
-  if (count === 0) return new Map();
+const LAYOUT_VERSION = "dagre-v1";
 
-  const area = 800;
-  const spacing = Math.sqrt((area * area) / count) * 1.6;
-  const iterations = 120;
-  const cooling = 0.97;
-
-  const positions = new Map();
-  nodes.forEach((node, index) => {
-    const angle = (2 * Math.PI * index) / count;
-    const radius = spacing * 1.2;
-    positions.set(node.id, { x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) });
-  });
-
-  const nodeSet = new Set(nodes.map((node) => node.id));
-  let temperature = spacing * 0.6;
-
-  for (let iteration = 0; iteration < iterations; iteration++) {
-    const displacement = new Map();
-    for (const node of nodes) displacement.set(node.id, { dx: 0, dy: 0 });
-
-    for (let i = 0; i < count; i++) {
-      for (let j = i + 1; j < count; j++) {
-        const a = nodes[i].id;
-        const b = nodes[j].id;
-        const pointA = positions.get(a);
-        const pointB = positions.get(b);
-        let dx = pointA.x - pointB.x;
-        let dy = pointA.y - pointB.y;
-        const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
-        const force = (spacing * spacing) / distance;
-        const fx = (dx / distance) * force;
-        const fy = (dy / distance) * force;
-        const dispA = displacement.get(a);
-        const dispB = displacement.get(b);
-        dispA.dx += fx;
-        dispA.dy += fy;
-        dispB.dx -= fx;
-        dispB.dy -= fy;
-      }
-    }
-
-    for (const edge of edges) {
-      if (!nodeSet.has(edge.from) || !nodeSet.has(edge.to)) continue;
-      const pointA = positions.get(edge.from);
-      const pointB = positions.get(edge.to);
-      let dx = pointA.x - pointB.x;
-      let dy = pointA.y - pointB.y;
-      const distance = Math.sqrt(dx * dx + dy * dy) || 0.01;
-      const force = (distance * distance) / spacing;
-      const fx = (dx / distance) * force;
-      const fy = (dy / distance) * force;
-      const dispA = displacement.get(edge.from);
-      const dispB = displacement.get(edge.to);
-      dispA.dx -= fx;
-      dispA.dy -= fy;
-      dispB.dx += fx;
-      dispB.dy += fy;
-    }
-
-    for (const node of nodes) {
-      const disp = displacement.get(node.id);
-      const magnitude = Math.sqrt(disp.dx * disp.dx + disp.dy * disp.dy) || 0.01;
-      const clampedMagnitude = Math.min(magnitude, temperature);
-      const point = positions.get(node.id);
-      point.x += (disp.dx / magnitude) * clampedMagnitude;
-      point.y += (disp.dy / magnitude) * clampedMagnitude;
-    }
-
-    temperature *= cooling;
+function layoutProfile(mode, direction, nodes) {
+  const isLR = direction !== "TB";
+  const eventCount = nodes.filter((node) => node.kind === "event").length;
+  switch (mode) {
+  case "holding":
+    return {
+      rankdir: isLR ? "LR" : "TB",
+      ranksep: isLR ? 260 : 210,
+      nodesep: isLR ? 110 : 120,
+      edgesep: 36,
+      marginx: 64,
+      marginy: 56,
+    };
+  case "template":
+    return {
+      rankdir: isLR ? "LR" : "TB",
+      ranksep: isLR ? 220 : 190,
+      nodesep: isLR ? 96 : 108,
+      edgesep: 34,
+      marginx: 60,
+      marginy: 52,
+    };
+  case "opco":
+    return {
+      rankdir: isLR ? "LR" : "TB",
+      ranksep: isLR ? 280 : 220,
+      nodesep: isLR ? 124 : 132,
+      edgesep: 40,
+      marginx: 70,
+      marginy: 64,
+    };
+  default:
+    return {
+      rankdir: isLR ? "LR" : "TB",
+      ranksep: isLR ? 180 + Math.min(80, eventCount * 4) : 160 + Math.min(60, eventCount * 3),
+      nodesep: isLR ? 72 : 92,
+      edgesep: 32,
+      marginx: 56,
+      marginy: 48,
+    };
   }
-
-  return positions;
 }
 
-export function buildGraphLayout(graph, direction) {
-  const nodes = (graph && graph.nodes) || [];
-  const edges = (graph && graph.edges) || [];
-  const dir = direction || "LR";
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
 
-  const byID = new Map();
-  for (const node of nodes) byID.set(node.id, node);
+function estimateNodeBox(node) {
+  const label = String(node?.label || node?.id || "");
+  const role = String(node?.role || "");
+  const longestLine = Math.max(label.length, role.length, 8);
 
-  if (nodes.length === 0) {
-    return { nodes: [], edges: [], pos: new Map(), bounds: { minX: 0, minY: 0, maxX: 1200, maxY: 700 }, byID };
+  if (node?.kind === "agent") {
+    return {
+      width: clamp(188 + longestLine * 4, 188, 280),
+      height: 108,
+    };
   }
 
-  const agents = nodes.filter((node) => node.kind === "agent");
-  const events = nodes.filter((node) => node.kind === "event");
-  const nonEvents = nodes.filter((node) => node.kind !== "event");
-  const pos = new Map();
+  if (node?.kind === "event") {
+    return {
+      width: clamp(132 + longestLine * 3, 132, 220),
+      height: 58,
+    };
+  }
 
-  if (events.length === 0 || (nonEvents.length > 0 && events.length <= nonEvents.length * 0.3)) {
-    const positions = forceDirectedLayout(nodes, edges, 400, 300);
-    for (const [id, point] of positions) pos.set(id, point);
-  } else if (events.length > 0) {
-    const agentSubCount = new Map();
-    const eventToAgents = new Map();
-    for (const edge of edges) {
-      if (!isEventLinkedEdgeKind(edge.kind)) continue;
-      const fromNode = byID.get(edge.from);
-      const toNode = byID.get(edge.to);
-      if (fromNode && fromNode.kind === "event" && toNode && toNode.kind === "agent" && edge.kind !== "producer") {
-        agentSubCount.set(edge.to, (agentSubCount.get(edge.to) || 0) + 1);
-        if (!eventToAgents.has(edge.from)) eventToAgents.set(edge.from, []);
-        eventToAgents.get(edge.from).push(edge.to);
-      }
-    }
+  return {
+    width: clamp(148 + longestLine * 3, 148, 230),
+    height: 72,
+  };
+}
 
-    const agentGap = 140;
-    const eventRowGap = 28;
-    const sortedAgents = [...agents].sort((a, b) => (agentSubCount.get(b.id) || 0) - (agentSubCount.get(a.id) || 0));
+function buildDagreLayout(nodes, edges, direction, mode) {
+  const graph = new dagre.graphlib.Graph({ multigraph: true });
+  const profile = layoutProfile(mode, direction, nodes);
+  graph.setGraph(profile);
+  graph.setDefaultEdgeLabel(() => ({}));
 
-    const agentEventGroups = new Map();
-    const unassignedEvents = [];
-    for (const eventNode of events) {
-      const targets = eventToAgents.get(eventNode.id) || [];
-      if (targets.length > 0) {
-        const primary = [...targets].sort((a, b) => (agentSubCount.get(b) || 0) - (agentSubCount.get(a) || 0))[0];
-        if (!agentEventGroups.has(primary)) agentEventGroups.set(primary, []);
-        agentEventGroups.get(primary).push(eventNode);
-      } else {
-        unassignedEvents.push(eventNode);
-      }
-    }
-
-    if (dir === "LR") {
-      let agentY = 60;
-      let eventY = 60;
-      for (const agent of sortedAgents) {
-        const groupEvents = (agentEventGroups.get(agent.id) || []).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
-        const groupStartY = eventY;
-        for (const eventNode of groupEvents) {
-          pos.set(eventNode.id, { x: 40, y: eventY });
-          eventY += eventRowGap;
-        }
-        if (groupEvents.length > 0) eventY += 12;
-        const groupCenterY = groupEvents.length > 0 ? groupStartY + ((groupEvents.length - 1) * eventRowGap) / 2 : agentY;
-        const finalAgentY = Math.max(agentY, groupCenterY);
-        pos.set(agent.id, { x: 700, y: finalAgentY });
-        agentY = finalAgentY + agentGap;
-      }
-      for (const eventNode of unassignedEvents) {
-        pos.set(eventNode.id, { x: 40, y: eventY });
-        eventY += eventRowGap;
-      }
-    } else {
-      let agentX = 60;
-      let eventX = 60;
-      for (const agent of sortedAgents) {
-        const groupEvents = (agentEventGroups.get(agent.id) || []).sort((a, b) => (a.label || "").localeCompare(b.label || ""));
-        const groupStartX = eventX;
-        for (const eventNode of groupEvents) {
-          pos.set(eventNode.id, { x: eventX, y: 40 });
-          eventX += 200;
-        }
-        if (groupEvents.length > 0) eventX += 20;
-        const groupCenterX = groupEvents.length > 0 ? groupStartX + ((groupEvents.length - 1) * 200) / 2 : agentX;
-        const finalAgentX = Math.max(agentX, groupCenterX);
-        pos.set(agent.id, { x: finalAgentX, y: 500 });
-        agentX = finalAgentX + 280;
-      }
-      for (const eventNode of unassignedEvents) {
-        pos.set(eventNode.id, { x: eventX, y: 40 });
-        eventX += 200;
-      }
-    }
-
-    const otherNodes = nodes.filter((node) => node.kind !== "agent" && node.kind !== "event");
-    otherNodes.forEach((node, index) => {
-      if (!pos.has(node.id)) pos.set(node.id, { x: 40, y: 40 + index * 80 });
+  for (const node of nodes) {
+    const box = estimateNodeBox(node);
+    graph.setNode(node.id, {
+      width: box.width,
+      height: box.height,
+      kind: node.kind,
+      rank: node.kind === "event" ? "min" : undefined,
     });
   }
 
-  let minX = 1e9;
-  let minY = 1e9;
-  let maxX = -1e9;
-  let maxY = -1e9;
+  edges.forEach((edge, index) => {
+    let weight = 1;
+    if (edge.kind === "management") weight = 5;
+    else if (edge.kind === "mailbox" || edge.kind === "message") weight = 3;
+    else if (edge.kind === "routing" && edge.source === "bootstrap") weight = 4;
+    else if (edge.kind === "routing" || edge.kind === "subscription") weight = 2;
+    graph.setEdge(edge.from, edge.to, { weight }, `${edge.kind || "edge"}:${index}`);
+  });
+
+  dagre.layout(graph);
+
+  const pos = new Map();
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+
   for (const node of nodes) {
-    const point = pos.get(node.id) || { x: 0, y: 0 };
+    const nodeWithPos = graph.node(node.id);
+    if (!nodeWithPos) continue;
+    const point = {
+      x: Math.round(nodeWithPos.x - nodeWithPos.width / 2),
+      y: Math.round(nodeWithPos.y - nodeWithPos.height / 2),
+    };
+    pos.set(node.id, point);
     minX = Math.min(minX, point.x);
     minY = Math.min(minY, point.y);
-    maxX = Math.max(maxX, point.x);
-    maxY = Math.max(maxY, point.y);
+    maxX = Math.max(maxX, point.x + nodeWithPos.width);
+    maxY = Math.max(maxY, point.y + nodeWithPos.height);
   }
+
   if (!Number.isFinite(minX)) {
     minX = 0;
     minY = 0;
@@ -194,15 +128,44 @@ export function buildGraphLayout(graph, direction) {
     maxY = 700;
   }
 
-  const usedForce = events.length === 0 || (nonEvents.length > 0 && events.length <= nonEvents.length * 0.3);
+  return {
+    pos,
+    bounds: { minX: minX - 120, minY: minY - 80, maxX: maxX + 180, maxY: maxY + 120 },
+  };
+}
+
+export function buildGraphLayout(graph, options) {
+  const nodes = (graph && graph.nodes) || [];
+  const edges = (graph && graph.edges) || [];
+  const dir = (typeof options === "string" ? options : options?.direction) || "LR";
+  const mode = (typeof options === "object" && options?.mode) ? options.mode : "workflow";
+
+  const byID = new Map();
+  for (const node of nodes) byID.set(node.id, node);
+
+  if (nodes.length === 0) {
+    return {
+      nodes: [],
+      edges: [],
+      pos: new Map(),
+      bounds: { minX: 0, minY: 0, maxX: 1200, maxY: 700 },
+      byID,
+      forceLayout: false,
+      layoutVersion: LAYOUT_VERSION,
+    };
+  }
+
+  const dagreLayout = buildDagreLayout(nodes, edges, dir, mode);
 
   return {
     nodes,
     edges,
-    pos,
-    bounds: { minX: minX - 180, minY: minY - 120, maxX: maxX + 260, maxY: maxY + 160 },
+    pos: dagreLayout.pos,
+    bounds: dagreLayout.bounds,
     byID,
-    forceLayout: usedForce,
+    forceLayout: false,
+    layoutVersion: LAYOUT_VERSION,
+    profileMode: mode,
   };
 }
 
@@ -311,4 +274,8 @@ export function deriveGraphForView(graph, opts) {
 
   const nextNodes = (nextGraph.nodes || []).filter((node) => node.kind !== "event");
   return { ...nextGraph, nodes: nextNodes, edges: directEdges };
+}
+
+export function getGraphLayoutVersion() {
+  return LAYOUT_VERSION;
 }

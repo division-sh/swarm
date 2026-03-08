@@ -382,6 +382,75 @@ button.btn-danger:hover {
   line-height: 1.6;
 }
 
+.code-viewer {
+  position: relative;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: #1e1e1e;
+}
+
+.code-viewer-compact {
+  margin-top: 6px;
+}
+
+.code-viewer-loading {
+  padding: 10px 12px;
+  color: var(--text-3);
+}
+
+.data-table-wrap {
+  margin-top: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 7px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.data-table-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table-head {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.data-table-sort-indicator {
+  color: var(--accent);
+  font-size: 10px;
+}
+
 /* --- Turnbar / Progress --- */
 .turnbar {
   height: 6px;
