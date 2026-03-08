@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type EmpireContractPaths struct {
+type ContractPaths struct {
 	ContractsRoot         string
 	WorkflowDir           string
 	WorkflowSchemaFile    string
@@ -29,7 +29,7 @@ type EmpireContractPaths struct {
 }
 
 type WorkflowContractBundle struct {
-	Paths    EmpireContractPaths
+	Paths    ContractPaths
 	Workflow WorkflowSchemaDocument
 	Hooks    GuardActionRegistryDocument
 	Nodes    map[string]SystemNodeContract
@@ -121,6 +121,9 @@ type EventCatalogEntry struct {
 	AlternateEmitters []string `yaml:"alternate_emitters"`
 	Consumer          any      `yaml:"consumer"`
 	ConsumerType      any      `yaml:"consumer_type"`
+	Intercepted       any      `yaml:"intercepted"`
+	Passthrough       any      `yaml:"passthrough"`
+	RuntimeHandling   string   `yaml:"runtime_handling"`
 	DeliveryChannel   any      `yaml:"delivery_channel"`
 	Payload           any      `yaml:"payload"`
 	Required          []string `yaml:"required"`
@@ -182,10 +185,10 @@ type PlatformSpecDocument struct {
 	} `yaml:"file_layout"`
 }
 
-func ResolveEmpireContractPaths(repoRoot string) EmpireContractPaths {
+func ResolveWorkflowContractPaths(repoRoot string) ContractPaths {
 	contractsRoot := filepath.Join(repoRoot, "contracts")
 	workflowDir := filepath.Join(contractsRoot, "empire")
-	return EmpireContractPaths{
+	return ContractPaths{
 		ContractsRoot:         contractsRoot,
 		WorkflowDir:           workflowDir,
 		WorkflowSchemaFile:    preferredContractPath(filepath.Join(workflowDir, "workflow-empire.yaml"), filepath.Join(contractsRoot, "workflow-schema.yaml")),
@@ -204,8 +207,8 @@ func ResolveEmpireContractPaths(repoRoot string) EmpireContractPaths {
 	}
 }
 
-func LoadEmpireWorkflowContractBundle(repoRoot string) (*WorkflowContractBundle, error) {
-	paths := ResolveEmpireContractPaths(repoRoot)
+func LoadWorkflowContractBundle(repoRoot string) (*WorkflowContractBundle, error) {
+	paths := ResolveWorkflowContractPaths(repoRoot)
 	bundle := &WorkflowContractBundle{Paths: paths}
 	if err := loadYAMLFile(paths.WorkflowSchemaFile, &bundle.Workflow); err != nil {
 		return nil, err
@@ -252,8 +255,8 @@ func (b *WorkflowContractBundle) TransitionIDsByOwner() map[string][]string {
 	return out
 }
 
-func EmpireContractFilesExist(repoRoot string) []string {
-	paths := ResolveEmpireContractPaths(repoRoot)
+func ContractFilesExist(repoRoot string) []string {
+	paths := ResolveWorkflowContractPaths(repoRoot)
 	files := []string{
 		paths.WorkflowSchemaFile,
 		paths.GuardRegistryFile,

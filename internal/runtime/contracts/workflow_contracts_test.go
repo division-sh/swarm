@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestResolveEmpireContractPaths_PrefersWorkflowScopedLayout(t *testing.T) {
+func TestResolveWorkflowContractPaths_PrefersWorkflowScopedLayout(t *testing.T) {
 	repoRoot := t.TempDir()
 	mustWriteTestFile(t, filepath.Join(repoRoot, "contracts", "workflow-schema.yaml"))
 	mustWriteTestFile(t, filepath.Join(repoRoot, "contracts", "guard-action-registry.yaml"))
@@ -26,7 +26,7 @@ func TestResolveEmpireContractPaths_PrefersWorkflowScopedLayout(t *testing.T) {
 		t.Fatalf("mkdir prompts dir: %v", err)
 	}
 
-	paths := ResolveEmpireContractPaths(repoRoot)
+	paths := ResolveWorkflowContractPaths(repoRoot)
 	if want := filepath.Join(repoRoot, "contracts", "empire", "workflow-empire.yaml"); paths.WorkflowSchemaFile != want {
 		t.Fatalf("workflow schema path = %s, want %s", paths.WorkflowSchemaFile, want)
 	}
@@ -38,7 +38,7 @@ func TestResolveEmpireContractPaths_PrefersWorkflowScopedLayout(t *testing.T) {
 	}
 }
 
-func TestResolveEmpireContractPaths_FallsBackToLegacyLayout(t *testing.T) {
+func TestResolveWorkflowContractPaths_FallsBackToLegacyLayout(t *testing.T) {
 	repoRoot := t.TempDir()
 	mustWriteTestFile(t, filepath.Join(repoRoot, "contracts", "workflow-schema.yaml"))
 	mustWriteTestFile(t, filepath.Join(repoRoot, "contracts", "guard-action-registry.yaml"))
@@ -51,7 +51,7 @@ func TestResolveEmpireContractPaths_FallsBackToLegacyLayout(t *testing.T) {
 		t.Fatalf("mkdir legacy prompts dir: %v", err)
 	}
 
-	paths := ResolveEmpireContractPaths(repoRoot)
+	paths := ResolveWorkflowContractPaths(repoRoot)
 	if want := filepath.Join(repoRoot, "contracts", "workflow-schema.yaml"); paths.WorkflowSchemaFile != want {
 		t.Fatalf("workflow schema path = %s, want %s", paths.WorkflowSchemaFile, want)
 	}

@@ -16,24 +16,25 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
 type Executor struct {
-	mu            sync.RWMutex
-	manager       Manager
+	mu              sync.RWMutex
+	manager         Manager
 	managerProvider ManagerProvider
-	sqlDB         *sql.DB
-	bus           EventPublisher
-	scheduler     Scheduler
-	scheduleStore SchedulePersistence
-	mailboxStore  MailboxPersistence
-	cfg           *config.Config
-	authorizer    *ToolAuthorizer
-	validator     *ToolInputValidator
-	dispatcher    *ToolDispatcher
-	oneShotMu     sync.Mutex
-	oneShotEmits  map[string]struct{}
+	sqlDB           *sql.DB
+	bus             EventPublisher
+	scheduler       Scheduler
+	scheduleStore   SchedulePersistence
+	mailboxStore    MailboxPersistence
+	cfg             *config.Config
+	authorizer      *ToolAuthorizer
+	validator       *ToolInputValidator
+	dispatcher      *ToolDispatcher
+	oneShotMu       sync.Mutex
+	oneShotEmits    map[string]struct{}
 }
 
 func NewExecutor(bus EventPublisher, scheduler Scheduler, manager Manager, stores ...SchedulePersistence) *Executor {
@@ -46,15 +47,15 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		scheduleStore = stores[0]
 	}
 	exec := &Executor{
-		manager:       opts.Manager,
+		manager:         opts.Manager,
 		managerProvider: opts.ManagerProvider,
-		bus:           bus,
-		scheduler:     scheduler,
-		scheduleStore: scheduleStore,
-		mailboxStore:  opts.MailboxStore,
-		sqlDB:         opts.SQLDB,
-		cfg:           opts.Config,
-		oneShotEmits:  make(map[string]struct{}),
+		bus:             bus,
+		scheduler:       scheduler,
+		scheduleStore:   scheduleStore,
+		mailboxStore:    opts.MailboxStore,
+		sqlDB:           opts.SQLDB,
+		cfg:             opts.Config,
+		oneShotEmits:    make(map[string]struct{}),
 	}
 	exec.authorizer = NewToolAuthorizer(bus)
 	exec.validator = NewToolInputValidator(ContractDefinitions)
@@ -670,8 +671,11 @@ var (
 )
 
 func authorizeRouting(actor, target models.AgentConfig, status string) error {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil && policy.AllowGlobalRouting(actor) {
+		return nil
+	}
 	switch actor.Role {
-	case "opco-ceo", "empire-coordinator":
+	case "opco-ceo":
 		return nil
 	case "chief-of-staff":
 		if status != "proposed" {
@@ -699,7 +703,7 @@ func authorizeRouting(actor, target models.AgentConfig, status string) error {
 }
 
 func authorizeManage(actor models.AgentConfig, targetRole, targetVerticalID string) error {
-	if actor.Role == "empire-coordinator" {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil && policy.AllowGlobalManagement(actor) {
 		return nil
 	}
 	if actor.VerticalID != "" && targetVerticalID != "" && actor.VerticalID != targetVerticalID {
@@ -729,6 +733,9 @@ func authorizeManage(actor models.AgentConfig, targetRole, targetVerticalID stri
 }
 
 func authorizeMailboxSend(actor models.AgentConfig) error {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil && policy.AllowMailboxSend(actor) {
+		return nil
+	}
 	switch actor.Role {
 	case "opco-ceo",
 		"vp-product",
@@ -736,7 +743,6 @@ func authorizeMailboxSend(actor models.AgentConfig) error {
 		"support-agent",
 		"marketing-agent",
 		"validation-coordinator",
-		"empire-coordinator",
 		"factory-cto",
 		"holding-devops",
 		"operations-analyst":

@@ -1,22 +1,92 @@
 package empire
 
-import runtimepipeline "empireai/internal/runtime/pipeline"
+import (
+	"sync"
 
-type module struct{}
+	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+)
+
+type module struct {
+	once           sync.Once
+	contractBundle *runtimecontracts.WorkflowContractBundle
+	workflow       *runtimepipeline.WorkflowDefinition
+	workflowNodes  []runtimepipeline.WorkflowNode
+	guardRegistry  runtimepipeline.GuardRegistry
+	actionRegistry runtimepipeline.ActionRegistry
+	loadErr        error
+}
 
 func NewModule() runtimepipeline.WorkflowModule {
+	return &module{}
+}
+
+func (m *module) init() {
+	m.once.Do(func() {
+		repoRoot := runtimepipeline.WorkflowRepoRoot()
+		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundle(repoRoot)
+		if m.loadErr != nil {
+			return
+		}
+		m.workflow, m.loadErr = runtimepipeline.LoadWorkflowDefinition(m.contractBundle)
+		if m.loadErr != nil {
+			return
+		}
+		m.workflowNodes, m.loadErr = runtimepipeline.LoadWorkflowNodes(m.contractBundle)
+		if m.loadErr != nil {
+			return
+		}
+		m.guardRegistry = runtimepipeline.NewContractGuardRegistry(m.contractBundle)
+		m.actionRegistry = runtimepipeline.NewContractActionRegistry(m.contractBundle)
+	})
+	if m.loadErr != nil {
+		panic(m.loadErr)
+	}
+}
+
+func (m *module) ContractBundle() *runtimecontracts.WorkflowContractBundle {
+	m.init()
+	return m.contractBundle
+}
+
+func (m *module) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	m.init()
+	return m.workflow
+}
+
+func (m *module) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	m.init()
+	out := make([]runtimepipeline.WorkflowNode, 0, len(m.workflowNodes))
+	for _, node := range m.workflowNodes {
+		nodeCopy := node
+		out = append(out, nodeCopy)
+	}
+	return out
+}
+
+func (m *module) GuardRegistry() runtimepipeline.GuardRegistry {
+	m.init()
+	return m.guardRegistry
+}
+
+func (m *module) ActionRegistry() runtimepipeline.ActionRegistry {
+	m.init()
+	return m.actionRegistry
+}
+
+func (m *module) WorkflowHooks() runtimepipeline.WorkflowHookExecutor {
+	return m
+}
+
+func (*module) DiscoveryPolicy() runtimepipeline.DiscoveryPolicy {
 	return module{}
 }
 
-func (module) DiscoveryPolicy() runtimepipeline.DiscoveryPolicy {
+func (*module) ScoringPolicy() runtimepipeline.ScoringPolicy {
 	return module{}
 }
 
-func (module) ScoringPolicy() runtimepipeline.ScoringPolicy {
-	return module{}
-}
-
-func (module) PayloadFactory() runtimepipeline.PayloadFactory {
+func (*module) PayloadFactory() runtimepipeline.PayloadFactory {
 	return module{}
 }
 

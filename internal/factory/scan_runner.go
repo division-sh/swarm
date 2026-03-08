@@ -68,8 +68,9 @@ func (r *ScanRequestedRunner) handle(ctx context.Context, evt events.Event) {
 	p := NewPipeline(r.db, r.events, r.mailbox)
 	mode := strings.TrimSpace(asString(payload["mode"]))
 	if mode == "" {
-		mode = "local_services"
+		mode = defaultFactoryScanMode()
 	}
+	mode = normalizeFactoryScanMode(mode)
 	pipelineID := strings.TrimSpace(asString(payload["campaign_id"]))
 	if _, err := uuid.Parse(pipelineID); err != nil {
 		pipelineID = evt.ID

@@ -8,15 +8,15 @@ import (
 )
 
 func TestEmpirePipelineWorkflowNodes_ExposeSubscriptions(t *testing.T) {
-	subs := empirePipelineSubscriptions()
+	subs := defaultPipelineSubscriptions()
 	if len(subs) == 0 {
 		t.Fatal("expected subscriptions")
 	}
 	want := map[events.EventType]struct{}{
-		events.EventType("scan.requested"):          {},
-		events.EventType("vertical.shortlisted"):    {},
-		events.EventType("spec.validation_passed"):  {},
-		events.EventType("runtime.reset"):           {},
+		events.EventType("scan.requested"):         {},
+		events.EventType("vertical.shortlisted"):   {},
+		events.EventType("spec.validation_passed"): {},
+		events.EventType("runtime.reset"):          {},
 	}
 	for evt := range want {
 		found := false
@@ -33,18 +33,18 @@ func TestEmpirePipelineWorkflowNodes_ExposeSubscriptions(t *testing.T) {
 }
 
 func TestEmpirePipelineWorkflowNodes_ExposePolicies(t *testing.T) {
-	policy, ok := empirePipelineEventPolicy("brand.revision_needed")
+	policy, ok := defaultPipelineEventPolicy("brand.revision_needed")
 	if !ok {
 		t.Fatal("expected brand.revision_needed policy")
 	}
-	if policy.Consume {
-		t.Fatal("brand.revision_needed should remain visible downstream")
+	if !policy.Consume {
+		t.Fatal("brand.revision_needed should be consumed by runtime")
 	}
 	if !policy.RequireVertical {
 		t.Fatal("brand.revision_needed should require vertical_id")
 	}
 
-	policy, ok = empirePipelineEventPolicy("category.assessed")
+	policy, ok = defaultPipelineEventPolicy("category.assessed")
 	if !ok || !policy.Consume {
 		t.Fatalf("expected category.assessed consume policy, got ok=%v consume=%v", ok, policy.Consume)
 	}
@@ -57,7 +57,7 @@ func TestEmpirePipelineWorkflowNodes_CoverValidationAndScanEdgeEvents(t *testing
 		"synthesis.resolved",
 		"trend_research.scan_complete",
 	} {
-		policy, ok := empirePipelineEventPolicy(eventType)
+		policy, ok := defaultPipelineEventPolicy(eventType)
 		if !ok {
 			t.Fatalf("expected policy for %s", eventType)
 		}

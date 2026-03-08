@@ -74,7 +74,6 @@ func TestRuntimeAndHumanEventClassifications(t *testing.T) {
 
 	for _, evt := range []string{
 		"brand.requested",
-		"brand.revision_needed",
 		"cto.spec_review_requested",
 		"founder_input.response",
 		"human_task.requested",
@@ -99,6 +98,7 @@ func TestRuntimeAndHumanEventClassifications(t *testing.T) {
 		"template.migration_approved",
 		"spend.approved",
 		"spend.rejected",
+		"brand.revision_needed",
 		"vertical.approved",
 		"vertical.needs_more_data",
 		"human_task.completed",
@@ -136,4 +136,49 @@ func TestProducerEventsForRoleIncludesActorGatewayAndCoordinatorResume(t *testin
 	assertHas("inbound-gateway", "inbound.email")
 	assertHas("dashboard", "human_task.assigned")
 	assertHas("actor-agent", "opco.routing_updated")
+}
+
+func TestMessageAuthorities_DeriveTemplateHierarchy(t *testing.T) {
+	assertRecipient := func(sender, recipient string) {
+		t.Helper()
+		sender = CanonicalRole(sender)
+		recipient = CanonicalRole(recipient)
+		for _, rule := range MessageAuthorities() {
+			if CanonicalRole(rule.SenderRole) != sender {
+				continue
+			}
+			for _, candidate := range rule.RecipientRoles {
+				if CanonicalRole(candidate) == recipient {
+					return
+				}
+			}
+		}
+		t.Fatalf("expected %q to be allowed to message %q", sender, recipient)
+	}
+
+	assertRecipient("opco-ceo", "vp-product")
+	assertRecipient("vp-product", "opco-ceo")
+	assertRecipient("cto-agent", "backend-agent")
+	assertRecipient("backend-agent", "cto-agent")
+	assertRecipient("opco-ceo", "backend-agent")
+	assertRecipient("backend-agent", "opco-ceo")
+}
+
+func TestMessageAuthorities_KeepManualPeerExceptions(t *testing.T) {
+	for _, rule := range MessageAuthorities() {
+		if CanonicalRole(rule.SenderRole) != "chief-of-staff" {
+			continue
+		}
+		recipients := map[string]struct{}{}
+		for _, recipient := range rule.RecipientRoles {
+			recipients[CanonicalRole(recipient)] = struct{}{}
+		}
+		for _, expected := range []string{"vp-product", "vp-growth", "opco-ceo"} {
+			if _, ok := recipients[expected]; !ok {
+				t.Fatalf("expected chief-of-staff to keep recipient %q; got %v", expected, rule.RecipientRoles)
+			}
+		}
+		return
+	}
+	t.Fatal("expected chief-of-staff message authority rule")
 }

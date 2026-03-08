@@ -191,7 +191,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 	`, verticalID).Scan(&currentStage)
 	from, to := NormalizePipelineStage(currentStage), NormalizePipelineStage(stage)
 	workflowState := workflowStateForVertical(verticalID, currentStage, pc.validationGate.states[verticalID])
-	if _, ok := PipelineWorkflowTransition(from, to); !ok && !EmpirePipelineWorkflow().CanTransition(workflowState, to) {
+	if _, ok := PipelineWorkflowTransition(from, to); !ok && !DefaultPipelineWorkflow().CanTransition(workflowState, to) {
 		runtimeWarn(
 			"pipeline-coordinator",
 			"non-canonical stage transition vertical_id=%s from=%s to=%s source_event=%s",

@@ -8,12 +8,12 @@ import (
 	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
-func ValidateEmpireWorkflowContracts() error {
-	bundle, err := runtimecontracts.LoadEmpireWorkflowContractBundle(workflowRepoRoot())
-	if err != nil {
-		return err
-	}
+func ValidateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) error {
 	return validateWorkflowContracts(bundle)
+}
+
+func ValidateDefaultWorkflowContracts() error {
+	return validateWorkflowContracts(defaultWorkflowModule().ContractBundle())
 }
 
 func (pc *FactoryPipelineCoordinator) ValidateWorkflowContracts() error {
@@ -61,6 +61,23 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 				if _, ok := bundle.Events[emits]; !ok {
 					errs = append(errs, fmt.Sprintf("transition %s action %s emits missing event %s", id, actionID, emits))
 				}
+			}
+			if !isExecutableWorkflowActionEntry(action) {
+				errs = append(errs, fmt.Sprintf("transition %s action %s has no executable runtime implementation", id, actionID))
+			}
+		}
+		for _, guardID := range transition.Guards {
+			guardID = strings.TrimSpace(guardID)
+			if guardID == "" {
+				continue
+			}
+			guard, ok := guardActionEntryByID(bundle.Hooks.Guards, guardID)
+			if !ok {
+				errs = append(errs, fmt.Sprintf("transition %s references unknown guard %s", id, guardID))
+				continue
+			}
+			if !isExecutableWorkflowGuardEntry(guard) {
+				errs = append(errs, fmt.Sprintf("transition %s guard %s has no executable runtime implementation", id, guardID))
 			}
 		}
 	}

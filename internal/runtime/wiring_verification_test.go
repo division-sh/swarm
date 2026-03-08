@@ -1551,7 +1551,10 @@ func parsePipelineInterceptorCoverage(pipelinePath string) (map[string]struct{},
 	}
 	for _, decl := range workflowNodesFile.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil || fn.Name == nil || fn.Name.Name != "workflowNodePolicyOverlay" {
+		if !ok || fn.Body == nil || fn.Name == nil {
+			continue
+		}
+		if fn.Name.Name != "workflowNodePolicyOverlay" && fn.Name.Name != "workflowNodeRuntimePolicyEvents" {
 			continue
 		}
 		collectMapStringKeys(fn.Body, interceptEvents)

@@ -14,6 +14,8 @@ type scoringWorkflowRuntime interface {
 	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
 	updateScoredVerticalState(context.Context, string, string, map[string]any, string)
 	appendScoringDigestBuffer(context.Context, VerticalScoredPayload)
+	persistWorkflowScoringAccumulator(context.Context, *scoringAccumulator)
+	clearWorkflowScoringAccumulator(context.Context, string)
 }
 
 func (n *ScoringState) NodeID() string { return "scoring-node" }

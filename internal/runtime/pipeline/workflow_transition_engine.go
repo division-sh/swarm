@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 type workflowTransitionOutcome struct {
@@ -22,6 +23,20 @@ type workflowTriggerContext struct {
 	Event           events.Event
 	State           WorkflowState
 	ValidationState *validationPipelineState
+}
+
+func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
+	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
+	payload := parsePayloadMap(triggerCtx.Event.Payload)
+	if verticalID == "" {
+		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
+	}
+	return WorkflowHookContext{
+		Event:      triggerCtx.Event,
+		VerticalID: verticalID,
+		Payload:    payload,
+		State:      triggerCtx.State,
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.Context, evt events.Event) (workflowTransitionOutcome, bool) {
@@ -76,7 +91,7 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 		return WorkflowTransition{}, nil, false
 	}
 	var guardsEvaluated []string
-	transition, ok := EmpirePipelineWorkflow().TransitionByTrigger(triggerCtx.State, trigger, func(candidate WorkflowTransition) bool {
+	transition, ok := DefaultPipelineWorkflow().TransitionByTrigger(triggerCtx.State, trigger, func(candidate WorkflowTransition) bool {
 		passed, evaluated := pc.evaluateWorkflowTransitionGuards(triggerCtx, candidate)
 		if passed {
 			guardsEvaluated = evaluated
@@ -112,116 +127,37 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuard(triggerCtx workflowT
 	if guardID == "" {
 		return true
 	}
-	switch guardID {
-	case "signal_above_threshold":
-		return asFloat(parsePayloadMap(triggerCtx.Event.Payload)["signal_strength"]) >= pc.contractPolicyFloat("signal_threshold", 55)
-	case "composite_above_shortlist":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		if result := strings.TrimSpace(asString(payload["result"])); result != "" {
-			return strings.EqualFold(result, "shortlisted")
-		}
-		return asFloat(payload["composite_score"]) >= pc.contractPolicyFloat("composite_shortlist", 75)
-	case "composite_in_marginal_range":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		if result := strings.TrimSpace(asString(payload["result"])); result != "" {
-			return strings.EqualFold(result, "marginal")
-		}
-		composite := asFloat(payload["composite_score"])
-		low := pc.contractPolicyFloat("composite_marginal_low", 55)
-		high := pc.contractPolicyFloat("composite_shortlist", 75)
-		return composite >= low && composite < high && pc.evaluateWorkflowGuard(triggerCtx, "marginal_promotion_eligible")
-	case "composite_below_marginal":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		if result := strings.TrimSpace(asString(payload["result"])); result != "" {
-			return strings.EqualFold(result, "rejected")
-		}
-		composite := asFloat(payload["composite_score"])
-		low := pc.contractPolicyFloat("composite_marginal_low", 55)
-		high := pc.contractPolicyFloat("composite_shortlist", 75)
-		if composite < low {
-			return true
-		}
-		return composite >= low && composite < high && !pc.evaluateWorkflowGuard(triggerCtx, "marginal_promotion_eligible")
-	case "both_hard_gates_pass":
-		floor := pc.contractPolicyInt("hard_gate_floor", 50)
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		return scoringDimensionScore(payload, "build_complexity") >= floor &&
-			scoringDimensionScore(payload, "automation_completeness") >= floor
-	case "marginal_promotion_eligible":
-		threshold := pc.contractPolicyInt("marginal_tier1_dimensions_above_70", 2)
-		count := 0
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		for _, dim := range empireTier1Dimensions {
-			if scoringDimensionScore(payload, dim) >= 70 {
-				count++
-			}
-		}
-		return count >= threshold
-	case "pipeline_has_capacity":
-		return pc.pipelineHasCapacity(context.Background(), pc.contractPolicyInt("pipeline_capacity_max", 3))
+	entry, ok := pc.resolveWorkflowGuard(guardID)
+	if !ok {
+		return false
+	}
+	hookCtx := workflowHookContextFromTrigger(triggerCtx)
+	switch workflowGuardExecutionKey(entry) {
 	case "has_vertical_id", "has_entity_id":
-		if strings.TrimSpace(triggerCtx.Event.VerticalID) != "" {
+		if strings.TrimSpace(hookCtx.VerticalID) != "" {
 			return true
 		}
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		return strings.TrimSpace(asString(payload["vertical_id"])) != ""
+		return strings.TrimSpace(asString(hookCtx.Payload["vertical_id"])) != ""
 	case "has_human_decision":
 		source := strings.TrimSpace(triggerCtx.Event.SourceAgent)
 		if strings.EqualFold(source, "human") || strings.EqualFold(source, "mailbox") {
 			return true
 		}
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		return strings.TrimSpace(asString(payload["mailbox_decision_id"])) != ""
+		return strings.TrimSpace(asString(hookCtx.Payload["mailbox_decision_id"])) != ""
 	case "inner_revision_count_below_limit", "revision_count_below_limit":
 		return asInt(triggerCtx.State.Metadata["revision_count"]) < maxRevisionCycles
-	case "gate_g1_research":
-		return truthyMetadataFlag(triggerCtx.State.Metadata["g1_research"])
-	case "gate_g2_spec":
-		return truthyMetadataFlag(triggerCtx.State.Metadata["g2_spec"])
-	case "gate_g3_cto":
-		return truthyMetadataFlag(triggerCtx.State.Metadata["g3_cto"])
-	case "gate_g4_brand":
-		return truthyMetadataFlag(triggerCtx.State.Metadata["g4_brand"])
-	case "all_gates_met":
-		return truthyMetadataFlag(triggerCtx.State.Metadata["g1_research"]) &&
-			truthyMetadataFlag(triggerCtx.State.Metadata["g2_spec"]) &&
-			truthyMetadataFlag(triggerCtx.State.Metadata["g3_cto"]) &&
-			truthyMetadataFlag(triggerCtx.State.Metadata["g4_brand"])
 	case "not_in_operating_phase":
-		stageDef, ok := EmpirePipelineWorkflow().Stage(triggerCtx.State.Stage)
+		stageDef, ok := DefaultPipelineWorkflow().Stage(triggerCtx.State.Stage)
 		return !ok || !strings.EqualFold(strings.TrimSpace(stageDef.Phase), "operating")
 	case "stage_in_phase":
-		stageDef, ok := EmpirePipelineWorkflow().Stage(triggerCtx.State.Stage)
+		stageDef, ok := DefaultPipelineWorkflow().Stage(triggerCtx.State.Stage)
 		return ok && strings.TrimSpace(stageDef.Phase) != ""
-	case "spec_validation_passed":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		return strings.EqualFold(strings.TrimSpace(asString(payload["status"])), "passed") ||
-			strings.EqualFold(strings.TrimSpace(asString(payload["passed"])), "true")
-	case "qa_passed":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		return strings.EqualFold(strings.TrimSpace(asString(payload["qa_passed"])), "true") ||
-			strings.EqualFold(strings.TrimSpace(asString(payload["status"])), "passed")
-	case "deploy_approved":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		return strings.EqualFold(strings.TrimSpace(asString(payload["decision"])), "approved") ||
-			strings.EqualFold(strings.TrimSpace(asString(payload["deploy_approved"])), "true")
-	case "has_retention_primitive":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		if items, ok := payload["retention_primitives"].([]any); ok {
-			return len(items) > 0
-		}
-		if items, ok := payload["retention_primitives"].([]string); ok {
-			return len(items) > 0
-		}
-		return false
-	case "evidence_sufficient":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		competitors := payloadSliceLen(payload["competitors"])
-		painSignals := payloadSliceLen(payload["pain_signals"])
-		return competitors > 0 && painSignals > 0
 	default:
-		// Keep non-validation Empire guards permissive until their owning node is cut over.
-		return true
+		if pc == nil || pc.module == nil || pc.module.WorkflowHooks() == nil {
+			return false
+		}
+		passed, handled := pc.module.WorkflowHooks().EvaluateWorkflowGuard(context.Background(), pc, hookCtx, entry)
+		return handled && passed
 	}
 }
 
@@ -271,53 +207,38 @@ func (pc *FactoryPipelineCoordinator) executeWorkflowAction(
 	if actionID == "" {
 		return false
 	}
-	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
-	if verticalID == "" {
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
+	entry, ok := pc.resolveWorkflowAction(actionID)
+	if !ok {
+		return false
 	}
-	switch actionID {
+	hookCtx := workflowHookContextFromTrigger(triggerCtx)
+	switch workflowActionExecutionKey(entry) {
 	case "increment_revision_count":
 		pc.mu.Lock()
-		if st := pc.validationGate.states[verticalID]; st != nil {
+		if st := pc.validationGate.states[hookCtx.VerticalID]; st != nil {
 			st.RevisionCount++
 		}
 		pc.mu.Unlock()
+		pc.PersistWorkflowMetadata(ctx, hookCtx.VerticalID, func(metadata map[string]any) {
+			metadata["revision_count"] = asInt(metadata["revision_count"]) + 1
+		})
 		return true
-	case "emit_validation_started":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		pc.publish(ctx, "validation.started", verticalID, payloadMap(pc.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, payload, nil)))
-		return true
-	case "emit_vertical_shortlisted":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		pc.publish(ctx, "vertical.shortlisted", verticalID, payloadMap(pc.payloadFactory.BuildVerticalShortlistedPayload(
-			verticalID,
-			asFloat(payload["composite_score"]),
-			asFloat(payload["viability_score"]),
-			payload,
-		)))
-		return true
-	case "emit_vertical_marginal":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		pc.publish(ctx, "vertical.marginal", verticalID, payloadMap(pc.payloadFactory.BuildVerticalMarginalPayload(
-			verticalID,
-			scoringCompositeFromPayload(payload),
-		)))
-		return true
-	case "emit_vertical_rejected":
-		payload := parsePayloadMap(triggerCtx.Event.Payload)
-		pc.publish(ctx, "vertical.rejected", verticalID, payloadMap(pc.payloadFactory.BuildVerticalRejectedPayload(
-			verticalID,
-			scoringCompositeFromPayload(payload),
-		)))
-		return true
-	case "emit_opco_spinup_requested":
-		// The empire-coordinator agent still owns this emit path in the current runtime.
-		return false
 	case "spinup_opco_org":
+		pc.PersistWorkflowMetadata(ctx, hookCtx.VerticalID, func(metadata map[string]any) {
+			metadata["opco_spinup_requested"] = true
+		})
+		return true
+	case "begin_teardown":
+		pc.PersistWorkflowMetadata(ctx, hookCtx.VerticalID, func(metadata map[string]any) {
+			metadata["teardown_requested"] = true
+		})
 		return true
 	default:
-		return false
+		if pc == nil || pc.module == nil || pc.module.WorkflowHooks() == nil {
+			return false
+		}
+		executed, handled := pc.module.WorkflowHooks().ExecuteWorkflowAction(ctx, pc, hookCtx, entry)
+		return handled && executed
 	}
 }
 
@@ -330,7 +251,7 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
 		instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
 		if err == nil && ok {
-			state.Stage = NormalizePipelineStage(instance.CurrentStage)
+			state = workflowStateFromInstance(instance, state)
 			return state
 		}
 	}
@@ -345,6 +266,72 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 		}
 	}
 	return state
+}
+
+func (pc *FactoryPipelineCoordinator) resolveWorkflowGuard(guardID string) (runtimecontracts.GuardActionEntry, bool) {
+	if pc == nil || pc.GuardRegistry() == nil {
+		return runtimecontracts.GuardActionEntry{}, false
+	}
+	entry, ok := pc.GuardRegistry().Guard(guardID)
+	if !ok || !pc.GuardRegistry().IsExecutable(guardID) {
+		return runtimecontracts.GuardActionEntry{}, false
+	}
+	return entry, true
+}
+
+func (pc *FactoryPipelineCoordinator) resolveWorkflowAction(actionID string) (runtimecontracts.GuardActionEntry, bool) {
+	if pc == nil || pc.ActionRegistry() == nil {
+		return runtimecontracts.GuardActionEntry{}, false
+	}
+	entry, ok := pc.ActionRegistry().Action(actionID)
+	if !ok || !pc.ActionRegistry().IsExecutable(actionID) {
+		return runtimecontracts.GuardActionEntry{}, false
+	}
+	return entry, true
+}
+
+func workflowStateFromInstance(instance WorkflowInstance, fallback WorkflowState) WorkflowState {
+	out := fallback
+	out.Stage = NormalizePipelineStage(instance.CurrentStage)
+	if metadata := cloneStringAnyMap(instance.Metadata); len(metadata) > 0 {
+		out.Metadata = metadata
+	}
+	if pipelineState, ok := asObject(instance.AccumulatorState["pipeline-coordinator"]); ok {
+		if out.Metadata == nil {
+			out.Metadata = map[string]any{}
+		}
+		for key, value := range pipelineState {
+			if _, exists := out.Metadata[key]; !exists {
+				out.Metadata[key] = value
+			}
+		}
+		if status := strings.TrimSpace(asString(pipelineState["status"])); status != "" {
+			out.Status = status
+		}
+	}
+	if status := strings.TrimSpace(asString(out.Metadata["status"])); status != "" {
+		out.Status = status
+	}
+	if out.Metadata == nil {
+		out.Metadata = map[string]any{}
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) PersistWorkflowMetadata(ctx context.Context, verticalID string, mutate func(metadata map[string]any)) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || mutate == nil {
+		return
+	}
+	verticalID = strings.TrimSpace(verticalID)
+	if verticalID == "" {
+		return
+	}
+	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
+		if instance.Metadata == nil {
+			instance.Metadata = map[string]any{}
+		}
+		mutate(instance.Metadata)
+	})
 }
 
 func (pc *FactoryPipelineCoordinator) validationStateSnapshot(verticalID string) *validationPipelineState {
@@ -370,7 +357,7 @@ func (pc *FactoryPipelineCoordinator) validationStateSnapshot(verticalID string)
 	return &copyState
 }
 
-func (pc *FactoryPipelineCoordinator) opcoSpinupRequestedPayload(
+func (pc *FactoryPipelineCoordinator) OpcoSpinupRequestedPayload(
 	ctx context.Context,
 	verticalID string,
 	approvalPayload map[string]any,
@@ -448,14 +435,7 @@ func payloadSliceLen(raw any) int {
 	}
 }
 
-var empireTier1Dimensions = []string{
-	"icp_crispness",
-	"distribution_leverage",
-	"time_to_value",
-	"operational_drag",
-}
-
-func (pc *FactoryPipelineCoordinator) contractPolicyFloat(key string, fallback float64) float64 {
+func (pc *FactoryPipelineCoordinator) ContractPolicyFloat(key string, fallback float64) float64 {
 	if pc == nil || pc.ContractBundle() == nil {
 		return fallback
 	}
@@ -465,7 +445,7 @@ func (pc *FactoryPipelineCoordinator) contractPolicyFloat(key string, fallback f
 	return fallback
 }
 
-func (pc *FactoryPipelineCoordinator) contractPolicyInt(key string, fallback int) int {
+func (pc *FactoryPipelineCoordinator) ContractPolicyInt(key string, fallback int) int {
 	if pc == nil || pc.ContractBundle() == nil {
 		return fallback
 	}
@@ -475,22 +455,6 @@ func (pc *FactoryPipelineCoordinator) contractPolicyInt(key string, fallback int
 		}
 	}
 	return fallback
-}
-
-func scoringDimensionScore(payload map[string]any, dimension string) int {
-	dimension = strings.TrimSpace(dimension)
-	if dimension == "" || len(payload) == 0 {
-		return 0
-	}
-	rawDimensions, ok := asObject(payload["dimensions"])
-	if !ok {
-		return 0
-	}
-	rawResult, ok := asObject(rawDimensions[dimension])
-	if !ok {
-		return 0
-	}
-	return asInt(rawResult["score"])
 }
 
 func scoringCompositeFromPayload(payload map[string]any) scoringComposite {
@@ -522,7 +486,7 @@ func scoringCompositeFromPayload(payload map[string]any) scoringComposite {
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) pipelineHasCapacity(ctx context.Context, limit int) bool {
+func (pc *FactoryPipelineCoordinator) PipelineHasCapacity(ctx context.Context, limit int) bool {
 	if pc == nil || pc.db == nil || limit <= 0 {
 		return true
 	}

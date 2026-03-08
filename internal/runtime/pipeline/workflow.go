@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 )
@@ -52,12 +51,6 @@ type WorkflowDefinition struct {
 	stages      map[PipelineStage]WorkflowStage
 	transitions []WorkflowTransition
 }
-
-var (
-	empireWorkflowDefinitionOnce sync.Once
-	empireWorkflowDefinition     *WorkflowDefinition
-	empireWorkflowDefinitionErr  error
-)
 
 func NewWorkflowDefinition(name string, stages []WorkflowStage, transitions []WorkflowTransition) *WorkflowDefinition {
 	stageMap := make(map[PipelineStage]WorkflowStage, len(stages))
@@ -185,18 +178,14 @@ func containsPipelineStage(stages []PipelineStage, want PipelineStage) bool {
 	return false
 }
 
-func empirePipelineWorkflow() *WorkflowDefinition {
-	empireWorkflowDefinitionOnce.Do(func() {
-		empireWorkflowDefinition, empireWorkflowDefinitionErr = loadWorkflowDefinitionFromContracts()
-	})
-	if empireWorkflowDefinitionErr != nil {
-		panic(empireWorkflowDefinitionErr)
-	}
-	return empireWorkflowDefinition
+func DefaultPipelineWorkflow() *WorkflowDefinition {
+	return defaultWorkflowModule().WorkflowDefinition()
 }
 
-func loadWorkflowDefinitionFromContracts() (*WorkflowDefinition, error) {
-	bundle := empireContractBundle()
+func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*WorkflowDefinition, error) {
+	if bundle == nil {
+		return nil, fmt.Errorf("workflow contract bundle is nil")
+	}
 	path := bundle.Paths.WorkflowSchemaFile
 	doc := bundle.Workflow
 	name := strings.TrimSpace(doc.Workflow.Name)
@@ -275,18 +264,6 @@ func loadWorkflowDefinitionFromContracts() (*WorkflowDefinition, error) {
 			Actions:  actions,
 		})
 	}
-	// Current runtime still projects the OpCo handoff as approved -> operating.
-	// Keep that behavior stable until the operating-phase workflow is implemented end-to-end.
-	if !workflowHasTransition(transitions, StageApproved, StageOperating) {
-		transitions = append(transitions, WorkflowTransition{
-			Name:    "approved_to_operating_compat",
-			From:    []PipelineStage{StageApproved},
-			To:      StageOperating,
-			Reason:  "compatibility overlay for current runtime operating-stage projection",
-			Guard:   alwaysWorkflowGuard,
-			Actions: []WorkflowAction{{Name: "spinup_opco_org"}},
-		})
-	}
 	return NewWorkflowDefinition(name, stages, transitions), nil
 }
 
@@ -313,7 +290,7 @@ func workflowTransitionFromStages(raw any) []PipelineStage {
 	}
 }
 
-func workflowRepoRoot() string {
+func WorkflowRepoRoot() string {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return "."

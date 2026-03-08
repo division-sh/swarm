@@ -65,7 +65,7 @@ func NewPipeline(db *sql.DB, eventStore runtimebus.EventStore, mailbox runtimeto
 }
 
 func (p *Pipeline) RunScan(ctx context.Context, geography, depth string, count int) (Summary, error) {
-	return p.runScan(ctx, geography, depth, "local_services", nil, count)
+	return p.runScan(ctx, geography, depth, defaultFactoryScanMode(), nil, count)
 }
 
 func (p *Pipeline) RunScanWithMode(ctx context.Context, geography, depth, mode string, taxonomyCategories any, count int) (Summary, error) {
@@ -105,7 +105,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 		depth = "full"
 	}
 	depth = strings.ToLower(strings.TrimSpace(depth))
-	mode = normalizeScanMode(mode)
+	mode = normalizeFactoryScanMode(mode)
 
 	out := Summary{VerticalIDs: make([]string, 0, count)}
 	_ = p.emit(ctx, events.Event{
@@ -119,7 +119,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 			"taxonomy_categories": taxonomyCategories,
 		}),
 		CreatedAt: time.Now(),
-	}, []string{"empire-coordinator"})
+	}, deliveryRecipientsForEvent("scan.started"))
 
 	signals := make([]Signal, 0, 24)
 	scannerErrors := make([]map[string]any, 0, 4)
@@ -142,7 +142,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 					"error":     err.Error(),
 				}),
 				CreatedAt: time.Now(),
-			}, []string{"empire-coordinator"})
+			}, deliveryRecipientsForEvent("scan.scanner_failed"))
 			continue
 		}
 		signals = append(signals, found...)
@@ -319,12 +319,12 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 		return "", fmt.Errorf("load vertical for scoring: %w", err)
 	}
 
-	mode := "local_services"
+	mode := defaultFactoryScanMode()
 	signals := make([]Signal, 0, 32)
 	if len(rawSignals) > 0 {
 		var rs map[string]any
 		if err := json.Unmarshal(rawSignals, &rs); err == nil {
-			mode = normalizeScanMode(asString(rs["mode"]))
+			mode = normalizeFactoryScanMode(asString(rs["mode"]))
 			signals = parseRawSignals(rs["signals"])
 		}
 	}
@@ -334,7 +334,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 	}
 	rubricUsed := strings.TrimSpace(scoreResult.RubricUsed)
 	if rubricUsed == "" {
-		rubricUsed = normalizeScanMode(mode)
+		rubricUsed = normalizeFactoryScanMode(mode)
 	}
 	dimensions := scoreResult.Dimensions
 	viability := clampScore(scoreResult.Viability)
@@ -426,7 +426,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 		VerticalID:  verticalID,
 		Payload:     scores,
 		CreatedAt:   time.Now(),
-	}, []string{"empire-coordinator"})
+	}, deliveryRecipientsForEvent("vertical.scored"))
 	switch result {
 	case "shortlisted":
 		_ = p.emit(ctx, events.Event{
@@ -445,7 +445,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),
-		}, []string{"empire-coordinator"})
+		}, deliveryRecipientsForEvent("vertical.marginal"))
 	case "rejected":
 		_ = p.emit(ctx, events.Event{
 			ID:          uuid.NewString(),
@@ -931,27 +931,17 @@ func makeBrandName(verticalName string) string {
 	return strings.Join(parts, "")
 }
 
-func normalizeScanMode(mode string) string {
-	mode = strings.ToLower(strings.TrimSpace(mode))
-	switch mode {
-	case "local_services", "saas_gap", "saas_trend":
-		return mode
-	default:
-		return "local_services"
-	}
-}
-
 func computeScore(mode, name, geography string) (rubricUsed string, dimensions map[string]int, viability, market, total int) {
 	res, _ := (RulesScoringEngine{}).Score(context.Background(), mode, name, geography, nil)
 	return res.RubricUsed, res.Dimensions, res.Viability, res.Market, res.Total
 }
 
 func (RulesScoringEngine) Score(_ context.Context, mode, name, geography string, signals []Signal) (ScoreResult, error) {
-	mode = normalizeScanMode(mode)
+	mode = normalizeFactoryScanMode(mode)
 	stats := buildSignalStats(mode, name, geography, signals)
 
-	switch mode {
-	case "saas_gap", "saas_trend":
+	switch {
+	case factoryModeUsesSaaSRubric(mode):
 		dimensions := map[string]int{
 			"willingness_to_pay":     clampScore(35 + stats.avgScore/2 + stats.painSignals*2),
 			"retention_likelihood":   clampScore(30 + stats.avgScore/2 + stats.reviewsCount*3),
@@ -988,7 +978,7 @@ func (RulesScoringEngine) Score(_ context.Context, mode, name, geography string,
 			"localization_advantage": 5,
 		})
 		return ScoreResult{
-			RubricUsed: "saas",
+			RubricUsed: factoryRubricName(mode),
 			Dimensions: dimensions,
 			Viability:  viability,
 			Market:     market,
@@ -1029,7 +1019,7 @@ func (RulesScoringEngine) Score(_ context.Context, mode, name, geography string,
 			"revenue_per_business": 8,
 		})
 		return ScoreResult{
-			RubricUsed: "local_services",
+			RubricUsed: factoryRubricName(mode),
 			Dimensions: dimensions,
 			Viability:  viability,
 			Market:     market,
@@ -1190,8 +1180,8 @@ func intFromAny(v any) int {
 }
 
 func (p *Pipeline) emitModeSignals(ctx context.Context, mode, geography string, taxonomyCategories any, signals []Signal) {
-	switch normalizeScanMode(mode) {
-	case "saas_gap":
+	switch {
+	case factoryEmitsCategorySignals(mode):
 		categories := parseCategories(taxonomyCategories)
 		if len(categories) == 0 {
 			categories = []string{"operations", "workflow", "billing", "crm", "automation"}
@@ -1216,7 +1206,7 @@ func (p *Pipeline) emitModeSignals(ctx context.Context, mode, geography string, 
 				CreatedAt: time.Now(),
 			}, []string{"discovery-coordinator"})
 		}
-	case "saas_trend":
+	case factoryEmitsTrendSignals(mode):
 		trends := []string{"ai_assisted_ops", "verticalized_crm", "self_serve_onboarding"}
 		for _, trend := range trends {
 			_ = p.emit(ctx, events.Event{

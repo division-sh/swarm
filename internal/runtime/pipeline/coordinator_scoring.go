@@ -14,7 +14,7 @@ import (
 )
 
 func ExpectedScoringDimensionsForTest(rubric string) []string {
-	module := defaultWorkflowModuleFactory()
+	module := defaultWorkflowModule()
 	return module.ScoringPolicy().ExpectedScoringDimensions(rubric)
 }
 
@@ -200,6 +200,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	}
 	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
+	pc.persistWorkflowScoringAccumulator(ctx, acc)
 
 	if _, ok := pc.applyWorkflowEventTransition(ctx, evt); !ok {
 		pc.updateVerticalStage(ctx, verticalID, "scoring", string(evt.Type))
@@ -415,11 +416,15 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 		if !acc.ContestNotified[dim] {
 			acc.ContestNotified[dim] = true
 			acc.LastUpdatedAt = time.Now().UTC()
+			snapshot := cloneScoringAccumulator(acc)
 			ss.mu.Unlock()
+			ss.runtime.persistWorkflowScoringAccumulator(ctx, snapshot)
 			ss.runtime.publish(ctx, "scoring.contested", verticalID, payloadMap(ss.payloadFactory.BuildScoringContestedPayload(verticalID, dim, contest, acc)))
 			return
 		}
+		snapshot := cloneScoringAccumulator(acc)
 		ss.mu.Unlock()
+		ss.runtime.persistWorkflowScoringAccumulator(ctx, snapshot)
 		return
 	}
 
@@ -427,8 +432,10 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 	delete(acc.Contested, dim)
 	delete(acc.ContestNotified, dim)
 	acc.LastUpdatedAt = time.Now().UTC()
+	snapshot := cloneScoringAccumulator(acc)
 	ready := len(acc.Contested) == 0 && hasAllExpectedDimensions(acc)
 	ss.mu.Unlock()
+	ss.runtime.persistWorkflowScoringAccumulator(ctx, snapshot)
 
 	if ready {
 		ss.finalizeScoringAccumulator(ctx, verticalID, false)
@@ -464,8 +471,10 @@ func (ss *ScoringState) handleScoringContestResolved(ctx context.Context, evt ev
 	delete(acc.Contested, dimension)
 	delete(acc.ContestNotified, dimension)
 	acc.LastUpdatedAt = time.Now().UTC()
+	snapshot := cloneScoringAccumulator(acc)
 	ready := len(acc.Contested) == 0 && hasAllExpectedDimensions(acc)
 	ss.mu.Unlock()
+	ss.runtime.persistWorkflowScoringAccumulator(ctx, snapshot)
 	if ready {
 		ss.finalizeScoringAccumulator(ctx, verticalID, false)
 	}
@@ -501,6 +510,7 @@ func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, vertical
 	result := ss.computeComposite(acc, partial || len(acc.Received) < len(acc.Expected))
 	delete(ss.accumulators, verticalID)
 	ss.mu.Unlock()
+	ss.runtime.clearWorkflowScoringAccumulator(ctx, verticalID)
 
 	scoredPayload := ss.payloadFactory.BuildVerticalScoredPayload(verticalID, result, acc)
 	scoredPayloadMap := payloadMap(scoredPayload)
@@ -755,6 +765,16 @@ func (ss *ScoringState) checkTimeouts(ctx context.Context, now time.Time) {
 			ref = now
 		}
 		if now.Sub(ref) >= scoringTimeout {
+			snapshot := cloneScoringAccumulator(acc)
+			if snapshot != nil {
+				ss.mu.Unlock()
+				ss.runtime.persistWorkflowScoringAccumulator(ctx, snapshot)
+				ss.mu.Lock()
+				acc = ss.accumulators[verticalID]
+				if acc == nil {
+					continue
+				}
+			}
 			stale = append(stale, verticalID)
 		}
 	}

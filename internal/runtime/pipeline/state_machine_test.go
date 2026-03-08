@@ -12,7 +12,8 @@ func TestCanTransitionPipelineStage(t *testing.T) {
 		{StageDiscovered, StageScoring, true},
 		{StageShortlisted, StageResearching, true},
 		{StageReadyForReview, StageApproved, true},
-		{StageApproved, StageOperating, true},
+		{StageApproved, PipelineStage("full_speccing"), true},
+		{StageApproved, StageOperating, false},
 		{StageDiscovered, StageOperating, false},
 		{StageKilled, StageApproved, false},
 	}
@@ -24,7 +25,7 @@ func TestCanTransitionPipelineStage(t *testing.T) {
 }
 
 func TestEmpirePipelineWorkflow_ExposesNamedTransitions(t *testing.T) {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	if workflow == nil {
 		t.Fatal("expected workflow definition")
 	}
@@ -42,7 +43,7 @@ func TestEmpirePipelineWorkflow_ExposesNamedTransitions(t *testing.T) {
 }
 
 func TestEmpirePipelineWorkflow_ExposesTerminalStages(t *testing.T) {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	stage, ok := workflow.Stage(StageKilled)
 	if !ok {
 		t.Fatal("expected killed stage")

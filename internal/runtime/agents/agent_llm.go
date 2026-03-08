@@ -17,6 +17,7 @@ import (
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/runtime/sharedjson"
 	runtimetools "empireai/internal/runtime/tools"
@@ -340,24 +341,10 @@ func (a *LLMAgent) attemptPostTurnContractRemediation(ctx context.Context, inbou
 func (a *LLMAgent) enforcePostTurnExpectations(inbound events.Event, recorder *runtimebus.EmittedEventsRecorder) error {
 	eventsOut := recorder.Snapshot()
 	role := canonicalRuntimeRole(a.cfg.Role)
-	inboundType := strings.TrimSpace(string(inbound.Type))
-
-	switch {
-	case role == "empire-coordinator" && inboundType == "system.directive":
-		for _, emitted := range eventsOut {
-			if strings.TrimSpace(string(emitted.Type)) == "scan.requested" {
-				return nil
-			}
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		if err := policy.EnforcePostTurn(role, inbound, eventsOut); err != nil {
+			return err
 		}
-		return errors.New("system.directive handling must emit scan.requested via emit_scan_requested")
-	case role == "empire-coordinator" && inboundType == "budget.threshold_crossed":
-		for _, emitted := range eventsOut {
-			evtType := strings.TrimSpace(string(emitted.Type))
-			if strings.HasPrefix(evtType, "budget.") {
-				return nil
-			}
-		}
-		return errors.New("budget.threshold_crossed handling must emit one budget.* event via emit_budget_* tool")
 	}
 	return nil
 }
@@ -543,11 +530,8 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	}
 	strictRequirement := ""
 	role := canonicalRuntimeRole(cfg.Role)
-	switch {
-	case role == "empire-coordinator" && strings.TrimSpace(string(evt.Type)) == "system.directive":
-		strictRequirement = "\n- REQUIRED for this turn: call emit_scan_requested exactly once (with mode, geography_id when known, and priority)."
-	case role == "empire-coordinator" && strings.TrimSpace(string(evt.Type)) == "budget.threshold_crossed":
-		strictRequirement = "\n- REQUIRED for this turn: call exactly one emit_budget_* tool to reflect the threshold decision."
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		strictRequirement = policy.AdditionalTurnRequirement(role, evt)
 	}
 	return fmt.Sprintf(
 		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- vertical_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s",
@@ -569,79 +553,12 @@ func canonicalRuntimeRole(role string) string {
 	return commgraph.CanonicalRole(role)
 }
 
-func inferDiscoveryMode(text string) string {
-	t := strings.ToLower(strings.TrimSpace(text))
-	switch {
-	case strings.Contains(t, "automation_micro"),
-		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
-		return "saas_gap"
-	case strings.Contains(t, "local service"), strings.Contains(t, "local_services"):
-		return "local_services"
-	case strings.Contains(t, "trend"), strings.Contains(t, "saas_trend"):
-		return "saas_trend"
-	default:
-		return "saas_gap"
-	}
-}
-
-func inferGeographyHint(text string) string {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return ""
-	}
-	low := strings.ToLower(t)
-	for _, geo := range []string{"paraguay", "argentina", "brazil", "mexico", "chile", "peru", "colombia", "uruguay"} {
-		if strings.Contains(low, geo) {
-			return geo
-		}
-	}
-	return t
-}
-
 func contractRemediationPrompt(cfg models.AgentConfig, evt events.Event, contractErr error) (string, bool) {
 	role := canonicalRuntimeRole(cfg.Role)
-	evtType := strings.TrimSpace(string(evt.Type))
-	errText := strings.TrimSpace(contractErr.Error())
-
-	switch {
-	case role == "empire-coordinator" && evtType == "system.directive":
-		return "Runtime contract remediation: your prior response did not satisfy the required event emission.\n" +
-			"Call emit_scan_requested exactly once now with valid arguments (include mode; include priority; include geography_id when known).\n" +
-			"Do not return prose. Use the tool call now.", true
-	case role == "empire-coordinator" && evtType == "budget.threshold_crossed":
-		return "Runtime contract remediation: your prior response did not satisfy the required event emission.\n" +
-			"Call exactly one emit_budget_* tool now to reflect the budget decision.\n" +
-			"Do not return prose. Use the tool call now.", true
-	default:
-		_ = errText
-		return "", false
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		return policy.ContractRemediationPrompt(role, evt, contractErr)
 	}
-}
-
-func budgetEventTypeFromThresholdPayload(raw []byte) events.EventType {
-	state := strings.ToLower(strings.TrimSpace(fieldStringFromJSON(raw, "state")))
-	switch state {
-	case "emergency":
-		return events.EventType("budget.emergency")
-	case "throttle":
-		return events.EventType("budget.throttle")
-	case "warning":
-		return events.EventType("budget.warning")
-	case "ok", "resumed":
-		return events.EventType("budget.resumed")
-	}
-	return events.EventType("")
-}
-
-func fieldStringFromJSON(raw []byte, key string) string {
-	if len(raw) == 0 || strings.TrimSpace(key) == "" {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
-		return ""
-	}
-	return strings.TrimSpace(sharedjson.AsString(obj[key]))
+	return "", false
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {
@@ -695,38 +612,4 @@ func normalizeScanMode(raw string) string {
 
 func normalizeScanPriority(raw string) string {
 	return runtimepipeline.NormalizeScanPriority(raw)
-}
-
-func extractCategoryList(payload map[string]any) []string {
-	toList := func(v any) []string {
-		switch t := v.(type) {
-		case []any:
-			out := make([]string, 0, len(t))
-			for _, item := range t {
-				s := strings.TrimSpace(sharedjson.AsString(item))
-				if s != "" {
-					out = append(out, s)
-				}
-			}
-			return out
-		case []string:
-			out := make([]string, 0, len(t))
-			for _, item := range t {
-				s := strings.TrimSpace(item)
-				if s != "" {
-					out = append(out, s)
-				}
-			}
-			return out
-		default:
-			return nil
-		}
-	}
-	if out := toList(payload["taxonomy_categories"]); len(out) > 0 {
-		return out
-	}
-	if out := toList(payload["categories"]); len(out) > 0 {
-		return out
-	}
-	return []string{}
 }

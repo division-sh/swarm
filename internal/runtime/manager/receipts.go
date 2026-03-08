@@ -11,6 +11,7 @@ import (
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecorpus "empireai/internal/runtime/corpusobs"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimerterr "empireai/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
@@ -42,9 +43,7 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", reason)
 		return nil
 	}
-	if strings.TrimSpace(agent.ID()) == "empire-coordinator" &&
-		strings.TrimSpace(string(evt.Type)) == "system.directive" &&
-		!directiveRequiresCoordinator(evt) {
+	if am.shouldInterceptDirective(agent.ID(), evt) {
 		if corpusMode {
 			duration := time.Since(corpusStartedAt)
 			am.logCorpusTurnLifecycle(ctx, "corpus.turn_intercepted", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), "intercepted simple directive (runtime-handled)")
@@ -159,6 +158,20 @@ func (am *AgentManager) logCorpusTurnLifecycle(
 		Error:      strings.TrimSpace(errText),
 		DurationUS: int(duration / time.Microsecond),
 	})
+}
+
+func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {
+	am.mu.RLock()
+	cfg, ok := am.agentCfg[agentID]
+	am.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	policy := runtimeproductpolicy.DefaultOrNil()
+	if policy == nil {
+		return false
+	}
+	return policy.InterceptRuntimeHandledDirective(cfg, evt)
 }
 
 func directiveRequiresCoordinator(evt events.Event) bool {
@@ -398,7 +411,10 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 
 	managerID := am.resolveManagerAgentID(agentID)
 	if strings.TrimSpace(managerID) == "" || managerID == agentID {
-		managerID = "empire-coordinator"
+		am.mu.RLock()
+		cfg := am.agentCfg[agentID]
+		am.mu.RUnlock()
+		managerID = am.defaultManagerAgentID(cfg)
 	}
 	if managerID == agentID {
 		// Prevent infinite self-escalation chains.
@@ -449,5 +465,5 @@ func (am *AgentManager) resolveManagerAgentID(agentID string) string {
 			return opCoAgentID("opco-ceo", cfg.VerticalID)
 		}
 	}
-	return "empire-coordinator"
+	return am.defaultManagerAgentID(cfg)
 }

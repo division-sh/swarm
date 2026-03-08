@@ -15,6 +15,7 @@ import (
 	runtimebus "empireai/internal/runtime/bus"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"empireai/internal/runtime/sessions"
 	workspace "empireai/internal/runtime/workspace"
 	"github.com/google/uuid"
@@ -115,7 +116,7 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 	am.writeReceipt(ctx, evt.ID, agentID, "processed", fmt.Sprintf("quarantined poison event after %d panics: %s", count, strings.TrimSpace(panicText)))
 	managerID := am.resolveManagerAgentID(agentID)
 	if strings.TrimSpace(managerID) == "" || managerID == agentID {
-		managerID = "empire-coordinator"
+		managerID = am.defaultManagerAgentID(models.AgentConfig{ID: agentID})
 	}
 	payload := map[string]any{
 		"agent_id":    agentID,
@@ -137,6 +138,15 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 
 func deterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
 	return DeterministicOutputEventID(inbound, agentID, index, out)
+}
+
+func (am *AgentManager) defaultManagerAgentID(cfg models.AgentConfig) string {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		if managerID := strings.TrimSpace(policy.ManagerFallbackAgentID(cfg)); managerID != "" {
+			return managerID
+		}
+	}
+	return ""
 }
 
 type eventExistenceReader interface {
@@ -585,7 +595,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 
 	managerID := am.resolveManagerAgentID(agent.ID())
 	if strings.TrimSpace(managerID) == "" || managerID == agent.ID() {
-		managerID = "empire-coordinator"
+		managerID = am.defaultManagerAgentID(cfg)
 	}
 	if managerID != agent.ID() {
 		if err := am.bus.PublishDirect(am.runtimeContext(), events.Event{

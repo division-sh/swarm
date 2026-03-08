@@ -1061,7 +1061,7 @@ func contractComplianceRepoRoot(t *testing.T) string {
 
 func contractComplianceLoadAgentTools(t *testing.T, repoRoot string) map[string]contractComplianceAgent {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).AgentRegistryFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).AgentRegistryFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1096,7 +1096,7 @@ func contractComplianceLoadAgentConfigMap(t *testing.T, repoRoot string) contrac
 
 func contractComplianceLoadEventCatalog(t *testing.T, repoRoot string) map[string]contractComplianceCatalogEvent {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).EventCatalogFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).EventCatalogFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1117,7 +1117,7 @@ func contractComplianceLoadEventCatalog(t *testing.T, repoRoot string) map[strin
 
 func contractComplianceLoadSystemNodes(t *testing.T, repoRoot string) map[string]contractComplianceSystemNode {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).SystemNodesFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).SystemNodesFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1186,7 +1186,7 @@ func contractComplianceLoadToolingLockVersion(t *testing.T, repoRoot string) str
 
 func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string]contractComplianceToolSchema {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).ToolSchemasFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).ToolSchemasFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1200,7 +1200,7 @@ func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string
 
 func contractComplianceLoadWorkflowSchema(t *testing.T, repoRoot string) contractComplianceWorkflowSchema {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).WorkflowSchemaFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).WorkflowSchemaFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1214,7 +1214,7 @@ func contractComplianceLoadWorkflowSchema(t *testing.T, repoRoot string) contrac
 
 func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) contractComplianceGuardActionRegistry {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).GuardRegistryFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).GuardRegistryFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -1245,7 +1245,7 @@ func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) co
 
 func contractComplianceLoadPlatformSpec(t *testing.T, repoRoot string) contractCompliancePlatformSpec {
 	t.Helper()
-	path := runtimecontracts.ResolveEmpireContractPaths(repoRoot).PlatformSpecFile
+	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).PlatformSpecFile
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

@@ -19,10 +19,6 @@ const (
 	StageKilled         PipelineStage = "killed"
 )
 
-func EmpirePipelineWorkflow() *WorkflowDefinition {
-	return empirePipelineWorkflow()
-}
-
 func NormalizePipelineStage(raw string) PipelineStage {
 	switch strings.TrimSpace(raw) {
 	case string(StageDiscovered):
@@ -55,7 +51,7 @@ func NormalizePipelineStage(raw string) PipelineStage {
 }
 
 func CanTransitionPipelineStage(from, to PipelineStage) bool {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	if workflow == nil {
 		return from == to
 	}
@@ -63,7 +59,7 @@ func CanTransitionPipelineStage(from, to PipelineStage) bool {
 }
 
 func PipelineWorkflowTransition(from, to PipelineStage) (WorkflowTransition, bool) {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	if workflow == nil {
 		return WorkflowTransition{}, false
 	}

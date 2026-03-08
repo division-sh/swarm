@@ -3,7 +3,7 @@ package pipeline
 import "testing"
 
 func TestEmpirePipelineWorkflow_LoadsFromContracts(t *testing.T) {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	if workflow == nil {
 		t.Fatal("expected workflow definition")
 	}
@@ -29,14 +29,14 @@ func TestEmpirePipelineWorkflow_LoadsFromContracts(t *testing.T) {
 }
 
 func TestEmpirePipelineWorkflow_AllowsWildcardFactoryKill(t *testing.T) {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	if _, ok := workflow.Transition(WorkflowState{Stage: StageResearching}, StageKilled); !ok {
 		t.Fatal("expected researching -> killed via wildcard transition")
 	}
 }
 
 func TestEmpirePipelineWorkflow_SupportsSeedTransitions(t *testing.T) {
-	workflow := EmpirePipelineWorkflow()
+	workflow := DefaultPipelineWorkflow()
 	for _, to := range []PipelineStage{StageDiscovered, StageScoring, StageResearching} {
 		transition, ok := workflow.Transition(WorkflowState{}, to)
 		if !ok {

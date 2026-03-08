@@ -46,11 +46,17 @@ func TestEmpireWorkflowRegistries_ResolveKnownIDs(t *testing.T) {
 	if !pc.GuardRegistry().HasGuard("signal_above_threshold") {
 		t.Fatal("expected empire guard signal_above_threshold")
 	}
+	if !pc.GuardRegistry().IsExecutable("signal_above_threshold") {
+		t.Fatal("expected signal_above_threshold to be executable")
+	}
 	if !pc.ActionRegistry().HasAction("emit_validation_started") {
 		t.Fatal("expected empire action emit_validation_started")
 	}
 	if !pc.ActionRegistry().HasAction("spinup_opco_org") {
 		t.Fatal("expected platform action spinup_opco_org")
+	}
+	if !pc.ActionRegistry().IsExecutable("spinup_opco_org") {
+		t.Fatal("expected spinup_opco_org to be executable")
 	}
 	guard, ok := pc.GuardRegistry().Guard("signal_above_threshold")
 	if !ok {

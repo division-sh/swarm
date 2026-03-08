@@ -3,7 +3,6 @@ package pipeline
 import (
 	"sort"
 	"strings"
-	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 )
@@ -36,7 +35,11 @@ type contractGuardRegistry struct {
 }
 
 func (r contractGuardRegistry) HasGuard(id string) bool { return r.registry.has(id) }
-func (r contractGuardRegistry) GuardIDs() []string      { return r.registry.sortedIDs() }
+func (r contractGuardRegistry) IsExecutable(id string) bool {
+	def, ok := r.Guard(id)
+	return ok && isExecutableWorkflowGuardEntry(def)
+}
+func (r contractGuardRegistry) GuardIDs() []string { return r.registry.sortedIDs() }
 func (r contractGuardRegistry) Guard(id string) (runtimecontracts.GuardActionEntry, bool) {
 	id = strings.TrimSpace(id)
 	def, ok := r.definitions[id]
@@ -49,64 +52,59 @@ type contractActionRegistry struct {
 }
 
 func (r contractActionRegistry) HasAction(id string) bool { return r.registry.has(id) }
-func (r contractActionRegistry) ActionIDs() []string      { return r.registry.sortedIDs() }
+func (r contractActionRegistry) IsExecutable(id string) bool {
+	def, ok := r.Action(id)
+	return ok && isExecutableWorkflowActionEntry(def)
+}
+func (r contractActionRegistry) ActionIDs() []string { return r.registry.sortedIDs() }
 func (r contractActionRegistry) Action(id string) (runtimecontracts.GuardActionEntry, bool) {
 	id = strings.TrimSpace(id)
 	def, ok := r.definitions[id]
 	return def, ok
 }
 
-var (
-	workflowGuardRegistryOnce sync.Once
-	workflowGuardRegistry     contractGuardRegistry
-	workflowActionRegistry    contractActionRegistry
-	workflowRegistryErr       error
-)
-
-func empireGuardRegistry() GuardRegistry {
-	loadWorkflowGuardActionRegistries()
-	if workflowRegistryErr != nil {
-		panic(workflowRegistryErr)
-	}
-	return workflowGuardRegistry
+func defaultGuardRegistry() GuardRegistry {
+	return defaultWorkflowModule().GuardRegistry()
 }
 
-func empireActionRegistry() ActionRegistry {
-	loadWorkflowGuardActionRegistries()
-	if workflowRegistryErr != nil {
-		panic(workflowRegistryErr)
-	}
-	return workflowActionRegistry
+func defaultActionRegistry() ActionRegistry {
+	return defaultWorkflowModule().ActionRegistry()
 }
 
-func loadWorkflowGuardActionRegistries() {
-	workflowGuardRegistryOnce.Do(func() {
-		bundle := empireContractBundle()
-		guards := make(map[string]struct{}, len(bundle.Hooks.Guards))
-		guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Guards))
-		for _, guard := range bundle.Hooks.Guards {
-			id := strings.TrimSpace(guard.ID)
-			if id != "" {
-				guards[id] = struct{}{}
-				guardDefs[id] = guard
-			}
+func NewContractGuardRegistry(bundle *runtimecontracts.WorkflowContractBundle) GuardRegistry {
+	if bundle == nil {
+		return contractGuardRegistry{}
+	}
+	guards := make(map[string]struct{}, len(bundle.Hooks.Guards))
+	guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Guards))
+	for _, guard := range bundle.Hooks.Guards {
+		id := strings.TrimSpace(guard.ID)
+		if id != "" {
+			guards[id] = struct{}{}
+			guardDefs[id] = guard
 		}
-		actions := make(map[string]struct{}, len(bundle.Hooks.Actions))
-		actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Actions))
-		for _, action := range bundle.Hooks.Actions {
-			id := strings.TrimSpace(action.ID)
-			if id != "" {
-				actions[id] = struct{}{}
-				actionDefs[id] = action
-			}
+	}
+	return contractGuardRegistry{
+		registry:    contractIDRegistry{ids: guards},
+		definitions: guardDefs,
+	}
+}
+
+func NewContractActionRegistry(bundle *runtimecontracts.WorkflowContractBundle) ActionRegistry {
+	if bundle == nil {
+		return contractActionRegistry{}
+	}
+	actions := make(map[string]struct{}, len(bundle.Hooks.Actions))
+	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Actions))
+	for _, action := range bundle.Hooks.Actions {
+		id := strings.TrimSpace(action.ID)
+		if id != "" {
+			actions[id] = struct{}{}
+			actionDefs[id] = action
 		}
-		workflowGuardRegistry = contractGuardRegistry{
-			registry:    contractIDRegistry{ids: guards},
-			definitions: guardDefs,
-		}
-		workflowActionRegistry = contractActionRegistry{
-			registry:    contractIDRegistry{ids: actions},
-			definitions: actionDefs,
-		}
-	})
+	}
+	return contractActionRegistry{
+		registry:    contractIDRegistry{ids: actions},
+		definitions: actionDefs,
+	}
 }

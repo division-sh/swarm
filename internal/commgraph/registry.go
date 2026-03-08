@@ -1,9 +1,16 @@
 package commgraph
 
 import (
+	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+
+	runtimecontracts "empireai/internal/runtime/contracts"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -26,253 +33,48 @@ type MailboxRoundTrip struct {
 	Timeout        string
 }
 
-var runtimeEmittedEvents = []string{
-	"system.started",
-	"timer.portfolio_digest",
-	"timer.marginal_review",
-	"timer.infra_health_check",
-	"campaign.completed",
-	"vertical.discovered",
-	"vertical.shortlisted",
-	"vertical.killed",
-	"validation.started",
-	"validation.more_data_needed",
-	"validation.package_ready",
-	"brand.requested",
-	"brand.revision_needed",
-	"spec.revision_requested",
-	"cto.spec_review_requested",
-	"dedup.ambiguous",
-	"synthesis.needed",
-	"scan.completed",
-	"market_research.scan_assigned",
-	"trend_research.scan_assigned",
-	"scanner.google_maps.scan_assigned",
-	"scanner.instagram.scan_assigned",
-	"scanner.reviews.scan_assigned",
-	"scanner.directories.scan_assigned",
-	"scanner.yelp.scan_assigned",
-	"mailbox.item_decided",
-	"opco.ceo_ready",
-	"opco.teardown_complete",
-	"user_onboarded",
-	"human_task.requested",
-	"human_task.expired",
-	"founder_input.response",
-	"devops.health_check_failed",
-	"ops.agent_panic",
-	"ops.agent_failed",
-	"spec.contradiction_detected",
-	"budget.threshold_crossed",
-	"cycle_limit_reached",
+type authorityKey struct {
+	sender string
+	scope  string
 }
 
-var humanEmittedEvents = []string{
-	"vertical.approved",
-	"vertical.needs_more_data",
-	"system.directive",
-	"template.publish_requested",
-	"template.migration_approved",
-	"spend.approved",
-	"spend.rejected",
-	"review.product_spec_feedback",
-	"review.deploy_feedback",
-	"board.directive",
-	"board.chat",
-	"opco.teardown_requested",
-	"human_task.completed",
+var extraProducerEvents = map[string][]string{
+	"inbound-gateway": {"inbound.whatsapp_message", "inbound.email"},
+	"dashboard":       {"human_task.assigned", "runtime.reset"},
+	"actor-agent":     {"opco.routing_updated"},
 }
 
-var agentProducerEvents = map[string][]string{
-	"empire-coordinator": {
-		"scan.requested",
-		"opco.spinup_requested",
-		"template.migration_planned",
-		"template.migration_completed",
-		"template.migration_failed",
-		"vertical.health_warning",
-		"vertical.resumed",
-		"portfolio.digest_compiled",
-		"budget.warning",
-		"budget.throttle",
-		"budget.emergency",
-		"budget.resumed",
-		"human_task.approved",
-		"human_task.rejected",
-		"human_task.deferred",
-		"scoring.contest_resolved",
-		"opco.escalation_response",
-	},
-	"factory-cto": {
-		"template.version_published",
-		"cto.spec_approved",
-		"cto.spec_revision_needed",
-		"cto.spec_vetoed",
-		"cto.architecture_directive",
-		"cto.extraction_recommended",
-		"cto.pattern_detected",
-		"cto.tech_spec_feedback",
-		"spec.validation_requested",
-	},
-	"holding-devops": {
-		"devops.deploy_complete",
-		"devops.deploy_failed",
-		"devops.rollback_complete",
-		"devops.rollback_failed",
-		"devops.capacity_warning",
-		"devops.infra_change_needed",
-		"devops.ssl_provisioned",
-		"devops.health_check_failed",
-	},
-	"operations-analyst": {
-		"analyst.bootstrap_upgrade_proposal",
-		"analyst.prompt_refinement_proposal",
-		"analyst.anti_pattern_advisory",
-	},
-	"spec-auditor": {
-		"spec.validation_passed",
-		"spec.validation_failed",
-	},
-	"discovery-coordinator": {
-		"dedup.resolved",
-		"synthesis.resolved",
-	},
-	"market-research-agent": {
-		"category.assessed",
-		"market_research.scan_complete",
-	},
-	"trend-research-agent": {
-		"trend.identified",
-		"trend_research.scan_complete",
-	},
-	"scanner-agent": {
-		"source.scraped",
-		"scanner.google_maps.scan_complete",
-		"scanner.instagram.scan_complete",
-		"scanner.reviews.scan_complete",
-		"scanner.directories.scan_complete",
-		"scanner.yelp.scan_complete",
-	},
-	"analysis-agent": {
-		"score.dimension_complete",
-		"vertical.derived",
-	},
-	"scoring-node": {
-		"scoring.requested",
-		"scoring.contested",
-		"vertical.discovered",
-		"vertical.scored",
-		"vertical.shortlisted",
-		"vertical.marginal",
-		"vertical.rejected",
-		"pipeline.dead_letter",
-	},
-	"validation-coordinator": {
-		"vertical.ready_for_review",
-	},
-	"business-research-agent": {
-		"research.completed",
-		"research.vertical_rejected",
-		"spec.requested",
-		"spec.approved",
-		"spec.revision_needed",
-		"spec_review.requested",
-	},
-	"lightweight-spec-agent": {
-		"spec.draft_ready",
-	},
-	"spec-reviewer": {
-		"spec_review.passed",
-		"spec_review.issues_found",
-	},
-	"pre-brand-agent": {
-		"brand.candidates_ready",
-	},
-	"opco-ceo": {
-		"opco.ceo_report",
-		"opco.launched",
-		"opco.escalation",
-		"opco.spend_request",
-		"opco.deploy_review",
-		"opco.founder_input",
-		"opco.steady_state_reached",
-		"mandate_updated",
-		"opco.growth_triggered",
-		"opco.growth_stabilized",
-	},
-	"chief-of-staff": {
-		"cross_domain_report",
-	},
-	"vp-product": {
-		"product_report",
-		"product_escalation",
-		"opco.product_spec_review",
-	},
-	"vp-growth": {
-		"growth_report",
-		"growth_escalation",
-	},
-	"cto-agent": {
-		"build_complete",
-		"build_blocked",
-		"build_progress",
-		"feature_deployed",
-		"launch_ready",
-		"deploy_requested",
-		"bug_fix_deployed",
-		"cycle_reset",
-		"cto.tech_spec_review_requested",
-		"spec.validation_requested",
-	},
-	"pm-agent": {
-		"product_spec_ready",
-	},
-	"tech-writer": {
-		"technical_spec_ready",
-	},
-	"qa-agent": {
-		"qa.validation_passed",
-		"qa.validation_failed",
-	},
-	"devops-agent": {
-		"devops.deploy_requested",
-		"devops.rollback_requested",
-	},
-	"support-agent": {
-		"bug_reported",
-		"feature_request",
-		"support_digest",
-		"support_critical",
-		"churn_risk",
-		"market_feedback",
-	},
-	"marketing-agent": {
-		"prelaunch_ready",
-		"outreach_digest",
-		"channel_blocked",
-		"channel_update",
-		"spend_needed",
-		"spend_request",
-		"market_signals",
-	},
-	"inbound-gateway": {
-		"inbound.whatsapp_message",
-		"inbound.email",
-	},
-	"dashboard": {
-		"human_task.assigned",
-		"runtime.reset",
-	},
-	"actor-agent": {
-		"opco.routing_updated",
-	},
+type contractProducerRegistry struct {
+	runtimeEvents []string
+	humanEvents   []string
+	producerRoles []string
+	agentEvents   map[string][]string
 }
+
+var (
+	contractRegistryOnce sync.Once
+	contractRegistryData contractProducerRegistry
+	messageAuthorityOnce sync.Once
+	messageAuthorityData []MessageAuthority
+)
 
 var roleAliases = map[string]string{
-	"head-of-product": "vp-product",
-	"head-of-growth":  "vp-growth",
-	"cto":             "cto-agent",
-	"opco-devops":     "devops-agent",
+	"head-of-product":      "vp-product",
+	"head-of-growth":       "vp-growth",
+	"cto":                  "cto-agent",
+	"devops":               "holding-devops",
+	"opco-head-of-product": "vp-product",
+	"opco-head-of-growth":  "vp-growth",
+	"opco-chief-of-staff":  "chief-of-staff",
+	"opco-support":         "support-agent",
+	"opco-marketing":       "marketing-agent",
+	"opco-cto":             "cto-agent",
+	"opco-pm":              "pm-agent",
+	"opco-qa":              "qa-agent",
+	"opco-tech-writer":     "tech-writer",
+	"opco-backend":         "backend-agent",
+	"opco-frontend":        "frontend-agent",
+	"opco-devops":          "devops-agent",
 }
 
 var messageAuthorityRegistry = []MessageAuthority{
@@ -281,12 +83,8 @@ var messageAuthorityRegistry = []MessageAuthority{
 	{SenderRole: "factory-cto", RecipientRoles: []string{"validation-coordinator", "operations-analyst", "cto-agent"}, Scope: "any"},
 	{SenderRole: "operations-analyst", RecipientRoles: []string{"empire-coordinator", "factory-cto"}, Scope: "holding"},
 
-	// OpCo level.
-	{SenderRole: "opco-ceo", RecipientRoles: []string{"chief-of-staff", "vp-product", "vp-growth", "pm-agent", "cto-agent", "support-agent", "marketing-agent", "tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}, Scope: "opco"},
+	// OpCo level exceptions that are not derivable from parent/child hierarchy.
 	{SenderRole: "chief-of-staff", RecipientRoles: []string{"vp-product", "vp-growth", "opco-ceo"}, Scope: "opco"},
-	{SenderRole: "vp-product", RecipientRoles: []string{"pm-agent", "cto-agent", "support-agent"}, Scope: "opco"},
-	{SenderRole: "vp-growth", RecipientRoles: []string{"marketing-agent"}, Scope: "opco"},
-	{SenderRole: "cto-agent", RecipientRoles: []string{"tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}, Scope: "opco"},
 }
 
 var mailboxRoundTrips = []MailboxRoundTrip{
@@ -303,16 +101,25 @@ var mailboxRoundTrips = []MailboxRoundTrip{
 }
 
 func RuntimeEvents() []string {
-	return append([]string(nil), runtimeEmittedEvents...)
+	reg := contractProducerData()
+	return append([]string(nil), reg.runtimeEvents...)
 }
 
 func HumanEvents() []string {
-	return append([]string(nil), humanEmittedEvents...)
+	reg := contractProducerData()
+	return append([]string(nil), reg.humanEvents...)
 }
 
 func MessageAuthorities() []MessageAuthority {
-	out := make([]MessageAuthority, len(messageAuthorityRegistry))
-	copy(out, messageAuthorityRegistry)
+	messageAuthorityOnce.Do(func() {
+		derived, err := loadMessageAuthorityRegistry()
+		if err == nil {
+			messageAuthorityData = derived
+			return
+		}
+		messageAuthorityData = cloneAuthorities(messageAuthorityRegistry)
+	})
+	out := cloneAuthorities(messageAuthorityData)
 	return out
 }
 
@@ -322,16 +129,23 @@ func MailboxRoundTrips() []MailboxRoundTrip {
 	return out
 }
 
+type templateAgentNode struct {
+	Role       string `yaml:"role"`
+	ParentRole string `yaml:"parent_role"`
+	Parent     string `yaml:"parent"`
+}
+
 func CanonicalRole(role string) string {
 	return canonicalRole(role)
 }
 
 func ProducerEventsForRole(role string) []string {
+	reg := contractProducerData()
 	key := canonicalRole(role)
 	if key == "" {
 		return nil
 	}
-	events := agentProducerEvents[key]
+	events := reg.agentEvents[key]
 	if len(events) == 0 {
 		return nil
 	}
@@ -353,31 +167,24 @@ func ProducerEventsForRole(role string) []string {
 }
 
 func ProducerRoles() []string {
-	out := make([]string, 0, len(agentProducerEvents))
-	for role := range agentProducerEvents {
-		role = strings.TrimSpace(role)
-		if role == "" {
-			continue
-		}
-		out = append(out, role)
-	}
-	sort.Strings(out)
-	return out
+	reg := contractProducerData()
+	return append([]string(nil), reg.producerRoles...)
 }
 
 func KnownProducedEvents() map[string]struct{} {
+	reg := contractProducerData()
 	out := make(map[string]struct{}, 256)
-	for _, evt := range runtimeEmittedEvents {
+	for _, evt := range reg.runtimeEvents {
 		if v := strings.TrimSpace(evt); v != "" {
 			out[v] = struct{}{}
 		}
 	}
-	for _, evt := range humanEmittedEvents {
+	for _, evt := range reg.humanEvents {
 		if v := strings.TrimSpace(evt); v != "" {
 			out[v] = struct{}{}
 		}
 	}
-	for _, events := range agentProducerEvents {
+	for _, events := range reg.agentEvents {
 		for _, evt := range events {
 			if v := strings.TrimSpace(evt); v != "" {
 				out[v] = struct{}{}
@@ -412,6 +219,291 @@ func canonicalRole(role string) string {
 		return alias
 	}
 	return role
+}
+
+func contractProducerData() contractProducerRegistry {
+	contractRegistryOnce.Do(func() {
+		registry, err := loadContractProducerRegistry()
+		if err == nil {
+			contractRegistryData = registry
+			return
+		}
+		contractRegistryData = fallbackProducerRegistry()
+	})
+	return contractRegistryData
+}
+
+func loadContractProducerRegistry() (contractProducerRegistry, error) {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return contractProducerRegistry{}, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot)
+	if err != nil {
+		return contractProducerRegistry{}, err
+	}
+	reg := contractProducerRegistry{
+		agentEvents: make(map[string][]string),
+	}
+	runtimeSet := map[string]struct{}{}
+	humanSet := map[string]struct{}{}
+	for eventType, entry := range bundle.Events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
+		}
+		switch strings.TrimSpace(strings.ToLower(entry.EmitterType)) {
+		case "runtime", "system_node":
+			runtimeSet[eventType] = struct{}{}
+		case "human":
+			humanSet[eventType] = struct{}{}
+		}
+		for _, role := range producerRolesForEvent(entry) {
+			role = canonicalRole(role)
+			if role == "" {
+				continue
+			}
+			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
+		}
+	}
+	for role, entry := range bundle.Agents {
+		role = canonicalRole(firstNonEmpty(role, entry.Role))
+		if role == "" {
+			continue
+		}
+		for _, eventType := range entry.EmitEvents {
+			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
+		}
+	}
+	for nodeID, node := range bundle.Nodes {
+		role := canonicalRole(nodeID)
+		if role == "" {
+			continue
+		}
+		for _, eventType := range node.Produces {
+			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
+		}
+	}
+	for role, events := range extraProducerEvents {
+		role = canonicalRole(role)
+		for _, eventType := range events {
+			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
+		}
+	}
+	reg.runtimeEvents = sortedSet(runtimeSet)
+	reg.humanEvents = sortedSet(humanSet)
+	for role := range reg.agentEvents {
+		reg.producerRoles = append(reg.producerRoles, role)
+	}
+	sort.Strings(reg.producerRoles)
+	return reg, nil
+}
+
+func fallbackProducerRegistry() contractProducerRegistry {
+	reg := contractProducerRegistry{
+		agentEvents: make(map[string][]string, len(extraProducerEvents)),
+	}
+	for role, events := range extraProducerEvents {
+		reg.agentEvents[role] = append([]string(nil), events...)
+		reg.producerRoles = append(reg.producerRoles, role)
+	}
+	sort.Strings(reg.producerRoles)
+	return reg
+}
+
+func loadMessageAuthorityRegistry() ([]MessageAuthority, error) {
+	repoRoot, err := findRepoRoot()
+	if err != nil {
+		return nil, err
+	}
+	authorities := cloneAuthorities(messageAuthorityRegistry)
+	byKey := make(map[authorityKey]map[string]struct{}, len(authorities))
+	for _, rule := range authorities {
+		key := authorityKey{
+			sender: canonicalRole(rule.SenderRole),
+			scope:  strings.TrimSpace(strings.ToLower(rule.Scope)),
+		}
+		if key.sender == "" {
+			continue
+		}
+		if byKey[key] == nil {
+			byKey[key] = make(map[string]struct{}, len(rule.RecipientRoles))
+		}
+		for _, recipient := range rule.RecipientRoles {
+			if role := canonicalRole(recipient); role != "" {
+				byKey[key][role] = struct{}{}
+			}
+		}
+	}
+	glob := filepath.Join(repoRoot, "configs", "agents", "templates", "*.yaml")
+	files, err := filepath.Glob(glob)
+	if err != nil {
+		return nil, err
+	}
+	parentByRole := map[string]string{}
+	for _, file := range files {
+		if strings.EqualFold(filepath.Base(file), "routes.yaml") {
+			continue
+		}
+		content, err := os.ReadFile(file)
+		if err != nil {
+			return nil, err
+		}
+		var node templateAgentNode
+		if err := yaml.Unmarshal(content, &node); err != nil {
+			return nil, err
+		}
+		role := canonicalRole(node.Role)
+		parent := canonicalRole(firstNonEmpty(node.ParentRole, node.Parent))
+		if role == "" {
+			continue
+		}
+		parentByRole[role] = parent
+	}
+	for role, parent := range parentByRole {
+		if role == "" || parent == "" || role == parent {
+			continue
+		}
+		ancestors := templateAncestors(role, parentByRole)
+		for _, ancestor := range ancestors {
+			addAuthorityRecipient(byKey, authorityKey{sender: ancestor, scope: "opco"}, role)
+			addAuthorityRecipient(byKey, authorityKey{sender: role, scope: "opco"}, ancestor)
+		}
+	}
+	authorities = authorities[:0]
+	for key, recipients := range byKey {
+		roles := sortedSet(recipients)
+		if key.sender == "" || len(roles) == 0 {
+			continue
+		}
+		authorities = append(authorities, MessageAuthority{
+			SenderRole:     key.sender,
+			RecipientRoles: roles,
+			Scope:          key.scope,
+		})
+	}
+	sort.Slice(authorities, func(i, j int) bool {
+		if authorities[i].Scope != authorities[j].Scope {
+			return authorities[i].Scope < authorities[j].Scope
+		}
+		return authorities[i].SenderRole < authorities[j].SenderRole
+	})
+	return authorities, nil
+}
+
+func templateAncestors(role string, parentByRole map[string]string) []string {
+	role = canonicalRole(role)
+	if role == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := []string{}
+	for current := canonicalRole(parentByRole[role]); current != ""; current = canonicalRole(parentByRole[current]) {
+		if _, ok := seen[current]; ok {
+			break
+		}
+		seen[current] = struct{}{}
+		out = append(out, current)
+	}
+	return out
+}
+
+func addAuthorityRecipient(byKey map[authorityKey]map[string]struct{}, key authorityKey, recipient string) {
+	if key.sender == "" {
+		return
+	}
+	recipient = canonicalRole(recipient)
+	if recipient == "" {
+		return
+	}
+	if byKey[key] == nil {
+		byKey[key] = make(map[string]struct{}, 1)
+	}
+	byKey[key][recipient] = struct{}{}
+}
+
+func cloneAuthorities(in []MessageAuthority) []MessageAuthority {
+	out := make([]MessageAuthority, len(in))
+	for i, rule := range in {
+		out[i] = MessageAuthority{
+			SenderRole:     rule.SenderRole,
+			RecipientRoles: append([]string(nil), rule.RecipientRoles...),
+			Scope:          rule.Scope,
+		}
+	}
+	return out
+}
+
+func producerRolesForEvent(entry runtimecontracts.EventCatalogEntry) []string {
+	roles := []string{}
+	if strings.TrimSpace(strings.ToLower(entry.EmitterType)) != "agent" {
+		return roles
+	}
+	if emitter := strings.TrimSpace(entry.Emitter); emitter != "" {
+		roles = append(roles, emitter)
+	}
+	roles = append(roles, entry.AlternateEmitters...)
+	return roles
+}
+
+func appendUniqueSortedEvent(events []string, eventType string) []string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return events
+	}
+	for _, existing := range events {
+		if strings.TrimSpace(existing) == eventType {
+			return events
+		}
+	}
+	events = append(events, eventType)
+	sort.Strings(events)
+	return events
+}
+
+func sortedSet(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func findRepoRoot() (string, error) {
+	if _, file, _, ok := runtime.Caller(0); ok {
+		dir := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+		if _, err := os.Stat(filepath.Join(dir, "contracts")); err == nil {
+			return dir, nil
+		}
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for dir := wd; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "contracts")); err == nil {
+			return dir, nil
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+	}
+	return "", os.ErrNotExist
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func routeMatches(pattern, eventType string) bool {

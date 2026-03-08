@@ -118,6 +118,82 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	return out, true, nil
 }
 
+func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	ctx = withoutSQLTxContext(ctx)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			instance_id::text,
+			workflow_name,
+			workflow_version,
+			current_stage,
+			entered_stage_at,
+			COALESCE(transition_history, '[]'::jsonb),
+			COALESCE(accumulator_state, '{}'::jsonb),
+			COALESCE(timer_state, '[]'::jsonb),
+			COALESCE(metadata, '{}'::jsonb),
+			created_at,
+			updated_at
+		FROM workflow_instances
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]WorkflowInstance, 0, 32)
+	for rows.Next() {
+		var (
+			item              WorkflowInstance
+			transitionHistory []byte
+			accumulatorState  []byte
+			timerState        []byte
+			metadata          []byte
+		)
+		if err := rows.Scan(
+			&item.InstanceID,
+			&item.WorkflowName,
+			&item.WorkflowVersion,
+			&item.CurrentStage,
+			&item.EnteredStageAt,
+			&transitionHistory,
+			&accumulatorState,
+			&timerState,
+			&metadata,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(transitionHistory, &item.TransitionHistory); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(accumulatorState, &item.AccumulatorState); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(timerState, &item.TimerState); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(metadata, &item.Metadata); err != nil {
+			return nil, err
+		}
+		if item.AccumulatorState == nil {
+			item.AccumulatorState = map[string]any{}
+		}
+		if item.Metadata == nil {
+			item.Metadata = map[string]any{}
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowInstance) error {
 	if s == nil || s.db == nil {
 		return nil
@@ -198,6 +274,22 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 		jsonOrDefault(metadata, "{}"),
 	)
 	return err
+}
+
+func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" || s == nil || s.db == nil || fn == nil {
+		return nil
+	}
+	instance, ok, err := s.Load(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		instance = WorkflowInstance{InstanceID: instanceID}
+	}
+	fn(&instance)
+	return s.Upsert(ctx, instance)
 }
 
 func (s *WorkflowInstanceStore) Delete(ctx context.Context, instanceID string) error {

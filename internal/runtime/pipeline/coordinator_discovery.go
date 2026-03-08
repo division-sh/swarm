@@ -135,12 +135,12 @@ func cloneMap(in map[string]any) map[string]any {
 }
 
 func EvaluateDiscoveryPreFilterForTest(payload map[string]any, rawSignal float64) (bool, float64, string) {
-	module := defaultWorkflowModuleFactory()
+	module := defaultWorkflowModule()
 	return module.DiscoveryPolicy().EvaluateDiscoveryPreFilter(payload, rawSignal)
 }
 
 func BuildPrefilterSkipDetailForTest(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
-	module := defaultWorkflowModuleFactory()
+	module := defaultWorkflowModule()
 	return module.DiscoveryPolicy().BuildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
 }
 

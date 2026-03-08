@@ -11,6 +11,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -154,7 +155,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	if e.bus == nil {
 		return nil, errors.New("event bus is not configured")
 	}
-	if actor.Role != "empire-coordinator" {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy == nil || !policy.AllowHumanTaskDecision(actor) {
 		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
 	}
 

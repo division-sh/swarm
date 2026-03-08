@@ -36,7 +36,9 @@ type WorkflowStateStore interface {
 type WorkflowInstancePersistence interface {
 	Enabled() bool
 	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
+	List(ctx context.Context) ([]WorkflowInstance, error)
 	Upsert(ctx context.Context, instance WorkflowInstance) error
+	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error
 	Delete(ctx context.Context, instanceID string) error
 }
 
@@ -47,26 +49,37 @@ type TransitionEvaluator interface {
 
 type GuardRegistry interface {
 	HasGuard(id string) bool
+	IsExecutable(id string) bool
 	GuardIDs() []string
 	Guard(id string) (runtimecontracts.GuardActionEntry, bool)
 }
 
 type ActionRegistry interface {
 	HasAction(id string) bool
+	IsExecutable(id string) bool
 	ActionIDs() []string
 	Action(id string) (runtimecontracts.GuardActionEntry, bool)
 }
 
 func (pc *FactoryPipelineCoordinator) ContractBundle() *runtimecontracts.WorkflowContractBundle {
-	return empireContractBundle()
+	if pc == nil || pc.module == nil {
+		return nil
+	}
+	return pc.module.ContractBundle()
 }
 
 func (pc *FactoryPipelineCoordinator) WorkflowDefinition() *WorkflowDefinition {
-	return EmpirePipelineWorkflow()
+	if pc == nil || pc.module == nil {
+		return nil
+	}
+	return pc.module.WorkflowDefinition()
 }
 
 func (pc *FactoryPipelineCoordinator) WorkflowNodes() []WorkflowNode {
-	return empirePipelineWorkflowNodes()
+	if pc == nil || pc.module == nil {
+		return nil
+	}
+	return pc.module.WorkflowNodes()
 }
 
 func (pc *FactoryPipelineCoordinator) WorkflowStateStore() WorkflowStateStore {
@@ -84,13 +97,19 @@ func (pc *FactoryPipelineCoordinator) WorkflowInstanceStore() WorkflowInstancePe
 }
 
 func (pc *FactoryPipelineCoordinator) TransitionEvaluator() TransitionEvaluator {
-	return EmpirePipelineWorkflow()
+	return pc.WorkflowDefinition()
 }
 
 func (pc *FactoryPipelineCoordinator) GuardRegistry() GuardRegistry {
-	return empireGuardRegistry()
+	if pc == nil || pc.module == nil {
+		return nil
+	}
+	return pc.module.GuardRegistry()
 }
 
 func (pc *FactoryPipelineCoordinator) ActionRegistry() ActionRegistry {
-	return empireActionRegistry()
+	if pc == nil || pc.module == nil {
+		return nil
+	}
+	return pc.module.ActionRegistry()
 }

@@ -228,3 +228,43 @@ func TestRuntimeHotspotFilesStayBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeGenericLayersStayFreeOfEmpireLiterals(t *testing.T) {
+	t.Helper()
+
+	repoRoot := projectRootFromArchitectureTest(t)
+	dirs := []string{
+		filepath.Join(repoRoot, "internal", "runtime", "agents"),
+		filepath.Join(repoRoot, "internal", "runtime", "tools"),
+		filepath.Join(repoRoot, "internal", "runtime", "manager"),
+	}
+	forbidden := []string{
+		"empire-coordinator",
+		"saas_gap",
+		"saas_trend",
+		"local_services",
+		"automation_micro",
+	}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			text := string(data)
+			for _, token := range forbidden {
+				if strings.Contains(text, token) {
+					t.Fatalf("%s still contains forbidden Empire literal %q", path, token)
+				}
+			}
+		}
+	}
+}

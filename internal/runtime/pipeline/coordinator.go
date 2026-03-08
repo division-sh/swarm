@@ -61,6 +61,7 @@ type FactoryPipelineCoordinator struct {
 	scanCoordinator *ScanCoordinator
 	scoringState    *ScoringState
 	validationGate  *ValidationGate
+	module          WorkflowModule
 	discoveryPolicy DiscoveryPolicy
 	scoringPolicy   ScoringPolicy
 	payloads        PayloadFactory
@@ -95,11 +96,8 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 		return nil
 	}
 	module := opts.Module
-	if module == nil && defaultWorkflowModuleFactory != nil {
-		module = defaultWorkflowModuleFactory()
-	}
 	if module == nil {
-		panic("pipeline: workflow module is required; pass FactoryPipelineCoordinatorOptions.Module")
+		module = defaultWorkflowModule()
 	}
 	discoveryPolicy := module.DiscoveryPolicy()
 	scoringPolicy := module.ScoringPolicy()
@@ -110,6 +108,7 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 		scanCoordinator: NewScanCoordinator(),
 		scoringState:    NewScoringState(),
 		validationGate:  NewValidationGate(),
+		module:          module,
 		discoveryPolicy: discoveryPolicy,
 		scoringPolicy:   scoringPolicy,
 		payloads:        payloads,
@@ -271,7 +270,7 @@ type VerticalDerivedPayload struct {
 }
 
 func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordinator {
-	return NewFactoryPipelineCoordinatorWithOptions(bus, db, FactoryPipelineCoordinatorOptions{})
+	return NewFactoryPipelineCoordinatorWithOptions(bus, db, FactoryPipelineCoordinatorOptions{Module: defaultWorkflowModule()})
 }
 
 func (pc *FactoryPipelineCoordinator) SetShardPlanner(planner *ShardPlanner) {
@@ -478,7 +477,7 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 }
 
 func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
-	return pc.bus.Subscribe("pipeline-coordinator", empirePipelineSubscriptions()...)
+	return pc.bus.Subscribe("pipeline-coordinator", defaultPipelineSubscriptions()...)
 }
 
 func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) {

@@ -33,11 +33,11 @@ func TestWorkflowInstanceStore_UpsertLoadDelete(t *testing.T) {
 		CurrentStage:    "researching",
 		EnteredStageAt:  now,
 		TransitionHistory: []WorkflowTransitionRecord{{
-			TransitionID:   "shortlisted_to_researching",
-			From:           "shortlisted",
-			To:             "researching",
-			TriggerEventID: uuid.NewString(),
-			FiredAt:        now,
+			TransitionID:    "shortlisted_to_researching",
+			From:            "shortlisted",
+			To:              "researching",
+			TriggerEventID:  uuid.NewString(),
+			FiredAt:         now,
 			GuardsEvaluated: []string{"has_vertical_id"},
 		}},
 		AccumulatorState: map[string]any{
@@ -82,5 +82,78 @@ func TestWorkflowInstanceStore_UpsertLoadDelete(t *testing.T) {
 	}
 	if _, ok, err := store.Load(ctx, instanceID); err != nil || ok {
 		t.Fatalf("expected workflow instance to be deleted, ok=%v err=%v", ok, err)
+	}
+}
+
+func TestWorkflowInstanceStore_Mutate(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	ctx := context.Background()
+	instanceID := uuid.NewString()
+
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      instanceID,
+		WorkflowName:    "empire_vertical_pipeline",
+		WorkflowVersion: "2.1.0",
+		CurrentStage:    "researching",
+		Metadata:        map[string]any{"revision_count": 1},
+	}); err != nil {
+		t.Fatalf("upsert workflow instance: %v", err)
+	}
+
+	if err := store.Mutate(ctx, instanceID, func(instance *WorkflowInstance) {
+		instance.CurrentStage = "mvp_speccing"
+		if instance.Metadata == nil {
+			instance.Metadata = map[string]any{}
+		}
+		instance.Metadata["revision_count"] = asInt(instance.Metadata["revision_count"]) + 1
+	}); err != nil {
+		t.Fatalf("mutate workflow instance: %v", err)
+	}
+
+	loaded, ok, err := store.Load(ctx, instanceID)
+	if err != nil || !ok {
+		t.Fatalf("load mutated instance: ok=%v err=%v", ok, err)
+	}
+	if loaded.CurrentStage != "mvp_speccing" {
+		t.Fatalf("unexpected current stage: %q", loaded.CurrentStage)
+	}
+	if got := asInt(loaded.Metadata["revision_count"]); got != 2 {
+		t.Fatalf("unexpected revision_count after mutate: %v", loaded.Metadata["revision_count"])
+	}
+}
+
+func TestWorkflowInstanceStore_List(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	ctx := context.Background()
+	firstID := uuid.NewString()
+	secondID := uuid.NewString()
+
+	for _, instanceID := range []string{firstID, secondID} {
+		if err := store.Upsert(ctx, WorkflowInstance{
+			InstanceID:      instanceID,
+			WorkflowName:    "empire_vertical_pipeline",
+			WorkflowVersion: "2.1.0",
+			CurrentStage:    "researching",
+			Metadata:        map[string]any{"instance_id": instanceID},
+		}); err != nil {
+			t.Fatalf("upsert workflow instance %s: %v", instanceID, err)
+		}
+	}
+
+	items, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("list workflow instances: %v", err)
+	}
+	if len(items) < 2 {
+		t.Fatalf("expected at least 2 workflow instances, got %d", len(items))
+	}
+	found := map[string]bool{}
+	for _, item := range items {
+		found[item.InstanceID] = true
+	}
+	if !found[firstID] || !found[secondID] {
+		t.Fatalf("expected both workflow instances in list, got %+v", items)
 	}
 }

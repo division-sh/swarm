@@ -1,11 +1,11 @@
 package tools
 
 import (
-	"encoding/json"
 	"strings"
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func (e *Executor) preNormalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
@@ -19,8 +19,10 @@ func (e *Executor) preNormalizeEmitPayload(actor models.AgentConfig, inbound eve
 		return preNormalizeVerticalDerivedPayload(payload)
 	}
 	role := canonicalRuntimeRole(actor.Role)
-	if role == "empire-coordinator" && eventType == "scan.requested" {
-		return preNormalizeCoordinatorScanRequestedPayload(inbound, payload)
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		if out, ok := policy.PreNormalizeEmitPayload(role, inbound, eventType, payload); ok {
+			return out
+		}
 	}
 	if shouldFlattenLegacyNestedEmitPayload(eventType) {
 		return preNormalizeLegacyNestedEmitPayload(payload)
@@ -48,13 +50,9 @@ func (e *Executor) normalizeEmitPayload(actor models.AgentConfig, inbound events
 		payload = map[string]any{}
 	}
 	role := canonicalRuntimeRole(actor.Role)
-	if role == "empire-coordinator" && eventType == "scan.requested" {
-		return normalizeCoordinatorScanRequestedPayload(inbound, payload)
-	}
-	if role == "empire-coordinator" && strings.HasPrefix(eventType, "budget.") && strings.TrimSpace(string(inbound.Type)) == "budget.threshold_crossed" {
-		payload["event_type"] = eventType
-		if _, ok := payload["threshold_event_id"]; !ok {
-			payload["threshold_event_id"] = strings.TrimSpace(inbound.ID)
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		if out, ok := policy.NormalizeEmitPayload(role, inbound, eventType, payload); ok {
+			payload = out
 		}
 	}
 	if eventType == "portfolio.digest_compiled" {
@@ -68,176 +66,6 @@ func (e *Executor) normalizeEmitPayload(actor models.AgentConfig, inbound events
 		}
 	}
 	return payload
-}
-
-func normalizeCoordinatorScanRequestedPayload(inbound events.Event, current map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, v := range current {
-		out[k] = v
-	}
-
-	directiveText := ""
-	if len(inbound.Payload) > 0 {
-		var payload map[string]any
-		if err := json.Unmarshal(inbound.Payload, &payload); err == nil {
-			directiveText = strings.TrimSpace(asString(payload["directive_text"]))
-		}
-	}
-
-	mode := normalizeScanModeCompat(asString(out["mode"]))
-	if mode == "" {
-		mode = inferDiscoveryMode(directiveText)
-	}
-	if mode == "" {
-		mode = "saas_gap"
-	}
-	out["mode"] = mode
-
-	priority := normalizeScanPriorityCompat(asString(out["priority"]))
-	if priority == "" {
-		priority = "normal"
-	}
-	out["priority"] = priority
-
-	if strings.TrimSpace(asString(out["geography"])) == "" && strings.TrimSpace(asString(out["geography_id"])) == "" {
-		if geo := inferGeographyHint(directiveText); geo != "" {
-			out["geography"] = geo
-		} else {
-			out["geography"] = "unspecified"
-		}
-	}
-	if _, ok := out["taxonomy_categories"]; !ok {
-		if categories := extractCategoryList(out); len(categories) > 0 {
-			out["taxonomy_categories"] = categories
-		} else {
-			out["taxonomy_categories"] = []string{}
-		}
-	}
-	if _, ok := out["campaign_context"]; !ok {
-		modes := []string{strings.TrimSpace(asString(out["mode"]))}
-		if modes[0] == "" {
-			modes[0] = "saas_gap"
-		}
-		strategicContext := strings.TrimSpace(asString(out["strategic_context"]))
-		if strategicContext == "" {
-			strategicContext = directiveText
-		}
-		directiveID := strings.TrimSpace(asString(out["directive_id"]))
-		if directiveID == "" {
-			directiveID = strings.TrimSpace(inbound.ID)
-		}
-		out["campaign_context"] = map[string]any{
-			"modes":             modes,
-			"strategic_context": strategicContext,
-			"directive_id":      directiveID,
-		}
-	}
-	delete(out, "vertical")
-	delete(out, "focus")
-	delete(out, "criteria")
-	delete(out, "payload")
-	return out
-}
-
-func preNormalizeCoordinatorScanRequestedPayload(inbound events.Event, current map[string]any) map[string]any {
-	out := map[string]any{}
-	for k, v := range current {
-		out[k] = v
-	}
-	directiveText := ""
-	if len(inbound.Payload) > 0 {
-		var payload map[string]any
-		if err := json.Unmarshal(inbound.Payload, &payload); err == nil {
-			directiveText = strings.TrimSpace(asString(payload["directive_text"]))
-		}
-	}
-	originalMode := strings.TrimSpace(asString(out["mode"]))
-	originalPriority := strings.TrimSpace(asString(out["priority"]))
-
-	if nested, ok := asObject(out["payload"]); ok {
-		runtimeWarn(
-			"emit-normalization",
-			"flattening coordinator scan.requested nested payload event_id=%s source=%s keys=%d",
-			strings.TrimSpace(inbound.ID),
-			strings.TrimSpace(inbound.SourceAgent),
-			len(nested),
-		)
-		for k, v := range nested {
-			if existing, exists := out[k]; !exists || strings.TrimSpace(asString(existing)) == "" {
-				out[k] = v
-			}
-		}
-	}
-
-	modeRaw := asString(out["mode"])
-	if mode := normalizeScanModeCompat(modeRaw); mode != "" {
-		out["mode"] = mode
-	} else if strings.TrimSpace(modeRaw) != "" {
-		inferred := inferDiscoveryMode(directiveText)
-		if inferred != "" {
-			runtimeWarn(
-				"emit-normalization",
-				"coercing invalid coordinator mode raw=%q inferred=%q event_id=%s",
-				strings.TrimSpace(modeRaw),
-				inferred,
-				strings.TrimSpace(inbound.ID),
-			)
-		}
-		out["mode"] = inferred
-	}
-	if priority := normalizeScanPriorityCompat(asString(out["priority"])); priority != "" {
-		out["priority"] = priority
-	}
-	if strings.TrimSpace(asString(out["geography"])) == "" && strings.TrimSpace(asString(out["geography_id"])) == "" {
-		if geo := inferGeographyHint(directiveText); geo != "" {
-			out["geography"] = geo
-		} else {
-			out["geography"] = "unspecified"
-		}
-	}
-	if _, ok := out["campaign_context"]; !ok {
-		modes := []string{strings.TrimSpace(asString(out["mode"]))}
-		if modes[0] == "" {
-			modes[0] = "saas_gap"
-		}
-		strategicContext := strings.TrimSpace(asString(out["strategic_context"]))
-		if strategicContext == "" {
-			strategicContext = directiveText
-		}
-		directiveID := strings.TrimSpace(asString(out["directive_id"]))
-		if directiveID == "" {
-			directiveID = strings.TrimSpace(inbound.ID)
-		}
-		out["campaign_context"] = map[string]any{
-			"modes":             modes,
-			"strategic_context": strategicContext,
-			"directive_id":      directiveID,
-		}
-	}
-	if coercedMode := strings.TrimSpace(asString(out["mode"])); originalMode != "" && coercedMode != "" && !strings.EqualFold(originalMode, coercedMode) {
-		runtimeWarn(
-			"emit-normalization",
-			"coordinator scan.requested mode normalized raw=%q normalized=%q event_id=%s",
-			originalMode,
-			coercedMode,
-			strings.TrimSpace(inbound.ID),
-		)
-	}
-	if coercedPriority := strings.TrimSpace(asString(out["priority"])); originalPriority != "" && coercedPriority != "" && !strings.EqualFold(originalPriority, coercedPriority) {
-		runtimeWarn(
-			"emit-normalization",
-			"coordinator scan.requested priority normalized raw=%q normalized=%q event_id=%s",
-			originalPriority,
-			coercedPriority,
-			strings.TrimSpace(inbound.ID),
-		)
-	}
-
-	delete(out, "vertical")
-	delete(out, "focus")
-	delete(out, "criteria")
-	delete(out, "payload")
-	return out
 }
 
 func shouldFlattenLegacyNestedEmitPayload(eventType string) bool {
@@ -347,42 +175,6 @@ func isPlaceholderGeography(value string) bool {
 		}
 	}
 	return true
-}
-
-func normalizeScanModeCompat(raw string) string {
-	if mode := normalizeScanMode(raw); mode != "" {
-		return mode
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "discovery", "scan", "default", "automation", "micro", "automation-micro", "automation_micro":
-		return "saas_gap"
-	case "saas":
-		return "saas_gap"
-	case "trend", "trend_scan", "saas-trend":
-		return "saas_trend"
-	case "local", "local_service", "local-services", "services":
-		return "local_services"
-	case "corpus_mode", "signal_corpus", "corpus":
-		return "corpus"
-	case "derived":
-		return "derived"
-	default:
-		return ""
-	}
-}
-
-func normalizeScanPriorityCompat(raw string) string {
-	if priority := normalizeScanPriority(raw); priority != "" {
-		return priority
-	}
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "med", "medium", "default":
-		return "normal"
-	case "urgent":
-		return "critical"
-	default:
-		return ""
-	}
 }
 
 func asObject(v any) (map[string]any, bool) {

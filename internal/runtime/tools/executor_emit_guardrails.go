@@ -7,6 +7,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func (e *Executor) enforceMigrationGuardrail(ctx context.Context, actor models.AgentConfig, eventType string, payload map[string]any) error {
@@ -97,22 +98,14 @@ func (e *Executor) trackTransitionPrerequisites(actor models.AgentConfig, inboun
 
 func (e *Executor) validateEmitTransition(actor models.AgentConfig, inbound events.Event, emitted events.Event) error {
 	role := canonicalRuntimeRole(actor.Role)
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		if err := policy.ValidateEmitTransition(role, inbound, emitted); err != nil {
+			return err
+		}
+	}
 	inboundType := strings.TrimSpace(string(inbound.Type))
 	emittedType := strings.TrimSpace(string(emitted.Type))
 	switch {
-	case role == "empire-coordinator" && emittedType == "opco.spinup_requested":
-		if inboundType != "vertical.approved" {
-			return fmt.Errorf("guardrail_violation transition_violation: opco.spinup_requested requires inbound vertical.approved, got %s", inboundType)
-		}
-	case role == "empire-coordinator" && emittedType == "template.migration_completed":
-		if inboundType != "template.migration_approved" {
-			return fmt.Errorf("guardrail_violation transition_violation: template.migration_completed requires inbound template.migration_approved, got %s", inboundType)
-		}
-	case role == "empire-coordinator" && strings.HasPrefix(emittedType, "budget.") && inboundType == "budget.threshold_crossed":
-		expected := strings.TrimSpace(string(budgetEventTypeFromThresholdPayload(inbound.Payload)))
-		if expected != "" && expected != emittedType {
-			return fmt.Errorf("guardrail_violation transition_violation: expected %s for inbound budget.threshold_crossed, got %s", expected, emittedType)
-		}
 	case role == "factory-cto" && emittedType == "template.version_published":
 		if inboundType != "spec.validation_passed" {
 			return fmt.Errorf("guardrail_violation transition_violation: template.version_published requires inbound spec.validation_passed, got %s", inboundType)

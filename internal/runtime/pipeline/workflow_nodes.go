@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 type WorkflowEventPolicy struct {
@@ -28,31 +28,20 @@ type WorkflowNode struct {
 	Policies         map[string]WorkflowEventPolicy
 }
 
-var (
-	empireWorkflowNodesOnce sync.Once
-	empireWorkflowNodes     []WorkflowNode
-	empireWorkflowNodesErr  error
-)
-
-func empirePipelineWorkflowNodes() []WorkflowNode {
-	empireWorkflowNodesOnce.Do(func() {
-		empireWorkflowNodes, empireWorkflowNodesErr = loadWorkflowNodesFromContracts()
-	})
-	if empireWorkflowNodesErr != nil {
-		panic(empireWorkflowNodesErr)
-	}
-	out := make([]WorkflowNode, 0, len(empireWorkflowNodes))
-	for _, node := range empireWorkflowNodes {
+func DefaultPipelineWorkflowNodes() []WorkflowNode {
+	nodes := defaultWorkflowModule().WorkflowNodes()
+	out := make([]WorkflowNode, 0, len(nodes))
+	for _, node := range nodes {
 		nodeCopy := node
 		out = append(out, nodeCopy)
 	}
 	return out
 }
 
-func empirePipelineSubscriptions() []events.EventType {
+func defaultPipelineSubscriptions() []events.EventType {
 	seen := make(map[events.EventType]struct{})
 	out := make([]events.EventType, 0, 32)
-	for _, node := range empirePipelineWorkflowNodes() {
+	for _, node := range DefaultPipelineWorkflowNodes() {
 		for _, evt := range node.Subscriptions {
 			if _, ok := seen[evt]; ok {
 				continue
@@ -65,14 +54,14 @@ func empirePipelineSubscriptions() []events.EventType {
 	return out
 }
 
-func empirePipelineEventPolicy(eventType string) (WorkflowEventPolicy, bool) {
+func defaultPipelineEventPolicy(eventType string) (WorkflowEventPolicy, bool) {
 	eventType = strings.TrimSpace(eventType)
 	return workflowNodeEventPolicy("", eventType)
 }
 
 func workflowNodeSubscriptions(nodeID string) []events.EventType {
 	nodeID = strings.TrimSpace(nodeID)
-	for _, node := range empirePipelineWorkflowNodes() {
+	for _, node := range DefaultPipelineWorkflowNodes() {
 		if strings.TrimSpace(node.ID) != nodeID {
 			continue
 		}
@@ -84,7 +73,7 @@ func workflowNodeSubscriptions(nodeID string) []events.EventType {
 func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, bool) {
 	eventType = strings.TrimSpace(eventType)
 	nodeID = strings.TrimSpace(nodeID)
-	for _, node := range empirePipelineWorkflowNodes() {
+	for _, node := range DefaultPipelineWorkflowNodes() {
 		if nodeID != "" && strings.TrimSpace(node.ID) != nodeID {
 			continue
 		}
@@ -95,8 +84,10 @@ func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, boo
 	return WorkflowEventPolicy{}, false
 }
 
-func loadWorkflowNodesFromContracts() ([]WorkflowNode, error) {
-	bundle := empireContractBundle()
+func LoadWorkflowNodes(bundle *runtimecontracts.WorkflowContractBundle) ([]WorkflowNode, error) {
+	if bundle == nil {
+		return nil, fmt.Errorf("workflow contract bundle is nil")
+	}
 	path := bundle.Paths.SystemNodesFile
 
 	// Current runtime execution still groups scan/discovery and validation-gate
@@ -135,59 +126,176 @@ func loadWorkflowNodesFromContracts() ([]WorkflowNode, error) {
 			Implementation:   strings.TrimSpace(entry.Implementation),
 			StateTable:       strings.TrimSpace(entry.StateTable),
 			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
-			Policies:         workflowNodePolicyOverlay(nodeID),
+			Policies:         buildWorkflowNodePolicies(bundle, nodeID, subscriptions),
 		})
 	}
 	return out, nil
 }
 
-func workflowNodePolicyOverlay(nodeID string) map[string]WorkflowEventPolicy {
+func buildWorkflowNodePolicies(bundle *runtimecontracts.WorkflowContractBundle, nodeID string, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
+	allowed := workflowNodeRuntimePolicyEvents(strings.TrimSpace(nodeID))
+	if len(allowed) == 0 {
+		return nil
+	}
+	subscribed := make(map[string]struct{}, len(subscriptions))
+	for _, evt := range subscriptions {
+		name := strings.TrimSpace(string(evt))
+		if name != "" {
+			subscribed[name] = struct{}{}
+		}
+	}
+	transitionTriggers := workflowNodeTransitionTriggers(bundle, nodeID)
+	policies := make(map[string]WorkflowEventPolicy, len(allowed))
+	for eventType := range allowed {
+		if _, ok := subscribed[eventType]; !ok {
+			continue
+		}
+		policy := deriveWorkflowEventPolicy(bundle, eventType, transitionTriggers[eventType])
+		if override, ok := workflowNodeRuntimePolicyOverride(nodeID, eventType); ok {
+			policy = override
+		}
+		policies[eventType] = policy
+	}
+	if len(policies) == 0 {
+		return nil
+	}
+	return policies
+}
+
+func workflowNodeRuntimePolicyEvents(nodeID string) map[string]struct{} {
 	switch strings.TrimSpace(nodeID) {
 	case "pipeline-coordinator":
-		return map[string]WorkflowEventPolicy{
-			"timer.portfolio_digest":            {Consume: true},
-			"runtime.reset":                     {Consume: false},
-			"scan.requested":                    {Consume: true},
-			"category.assessed":                 {Consume: true},
-			"trend.identified":                  {Consume: true},
-			"source.scraped":                    {Consume: true},
-			"market_research.scan_complete":     {Consume: true},
-			"trend_research.scan_complete":      {Consume: true},
-			"scanner.google_maps.scan_complete": {Consume: true},
-			"scanner.instagram.scan_complete":   {Consume: true},
-			"scanner.reviews.scan_complete":     {Consume: true},
-			"scanner.directories.scan_complete": {Consume: true},
-			"scanner.yelp.scan_complete":        {Consume: true},
-			"dedup.resolved":                    {Consume: true},
-			"synthesis.resolved":                {Consume: true},
-			"vertical.shortlisted":              {Consume: true, RequireVertical: true},
-			"research.completed":                {Consume: true, RequireVertical: true},
-			"research.vertical_rejected":        {Consume: true, RequireVertical: true},
-			"spec.revision_requested":           {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"spec.approved":                     {Consume: true, RequireVertical: true},
-			"spec.validation_passed":            {Consume: true, RequireVertical: true},
-			"spec.validation_failed":            {Consume: true, RequireVertical: true},
-			"cto.spec_approved":                 {Consume: true, RequireVertical: true},
-			"cto.spec_revision_needed":          {Consume: true, RequireVertical: true},
-			"cto.spec_vetoed":                   {Consume: true, RequireVertical: true},
-			"brand.candidates_ready":            {Consume: true, RequireVertical: true},
-			"vertical.ready_for_review":         {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"vertical.needs_more_data":          {Consume: true, RequireVertical: true},
-			"brand.revision_needed":             {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"vertical.approved":                 {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"vertical.killed":                   {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"vertical.resumed":                  {Consume: true, RequireVertical: true},
-			"opco.ceo_ready":                    {Consume: false, RequireVertical: true, VisibleDownstream: true},
+		return map[string]struct{}{
+			"timer.portfolio_digest":            {},
+			"runtime.reset":                     {},
+			"scan.requested":                    {},
+			"category.assessed":                 {},
+			"trend.identified":                  {},
+			"source.scraped":                    {},
+			"market_research.scan_complete":     {},
+			"trend_research.scan_complete":      {},
+			"scanner.google_maps.scan_complete": {},
+			"scanner.instagram.scan_complete":   {},
+			"scanner.reviews.scan_complete":     {},
+			"scanner.directories.scan_complete": {},
+			"scanner.yelp.scan_complete":        {},
+			"dedup.resolved":                    {},
+			"synthesis.resolved":                {},
+			"vertical.shortlisted":              {},
+			"research.completed":                {},
+			"research.vertical_rejected":        {},
+			"spec.revision_requested":           {},
+			"spec.approved":                     {},
+			"spec.validation_passed":            {},
+			"spec.validation_failed":            {},
+			"cto.spec_approved":                 {},
+			"cto.spec_revision_needed":          {},
+			"cto.spec_vetoed":                   {},
+			"brand.candidates_ready":            {},
+			"vertical.ready_for_review":         {},
+			"vertical.needs_more_data":          {},
+			"brand.revision_needed":             {},
+			"vertical.approved":                 {},
+			"vertical.killed":                   {},
+			"vertical.resumed":                  {},
+			"opco.ceo_ready":                    {},
 		}
 	case "scoring-node":
-		return map[string]WorkflowEventPolicy{
-			"vertical.discovered":      {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"vertical.derived":         {Consume: true},
-			"score.dimension_complete": {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"scoring.contest_resolved": {Consume: false, RequireVertical: true, VisibleDownstream: true},
-			"vertical.scored":          {Consume: false},
+		return map[string]struct{}{
+			"vertical.discovered":      {},
+			"vertical.derived":         {},
+			"score.dimension_complete": {},
+			"scoring.contest_resolved": {},
+			"vertical.scored":          {},
 		}
 	default:
 		return nil
+	}
+}
+
+func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventPolicy, bool) {
+	switch strings.TrimSpace(nodeID) {
+	case "pipeline-coordinator":
+		switch strings.TrimSpace(eventType) {
+		case "timer.portfolio_digest":
+			return WorkflowEventPolicy{Consume: true}, true
+		case "runtime.reset":
+			return WorkflowEventPolicy{Consume: false}, true
+		case "spec.revision_requested":
+			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
+		case "spec.validation_passed", "spec.validation_failed":
+			return WorkflowEventPolicy{Consume: true, RequireVertical: true}, true
+		case "brand.revision_needed":
+			return WorkflowEventPolicy{Consume: true, RequireVertical: true}, true
+		}
+	case "scoring-node":
+		switch strings.TrimSpace(eventType) {
+		case "vertical.derived":
+			return WorkflowEventPolicy{Consume: true}, true
+		case "score.dimension_complete", "scoring.contest_resolved":
+			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
+		}
+	}
+	return WorkflowEventPolicy{}, false
+}
+
+func workflowNodeTransitionTriggers(bundle *runtimecontracts.WorkflowContractBundle, nodeID string) map[string]bool {
+	out := make(map[string]bool)
+	if bundle == nil {
+		return out
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	for _, transition := range bundle.Workflow.Workflow.Transitions {
+		if strings.TrimSpace(transition.Node) != nodeID {
+			continue
+		}
+		trigger := strings.TrimSpace(transition.Trigger)
+		if trigger != "" {
+			out[trigger] = true
+		}
+	}
+	return out
+}
+
+func deriveWorkflowEventPolicy(bundle *runtimecontracts.WorkflowContractBundle, eventType string, drivesTransition bool) WorkflowEventPolicy {
+	eventType = strings.TrimSpace(eventType)
+	entry, ok := bundle.Events[eventType]
+	if !ok {
+		return WorkflowEventPolicy{RequireVertical: drivesTransition}
+	}
+	requireVertical := drivesTransition
+	consume, visible := deriveWorkflowEventDelivery(entry)
+	return WorkflowEventPolicy{
+		Consume:           consume,
+		RequireVertical:   requireVertical,
+		VisibleDownstream: visible,
+	}
+}
+
+func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {
+	switch strings.TrimSpace(entry.RuntimeHandling) {
+	case "consuming":
+		return true, false
+	case "projection", "stage_projection":
+		return false, true
+	}
+	consumerType := strings.TrimSpace(asString(entry.ConsumerType))
+	intercepted := truthyContractFlag(entry.Intercepted)
+	passthrough := truthyContractFlag(entry.Passthrough)
+	if consumerType == "system_component" && intercepted && !passthrough {
+		return true, false
+	}
+	return false, true
+}
+
+func truthyContractFlag(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		s := strings.ToLower(strings.TrimSpace(t))
+		return s == "true" || s == "conditional" || s == "projection" || s == "consuming"
+	default:
+		return false
 	}
 }

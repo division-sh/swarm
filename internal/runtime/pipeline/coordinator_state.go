@@ -22,6 +22,24 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	if loaded {
 		return
 	}
+	workflowValidations := map[string]*validationPipelineState{}
+	workflowScoring := map[string]*scoringAccumulator{}
+	workflowStages := map[string]string{}
+	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+		if instances, err := pc.workflowStore.List(ctx); err == nil {
+			for _, instance := range instances {
+				if st, ok := restoreValidationStateFromInstance(instance); ok {
+					workflowValidations[strings.TrimSpace(instance.InstanceID)] = st
+				}
+				if acc, ok := restoreScoringAccumulatorFromInstance(instance); ok {
+					workflowScoring[strings.TrimSpace(instance.InstanceID)] = acc
+				}
+				if verticalID := strings.TrimSpace(instance.InstanceID); verticalID != "" {
+					workflowStages[verticalID] = strings.TrimSpace(instance.CurrentStage)
+				}
+			}
+		}
+	}
 	snapshot := pc.stateStore.Load(ctx)
 
 	pc.mu.Lock()
@@ -35,10 +53,15 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	if pc.scoringState.accumulators == nil {
 		pc.scoringState.accumulators = make(map[string]*scoringAccumulator)
 	}
+	for verticalID, acc := range workflowScoring {
+		pc.scoringState.accumulators[verticalID] = acc
+	}
 	if len(snapshot.PendingDedup) > 0 {
 		pc.scanCoordinator.pendingDedup = snapshot.PendingDedup
 	}
-	if len(snapshot.Validations) > 0 {
+	if len(workflowValidations) > 0 {
+		pc.validationGate.states = workflowValidations
+	} else if len(snapshot.Validations) > 0 {
 		pc.validationGate.states = snapshot.Validations
 	}
 	if len(snapshot.Processed) > 0 {
@@ -48,6 +71,15 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	pc.mu.Unlock()
 
 	// Ensure dashboard-facing stage projection is consistent with recovered validation state.
+	if len(workflowStages) > 0 {
+		for verticalID, stage := range workflowStages {
+			if strings.TrimSpace(stage) == "" {
+				continue
+			}
+			pc.updateVerticalStage(ctx, verticalID, stage, "")
+		}
+		return
+	}
 	for verticalID, st := range snapshot.Validations {
 		if st == nil {
 			continue

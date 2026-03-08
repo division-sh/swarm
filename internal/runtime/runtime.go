@@ -13,11 +13,14 @@ import (
 	"empireai/internal/events"
 	runtimeagents "empireai/internal/runtime/agents"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	empirepipeline "empireai/internal/runtime/pipeline/empire"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	empireproductpolicy "empireai/internal/runtime/productpolicy/empire"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -86,7 +89,14 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		}
 		log.Printf("emit schema hardening warning: %d agent-emitted event schemas are missing explicit definitions; add explicit schemas (sample: %s)", len(generated), strings.Join(sample, ", "))
 	}
-	if err := runtimepipeline.ValidateEmpireWorkflowContracts(); err != nil {
+	workflowModule := empirepipeline.NewModule()
+	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
+		return workflowModule
+	})
+	runtimeproductpolicy.SetDefaultFactory(func() runtimeproductpolicy.Policy {
+		return empireproductpolicy.New()
+	})
+	if err := runtimepipeline.ValidateWorkflowContracts(workflowModule.ContractBundle()); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 
@@ -109,7 +119,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Pipeline = runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.FactoryPipelineCoordinatorOptions{
 			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding),
-			Module:       empirepipeline.NewModule(),
+			Module:       workflowModule,
 		})
 		if rt.Pipeline != nil {
 			rt.ScoringNode = runtimepipeline.NewScoringNode(rt.Bus, rt.Pipeline, stores.SQLDB)
@@ -244,11 +254,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				log.Printf("restore schedule failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 			}
 		}
-		if err := ensurePortfolioDigestSchedule(ctx, rt.Stores.ScheduleStore); err != nil {
-			log.Printf("digest schedule ensure failed: %v", err)
-		}
-		if err := ensureMarginalReviewSchedule(ctx, rt.Stores.ScheduleStore); err != nil {
-			log.Printf("marginal review schedule ensure failed: %v", err)
+		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Pipeline); err != nil {
+			log.Printf("workflow recurring schedule ensure failed: %v", err)
 		}
 		if err := ensureInfraHealthCheckSchedule(ctx, rt.Stores.ScheduleStore); err != nil {
 			log.Printf("infra health schedule ensure failed: %v", err)
@@ -353,38 +360,55 @@ func (rt *Runtime) selfCheck() error {
 	return nil
 }
 
-func ensurePortfolioDigestSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
-	if store == nil {
+func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, workflow runtimepipeline.WorkflowRuntime) error {
+	if store == nil || workflow == nil || workflow.ContractBundle() == nil {
 		return nil
 	}
-	cron := strings.TrimSpace(os.Getenv("EMPIREAI_DIGEST_CRON"))
-	if cron == "" {
-		cron = "0 9 * * *"
+	for _, timer := range workflow.ContractBundle().Workflow.Workflow.Timers {
+		if !timer.Recurring {
+			continue
+		}
+		owner := strings.TrimSpace(timer.Owner)
+		eventType := strings.TrimSpace(timer.Event)
+		if owner == "" || eventType == "" {
+			continue
+		}
+		cron, ok := recurringWorkflowTimerSpec(timer)
+		if !ok {
+			continue
+		}
+		if err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
+			AgentID:   owner,
+			EventType: eventType,
+			Mode:      "cron",
+			Cron:      cron,
+			Payload:   recurringWorkflowTimerPayload(timer),
+		}); err != nil {
+			return err
+		}
 	}
-	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "empire-coordinator",
-		EventType: "timer.portfolio_digest",
-		Mode:      "cron",
-		Cron:      cron,
-		Payload:   []byte(`{"trigger":"daily"}`),
-	})
+	return nil
 }
 
-func ensureMarginalReviewSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
-	if store == nil {
-		return nil
+func recurringWorkflowTimerSpec(timer runtimecontracts.WorkflowTimerContract) (string, bool) {
+	var interval time.Duration
+	interval += time.Duration(timer.DelaySeconds) * time.Second
+	interval += time.Duration(timer.DelayMinutes) * time.Minute
+	interval += time.Duration(timer.DelayHours) * time.Hour
+	interval += time.Duration(timer.DelayDays) * 24 * time.Hour
+	if interval <= 0 {
+		return "", false
 	}
-	cron := strings.TrimSpace(os.Getenv("EMPIREAI_MARGINAL_REVIEW_CRON"))
-	if cron == "" {
-		cron = "0 9 */14 * *"
+	return "@every " + interval.String(), true
+}
+
+func recurringWorkflowTimerPayload(timer runtimecontracts.WorkflowTimerContract) []byte {
+	switch strings.TrimSpace(timer.Event) {
+	case "timer.portfolio_digest":
+		return mustJSON(map[string]any{"trigger_reason": strings.TrimSpace(timer.ID)})
+	default:
+		return mustJSON(map[string]any{})
 	}
-	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "empire-coordinator",
-		EventType: "timer.marginal_review",
-		Mode:      "cron",
-		Cron:      cron,
-		Payload:   []byte(`{"trigger":"marginal_review"}`),
-	})
 }
 
 func ensureInfraHealthCheckSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {

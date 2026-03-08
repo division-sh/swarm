@@ -10,7 +10,7 @@ import (
 )
 
 func ValidatePromptSchemaGuards(repoRoot string) error {
-	promptsDir := ResolveEmpireContractPaths(repoRoot).PromptsDir
+	promptsDir := ResolveWorkflowContractPaths(repoRoot).PromptsDir
 	schemas := EventSchemaRegistry()
 
 	type guardCase struct {

@@ -1,5 +1,12 @@
 package pipeline
 
+import (
+	"context"
+
+	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
+)
+
 type scoreDimensionResult = ScoreDimensionResult
 type contestedDimension = ContestedDimension
 type scoringComposite = ScoringComposite
@@ -338,7 +345,35 @@ type PayloadFactory interface {
 	BuildValidationStartedPayload(verticalID, name, geography string, scoring map[string]any) ValidationStartedPayload
 }
 
+type WorkflowHookContext struct {
+	Event      events.Event
+	VerticalID string
+	Payload    map[string]any
+	State      WorkflowState
+}
+
+type WorkflowHookRuntime interface {
+	ContractPolicyFloat(key string, fallback float64) float64
+	ContractPolicyInt(key string, fallback int) int
+	PipelineHasCapacity(ctx context.Context, limit int) bool
+	PublishWorkflowEvent(ctx context.Context, eventType, verticalID string, payload map[string]any)
+	PersistWorkflowMetadata(ctx context.Context, verticalID string, mutate func(metadata map[string]any))
+	WorkflowPayloadFactory() *PipelinePayloadFactory
+	OpcoSpinupRequestedPayload(ctx context.Context, verticalID string, approvalPayload map[string]any) map[string]any
+}
+
+type WorkflowHookExecutor interface {
+	EvaluateWorkflowGuard(ctx context.Context, runtime WorkflowHookRuntime, hookCtx WorkflowHookContext, guard runtimecontracts.GuardActionEntry) (bool, bool)
+	ExecuteWorkflowAction(ctx context.Context, runtime WorkflowHookRuntime, hookCtx WorkflowHookContext, action runtimecontracts.GuardActionEntry) (bool, bool)
+}
+
 type WorkflowModule interface {
+	ContractBundle() *runtimecontracts.WorkflowContractBundle
+	WorkflowDefinition() *WorkflowDefinition
+	WorkflowNodes() []WorkflowNode
+	GuardRegistry() GuardRegistry
+	ActionRegistry() ActionRegistry
+	WorkflowHooks() WorkflowHookExecutor
 	DiscoveryPolicy() DiscoveryPolicy
 	ScoringPolicy() ScoringPolicy
 	PayloadFactory() PayloadFactory
@@ -348,4 +383,19 @@ var defaultWorkflowModuleFactory func() WorkflowModule
 
 func SetDefaultWorkflowModuleFactory(factory func() WorkflowModule) {
 	defaultWorkflowModuleFactory = factory
+}
+
+func defaultWorkflowModule() WorkflowModule {
+	module := defaultWorkflowModuleOrNil()
+	if module == nil {
+		panic("pipeline: workflow module is required; configure SetDefaultWorkflowModuleFactory or pass FactoryPipelineCoordinatorOptions.Module")
+	}
+	return module
+}
+
+func defaultWorkflowModuleOrNil() WorkflowModule {
+	if defaultWorkflowModuleFactory == nil {
+		return nil
+	}
+	return defaultWorkflowModuleFactory()
 }
