@@ -1,27 +1,27 @@
 import React from "react";
-import ControlView from "../features/control/ControlView.jsx";
 import HealthView from "../features/health/HealthView.jsx";
-import HoldingView from "../features/holding/HoldingView.jsx";
-import PipelineView from "../features/pipeline/PipelineView.jsx";
-import TasksView from "../features/tasks/TasksView.jsx";
+import OperationsView from "../features/operations/OperationsView.jsx";
+import PortfolioView from "../features/portfolio/PortfolioView.jsx";
 
-export default function DashboardOpsViews({ activeView, ops, pipeline }) {
+export default function DashboardOpsViews({ activeView, setActiveView, ops, pipeline }) {
   return (
     <>
-      {activeView === "control" ? (
-        <ControlView state={ops.control.state} actions={ops.control.actions} />
+      {activeView === "operations" || activeView === "control" || activeView === "tasks" ? (
+        <OperationsView
+          activeView={activeView}
+          setActiveView={setActiveView}
+          control={ops.control}
+          tasks={ops.tasks}
+        />
       ) : null}
 
-      {activeView === "tasks" ? (
-        <TasksView state={ops.tasks.state} actions={ops.tasks.actions} />
-      ) : null}
-
-      {activeView === "pipeline" ? (
-        <PipelineView state={pipeline.pipeline.state} actions={pipeline.pipeline.actions} />
-      ) : null}
-
-      {activeView === "holding" ? (
-        <HoldingView state={pipeline.holding.state} actions={pipeline.holding.actions} />
+      {activeView === "portfolio" || activeView === "pipeline" || activeView === "holding" ? (
+        <PortfolioView
+          activeView={activeView}
+          setActiveView={setActiveView}
+          pipeline={pipeline.pipeline}
+          holding={pipeline.holding}
+        />
       ) : null}
 
       {activeView === "health" ? (

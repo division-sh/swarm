@@ -6,6 +6,7 @@ export function useNavigationActions({
   loadAgents,
   loadTargets,
   setActiveView,
+  setModalContent,
   setControlTarget,
   setSelectedAgentID,
   setSelectedTaskID,
@@ -18,7 +19,11 @@ export function useNavigationActions({
 }) {
   const handleAgentNavigate = useCallback((view, opts) => {
     if (opts && opts.eventID) setSelectedEventID(opts.eventID);
-    if (opts && opts.convID) setSelectedConv(opts.convID);
+    if (opts && opts.convID) {
+      setSelectedConv(opts.convID);
+      setSelectedAgentID(opts.agentID || opts.convID);
+    }
+    if (opts && opts.agentID) setSelectedAgentID(opts.agentID);
     if (opts && opts.eventsSubscriber) {
       setEventsFilter({ type: "", source: "", vertical: "", component: "", level: "", subscriber: opts.eventsSubscriber });
       setEventsRuntimeErrorsOnly(false);
@@ -36,6 +41,7 @@ export function useNavigationActions({
     setLogsRuntimeErrorsOnly,
     setSelectedConv,
     setSelectedEventID,
+    setSelectedAgentID,
   ]);
 
   const openControl = useCallback((agentID) => {
@@ -57,11 +63,13 @@ export function useNavigationActions({
     agent,
     addToast,
     onNavigate: handleAgentNavigate,
+    onOpenMessage: (message) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
+    onCopyConversation: copyConversation,
     onAction: () => {
       loadAgents().catch(() => {});
       loadTargets().catch(() => {});
     },
-  }), [addToast, handleAgentNavigate, loadAgents, loadTargets]);
+  }), [addToast, copyConversation, handleAgentNavigate, loadAgents, loadTargets, setModalContent]);
 
   const copyConversation = useCallback((agentID, messages) => {
     const msgs = messages || [];
@@ -90,8 +98,9 @@ export function useNavigationActions({
 
   const openConvoForAgent = useCallback((agentID) => {
     setSelectedConv(agentID);
-    setActiveView("convos");
-  }, [setActiveView, setSelectedConv]);
+    setSelectedAgentID(agentID);
+    setActiveView("agents");
+  }, [setActiveView, setSelectedAgentID, setSelectedConv]);
 
   return {
     handleAgentNavigate,

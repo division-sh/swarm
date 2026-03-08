@@ -5,7 +5,7 @@ import { usePersistentState } from "../hooks/usePersistentState.js";
 import { VALID_TABS } from "./dashboardTabs.js";
 
 export function useDashboardUIState() {
-  const [activeView, setActiveView] = useHashTab(VALID_TABS, "agents");
+  const [activeView, setActiveView] = useHashTab(VALID_TABS, "overview");
   const [statusText, setStatusText] = useState("Loading...");
   const [apiKey, setApiKey] = usePersistentState("empire_api_key", getEmpireKey());
   const [initialLoading, setInitialLoading] = useState(true);

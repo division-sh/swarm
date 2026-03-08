@@ -13,6 +13,8 @@ export default function AppShell() {
       <DashboardHeader {...header} />
       <DashboardViewRouter
         activeView={header.activeView}
+        setActiveView={header.setActiveView}
+        overview={views.overview}
         runtime={views.runtime}
         pipeline={views.pipeline}
         ops={views.ops}

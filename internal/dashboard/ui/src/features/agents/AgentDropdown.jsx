@@ -1,12 +1,13 @@
 import React from "react";
 import AgentChatPanel from "./AgentChatPanel.jsx";
+import AgentConversationPanel from "./AgentConversationPanel.jsx";
 import AgentDirectivePanel from "./AgentDirectivePanel.jsx";
 import AgentPromptPanel from "./AgentPromptPanel.jsx";
 import AgentSummaryPanel from "./AgentSummaryPanel.jsx";
 import AgentTurnsPanel from "./AgentTurnsPanel.jsx";
 import { useAgentConsole } from "./useAgentConsole.js";
 
-export default function AgentDropdown({ agent, addToast, onNavigate, onAction }) {
+export default function AgentDropdown({ agent, addToast, onNavigate, onAction, onOpenMessage, onCopyConversation }) {
   const consoleState = useAgentConsole({ agent, addToast, onAction });
 
   return (
@@ -15,7 +16,13 @@ export default function AgentDropdown({ agent, addToast, onNavigate, onAction })
         <div>
           <AgentSummaryPanel agent={agent} onNavigate={onNavigate} />
           <AgentPromptPanel agent={agent} prompt={consoleState.prompt} busy={consoleState.busy} addToast={addToast} />
-          <AgentTurnsPanel turns={consoleState.turns} />
+          <AgentTurnsPanel turns={consoleState.conversation.turns} />
+          <AgentConversationPanel
+            agentID={agent.id}
+            conversation={consoleState.conversation}
+            onCopyConversation={onCopyConversation}
+            onOpenMessage={onOpenMessage}
+          />
         </div>
         <div className="agent-actions">
           <AgentChatPanel chat={consoleState.chat} busy={consoleState.busy} addToast={addToast} />

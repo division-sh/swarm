@@ -1,76 +1,42 @@
-import React, { useEffect, useId, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import React, { useEffect, useId, useState } from "react";
 
 export default function Modal({ title, onClose, copyText, children, className = "" }) {
   const [copied, setCopied] = useState(false);
   const titleID = useId();
-  const containerRef = useRef(null);
-  const closeRef = useRef(null);
 
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const previousActive = document.activeElement;
-    document.body.style.overflow = "hidden";
-    window.requestAnimationFrame(() => {
-      (closeRef.current || containerRef.current)?.focus();
-    });
-
-    function trapTab(event) {
-      if (event.key !== "Tab" || !containerRef.current) return;
-      const nodes = Array.from(containerRef.current.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )).filter((node) => !node.hasAttribute("disabled"));
-      if (nodes.length === 0) return;
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }
-
-    function onKey(e) {
-      if (e.key === "Escape") onClose();
-      trapTab(e);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      if (previousActive && typeof previousActive.focus === "function") {
-        previousActive.focus();
-      }
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
+    if (!copied) return undefined;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        ref={containerRef}
-        className={`modal-container ${className}`.trim()}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleID}
-        tabIndex={-1}
-      >
-        <div className="modal-header">
-          <div id={titleID} className="modal-title">{title}</div>
-          <div className="stack">
-            {copyText ? (
-              <button className="btn-secondary" onClick={() => {
-                navigator.clipboard.writeText(copyText).catch(() => {});
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              }}>{copied ? "Copied!" : "Copy"}</button>
-            ) : null}
-            <button ref={closeRef} className="btn-secondary modal-close" onClick={onClose} aria-label="Close dialog">&times;</button>
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="modal-overlay" />
+        <Dialog.Content
+          className={`modal-container ${className}`.trim()}
+          aria-labelledby={titleID}
+          aria-describedby={undefined}
+        >
+          <div className="modal-header">
+            <Dialog.Title id={titleID} className="modal-title">{title}</Dialog.Title>
+            <div className="stack">
+              {copyText ? (
+                <button className="btn-secondary" onClick={() => {
+                  navigator.clipboard.writeText(copyText).catch(() => {});
+                  setCopied(true);
+                }}>{copied ? "Copied!" : "Copy"}</button>
+              ) : null}
+              <Dialog.Close asChild>
+                <button className="btn-secondary modal-close" aria-label="Close dialog" autoFocus>&times;</button>
+              </Dialog.Close>
+            </div>
           </div>
-        </div>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
+          <div className="modal-body">{children}</div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

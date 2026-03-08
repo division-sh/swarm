@@ -9,7 +9,7 @@ export function useAgentConsole({ agent, addToast, onAction }) {
   const [quickUseCorpus, setQuickUseCorpus] = useState(true);
   const [quickMode, setQuickMode] = useState("saas_gap");
   const [quickCorpusPath, setQuickCorpusPath] = useState("/data/test-signals-25.jsonl");
-  const [turns, setTurns] = useState([]);
+  const [conversation, setConversation] = useState({ messages: [], turns: [] });
   const [busy, setBusy] = useState("");
   const [promptState, setPromptState] = useState(null);
   const [promptEdit, setPromptEdit] = useState("");
@@ -18,9 +18,12 @@ export function useAgentConsole({ agent, addToast, onAction }) {
   const [diffData, setDiffData] = useState(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
 
-  const loadTurns = useCallback(async () => {
+  const loadConversation = useCallback(async () => {
     const data = await fetchJSON(`/dashboard/api/conversations/${encodeURIComponent(agent.id)}`);
-    setTurns(data.turns || []);
+    setConversation({
+      messages: data.messages || [],
+      turns: data.turns || [],
+    });
   }, [agent.id]);
 
   const loadPrompt = useCallback(async () => {
@@ -30,9 +33,9 @@ export function useAgentConsole({ agent, addToast, onAction }) {
   }, [agent.id]);
 
   useEffect(() => {
-    loadTurns().catch(() => {});
+    loadConversation().catch(() => {});
     loadPrompt().catch(() => {});
-  }, [loadPrompt, loadTurns]);
+  }, [loadConversation, loadPrompt]);
 
   const run = useCallback(async (key, fn) => {
     setBusy(key);
@@ -88,10 +91,10 @@ export function useAgentConsole({ agent, addToast, onAction }) {
     return run("chat", async () => {
       const out = await postJSON(`/api/chat/${encodeURIComponent(agent.id)}`, { mode: chatMode, message });
       setChatMessage("");
-      await loadTurns();
+      await loadConversation();
       return out;
     });
-  }, [agent.id, chatMessage, chatMode, loadTurns, run]);
+  }, [agent.id, chatMessage, chatMode, loadConversation, run]);
 
   const sendDirective = useCallback(() => {
     const message = directiveMessage.trim();
@@ -161,7 +164,7 @@ export function useAgentConsole({ agent, addToast, onAction }) {
       options: ["US", "Argentina", "Brazil", "Mexico", "Chile", "Peru", "Paraguay", "Uruguay", "Colombia"],
       datalistID: `geo-options-${(agent.id || "agent").replace(/[^a-zA-Z0-9_-]/g, "-")}`,
     },
-    turns,
+    conversation,
     busy,
   };
 }

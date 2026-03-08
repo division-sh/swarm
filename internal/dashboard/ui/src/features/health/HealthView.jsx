@@ -6,11 +6,22 @@ export default function HealthView({ state }) {
   const { health, contractsData, contractWorkflow, contractPlatform, contractVerification } = state;
   return (
     <section>
-      <div className="head"><h2>Health</h2><span className="tiny">ops telemetry + contract summary</span></div>
+      <div className="head"><h2>Health</h2><span className="tiny">deep diagnostics + contract state</span></div>
       <div className="body scroll">
+        <div className="health-card" style={{ marginBottom: 10 }}>
+          <div className="tiny">Diagnostic Scope</div>
+          <div style={{ marginTop: 6 }}>
+            Health is now the deeper diagnostics page for infra state, auth, spend, contracts, workflow audits, and vertical deploy health.
+          </div>
+          <div className="tiny" style={{ marginTop: 6 }}>
+            Use <span className="mono">Overview</span> for live triage and "what needs attention now".
+          </div>
+        </div>
+
+        <div className="tiny" style={{ marginBottom: 6 }}>Infra Diagnostics</div>
         <div className="row" style={{ marginBottom: 10 }}>
           <div className="health-card">
-            <div className="tiny">System Status</div>
+            <div className="tiny">Runtime + Database</div>
             <div className="health-kv">
               <span>Runtime</span>
               <span className={health.runtime?.running ? "health-good" : "health-bad"}>{health.runtime?.running ? "Running" : "Stopped"}</span>
@@ -24,6 +35,32 @@ export default function HealthView({ state }) {
               <span className="mono">{health.postgres?.active_connections || 0} / {health.postgres?.max_connections || 0} connections</span>
             </div>
           </div>
+          <div className="health-card">
+            <div className="tiny">Auth + Containers</div>
+            <div className="health-kv">
+              <span>OAuth Token</span>
+              <span className={health.auth?.oauth_token_configured ? "health-good" : "health-bad"}>{health.auth?.oauth_token_configured ? "Configured" : "Missing"}</span>
+            </div>
+            <div className="health-kv">
+              <span>Auth Errors (1h)</span>
+              <span className={(health.auth?.auth_errors_1h || 0) > 0 ? "health-bad mono" : "mono"}>{health.auth?.auth_errors_1h || 0}</span>
+            </div>
+            <div className="health-kv">
+              <span>Auth Errors (24h)</span>
+              <span className={(health.auth?.auth_errors_24h || 0) > 0 ? "health-warn mono" : "mono"}>{health.auth?.auth_errors_24h || 0}</span>
+            </div>
+            {(health.containers || []).length === 0 ? <div className="empty-state">No container data</div> : (health.containers || []).map((x) => (
+              <div className="health-kv" key={x.name}>
+                <span>{x.name}</span>
+                <span className={x.status === "running" ? "health-good mono" : "health-warn mono"}>{x.status}</span>
+              </div>
+            ))}
+            {health.container_error ? <div className="health-bad mono" style={{ marginTop: 4 }}>{health.container_error}</div> : null}
+          </div>
+        </div>
+
+        <div className="tiny" style={{ marginBottom: 6 }}>Spend + Contract Diagnostics</div>
+        <div className="row" style={{ marginBottom: 10 }}>
           <div className="health-card">
             <div className="tiny">Spend (24h)</div>
             <div className="health-kv">
@@ -43,35 +80,6 @@ export default function HealthView({ state }) {
               <span className="mono">{formatDollars(health.spend?.spend_ledger_24h_cents)}</span>
             </div>
           </div>
-        </div>
-        <div className="row" style={{ marginBottom: 10 }}>
-          <div className="health-card">
-            <div className="tiny">Auth</div>
-            <div className="health-kv">
-              <span>OAuth Token</span>
-              <span className={health.auth?.oauth_token_configured ? "health-good" : "health-bad"}>{health.auth?.oauth_token_configured ? "Configured" : "Missing"}</span>
-            </div>
-            <div className="health-kv">
-              <span>Errors (1h)</span>
-              <span className={(health.auth?.auth_errors_1h || 0) > 0 ? "health-bad mono" : "mono"}>{health.auth?.auth_errors_1h || 0}</span>
-            </div>
-            <div className="health-kv">
-              <span>Errors (24h)</span>
-              <span className={(health.auth?.auth_errors_24h || 0) > 0 ? "health-warn mono" : "mono"}>{health.auth?.auth_errors_24h || 0}</span>
-            </div>
-          </div>
-          <div className="health-card">
-            <div className="tiny">Containers</div>
-            {(health.containers || []).length === 0 ? <div className="empty-state">No container data</div> : (health.containers || []).map((x) => (
-              <div className="health-kv" key={x.name}>
-                <span>{x.name}</span>
-                <span className={x.status === "running" ? "health-good mono" : "health-warn mono"}>{x.status}</span>
-              </div>
-            ))}
-            {health.container_error ? <div className="health-bad mono" style={{ marginTop: 4 }}>{health.container_error}</div> : null}
-          </div>
-        </div>
-        <div className="row" style={{ marginBottom: 10 }}>
           <div className="health-card">
             <div className="tiny">Contract Versions</div>
             <div className="health-kv">
@@ -123,6 +131,8 @@ export default function HealthView({ state }) {
             </div>
           </div>
         </div>
+
+        <div className="tiny" style={{ marginBottom: 6 }}>Workflow Diagnostics</div>
         <div className="row" style={{ marginBottom: 10 }}>
           <div className="holding-detail-section">
             <div className="tiny" style={{ marginBottom: 6 }}>Workflow Audit Warnings</div>
@@ -148,8 +158,8 @@ export default function HealthView({ state }) {
             <JsonBlock data={contractsData.paths || {}} defaultOpen={2} />
           </div>
         </div>
+        <div className="tiny" style={{ marginBottom: 6 }}>Vertical Deploy Health</div>
         <div className="health-card">
-          <div className="tiny">Vertical Health</div>
           {(health.vertical_health || []).length === 0 ? <div className="empty-state">No vertical health data</div> : (
             <table>
               <thead><tr><th>Vertical</th><th>Health</th><th>Deploy</th></tr></thead>

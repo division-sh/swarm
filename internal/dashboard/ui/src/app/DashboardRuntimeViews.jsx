@@ -1,17 +1,22 @@
-import React from "react";
+import React, { useEffect } from "react";
 import AgentsView from "../features/agents/AgentsView.jsx";
-import ConversationsView from "../features/conversations/ConversationsView.jsx";
 import DigestView from "../features/digest/DigestView.jsx";
-import EventsView from "../features/events/EventsView.jsx";
-import FlowView from "../features/flow/FlowView.jsx";
-import GraphPage from "../features/graph/GraphPage.jsx";
-import IncidentsView from "../features/incidents/IncidentsView.jsx";
-import LogsView from "../features/logs/LogsView.jsx";
+import ObservabilityView from "../features/observability/ObservabilityView.jsx";
+import WorkflowView from "../features/workflow/WorkflowView.jsx";
 
-export default function DashboardRuntimeViews({ activeView, runtime, pipeline }) {
+export default function DashboardRuntimeViews({ activeView, setActiveView, runtime, pipeline }) {
+  useEffect(() => {
+    if (activeView !== "convos") return;
+    const legacyAgentID = runtime.conversations.state.selectedConv;
+    if (legacyAgentID) {
+      runtime.agents.actions.setSelectedAgentID(legacyAgentID);
+    }
+    setActiveView("agents");
+  }, [activeView, runtime, setActiveView]);
+
   return (
     <>
-      {activeView === "agents" ? (
+      {activeView === "agents" || activeView === "convos" ? (
         <AgentsView state={runtime.agents.state} actions={runtime.agents.actions} />
       ) : null}
 
@@ -19,28 +24,23 @@ export default function DashboardRuntimeViews({ activeView, runtime, pipeline })
         <DigestView state={runtime.digest.state} actions={runtime.digest.actions} />
       ) : null}
 
-      {activeView === "events" ? (
-        <EventsView state={runtime.events.state} actions={runtime.events.actions} />
+      {activeView === "observability" || activeView === "events" || activeView === "logs" || activeView === "incidents" ? (
+        <ObservabilityView
+          activeView={activeView}
+          setActiveView={setActiveView}
+          events={runtime.events}
+          logs={runtime.logs}
+          incidents={runtime.incidents}
+        />
       ) : null}
 
-      {activeView === "logs" ? (
-        <LogsView state={runtime.logs.state} actions={runtime.logs.actions} />
-      ) : null}
-
-      {activeView === "incidents" ? (
-        <IncidentsView state={runtime.incidents.state} actions={runtime.incidents.actions} />
-      ) : null}
-
-      {activeView === "flow" ? (
-        <FlowView state={pipeline.flow.state} actions={pipeline.flow.actions} />
-      ) : null}
-
-      {activeView === "convos" ? (
-        <ConversationsView state={runtime.conversations.state} actions={runtime.conversations.actions} />
-      ) : null}
-
-      {activeView === "graph" ? (
-        <GraphPage state={pipeline.graph.state} actions={pipeline.graph.actions} />
+      {activeView === "workflow" || activeView === "flow" || activeView === "graph" ? (
+        <WorkflowView
+          activeView={activeView}
+          setActiveView={setActiveView}
+          flow={pipeline.flow}
+          graph={pipeline.graph}
+        />
       ) : null}
     </>
   );

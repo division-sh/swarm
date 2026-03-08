@@ -34,6 +34,7 @@ export function useDashboardActionComposition({
     loadAgents,
     loadTargets,
     setActiveView: ui.setActiveView,
+    setModalContent: ui.setModalContent,
     setControlTarget: opsState.setControlTarget,
     setSelectedAgentID: opsState.setSelectedAgentID,
     setSelectedTaskID: taskState.setSelectedTaskID,

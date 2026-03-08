@@ -4,6 +4,7 @@ import { useDashboardCoreSources } from "./useDashboardCoreSources.js";
 import { useDashboardDomainState } from "./useDashboardDomainState.js";
 import { useDashboardLifecycle } from "./useDashboardLifecycle.js";
 import { useDashboardOpsAssembly } from "./useDashboardOpsAssembly.js";
+import { useDashboardOverviewAssembly } from "./useDashboardOverviewAssembly.js";
 import { useDashboardPipelineAssembly } from "./useDashboardPipelineAssembly.js";
 import { useDashboardPipelineSources } from "./useDashboardPipelineSources.js";
 import { useDashboardRuntimeAssembly } from "./useDashboardRuntimeAssembly.js";
@@ -146,6 +147,19 @@ export function useDashboardCoordinator() {
     healthContracts,
   });
 
+  const overview = useDashboardOverviewAssembly({
+    overview: domain.overview,
+    digestResp: domain.digestResp,
+    agentsResp: domain.agentsResp,
+    incidentsData: domain.runtimeState.incidentsData,
+    mailbox: domain.opsState.mailbox,
+    tasksResp: domain.taskState.tasksResp,
+    health: domain.opsState.health,
+    funnel: domain.pipelineState.funnel,
+    holdingData: domain.pipelineState.holdingData,
+    setActiveView: ui.setActiveView,
+  });
+
   const { tabs, tabBadges } = useDashboardTabsState({
     agentsResp: domain.agentsResp,
     incidentsData: domain.runtimeState.incidentsData,
@@ -169,6 +183,7 @@ export function useDashboardCoordinator() {
       setActiveView: ui.setActiveView,
     },
     views: {
+      overview,
       runtime,
       pipeline,
       ops,

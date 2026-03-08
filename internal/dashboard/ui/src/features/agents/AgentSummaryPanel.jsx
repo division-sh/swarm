@@ -16,9 +16,9 @@ export default function AgentSummaryPanel({ agent, onNavigate }) {
       <div className="agent-kv tiny"><strong>Creation Event</strong>{agent.creation_event?.type ? `${agent.creation_event.type} ${relTime(agent.creation_event.created_at)}` : "No source event"}</div>
       <div className="stack" style={{ marginBottom: 8 }}>
         <button className="btn-secondary" disabled={!creationID} onClick={() => onNavigate("events", { eventID: creationID })}>Open Creation Event</button>
-        <button className="btn-secondary" onClick={() => onNavigate("convos", { convID: agent.id })}>Open Conversation</button>
-        <button className="btn-secondary" onClick={() => onNavigate("events", { eventsSubscriber: agent.id })}>View Events</button>
-        <button className="btn-secondary" onClick={() => onNavigate("logs", { logsAgent: agent.id })}>View Logs</button>
+        <button className="btn-secondary" onClick={() => onNavigate("agents", { convID: agent.id, agentID: agent.id })}>Open Agent Console</button>
+        <button className="btn-secondary" onClick={() => onNavigate("events", { eventsSubscriber: agent.id })}>Open Event Trace</button>
+        <button className="btn-secondary" onClick={() => onNavigate("logs", { logsAgent: agent.id })}>Open Runtime Logs</button>
       </div>
     </>
   );
