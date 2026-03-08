@@ -1,0 +1,112 @@
+# EmpireAI agent-config-map.yaml — v2.2.0
+# Maps contract agent IDs to actual config file paths in the repository.
+# Authoritative for filename resolution — no guessing.
+#
+# Config file naming conventions:
+#   Holding agents:    configs/agents/{id}.yaml
+#   Factory agents:    configs/agents/{id}.yaml
+#   OpCo leadership:   configs/agents/templates/{role-name}.yaml (NOT opco-*.yaml)
+#   OpCo workers:      configs/agents/templates/{role}-agent.yaml (NOT opco-*.yaml)
+#   Routing bootstrap: configs/agents/templates/routes.yaml (single file for all OpCo routes)
+#   Ephemeral agents:  No config file — spawned from templates at runtime
+#
+# IMPORTANT: Only opco-ceo.yaml uses the opco- prefix.
+# All other OpCo agents use role-first naming: backend-agent.yaml, pm-agent.yaml, etc.
+
+agents:
+
+  # Holding agents
+  empire-coordinator:
+    config_path: configs/agents/empire-coordinator.yaml
+
+  factory-cto:
+    config_path: configs/agents/factory-cto.yaml
+
+  holding-devops:
+    config_path: configs/agents/holding-devops.yaml
+
+  operations-analyst:
+    config_path: configs/agents/operations-analyst.yaml
+
+  spec-auditor:
+    config_path: configs/agents/spec-auditor.yaml
+
+  # Factory agents
+  discovery-coordinator:
+    config_path: configs/agents/discovery-coordinator.yaml
+
+  analysis-agent:
+    config_path: configs/agents/analysis-agent.yaml
+
+  validation-coordinator:
+    config_path: configs/agents/validation-coordinator.yaml
+
+  business-research-agent:
+    config_path: configs/agents/business-research-agent.yaml
+
+  lightweight-spec-agent:
+    config_path: configs/agents/lightweight-spec-agent.yaml
+
+  spec-reviewer:
+    config_path: configs/agents/spec-reviewer.yaml
+
+  market-research-agent:
+    config_path: configs/agents/market-research-agent.yaml
+
+  trend-research-agent:
+    config_path: configs/agents/trend-research-agent.yaml
+
+  pre-brand-agent:
+    config_path: configs/agents/pre-brand-agent.yaml
+
+  scanner-agent:
+    config_path: null  # Ephemeral — spawned from template at runtime
+
+  # OpCo leadership (configs/agents/templates/)
+  opco-ceo:
+    config_path: configs/agents/templates/opco-ceo.yaml
+
+  opco-chief-of-staff:
+    config_path: configs/agents/templates/chief-of-staff.yaml
+
+  opco-head-of-product:
+    config_path: configs/agents/templates/vp-product.yaml
+
+  opco-head-of-growth:
+    config_path: configs/agents/templates/vp-growth.yaml
+
+  # OpCo workers (configs/agents/templates/)
+  opco-pm:
+    config_path: configs/agents/templates/pm-agent.yaml
+
+  opco-cto:
+    config_path: configs/agents/templates/cto-agent.yaml
+
+  opco-tech-writer:
+    config_path: configs/agents/templates/tech-writer.yaml
+
+  opco-backend:
+    config_path: configs/agents/templates/backend-agent.yaml
+
+  opco-frontend:
+    config_path: configs/agents/templates/frontend-agent.yaml
+
+  opco-qa:
+    config_path: configs/agents/templates/qa-agent.yaml
+
+  opco-devops:
+    config_path: configs/agents/templates/devops-agent.yaml
+
+  opco-marketing:
+    config_path: configs/agents/templates/marketing-agent.yaml
+
+  opco-support:
+    config_path: configs/agents/templates/support-agent.yaml
+
+# Routing bootstrap (shared across all OpCo agents)
+routing_bootstrap:
+  config_path: configs/agents/templates/routes.yaml
+  description: >
+    Contains bootstrap + seeded route entries that are installed into
+    routing_rules table at OpCo spinup. Source of truth for
+    subscriptions_bootstrap values in agent-tools.yaml.

@@ -74,6 +74,8 @@ brand.candidates_ready:
     vertical_id: string
     candidates: array
   emitter_type: agent
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 brand.requested:
   emitter: runtime
   consumer: pre-brand-agent
@@ -88,18 +90,21 @@ brand.requested:
     business_brief: object
   emitter_type: runtime
 brand.revision_needed:
-  emitter: human
+  emitter: validation-orchestrator
   consumer: runtime
   consumer_type: system_component
   intercepted: true
   passthrough: false
   routing: static
   delivery_channel: runtime
-  runtime_handling: consuming
+  runtime_handling: dual_delivery
   payload:
     vertical_id: string
     feedback: string
-  emitter_type: human
+  emitter_type: system_node
+  owning_node: validation-orchestrator
+  alternate_emitters:
+  - human
 budget.emergency:
   emitter: empire-coordinator
   consumer: audit
@@ -139,6 +144,7 @@ budget.threshold_crossed:
     budget_cap: number
     percentage: number
   emitter_type: runtime
+  owning_node: lifecycle-orchestrator
 budget.throttle:
   emitter: empire-coordinator
   consumer: audit
@@ -212,7 +218,8 @@ build_complete:
     feature: string
     environment: string
   emitter_type: opco_agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 build_progress:
   emitter: opco-cto
   consumer: opco-head-of-product
@@ -338,10 +345,12 @@ category.assessed:
   - geographic_scope
   notes: 'v2.0.40: Multi-signal model — MRA emits 0-N signals per subcategory. Each signal is one opportunity. automation_micro
     nested field removed. Runtime pre-filter applies ICP positive check, evidence completeness, and red flag filtering before
-    emitting vertical.discovered. geographic_scope indicates if opportunity is geography-locked or global. v2.1.0: opportunity_pattern,
+    emitting vertical.discovered. geographic_scope indicates if opportunity is geography-locked or global. v2.2.0: opportunity_pattern,
     signal_sources, and required_capabilities added. In corpus mode, category/subcategory may be null (MRA assigns from signal
     content). signal_sources tracks provenance for yield analysis.'
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: discovery-aggregator
 channel_blocked:
   emitter: opco-marketing
   consumer:
@@ -446,7 +455,8 @@ cto.spec_approved:
     vertical_id: string
     cto_notes: string
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 cto.spec_review_requested:
   emitter: runtime
   consumer: factory-cto
@@ -472,7 +482,8 @@ cto.spec_revision_needed:
     vertical_id: string
     technical_issues: string
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 cto.spec_vetoed:
   emitter: factory-cto
   consumer: runtime
@@ -485,7 +496,8 @@ cto.spec_vetoed:
     vertical_id: string
     reason: string
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 cto.tech_spec_feedback:
   emitter: factory-cto
   consumer: opco-cto
@@ -563,6 +575,8 @@ dedup.resolved:
     action: string
     reasoning: string
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: discovery-aggregator
 deploy_requested:
   emitter: opco-cto
   consumer: opco-devops
@@ -888,7 +902,8 @@ launch_ready:
     deploy_url: string
     test_results: object
   emitter_type: opco_agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 mailbox.item_decided:
   emitter: runtime
   consumer: runtime
@@ -905,6 +920,7 @@ mailbox.item_decided:
     vertical_id: string
     original_event_type: string
   emitter_type: runtime
+  owning_node: lifecycle-orchestrator
 mandate_updated:
   emitter: opco-ceo
   consumer:
@@ -972,6 +988,8 @@ market_research.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 market_signals:
   emitter: opco-marketing
   consumer: opco-head-of-growth
@@ -996,7 +1014,8 @@ opco.ceo_ready:
     vertical_id: string
     agent_count: number
   emitter_type: runtime
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 opco.ceo_report:
   emitter: opco-ceo
   consumer:
@@ -1103,7 +1122,9 @@ opco.spend_request:
   emitter_type: agent
 opco.spinup_requested:
   emitter: empire-coordinator
-  consumer: runtime (creates OpCo) + opco-ceo (receives mandate)
+  consumer:
+  - runtime (creates OpCo)
+  - opco-ceo (receives mandate)
   consumer_type: hybrid
   intercepted: false
   routing: static
@@ -1119,6 +1140,8 @@ opco.spinup_requested:
   - vertical_id
   - mandate
   emitter_type: agent
+  alternate_emitters:
+  - lifecycle-orchestrator
 opco.steady_state_reached:
   emitter: opco-ceo
   consumer:
@@ -1132,7 +1155,8 @@ opco.steady_state_reached:
   payload:
     vertical_id: string
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 opco.teardown_complete:
   emitter: runtime
   consumer: empire-coordinator
@@ -1287,7 +1311,8 @@ qa.validation_passed:
     coverage_notes: string
     staging_url: string
   emitter_type: opco_agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 research.completed:
   emitter: business-research-agent
   consumer: runtime
@@ -1300,7 +1325,8 @@ research.completed:
     vertical_id: string
     business_brief: object
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 research.vertical_rejected:
   emitter: business-research-agent
   consumer: runtime
@@ -1314,7 +1340,8 @@ research.vertical_rejected:
     rejection_reason: string
     evidence: object
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 scan.completed:
   emitter: runtime
   consumer: runtime
@@ -1333,6 +1360,8 @@ scan.completed:
     campaign_id: string
     verticals_skipped: integer
   emitter_type: runtime
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 scan.requested:
   emitter: empire-coordinator
   consumer: runtime
@@ -1366,6 +1395,8 @@ scan.requested:
   - mode
   - campaign_context
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 scanner.directories.scan_assigned:
   emitter: runtime
   consumer: scanner-directories
@@ -1397,6 +1428,8 @@ scanner.directories.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 scanner.google_maps.scan_assigned:
   emitter: runtime
   consumer: scanner-google_maps
@@ -1428,6 +1461,8 @@ scanner.google_maps.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 scanner.instagram.scan_assigned:
   emitter: runtime
   consumer: scanner-instagram
@@ -1459,6 +1494,8 @@ scanner.instagram.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 scanner.reviews.scan_assigned:
   emitter: runtime
   consumer: scanner-reviews
@@ -1490,6 +1527,8 @@ scanner.reviews.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 scanner.yelp.scan_assigned:
   emitter: runtime
   consumer: scanner-yelp
@@ -1521,6 +1560,8 @@ scanner.yelp.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 score.dimension_complete:
   emitter: analysis-agent
   consumer: scoring-node
@@ -1544,6 +1585,8 @@ score.dimension_complete:
   - score
   - evidence
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scoring-node
 scoring.contest_resolved:
   emitter: empire-coordinator
   consumer: scoring-node
@@ -1557,6 +1600,8 @@ scoring.contest_resolved:
     resolved_score: integer
     reasoning: string
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scoring-node
 scoring.contested:
   emitter: scoring-node
   consumer: empire-coordinator
@@ -1604,6 +1649,7 @@ scoring.requested:
   - dimensions_requested
   - discovery_context
   emitter_type: system_node
+  runtime_handling: passthrough
 source.scraped:
   emitter: scanner-agent
   consumer: runtime
@@ -1623,6 +1669,8 @@ source.scraped:
   - evidence
   - geography
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: discovery-aggregator
 spec.approved:
   emitter: business-research-agent
   consumer: runtime
@@ -1637,9 +1685,10 @@ spec.approved:
   required:
   - vertical_id
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
   alternate_emitters:
   - opco-cto
+  owning_node: validation-orchestrator
 spec.contradiction_detected:
   emitter: runtime
   consumer: spec-auditor
@@ -1687,6 +1736,8 @@ spec.revision_needed:
     vertical_id: string
     misalignment_details: string
   emitter_type: agent
+  owning_node: validation-orchestrator
+  runtime_handling: dual_delivery
 spec.revision_requested:
   emitter: runtime
   consumer: business-research-agent
@@ -1698,9 +1749,13 @@ spec.revision_requested:
     vertical_id: string
     cto_feedback: string
   emitter_type: runtime
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 spec.validation_failed:
   emitter: spec-auditor
-  consumer: pipeline-coordinator + factory-cto
+  consumer:
+  - validation-orchestrator
+  - factory-cto
   consumer_type: system_component
   intercepted: conditional
   routing: static
@@ -1713,10 +1768,13 @@ spec.validation_failed:
         type: object
     severity: string
   emitter_type: agent
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 spec.validation_passed:
   emitter: spec-auditor
-  consumer: pipeline-coordinator + factory-cto
+  consumer:
+  - validation-orchestrator
+  - factory-cto
   consumer_type: system_component
   intercepted: conditional
   routing: static
@@ -1725,6 +1783,8 @@ spec.validation_passed:
     vertical_id: string
     validation_notes: string
   emitter_type: agent
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 spec.validation_requested:
   emitter: factory-cto
   consumer: spec-auditor
@@ -1775,7 +1835,9 @@ spec_review.requested:
   emitter_type: agent
 spend.approved:
   emitter: human
-  consumer: requesting-agent (dynamic) + opco-ceo, holding-devops (static)
+  consumer:
+  - requesting-agent (dynamic)
+  - opco-ceo, holding-devops (static)
   consumer_type: hybrid
   intercepted: false
   routing: static
@@ -1786,7 +1848,9 @@ spend.approved:
   emitter_type: human
 spend.rejected:
   emitter: human
-  consumer: requesting-agent (dynamic) + opco-ceo, holding-devops (static)
+  consumer:
+  - requesting-agent (dynamic)
+  - opco-ceo, holding-devops (static)
   consumer_type: hybrid
   intercepted: false
   routing: static
@@ -1873,6 +1937,8 @@ synthesis.resolved:
   payload:
     resolved_assessment: string
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: discovery-aggregator
 system.directive:
   emitter: human
   consumer: empire-coordinator
@@ -1885,6 +1951,8 @@ system.directive:
     directive_text: string
     timestamp: string
   emitter_type: human
+  owning_node: lifecycle-orchestrator
+  runtime_handling: consuming
 system.started:
   emitter: runtime
   consumer: empire-coordinator
@@ -2010,6 +2078,8 @@ timer.marginal_review:
   payload:
     parked_marginals_summary: string
   emitter_type: runtime
+  runtime_handling: consuming
+  owning_node: lifecycle-orchestrator
 timer.portfolio_digest:
   emitter: runtime
   consumer: empire-coordinator
@@ -2017,10 +2087,11 @@ timer.portfolio_digest:
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
-  runtime_handling: projection
+  runtime_handling: consuming
   payload:
     trigger_reason: string
   emitter_type: runtime
+  owning_node: lifecycle-orchestrator
 trend.identified:
   emitter: trend-research-agent
   consumer: runtime
@@ -2103,6 +2174,8 @@ trend.identified:
   notes: 'v2.0.41: Aligned with category.assessed structured format. Legacy fields urgency and market_intersection removed.
     Same runtime pre-filter logic applies as for category.assessed.'
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: discovery-aggregator
 trend_research.scan_assigned:
   emitter: runtime
   consumer: trend-research-agent
@@ -2129,6 +2202,8 @@ trend_research.scan_complete:
   required:
   - scan_id
   emitter_type: agent
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
 user_onboarded:
   emitter: runtime
   consumer: opco-head-of-growth
@@ -2186,12 +2261,13 @@ vertical.approved:
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
   payload:
     vertical_id: string
     brand_choice: string
     founder_directives: string
   emitter_type: human
+  owning_node: lifecycle-orchestrator
 vertical.discovered:
   emitter: runtime
   consumer: scoring-node
@@ -2212,6 +2288,8 @@ vertical.discovered:
   alternate_emitters:
   - scoring-node
   emitter_type: runtime
+  runtime_handling: passthrough
+  owning_node: scoring-node
 vertical.derived:
   emitter: analysis-agent
   consumer: scoring-node
@@ -2262,6 +2340,7 @@ vertical.derived:
 
     '
   emitter_type: agent
+  owning_node: scoring-node
 vertical.health_warning:
   emitter: empire-coordinator
   consumer: mailbox
@@ -2282,12 +2361,13 @@ vertical.killed:
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
-  runtime_handling: projection
+  runtime_handling: dual_delivery
   payload:
     vertical_id: string
     reason: string
     source: string
   emitter_type: runtime
+  owning_node: lifecycle-orchestrator
 vertical.marginal:
   emitter: scoring-node
   consumer: empire-coordinator
@@ -2295,7 +2375,7 @@ vertical.marginal:
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
-  runtime_handling: projection
+  runtime_handling: passthrough
   payload:
     vertical_id: string
     composite_score: number
@@ -2316,6 +2396,8 @@ vertical.needs_more_data:
     vertical_id: string
     questions: string
   emitter_type: human
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 vertical.ready_for_review:
   emitter: validation-coordinator
   consumer: mailbox
@@ -2323,12 +2405,13 @@ vertical.ready_for_review:
   intercepted: false
   routing: static
   delivery_channel: mailbox
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
   payload:
     vertical_id: string
     validation_kit:
       type: object
   emitter_type: agent
+  owning_node: validation-orchestrator
 vertical.rejected:
   emitter: scoring-node
   consumer: audit
@@ -2351,6 +2434,8 @@ vertical.resumed:
   payload:
     vertical_id: string
   emitter_type: agent
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 vertical.scored:
   emitter: scoring-node
   consumer: empire-coordinator
@@ -2358,7 +2443,7 @@ vertical.scored:
   intercepted: false
   routing: static
   delivery_channel: eventbus_static
-  runtime_handling: projection
+  runtime_handling: passthrough
   payload:
     vertical_id: string
     result: string
@@ -2385,7 +2470,8 @@ vertical.shortlisted:
       type: object
   alternate_emitters: []
   emitter_type: system_node
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: validation-orchestrator
 opco.routing_updated:
   emitter: actor-agent
   consumer: audit
@@ -2422,8 +2508,8 @@ human_task.assigned:
 runtime.reset:
   emitter: dashboard
   consumer:
-  - pipeline-coordinator
-  - scan-campaign-manager
+  - lifecycle-orchestrator
+  - scan-orchestrator
   consumer_type: system_component
   intercepted: false
   routing: static
@@ -2431,8 +2517,10 @@ runtime.reset:
   payload:
     source: string
     timestamp: string
-  _note: Emitted by dashboard publishRuntimeReset. Consumed by pipeline-coordinator and scan-campaign-manager.
+  _note: Emitted by dashboard. Consumed by lifecycle-orchestrator and scan-orchestrator.
   emitter_type: agent
+  owning_node: lifecycle-orchestrator
+  runtime_handling: consuming
 review.product_spec_feedback:
   emitter: human
   consumer: TBD
@@ -2461,9 +2549,10 @@ review.deploy_feedback:
   _note: Human deploy review feedback. Runtime uses for pre_launch stage guard.
   _status: active
   emitter_type: human
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
 pipeline.dead_letter:
-  emitter: scoring-node
+  emitter: system_nodes
   consumer: operations-analyst
   consumer_type: agent
   intercepted: false
@@ -2487,6 +2576,12 @@ pipeline.dead_letter:
 
     '
   emitter_type: system_node
+  alternate_emitters:
+  - scoring-node
+  - scan-orchestrator
+  - discovery-aggregator
+  - validation-orchestrator
+  - lifecycle-orchestrator
 opco.growth_triggered:
   emitter: opco-ceo
   emitter_type: opco_agent
@@ -2495,7 +2590,9 @@ opco.growth_triggered:
   payload:
     vertical_id: string
     trigger_reason: string
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
+  consumer_type: system_component
 opco.growth_stabilized:
   emitter: opco-ceo
   emitter_type: opco_agent
@@ -2504,7 +2601,9 @@ opco.growth_stabilized:
   payload:
     vertical_id: string
     stabilization_metrics: object
-  runtime_handling: stage_projection
+  runtime_handling: dual_delivery
+  owning_node: lifecycle-orchestrator
+  consumer_type: system_component
 timer.marginal_kill:
   emitter: runtime
   emitter_type: runtime
@@ -2513,19 +2612,28 @@ timer.marginal_kill:
   payload:
     vertical_id: string
     parked_days: integer
+  runtime_handling: consuming
+  owning_node: lifecycle-orchestrator
+  consumer_type: system_component
 timer.scan_timeout:
   emitter: runtime
   emitter_type: runtime
-  consumer: pipeline-coordinator
+  consumer: scan-orchestrator
   delivery_channel: internal
   payload:
     scan_id: string
     elapsed_minutes: integer
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
+  consumer_type: system_component
 timer.campaign_deadline:
   emitter: runtime
   emitter_type: runtime
-  consumer: pipeline-coordinator
+  consumer: scan-orchestrator
   delivery_channel: internal
   payload:
     campaign_id: string
     elapsed_hours: integer
+  runtime_handling: consuming
+  owning_node: scan-orchestrator
+  consumer_type: system_component

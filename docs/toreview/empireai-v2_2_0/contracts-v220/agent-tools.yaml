@@ -1,5 +1,5 @@
 # ============================================================================
-# EmpireAI Agent Tools Contract — v2.1.0
+# EmpireAI Agent Tools Contract — v2.2.0
 # ============================================================================
 # Defines every agent's wiring: subscriptions, tools, emit_events, model config.
 #
