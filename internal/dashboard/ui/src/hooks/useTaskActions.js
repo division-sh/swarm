@@ -1,9 +1,10 @@
 import { useCallback } from "react";
-import { fetchJSON, postJSON } from "../api/client.js";
+import { postJSON } from "../api/client.js";
 
 export function useTaskActions({
   runControl,
   loadTasks,
+  loadTaskStats,
   selectedTaskID,
   taskResultText,
   setTaskResultText,
@@ -13,7 +14,6 @@ export function useTaskActions({
   setTaskFollowUpNeeded,
   taskRejectReason,
   setTaskRejectReason,
-  setTasksStats,
 }) {
   const claimSelectedTask = useCallback(async () => {
     if (!selectedTaskID) return;
@@ -52,11 +52,6 @@ export function useTaskActions({
     setTaskRejectReason("");
     await loadTasks();
   }, [loadTasks, runControl, selectedTaskID, setTaskRejectReason, taskRejectReason]);
-
-  const loadTaskStats = useCallback(async () => {
-    const d = await fetchJSON("/api/tasks/stats");
-    setTasksStats(d || null);
-  }, [setTasksStats]);
 
   return {
     claimSelectedTask,

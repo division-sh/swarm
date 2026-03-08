@@ -9,6 +9,7 @@ export function useDashboardRuntimeAssembly({
   digestResp,
   ui,
   runtimeState,
+  runtimeData,
   opsState,
   loaders,
   navigationActions,
@@ -22,20 +23,20 @@ export function useDashboardRuntimeAssembly({
   });
 
   const { filteredEvents, filteredRuntimeLogs } = useEventsState({
-    events: runtimeState.events,
-    runtimeLogs: runtimeState.runtimeLogs,
+    events: runtimeData.events,
+    runtimeLogs: runtimeData.runtimeLogs,
     eventsRuntimeErrorsOnly: runtimeState.eventsRuntimeErrorsOnly,
   });
 
   const { filteredLogsData, selectedLog } = useLogsState({
-    logsData: runtimeState.logsData,
+    logsData: runtimeData.logsData,
     logsRuntimeErrorsOnly: runtimeState.logsRuntimeErrorsOnly,
     selectedLogID: runtimeState.selectedLogID,
     setSelectedLogID: runtimeState.setSelectedLogID,
   });
 
   const selectedIncident = useIncidentState({
-    incidentsData: runtimeState.incidentsData,
+    incidentsData: runtimeData.incidentsData,
     selectedIncidentCode: runtimeState.selectedIncidentCode,
   });
 
@@ -53,7 +54,7 @@ export function useDashboardRuntimeAssembly({
     addToast,
     filteredEvents,
     filteredRuntimeLogs,
-    eventDetail: runtimeState.eventDetail,
+    eventDetail: runtimeData.eventDetail,
     eventsFilter: runtimeState.eventsFilter,
     setEventsFilter: runtimeState.setEventsFilter,
     eventsIncludeRuntime: runtimeState.eventsIncludeRuntime,
@@ -75,10 +76,10 @@ export function useDashboardRuntimeAssembly({
     selectedLogID: runtimeState.selectedLogID,
     setSelectedLogID: runtimeState.setSelectedLogID,
     loadLogs: loaders.loadLogs,
-    incidentsData: runtimeState.incidentsData,
+    incidentsData: runtimeData.incidentsData,
     selectedIncident,
-    incidentArtifacts: runtimeState.incidentArtifacts,
-    incidentLogs: runtimeState.incidentLogs,
+    incidentArtifacts: runtimeData.incidentArtifacts,
+    incidentLogs: runtimeData.incidentLogs,
     incidentsFilter: runtimeState.incidentsFilter,
     setIncidentsFilter: runtimeState.setIncidentsFilter,
     selectedIncidentCode: runtimeState.selectedIncidentCode,
@@ -88,8 +89,8 @@ export function useDashboardRuntimeAssembly({
     loadIncidents: loaders.loadIncidents,
     openLogsForAgent: navigationActions.openLogsForAgent,
     openConvoForAgent: navigationActions.openConvoForAgent,
-    conversations: runtimeState.conversations,
-    conversationDetail: runtimeState.conversationDetail,
+    conversations: runtimeData.conversations,
+    conversationDetail: runtimeData.conversationDetail,
     selectedConv: runtimeState.selectedConv,
     setSelectedConv: runtimeState.setSelectedConv,
     loadConversationDetail: loaders.loadConversationDetail,

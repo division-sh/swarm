@@ -1,11 +1,16 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { getEmpireKey } from "../api/client.js";
 import { useHashTab } from "../hooks/useHashTab.js";
 import { usePersistentState } from "../hooks/usePersistentState.js";
 import { VALID_TABS } from "./dashboardTabs.js";
 
 export function useDashboardUIState() {
-  const [activeView, setActiveView] = useHashTab(VALID_TABS, "overview");
+  const {
+    activeTab: activeView,
+    activeSubview,
+    setActiveTab: setActiveView,
+    setRoute: setViewRoute,
+  } = useHashTab(VALID_TABS, "overview");
   const [statusText, setStatusText] = useState("Loading...");
   const [apiKey, setApiKey] = usePersistentState("empire_api_key", getEmpireKey());
   const [initialLoading, setInitialLoading] = useState(true);
@@ -21,9 +26,11 @@ export function useDashboardUIState() {
     setTimeout(() => setToasts((prev) => prev.filter((toast) => toast.id !== id)), 4000);
   }, []);
 
-  return {
+  return useMemo(() => ({
     activeView,
+    activeSubview,
     setActiveView,
+    setViewRoute,
     statusText,
     setStatusText,
     apiKey,
@@ -38,5 +45,18 @@ export function useDashboardUIState() {
     setModalContent,
     toasts,
     addToast,
-  };
+  }), [
+    activeView,
+    activeSubview,
+    statusText,
+    apiKey,
+    initialLoading,
+    agentSearch,
+    selectedMailboxItem,
+    modalContent,
+    toasts,
+    addToast,
+    setActiveView,
+    setViewRoute,
+  ]);
 }

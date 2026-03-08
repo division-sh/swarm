@@ -11,7 +11,8 @@
   - `DashboardRuntimeViews.jsx` for runtime-facing tabs
   - `DashboardOpsViews.jsx` for ops/control-facing tabs
   - `useDashboardCoordinator.js` for global composition and hook wiring
-  - `useDashboardCoreSources.js`, `useDashboardRuntimeSources.js`, and `useDashboardPipelineSources.js` for app-layer data source composition
+  - `useDashboardCoreQueries.js`, `useDashboardRuntimeSources.js`, and `useDashboardPipelineSources.js` for app-layer data source composition
+  - `useDashboardRuntimeQueries.js`, `useDashboardPortfolioQueries.js`, and `useDashboardWorkflowQueries.js` for query-backed domain data
   - `useDashboardDerivedState.js` for global badge/tab derivation only
   - `useDashboardStateBuckets.js` for grouped local state buckets
   - `dashboardTabs.js` for tab definitions and badges

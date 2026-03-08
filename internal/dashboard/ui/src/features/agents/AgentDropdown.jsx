@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import AgentChatPanel from "./AgentChatPanel.jsx";
 import AgentConversationPanel from "./AgentConversationPanel.jsx";
 import AgentDirectivePanel from "./AgentDirectivePanel.jsx";
@@ -9,21 +9,31 @@ import { useAgentConsole } from "./useAgentConsole.js";
 
 export default function AgentDropdown({ agent, addToast, onNavigate, onAction, onOpenMessage, onCopyConversation }) {
   const consoleState = useAgentConsole({ agent, addToast, onAction });
+  const [section, setSection] = useState("context");
 
   return (
     <div className="agent-drop">
-      <div className="agent-drop-grid">
+      <div className="stack" style={{ marginBottom: 8 }}>
+        <button className={section === "context" ? "active" : ""} onClick={() => setSection("context")}>Context</button>
+        <button className={section === "conversation" ? "active" : ""} onClick={() => setSection("conversation")}>Conversation</button>
+        <button className={section === "actions" ? "active" : ""} onClick={() => setSection("actions")}>Actions</button>
+      </div>
+      {section === "context" ? (
         <div>
           <AgentSummaryPanel agent={agent} onNavigate={onNavigate} />
           <AgentPromptPanel agent={agent} prompt={consoleState.prompt} busy={consoleState.busy} addToast={addToast} />
           <AgentTurnsPanel turns={consoleState.conversation.turns} />
-          <AgentConversationPanel
-            agentID={agent.id}
-            conversation={consoleState.conversation}
-            onCopyConversation={onCopyConversation}
-            onOpenMessage={onOpenMessage}
-          />
         </div>
+      ) : null}
+      {section === "conversation" ? (
+        <AgentConversationPanel
+          agentID={agent.id}
+          conversation={consoleState.conversation}
+          onCopyConversation={onCopyConversation}
+          onOpenMessage={onOpenMessage}
+        />
+      ) : null}
+      {section === "actions" ? (
         <div className="agent-actions">
           <AgentChatPanel chat={consoleState.chat} busy={consoleState.busy} addToast={addToast} />
           <AgentDirectivePanel
@@ -33,7 +43,7 @@ export default function AgentDropdown({ agent, addToast, onNavigate, onAction, o
             addToast={addToast}
           />
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

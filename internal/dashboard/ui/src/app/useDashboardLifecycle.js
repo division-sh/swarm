@@ -9,39 +9,31 @@ export function useDashboardLifecycle({
   ui,
   runtimeState,
   pipelineState,
+  workflowStream,
+  flowEvents,
   refreshers,
   addToast,
-  loadOverview,
-  loadAgents,
-  loadDigest,
-  loadTasks,
-  loadMailbox,
-  loadHealth,
+  loadLogs,
   loadIncidents,
-  loadTargets,
-  loadFunnel,
-  loadVerticals,
-  loadHolding,
+  loadConversations,
+  loadGraph,
   loadPipelineFlow,
 }) {
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      refreshers.loadOverview(),
-      refreshers.loadAgents(),
-      refreshers.loadDigest(),
-      refreshers.loadTasks(),
-      refreshers.loadEvents(),
-      refreshers.loadRuntimeLogs(),
-      refreshers.loadConversations(),
-      refreshers.loadTargets(),
-      refreshers.loadFunnel(),
-      refreshers.loadShardScans(),
-      refreshers.loadMailbox(),
-      refreshers.loadHealth(),
-      refreshers.loadVerticals(),
-      refreshers.loadHolding(),
-      refreshers.loadIncidents(),
-    ]);
+    const jobs = [
+      ["events", refreshers.loadEvents],
+      ["runtimeLogs", refreshers.loadRuntimeLogs],
+      ["conversations", refreshers.loadConversations],
+      ["incidents", refreshers.loadIncidents],
+    ];
+    const results = await Promise.allSettled(jobs.map(([, job]) => job()));
+    const failures = results
+      .map((result, index) => ({ result, key: jobs[index][0] }))
+      .filter(({ result }) => result.status === "rejected");
+    if (failures.length > 0) {
+      const first = failures[0].result.reason;
+      throw new Error(`${failures.length} refreshes failed${first?.message ? ` (${first.message})` : ""}`);
+    }
   }, [refreshers]);
 
   useEffect(() => {
@@ -51,13 +43,13 @@ export function useDashboardLifecycle({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pipelineState]);
+  }, [pipelineState.graphFullscreen, pipelineState.setGraphFullscreen]);
 
   useEffect(() => {
     refreshAll()
       .catch((err) => { ui.setStatusText(`Dashboard error: ${err.message}`); })
       .finally(() => ui.setInitialLoading(false));
-  }, [refreshAll, ui]);
+  }, [refreshAll, ui.setInitialLoading, ui.setStatusText]);
 
   useEventStream({
     eventsFilter: runtimeState.eventsFilter,
@@ -71,35 +63,30 @@ export function useDashboardLifecycle({
 
   useFlowRuntimeStream({
     activeView: ui.activeView,
+    activeSubview: ui.activeSubview,
     flowView: pipelineState.flowView,
     flowVertical: pipelineState.flowVertical,
     getKey: getEmpireKey,
-    setFlowEvents: pipelineState.setFlowEvents,
+    patchFlowEvent: workflowStream.patchRuntimeFlowEvent,
   });
 
   useReplayTicker({
     flowView: pipelineState.flowView,
     flowReplayOn: pipelineState.flowReplayOn,
     flowReplaySpeed: pipelineState.flowReplaySpeed,
-    flowEvents: pipelineState.flowEvents,
+    flowEvents,
     setFlowReplayIndex: pipelineState.setFlowReplayIndex,
     setFlowReplayOn: pipelineState.setFlowReplayOn,
   });
 
   useDashboardPolling({
-    loadOverview,
-    loadAgents,
-    loadDigest,
-    loadTasks,
-    loadMailbox,
-    loadHealth,
+    loadLogs,
     loadRuntimeLogs,
     loadIncidents,
-    loadTargets,
-    loadFunnel,
-    loadVerticals,
-    loadHolding,
+    loadConversations,
     activeView: ui.activeView,
+    activeSubview: ui.activeSubview,
+    loadGraph,
     flowView: pipelineState.flowView,
     loadPipelineFlow,
   });

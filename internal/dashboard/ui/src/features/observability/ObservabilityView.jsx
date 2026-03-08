@@ -12,27 +12,26 @@ function routeToSubview(activeView) {
 
 export default function ObservabilityView({
   activeView,
-  setActiveView,
+  activeSubview,
+  setViewRoute,
   events,
   logs,
   incidents,
 }) {
-  const routeSubview = routeToSubview(activeView);
+  const routeSubview = routeToSubview(activeView) || activeSubview;
   const [subview, setSubview] = useState(routeSubview || "events");
 
   useEffect(() => {
     if (!routeSubview) return;
     setSubview(routeSubview);
-    if (activeView !== "observability") {
-      setActiveView("observability");
+    if (activeView === "events" || activeView === "logs" || activeView === "incidents") {
+      setViewRoute("observability", routeSubview);
     }
-  }, [activeView, routeSubview, setActiveView]);
+  }, [activeView, routeSubview, setViewRoute]);
 
   function selectSubview(next) {
     setSubview(next);
-    if (activeView !== "observability") {
-      setActiveView("observability");
-    }
+    setViewRoute("observability", next);
   }
 
   const eventCount = Array.isArray(events.state.filteredEvents) ? events.state.filteredEvents.length : 0;
@@ -45,18 +44,18 @@ export default function ObservabilityView({
         <h2>Observability</h2>
         <div className="stack">
           <button className={subview === "events" ? "active" : ""} onClick={() => selectSubview("events")}>
-            Event Trace{eventCount > 0 ? ` (${eventCount})` : ""}
+            Event Trace
           </button>
           <button className={subview === "logs" ? "active" : ""} onClick={() => selectSubview("logs")}>
-            Runtime Logs{logCount > 0 ? ` (${logCount})` : ""}
+            Runtime Logs
           </button>
           <button className={subview === "incidents" ? "active" : ""} onClick={() => selectSubview("incidents")}>
-            Incidents{incidentCount > 0 ? ` (${incidentCount})` : ""}
+            Incidents
           </button>
         </div>
       </div>
       <div className="tiny" style={{ marginBottom: 10 }}>
-        Unified runtime tracing, log inspection, and incident triage. Legacy event/log/incident routes remain supported and land here.
+        Unified runtime tracing, log inspection, and incident triage. {eventCount} filtered events, {logCount} filtered logs, {incidentCount} incidents in the current window.
       </div>
       {subview === "events" ? (
         <EventsView state={events.state} actions={events.actions} />

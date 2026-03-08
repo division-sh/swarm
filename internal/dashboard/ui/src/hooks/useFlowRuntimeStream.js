@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 
-export function useFlowRuntimeStream({ activeView, flowView, flowVertical, getKey, setFlowEvents }) {
+export function useFlowRuntimeStream({ activeView, activeSubview, flowView, flowVertical, getKey, patchFlowEvent }) {
   useEffect(() => {
-    if (activeView !== "flow" || flowView !== "runtime") return undefined;
+    const showingRuntimeFlow = ((activeView === "workflow" && (activeSubview || "flow") === "flow") || activeView === "flow")
+      && flowView === "runtime";
+    if (!showingRuntimeFlow) return undefined;
     let stream = null;
     let retryTimer = null;
     let retryCount = 0;
@@ -20,10 +22,7 @@ export function useFlowRuntimeStream({ activeView, flowView, flowVertical, getKe
         try {
           const item = JSON.parse(ev.data || "{}");
           if (!item || !item.event_id) return;
-          setFlowEvents((prev) => {
-            const rows = [item, ...(prev || []).filter((x) => x.event_id !== item.event_id)];
-            return rows.slice(0, 500);
-          });
+          patchFlowEvent(item);
         } catch {}
       });
       stream.addEventListener("open", () => { retryCount = 0; });
@@ -40,5 +39,5 @@ export function useFlowRuntimeStream({ activeView, flowView, flowVertical, getKe
       if (stream) stream.close();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [activeView, flowView, flowVertical, getKey, setFlowEvents]);
+  }, [activeSubview, activeView, flowView, flowVertical, getKey, patchFlowEvent]);
 }

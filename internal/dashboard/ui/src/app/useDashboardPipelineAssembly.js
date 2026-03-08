@@ -5,6 +5,8 @@ import { useDashboardPipelineController } from "./useDashboardPipelineController
 export function useDashboardPipelineAssembly({
   agentsResp,
   pipelineState,
+  portfolioData,
+  workflowData,
   loaders,
   addToast,
   navigationActions,
@@ -12,7 +14,7 @@ export function useDashboardPipelineAssembly({
   holdingViewState,
 }) {
   useGraphSelection({
-    graph: pipelineState.graph,
+    graph: workflowData.graph,
     graphViewGraph: pipelineState.graphViewGraph,
     selectedGraphNodeID: pipelineState.selectedGraphNodeID,
     setSelectedGraphNodeID: pipelineState.setSelectedGraphNodeID,
@@ -21,13 +23,13 @@ export function useDashboardPipelineAssembly({
   });
 
   const flowDerived = useFlowDerivedState({
-    flowGraphMeta: pipelineState.flowGraphMeta,
-    flowEvents: pipelineState.flowEvents,
+    flowGraphMeta: workflowData.flowGraphMeta,
+    flowEvents: workflowData.flowEvents,
     flowView: pipelineState.flowView,
     flowReplayIndex: pipelineState.flowReplayIndex,
     flowStage: pipelineState.flowStage,
     flowRubric: pipelineState.flowRubric,
-    flowGraph: pipelineState.flowGraph,
+    flowGraph: workflowData.flowGraph,
     flowViewGraph: pipelineState.flowViewGraph,
     selectedFlowNodeID: pipelineState.selectedFlowNodeID,
     setSelectedFlowNodeID: pipelineState.setSelectedFlowNodeID,
@@ -36,11 +38,11 @@ export function useDashboardPipelineAssembly({
   });
 
   return useDashboardPipelineController({
-    verticals: pipelineState.verticals,
+    verticals: portfolioData.verticals,
     visibleFlowEvents: flowDerived.visibleFlowEvents,
-    flowEvents: pipelineState.flowEvents,
-    flowGraph: pipelineState.flowGraph,
-    flowGraphMeta: pipelineState.flowGraphMeta,
+    flowEvents: workflowData.flowEvents,
+    flowGraph: workflowData.flowGraph,
+    flowGraphMeta: workflowData.flowGraphMeta,
     flowActiveEdgeKeys: flowDerived.flowActiveEdgeKeys,
     selectedFlowSummary: flowDerived.selectedFlowSummary,
     agentsResp,
@@ -74,7 +76,7 @@ export function useDashboardPipelineAssembly({
     setFlowViewGraph: pipelineState.setFlowViewGraph,
     graphFullscreen: pipelineState.graphFullscreen,
     setGraphFullscreen: pipelineState.setGraphFullscreen,
-    graph: pipelineState.graph,
+    graph: workflowData.graph,
     graphViewGraph: pipelineState.graphViewGraph,
     graphMode: pipelineState.graphMode,
     setGraphMode: pipelineState.setGraphMode,
@@ -90,10 +92,10 @@ export function useDashboardPipelineAssembly({
     openControl: navigationActions.openControl,
     inspectAgent: navigationActions.inspectAgent,
     navigateToTask: navigationActions.navigateToTask,
-    funnel: pipelineState.funnel,
-    shardScans: pipelineState.shardScans,
-    shardScanDetails: pipelineState.shardScanDetails,
-    traceRows: pipelineState.traceRows,
+    funnel: portfolioData.funnel,
+    shardScans: portfolioData.shardScans,
+    shardScanDetails: portfolioData.shardScanDetails,
+    traceRows: portfolioData.traceRows,
     traceVertical: pipelineState.traceVertical,
     setTraceVertical: pipelineState.setTraceVertical,
     selectedShardScanID: pipelineState.selectedShardScanID,

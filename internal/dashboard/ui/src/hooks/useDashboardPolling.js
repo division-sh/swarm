@@ -1,41 +1,37 @@
 import { useEffect } from "react";
 
 export function useDashboardPolling({
-  loadOverview,
-  loadAgents,
-  loadDigest,
-  loadTasks,
-  loadMailbox,
-  loadHealth,
   loadRuntimeLogs,
+  loadLogs,
   loadIncidents,
-  loadTargets,
-  loadFunnel,
-  loadVerticals,
-  loadHolding,
+  loadConversations,
+  loadGraph,
   activeView,
+  activeSubview,
   flowView,
   loadPipelineFlow,
 }) {
   useEffect(() => {
+    const observabilitySubview = activeView === "observability" ? (activeSubview || "events") : activeView;
+    const workflowSubview = activeView === "workflow" ? (activeSubview || "flow") : activeView;
+
     const i1 = setInterval(() => {
       if (document.hidden) return;
-      loadOverview().catch(() => {});
-      loadAgents().catch(() => {});
-      loadDigest().catch(() => {});
-      loadTasks().catch(() => {});
-      loadMailbox().catch(() => {});
-      loadHealth().catch(() => {});
       loadRuntimeLogs().catch(() => {});
       loadIncidents().catch(() => {});
+      if (observabilitySubview === "logs") {
+        loadLogs().catch(() => {});
+      }
+      if (activeView === "agents") {
+        loadConversations().catch(() => {});
+      }
     }, 15000);
     const i2 = setInterval(() => {
       if (document.hidden) return;
-      loadTargets().catch(() => {});
-      loadFunnel().catch(() => {});
-      loadVerticals().catch(() => {});
-      loadHolding().catch(() => {});
-      if (activeView === "flow" && flowView !== "runtime") {
+      if (workflowSubview === "graph") {
+        loadGraph().catch(() => {});
+      }
+      if (workflowSubview === "flow" && flowView !== "runtime") {
         loadPipelineFlow().catch(() => {});
       }
     }, 22000);
@@ -43,5 +39,5 @@ export function useDashboardPolling({
       clearInterval(i1);
       clearInterval(i2);
     };
-  }, [loadOverview, loadAgents, loadDigest, loadTasks, loadMailbox, loadHealth, loadRuntimeLogs, loadIncidents, loadTargets, loadFunnel, loadVerticals, loadHolding, activeView, flowView, loadPipelineFlow]);
+  }, [loadRuntimeLogs, loadLogs, loadIncidents, loadConversations, loadGraph, activeView, activeSubview, flowView, loadPipelineFlow]);
 }

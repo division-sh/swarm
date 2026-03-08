@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { deleteJSON, fetchJSON, postJSON, putJSON } from "../../api/client.js";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  fetchAgentPrompt,
+  fetchAgentPromptDiff,
+  replayAgentRuntime,
+  restartAgentRuntime,
+  revertAgentPromptOverride,
+  saveAgentPromptOverride,
+  sendAgentChat,
+  sendAgentDirective,
+} from "../../api/dashboardAgentConsole.js";
+import { dashboardQueryKeys } from "../../app/dashboardQueryKeys.js";
+import { fetchConversationDetail } from "../../api/dashboardRuntime.js";
 
 export function useAgentConsole({ agent, addToast, onAction }) {
+  const queryClient = useQueryClient();
   const [chatMode, setChatMode] = useState("live");
   const [chatMessage, setChatMessage] = useState("");
   const [directiveMessage, setDirectiveMessage] = useState("");
@@ -9,33 +22,30 @@ export function useAgentConsole({ agent, addToast, onAction }) {
   const [quickUseCorpus, setQuickUseCorpus] = useState(true);
   const [quickMode, setQuickMode] = useState("saas_gap");
   const [quickCorpusPath, setQuickCorpusPath] = useState("/data/test-signals-25.jsonl");
-  const [conversation, setConversation] = useState({ messages: [], turns: [] });
   const [busy, setBusy] = useState("");
-  const [promptState, setPromptState] = useState(null);
   const [promptEdit, setPromptEdit] = useState("");
   const [promptNotes, setPromptNotes] = useState("");
   const [showDiff, setShowDiff] = useState(false);
-  const [diffData, setDiffData] = useState(null);
   const [editingPrompt, setEditingPrompt] = useState(false);
 
-  const loadConversation = useCallback(async () => {
-    const data = await fetchJSON(`/dashboard/api/conversations/${encodeURIComponent(agent.id)}`);
-    setConversation({
-      messages: data.messages || [],
-      turns: data.turns || [],
-    });
-  }, [agent.id]);
-
-  const loadPrompt = useCallback(async () => {
-    const data = await fetchJSON(`/api/agents/${encodeURIComponent(agent.id)}/prompt`);
-    setPromptState(data);
-    setPromptEdit(data.effective_prompt || "");
-  }, [agent.id]);
+  const conversationQuery = useQuery({
+    queryKey: dashboardQueryKeys.conversationDetail(agent.id),
+    queryFn: () => fetchConversationDetail(agent.id),
+  });
+  const promptQuery = useQuery({
+    queryKey: dashboardQueryKeys.agentPrompt(agent.id),
+    queryFn: () => fetchAgentPrompt(agent.id),
+  });
+  const promptDiffQuery = useQuery({
+    queryKey: dashboardQueryKeys.agentPromptDiff(agent.id),
+    queryFn: () => fetchAgentPromptDiff(agent.id),
+    enabled: false,
+  });
 
   useEffect(() => {
-    loadConversation().catch(() => {});
-    loadPrompt().catch(() => {});
-  }, [loadConversation, loadPrompt]);
+    if (!promptQuery.data || editingPrompt) return;
+    setPromptEdit(promptQuery.data.effective_prompt || "");
+  }, [editingPrompt, promptQuery.data?.effective_prompt]);
 
   const run = useCallback(async (key, fn) => {
     setBusy(key);
@@ -52,62 +62,83 @@ export function useAgentConsole({ agent, addToast, onAction }) {
     }
   }, [addToast, onAction]);
 
+  const refreshAgentConsole = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agentPrompt(agent.id) }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.conversationDetail(agent.id) }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.conversations() }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agents() }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.targets() }),
+    ]);
+  }, [agent.id, queryClient]);
+
   const openPromptDiff = useCallback(() => {
-    fetchJSON(`/api/agents/${encodeURIComponent(agent.id)}/prompt/diff`)
-      .then((data) => {
-        setDiffData(data);
+    promptDiffQuery.refetch()
+      .then((result) => {
+        if (result.error) throw result.error;
         setShowDiff(true);
       })
       .catch((err) => addToast(err.message, "error"));
-  }, [addToast, agent.id]);
+  }, [addToast, promptDiffQuery]);
 
   const togglePromptEdit = useCallback(() => {
-    setPromptEdit(promptState?.effective_prompt || "");
+    setPromptEdit(promptQuery.data?.effective_prompt || "");
     setPromptNotes("");
     setEditingPrompt((value) => !value);
-  }, [promptState]);
+  }, [promptQuery.data?.effective_prompt]);
 
   const savePromptOverride = useCallback(() => run("save-prompt", async () => {
-    const out = await putJSON(`/api/agents/${encodeURIComponent(agent.id)}/prompt`, {
-      prompt: promptEdit,
-      source: "dashboard",
-      notes: promptNotes || undefined,
-    });
-    await loadPrompt();
+    const out = await saveAgentPromptOverride(agent.id, promptEdit, promptNotes || undefined);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agentPrompt(agent.id) }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agentPromptDiff(agent.id) }),
+    ]);
     setEditingPrompt(false);
     return out;
-  }), [agent.id, loadPrompt, promptEdit, promptNotes, run]);
+  }), [agent.id, promptEdit, promptNotes, queryClient, run]);
 
   const revertPromptOverride = useCallback(() => run("revert-prompt", async () => {
-    const out = await deleteJSON(`/api/agents/${encodeURIComponent(agent.id)}/prompt`);
-    await loadPrompt();
+    const out = await revertAgentPromptOverride(agent.id);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agentPrompt(agent.id) }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agentPromptDiff(agent.id) }),
+    ]);
     setEditingPrompt(false);
     return out;
-  }), [agent.id, loadPrompt, run]);
+  }), [agent.id, queryClient, run]);
 
   const sendChat = useCallback(() => {
     const message = chatMessage.trim();
     if (!message) return Promise.resolve(null);
     return run("chat", async () => {
-      const out = await postJSON(`/api/chat/${encodeURIComponent(agent.id)}`, { mode: chatMode, message });
+      const out = await sendAgentChat(agent.id, chatMode, message);
       setChatMessage("");
-      await loadConversation();
+      await refreshAgentConsole();
       return out;
     });
-  }, [agent.id, chatMessage, chatMode, loadConversation, run]);
+  }, [agent.id, chatMessage, chatMode, refreshAgentConsole, run]);
 
   const sendDirective = useCallback(() => {
     const message = directiveMessage.trim();
     if (!message) return Promise.resolve(null);
     return run("directive", async () => {
-      const out = await postJSON("/dashboard/api/control/directive", { agent_id: agent.id, message });
+      const out = await sendAgentDirective(agent.id, message);
       setDirectiveMessage("");
+      await refreshAgentConsole();
       return out;
     });
-  }, [agent.id, directiveMessage, run]);
+  }, [agent.id, directiveMessage, refreshAgentConsole, run]);
 
-  const restartAgent = useCallback(() => run("restart", () => postJSON("/dashboard/api/control/agents/restart", { agent_id: agent.id })), [agent.id, run]);
-  const replayAgent = useCallback(() => run("replay", () => postJSON("/dashboard/api/control/agents/replay", { agent_id: agent.id })), [agent.id, run]);
+  const restartAgent = useCallback(() => run("restart", async () => {
+    const out = await restartAgentRuntime(agent.id);
+    await refreshAgentConsole();
+    return out;
+  }), [agent.id, refreshAgentConsole, run]);
+  const replayAgent = useCallback(() => run("replay", async () => {
+    const out = await replayAgentRuntime(agent.id);
+    await refreshAgentConsole();
+    return out;
+  }), [agent.id, refreshAgentConsole, run]);
 
   const quickDirective = useMemo(() => {
     const geography = (quickGeography || "").trim() || "US";
@@ -135,7 +166,7 @@ export function useAgentConsole({ agent, addToast, onAction }) {
       replay: replayAgent,
     },
     prompt: {
-      state: promptState,
+      state: promptQuery.data || null,
       edit: promptEdit,
       setEdit: setPromptEdit,
       notes: promptNotes,
@@ -144,7 +175,7 @@ export function useAgentConsole({ agent, addToast, onAction }) {
       setEditing: setEditingPrompt,
       diffOpen: showDiff,
       setDiffOpen: setShowDiff,
-      diffData,
+      diffData: promptDiffQuery.data || null,
       openDiff: openPromptDiff,
       toggleEdit: togglePromptEdit,
       saveOverride: savePromptOverride,
@@ -164,7 +195,7 @@ export function useAgentConsole({ agent, addToast, onAction }) {
       options: ["US", "Argentina", "Brazil", "Mexico", "Chile", "Peru", "Paraguay", "Uruguay", "Colombia"],
       datalistID: `geo-options-${(agent.id || "agent").replace(/[^a-zA-Z0-9_-]/g, "-")}`,
     },
-    conversation,
+    conversation: conversationQuery.data || { messages: [], turns: [] },
     busy,
   };
 }

@@ -10,7 +10,7 @@ export function useOverviewController({
   health,
   funnel,
   holdingData,
-  setActiveView,
+  openView,
 }) {
   return useMemo(() => ({
     state: {
@@ -25,7 +25,7 @@ export function useOverviewController({
       holdingData,
     },
     actions: {
-      openTab: setActiveView,
+      openView,
     },
   }), [
     agentsResp,
@@ -36,7 +36,7 @@ export function useOverviewController({
     incidentsData,
     mailbox,
     overview,
-    setActiveView,
+    openView,
     tasksResp,
   ]);
 }

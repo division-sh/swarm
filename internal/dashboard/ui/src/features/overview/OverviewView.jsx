@@ -29,7 +29,7 @@ export default function OverviewView({ state, actions }) {
     funnel,
     holdingData,
   } = state;
-  const { openTab } = actions;
+  const { openView } = actions;
 
   const stuckAgents = (agentsResp.states && agentsResp.states.stuck) || 0;
   const pendingMailbox = mailbox.summary?.pending || 0;
@@ -57,7 +57,7 @@ export default function OverviewView({ state, actions }) {
             tone={health.runtime?.running ? "" : "health-bad"}
             detail={`${overview.agents_active || 0} active agents`}
             cta="Open Health"
-            onClick={() => openTab("health")}
+            onClick={() => openView("health")}
           />
           <SummaryCard
             label="Stuck Agents"
@@ -65,7 +65,7 @@ export default function OverviewView({ state, actions }) {
             tone={stuckAgents > 0 ? "health-warn" : ""}
             detail={`${overview.events_24h || 0} events in the last 24h`}
             cta="Open Agents"
-            onClick={() => openTab("agents")}
+            onClick={() => openView("agents")}
           />
           <SummaryCard
             label="Incidents"
@@ -73,7 +73,7 @@ export default function OverviewView({ state, actions }) {
             tone={(incidentsData || []).length > 0 ? "health-bad" : ""}
             detail={`last refresh ${fmtTime(overview.generated_at)}`}
             cta="Open Observability"
-            onClick={() => openTab("observability")}
+            onClick={() => openView("observability", "incidents")}
           />
           <SummaryCard
             label="Pending Mailbox"
@@ -81,7 +81,7 @@ export default function OverviewView({ state, actions }) {
             tone={pendingMailbox > 0 ? "health-warn" : ""}
             detail={`${openTasks} open tasks loaded`}
             cta="Open Operations"
-            onClick={() => openTab("operations")}
+            onClick={() => openView("operations", "control")}
           />
           <SummaryCard
             label="Workflow Drift"
@@ -89,7 +89,7 @@ export default function OverviewView({ state, actions }) {
             tone={driftCount > 0 ? "health-warn" : ""}
             detail={`${holdingData.workflow_summary?.active_timers || 0} active timers, ${holdingData.workflow_summary?.revisioned || 0} revisioned`}
             cta="Open Portfolio"
-            onClick={() => openTab("portfolio")}
+            onClick={() => openView("portfolio", "holding")}
           />
           <SummaryCard
             label="Pipeline Blockers"
@@ -97,7 +97,7 @@ export default function OverviewView({ state, actions }) {
             tone={(funnel.stuck || []).length > 0 ? "health-warn" : ""}
             detail={`${funnel.throughput?.discoveries_14d || 0} discoveries in 14d`}
             cta="Open Portfolio"
-            onClick={() => openTab("portfolio")}
+            onClick={() => openView("portfolio", "pipeline")}
           />
         </div>
 
@@ -105,7 +105,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Workflow Audit Warnings</div>
-              <button className="btn-secondary" onClick={() => openTab("health")}>Open Health</button>
+              <button className="btn-secondary" onClick={() => openView("health")}>Open Health</button>
             </div>
             {workflowWarnings.length === 0 ? (
               <div className="empty-state">No workflow audit warnings</div>
@@ -125,7 +125,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Mailbox and Task Queue</div>
-              <button className="btn-secondary" onClick={() => openTab("operations")}>Open Operations</button>
+              <button className="btn-secondary" onClick={() => openView("operations", "tasks")}>Open Operations</button>
             </div>
             <div className="health-kv"><span>Pending Mailbox</span><span className="mono">{pendingMailbox}</span></div>
             <div className="health-kv"><span>Approved</span><span className="mono">{mailbox.summary?.approved || 0}</span></div>
@@ -144,7 +144,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Stuck Agents</div>
-              <button className="btn-secondary" onClick={() => openTab("agents")}>Open Agents</button>
+              <button className="btn-secondary" onClick={() => openView("agents")}>Open Agents</button>
             </div>
             {topStuckAgents.length === 0 ? (
               <div className="empty-state">No stuck agents</div>
@@ -167,7 +167,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Workflow Triage</div>
-              <button className="btn-secondary" onClick={() => openTab("portfolio")}>Open Portfolio</button>
+              <button className="btn-secondary" onClick={() => openView("portfolio", "holding")}>Open Portfolio</button>
             </div>
             {triageVerticals.length === 0 ? (
               <div className="empty-state">No triage hotspots</div>
@@ -193,7 +193,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Recent Incidents</div>
-              <button className="btn-secondary" onClick={() => openTab("observability")}>Open Observability</button>
+              <button className="btn-secondary" onClick={() => openView("observability", "incidents")}>Open Observability</button>
             </div>
             {recentIncidents.length === 0 ? (
               <div className="empty-state">No incidents in current window</div>
@@ -215,7 +215,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Digest Snapshot</div>
-              <button className="btn-secondary" onClick={() => openTab("digest")}>Open Digest</button>
+              <button className="btn-secondary" onClick={() => openView("digest")}>Open Digest</button>
             </div>
             <div className="tiny" style={{ marginBottom: 6 }}>
               Last compiled {digestResp?.last_compiled?.at ? relTime(digestResp.last_compiled.at) : "never"}

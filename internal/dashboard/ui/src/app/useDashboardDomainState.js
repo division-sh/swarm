@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo } from "react";
 import {
   useDashboardOpsState,
   useDashboardPipelineState,
@@ -7,24 +7,20 @@ import {
 } from "./useDashboardStateBuckets.js";
 
 export function useDashboardDomainState() {
-  const [overview, setOverview] = useState({});
-  const [agentsResp, setAgentsResp] = useState({ agents: [], states: {} });
-  const [digestResp, setDigestResp] = useState(null);
   const taskState = useDashboardTaskState();
   const runtimeState = useDashboardRuntimeState();
   const opsState = useDashboardOpsState();
   const pipelineState = useDashboardPipelineState();
 
-  return {
-    overview,
-    setOverview,
-    agentsResp,
-    setAgentsResp,
-    digestResp,
-    setDigestResp,
+  return useMemo(() => ({
     taskState,
     runtimeState,
     opsState,
     pipelineState,
-  };
+  }), [
+    taskState,
+    runtimeState,
+    opsState,
+    pipelineState,
+  ]);
 }

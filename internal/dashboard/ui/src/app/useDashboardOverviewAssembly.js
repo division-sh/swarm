@@ -10,7 +10,7 @@ export function useDashboardOverviewAssembly({
   health,
   funnel,
   holdingData,
-  setActiveView,
+  openView,
 }) {
   return useOverviewController({
     overview,
@@ -22,6 +22,6 @@ export function useDashboardOverviewAssembly({
     health,
     funnel,
     holdingData,
-    setActiveView,
+    openView,
   });
 }

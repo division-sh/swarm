@@ -12,6 +12,7 @@ export function useDashboardActionComposition({
   addToast,
   loadAgents,
   loadTasks,
+  loadTaskStats,
   loadEvents,
   loadMailbox,
   loadTargets,
@@ -34,6 +35,7 @@ export function useDashboardActionComposition({
     loadAgents,
     loadTargets,
     setActiveView: ui.setActiveView,
+    setViewRoute: ui.setViewRoute,
     setModalContent: ui.setModalContent,
     setControlTarget: opsState.setControlTarget,
     setSelectedAgentID: opsState.setSelectedAgentID,
@@ -56,6 +58,7 @@ export function useDashboardActionComposition({
   const taskActions = useTaskActions({
     runControl,
     loadTasks,
+    loadTaskStats,
     selectedTaskID: taskState.selectedTaskID,
     taskResultText: taskState.taskResultText,
     setTaskResultText: taskState.setTaskResultText,
@@ -65,7 +68,6 @@ export function useDashboardActionComposition({
     setTaskFollowUpNeeded: taskState.setTaskFollowUpNeeded,
     taskRejectReason: taskState.taskRejectReason,
     setTaskRejectReason: taskState.setTaskRejectReason,
-    setTasksStats: taskState.setTasksStats,
   });
 
   return {

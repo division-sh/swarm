@@ -6,8 +6,6 @@ export default function DashboardHeader({
   statusText,
   apiKey,
   setApiKey,
-  overview,
-  stuckAgents,
   tabs,
   tabBadges,
   activeView,
@@ -31,23 +29,17 @@ export default function DashboardHeader({
             <div className="sub">{statusText}</div>
             <LiveClock />
           </div>
-          <div className="header-key">
-            <span className="tiny">API Key</span>
+          <details className="header-key">
+            <summary className="tiny" style={{ cursor: "pointer", userSelect: "none" }}>Connection</summary>
             <input
               type="password"
               className="mono"
               placeholder="Enter key..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              style={{ marginTop: 6 }}
             />
-          </div>
-        </div>
-        <div className="overview">
-          <div className="kpi"><div className="label">Agents Active</div><div className="value">{overview.agents_active || 0}</div></div>
-          <div className="kpi"><div className="label">Events 24h</div><div className="value">{overview.events_24h || 0}</div></div>
-          <div className="kpi"><div className="label">Mailbox Pending</div><div className="value">{overview.mailbox_pending || 0}</div></div>
-          <div className="kpi"><div className="label">Verticals</div><div className="value">{overview.verticals_total || 0}</div></div>
-          <div className={`kpi ${stuckAgents > 0 ? "kpi-alert" : ""}`}><div className="label">Stuck Agents</div><div className="value">{stuckAgents}</div></div>
+          </details>
         </div>
         <div className="view-nav">
           {tabs.map(([id, label]) => {

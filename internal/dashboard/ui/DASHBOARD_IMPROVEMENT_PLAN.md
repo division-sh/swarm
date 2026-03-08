@@ -379,9 +379,11 @@ Prefer urgency-first ordering over raw recency where applicable:
 
 Delivered on 2026-03-08:
 
-- consolidated tabs now show local subview counts where useful
-- local subview labels were tightened to match the new IA
-- obvious legacy deep-link labels in the agent surface were renamed to match the consolidated areas
+- consolidated subviews are now hash-addressable and shareable
+- overview shortcuts now open the intended consolidated subview directly
+- header-level summary duplication was removed so `Overview` remains the main triage surface
+- the agent detail surface is split into local `Context`, `Conversation`, and `Actions` sections
+- local subview labels were tightened to match the consolidated IA
 
 ## Out of Scope For Now
 

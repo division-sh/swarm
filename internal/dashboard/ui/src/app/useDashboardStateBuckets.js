@@ -1,20 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 export function useDashboardTaskState() {
   const [taskStatus, setTaskStatus] = useState("open");
-  const [tasksResp, setTasksResp] = useState({ tasks: [] });
   const [selectedTaskID, setSelectedTaskID] = useState("");
   const [taskResultText, setTaskResultText] = useState("");
   const [taskOutcome, setTaskOutcome] = useState("success");
   const [taskFollowUpNeeded, setTaskFollowUpNeeded] = useState(false);
   const [taskRejectReason, setTaskRejectReason] = useState("");
-  const [tasksStats, setTasksStats] = useState(null);
 
-  return {
+  return useMemo(() => ({
     taskStatus,
     setTaskStatus,
-    tasksResp,
-    setTasksResp,
     selectedTaskID,
     setSelectedTaskID,
     taskResultText,
@@ -25,85 +21,73 @@ export function useDashboardTaskState() {
     setTaskFollowUpNeeded,
     taskRejectReason,
     setTaskRejectReason,
-    tasksStats,
-    setTasksStats,
-  };
+  }), [
+    taskStatus,
+    selectedTaskID,
+    taskResultText,
+    taskOutcome,
+    taskFollowUpNeeded,
+    taskRejectReason,
+  ]);
 }
 
 export function useDashboardRuntimeState() {
   const [eventsFilter, setEventsFilter] = useState({ type: "", source: "", vertical: "", component: "", level: "", subscriber: "" });
   const [eventsIncludeRuntime, setEventsIncludeRuntime] = useState(true);
   const [eventsRuntimeErrorsOnly, setEventsRuntimeErrorsOnly] = useState(false);
-  const [events, setEvents] = useState([]);
-  const [runtimeLogs, setRuntimeLogs] = useState([]);
   const [selectedEventID, setSelectedEventID] = useState("");
-  const [eventDetail, setEventDetail] = useState(null);
-  const [conversations, setConversations] = useState([]);
   const [selectedConv, setSelectedConv] = useState("");
-  const [conversationDetail, setConversationDetail] = useState({ messages: [], turns: [] });
   const [logsFilter, setLogsFilter] = useState({ type: "", source: "", vertical: "", component: "", level: "", subscriber: "" });
   const [logsRuntimeErrorsOnly, setLogsRuntimeErrorsOnly] = useState(false);
-  const [logsData, setLogsData] = useState([]);
   const [selectedLogID, setSelectedLogID] = useState(null);
   const [logsOrder, setLogsOrder] = useState("desc");
   const [incidentsFilter, setIncidentsFilter] = useState({ sinceHours: 24, mcpOnly: true, level: "warn", component: "" });
-  const [incidentsData, setIncidentsData] = useState([]);
   const [selectedIncidentCode, setSelectedIncidentCode] = useState("");
   const [selectedIncidentAgent, setSelectedIncidentAgent] = useState("");
-  const [incidentLogs, setIncidentLogs] = useState([]);
-  const [incidentArtifacts, setIncidentArtifacts] = useState({ loading: false, error: "", data: null });
 
-  return {
+  return useMemo(() => ({
     eventsFilter,
     setEventsFilter,
     eventsIncludeRuntime,
     setEventsIncludeRuntime,
     eventsRuntimeErrorsOnly,
     setEventsRuntimeErrorsOnly,
-    events,
-    setEvents,
-    runtimeLogs,
-    setRuntimeLogs,
     selectedEventID,
     setSelectedEventID,
-    eventDetail,
-    setEventDetail,
-    conversations,
-    setConversations,
     selectedConv,
     setSelectedConv,
-    conversationDetail,
-    setConversationDetail,
     logsFilter,
     setLogsFilter,
     logsRuntimeErrorsOnly,
     setLogsRuntimeErrorsOnly,
-    logsData,
-    setLogsData,
     selectedLogID,
     setSelectedLogID,
     logsOrder,
     setLogsOrder,
     incidentsFilter,
     setIncidentsFilter,
-    incidentsData,
-    setIncidentsData,
     selectedIncidentCode,
     setSelectedIncidentCode,
     selectedIncidentAgent,
     setSelectedIncidentAgent,
-    incidentLogs,
-    setIncidentLogs,
-    incidentArtifacts,
-    setIncidentArtifacts,
-  };
+  }), [
+    eventsFilter,
+    eventsIncludeRuntime,
+    eventsRuntimeErrorsOnly,
+    selectedEventID,
+    selectedConv,
+    logsFilter,
+    logsRuntimeErrorsOnly,
+    selectedLogID,
+    logsOrder,
+    incidentsFilter,
+    selectedIncidentCode,
+    selectedIncidentAgent,
+  ]);
 }
 
 export function useDashboardOpsState() {
   const [mailStatus, setMailStatus] = useState("all");
-  const [mailbox, setMailbox] = useState({ summary: {}, items: [] });
-  const [health, setHealth] = useState({});
-  const [targets, setTargets] = useState([]);
   const [selectedAgentID, setSelectedAgentID] = useState("");
   const [controlTarget, setControlTarget] = useState("");
   const [directiveMessage, setDirectiveMessage] = useState("");
@@ -120,15 +104,9 @@ export function useDashboardOpsState() {
   const [resetConfirm, setResetConfirm] = useState("");
   const [controlOutput, setControlOutput] = useState({ ok: true, message: "Ready." });
 
-  return {
+  return useMemo(() => ({
     mailStatus,
     setMailStatus,
-    mailbox,
-    setMailbox,
-    health,
-    setHealth,
-    targets,
-    setTargets,
     selectedAgentID,
     setSelectedAgentID,
     controlTarget,
@@ -159,29 +137,37 @@ export function useDashboardOpsState() {
     setResetConfirm,
     controlOutput,
     setControlOutput,
-  };
+  }), [
+    mailStatus,
+    selectedAgentID,
+    controlTarget,
+    directiveMessage,
+    chatMode,
+    chatMessage,
+    verticalName,
+    verticalGeo,
+    verticalSlug,
+    requeueEventID,
+    requeueAgentID,
+    mailboxID,
+    mailboxAction,
+    mailboxNotes,
+    resetConfirm,
+    controlOutput,
+  ]);
 }
 
 export function useDashboardPipelineState() {
-  const [funnel, setFunnel] = useState({ throughput: {}, stuck: [] });
-  const [shardScans, setShardScans] = useState([]);
   const [selectedShardScanID, setSelectedShardScanID] = useState("");
-  const [shardScanDetails, setShardScanDetails] = useState({});
   const [traceVertical, setTraceVertical] = useState("");
-  const [traceRows, setTraceRows] = useState([]);
-  const [verticals, setVerticals] = useState([]);
   const [graphMode, setGraphMode] = useState("holding");
   const [graphVertical, setGraphVertical] = useState("");
-  const [graph, setGraph] = useState({ nodes: [], edges: [] });
   const [graphViewGraph, setGraphViewGraph] = useState(null);
   const [selectedGraphNodeID, setSelectedGraphNodeID] = useState("");
   const [selectedGraphEdgeID, setSelectedGraphEdgeID] = useState("");
   const [graphFullscreen, setGraphFullscreen] = useState(false);
   const [flowView, setFlowView] = useState("design");
   const [flowVertical, setFlowVertical] = useState("");
-  const [flowGraph, setFlowGraph] = useState({ nodes: [], edges: [] });
-  const [flowGraphMeta, setFlowGraphMeta] = useState({});
-  const [flowEvents, setFlowEvents] = useState([]);
   const [selectedFlowNodeID, setSelectedFlowNodeID] = useState("");
   const [selectedFlowEdgeID, setSelectedFlowEdgeID] = useState("");
   const [flowViewGraph, setFlowViewGraph] = useState(null);
@@ -192,7 +178,6 @@ export function useDashboardPipelineState() {
   const [flowReplaySpeed, setFlowReplaySpeed] = useState(10);
   const [flowReplayOn, setFlowReplayOn] = useState(false);
   const [flowReplayIndex, setFlowReplayIndex] = useState(0);
-  const [holdingData, setHoldingData] = useState({ campaigns: [], verticals: [], agent_counts: {}, summary: {}, workflow_summary: {} });
   const [holdingDetailModal, setHoldingDetailModal] = useState({
     open: false,
     loading: false,
@@ -201,27 +186,15 @@ export function useDashboardPipelineState() {
     data: null,
   });
 
-  return {
-    funnel,
-    setFunnel,
-    shardScans,
-    setShardScans,
+  return useMemo(() => ({
     selectedShardScanID,
     setSelectedShardScanID,
-    shardScanDetails,
-    setShardScanDetails,
     traceVertical,
     setTraceVertical,
-    traceRows,
-    setTraceRows,
-    verticals,
-    setVerticals,
     graphMode,
     setGraphMode,
     graphVertical,
     setGraphVertical,
-    graph,
-    setGraph,
     graphViewGraph,
     setGraphViewGraph,
     selectedGraphNodeID,
@@ -234,12 +207,6 @@ export function useDashboardPipelineState() {
     setFlowView,
     flowVertical,
     setFlowVertical,
-    flowGraph,
-    setFlowGraph,
-    flowGraphMeta,
-    setFlowGraphMeta,
-    flowEvents,
-    setFlowEvents,
     selectedFlowNodeID,
     setSelectedFlowNodeID,
     selectedFlowEdgeID,
@@ -260,9 +227,29 @@ export function useDashboardPipelineState() {
     setFlowReplayOn,
     flowReplayIndex,
     setFlowReplayIndex,
-    holdingData,
-    setHoldingData,
     holdingDetailModal,
     setHoldingDetailModal,
-  };
+  }), [
+    selectedShardScanID,
+    traceVertical,
+    graphMode,
+    graphVertical,
+    graphViewGraph,
+    selectedGraphNodeID,
+    selectedGraphEdgeID,
+    graphFullscreen,
+    flowView,
+    flowVertical,
+    selectedFlowNodeID,
+    selectedFlowEdgeID,
+    flowViewGraph,
+    flowStart,
+    flowEnd,
+    flowStage,
+    flowRubric,
+    flowReplaySpeed,
+    flowReplayOn,
+    flowReplayIndex,
+    holdingDetailModal,
+  ]);
 }

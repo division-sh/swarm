@@ -9,26 +9,25 @@ function routeToSubview(activeView) {
 
 export default function WorkflowView({
   activeView,
-  setActiveView,
+  activeSubview,
+  setViewRoute,
   flow,
   graph,
 }) {
-  const routeSubview = routeToSubview(activeView);
+  const routeSubview = routeToSubview(activeView) || activeSubview;
   const [subview, setSubview] = useState(routeSubview || "flow");
 
   useEffect(() => {
     if (!routeSubview) return;
     setSubview(routeSubview);
-    if (activeView !== "workflow") {
-      setActiveView("workflow");
+    if (activeView === "flow" || activeView === "graph") {
+      setViewRoute("workflow", routeSubview);
     }
-  }, [activeView, routeSubview, setActiveView]);
+  }, [activeView, routeSubview, setViewRoute]);
 
   function selectSubview(next) {
     setSubview(next);
-    if (activeView !== "workflow") {
-      setActiveView("workflow");
-    }
+    setViewRoute("workflow", next);
   }
 
   const flowCount = Array.isArray(flow.state.flowEvents) ? flow.state.flowEvents.length : 0;
@@ -40,15 +39,15 @@ export default function WorkflowView({
         <h2>Workflow</h2>
         <div className="stack">
           <button className={subview === "flow" ? "active" : ""} onClick={() => selectSubview("flow")}>
-            Flow{flowCount > 0 ? ` (${flowCount})` : ""}
+            Flow
           </button>
           <button className={subview === "graph" ? "active" : ""} onClick={() => selectSubview("graph")}>
-            Topology{graphCount > 0 ? ` (${graphCount})` : ""}
+            Topology
           </button>
         </div>
       </div>
       <div className="tiny" style={{ marginBottom: 10 }}>
-        Unified workflow design, runtime flow, replay inspection, and org topology. Legacy `flow` and `graph` routes still land here.
+        Unified workflow design, runtime flow, replay inspection, and org topology. {flowCount} flow events loaded, {graphCount} topology nodes available.
       </div>
       {subview === "flow" ? <FlowView state={flow.state} actions={flow.actions} /> : null}
       {subview === "graph" ? <GraphPage state={graph.state} actions={graph.actions} /> : null}

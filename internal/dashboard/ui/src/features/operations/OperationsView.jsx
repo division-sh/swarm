@@ -9,26 +9,25 @@ function routeToSubview(activeView) {
 
 export default function OperationsView({
   activeView,
-  setActiveView,
+  activeSubview,
+  setViewRoute,
   control,
   tasks,
 }) {
-  const routeSubview = routeToSubview(activeView);
+  const routeSubview = routeToSubview(activeView) || activeSubview;
   const [subview, setSubview] = useState(routeSubview || "control");
 
   useEffect(() => {
     if (!routeSubview) return;
     setSubview(routeSubview);
-    if (activeView !== "operations") {
-      setActiveView("operations");
+    if (activeView === "control" || activeView === "tasks") {
+      setViewRoute("operations", routeSubview);
     }
-  }, [activeView, routeSubview, setActiveView]);
+  }, [activeView, routeSubview, setViewRoute]);
 
   function selectSubview(next) {
     setSubview(next);
-    if (activeView !== "operations") {
-      setActiveView("operations");
-    }
+    setViewRoute("operations", next);
   }
 
   const mailboxPending = control.state.mailbox?.summary?.pending || 0;
@@ -40,15 +39,15 @@ export default function OperationsView({
         <h2>Operations</h2>
         <div className="stack">
           <button className={subview === "control" ? "active" : ""} onClick={() => selectSubview("control")}>
-            Control + Mailbox{mailboxPending > 0 ? ` (${mailboxPending})` : ""}
+            Control + Mailbox
           </button>
           <button className={subview === "tasks" ? "active" : ""} onClick={() => selectSubview("tasks")}>
-            Tasks{taskCount > 0 ? ` (${taskCount})` : ""}
+            Tasks
           </button>
         </div>
       </div>
       <div className="tiny" style={{ marginBottom: 10 }}>
-        Unified mailbox, control, and human-task workflow surface. Legacy `control` and `tasks` routes still land here.
+        Unified mailbox, control, and human-task workflow surface. {mailboxPending} pending mailbox items, {taskCount} loaded tasks.
       </div>
       {subview === "control" ? <ControlView state={control.state} actions={control.actions} /> : null}
       {subview === "tasks" ? <TasksView state={tasks.state} actions={tasks.actions} /> : null}

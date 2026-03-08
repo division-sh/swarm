@@ -1,6 +1,7 @@
+import { useMemo } from "react";
 import { useDashboardActionComposition } from "./useDashboardActionComposition.js";
 import { useDashboardContractsState } from "./useDashboardContractsState.js";
-import { useDashboardCoreSources } from "./useDashboardCoreSources.js";
+import { useDashboardCoreQueries } from "./useDashboardCoreQueries.js";
 import { useDashboardDomainState } from "./useDashboardDomainState.js";
 import { useDashboardLifecycle } from "./useDashboardLifecycle.js";
 import { useDashboardOpsAssembly } from "./useDashboardOpsAssembly.js";
@@ -16,59 +17,53 @@ export function useDashboardCoordinator() {
   const ui = useDashboardUIState();
   const domain = useDashboardDomainState();
 
-  const core = useDashboardCoreSources({
-    ui,
-    domain,
+  const core = useDashboardCoreQueries({
+    taskStatus: domain.taskState.taskStatus,
+    mailStatus: domain.opsState.mailStatus,
+    controlTarget: domain.opsState.controlTarget,
+    setControlTarget: domain.opsState.setControlTarget,
+    setStatusText: ui.setStatusText,
   });
   const runtimeSources = useDashboardRuntimeSources({
     activeView: ui.activeView,
-    addToast: ui.addToast,
+    activeSubview: ui.activeSubview,
     runtimeState: domain.runtimeState,
   });
   const pipelineSources = useDashboardPipelineSources({
     activeView: ui.activeView,
+    activeSubview: ui.activeSubview,
     addToast: ui.addToast,
     pipelineState: domain.pipelineState,
   });
   const loaders = {
-    ...core,
+    ...core.loaders,
     ...runtimeSources,
-    ...pipelineSources,
+    ...pipelineSources.loaders,
   };
+  const refreshers = useMemo(() => ({
+    loadEvents: loaders.loadEvents,
+    loadRuntimeLogs: loaders.loadRuntimeLogs,
+    loadConversations: loaders.loadConversations,
+    loadIncidents: loaders.loadIncidents,
+  }), [
+    loaders.loadConversations,
+    loaders.loadEvents,
+    loaders.loadIncidents,
+    loaders.loadRuntimeLogs,
+  ]);
 
   useDashboardLifecycle({
     ui,
     runtimeState: domain.runtimeState,
     pipelineState: domain.pipelineState,
-    refreshers: {
-      loadOverview: loaders.loadOverview,
-      loadAgents: loaders.loadAgents,
-      loadDigest: loaders.loadDigest,
-      loadTasks: loaders.loadTasks,
-      loadEvents: loaders.loadEvents,
-      loadRuntimeLogs: loaders.loadRuntimeLogs,
-      loadConversations: loaders.loadConversations,
-      loadTargets: loaders.loadTargets,
-      loadFunnel: loaders.loadFunnel,
-      loadShardScans: loaders.loadShardScans,
-      loadMailbox: loaders.loadMailbox,
-      loadHealth: loaders.loadHealth,
-      loadVerticals: loaders.loadVerticals,
-      loadHolding: loaders.loadHolding,
-      loadIncidents: loaders.loadIncidents,
-    },
+    workflowStream: pipelineSources.workflowStream,
+    flowEvents: pipelineSources.data.flowEvents,
+    refreshers,
     addToast: ui.addToast,
-    loadOverview: loaders.loadOverview,
-    loadAgents: loaders.loadAgents,
-    loadDigest: loaders.loadDigest,
-    loadTasks: loaders.loadTasks,
-    loadMailbox: loaders.loadMailbox,
-    loadHealth: loaders.loadHealth,
+    loadLogs: loaders.loadLogs,
     loadIncidents: loaders.loadIncidents,
-    loadTargets: loaders.loadTargets,
-    loadFunnel: loaders.loadFunnel,
-    loadVerticals: loaders.loadVerticals,
-    loadHolding: loaders.loadHolding,
+    loadConversations: loaders.loadConversations,
+    loadGraph: loaders.loadGraph,
     loadPipelineFlow: loaders.loadPipelineFlow,
   });
 
@@ -80,6 +75,7 @@ export function useDashboardCoordinator() {
     addToast: ui.addToast,
     loadAgents: loaders.loadAgents,
     loadTasks: loaders.loadTasks,
+    loadTaskStats: loaders.loadTaskStats,
     loadEvents: loaders.loadEvents,
     loadMailbox: loaders.loadMailbox,
     loadTargets: loaders.loadTargets,
@@ -88,19 +84,20 @@ export function useDashboardCoordinator() {
   });
 
   const { healthContracts, holdingViewState } = useDashboardContractsState({
-    health: domain.opsState.health,
-    holdingData: domain.pipelineState.holdingData,
+    health: core.data.health,
+    holdingData: pipelineSources.data.holdingData,
   });
 
   const runtime = useDashboardRuntimeAssembly({
-    agentsResp: domain.agentsResp,
-    digestResp: domain.digestResp,
+    agentsResp: core.data.agentsResp,
+    digestResp: core.data.digestResp,
     ui: {
       agentSearch: ui.agentSearch,
       setAgentSearch: ui.setAgentSearch,
       setModalContent: ui.setModalContent,
     },
     runtimeState: domain.runtimeState,
+    runtimeData: runtimeSources.data,
     opsState: domain.opsState,
     loaders: {
       loadDigest: loaders.loadDigest,
@@ -115,8 +112,10 @@ export function useDashboardCoordinator() {
   });
 
   const pipeline = useDashboardPipelineAssembly({
-    agentsResp: domain.agentsResp,
+    agentsResp: core.data.agentsResp,
     pipelineState: domain.pipelineState,
+    portfolioData: pipelineSources.data,
+    workflowData: pipelineSources.data,
     loaders: {
       loadVerticals: loaders.loadVerticals,
       loadGraph: loaders.loadGraph,
@@ -137,6 +136,14 @@ export function useDashboardCoordinator() {
     opsState: domain.opsState,
     loaders: {
       loadTasks: loaders.loadTasks,
+      loadTaskStats: loaders.loadTaskStats,
+    },
+    queryData: {
+      targets: core.data.targets,
+      mailbox: core.data.mailbox,
+      health: core.data.health,
+      tasksResp: core.data.tasksResp,
+      tasksStats: core.data.tasksStats,
     },
     ui: {
       selectedMailboxItem: ui.selectedMailboxItem,
@@ -148,39 +155,39 @@ export function useDashboardCoordinator() {
   });
 
   const overview = useDashboardOverviewAssembly({
-    overview: domain.overview,
-    digestResp: domain.digestResp,
-    agentsResp: domain.agentsResp,
-    incidentsData: domain.runtimeState.incidentsData,
-    mailbox: domain.opsState.mailbox,
-    tasksResp: domain.taskState.tasksResp,
-    health: domain.opsState.health,
-    funnel: domain.pipelineState.funnel,
-    holdingData: domain.pipelineState.holdingData,
-    setActiveView: ui.setActiveView,
+    overview: core.data.overview,
+    digestResp: core.data.digestResp,
+    agentsResp: core.data.agentsResp,
+    incidentsData: runtimeSources.data.incidentsData,
+    mailbox: core.data.mailbox,
+    tasksResp: core.data.tasksResp,
+    health: core.data.health,
+    funnel: pipelineSources.data.funnel,
+    holdingData: pipelineSources.data.holdingData,
+    openView: ui.setViewRoute,
   });
 
   const { tabs, tabBadges } = useDashboardTabsState({
-    agentsResp: domain.agentsResp,
-    incidentsData: domain.runtimeState.incidentsData,
-    flowEvents: domain.pipelineState.flowEvents,
-    mailbox: domain.opsState.mailbox,
-    funnel: domain.pipelineState.funnel,
-    holdingData: domain.pipelineState.holdingData,
+    agentsResp: core.data.agentsResp,
+    incidentsData: runtimeSources.data.incidentsData,
+    flowEvents: pipelineSources.data.flowEvents,
+    mailbox: core.data.mailbox,
+    funnel: pipelineSources.data.funnel,
+    holdingData: pipelineSources.data.holdingData,
   });
 
   return {
     header: {
-      initialLoading: ui.initialLoading,
+      initialLoading: ui.initialLoading || core.isInitialLoading,
       statusText: ui.statusText,
       apiKey: ui.apiKey,
       setApiKey: ui.setApiKey,
-      overview: domain.overview,
-      stuckAgents: domain.agentsResp.states.stuck || 0,
       tabs,
       tabBadges,
       activeView: ui.activeView,
+      activeSubview: ui.activeSubview,
       setActiveView: ui.setActiveView,
+      setViewRoute: ui.setViewRoute,
     },
     views: {
       overview,

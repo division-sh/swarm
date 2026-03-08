@@ -1,44 +1,46 @@
-import { useDashboardPipelineData } from "../hooks/useDashboardPipelineData.js";
+import { useDashboardPortfolioQueries } from "./useDashboardPortfolioQueries.js";
+import { useDashboardWorkflowQueries } from "./useDashboardWorkflowQueries.js";
 
 export function useDashboardPipelineSources({
   activeView,
+  activeSubview,
   addToast,
   pipelineState,
 }) {
-  return useDashboardPipelineData({
-    activeView,
-    addToast,
-    setFunnel: pipelineState.setFunnel,
-    setShardScans: pipelineState.setShardScans,
-    setShardScanDetails: pipelineState.setShardScanDetails,
+  const portfolio = useDashboardPortfolioQueries({
     selectedShardScanID: pipelineState.selectedShardScanID,
     setSelectedShardScanID: pipelineState.setSelectedShardScanID,
-    shardScans: pipelineState.shardScans,
-    setTraceRows: pipelineState.setTraceRows,
-    setHoldingData: pipelineState.setHoldingData,
-    setHoldingDetailModal: pipelineState.setHoldingDetailModal,
-    graphMode: pipelineState.graphMode,
+    traceVertical: pipelineState.traceVertical,
     graphVertical: pipelineState.graphVertical,
     setGraphVertical: pipelineState.setGraphVertical,
-    setVerticals: pipelineState.setVerticals,
     flowVertical: pipelineState.flowVertical,
     setFlowVertical: pipelineState.setFlowVertical,
-    selectedGraphNodeID: pipelineState.selectedGraphNodeID,
-    setSelectedGraphNodeID: pipelineState.setSelectedGraphNodeID,
-    selectedGraphEdgeID: pipelineState.selectedGraphEdgeID,
-    setSelectedGraphEdgeID: pipelineState.setSelectedGraphEdgeID,
-    setGraph: pipelineState.setGraph,
+    setHoldingDetailModal: pipelineState.setHoldingDetailModal,
+    addToast,
+  });
+
+  const workflowQueries = useDashboardWorkflowQueries({
+    activeView,
+    activeSubview,
+    graphMode: pipelineState.graphMode,
+    graphVertical: pipelineState.graphVertical,
     flowView: pipelineState.flowView,
+    flowVertical: pipelineState.flowVertical,
     flowStart: pipelineState.flowStart,
     flowEnd: pipelineState.flowEnd,
-    selectedFlowNodeID: pipelineState.selectedFlowNodeID,
-    setSelectedFlowNodeID: pipelineState.setSelectedFlowNodeID,
-    selectedFlowEdgeID: pipelineState.selectedFlowEdgeID,
-    setSelectedFlowEdgeID: pipelineState.setSelectedFlowEdgeID,
-    setFlowGraph: pipelineState.setFlowGraph,
-    setFlowGraphMeta: pipelineState.setFlowGraphMeta,
-    setFlowEvents: pipelineState.setFlowEvents,
-    setFlowReplayIndex: pipelineState.setFlowReplayIndex,
-    setFlowReplayOn: pipelineState.setFlowReplayOn,
   });
+
+  return {
+    data: {
+      ...portfolio.data,
+      ...workflowQueries.data,
+    },
+    loaders: {
+      ...portfolio.loaders,
+      ...workflowQueries.loaders,
+    },
+    workflowStream: {
+      patchRuntimeFlowEvent: workflowQueries.patchRuntimeFlowEvent,
+    },
+  };
 }

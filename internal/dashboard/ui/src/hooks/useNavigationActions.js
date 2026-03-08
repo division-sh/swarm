@@ -6,6 +6,7 @@ export function useNavigationActions({
   loadAgents,
   loadTargets,
   setActiveView,
+  setViewRoute,
   setModalContent,
   setControlTarget,
   setSelectedAgentID,
@@ -17,6 +18,26 @@ export function useNavigationActions({
   setLogsFilter,
   setLogsRuntimeErrorsOnly,
 }) {
+  const routeForView = useCallback((view) => {
+    switch (view) {
+    case "events":
+    case "logs":
+    case "incidents":
+      return { tab: "observability", subview: view };
+    case "flow":
+    case "graph":
+      return { tab: "workflow", subview: view };
+    case "pipeline":
+    case "holding":
+      return { tab: "portfolio", subview: view };
+    case "control":
+    case "tasks":
+      return { tab: "operations", subview: view };
+    default:
+      return { tab: view, subview: "" };
+    }
+  }, []);
+
   const handleAgentNavigate = useCallback((view, opts) => {
     if (opts && opts.eventID) setSelectedEventID(opts.eventID);
     if (opts && opts.convID) {
@@ -32,7 +53,9 @@ export function useNavigationActions({
       setLogsFilter({ type: "", source: opts.logsAgent, vertical: "", component: "", level: "", subscriber: "" });
       setLogsRuntimeErrorsOnly(false);
     }
-    setActiveView(view);
+    const route = routeForView(view);
+    if (route.subview) setViewRoute(route.tab, route.subview);
+    else setActiveView(route.tab);
   }, [
     setActiveView,
     setEventsFilter,
@@ -42,34 +65,9 @@ export function useNavigationActions({
     setSelectedConv,
     setSelectedEventID,
     setSelectedAgentID,
+    setViewRoute,
+    routeForView,
   ]);
-
-  const openControl = useCallback((agentID) => {
-    setControlTarget(agentID);
-    setActiveView("control");
-  }, [setActiveView, setControlTarget]);
-
-  const inspectAgent = useCallback((agentID) => {
-    setSelectedAgentID(agentID);
-    setActiveView("agents");
-  }, [setActiveView, setSelectedAgentID]);
-
-  const navigateToTask = useCallback((taskID) => {
-    setSelectedTaskID(taskID);
-    setActiveView("tasks");
-  }, [setActiveView, setSelectedTaskID]);
-
-  const renderAgentDropdown = useCallback((agent) => React.createElement(AgentDropdown, {
-    agent,
-    addToast,
-    onNavigate: handleAgentNavigate,
-    onOpenMessage: (message) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
-    onCopyConversation: copyConversation,
-    onAction: () => {
-      loadAgents().catch(() => {});
-      loadTargets().catch(() => {});
-    },
-  }), [addToast, copyConversation, handleAgentNavigate, loadAgents, loadTargets, setModalContent]);
 
   const copyConversation = useCallback((agentID, messages) => {
     const msgs = messages || [];
@@ -90,17 +88,44 @@ export function useNavigationActions({
     navigator.clipboard.writeText(text).then(() => addToast("Conversation copied", "success")).catch(() => addToast("Copy failed", "error"));
   }, [addToast]);
 
+  const openControl = useCallback((agentID) => {
+    setControlTarget(agentID);
+    setViewRoute("operations", "control");
+  }, [setControlTarget, setViewRoute]);
+
+  const inspectAgent = useCallback((agentID) => {
+    setSelectedAgentID(agentID);
+    setActiveView("agents");
+  }, [setActiveView, setSelectedAgentID]);
+
+  const navigateToTask = useCallback((taskID) => {
+    setSelectedTaskID(taskID);
+    setViewRoute("operations", "tasks");
+  }, [setSelectedTaskID, setViewRoute]);
+
+  const renderAgentDropdown = useCallback((agent) => React.createElement(AgentDropdown, {
+    agent,
+    addToast,
+    onNavigate: handleAgentNavigate,
+    onOpenMessage: (message) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
+    onCopyConversation: copyConversation,
+    onAction: () => {
+      loadAgents().catch(() => {});
+      loadTargets().catch(() => {});
+    },
+  }), [addToast, copyConversation, handleAgentNavigate, loadAgents, loadTargets, setModalContent]);
+
   const openLogsForAgent = useCallback((agentID) => {
     setLogsFilter({ type: "", source: agentID, vertical: "", component: "", level: "", subscriber: "" });
     setLogsRuntimeErrorsOnly(false);
-    setActiveView("logs");
-  }, [setActiveView, setLogsFilter, setLogsRuntimeErrorsOnly]);
+    setViewRoute("observability", "logs");
+  }, [setLogsFilter, setLogsRuntimeErrorsOnly, setViewRoute]);
 
   const openConvoForAgent = useCallback((agentID) => {
     setSelectedConv(agentID);
     setSelectedAgentID(agentID);
-    setActiveView("agents");
-  }, [setActiveView, setSelectedAgentID, setSelectedConv]);
+    setViewRoute("agents");
+  }, [setSelectedAgentID, setSelectedConv, setViewRoute]);
 
   return {
     handleAgentNavigate,
