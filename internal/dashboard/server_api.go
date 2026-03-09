@@ -232,7 +232,7 @@ func (s *Server) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAPIDirective(w http.ResponseWriter, r *http.Request) {
-	// POST /api/directive (queues system.directive to Empire Coordinator)
+	// POST /api/directive (queues system.directive to the control-plane agent)
 	if !allowMethod(w, r, http.MethodPost) {
 		return
 	}

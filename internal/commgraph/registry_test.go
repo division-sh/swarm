@@ -98,7 +98,6 @@ func TestRuntimeAndHumanEventClassifications(t *testing.T) {
 		"template.migration_approved",
 		"spend.approved",
 		"spend.rejected",
-		"brand.revision_needed",
 		"vertical.approved",
 		"vertical.needs_more_data",
 		"human_task.completed",

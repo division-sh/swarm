@@ -267,7 +267,7 @@ func runTemplateSubcommand(args []string) error {
 		storeMode := fs.String("store", "postgres", "Storage mode")
 		migrate := fs.Bool("migrate", false, "Apply migrations")
 		migrationFile := fs.String("migration-file", defaultMigrationFilePath, "Migration file path")
-		executedBy := fs.String("executed-by", "empire-coordinator", "Executor agent")
+		executedBy := fs.String("executed-by", defaultControlPlaneAgentID(), "Executor agent")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -383,7 +383,7 @@ func editPromptInEditor(initial string) (string, error) {
 	if editor == "" {
 		editor = "vi"
 	}
-	f, err := os.CreateTemp("", "empire-prompt-*.txt")
+	f, err := os.CreateTemp("", "prompt-edit-*.txt")
 	if err != nil {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}

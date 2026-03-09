@@ -3,6 +3,7 @@ package productpolicy
 import (
 	"empireai/internal/events"
 	"empireai/internal/models"
+	"strings"
 )
 
 type Policy interface {
@@ -18,6 +19,8 @@ type Policy interface {
 	AllowGlobalManagement(actor models.AgentConfig) bool
 	AllowMailboxSend(actor models.AgentConfig) bool
 	ManagerFallbackAgentID(agent models.AgentConfig) string
+	WorkspaceClass(actor models.AgentConfig) string
+	DiagnosticWorkspaceClass(role string) string
 }
 
 var defaultPolicyFactory func() Policy
@@ -31,4 +34,12 @@ func DefaultOrNil() Policy {
 		return nil
 	}
 	return defaultPolicyFactory()
+}
+
+func ControlPlaneAgentID() string {
+	policy := DefaultOrNil()
+	if policy == nil {
+		return ""
+	}
+	return strings.TrimSpace(policy.ManagerFallbackAgentID(models.AgentConfig{}))
 }

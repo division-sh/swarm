@@ -33,7 +33,7 @@ func runDirectiveSubcommand(args []string) error {
 		return fmt.Errorf("usage: empire directive \"message\"  (or legacy: empire directive <target> \"message\")")
 	}
 
-	targetRaw := "empire-coordinator"
+	targetRaw := defaultControlPlaneAgentID()
 	msgArgs := fs.Args()
 	if len(msgArgs) >= 2 {
 		targetRaw = msgArgs[0]

@@ -22,7 +22,7 @@ func DefaultOpCoRoster(verticalID string) []PersistedAgent {
 			CoordinatorID:   OpCoAgentID("opco-ceo", verticalID),
 			Status:          "active",
 			HiredBy:         "agent-manager",
-			TemplateVersion: "2.1.0",
+			TemplateVersion: "2.2.1",
 		}
 	}
 
@@ -71,7 +71,6 @@ func DefaultOpCoRoutes(verticalID string) []PersistedRoutingRule {
 		}
 	}
 	return []PersistedRoutingRule{
-		bootstrap("spec.approved", cto),
 		bootstrap("product_spec_ready", cto),
 		bootstrap("cto.tech_spec_review_requested", OpCoAgentID("tech-writer", verticalID)),
 		bootstrap("technical_spec_ready", cto),

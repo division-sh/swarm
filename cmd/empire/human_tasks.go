@@ -225,7 +225,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				`,
 					uuid.NewString(),
 					strings.TrimSpace(tr.Vertical),
-					"empire-coordinator",
+					defaultControlPlaneAgentID(),
 					"human_task_requeue_escalation",
 					"critical",
 					string(b),

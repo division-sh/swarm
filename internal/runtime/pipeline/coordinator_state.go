@@ -24,6 +24,8 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 	}
 	workflowValidations := map[string]*validationPipelineState{}
 	workflowScoring := map[string]*scoringAccumulator{}
+	workflowScans := map[string]*scanAccumulator{}
+	workflowPending := map[string]pendingCandidate{}
 	workflowStages := map[string]string{}
 	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
 		if instances, err := pc.workflowStore.List(ctx); err == nil {
@@ -33,6 +35,12 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 				}
 				if acc, ok := restoreScoringAccumulatorFromInstance(instance); ok {
 					workflowScoring[strings.TrimSpace(instance.InstanceID)] = acc
+				}
+				if acc, pending, ok := restoreScanStateFromInstance(instance); ok {
+					workflowScans[strings.TrimSpace(acc.ScanID)] = acc
+					for dedupID, cand := range pending {
+						workflowPending[dedupID] = cand
+					}
 				}
 				if verticalID := strings.TrimSpace(instance.InstanceID); verticalID != "" {
 					workflowStages[verticalID] = strings.TrimSpace(instance.CurrentStage)
@@ -47,23 +55,15 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 		pc.mu.Unlock()
 		return
 	}
-	if len(snapshot.Scans) > 0 {
-		pc.scanCoordinator.scans = snapshot.Scans
-	}
+	pc.scanCoordinator.scans = mergeScanAccumulators(snapshot.Scans, workflowScans)
 	if pc.scoringState.accumulators == nil {
 		pc.scoringState.accumulators = make(map[string]*scoringAccumulator)
 	}
 	for verticalID, acc := range workflowScoring {
 		pc.scoringState.accumulators[verticalID] = acc
 	}
-	if len(snapshot.PendingDedup) > 0 {
-		pc.scanCoordinator.pendingDedup = snapshot.PendingDedup
-	}
-	if len(workflowValidations) > 0 {
-		pc.validationGate.states = workflowValidations
-	} else if len(snapshot.Validations) > 0 {
-		pc.validationGate.states = snapshot.Validations
-	}
+	pc.scanCoordinator.pendingDedup = mergePendingCandidates(snapshot.PendingDedup, workflowPending)
+	pc.validationGate.states = mergeValidationStates(snapshot.Validations, workflowValidations)
 	if len(snapshot.Processed) > 0 {
 		pc.processed = snapshot.Processed
 	}
@@ -86,6 +86,72 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 		}
 		pc.updateVerticalStage(ctx, verticalID, pc.validationGate.stageForState(st), "")
 	}
+}
+
+func mergeScanAccumulators(base, override map[string]*scanAccumulator) map[string]*scanAccumulator {
+	if len(base) == 0 && len(override) == 0 {
+		return map[string]*scanAccumulator{}
+	}
+	out := make(map[string]*scanAccumulator, len(base)+len(override))
+	for scanID, acc := range base {
+		if acc == nil {
+			continue
+		}
+		out[scanID] = cloneScanAccumulator(acc)
+	}
+	for scanID, acc := range override {
+		if acc == nil {
+			continue
+		}
+		out[scanID] = cloneScanAccumulator(acc)
+	}
+	return out
+}
+
+func mergePendingCandidates(base, override map[string]pendingCandidate) map[string]pendingCandidate {
+	if len(base) == 0 && len(override) == 0 {
+		return map[string]pendingCandidate{}
+	}
+	out := make(map[string]pendingCandidate, len(base)+len(override))
+	for dedupID, cand := range base {
+		out[dedupID] = cand
+	}
+	for dedupID, cand := range override {
+		out[dedupID] = cand
+	}
+	return out
+}
+
+func mergeValidationStates(base, override map[string]*validationPipelineState) map[string]*validationPipelineState {
+	if len(base) == 0 && len(override) == 0 {
+		return map[string]*validationPipelineState{}
+	}
+	out := make(map[string]*validationPipelineState, len(base)+len(override))
+	for verticalID, st := range base {
+		if st == nil {
+			continue
+		}
+		copied := *st
+		copied.ResearchPayload = cloneRaw(st.ResearchPayload)
+		copied.SpecPayload = cloneRaw(st.SpecPayload)
+		copied.CTOPayload = cloneRaw(st.CTOPayload)
+		copied.BrandPayload = cloneRaw(st.BrandPayload)
+		copied.ScoringPayload = cloneRaw(st.ScoringPayload)
+		out[verticalID] = &copied
+	}
+	for verticalID, st := range override {
+		if st == nil {
+			continue
+		}
+		copied := *st
+		copied.ResearchPayload = cloneRaw(st.ResearchPayload)
+		copied.SpecPayload = cloneRaw(st.SpecPayload)
+		copied.CTOPayload = cloneRaw(st.CTOPayload)
+		copied.BrandPayload = cloneRaw(st.BrandPayload)
+		copied.ScoringPayload = cloneRaw(st.ScoringPayload)
+		out[verticalID] = &copied
+	}
+	return out
 }
 
 func (pc *FactoryPipelineCoordinator) markEventProcessed(ctx context.Context, eventID string) bool {
@@ -117,6 +183,7 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 	validations := pc.validationGate.states
 	defer pc.mu.Unlock()
 	pc.stateStore.Persist(ctx, scans, pending, validations)
+	pc.persistWorkflowScanProjection(ctx, scans, pending)
 }
 
 func (pc *FactoryPipelineCoordinator) clearPersistentState(ctx context.Context) {

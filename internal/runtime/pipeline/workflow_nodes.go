@@ -39,9 +39,13 @@ func DefaultPipelineWorkflowNodes() []WorkflowNode {
 }
 
 func defaultPipelineSubscriptions() []events.EventType {
+	return workflowSubscriptions(DefaultPipelineWorkflowNodes())
+}
+
+func workflowSubscriptions(nodes []WorkflowNode) []events.EventType {
 	seen := make(map[events.EventType]struct{})
 	out := make([]events.EventType, 0, 32)
-	for _, node := range DefaultPipelineWorkflowNodes() {
+	for _, node := range nodes {
 		for _, evt := range node.Subscriptions {
 			if _, ok := seen[evt]; ok {
 				continue
@@ -90,10 +94,7 @@ func LoadWorkflowNodes(bundle *runtimecontracts.WorkflowContractBundle) ([]Workf
 	}
 	path := bundle.Paths.SystemNodesFile
 
-	// Current runtime execution still groups scan/discovery and validation-gate
-	// behavior under the pipeline-coordinator implementation, while scoring is a
-	// separate workflow node. Consume/visibility semantics remain runtime policy.
-	wantIDs := []string{"pipeline-coordinator", "scoring-node"}
+	wantIDs := workflowRuntimeNodeIDs(bundle)
 	out := make([]WorkflowNode, 0, len(wantIDs))
 	for _, nodeID := range wantIDs {
 		entry, ok := bundle.Nodes[nodeID]
@@ -132,8 +133,60 @@ func LoadWorkflowNodes(bundle *runtimecontracts.WorkflowContractBundle) ([]Workf
 	return out, nil
 }
 
+func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []string {
+	if bundle == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, len(bundle.Nodes))
+	for _, transition := range bundle.Workflow.Workflow.Transitions {
+		nodeID := strings.TrimSpace(transition.Node)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := bundle.Nodes[nodeID]; !ok {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		out = append(out, nodeID)
+	}
+	for _, entry := range bundle.Events {
+		nodeID := strings.TrimSpace(entry.OwningNode)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := bundle.Nodes[nodeID]; !ok {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		out = append(out, nodeID)
+	}
+	for nodeID, node := range bundle.Nodes {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		if len(node.SubscribesTo) == 0 && len(node.OwnedTransitions) == 0 && len(node.Timers) == 0 {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		out = append(out, nodeID)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func buildWorkflowNodePolicies(bundle *runtimecontracts.WorkflowContractBundle, nodeID string, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
-	allowed := workflowNodeRuntimePolicyEvents(strings.TrimSpace(nodeID))
+	allowed := workflowNodeRuntimePolicyEvents(bundle, strings.TrimSpace(nodeID), subscriptions)
 	if len(allowed) == 0 {
 		return nil
 	}
@@ -162,55 +215,40 @@ func buildWorkflowNodePolicies(bundle *runtimecontracts.WorkflowContractBundle, 
 	return policies
 }
 
-func workflowNodeRuntimePolicyEvents(nodeID string) map[string]struct{} {
-	switch strings.TrimSpace(nodeID) {
-	case "pipeline-coordinator":
-		return map[string]struct{}{
-			"timer.portfolio_digest":            {},
-			"runtime.reset":                     {},
-			"scan.requested":                    {},
-			"category.assessed":                 {},
-			"trend.identified":                  {},
-			"source.scraped":                    {},
-			"market_research.scan_complete":     {},
-			"trend_research.scan_complete":      {},
-			"scanner.google_maps.scan_complete": {},
-			"scanner.instagram.scan_complete":   {},
-			"scanner.reviews.scan_complete":     {},
-			"scanner.directories.scan_complete": {},
-			"scanner.yelp.scan_complete":        {},
-			"dedup.resolved":                    {},
-			"synthesis.resolved":                {},
-			"vertical.shortlisted":              {},
-			"research.completed":                {},
-			"research.vertical_rejected":        {},
-			"spec.revision_requested":           {},
-			"spec.approved":                     {},
-			"spec.validation_passed":            {},
-			"spec.validation_failed":            {},
-			"cto.spec_approved":                 {},
-			"cto.spec_revision_needed":          {},
-			"cto.spec_vetoed":                   {},
-			"brand.candidates_ready":            {},
-			"vertical.ready_for_review":         {},
-			"vertical.needs_more_data":          {},
-			"brand.revision_needed":             {},
-			"vertical.approved":                 {},
-			"vertical.killed":                   {},
-			"vertical.resumed":                  {},
-			"opco.ceo_ready":                    {},
-		}
-	case "scoring-node":
-		return map[string]struct{}{
-			"vertical.discovered":      {},
-			"vertical.derived":         {},
-			"score.dimension_complete": {},
-			"scoring.contest_resolved": {},
-			"vertical.scored":          {},
-		}
-	default:
+func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBundle, nodeID string, subscriptions []events.EventType) map[string]struct{} {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" || bundle == nil {
 		return nil
 	}
+	out := make(map[string]struct{}, len(subscriptions)+8)
+	for _, evt := range subscriptions {
+		name := strings.TrimSpace(string(evt))
+		if name != "" {
+			out[name] = struct{}{}
+		}
+	}
+	for eventType, entry := range bundle.Events {
+		if strings.TrimSpace(entry.OwningNode) != nodeID {
+			continue
+		}
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	for _, transition := range bundle.Workflow.Workflow.Transitions {
+		if strings.TrimSpace(transition.Node) != nodeID {
+			continue
+		}
+		trigger := strings.TrimSpace(transition.Trigger)
+		if trigger != "" {
+			out[trigger] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventPolicy, bool) {
@@ -233,6 +271,11 @@ func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventP
 		case "vertical.derived":
 			return WorkflowEventPolicy{Consume: true}, true
 		case "score.dimension_complete", "scoring.contest_resolved":
+			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
+		}
+	case "validation-orchestrator":
+		switch strings.TrimSpace(eventType) {
+		case "spec.validation_passed", "spec.validation_failed":
 			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
 		}
 	}
@@ -276,6 +319,10 @@ func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (cons
 	switch strings.TrimSpace(entry.RuntimeHandling) {
 	case "consuming":
 		return true, false
+	case "dual_delivery":
+		return false, true
+	case "passthrough":
+		return false, true
 	case "projection", "stage_projection":
 		return false, true
 	}

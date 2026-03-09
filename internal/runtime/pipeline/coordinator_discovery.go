@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"log"
 	"regexp"
 	"strings"
-	"time"
 
 	"empireai/internal/events"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
@@ -15,48 +13,8 @@ import (
 )
 
 func (sc *ScanCoordinator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
-	payload := parsePayloadMap(evt.Payload)
-	scanID := strings.TrimSpace(asString(payload["scan_id"]))
-	if scanID == "" {
-		runtimeWarn(
-			"pipeline-coordinator",
-			"dropping discovery report missing scan_id event_id=%s type=%s source=%s",
-			strings.TrimSpace(evt.ID),
-			strings.TrimSpace(string(evt.Type)),
-			strings.TrimSpace(evt.SourceAgent),
-		)
-		return
-	}
-
-	sc.mu.Lock()
-	acc := sc.scans[scanID]
-	if acc == nil {
-		acc = &scanAccumulator{
-			ScanID:      scanID,
-			Mode:        normalizeScanMode(asString(payload["mode"])),
-			Geography:   strings.TrimSpace(asString(payload["geography"])),
-			Expected:    1,
-			CompletedBy: make(map[string]struct{}),
-			ReportData:  make([]map[string]any, 0),
-			CreatedAt:   time.Now(),
-		}
-		if acc.Mode == "" {
-			acc.Mode = "saas_gap"
-		}
-		sc.scans[scanID] = acc
-	}
-	acc.ReportData = append(acc.ReportData, cloneMap(payload))
-	acc.Reports++
-	sc.mu.Unlock()
-
-	if payloadIndicatesSynthesisNeeded(payload) {
-		sc.runtime.publish(ctx, "synthesis.needed", "", payloadMap(sc.payloadFactory.BuildSynthesisNeededPayload(scanID, acc, payload)))
-		return
-	}
-
-	candidates := buildDiscoveryCandidatesForReport(acc.Mode, payload)
-	for _, cand := range candidates {
-		sc.processDiscoveryCandidate(ctx, evt, scanID, acc, cand)
+	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
+		(&DiscoveryAggregator{coordinator: pc}).handleDiscoveryReport(ctx, evt)
 	}
 }
 
@@ -148,132 +106,46 @@ func CloneMapForTest(in map[string]any) map[string]any {
 	return cloneMap(in)
 }
 
-func (sc *ScanCoordinator) processDiscoveryCandidate(
-	ctx context.Context,
-	evt events.Event,
-	scanID string,
-	acc *scanAccumulator,
-	candidate discoveryCandidate,
-) {
-	signal := candidate.Signal
-	allowed, adjustedSignal, reason := sc.discovery.EvaluateDiscoveryPreFilter(candidate.Payload, signal)
-	if !allowed {
-		sc.runtime.logPrefilterSkip(ctx, evt, scanID, acc.CampaignID, reason, candidate.Mode, candidate.Payload, signal, adjustedSignal)
-		sc.mu.Lock()
-		acc.Skipped++
-		sc.mu.Unlock()
-		return
+func (sc *ScanCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
+	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
+		(&DiscoveryAggregator{coordinator: pc}).handleDedupResolved(ctx, evt)
 	}
-	signal = adjustedSignal
-	candidate.Payload["signal_strength"] = adjustedSignal
-
-	payload := candidate.Payload
-	name := deriveDiscoveryCandidateName(payload)
-	if name == "" {
-		runtimeWarn(
-			"pipeline-coordinator",
-			"skipping discovery candidate with missing name scan_id=%s event_id=%s source=%s mode=%s",
-			scanID,
-			strings.TrimSpace(evt.ID),
-			strings.TrimSpace(evt.SourceAgent),
-			candidate.Mode,
-		)
-		sc.mu.Lock()
-		acc.Skipped++
-		sc.mu.Unlock()
-		return
-	}
-
-	geography := strings.TrimSpace(firstNonEmptyString(asString(payload["geography"]), acc.Geography))
-	if geography == "" {
-		geography = "unknown"
-	}
-
-	existing, err := sc.runtime.loadVerticalsByGeography(ctx, geography)
-	if err != nil {
-		log.Printf("pipeline: dedup lookup failed scan=%s geo=%s err=%v", scanID, geography, err)
-		existing = nil
-	}
-	for _, v := range existing {
-		if normalizeName(v.Name) == normalizeName(name) {
-			sc.mu.Lock()
-			acc.Skipped++
-			sc.mu.Unlock()
-			return
-		}
-	}
-
-	if best, score := fuzzyBestMatch(name, existing); best.ID != "" && score >= 0.70 {
-		dedupEventID := uuid.NewString()
-		cand := pendingCandidate{
-			DedupEventID: dedupEventID,
-			ExistingID:   strings.TrimSpace(best.ID),
-			ScanID:       scanID,
-			CampaignID:   acc.CampaignID,
-			Mode:         candidate.Mode,
-			Geography:    geography,
-			Name:         name,
-			Signal:       signal,
-			Payload:      payload,
-		}
-		sc.mu.Lock()
-		sc.pendingDedup[dedupEventID] = cand
-		sc.mu.Unlock()
-		sc.runtime.publish(ctx, "dedup.ambiguous", "", payloadMap(sc.payloadFactory.BuildDedupAmbiguousPayload(scanID, dedupEventID, score, name, geography, signal, best.ID, best.Name)))
-		return
-	}
-
-	verticalID, err := sc.runtime.ensureVerticalDiscovered(ctx, name, geography, candidate.Mode, payload)
-	if err != nil {
-		log.Printf("pipeline: ensure discovered vertical failed name=%s geo=%s mode=%s err=%v", name, geography, candidate.Mode, err)
-		return
-	}
-	sc.mu.Lock()
-	acc.Discovered++
-	sc.mu.Unlock()
-	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(verticalID, name, geography, candidate.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload))
-	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
 }
 
-func (sc *ScanCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
-	payload := parsePayloadMap(evt.Payload)
-	dedupEventID := strings.TrimSpace(asString(payload["dedup_event_id"]))
-	if dedupEventID == "" {
+func (sc *ScanCoordinator) handleSynthesisResolved(ctx context.Context, evt events.Event) {
+	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
+		(&DiscoveryAggregator{coordinator: pc}).handleSynthesisResolved(ctx, evt)
+	}
+}
+
+func (sc *ScanCoordinator) ensureScanProjectionLoaded(ctx context.Context, scanID string) {
+	if sc == nil || sc.runtime == nil {
 		return
 	}
-
+	scanID = strings.TrimSpace(scanID)
+	if scanID == "" {
+		return
+	}
 	sc.mu.Lock()
-	cand, ok := sc.pendingDedup[dedupEventID]
-	if ok {
-		delete(sc.pendingDedup, dedupEventID)
-	}
+	_, hasScan := sc.scans[scanID]
 	sc.mu.Unlock()
-	if !ok {
+	if hasScan {
 		return
 	}
-
-	action := strings.ToLower(strings.TrimSpace(asString(payload["action"])))
-	if action == "merge" {
-		sc.mu.Lock()
-		if acc := sc.scans[cand.ScanID]; acc != nil {
-			acc.Skipped++
+	acc, pending, ok := sc.runtime.loadWorkflowScanProjection(ctx, scanID)
+	if !ok || acc == nil {
+		return
+	}
+	sc.mu.Lock()
+	if _, exists := sc.scans[scanID]; !exists {
+		sc.scans[scanID] = acc
+	}
+	for dedupID, cand := range pending {
+		if _, exists := sc.pendingDedup[dedupID]; !exists {
+			sc.pendingDedup[dedupID] = cand
 		}
-		sc.mu.Unlock()
-		return
-	}
-
-	verticalID, err := sc.runtime.ensureVerticalDiscovered(ctx, cand.Name, cand.Geography, cand.Mode, cand.Payload)
-	if err != nil {
-		log.Printf("pipeline: dedup keep_both insert failed err=%v", err)
-		return
-	}
-	sc.mu.Lock()
-	if acc := sc.scans[cand.ScanID]; acc != nil {
-		acc.Discovered++
 	}
 	sc.mu.Unlock()
-	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "pipeline-coordinator", cand.Payload))
-	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
 }
 
 func (sc *ScanCoordinator) pendingDedupCountForScan(scanID string) int {

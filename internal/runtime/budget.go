@@ -13,6 +13,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -53,12 +54,13 @@ type BudgetTracker struct {
 }
 
 func NewBudgetTracker(db *sql.DB, bus *EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence) *BudgetTracker {
+	mailboxFrom := runtimeproductpolicy.ControlPlaneAgentID()
 	return &BudgetTracker{
 		db:          db,
 		bus:         bus,
 		cfg:         cfg,
 		mailbox:     mailbox,
-		mailboxFrom: "empire-coordinator",
+		mailboxFrom: mailboxFrom,
 		lastState:   make(map[string]string),
 	}
 }

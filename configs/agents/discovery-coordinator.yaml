@@ -7,7 +7,6 @@ subscriptions:
   - synthesis.needed
 tools:
   - agent_message
-  - sql_execute
 constraints:
   max_turns_per_task: 10
   conversation_mode: task

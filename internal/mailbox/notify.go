@@ -115,7 +115,7 @@ func (n *TelegramNotifier) NotifyCritical(ctx context.Context, item runtimetools
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
 	text := fmt.Sprintf(
-		"[EmpireAI] CRITICAL mailbox item\nid=%s\nvertical=%s\ntype=%s\nfrom=%s\nsummary=%s",
+		"[Portfolio] CRITICAL mailbox item\nid=%s\nvertical=%s\ntype=%s\nfrom=%s\nsummary=%s",
 		item.ID,
 		item.VerticalID,
 		item.Type,
@@ -205,7 +205,7 @@ func (n *EmailNotifier) NotifyCritical(ctx context.Context, item runtimetools.Ma
 	if strings.TrimSpace(n.SMTPAddr) == "" || strings.TrimSpace(n.From) == "" || len(n.To) == 0 {
 		return fmt.Errorf("smtp addr, from, and to are required")
 	}
-	subject := fmt.Sprintf("EmpireAI critical mailbox item [%s]", item.Type)
+	subject := fmt.Sprintf("Critical mailbox item [%s]", item.Type)
 	body := fmt.Sprintf(
 		"Critical mailbox item\n\nid: %s\nvertical: %s\ntype: %s\nfrom: %s\nsummary: %s\n",
 		item.ID, item.VerticalID, item.Type, item.FromAgent, strings.TrimSpace(item.Summary),

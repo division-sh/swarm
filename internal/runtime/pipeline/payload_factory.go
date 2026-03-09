@@ -26,9 +26,16 @@ func (pf *PipelinePayloadFactory) ValidationContext(verticalID string) validatio
 			Scoring:  map[string]any{},
 		}
 	}
-	pf.coordinator.mu.Lock()
-	defer pf.coordinator.mu.Unlock()
-	st := pf.coordinator.validationGate.getStateLocked(verticalID)
+	st := pf.coordinator.validationStateSnapshot(verticalID)
+	if st == nil {
+		return validationContextSnapshot{
+			Research: map[string]any{},
+			Spec:     map[string]any{},
+			CTONotes: map[string]any{},
+			Brand:    map[string]any{},
+			Scoring:  map[string]any{},
+		}
+	}
 	return validationContextSnapshot{
 		Research:    parsePayloadMap(st.ResearchPayload),
 		Spec:        parsePayloadMap(st.SpecPayload),

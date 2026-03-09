@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"empireai/internal/models"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 type Target struct {
@@ -231,9 +232,8 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 }
 
 func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error) {
-	role := strings.TrimSpace(strings.ToLower(actor.Role))
-	switch role {
-	case "factory-cto":
+	switch workspaceClass(actor) {
+	case "factory":
 		if err := m.EnsureContainerRunning(ctx, m.cfg.FactoryContainer, []string{
 			"-v", fmt.Sprintf("%s:%s", m.cfg.FactoryVolume, m.cfg.FactoryWorkdir),
 			"-w", m.cfg.FactoryWorkdir,
@@ -246,7 +246,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Container: m.cfg.FactoryContainer,
 			Workdir:   m.cfg.FactoryWorkdir,
 		}, nil
-	case "holding-devops":
+	case "infra":
 		if err := m.EnsureContainerRunning(ctx, m.cfg.InfraContainer, []string{
 			"--privileged",
 			"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraVerticalsVolume),
@@ -261,33 +261,6 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		return &Target{
 			Container: m.cfg.InfraContainer,
 			Workdir:   m.cfg.InfraWorkdir,
-		}, nil
-	case "empire-coordinator",
-		"operations-analyst",
-		"scanner-agent",
-		"analysis-agent",
-		"validation-coordinator",
-		"pre-brand-agent",
-		"business-research-agent",
-		"lightweight-spec-agent",
-		"spec-reviewer",
-		"market-research-agent",
-		"trend-research-agent",
-		"spec-auditor",
-		"discovery-coordinator":
-		// Global agents still need a workspace with the Claude/Codex CLIs available.
-		// For now we colocate them in the non-privileged factory workspace.
-		if err := m.EnsureContainerRunning(ctx, m.cfg.FactoryContainer, []string{
-			"-v", fmt.Sprintf("%s:%s", m.cfg.FactoryVolume, m.cfg.FactoryWorkdir),
-			"-w", m.cfg.FactoryWorkdir,
-			m.cfg.WorkspaceImage,
-			"sleep", "infinity",
-		}); err != nil {
-			return nil, err
-		}
-		return &Target{
-			Container: m.cfg.FactoryContainer,
-			Workdir:   m.cfg.FactoryWorkdir,
 		}, nil
 	}
 
@@ -305,6 +278,13 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		Container: m.VerticalContainerName(slug),
 		Workdir:   m.cfg.VerticalWorkdir,
 	}, nil
+}
+
+func workspaceClass(actor models.AgentConfig) string {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		return strings.TrimSpace(policy.WorkspaceClass(actor))
+	}
+	return ""
 }
 
 func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string, createArgs []string) error {

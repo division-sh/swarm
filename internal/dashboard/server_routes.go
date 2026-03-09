@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"empireai/internal/protocolheaders"
 )
 
 func (s *Server) Handler() http.Handler {
@@ -92,7 +94,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 				writeErr(w, http.StatusInternalServerError, fmt.Errorf("EMPIREAI_API_KEY is not set"))
 				return
 			}
-			supplied := strings.TrimSpace(r.Header.Get("X-Empire-Key"))
+			supplied := strings.TrimSpace(r.Header.Get(protocolheaders.APIKeyHeader))
 			if supplied == "" {
 				// SSE EventSource can't set headers; allow query param fallback.
 				supplied = strings.TrimSpace(r.URL.Query().Get("key"))

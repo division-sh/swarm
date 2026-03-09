@@ -429,9 +429,7 @@ func (pc *FactoryPipelineCoordinator) interceptStateDropReason(eventType string,
 		return ""
 	}
 
-	pc.mu.Lock()
-	st := pc.validationGate.states[verticalID]
-	pc.mu.Unlock()
+	st := pc.validationStateSnapshot(verticalID)
 
 	switch eventType {
 	case "vertical.shortlisted":
@@ -477,7 +475,7 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 }
 
 func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
-	return pc.bus.Subscribe("pipeline-coordinator", defaultPipelineSubscriptions()...)
+	return pc.bus.Subscribe("pipeline-coordinator", workflowSubscriptions(pc.WorkflowNodes())...)
 }
 
 func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) {
@@ -490,8 +488,10 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 
 	switch string(evt.Type) {
 	case "runtime.reset":
-		pc.resetInMemoryState()
-		pc.clearPersistentState(ctx)
+		if pc.dispatchWorkflowNodeEvent(ctx, evt) {
+			return
+		}
+		pc.handleRuntimeReset(ctx, evt)
 		return
 	default:
 		_ = pc.dispatchWorkflowNodeEvent(ctx, evt)

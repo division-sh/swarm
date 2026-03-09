@@ -173,8 +173,8 @@ func TestEnsureRecurringWorkflowSchedules_UsesRecurringTimersFromContracts(t *te
 		t.Fatalf("expected 1 recurring workflow schedule, got %d", len(store.upserts))
 	}
 	got := store.upserts[0]
-	if got.AgentID != "empire-coordinator" {
-		t.Fatalf("expected contract owner empire-coordinator, got %q", got.AgentID)
+	if got.AgentID != "lifecycle-orchestrator" {
+		t.Fatalf("expected contract owner lifecycle-orchestrator, got %q", got.AgentID)
 	}
 	if got.EventType != "timer.portfolio_digest" {
 		t.Fatalf("expected timer.portfolio_digest schedule, got %q", got.EventType)

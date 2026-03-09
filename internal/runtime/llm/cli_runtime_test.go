@@ -179,9 +179,9 @@ func TestBuildMCPConfigArg_IncludesScopedHeaders(t *testing.T) {
 		t.Fatalf("unmarshal mcp config: %v", err)
 	}
 	servers, _ := cfgObj["mcpServers"].(map[string]any)
-	srvAny, ok := servers["empire-runtime"]
+	srvAny, ok := servers["runtime-tools"]
 	if !ok {
-		t.Fatalf("missing empire-runtime server in config: %#v", cfgObj)
+		t.Fatalf("missing runtime-tools server in config: %#v", cfgObj)
 	}
 	srv, _ := srvAny.(map[string]any)
 	if srv["type"] != "http" {

@@ -24,6 +24,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/factory"
 	"empireai/internal/mailbox"
+	"empireai/internal/protocolheaders"
 	"empireai/internal/runtime"
 	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
@@ -464,7 +465,7 @@ func dispatchSystemDirectiveViaDashboard(ctx context.Context, target targetAgent
 		return "", true, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Empire-Key", apiKey)
+	req.Header.Set(protocolheaders.APIKeyHeader, apiKey)
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

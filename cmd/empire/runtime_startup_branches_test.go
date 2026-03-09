@@ -116,7 +116,7 @@ func TestRunRuntime_StartupSchedulesEnsureAfterGlobalAgentSync(t *testing.T) {
 	if err := stores.SQLDB.QueryRowContext(ctx, `
 		SELECT count(*)
 		FROM schedules
-		WHERE agent_id = 'empire-coordinator'
+		WHERE agent_id = 'lifecycle-orchestrator'
 		  AND event_type = 'timer.portfolio_digest'
 		  AND active = true
 	`).Scan(&digestCount); err != nil {

@@ -3,8 +3,12 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx context.Context, acc *scoringAccumulator) {
@@ -16,11 +20,13 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx cont
 		return
 	}
 	encoded := encodeScoringAccumulator(acc)
+	encodedNode := encodeScoringAccumulatorForWorkflow(pc.ContractBundle(), acc)
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		if instance.AccumulatorState == nil {
 			instance.AccumulatorState = map[string]any{}
 		}
 		instance.AccumulatorState["scoring-state"] = encoded
+		instance.AccumulatorState["scoring-node"] = encodedNode
 	})
 }
 
@@ -37,11 +43,133 @@ func (pc *FactoryPipelineCoordinator) clearWorkflowScoringAccumulator(ctx contex
 			return
 		}
 		delete(instance.AccumulatorState, "scoring-state")
+		delete(instance.AccumulatorState, "scoring-node")
 	})
+}
+
+func (pc *FactoryPipelineCoordinator) loadWorkflowScoringAccumulator(ctx context.Context, verticalID string) (*scoringAccumulator, bool) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil, false
+	}
+	verticalID = strings.TrimSpace(verticalID)
+	if verticalID == "" {
+		return nil, false
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
+	if err != nil || !ok {
+		return nil, false
+	}
+	return restoreScoringAccumulatorFromInstance(instance)
+}
+
+func (pc *FactoryPipelineCoordinator) scoringAccumulatorSnapshot(ctx context.Context, verticalID string) *scoringAccumulator {
+	if pc == nil {
+		return nil
+	}
+	verticalID = strings.TrimSpace(verticalID)
+	if verticalID == "" {
+		return nil
+	}
+	pc.mu.Lock()
+	acc := cloneScoringAccumulator(pc.scoringState.accumulators[verticalID])
+	pc.mu.Unlock()
+	if acc != nil {
+		return acc
+	}
+	if restored, ok := pc.loadWorkflowScoringAccumulator(ctx, verticalID); ok && restored != nil {
+		return restored
+	}
+	return nil
+}
+
+func (pc *FactoryPipelineCoordinator) persistWorkflowScanProjection(ctx context.Context, scans map[string]*scanAccumulator, pending map[string]pendingCandidate) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return
+	}
+	pendingByScan := map[string][]pendingCandidate{}
+	for _, cand := range pending {
+		scanID := strings.TrimSpace(cand.ScanID)
+		if scanID == "" {
+			continue
+		}
+		pendingByScan[scanID] = append(pendingByScan[scanID], cand)
+	}
+	for scanID, acc := range scans {
+		scanID = strings.TrimSpace(scanID)
+		if scanID == "" || acc == nil {
+			continue
+		}
+		encodedScan := encodeScanAccumulatorForWorkflow(pc.ContractBundle(), acc)
+		encodedPending := encodePendingCandidatesForWorkflow(pc.ContractBundle(), pendingByScan[scanID])
+		encodedDiscovery := encodeDiscoveryStateForWorkflow(pc.ContractBundle(), pendingByScan[scanID])
+		bundle := pc.ContractBundle()
+		_ = pc.workflowStore.Mutate(ctx, scanID, func(instance *WorkflowInstance) {
+			if strings.TrimSpace(instance.WorkflowName) == "" {
+				instance.WorkflowName = strings.TrimSpace(bundle.Workflow.Workflow.Name)
+			}
+			if strings.TrimSpace(instance.WorkflowVersion) == "" {
+				instance.WorkflowVersion = strings.TrimSpace(bundle.Workflow.Workflow.Version)
+			}
+			if strings.TrimSpace(instance.CurrentStage) == "" {
+				instance.CurrentStage = "scanning"
+			}
+			if instance.AccumulatorState == nil {
+				instance.AccumulatorState = map[string]any{}
+			}
+			instance.AccumulatorState["scan-state"] = encodedScan
+			instance.AccumulatorState["pending-dedup"] = encodedPending
+			instance.AccumulatorState["discovery-aggregator"] = encodedDiscovery
+			if instance.Metadata == nil {
+				instance.Metadata = map[string]any{}
+			}
+			instance.Metadata["instance_kind"] = "scan"
+		})
+	}
+	items, err := pc.workflowStore.List(ctx)
+	if err != nil {
+		return
+	}
+	for _, item := range items {
+		acc, _, ok := restoreScanStateFromInstance(item)
+		if !ok || acc == nil {
+			continue
+		}
+		if _, stillActive := scans[strings.TrimSpace(acc.ScanID)]; stillActive {
+			continue
+		}
+		_ = pc.workflowStore.Delete(ctx, item.InstanceID)
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) loadWorkflowScanProjection(ctx context.Context, scanID string) (*scanAccumulator, map[string]pendingCandidate, bool) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil, nil, false
+	}
+	scanID = strings.TrimSpace(scanID)
+	if scanID == "" {
+		return nil, nil, false
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, scanID)
+	if err != nil || !ok {
+		return nil, nil, false
+	}
+	return restoreScanStateFromInstance(instance)
 }
 
 func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationPipelineState, bool) {
 	metadata := cloneStringAnyMap(instance.Metadata)
+	if bucket, ok := asObject(instance.AccumulatorState["validation-orchestrator"]); ok {
+		if gateState, ok := asObject(bucket["gate_state"]); ok {
+			for _, gate := range []string{"g1_research", "g2_spec", "g3_cto", "g4_brand"} {
+				if _, exists := metadata[gate]; !exists {
+					metadata[gate] = gateState[gate]
+				}
+			}
+		}
+		if _, exists := metadata["revision_count"]; !exists {
+			metadata["revision_count"] = bucket["revision_count"]
+		}
+	}
 	bucket, ok := asObject(instance.AccumulatorState["pipeline-coordinator"])
 	if ok {
 		for key, value := range bucket {
@@ -91,9 +219,17 @@ func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationP
 }
 
 func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringAccumulator, bool) {
-	bucket, ok := asObject(instance.AccumulatorState["scoring-state"])
-	if !ok || len(bucket) == 0 {
+	nodeBucket, nodeOK := asObject(instance.AccumulatorState["scoring-node"])
+	compatBucket, compatOK := asObject(instance.AccumulatorState["scoring-state"])
+	if (!nodeOK || len(nodeBucket) == 0) && (!compatOK || len(compatBucket) == 0) {
 		return nil, false
+	}
+	bucket := map[string]any{}
+	for key, value := range compatBucket {
+		bucket[key] = value
+	}
+	for key, value := range nodeBucket {
+		bucket[key] = value
 	}
 	verticalID := strings.TrimSpace(firstNonEmptyString(asString(bucket["vertical_id"]), instance.InstanceID))
 	if verticalID == "" {
@@ -107,11 +243,11 @@ func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringA
 		Mode:             normalizeScanMode(asString(bucket["mode"])),
 		Rubric:           strings.TrimSpace(asString(bucket["rubric"])),
 		DiscoveryContext: cloneMapFromAny(bucket["discovery_context"]),
-		Expected:         stringSliceFromAny(bucket["expected"]),
-		Received:         decodeScoreDimensionResults(bucket["received"]),
+		Expected:         stringSliceFromAny(firstNonNil(bucket["dimensions_requested"], bucket["expected"])),
+		Received:         decodeScoreDimensionResults(firstNonNil(bucket["dimensions_received"], bucket["received"])),
 		Contested:        decodeContestedDimensions(bucket["contested"]),
-		RequestedAt:      parseWorkflowTime(bucket["requested_at"]),
-		LastUpdatedAt:    parseWorkflowTime(bucket["last_updated_at"]),
+		RequestedAt:      parseWorkflowTime(firstNonNil(bucket["started_at"], bucket["requested_at"])),
+		LastUpdatedAt:    parseWorkflowTime(firstNonNil(bucket["completed_at"], bucket["last_updated_at"])),
 		ContestNotified:  boolMapFromAny(bucket["contest_notified"]),
 	}
 	if acc.Mode == "" && acc.Rubric == "" && len(acc.Expected) == 0 && len(acc.Received) == 0 && len(acc.Contested) == 0 {
@@ -127,6 +263,54 @@ func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringA
 		acc.ContestNotified = map[string]bool{}
 	}
 	return acc, true
+}
+
+func restoreScanStateFromInstance(instance WorkflowInstance) (*scanAccumulator, map[string]pendingCandidate, bool) {
+	bucket, ok := asObject(instance.AccumulatorState["scan-state"])
+	if !ok || len(bucket) == 0 {
+		return nil, nil, false
+	}
+	scanID := strings.TrimSpace(firstNonEmptyString(asString(bucket["scan_id"]), instance.InstanceID))
+	if scanID == "" {
+		return nil, nil, false
+	}
+	acc := &scanAccumulator{
+		ScanID:      scanID,
+		CampaignID:  strings.TrimSpace(asString(bucket["campaign_id"])),
+		Mode:        normalizeScanMode(asString(bucket["mode"])),
+		Geography:   strings.TrimSpace(asString(bucket["geography"])),
+		Expected:    maxInt(asInt(bucket["expected"]), len(stringSliceFromAny(firstNonNil(bucket["expected_scanners"], bucket["expected"])))),
+		Reports:     asInt(bucket["reports"]),
+		Discovered:  asInt(bucket["discovered"]),
+		Skipped:     asInt(bucket["skipped"]),
+		CreatedAt:   parseWorkflowTime(firstNonNil(bucket["started_at"], bucket["created_at"])),
+		CompletedBy: map[string]struct{}{},
+		ReportData:  []map[string]any{},
+	}
+	for _, key := range stringSliceFromAny(firstNonNil(bucket["completed_scanners"], bucket["completed_by"])) {
+		acc.CompletedBy[strings.TrimSpace(key)] = struct{}{}
+	}
+	for _, item := range sliceOfMapsFromAny(bucket["report_data"]) {
+		acc.ReportData = append(acc.ReportData, item)
+	}
+	pending := map[string]pendingCandidate{}
+	for _, raw := range sliceOfMapsFromAny(instance.AccumulatorState["pending-dedup"]) {
+		cand := pendingCandidate{
+			DedupEventID: strings.TrimSpace(firstNonEmptyString(asString(raw["dedup_event_id"]), asString(raw["id"]))),
+			ExistingID:   strings.TrimSpace(firstNonEmptyString(asString(raw["existing_id"]), asString(raw["matched_vertical_id"]))),
+			ScanID:       strings.TrimSpace(firstNonEmptyString(asString(raw["scan_id"]), scanID)),
+			CampaignID:   strings.TrimSpace(asString(raw["campaign_id"])),
+			Mode:         normalizeScanMode(asString(raw["mode"])),
+			Geography:    strings.TrimSpace(asString(raw["geography"])),
+			Name:         strings.TrimSpace(firstNonEmptyString(asString(raw["name"]), asString(raw["opportunity_name"]))),
+			Signal:       asFloat(firstNonNil(raw["signal"], raw["signal_strength"])),
+			Payload:      cloneMapFromAny(firstNonNil(raw["payload"], raw["evidence"])),
+		}
+		if cand.DedupEventID != "" {
+			pending[cand.DedupEventID] = cand
+		}
+	}
+	return acc, pending, true
 }
 
 func encodeScoringAccumulator(acc *scoringAccumulator) map[string]any {
@@ -155,6 +339,243 @@ func encodeScoringAccumulator(acc *scoringAccumulator) map[string]any {
 	return out
 }
 
+func encodeScoringAccumulatorForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, acc *scoringAccumulator) map[string]any {
+	fields := workflowSystemNodeStateSchemaFields(bundle, ScoringNodeID)
+	if len(fields) == 0 || acc == nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	if _, ok := fields["vertical_id"]; ok {
+		out["vertical_id"] = strings.TrimSpace(acc.VerticalID)
+	}
+	if _, ok := fields["dimensions_requested"]; ok {
+		out["dimensions_requested"] = append([]string(nil), acc.Expected...)
+	}
+	if _, ok := fields["dimensions_received"]; ok {
+		out["dimensions_received"] = encodeScoreDimensionResults(acc.Received)
+	}
+	if _, ok := fields["analyst_id"]; ok {
+		out["analyst_id"] = strings.TrimSpace(asString(acc.DiscoveryContext["analyst_id"]))
+	}
+	if _, ok := fields["started_at"]; ok && !acc.RequestedAt.IsZero() {
+		out["started_at"] = acc.RequestedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if _, ok := fields["completed_at"]; ok && len(acc.Expected) > 0 && len(acc.Received) >= len(acc.Expected) && !acc.LastUpdatedAt.IsZero() {
+		out["completed_at"] = acc.LastUpdatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return out
+}
+
+func encodeScanAccumulator(acc *scanAccumulator) map[string]any {
+	if acc == nil {
+		return map[string]any{}
+	}
+	completedBy := make([]string, 0, len(acc.CompletedBy))
+	for key := range acc.CompletedBy {
+		completedBy = append(completedBy, strings.TrimSpace(key))
+	}
+	sort.Strings(completedBy)
+	reportData := make([]map[string]any, 0, len(acc.ReportData))
+	for _, item := range acc.ReportData {
+		reportData = append(reportData, cloneMap(item))
+	}
+	out := map[string]any{
+		"scan_id":      strings.TrimSpace(acc.ScanID),
+		"campaign_id":  strings.TrimSpace(acc.CampaignID),
+		"mode":         strings.TrimSpace(acc.Mode),
+		"geography":    strings.TrimSpace(acc.Geography),
+		"expected":     acc.Expected,
+		"reports":      acc.Reports,
+		"discovered":   acc.Discovered,
+		"skipped":      acc.Skipped,
+		"completed_by": completedBy,
+		"report_data":  reportData,
+	}
+	if !acc.CreatedAt.IsZero() {
+		out["created_at"] = acc.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return out
+}
+
+func encodeScanAccumulatorForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, acc *scanAccumulator) map[string]any {
+	out := encodeScanAccumulator(acc)
+	if acc == nil {
+		return out
+	}
+	stateFields := workflowSystemNodeStateSchemaFields(bundle, "scan-orchestrator")
+	if len(stateFields) == 0 {
+		return out
+	}
+	expectedScanners := scanExpectedDispatchKeys(bundle, acc)
+	completedScanners := make([]string, 0, len(acc.CompletedBy))
+	for key := range acc.CompletedBy {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			completedScanners = append(completedScanners, key)
+		}
+	}
+	sort.Strings(completedScanners)
+	projected := map[string]any{}
+	if _, ok := stateFields["scan_id"]; ok {
+		projected["scan_id"] = strings.TrimSpace(acc.ScanID)
+	}
+	if _, ok := stateFields["campaign_id"]; ok {
+		projected["campaign_id"] = strings.TrimSpace(acc.CampaignID)
+	}
+	if _, ok := stateFields["geography"]; ok {
+		projected["geography"] = strings.TrimSpace(acc.Geography)
+	}
+	if _, ok := stateFields["mode"]; ok {
+		projected["mode"] = strings.TrimSpace(acc.Mode)
+	}
+	if _, ok := stateFields["expected_scanners"]; ok {
+		projected["expected_scanners"] = expectedScanners
+	}
+	if _, ok := stateFields["completed_scanners"]; ok {
+		projected["completed_scanners"] = completedScanners
+	}
+	if _, ok := stateFields["started_at"]; ok && !acc.CreatedAt.IsZero() {
+		projected["started_at"] = acc.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if _, ok := stateFields["status"]; ok {
+		projected["status"] = scanProjectionStatus(acc, expectedScanners)
+	}
+	return projected
+}
+
+func scanExpectedDispatchKeys(bundle *runtimecontracts.WorkflowContractBundle, acc *scanAccumulator) []string {
+	if acc == nil {
+		return nil
+	}
+	expected := scanDispatchKeysForMode(bundle, acc.Mode)
+	if len(expected) >= maxInt(acc.Expected, 0) {
+		return expected
+	}
+	for idx := len(expected); idx < maxInt(acc.Expected, 0); idx++ {
+		expected = append(expected, "slot:"+strconv.Itoa(idx+1))
+	}
+	return expected
+}
+
+func scanDispatchKeysForMode(bundle *runtimecontracts.WorkflowContractBundle, mode string) []string {
+	if bundle == nil {
+		return nil
+	}
+	node, ok := bundle.Nodes["scan-orchestrator"]
+	if !ok {
+		return nil
+	}
+	handler, ok := node.EventHandlers["scan.requested"]
+	if !ok {
+		return nil
+	}
+	raw, ok := handler.ModeToScanners[normalizeScanMode(mode)]
+	if !ok {
+		return nil
+	}
+	return stringSliceFromAny(raw)
+}
+
+func scanProjectionStatus(acc *scanAccumulator, expectedScanners []string) string {
+	if acc == nil {
+		return ""
+	}
+	expected := maxInt(acc.Expected, len(expectedScanners))
+	if expected <= 0 {
+		expected = 1
+	}
+	if len(acc.CompletedBy) >= expected {
+		return "completed"
+	}
+	return "active"
+}
+
+func firstNonNil(vals ...any) any {
+	for _, v := range vals {
+		if v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func encodePendingCandidates(candidates []pendingCandidate) []map[string]any {
+	if len(candidates) == 0 {
+		return []map[string]any{}
+	}
+	out := make([]map[string]any, 0, len(candidates))
+	for _, cand := range candidates {
+		out = append(out, map[string]any{
+			"dedup_event_id": strings.TrimSpace(cand.DedupEventID),
+			"existing_id":    strings.TrimSpace(cand.ExistingID),
+			"scan_id":        strings.TrimSpace(cand.ScanID),
+			"campaign_id":    strings.TrimSpace(cand.CampaignID),
+			"mode":           strings.TrimSpace(cand.Mode),
+			"geography":      strings.TrimSpace(cand.Geography),
+			"name":           strings.TrimSpace(cand.Name),
+			"signal":         cand.Signal,
+			"payload":        cloneMap(cand.Payload),
+		})
+	}
+	return out
+}
+
+func encodePendingCandidatesForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, candidates []pendingCandidate) []map[string]any {
+	out := encodePendingCandidates(candidates)
+	fields := workflowSystemNodeStateSchemaFields(bundle, "discovery-aggregator")
+	if len(fields) == 0 {
+		return out
+	}
+	for idx := range out {
+		cand := candidates[idx]
+		item := out[idx]
+		if _, ok := fields["id"]; ok && strings.TrimSpace(asString(item["id"])) == "" {
+			item["id"] = strings.TrimSpace(cand.DedupEventID)
+		}
+		if _, ok := fields["opportunity_name"]; ok && strings.TrimSpace(asString(item["opportunity_name"])) == "" {
+			item["opportunity_name"] = strings.TrimSpace(cand.Name)
+		}
+		if _, ok := fields["signal_strength"]; ok {
+			item["signal_strength"] = cand.Signal
+		}
+		if _, ok := fields["evidence"]; ok && item["evidence"] == nil {
+			item["evidence"] = cloneMap(cand.Payload)
+		}
+		if _, ok := fields["status"]; ok && strings.TrimSpace(asString(item["status"])) == "" {
+			item["status"] = "pending"
+		}
+		if _, ok := fields["matched_vertical_id"]; ok && strings.TrimSpace(asString(item["matched_vertical_id"])) == "" {
+			item["matched_vertical_id"] = strings.TrimSpace(cand.ExistingID)
+		}
+		if _, ok := fields["created_at"]; ok && item["created_at"] == nil {
+			if createdAt := parseWorkflowTime(cand.Payload["created_at"]); !createdAt.IsZero() {
+				item["created_at"] = createdAt.UTC().Format(time.RFC3339Nano)
+			}
+		}
+		out[idx] = item
+	}
+	return out
+}
+
+func encodeDiscoveryStateForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, candidates []pendingCandidate) []map[string]any {
+	fields := workflowSystemNodeStateSchemaFields(bundle, "discovery-aggregator")
+	if len(fields) == 0 || len(candidates) == 0 {
+		return []map[string]any{}
+	}
+	withCompat := encodePendingCandidatesForWorkflow(bundle, candidates)
+	out := make([]map[string]any, 0, len(withCompat))
+	for _, item := range withCompat {
+		filtered := map[string]any{}
+		for key := range fields {
+			if value, ok := item[key]; ok {
+				filtered[key] = value
+			}
+		}
+		out = append(out, filtered)
+	}
+	return out
+}
+
 func cloneScoringAccumulator(acc *scoringAccumulator) *scoringAccumulator {
 	if acc == nil {
 		return nil
@@ -176,6 +597,37 @@ func cloneScoringAccumulator(acc *scoringAccumulator) *scoringAccumulator {
 	}
 	out.ContestNotified = cloneBoolMap(acc.ContestNotified)
 	return &out
+}
+
+func cloneScanAccumulator(acc *scanAccumulator) *scanAccumulator {
+	if acc == nil {
+		return nil
+	}
+	out := *acc
+	out.CompletedBy = map[string]struct{}{}
+	for key := range acc.CompletedBy {
+		out.CompletedBy[key] = struct{}{}
+	}
+	out.ReportData = make([]map[string]any, 0, len(acc.ReportData))
+	for _, item := range acc.ReportData {
+		out.ReportData = append(out.ReportData, cloneMap(item))
+	}
+	return &out
+}
+
+func sliceOfMapsFromAny(raw any) []map[string]any {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		m, ok := asObject(item)
+		if ok {
+			out = append(out, cloneMap(m))
+		}
+	}
+	return out
 }
 
 func assignJSONRaw(target *json.RawMessage, raw any) {

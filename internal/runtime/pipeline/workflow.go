@@ -35,15 +35,16 @@ type WorkflowState struct {
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool
 
 type WorkflowTransition struct {
-	Name     string           `json:"name"`
-	From     []PipelineStage  `json:"from"`
-	To       PipelineStage    `json:"to"`
-	Reason   string           `json:"reason,omitempty"`
-	Trigger  string           `json:"trigger,omitempty"`
-	Node     string           `json:"node,omitempty"`
-	GuardIDs []string         `json:"guard_ids,omitempty"`
-	Guard    WorkflowGuard    `json:"-"`
-	Actions  []WorkflowAction `json:"actions,omitempty"`
+	Name             string                                   `json:"name"`
+	From             []PipelineStage                          `json:"from"`
+	To               PipelineStage                            `json:"to"`
+	Reason           string                                   `json:"reason,omitempty"`
+	Trigger          string                                   `json:"trigger,omitempty"`
+	Node             string                                   `json:"node,omitempty"`
+	GuardIDs         []string                                 `json:"guard_ids,omitempty"`
+	Guard            WorkflowGuard                            `json:"-"`
+	Actions          []WorkflowAction                         `json:"actions,omitempty"`
+	DataAccumulation runtimecontracts.WorkflowDataAccumulation `json:"data_accumulation,omitempty"`
 }
 
 type WorkflowDefinition struct {
@@ -253,15 +254,16 @@ func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*W
 			guardIDs = append(guardIDs, guard)
 		}
 		transitions = append(transitions, WorkflowTransition{
-			Name:     id,
-			From:     workflowTransitionFromStages(transition.From),
-			To:       PipelineStage(to),
-			Reason:   strings.TrimSpace(transition.Trigger),
-			Trigger:  strings.TrimSpace(transition.Trigger),
-			Node:     strings.TrimSpace(transition.Node),
-			GuardIDs: guardIDs,
-			Guard:    alwaysWorkflowGuard,
-			Actions:  actions,
+			Name:             id,
+			From:             workflowTransitionFromStages(transition.From),
+			To:               PipelineStage(to),
+			Reason:           strings.TrimSpace(transition.Trigger),
+			Trigger:          strings.TrimSpace(transition.Trigger),
+			Node:             strings.TrimSpace(transition.Node),
+			GuardIDs:         guardIDs,
+			Guard:            alwaysWorkflowGuard,
+			Actions:          actions,
+			DataAccumulation: transition.DataAccumulation,
 		})
 	}
 	return NewWorkflowDefinition(name, stages, transitions), nil

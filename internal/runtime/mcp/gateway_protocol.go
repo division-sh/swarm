@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"empireai/internal/models"
+	"empireai/internal/protocolheaders"
 )
 
 type ToolGatewayRequest struct {
@@ -71,10 +72,10 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 		return models.AgentConfig{}, false
 	}
 	actor := models.AgentConfig{
-		ID:         FirstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")), strings.TrimSpace(r.URL.Query().Get("empire_agent_id"))),
-		Role:       FirstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Role")), strings.TrimSpace(r.URL.Query().Get("empire_agent_role"))),
-		VerticalID: FirstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")), strings.TrimSpace(r.URL.Query().Get("empire_vertical_id"))),
-		Mode:       FirstNonEmpty(strings.TrimSpace(r.Header.Get("X-Empire-Agent-Mode")), strings.TrimSpace(r.URL.Query().Get("empire_agent_mode"))),
+		ID:         FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorIDQuery))),
+		Role:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorRoleQuery))),
+		VerticalID: FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.VerticalIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.VerticalIDQuery))),
+		Mode:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorModeHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorModeQuery))),
 	}
 	if strings.TrimSpace(actor.ID) == "" {
 		return models.AgentConfig{}, false
@@ -102,18 +103,18 @@ func ParseToolListHeader(raw string) map[string]struct{} {
 }
 
 func ParseAllowedToolsFromRequest(r *http.Request) map[string]struct{} {
-	allowed := ParseToolListHeader(strings.TrimSpace(r.Header.Get("X-Empire-Allowed-Tools")))
+	allowed := ParseToolListHeader(strings.TrimSpace(r.Header.Get(protocolheaders.AllowedToolsHeader)))
 	if len(allowed) > 0 {
 		return allowed
 	}
-	return ParseToolListHeader(strings.TrimSpace(r.URL.Query().Get("empire_allowed_tools")))
+	return ParseToolListHeader(strings.TrimSpace(r.URL.Query().Get(protocolheaders.AllowedToolsQuery)))
 }
 
 func ContextTokenFromRequest(r *http.Request) string {
-	if token := strings.TrimSpace(r.Header.Get("X-Empire-Context-Token")); token != "" {
+	if token := strings.TrimSpace(r.Header.Get(protocolheaders.ContextTokenHeader)); token != "" {
 		return token
 	}
-	return strings.TrimSpace(r.URL.Query().Get("empire_ctx_token"))
+	return strings.TrimSpace(r.URL.Query().Get(protocolheaders.ContextTokenQuery))
 }
 
 func ToolResultText(v any) string {
@@ -136,9 +137,9 @@ func ToolResultText(v any) string {
 
 func TraceIDFromRequest(r *http.Request) string {
 	return FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get("X-Empire-Trace-Id")),
-		strings.TrimSpace(r.URL.Query().Get("empire_trace_id")),
-		strings.TrimSpace(r.URL.Query().Get("empire_ctx_token")),
+		strings.TrimSpace(r.Header.Get(protocolheaders.TraceIDHeader)),
+		strings.TrimSpace(r.URL.Query().Get(protocolheaders.TraceIDQuery)),
+		strings.TrimSpace(r.URL.Query().Get(protocolheaders.ContextTokenQuery)),
 	)
 }
 

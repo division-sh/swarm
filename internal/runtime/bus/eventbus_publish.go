@@ -356,7 +356,7 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 
 	// Human task events must always reach the requesting agent (even if operating
 	// and not subscribed) and should also be visible to subscribers like the
-	// Empire Coordinator. Treat them as global events, not OpCo-routed events.
+	// control-plane roles. Treat them as global events, not OpCo-routed events.
 	if strings.HasPrefix(string(evt.Type), "human_task.") {
 		recipients := eb.resolveSubscribedRecipients(string(evt.Type))
 		// Only outcome/decision events are forced to the requesting agent; the

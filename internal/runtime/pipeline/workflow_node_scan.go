@@ -16,6 +16,7 @@ type scanWorkflowRuntime interface {
 	shardTerminalProgress(context.Context, string) (int, int, int, bool)
 	loadVerticalsByGeography(context.Context, string) ([]verticalCandidate, error)
 	ensureVerticalDiscovered(context.Context, string, string, string, map[string]any) (string, error)
+	loadWorkflowScanProjection(context.Context, string) (*scanAccumulator, map[string]pendingCandidate, bool)
 }
 
 func (n *ScanCoordinator) NodeID() string { return "pipeline-coordinator" }
@@ -53,6 +54,10 @@ func (n *ScanCoordinator) Handle(ctx context.Context, evt events.Event) bool {
 	switch strings.TrimSpace(string(evt.Type)) {
 	case "timer.portfolio_digest":
 		n.runtime.handlePortfolioDigestTimer(ctx, evt)
+	case "timer.scan_timeout":
+		n.handleScanTimeout(ctx, evt)
+	case "timer.campaign_deadline":
+		n.handleCampaignDeadline(ctx, evt)
 	case "scan.requested":
 		n.handleScanRequested(ctx, evt)
 	case "category.assessed", "trend.identified", "source.scraped":
@@ -65,8 +70,7 @@ func (n *ScanCoordinator) Handle(ctx context.Context, evt events.Event) bool {
 	case "dedup.resolved":
 		n.handleDedupResolved(ctx, evt)
 	case "synthesis.resolved":
-		// synthesis is a pure judgment refinement; discovery accumulation
-		// already consumed raw reports and does not need additional state here.
+		n.handleSynthesisResolved(ctx, evt)
 	default:
 		return false
 	}

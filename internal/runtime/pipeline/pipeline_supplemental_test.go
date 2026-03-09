@@ -574,8 +574,8 @@ func TestFactoryPipelineCoordinator_InterceptPolicyAndRunMaintenance(t *testing.
 	if consume, handled := pc.interceptPolicy("scan.requested", events.Event{ID: uuid.NewString()}); !consume || !handled {
 		t.Fatalf("scan.requested should be intercepted and consumed; got consume=%v handled=%v", consume, handled)
 	}
-	if consume, handled := pc.interceptPolicy("vertical.shortlisted", events.Event{ID: uuid.NewString(), VerticalID: uuid.NewString()}); !consume || !handled {
-		t.Fatalf("vertical.shortlisted should be intercepted and consumed; got consume=%v handled=%v", consume, handled)
+	if consume, handled := pc.interceptPolicy("vertical.shortlisted", events.Event{ID: uuid.NewString(), VerticalID: uuid.NewString()}); !handled || consume {
+		t.Fatalf("vertical.shortlisted should be intercepted with downstream visibility; got consume=%v handled=%v", consume, handled)
 	}
 	if consume, handled := pc.interceptPolicy("spec.validation_passed", events.Event{ID: uuid.NewString()}); consume || handled {
 		t.Fatalf("spec.validation_passed without vertical should not be handled; got consume=%v handled=%v", consume, handled)

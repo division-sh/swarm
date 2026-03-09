@@ -1,13 +1,9 @@
 package pipeline
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
-	"encoding/json"
-	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -16,87 +12,8 @@ import (
 )
 
 func (sc *ScanCoordinator) handleScanRequested(ctx context.Context, evt events.Event) {
-	payload := parsePayloadMap(evt.Payload)
-	scanID := strings.TrimSpace(asString(payload["scan_id"]))
-	if scanID == "" {
-		scanID = evt.ID
-	}
-	mode := normalizeScanMode(asString(payload["mode"]))
-	if mode == "" {
-		mode = "saas_gap"
-	}
-	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
-	if campaignID == "" {
-		// v2.0.35 canonical schema requires non-null campaign_id in scan_accumulators.
-		// When legacy events omit campaign_id, use scan_id as a stable surrogate.
-		campaignID = scanID
-	}
-	geography := strings.TrimSpace(asString(payload["geography"]))
-	if geography == "" {
-		geography = strings.TrimSpace(asString(payload["geography_label"]))
-	}
-	if geography == "" {
-		geography = strings.TrimSpace(asString(payload["geography_id"]))
-	}
-
-	plannedShardCount := sc.runtime.planAndPersistShards(ctx, evt, scanID, mode, payload)
-
-	acc := &scanAccumulator{
-		ScanID:      scanID,
-		CampaignID:  campaignID,
-		Mode:        mode,
-		Geography:   geography,
-		Expected:    expectedAgents(mode),
-		CompletedBy: make(map[string]struct{}),
-		ReportData:  make([]map[string]any, 0),
-		CreatedAt:   time.Now(),
-	}
-	if plannedShardCount > 0 {
-		acc.Expected = plannedShardCount
-	}
-	sc.mu.Lock()
-	sc.scans[scanID] = acc
-	sc.mu.Unlock()
-
-	assigned := sc.payloadFactory.BuildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
-	if plannedShardCount > 0 && (mode == "saas_gap" || mode == "saas_trend") {
-		// Assignment dispatch is owned by the shard dispatcher loop.
-		return
-	}
-
-	switch mode {
-	case "saas_gap":
-		sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
-	case "saas_trend":
-		sc.runtime.publish(ctx, "trend_research.scan_assigned", "", payloadMap(assigned))
-	case "corpus":
-		corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
-		assigned.CorpusPath = corpusPath
-		batches, err := readJSONLFile(corpusPath, corpusBatchSize)
-		if err != nil {
-			runtimeWarn("pipeline-coordinator", "corpus mode read failed path=%q err=%v", corpusPath, err)
-			assigned.CorpusSignals = []map[string]any{}
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
-			return
-		}
-		if len(batches) == 0 {
-			assigned.CorpusSignals = []map[string]any{}
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
-			return
-		}
-		for _, batch := range batches {
-			perBatch := assigned
-			perBatch.CorpusSignals = batch
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(perBatch))
-		}
-	case "local_services":
-		sc.runtime.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(assigned))
-	default:
-		sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
+		(&ScanOrchestrator{coordinator: pc.scanCoordinator}).handleScanRequested(ctx, evt)
 	}
 }
 
@@ -239,122 +156,23 @@ func stableUUID(raw string) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(raw))
 }
 
-func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("corpus_path is required for corpus mode")
+func (sc *ScanCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
+	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
+		(&ScanOrchestrator{coordinator: pc.scanCoordinator}).handleScanCompletion(ctx, evt)
 	}
-	if batchSize <= 0 {
-		batchSize = corpusBatchSize
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	out := make([][]map[string]any, 0, 8)
-	current := make([]map[string]any, 0, batchSize)
-	sc := bufio.NewScanner(f)
-	// Allow reasonably large lines for corpus entries.
-	buf := make([]byte, 0, 64*1024)
-	sc.Buffer(buf, 2*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		row := map[string]any{}
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			return nil, fmt.Errorf("invalid jsonl row: %w", err)
-		}
-		current = append(current, row)
-		if len(current) >= batchSize {
-			out = append(out, current)
-			current = make([]map[string]any, 0, batchSize)
-		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	if len(current) > 0 {
-		out = append(out, current)
-	}
-	return out, nil
 }
 
-func (sc *ScanCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
-	payload := parsePayloadMap(evt.Payload)
-	scanID := strings.TrimSpace(asString(payload["scan_id"]))
-	if scanID == "" {
-		runtimeWarn(
-			"pipeline-coordinator",
-			"dropping scan completion missing scan_id event_id=%s type=%s source=%s",
-			strings.TrimSpace(evt.ID),
-			strings.TrimSpace(string(evt.Type)),
-			strings.TrimSpace(evt.SourceAgent),
-		)
+func (sc *ScanCoordinator) handleScanTimeout(ctx context.Context, _ events.Event) {
+	if sc == nil {
 		return
 	}
-	completionKey := strings.TrimSpace(evt.SourceAgent)
-	if completionKey == "" {
-		completionKey = strings.TrimSpace(string(evt.Type))
-	}
-	// local_services fanout uses one scanner agent role handling multiple scanner
-	// event types; completion accounting must key by scanner completion event type.
-	if strings.HasPrefix(strings.TrimSpace(string(evt.Type)), "scanner.") &&
-		strings.HasSuffix(strings.TrimSpace(string(evt.Type)), ".scan_complete") {
-		completionKey = strings.TrimSpace(string(evt.Type))
-	}
-	if shardID := sc.runtime.markShardCompletedByAgent(ctx, strings.TrimSpace(evt.SourceAgent)); shardID != "" {
-		completionKey = "shard:" + shardID
-	}
-	shardTotal, shardCompleted, shardFailed, hasShardProgress := sc.runtime.shardTerminalProgress(ctx, scanID)
+	sc.checkTimeouts(ctx, time.Now().UTC())
+}
 
-	sc.mu.Lock()
-	acc := sc.scans[scanID]
-	if acc == nil {
-		sc.mu.Unlock()
-		runtimeWarn(
-			"pipeline-coordinator",
-			"received scan completion for unknown accumulator scan_id=%s event_id=%s source=%s",
-			scanID,
-			strings.TrimSpace(evt.ID),
-			strings.TrimSpace(evt.SourceAgent),
-		)
-		return
-	}
-	acc.CompletedBy[completionKey] = struct{}{}
-	done := len(acc.CompletedBy) >= maxInt(acc.Expected, 1)
-	stats := sc.payloadFactory.BuildScanCompletedPayload(scanCompletedBuildInput{
-		ScanID:          acc.ScanID,
-		CampaignID:      acc.CampaignID,
-		Mode:            acc.Mode,
-		Geography:       acc.Geography,
-		ReportsReceived: acc.Reports,
-		Expected:        maxInt(acc.Expected, 1),
-		Complete:        len(acc.CompletedBy),
-		Discovered:      acc.Discovered,
-		Skipped:         acc.Skipped,
-		PendingDedup:    sc.pendingDedupCountForScan(acc.ScanID),
-		TimedOut:        false,
-	})
-	if hasShardProgress {
-		terminal := shardCompleted + shardFailed
-		stats.Expected = shardTotal
-		stats.Complete = terminal
-		stats.ShardsTotal = shardTotal
-		stats.ShardsCompleted = shardCompleted
-		stats.ShardsFailed = shardFailed
-		done = terminal >= shardTotal && shardTotal > 0
-	}
-	if done {
-		delete(sc.scans, scanID)
-	}
-	sc.mu.Unlock()
-
-	if done {
-		sc.runtime.publish(ctx, "scan.completed", "", payloadMap(stats))
-	}
+func (sc *ScanCoordinator) handleCampaignDeadline(context.Context, events.Event) {
+	// 2.2.0 assigns this timer to scan-orchestrator. Campaign completion still
+	// runs through the campaign manager, so this remains an explicit scan-owned
+	// compatibility no-op until the remaining campaign state is moved over.
 }
 
 func (pc *FactoryPipelineCoordinator) markShardCompletedByAgent(ctx context.Context, agentID string) string {

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	workspace "empireai/internal/runtime/workspace"
 )
 
@@ -294,11 +295,10 @@ func secondsIntervalLiteral(d time.Duration) string {
 }
 
 func resolveDiagnosticContainer(ctx context.Context, db *sql.DB, role, verticalID string) (container, verticalSlug string) {
-	role = strings.ToLower(strings.TrimSpace(role))
-	switch role {
-	case "holding-devops":
+	switch diagnosticWorkspaceClass(role) {
+	case "infra":
 		return workspace.EnvOrDefault("EMPIREAI_INFRA_CONTAINER", "empireai-infra"), ""
-	case "factory-cto", "empire-coordinator", "operations-analyst", "scanner-agent", "analysis-agent", "validation-coordinator", "pre-brand-agent", "business-research-agent", "lightweight-spec-agent", "spec-reviewer", "market-research-agent", "trend-research-agent", "spec-auditor", "discovery-coordinator":
+	case "factory":
 		return workspace.EnvOrDefault("EMPIREAI_FACTORY_CONTAINER", "empireai-factory"), ""
 	}
 	verticalID = strings.TrimSpace(verticalID)
@@ -319,6 +319,13 @@ func resolveDiagnosticContainer(ctx context.Context, db *sql.DB, role, verticalI
 		return "", ""
 	}
 	return workspace.EnvOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-") + slug, slug
+}
+
+func diagnosticWorkspaceClass(role string) string {
+	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
+		return strings.TrimSpace(policy.DiagnosticWorkspaceClass(role))
+	}
+	return ""
 }
 
 func findSessionProjectFileInContainer(ctx context.Context, container, sessionID string) (string, error) {

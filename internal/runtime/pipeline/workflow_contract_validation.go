@@ -25,6 +25,9 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 		return fmt.Errorf("workflow contract bundle is nil")
 	}
 	errs := make([]string, 0, 16)
+	usesOwningNodeModel := contractBundleUsesOwningNodeModel(bundle)
+	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(bundle)
+	entityFields := workflowEntitySchemaFields(bundle)
 	if strings.TrimSpace(bundle.Workflow.Workflow.Name) == "" {
 		errs = append(errs, "workflow.name missing")
 	}
@@ -46,6 +49,15 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 			errs = append(errs, fmt.Sprintf("transition %s missing trigger", id))
 		} else if _, ok := bundle.Events[strings.TrimSpace(transition.Trigger)]; !ok {
 			errs = append(errs, fmt.Sprintf("transition %s trigger %s missing from event catalog", id, transition.Trigger))
+		}
+		for _, field := range transition.DataAccumulation.Writes {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := entityFields[field]; !ok {
+				errs = append(errs, fmt.Sprintf("transition %s data_accumulation field %s missing from workflow entity_schema", id, field))
+			}
 		}
 		for _, actionID := range transition.Actions {
 			actionID = strings.TrimSpace(actionID)
@@ -103,13 +115,33 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 				errs = append(errs, fmt.Sprintf("node %s owns transition %s but workflow owner is %s", nodeID, transitionID, owner))
 			}
 			trigger := strings.TrimSpace(transition.Trigger)
-			if trigger != "" {
+			if trigger != "" && !usesOwningNodeModel {
 				if _, ok := subs[trigger]; !ok {
 					if _, emitted := produces[trigger]; !emitted {
 						errs = append(errs, fmt.Sprintf("node %s cannot see trigger %s for owned transition %s", nodeID, trigger, transitionID))
 					}
 				}
 			}
+		}
+	}
+
+	for eventType, entry := range bundle.Events {
+		eventType = strings.TrimSpace(eventType)
+		handling := strings.TrimSpace(entry.RuntimeHandling)
+		owner := strings.TrimSpace(entry.OwningNode)
+		if !requiresOwningNode(handling) || !usesOwningNodeModel {
+			continue
+		}
+		if owner == "" {
+			errs = append(errs, fmt.Sprintf("event %s with runtime_handling=%s missing owning_node", eventType, handling))
+			continue
+		}
+		if _, ok := bundle.Nodes[owner]; !ok {
+			errs = append(errs, fmt.Sprintf("event %s owning_node %s missing from system nodes", eventType, owner))
+			continue
+		}
+		if _, ok := runtimeExecutors[owner]; !ok {
+			errs = append(errs, fmt.Sprintf("event %s owning_node %s has no runtime executor", eventType, owner))
 		}
 	}
 
@@ -136,6 +168,106 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 		return fmt.Errorf("workflow contract validation failed:\n- %s", strings.Join(errs, "\n- "))
 	}
 	return nil
+}
+
+func workflowEntitySchemaFields(bundle *runtimecontracts.WorkflowContractBundle) map[string]struct{} {
+	out := map[string]struct{}{}
+	if bundle == nil {
+		return out
+	}
+	collectEntitySchemaFields(bundle.Workflow.Workflow.EntitySchema, out)
+	return out
+}
+
+func workflowSystemNodeStateSchemaFields(bundle *runtimecontracts.WorkflowContractBundle, nodeID string) map[string]struct{} {
+	out := map[string]struct{}{}
+	if bundle == nil {
+		return out
+	}
+	node, ok := bundle.Nodes[strings.TrimSpace(nodeID)]
+	if !ok {
+		return out
+	}
+	obj, ok := asObject(node.StateSchema)
+	if !ok {
+		return out
+	}
+	fields, ok := asObject(obj["fields"])
+	if !ok {
+		return out
+	}
+	for key := range fields {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out[key] = struct{}{}
+		}
+	}
+	return out
+}
+
+func collectEntitySchemaFields(raw any, out map[string]struct{}) {
+	obj, ok := asObject(raw)
+	if !ok {
+		return
+	}
+	for key, value := range obj {
+		key = strings.TrimSpace(key)
+		if key == "" || key == "description" {
+			continue
+		}
+		if child, ok := asObject(value); ok && len(child) > 0 {
+			collectEntitySchemaFields(child, out)
+			continue
+		}
+		out[key] = struct{}{}
+	}
+}
+
+func supportedWorkflowRuntimeExecutorIDs(bundle *runtimecontracts.WorkflowContractBundle) map[string]struct{} {
+	out := map[string]struct{}{
+		ScoringNodeID:             {},
+		"pipeline-coordinator":    {},
+		"scan-orchestrator":       {},
+		"discovery-aggregator":    {},
+		"validation-orchestrator": {},
+		"lifecycle-orchestrator":  {},
+	}
+	if bundle == nil {
+		return out
+	}
+	filtered := make(map[string]struct{}, len(out))
+	for nodeID := range out {
+		if _, ok := bundle.Nodes[nodeID]; ok {
+			filtered[nodeID] = struct{}{}
+		}
+	}
+	return filtered
+}
+
+func requiresOwningNode(runtimeHandling string) bool {
+	switch strings.TrimSpace(runtimeHandling) {
+	case "consuming", "dual_delivery", "projection", "stage_projection":
+		return true
+	default:
+		return false
+	}
+}
+
+func contractBundleUsesOwningNodeModel(bundle *runtimecontracts.WorkflowContractBundle) bool {
+	if bundle == nil {
+		return false
+	}
+	for _, entry := range bundle.Events {
+		if strings.TrimSpace(entry.OwningNode) != "" {
+			return true
+		}
+	}
+	for _, node := range bundle.Nodes {
+		if len(node.EventHandlers) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowParticipantExists(bundle *runtimecontracts.WorkflowContractBundle, participant string) bool {

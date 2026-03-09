@@ -29,7 +29,7 @@ func TestWorkflowInstanceStore_UpsertLoadDelete(t *testing.T) {
 	inst := WorkflowInstance{
 		InstanceID:      instanceID,
 		WorkflowName:    "empire_vertical_pipeline",
-		WorkflowVersion: "2.1.0",
+		WorkflowVersion: "2.2.0",
 		CurrentStage:    "researching",
 		EnteredStageAt:  now,
 		TransitionHistory: []WorkflowTransitionRecord{{
@@ -94,7 +94,7 @@ func TestWorkflowInstanceStore_Mutate(t *testing.T) {
 	if err := store.Upsert(ctx, WorkflowInstance{
 		InstanceID:      instanceID,
 		WorkflowName:    "empire_vertical_pipeline",
-		WorkflowVersion: "2.1.0",
+		WorkflowVersion: "2.2.0",
 		CurrentStage:    "researching",
 		Metadata:        map[string]any{"revision_count": 1},
 	}); err != nil {
@@ -134,7 +134,7 @@ func TestWorkflowInstanceStore_List(t *testing.T) {
 		if err := store.Upsert(ctx, WorkflowInstance{
 			InstanceID:      instanceID,
 			WorkflowName:    "empire_vertical_pipeline",
-			WorkflowVersion: "2.1.0",
+			WorkflowVersion: "2.2.0",
 			CurrentStage:    "researching",
 			Metadata:        map[string]any{"instance_id": instanceID},
 		}); err != nil {

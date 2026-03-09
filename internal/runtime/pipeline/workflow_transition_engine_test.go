@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -82,6 +83,96 @@ func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_IncrementsRevis
 	if got := pc.validationGate.states[verticalID].RevisionCount; got != 1 {
 		t.Fatalf("expected revision_count=1, got %d", got)
 	}
+	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
+	if err != nil || !ok {
+		t.Fatalf("expected workflow instance after revision increment, ok=%v err=%v", ok, err)
+	}
+	if got := asInt(instance.Metadata["revision_count"]); got != 1 {
+		t.Fatalf("expected workflow metadata revision_count=1, got %+v", instance.Metadata)
+	}
+	bucket, ok := asObject(instance.AccumulatorState["validation-orchestrator"])
+	if !ok {
+		t.Fatalf("expected validation-orchestrator bucket, got %+v", instance.AccumulatorState)
+	}
+	if got := asInt(bucket["revision_count"]); got != 1 {
+		t.Fatalf("expected validation-orchestrator revision_count=1, got %+v", bucket)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_IncrementsRevisionCountFromWorkflowState(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'EU VAT Reconciliation', 'eu-vat-reconciliation', 'eu', 'cto_spec_review', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      verticalID,
+		WorkflowName:    pc.ContractBundle().Workflow.Workflow.Name,
+		WorkflowVersion: pc.ContractBundle().Workflow.Workflow.Version,
+		CurrentStage:    "cto_spec_review",
+		Metadata: map[string]any{
+			"status":         "active",
+			"revision_count": 2,
+			"g1_research":    true,
+			"g2_spec":        true,
+			"g3_cto":         true,
+		},
+		AccumulatorState: map[string]any{
+			"validation-orchestrator": map[string]any{
+				"vertical_id": verticalID,
+				"gate_state": map[string]any{
+					"g1_research": true,
+					"g2_spec":     true,
+					"g3_cto":      true,
+					"g4_brand":    false,
+				},
+				"revision_count": 2,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("spec.validation_failed"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"status": "blocker"}),
+	})
+	if !ok {
+		t.Fatal("expected spec.validation_failed workflow transition")
+	}
+	if outcome.Transition.Name != "validation_failed_to_speccing" {
+		t.Fatalf("unexpected transition: %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "mvp_speccing")
+	st := pc.validationGate.states[verticalID]
+	if st == nil {
+		t.Fatal("expected workflow-backed validation state to hydrate into memory")
+	}
+	if got := st.RevisionCount; got != 3 {
+		t.Fatalf("expected hydrated revision_count=3, got %+v", st)
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
+	if err != nil || !ok {
+		t.Fatalf("expected workflow instance after revision increment, ok=%v err=%v", ok, err)
+	}
+	if got := asInt(instance.Metadata["revision_count"]); got != 3 {
+		t.Fatalf("expected workflow metadata revision_count=3, got %+v", instance.Metadata)
+	}
+	bucket, ok := asObject(instance.AccumulatorState["validation-orchestrator"])
+	if !ok {
+		t.Fatalf("expected validation-orchestrator bucket, got %+v", instance.AccumulatorState)
+	}
+	if got := asInt(bucket["revision_count"]); got != 3 {
+		t.Fatalf("expected validation-orchestrator revision_count=3, got %+v", bucket)
+	}
 }
 
 func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_RequiresHumanApproval(t *testing.T) {
@@ -145,6 +236,78 @@ func TestFactoryPipelineCoordinator_HandleScoringRequested_ProjectsScoringStage(
 	})
 
 	assertVerticalStage(t, ctx, db, verticalID, "scoring")
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowDataAccumulation_PersistsDeclaredWrites(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Clinical Billing', 'clinical-billing', 'us', 'discovered', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:       verticalID,
+		WorkflowName:     "empire_vertical_pipeline",
+		WorkflowVersion:  "2.2.0",
+		CurrentStage:     "discovered",
+		AccumulatorState: map[string]any{},
+		Metadata:         map[string]any{},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	transition := WorkflowTransition{
+		Name: "discovered_to_scoring",
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes:      []string{"name", "geography", "signal_strength"},
+			SourceEvent: "vertical.discovered",
+		},
+	}
+	evt := events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("vertical.discovered"),
+		VerticalID: verticalID,
+		Payload: mustJSON(map[string]any{
+			"name":            "Clinical Billing",
+			"geography":       "us",
+			"signal_strength": 81,
+			"ignored_field":   "x",
+		}),
+	}
+
+	pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
+
+	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected workflow instance")
+	}
+	entityProjection, ok := instance.AccumulatorState["entity_projection"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity_projection map, got %#v", instance.AccumulatorState["entity_projection"])
+	}
+	if asString(entityProjection["name"]) != "Clinical Billing" {
+		t.Fatalf("expected name to be accumulated, got %#v", entityProjection["name"])
+	}
+	if asString(entityProjection["geography"]) != "us" {
+		t.Fatalf("expected geography to be accumulated, got %#v", entityProjection["geography"])
+	}
+	if asInt(entityProjection["signal_strength"]) != 81 {
+		t.Fatalf("expected signal_strength to be accumulated, got %#v", entityProjection["signal_strength"])
+	}
+	if _, exists := entityProjection["ignored_field"]; exists {
+		t.Fatalf("did not expect ignored_field in entity_projection: %#v", entityProjection)
+	}
+	if asString(instance.Metadata["last_data_accumulation_event"]) != "vertical.discovered" {
+		t.Fatalf("expected last_data_accumulation_event to be recorded, got %#v", instance.Metadata["last_data_accumulation_event"])
+	}
 }
 
 func TestFactoryPipelineCoordinator_FinalizeScoringAccumulator_UsesWorkflowTransition(t *testing.T) {

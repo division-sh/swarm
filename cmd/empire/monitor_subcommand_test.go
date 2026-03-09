@@ -33,7 +33,7 @@ exit 0
 	}
 
 	rootDir := filepath.Join(dir, "monitor")
-	if err := syncTMuxMonitorSession(context.Background(), tmuxStub, "empire-monitor", rootDir, []string{"agent-one"}, false); err != nil {
+	if err := syncTMuxMonitorSession(context.Background(), tmuxStub, "runtime-monitor", rootDir, []string{"agent-one"}, false); err != nil {
 		t.Fatalf("syncTMuxMonitorSession: %v", err)
 	}
 
@@ -42,10 +42,10 @@ exit 0
 		t.Fatalf("read tmux log: %v", err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "new-window -d -t empire-monitor -n agent-one") {
+	if !strings.Contains(text, "new-window -d -t runtime-monitor -n agent-one") {
 		t.Fatalf("expected new agent window command, got:\n%s", text)
 	}
-	if !strings.Contains(text, "kill-window -t empire-monitor:stale") {
+	if !strings.Contains(text, "kill-window -t runtime-monitor:stale") {
 		t.Fatalf("expected stale window prune, got:\n%s", text)
 	}
 	if !strings.Contains(text, llm.MonitorLogPath(rootDir, "agent-one")) {

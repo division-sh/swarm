@@ -52,6 +52,7 @@ type WorkflowSchemaDocument struct {
 		TerminalStages []string                     `yaml:"terminal_stages"`
 		Transitions    []WorkflowTransitionContract `yaml:"transitions"`
 		Timers         []WorkflowTimerContract      `yaml:"timers"`
+		EntitySchema   map[string]any               `yaml:"entity_schema"`
 	} `yaml:"workflow"`
 }
 
@@ -62,14 +63,20 @@ type WorkflowStageContract struct {
 }
 
 type WorkflowTransitionContract struct {
-	ID                string   `yaml:"id"`
-	From              any      `yaml:"from"`
-	To                string   `yaml:"to"`
-	Trigger           string   `yaml:"trigger"`
-	Node              string   `yaml:"node"`
-	Guards            []string `yaml:"guards"`
-	Actions           []string `yaml:"actions"`
-	AllowTerminalExit bool     `yaml:"allow_terminal_exit"`
+	ID                string                   `yaml:"id"`
+	From              any                      `yaml:"from"`
+	To                string                   `yaml:"to"`
+	Trigger           string                   `yaml:"trigger"`
+	Node              string                   `yaml:"node"`
+	Guards            []string                 `yaml:"guards"`
+	Actions           []string                 `yaml:"actions"`
+	DataAccumulation  WorkflowDataAccumulation `yaml:"data_accumulation"`
+	AllowTerminalExit bool                     `yaml:"allow_terminal_exit"`
+}
+
+type WorkflowDataAccumulation struct {
+	Writes     []string `yaml:"writes"`
+	SourceEvent string  `yaml:"source_event"`
 }
 
 type WorkflowTimerContract struct {
@@ -104,15 +111,32 @@ type GuardActionEntry struct {
 }
 
 type SystemNodeContract struct {
-	ID               string   `yaml:"id"`
-	ExecutionType    string   `yaml:"execution_type"`
-	Implementation   string   `yaml:"implementation"`
-	SubscribesTo     []string `yaml:"subscribes_to"`
-	Produces         []string `yaml:"produces"`
-	OwnedTransitions []string `yaml:"owned_transitions"`
-	StateTable       string   `yaml:"state_table"`
-	IdempotencyTable string   `yaml:"idempotency_table"`
-	Timers           []string `yaml:"timers"`
+	ID               string                            `yaml:"id"`
+	Description      string                            `yaml:"description"`
+	ExecutionType    string                            `yaml:"execution_type"`
+	Implementation   string                            `yaml:"implementation"`
+	SubscribesTo     []string                          `yaml:"subscribes_to"`
+	Produces         []string                          `yaml:"produces"`
+	OwnedTransitions []string                          `yaml:"owned_transitions"`
+	StateTable       string                            `yaml:"state_table"`
+	IdempotencyTable string                            `yaml:"idempotency_table"`
+	Timers           []string                          `yaml:"timers"`
+	EventHandlers    map[string]SystemNodeEventHandler `yaml:"event_handlers"`
+	StateSchema      map[string]any                    `yaml:"state_schema"`
+}
+
+type SystemNodeEventHandler struct {
+	Action         string         `yaml:"action"`
+	Description    string         `yaml:"description"`
+	Emits          string         `yaml:"emits"`
+	Guard          string         `yaml:"guard"`
+	CompletionRule string         `yaml:"completion_rule"`
+	Logic          string         `yaml:"logic"`
+	PolicyRef      string         `yaml:"policy_ref"`
+	OnComplete     map[string]any `yaml:"on_complete"`
+	Rules          map[string]any `yaml:"rules"`
+	Branch         []any          `yaml:"branch"`
+	ModeToScanners map[string]any `yaml:"mode_to_scanners"`
 }
 
 type EventCatalogEntry struct {
@@ -124,6 +148,7 @@ type EventCatalogEntry struct {
 	Intercepted       any      `yaml:"intercepted"`
 	Passthrough       any      `yaml:"passthrough"`
 	RuntimeHandling   string   `yaml:"runtime_handling"`
+	OwningNode        string   `yaml:"owning_node"`
 	DeliveryChannel   any      `yaml:"delivery_channel"`
 	Payload           any      `yaml:"payload"`
 	Required          []string `yaml:"required"`

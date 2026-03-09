@@ -144,6 +144,7 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	toolToEvent := buildToolToEventMap()
 	contracts := loadWiringEventContracts(repoRoot)
 	runtimeManagedEvents := loadRuntimeManagedEvents(repoRoot)
+	systemNodes := loadWiringSystemNodes(repoRoot)
 
 	sites, err := collectRuntimeEmitSites(runtimeDir)
 	if err != nil {
@@ -186,13 +187,22 @@ func TestSpecRuntimeWiringVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse pipeline coordinator switch coverage: %v", err)
 	}
+	for _, node := range systemNodes {
+		for _, evt := range node.SubscribesTo {
+			evt = strings.TrimSpace(evt)
+			if evt == "" {
+				continue
+			}
+			interceptEvents[evt] = struct{}{}
+		}
+	}
 
 	results := make([]wiringResult, 0, 512)
 	results = append(results, verifyEmitToolCompleteness(agents, schemas, toolToEvent)...)
 	results = append(results, verifySubscriptionCompleteness(agents, producersByEvent, contracts)...)
 	results = append(results, verifyPayloadContracts(agents, schemas, runtimeEmitted)...)
 	nonLocalIntercepts := map[string]struct{}{}
-	for id, node := range loadWiringSystemNodes(repoRoot) {
+	for id, node := range systemNodes {
 		if strings.TrimSpace(id) == "pipeline-coordinator" {
 			continue
 		}
@@ -601,21 +611,21 @@ func verifyPipelinePathTracing(agents []wiringAgent, producersByEvent map[string
 		{Event: "scoring.contested", ConsumerKind: "agent", ConsumerID: "empire-coordinator"},
 		{Event: "scoring.contest_resolved", ConsumerKind: "runtime", ConsumerID: "scoring-node"},
 		{Event: "vertical.scored", ConsumerKind: "agent", ConsumerID: "empire-coordinator"},
-		{Event: "vertical.shortlisted", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "vertical.shortlisted", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
 		{Event: "validation.started", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
-		{Event: "research.completed", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "research.completed", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
 		{Event: "spec.requested", ConsumerKind: "agent", ConsumerID: "lightweight-spec-agent"},
 		{Event: "spec.draft_ready", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
 		{Event: "spec_review.requested", ConsumerKind: "agent", ConsumerID: "spec-reviewer"},
 		{Event: "spec_review.passed", ConsumerKind: "agent", ConsumerID: "business-research-agent"},
-		{Event: "spec.approved", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "spec.approved", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
 		{Event: "spec.validation_requested", ConsumerKind: "agent", ConsumerID: "spec-auditor"},
-		{Event: "spec.validation_passed", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "spec.validation_passed", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
 		{Event: "cto.spec_review_requested", ConsumerKind: "agent", ConsumerID: "factory-cto"},
-		{Event: "cto.spec_approved", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
-		{Event: "brand.candidates_ready", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "cto.spec_approved", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
+		{Event: "brand.candidates_ready", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
 		{Event: "validation.package_ready", ConsumerKind: "agent", ConsumerID: "validation-coordinator"},
-		{Event: "vertical.ready_for_review", ConsumerKind: "runtime", ConsumerID: "pipeline-coordinator"},
+		{Event: "vertical.ready_for_review", ConsumerKind: "runtime", ConsumerID: "validation-orchestrator"},
 	}
 
 	subIndex := map[string]map[string]struct{}{}

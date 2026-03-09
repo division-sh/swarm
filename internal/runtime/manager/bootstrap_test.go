@@ -7,8 +7,8 @@ import (
 
 func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 	routes := DefaultOpCoRoutes("v1")
-	if len(routes) != 21 {
-		t.Fatalf("expected 21 default routes (all bootstrap), got %d", len(routes))
+	if len(routes) != 20 {
+		t.Fatalf("expected 20 default routes (all bootstrap), got %d", len(routes))
 	}
 	bootstrap := 0
 	seeded := 0
@@ -28,8 +28,8 @@ func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 			deployToDevOps = true
 		}
 	}
-	if bootstrap != 21 {
-		t.Fatalf("expected 21 bootstrap routes, got %d", bootstrap)
+	if bootstrap != 20 {
+		t.Fatalf("expected 20 bootstrap routes, got %d", bootstrap)
 	}
 	if seeded != 0 {
 		t.Fatalf("expected 0 seeded routes, got %d", seeded)

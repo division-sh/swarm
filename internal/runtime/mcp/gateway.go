@@ -10,6 +10,7 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	"empireai/internal/protocolheaders"
 	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
 )
@@ -157,7 +158,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			"protocolVersion": "2025-03-26",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo": map[string]any{
-				"name":    "empire-tool-gateway",
+				"name":    "tool-gateway",
 				"version": "1.0.0",
 			},
 		})
@@ -326,7 +327,7 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 			}
 		}
 	}
-	role := strings.TrimSpace(r.Header.Get("X-Empire-Agent-Role"))
+	role := strings.TrimSpace(r.Header.Get(protocolheaders.ActorRoleHeader))
 	if role != "" && g.hooks.EmitTools != nil {
 		for _, def := range g.hooks.EmitTools(role) {
 			name := strings.TrimSpace(def.Name)
@@ -422,12 +423,12 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 		return
 	}
 	agentID := FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get("X-Empire-Agent-Id")),
-		strings.TrimSpace(r.URL.Query().Get("empire_agent_id")),
+		strings.TrimSpace(r.Header.Get(protocolheaders.ActorIDHeader)),
+		strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorIDQuery)),
 	)
 	verticalID := FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get("X-Empire-Vertical-Id")),
-		strings.TrimSpace(r.URL.Query().Get("empire_vertical_id")),
+		strings.TrimSpace(r.Header.Get(protocolheaders.VerticalIDHeader)),
+		strings.TrimSpace(r.URL.Query().Get(protocolheaders.VerticalIDQuery)),
 	)
 	errText := ""
 	if err != nil {

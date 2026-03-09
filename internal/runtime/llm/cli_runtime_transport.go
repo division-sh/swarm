@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"empireai/internal/models"
+	"empireai/internal/protocolheaders"
 	runtimeactor "empireai/internal/runtime/actorctx"
 	workspace "empireai/internal/runtime/workspace"
 )
@@ -52,11 +53,11 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	}
 	allowedTools := toolNamesCSV(s.Tools)
 	headers := map[string]string{
-		"X-Empire-Agent-Id":      strings.TrimSpace(actor.ID),
-		"X-Empire-Agent-Role":    strings.TrimSpace(actor.Role),
-		"X-Empire-Agent-Mode":    strings.TrimSpace(actor.Mode),
-		"X-Empire-Vertical-Id":   strings.TrimSpace(actor.VerticalID),
-		"X-Empire-Allowed-Tools": allowedTools,
+		protocolheaders.ActorIDHeader:      strings.TrimSpace(actor.ID),
+		protocolheaders.ActorRoleHeader:    strings.TrimSpace(actor.Role),
+		protocolheaders.ActorModeHeader:    strings.TrimSpace(actor.Mode),
+		protocolheaders.VerticalIDHeader:   strings.TrimSpace(actor.VerticalID),
+		protocolheaders.AllowedToolsHeader: allowedTools,
 	}
 	if token := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
@@ -64,15 +65,15 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
 	traceID := strings.TrimSpace(contextToken)
 	if contextToken != "" {
-		headers["X-Empire-Context-Token"] = contextToken
+		headers[protocolheaders.ContextTokenHeader] = contextToken
 	}
 	if traceID != "" {
-		headers["X-Empire-Trace-Id"] = traceID
+		headers[protocolheaders.TraceIDHeader] = traceID
 	}
 	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools, traceID)
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
-			"empire-runtime": map[string]any{
+			"runtime-tools": map[string]any{
 				"type":    "http",
 				"url":     serverURL,
 				"headers": headers,
@@ -145,25 +146,25 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	}
 	q := u.Query()
 	if v := strings.TrimSpace(contextToken); v != "" {
-		q.Set("empire_ctx_token", v)
+		q.Set(protocolheaders.ContextTokenQuery, v)
 	}
 	if v := strings.TrimSpace(actor.ID); v != "" {
-		q.Set("empire_agent_id", v)
+		q.Set(protocolheaders.ActorIDQuery, v)
 	}
 	if v := strings.TrimSpace(actor.Role); v != "" {
-		q.Set("empire_agent_role", v)
+		q.Set(protocolheaders.ActorRoleQuery, v)
 	}
 	if v := strings.TrimSpace(actor.Mode); v != "" {
-		q.Set("empire_agent_mode", v)
+		q.Set(protocolheaders.ActorModeQuery, v)
 	}
 	if v := strings.TrimSpace(actor.VerticalID); v != "" {
-		q.Set("empire_vertical_id", v)
+		q.Set(protocolheaders.VerticalIDQuery, v)
 	}
 	if v := strings.TrimSpace(allowedTools); v != "" {
-		q.Set("empire_allowed_tools", v)
+		q.Set(protocolheaders.AllowedToolsQuery, v)
 	}
 	if v := strings.TrimSpace(traceID); v != "" {
-		q.Set("empire_trace_id", v)
+		q.Set(protocolheaders.TraceIDQuery, v)
 	}
 	u.RawQuery = q.Encode()
 	return strings.TrimSpace(u.String())

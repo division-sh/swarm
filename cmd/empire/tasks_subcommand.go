@@ -163,7 +163,7 @@ func rejectHumanTask(ctx context.Context, stores storeBundle, cfg *config.Config
 		VerticalID:  verticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}, []string{strings.TrimSpace(requestingAgent), "empire-coordinator"}); err != nil {
+	}, withControlPlaneRecipient(strings.TrimSpace(requestingAgent))); err != nil {
 		return err
 	}
 

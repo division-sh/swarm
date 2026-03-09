@@ -240,6 +240,56 @@ func (policy) ManagerFallbackAgentID(agent models.AgentConfig) string {
 	return "empire-coordinator"
 }
 
+func (policy) WorkspaceClass(actor models.AgentConfig) string {
+	role := strings.ToLower(strings.TrimSpace(actor.Role))
+	switch role {
+	case "holding-devops":
+		return "infra"
+	case "factory-cto",
+		"empire-coordinator",
+		"operations-analyst",
+		"scanner-agent",
+		"analysis-agent",
+		"validation-coordinator",
+		"pre-brand-agent",
+		"business-research-agent",
+		"lightweight-spec-agent",
+		"spec-reviewer",
+		"market-research-agent",
+		"trend-research-agent",
+		"spec-auditor",
+		"discovery-coordinator":
+		return "factory"
+	default:
+		return ""
+	}
+}
+
+func (policy) DiagnosticWorkspaceClass(role string) string {
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "holding-devops":
+		return "infra"
+	case "factory-cto",
+		"empire-coordinator",
+		"operations-analyst",
+		"scanner-agent",
+		"analysis-agent",
+		"validation-coordinator",
+		"pre-brand-agent",
+		"business-research-agent",
+		"lightweight-spec-agent",
+		"spec-reviewer",
+		"market-research-agent",
+		"trend-research-agent",
+		"spec-auditor",
+		"discovery-coordinator":
+		return "factory"
+	default:
+		return ""
+	}
+}
+
 func cloneMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return map[string]any{}

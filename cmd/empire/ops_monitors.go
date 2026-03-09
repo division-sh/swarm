@@ -31,7 +31,7 @@ func ensurePortfolioDigestSchedule(ctx context.Context, store runtimepipeline.Sc
 	}
 	payload := []byte(`{"trigger":"daily"}`)
 	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "empire-coordinator",
+		AgentID:   defaultControlPlaneAgentID(),
 		EventType: "timer.portfolio_digest",
 		Mode:      "cron",
 		Cron:      cron,
@@ -50,7 +50,7 @@ func ensureMarginalReviewSchedule(ctx context.Context, store runtimepipeline.Sch
 	}
 	payload := []byte(`{"trigger":"marginal_review"}`)
 	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "empire-coordinator",
+		AgentID:   defaultControlPlaneAgentID(),
 		EventType: "timer.marginal_review",
 		Mode:      "cron",
 		Cron:      cron,
@@ -135,7 +135,7 @@ func portfolioDigestLoop(
 		evt := events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("portfolio.digest_compiled"),
-			SourceAgent: "empire-coordinator",
+			SourceAgent: defaultControlPlaneAgentID(),
 			Payload:     payload,
 			CreatedAt:   time.Now(),
 		}
@@ -190,7 +190,7 @@ func portfolioDigestLoop(
 
 func renderCompactDigest(trigger string, snap digest.Snapshot) string {
 	var b strings.Builder
-	b.WriteString("[EmpireAI] portfolio digest\n")
+	b.WriteString("[Portfolio] portfolio digest\n")
 	b.WriteString(fmt.Sprintf("trigger=%s\n", strings.TrimSpace(trigger)))
 	b.WriteString(fmt.Sprintf("action_required: pending=%d critical=%d\n", snap.MailboxPending, snap.MailboxCritical))
 	b.WriteString(fmt.Sprintf("active_verticals: %d\n", snap.ActiveVerticals))
@@ -259,7 +259,7 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 			if err := bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("vertical.health_warning"),
-				SourceAgent: "empire-coordinator",
+				SourceAgent: defaultControlPlaneAgentID(),
 				Payload:     payload,
 				CreatedAt:   time.Now(),
 			}); err != nil {
@@ -275,7 +275,7 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 				if _, err := mailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					ID:         uuid.NewString(),
 					VerticalID: verticalID,
-					FromAgent:  "empire-coordinator",
+					FromAgent:  defaultControlPlaneAgentID(),
 					Type:       "escalation",
 					Priority:   priority,
 					Status:     "pending",

@@ -30,7 +30,7 @@ func applyTemplateMigrationWithPrimitives(ctx context.Context, cfgRuntimeMode st
 	}
 	executedBy = strings.TrimSpace(executedBy)
 	if executedBy == "" {
-		executedBy = "empire-coordinator"
+		executedBy = defaultControlPlaneAgentID()
 	}
 
 	var verticalID, fromVersion, toVersion, status string

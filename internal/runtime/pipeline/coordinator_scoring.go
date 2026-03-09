@@ -158,25 +158,25 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 		discoveryContext = pc.scoringState.scoring.BuildDiscoveryContextPayload(payload)
 	}
 	geographicScope := pc.scoringState.scoring.NormalizeGeographicScope(asString(payload["geographic_scope"]))
-	pc.mu.Lock()
-	acc := &scoringAccumulator{
-		VerticalID:       verticalID,
-		VerticalName:     name,
-		Geography:        geography,
-		GeographicScope:  geographicScope,
-		Mode:             mode,
-		Rubric:           rubric,
-		DiscoveryContext: discoveryContext,
-		Expected:         expected,
-		Received:         make(map[string]scoreDimensionResult, len(expected)),
-		Contested:        make(map[string]contestedDimension),
-		RequestedAt:      now,
-		LastUpdatedAt:    now,
-		ContestNotified:  make(map[string]bool),
-	}
-	if existing := pc.scoringState.accumulators[verticalID]; existing != nil {
+	acc := pc.scoringAccumulatorSnapshot(ctx, verticalID)
+	if acc == nil {
+		acc = &scoringAccumulator{
+			VerticalID:       verticalID,
+			VerticalName:     name,
+			Geography:        geography,
+			GeographicScope:  geographicScope,
+			Mode:             mode,
+			Rubric:           rubric,
+			DiscoveryContext: discoveryContext,
+			Expected:         expected,
+			Received:         make(map[string]scoreDimensionResult, len(expected)),
+			Contested:        make(map[string]contestedDimension),
+			RequestedAt:      now,
+			LastUpdatedAt:    now,
+			ContestNotified:  make(map[string]bool),
+		}
+	} else {
 		// Keep existing progress but refresh metadata when discovery details improve.
-		acc = existing
 		acc.VerticalName = firstNonEmptyString(name, acc.VerticalName)
 		acc.Geography = firstNonEmptyString(geography, acc.Geography)
 		if strings.TrimSpace(geographicScope) != "" {
@@ -198,6 +198,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 			acc.ContestNotified = make(map[string]bool)
 		}
 	}
+	pc.mu.Lock()
 	pc.scoringState.accumulators[verticalID] = acc
 	pc.mu.Unlock()
 	pc.persistWorkflowScoringAccumulator(ctx, acc)
@@ -366,6 +367,20 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 	ss.mu.Lock()
 	acc := ss.accumulators[verticalID]
 	if acc == nil {
+		ss.mu.Unlock()
+		if restored, ok := ss.runtime.loadWorkflowScoringAccumulator(ctx, verticalID); ok && restored != nil {
+			ss.mu.Lock()
+			if existing := ss.accumulators[verticalID]; existing == nil {
+				ss.accumulators[verticalID] = restored
+				acc = restored
+			} else {
+				acc = existing
+			}
+		} else {
+			ss.mu.Lock()
+		}
+	}
+	if acc == nil {
 		acc = &scoringAccumulator{
 			VerticalID:      verticalID,
 			Rubric:          "universal",
@@ -455,7 +470,17 @@ func (ss *ScoringState) handleScoringContestResolved(ctx context.Context, evt ev
 	acc := ss.accumulators[verticalID]
 	if acc == nil {
 		ss.mu.Unlock()
-		return
+		if restored, ok := ss.runtime.loadWorkflowScoringAccumulator(ctx, verticalID); ok && restored != nil {
+			ss.mu.Lock()
+			if existing := ss.accumulators[verticalID]; existing == nil {
+				ss.accumulators[verticalID] = restored
+				acc = restored
+			} else {
+				acc = existing
+			}
+		} else {
+			return
+		}
 	}
 	if acc.Received == nil {
 		acc.Received = map[string]scoreDimensionResult{}

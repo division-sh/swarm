@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -19,6 +20,10 @@ type Service struct {
 
 func NewService(db *sql.DB, mailbox runtimetools.MailboxPersistence) *Service {
 	return &Service{DB: db, Mailbox: mailbox}
+}
+
+func controlPlaneMailboxSender() string {
+	return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
 }
 
 type MetricInput struct {
@@ -154,7 +159,7 @@ func (s *Service) evaluateKillCriteria(ctx context.Context) (int, error) {
 		})
 		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			VerticalID: verticalID,
-			FromAgent:  "empire-coordinator",
+			FromAgent:  controlPlaneMailboxSender(),
 			Type:       "vertical_approval",
 			Priority:   "critical",
 			Status:     "pending",
@@ -222,7 +227,7 @@ func (s *Service) evaluateBudgetPressure(ctx context.Context) (int, error) {
 		})
 		if _, err := s.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			VerticalID: verticalID,
-			FromAgent:  "empire-coordinator",
+			FromAgent:  controlPlaneMailboxSender(),
 			Type:       "budget_increase",
 			Priority:   "normal",
 			Status:     "pending",

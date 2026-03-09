@@ -151,7 +151,7 @@ func emitMailboxDecisionSideEffects(
 			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   time.Now(),
-		}, []string{"empire-coordinator"}); err != nil {
+		}, withControlPlaneRecipient()); err != nil {
 			return err
 		}
 	}
@@ -171,7 +171,7 @@ func emitMailboxDecisionSideEffects(
 				VerticalID:  item.VerticalID,
 				Payload:     mustJSON(basePayload),
 				CreatedAt:   time.Now(),
-			}, []string{"empire-coordinator"}); err != nil {
+			}, withControlPlaneRecipient()); err != nil {
 				return err
 			}
 		}
@@ -184,7 +184,7 @@ func emitMailboxDecisionSideEffects(
 			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   time.Now(),
-		}, []string{"empire-coordinator"}); err != nil {
+			}, withControlPlaneRecipient()); err != nil {
 			return err
 		}
 	}
@@ -271,7 +271,7 @@ func emitMailboxDecisionSideEffects(
 				"context":      json.RawMessage(item.Context),
 			}),
 			CreatedAt: time.Now(),
-		}, []string{"empire-coordinator"}); err != nil {
+		}, withControlPlaneRecipient()); err != nil {
 			return err
 		}
 	}

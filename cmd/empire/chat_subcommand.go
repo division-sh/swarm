@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
 	"empireai/internal/events"
 	"empireai/internal/models"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -219,9 +221,71 @@ func syncRuntimeGlobalAgents(ctx context.Context, managerStore globalAgentStore)
 	}
 	rosterPath := filepath.Join(agentsDir, "roster.yaml")
 	if _, err := os.Stat(rosterPath); err != nil {
+		return syncRuntimeSystemNodeOwners(ctx, managerStore)
+	}
+	if err := seedGlobalAgentsFromYAML(ctx, managerStore, agentsDir); err != nil {
+		return err
+	}
+	return syncRuntimeSystemNodeOwners(ctx, managerStore)
+}
+
+func syncRuntimeSystemNodeOwners(ctx context.Context, managerStore globalAgentStore) error {
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(resolveContractLoaderRoot())
+	if err != nil || bundle == nil {
 		return nil
 	}
-	return seedGlobalAgentsFromYAML(ctx, managerStore, agentsDir)
+	for _, timer := range bundle.Workflow.Workflow.Timers {
+		if !timer.Recurring {
+			continue
+		}
+		owner := strings.TrimSpace(timer.Owner)
+		if owner == "" {
+			continue
+		}
+		rec := runtimemanager.PersistedAgent{
+			Config: models.AgentConfig{
+				ID:   owner,
+				Type: "system",
+				Role: owner,
+				Mode: "system",
+			},
+			Status: "active",
+		}
+		if err := managerStore.UpsertAgent(ctx, rec); err != nil {
+			return fmt.Errorf("upsert system-node owner %s: %w", owner, err)
+		}
+	}
+	return nil
+}
+
+func resolveContractLoaderRoot() string {
+	if cwd, err := os.Getwd(); err == nil {
+		root := searchContractRoot(cwd)
+		if root != "" {
+			return root
+		}
+	}
+	if _, thisFile, _, ok := goruntime.Caller(0); ok {
+		root := searchContractRoot(filepath.Dir(thisFile))
+		if root != "" {
+			return root
+		}
+	}
+	return "."
+}
+
+func searchContractRoot(start string) string {
+	dir := filepath.Clean(start)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "contracts", "workflow-schema.yaml")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 type loadedAgentStore interface {

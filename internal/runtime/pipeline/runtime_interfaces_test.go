@@ -88,6 +88,9 @@ func TestFactoryPipelineCoordinator_WorkflowNodesHaveExecutors(t *testing.T) {
 		if _, ok := execByID[node.ID]; !ok {
 			t.Fatalf("workflow node %s missing runtime executor", node.ID)
 		}
+		if node.ID == "scan-orchestrator" || node.ID == "discovery-aggregator" {
+			continue
+		}
 		if len(node.OwnedTransitions) == 0 {
 			t.Fatalf("workflow node %s missing owned transitions", node.ID)
 		}

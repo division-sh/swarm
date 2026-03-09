@@ -63,6 +63,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.C
 		return workflowTransitionOutcome{}, false
 	}
 
+	pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
 	actionsExecuted := pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
 	pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
 	nextState := pc.currentWorkflowState(ctx, verticalID)
@@ -83,6 +84,65 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.C
 	}, true
 }
 
+func (pc *FactoryPipelineCoordinator) applyWorkflowDataAccumulation(
+	ctx context.Context,
+	verticalID string,
+	transition WorkflowTransition,
+	evt events.Event,
+) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return
+	}
+	verticalID = strings.TrimSpace(verticalID)
+	if verticalID == "" {
+		return
+	}
+	writes := transition.DataAccumulation.Writes
+	if len(writes) == 0 {
+		return
+	}
+	allowedFields := workflowEntitySchemaFields(pc.ContractBundle())
+	if len(allowedFields) == 0 {
+		return
+	}
+	payload := parsePayloadMap(evt.Payload)
+	if len(payload) == 0 {
+		return
+	}
+	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
+		if instance.AccumulatorState == nil {
+			instance.AccumulatorState = map[string]any{}
+		}
+		entityProjection, _ := asObject(instance.AccumulatorState["entity_projection"])
+		entityProjection = cloneStringAnyMap(entityProjection)
+		if entityProjection == nil {
+			entityProjection = map[string]any{}
+		}
+		for _, field := range writes {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := allowedFields[field]; !ok {
+				continue
+			}
+			if value, ok := payload[field]; ok {
+				entityProjection[field] = value
+			}
+		}
+		if len(entityProjection) > 0 {
+			instance.AccumulatorState["entity_projection"] = entityProjection
+		}
+		if instance.Metadata == nil {
+			instance.Metadata = map[string]any{}
+		}
+		instance.Metadata["last_data_accumulation_event"] = strings.TrimSpace(string(evt.Type))
+		if source := strings.TrimSpace(transition.DataAccumulation.SourceEvent); source != "" {
+			instance.Metadata["last_data_accumulation_source"] = source
+		}
+	})
+}
+
 func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 	triggerCtx workflowTriggerContext,
 ) (WorkflowTransition, []string, bool) {
@@ -91,7 +151,11 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 		return WorkflowTransition{}, nil, false
 	}
 	var guardsEvaluated []string
-	transition, ok := DefaultPipelineWorkflow().TransitionByTrigger(triggerCtx.State, trigger, func(candidate WorkflowTransition) bool {
+	workflow := pc.WorkflowDefinition()
+	if workflow == nil {
+		return WorkflowTransition{}, nil, false
+	}
+	transition, ok := workflow.TransitionByTrigger(triggerCtx.State, trigger, func(candidate WorkflowTransition) bool {
 		passed, evaluated := pc.evaluateWorkflowTransitionGuards(triggerCtx, candidate)
 		if passed {
 			guardsEvaluated = evaluated
@@ -147,10 +211,18 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuard(triggerCtx workflowT
 	case "inner_revision_count_below_limit", "revision_count_below_limit":
 		return asInt(triggerCtx.State.Metadata["revision_count"]) < maxRevisionCycles
 	case "not_in_operating_phase":
-		stageDef, ok := DefaultPipelineWorkflow().Stage(triggerCtx.State.Stage)
+		workflow := pc.WorkflowDefinition()
+		if workflow == nil {
+			return true
+		}
+		stageDef, ok := workflow.Stage(triggerCtx.State.Stage)
 		return !ok || !strings.EqualFold(strings.TrimSpace(stageDef.Phase), "operating")
 	case "stage_in_phase":
-		stageDef, ok := DefaultPipelineWorkflow().Stage(triggerCtx.State.Stage)
+		workflow := pc.WorkflowDefinition()
+		if workflow == nil {
+			return false
+		}
+		stageDef, ok := workflow.Stage(triggerCtx.State.Stage)
 		return ok && strings.TrimSpace(stageDef.Phase) != ""
 	default:
 		if pc == nil || pc.module == nil || pc.module.WorkflowHooks() == nil {
@@ -214,14 +286,24 @@ func (pc *FactoryPipelineCoordinator) executeWorkflowAction(
 	hookCtx := workflowHookContextFromTrigger(triggerCtx)
 	switch workflowActionExecutionKey(entry) {
 	case "increment_revision_count":
-		pc.mu.Lock()
-		if st := pc.validationGate.states[hookCtx.VerticalID]; st != nil {
+		pc.mutateValidationState(ctx, hookCtx.VerticalID, func(st *validationPipelineState) {
 			st.RevisionCount++
-		}
-		pc.mu.Unlock()
-		pc.PersistWorkflowMetadata(ctx, hookCtx.VerticalID, func(metadata map[string]any) {
-			metadata["revision_count"] = asInt(metadata["revision_count"]) + 1
 		})
+		if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+			_ = pc.workflowStore.Mutate(ctx, hookCtx.VerticalID, func(instance *WorkflowInstance) {
+				if instance.Metadata == nil {
+					instance.Metadata = map[string]any{}
+				}
+				instance.Metadata["revision_count"] = asInt(instance.Metadata["revision_count"]) + 1
+				if instance.AccumulatorState == nil {
+					instance.AccumulatorState = map[string]any{}
+				}
+				if bucket, ok := asObject(instance.AccumulatorState["validation-orchestrator"]); ok {
+					bucket["revision_count"] = asInt(bucket["revision_count"]) + 1
+					instance.AccumulatorState["validation-orchestrator"] = bucket
+				}
+			})
+		}
 		return true
 	case "spinup_opco_org":
 		pc.PersistWorkflowMetadata(ctx, hookCtx.VerticalID, func(metadata map[string]any) {
@@ -296,17 +378,19 @@ func workflowStateFromInstance(instance WorkflowInstance, fallback WorkflowState
 	if metadata := cloneStringAnyMap(instance.Metadata); len(metadata) > 0 {
 		out.Metadata = metadata
 	}
-	if pipelineState, ok := asObject(instance.AccumulatorState["pipeline-coordinator"]); ok {
+	if validationState, ok := asObject(instance.AccumulatorState["validation-orchestrator"]); ok {
 		if out.Metadata == nil {
 			out.Metadata = map[string]any{}
 		}
-		for key, value := range pipelineState {
-			if _, exists := out.Metadata[key]; !exists {
-				out.Metadata[key] = value
+		if gateState, ok := asObject(validationState["gate_state"]); ok {
+			for _, gate := range []string{"g1_research", "g2_spec", "g3_cto", "g4_brand"} {
+				if _, exists := out.Metadata[gate]; !exists {
+					out.Metadata[gate] = gateState[gate]
+				}
 			}
 		}
-		if status := strings.TrimSpace(asString(pipelineState["status"])); status != "" {
-			out.Status = status
+		if _, exists := out.Metadata["revision_count"]; !exists {
+			out.Metadata["revision_count"] = validationState["revision_count"]
 		}
 	}
 	if status := strings.TrimSpace(asString(out.Metadata["status"])); status != "" {
@@ -343,8 +427,66 @@ func (pc *FactoryPipelineCoordinator) validationStateSnapshot(verticalID string)
 		return nil
 	}
 	pc.mu.Lock()
-	defer pc.mu.Unlock()
 	st := pc.validationGate.states[verticalID]
+	pc.mu.Unlock()
+	if st != nil {
+		return cloneValidationPipelineState(st)
+	}
+	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+		if instance, ok, err := pc.workflowStore.Load(context.Background(), verticalID); err == nil && ok {
+			if restored, ok := restoreValidationStateFromInstance(instance); ok {
+				return restored
+			}
+		}
+	}
+	return nil
+}
+
+func (pc *FactoryPipelineCoordinator) mutateValidationState(
+	ctx context.Context,
+	verticalID string,
+	mutate func(*validationPipelineState),
+) *validationPipelineState {
+	if pc == nil || mutate == nil {
+		return nil
+	}
+	verticalID = strings.TrimSpace(verticalID)
+	if verticalID == "" {
+		return nil
+	}
+	pc.mu.Lock()
+	if st := pc.validationGate.states[verticalID]; st != nil {
+		mutate(st)
+		snapshot := cloneValidationPipelineState(st)
+		pc.mu.Unlock()
+		return snapshot
+	}
+	pc.mu.Unlock()
+
+	var restored *validationPipelineState
+	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+		if instance, ok, err := pc.workflowStore.Load(ctx, verticalID); err == nil && ok {
+			if st, ok := restoreValidationStateFromInstance(instance); ok {
+				restored = st
+			}
+		}
+	}
+	if restored == nil {
+		return nil
+	}
+
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	if st := pc.validationGate.states[verticalID]; st != nil {
+		mutate(st)
+		return cloneValidationPipelineState(st)
+	}
+	mutate(restored)
+	pc.validationGate.states[verticalID] = restored
+	return cloneValidationPipelineState(restored)
+}
+
+func cloneValidationPipelineState(st *validationPipelineState) *validationPipelineState {
 	if st == nil {
 		return nil
 	}

@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-const defaultMonitorDir = "/tmp/empire-monitor"
+const defaultMonitorDir = "/tmp/runtime-monitor"
 
 type MonitorTurnMeta struct {
 	AgentID    string

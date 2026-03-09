@@ -59,7 +59,7 @@ const (
 	managerShutdownTimeout  = 15 * time.Second
 	poisonPanicQuarantineAt = 3
 	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.1.0"
+	runtimeSpecVersion      = "v2.2.1"
 )
 
 func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {

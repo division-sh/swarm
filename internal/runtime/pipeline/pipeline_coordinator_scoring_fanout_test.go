@@ -111,8 +111,8 @@ func TestFactoryPipelineCoordinator_FinalizeScoring_ShortlistedPublishesVertical
 	if !containsEventType(received, "vertical.scored") {
 		t.Fatalf("shortlisted scoring must emit vertical.scored to EC, got=%v", received)
 	}
-	if containsEventType(received, "vertical.shortlisted") {
-		t.Fatalf("vertical.shortlisted should be interceptor-consumed, got=%v", received)
+	if !containsEventType(received, "vertical.shortlisted") {
+		t.Fatalf("vertical.shortlisted should remain visible downstream under dual_delivery, got=%v", received)
 	}
 }
 

@@ -77,29 +77,6 @@ var roleAliases = map[string]string{
 	"opco-devops":          "devops-agent",
 }
 
-var messageAuthorityRegistry = []MessageAuthority{
-	// Holding level.
-	{SenderRole: "empire-coordinator", RecipientRoles: []string{"factory-cto", "holding-devops", "operations-analyst", "discovery-coordinator", "validation-coordinator", "spec-auditor", "opco-ceo"}, Scope: "any"},
-	{SenderRole: "factory-cto", RecipientRoles: []string{"validation-coordinator", "operations-analyst", "cto-agent"}, Scope: "any"},
-	{SenderRole: "operations-analyst", RecipientRoles: []string{"empire-coordinator", "factory-cto"}, Scope: "holding"},
-
-	// OpCo level exceptions that are not derivable from parent/child hierarchy.
-	{SenderRole: "chief-of-staff", RecipientRoles: []string{"vp-product", "vp-growth", "opco-ceo"}, Scope: "opco"},
-}
-
-var mailboxRoundTrips = []MailboxRoundTrip{
-	{SenderRole: "validation-coordinator", MailboxType: "vertical_approval", DecisionEvents: []string{"vertical.approved", "vertical.killed", "vertical.needs_more_data"}, ReturnToRole: "empire-coordinator"},
-	{SenderRole: "opco-ceo", MailboxType: "spend_request", DecisionEvents: []string{"spend.approved", "spend.rejected"}, ReturnToRole: "opco-ceo"},
-	{SenderRole: "vp-product", MailboxType: "product_spec_review", DecisionEvents: []string{"review.product_spec_feedback"}, ReturnToRole: "vp-product", Timeout: "48h auto-proceed"},
-	{SenderRole: "opco-ceo", MailboxType: "deploy_review", DecisionEvents: []string{"review.deploy_feedback"}, ReturnToRole: "opco-ceo", Timeout: "48h auto-proceed"},
-	{SenderRole: "opco-ceo", MailboxType: "founder_input", DecisionEvents: []string{"founder_input.response"}, ReturnToRole: "opco-ceo", Timeout: "48h use CEO recommendation"},
-	{SenderRole: "opco-ceo", MailboxType: "escalation", DecisionEvents: []string{"opco.escalation_response"}, ReturnToRole: "opco-ceo"},
-	{SenderRole: "empire-coordinator", MailboxType: "template_migration", DecisionEvents: []string{"template.migration_approved"}, ReturnToRole: "empire-coordinator"},
-	{SenderRole: "holding-devops", MailboxType: "capacity_warning", DecisionEvents: []string{"spend.approved", "spend.rejected"}, ReturnToRole: "holding-devops"},
-	{SenderRole: "empire-coordinator", MailboxType: "health_warning", DecisionEvents: []string{"vertical.killed"}, ReturnToRole: "empire-coordinator"},
-	{SenderRole: "empire-coordinator", MailboxType: "human_task", DecisionEvents: []string{"human_task.completed"}, ReturnToRole: "requesting-agent", Timeout: "auto_expire_hours"},
-}
-
 func RuntimeEvents() []string {
 	reg := contractProducerData()
 	return append([]string(nil), reg.runtimeEvents...)
@@ -117,15 +94,16 @@ func MessageAuthorities() []MessageAuthority {
 			messageAuthorityData = derived
 			return
 		}
-		messageAuthorityData = cloneAuthorities(messageAuthorityRegistry)
+		messageAuthorityData = cloneAuthorities(baseMessageAuthorities())
 	})
 	out := cloneAuthorities(messageAuthorityData)
 	return out
 }
 
 func MailboxRoundTrips() []MailboxRoundTrip {
-	out := make([]MailboxRoundTrip, len(mailboxRoundTrips))
-	copy(out, mailboxRoundTrips)
+	base := baseMailboxRoundTrips()
+	out := make([]MailboxRoundTrip, len(base))
+	copy(out, base)
 	return out
 }
 
@@ -137,6 +115,22 @@ type templateAgentNode struct {
 
 func CanonicalRole(role string) string {
 	return canonicalRole(role)
+}
+
+func baseMessageAuthorities() []MessageAuthority {
+	policy := defaultPolicyOrNil()
+	if policy == nil {
+		return nil
+	}
+	return policy.MessageAuthorities()
+}
+
+func baseMailboxRoundTrips() []MailboxRoundTrip {
+	policy := defaultPolicyOrNil()
+	if policy == nil {
+		return nil
+	}
+	return policy.MailboxRoundTrips()
 }
 
 func ProducerEventsForRole(role string) []string {
@@ -316,7 +310,7 @@ func loadMessageAuthorityRegistry() ([]MessageAuthority, error) {
 	if err != nil {
 		return nil, err
 	}
-	authorities := cloneAuthorities(messageAuthorityRegistry)
+	authorities := cloneAuthorities(baseMessageAuthorities())
 	byKey := make(map[authorityKey]map[string]struct{}, len(authorities))
 	for _, rule := range authorities {
 		key := authorityKey{

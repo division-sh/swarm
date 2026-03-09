@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -52,6 +53,10 @@ type ScanCampaignManager struct {
 	maxPendingMailbox  int
 	budgetPaused       bool
 	backpressurePaused bool
+}
+
+func controlPlaneDirectiveRecipient() string {
+	return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
 }
 
 const DefaultCampaignTimeCap = 24 * time.Hour
@@ -402,8 +407,9 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 			"original_event":   evt.ID,
 			"parsed_directive": parsed,
 		}
-		if err := m.bus.PublishDirect(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("system.directive"), SourceAgent: "scan-campaign-manager", Payload: mustJSONBytes(forwardedPayload), CreatedAt: m.now()}, []string{"empire-coordinator"}); err != nil {
-			m.warnf("scan-campaign-manager", "failed to forward complex directive to empire-coordinator event_id=%s: %v", strings.TrimSpace(evt.ID), err)
+		recipient := controlPlaneDirectiveRecipient()
+		if err := m.bus.PublishDirect(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("system.directive"), SourceAgent: "scan-campaign-manager", Payload: mustJSONBytes(forwardedPayload), CreatedAt: m.now()}, []string{recipient}); err != nil {
+			m.warnf("scan-campaign-manager", "failed to forward complex directive to control-plane agent event_id=%s: %v", strings.TrimSpace(evt.ID), err)
 		}
 		return
 	}

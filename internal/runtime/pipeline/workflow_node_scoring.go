@@ -10,6 +10,7 @@ import (
 type scoringWorkflowRuntime interface {
 	handleVerticalDerived(context.Context, events.Event)
 	loadScoringSeed(context.Context, string) (string, string, string)
+	loadWorkflowScoringAccumulator(context.Context, string) (*scoringAccumulator, bool)
 	publish(context.Context, string, string, map[string]any)
 	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
 	updateScoredVerticalState(context.Context, string, string, map[string]any, string)

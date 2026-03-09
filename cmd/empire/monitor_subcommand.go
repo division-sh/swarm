@@ -31,7 +31,7 @@ func runMonitorTMuxSubcommand(args []string) error {
 	storeMode := fs.String("store", "postgres", "Storage mode")
 	migrate := fs.Bool("migrate", false, "Apply migrations")
 	migrationFile := fs.String("migration-file", defaultMigrationFilePath, "Migration file path")
-	sessionName := fs.String("session", "empire-monitor", "tmux session name")
+	sessionName := fs.String("session", "runtime-monitor", "tmux session name")
 	tmuxBin := fs.String("tmux-bin", "tmux", "tmux binary")
 	rootDir := fs.String("root", llm.DefaultMonitorDir(), "Monitor log directory")
 	attach := fs.Bool("attach", true, "Attach to the tmux session after syncing windows")
@@ -92,7 +92,7 @@ func syncTMuxMonitorSession(ctx context.Context, tmuxBin, sessionName, rootDir s
 		tmuxBin = "tmux"
 	}
 	if sessionName == "" {
-		sessionName = "empire-monitor"
+		sessionName = "runtime-monitor"
 	}
 
 	exists, err := tmuxSessionExists(ctx, tmuxBin, sessionName)
