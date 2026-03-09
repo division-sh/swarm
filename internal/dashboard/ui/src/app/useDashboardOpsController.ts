@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { HealthResponse, MailboxResponse, TargetRecord, TasksResponse } from "../types/core.ts";
-import { useControlController } from "../features/control/useControlController.js";
+import { useControlController } from "../features/control/useControlController.ts";
 import { useHealthController } from "../features/health/useHealthController.ts";
 import { useTasksController } from "../features/tasks/useTasksController.ts";
 
@@ -31,8 +31,8 @@ type DashboardOpsControllerInput = {
   setRequeueEventID: StringSetter;
   requeueAgentID: string;
   setRequeueAgentID: StringSetter;
-  resetConfirm: boolean;
-  setResetConfirm: BoolSetter;
+  resetConfirm: string;
+  setResetConfirm: StringSetter;
   mailStatus: string;
   setMailStatus: StringSetter;
   mailboxID: string;
@@ -55,7 +55,7 @@ type DashboardOpsControllerInput = {
   resetDBAndSeed: AsyncAction;
   wipeDB: AsyncAction;
   decideMailbox: AsyncAction;
-  quickMailboxDecide: AsyncAction;
+  quickMailboxDecide: (action: string) => Promise<unknown>;
   tasksResp: TasksResponse;
   tasksStats: Record<string, any>;
   selectedTask: Record<string, any> | null;

@@ -15,6 +15,9 @@ Success means:
 Already in place:
 - [tsconfig.json](./tsconfig.json)
 - `npm run typecheck`
+- `npm run lint`
+- `npm run check:deps`
+- `npm run check:architecture`
 - `tsx`-based test scripts in [package.json](./package.json)
 - first converted modules:
   - [src/lib/format.ts](./src/lib/format.ts)
@@ -28,11 +31,18 @@ Already in place:
     - [src/features/operations](./src/features/operations)
 
 Current compiler posture:
-- `allowJs: true`
+- `allowJs: false`
 - `strict: false`
 - `noEmit: true`
 
 That is intentional for the first phase.
+
+Current migration checkpoint:
+- app shell/coordinator path: mostly typed
+- query/API layer: typed
+- feature controller/helper layer: largely typed for major surfaces
+- major workbench/container views: typed
+- current source mix: `173` `ts/tsx` files and `0` `js/jsx` files under [src](./src)
 
 ## Migration Principles
 
@@ -57,6 +67,8 @@ Exit criteria:
 - converted helper modules remain covered by tests
 
 ## Phase 2: Query And API Contracts
+
+Status: complete
 
 Target:
 - convert API/query layers from loosely shaped JS objects to typed request/response modules
@@ -88,6 +100,8 @@ Exit criteria:
 
 ## Phase 3: Feature Controllers And Derived State
 
+Status: substantially complete
+
 Target:
 - convert state-shaping and feature-controller modules that sit between raw data and JSX
 
@@ -118,6 +132,8 @@ Exit criteria:
 
 ## Phase 4: App Assembly Layer
 
+Status: substantially complete
+
 Target:
 - type the shell/coordinator/assembly layer once data and controller contracts are stable
 
@@ -144,6 +160,8 @@ Exit criteria:
 
 ## Phase 5: React Components
 
+Status: in progress
+
 Target:
 - convert components once their inputs are typed
 
@@ -167,6 +185,10 @@ Then:
 Exit criteria:
 - component props are typed at the boundaries
 - no large JSX file is converted before its data/controller inputs are typed
+
+Current checkpoint:
+- all files under [src](./src) are now TypeScript or TSX
+- remaining work is type-quality improvement rather than file-format migration
 
 ## Phase 6: Strictness Ramp
 
@@ -218,15 +240,11 @@ Additions over time:
 
 ## Immediate Next Steps
 
-1. Convert query key consumers and query modules to import [dashboardQueryKeys.ts](./src/app/dashboardQueryKeys.ts).
-2. Add domain type files under [src/types](./src/types) for:
-   - core
-   - runtime
-   - workflow
-   - portfolio
-3. Convert the query modules in [src/app](./src/app) and [src/api](./src/api).
-4. Convert controller hooks for `Health`, `Overview`, `Observability`, `Tasks`, and `Operations`.
-5. Reassess compiler strictness after those layers are typed.
+1. Replace broad `Record<string, any>` types in hot paths with narrower domain interfaces.
+2. Start enabling stricter compiler flags beginning with `noImplicitAny`.
+3. Tighten graph/workflow/portfolio domain models where the remaining casts cluster.
+4. Decide whether to type-check `scripts/` more aggressively or leave them intentionally lightweight.
+5. Keep the verification baseline green as type strictness increases.
 
 ## Definition Of Done
 

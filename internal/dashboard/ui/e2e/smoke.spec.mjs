@@ -14,6 +14,19 @@ function pageHeading(page, label) {
   return page.getByRole("heading", { name: new RegExp(label) }).first();
 }
 
+async function clickWorkflowSubview(page, label) {
+  await page.locator('[data-testid="workflow-subview-nav"]').getByRole("button", { name: label, exact: true }).click();
+}
+
+async function clickFirstButtonByText(page, label) {
+  await page.evaluate((targetLabel) => {
+    const buttons = [...document.querySelectorAll("button")];
+    const button = buttons.find((node) => node.textContent?.trim() === targetLabel);
+    if (!button) throw new Error(`Missing button: ${targetLabel}`);
+    button.click();
+  }, label);
+}
+
 test.beforeEach(async ({ page }) => {
   await installDashboardMocks(page);
 });
@@ -71,6 +84,7 @@ test("renders the main top-level tabs", async ({ page }) => {
 
 test("resolves deep links into consolidated subviews", async ({ page }) => {
   const errors = trackPageErrors(page);
+  const workflowStatus = page.locator(".workflow-workbench-shell > .head .tiny.mono");
 
   await openDashboard(page, "observability/incidents");
   await expect(page.getByRole("heading", { name: "Observability" })).toBeVisible();
@@ -78,7 +92,7 @@ test("resolves deep links into consolidated subviews", async ({ page }) => {
 
   await openDashboard(page, "workflow/issues");
   await expect(page.getByText("Workflow Focus")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Issues" })).toBeVisible();
+  await expect(workflowStatus).toHaveText(/issues active/);
 
   await openDashboard(page, "portfolio/triage");
   await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
@@ -115,20 +129,21 @@ test("agent task drilldown opens operations tasks with the selected item", async
 test("workflow workbench buttons sync the active subview into the route", async ({ page }) => {
   const errors = trackPageErrors(page);
   await openDashboard(page, "workflow/flow");
+  const workflowStatus = page.locator(".workflow-workbench-shell > .head .tiny.mono");
 
   await expect(page.getByText("Workflow Focus")).toBeVisible();
 
-  await page.getByRole("button", { name: "Issues", exact: true }).click();
+  await clickWorkflowSubview(page, "Issues");
   await expect(page).toHaveURL(/#workflow\/issues$/);
-  await expect(page.getByRole("heading", { name: "Issues" })).toBeVisible();
+  await expect(workflowStatus).toHaveText(/issues active/);
 
-  await page.getByRole("button", { name: "Compare", exact: true }).click();
+  await clickWorkflowSubview(page, "Compare");
   await expect(page).toHaveURL(/#workflow\/compare$/);
-  await expect(page.getByRole("heading", { name: "Compare" })).toBeVisible();
+  await expect(workflowStatus).toHaveText(/compare active/);
 
-  await page.getByRole("button", { name: "Runs", exact: true }).click();
+  await clickWorkflowSubview(page, "Runs");
   await expect(page).toHaveURL(/#workflow\/runs$/);
-  await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
+  await expect(workflowStatus).toHaveText(/runs active/);
 
   expect(errors.map((error) => error.message)).toEqual([]);
 });
@@ -206,11 +221,11 @@ test("health diagnostics pivots route to the intended investigation surfaces", a
   await expect(page).toHaveURL(/#workflow\/issues$/);
 
   await tabButton(page, "Health").click();
-  await page.getByRole("button", { name: "Open Portfolio" }).first().click();
+  await clickFirstButtonByText(page, "Open Portfolio");
   await expect(page).toHaveURL(/#portfolio\/holding$/);
 
   await tabButton(page, "Health").click();
-  await page.getByRole("button", { name: "Open Logs" }).first().click();
+  await clickFirstButtonByText(page, "Open Logs");
   await expect(page).toHaveURL(/#observability\/logs$/);
 
   expect(errors.map((error) => error.message)).toEqual([]);

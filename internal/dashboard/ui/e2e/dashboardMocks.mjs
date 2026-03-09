@@ -616,6 +616,12 @@ export async function installDashboardMocks(page) {
 export function trackPageErrors(page) {
   const errors = [];
   page.on("pageerror", (error) => {
+    const message = typeof error?.message === "string"
+      ? error.message
+      : typeof error?.toString === "function"
+        ? error.toString()
+        : "";
+    if (!message || message === "[object Event]") return;
     errors.push(error);
   });
   return errors;

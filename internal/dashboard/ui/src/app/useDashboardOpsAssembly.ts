@@ -1,0 +1,112 @@
+import { useSelectedTask } from "../features/tasks/useSelectedTask.ts";
+import { useDashboardOpsController } from "./useDashboardOpsController.ts";
+
+type OpsAssemblyInput = {
+  taskState: Record<string, any>;
+  opsState: Record<string, any>;
+  loaders: {
+    loadTasks: () => Promise<unknown>;
+    loadTaskStats: () => Promise<unknown>;
+  };
+  queryData: Record<string, any>;
+  ui: {
+    selectedMailboxItem: string;
+    setSelectedMailboxItem: (value: string) => void;
+  };
+  taskActions: Record<string, any>;
+  controlActions: Record<string, any>;
+  healthContracts: Record<string, any>;
+  openView: (view: string, subview?: string) => void;
+};
+
+export function useDashboardOpsAssembly({
+  taskState,
+  opsState,
+  loaders,
+  queryData,
+  ui,
+  taskActions,
+  controlActions,
+  healthContracts,
+  openView,
+}: OpsAssemblyInput) {
+  const selectedTask = useSelectedTask({
+    tasks: queryData.tasksResp.tasks,
+    selectedTaskID: taskState.selectedTaskID,
+  });
+
+  return useDashboardOpsController({
+    targets: queryData.targets,
+    mailbox: queryData.mailbox,
+    controlOutput: opsState.controlOutput,
+    controlTarget: opsState.controlTarget,
+    setControlTarget: opsState.setControlTarget,
+    directiveMessage: opsState.directiveMessage,
+    setDirectiveMessage: opsState.setDirectiveMessage,
+    chatMessage: opsState.chatMessage,
+    setChatMessage: opsState.setChatMessage,
+    chatMode: opsState.chatMode,
+    setChatMode: opsState.setChatMode,
+    verticalName: opsState.verticalName,
+    setVerticalName: opsState.setVerticalName,
+    verticalGeo: opsState.verticalGeo,
+    setVerticalGeo: opsState.setVerticalGeo,
+    verticalSlug: opsState.verticalSlug,
+    setVerticalSlug: opsState.setVerticalSlug,
+    requeueEventID: opsState.requeueEventID,
+    setRequeueEventID: opsState.setRequeueEventID,
+    requeueAgentID: opsState.requeueAgentID,
+    setRequeueAgentID: opsState.setRequeueAgentID,
+    resetConfirm: opsState.resetConfirm,
+    setResetConfirm: opsState.setResetConfirm,
+    mailStatus: opsState.mailStatus,
+    setMailStatus: opsState.setMailStatus,
+    mailboxID: opsState.mailboxID,
+    setMailboxID: opsState.setMailboxID,
+    mailboxAction: opsState.mailboxAction,
+    setMailboxAction: opsState.setMailboxAction,
+    mailboxNotes: opsState.mailboxNotes,
+    setMailboxNotes: opsState.setMailboxNotes,
+    selectedMailboxItem: ui.selectedMailboxItem,
+    setSelectedMailboxItem: ui.setSelectedMailboxItem,
+    sendDirective: controlActions.sendDirective,
+    sendChat: controlActions.sendChat,
+    restartControlTarget: controlActions.restartControlTarget,
+    replayControlTarget: controlActions.replayControlTarget,
+    createVertical: controlActions.createVertical,
+    requeueEvent: controlActions.requeueEvent,
+    seedOrg: controlActions.seedOrg,
+    pauseRuntime: controlActions.pauseRuntime,
+    resumeRuntime: controlActions.resumeRuntime,
+    resetDBAndSeed: controlActions.resetDBAndSeed,
+    wipeDB: controlActions.wipeDB,
+    decideMailbox: controlActions.decideMailbox,
+    quickMailboxDecide: controlActions.quickMailboxDecide,
+    tasksResp: queryData.tasksResp,
+    tasksStats: queryData.tasksStats,
+    selectedTask,
+    taskStatus: taskState.taskStatus,
+    setTaskStatus: taskState.setTaskStatus,
+    selectedTaskID: taskState.selectedTaskID,
+    setSelectedTaskID: taskState.setSelectedTaskID,
+    taskResultText: taskState.taskResultText,
+    setTaskResultText: taskState.setTaskResultText,
+    taskOutcome: taskState.taskOutcome,
+    setTaskOutcome: taskState.setTaskOutcome,
+    taskFollowUpNeeded: taskState.taskFollowUpNeeded,
+    setTaskFollowUpNeeded: taskState.setTaskFollowUpNeeded,
+    taskRejectReason: taskState.taskRejectReason,
+    setTaskRejectReason: taskState.setTaskRejectReason,
+    loadTasks: loaders.loadTasks,
+    loadTaskStats: loaders.loadTaskStats,
+    claimSelectedTask: taskActions.claimSelectedTask,
+    completeSelectedTask: taskActions.completeSelectedTask,
+    rejectSelectedTask: taskActions.rejectSelectedTask,
+    health: queryData.health,
+    contractsData: healthContracts.contractsData,
+    contractWorkflow: healthContracts.contractWorkflow,
+    contractPlatform: healthContracts.contractPlatform,
+    contractVerification: healthContracts.contractVerification,
+    openView,
+  });
+}
