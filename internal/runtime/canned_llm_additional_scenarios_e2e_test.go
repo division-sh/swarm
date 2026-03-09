@@ -99,7 +99,7 @@ type e2eScenarioRig struct {
 	pc            *runtimepipeline.FactoryPipelineCoordinator
 	am            *runtimemanager.AgentManager
 	scanMgr       *runtimepipeline.ScanCampaignManager
-	scoringNode   *runtimepipeline.ScoringNode
+	scoringNode   runtimepipeline.BackgroundNode
 	scheduler     *runtimepipeline.Scheduler
 	scheduleStore *captureScheduleStore
 	canned        *yamlCannedRuntime

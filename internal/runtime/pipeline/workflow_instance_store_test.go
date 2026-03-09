@@ -41,7 +41,10 @@ func TestWorkflowInstanceStore_UpsertLoadDelete(t *testing.T) {
 			GuardsEvaluated: []string{"has_vertical_id"},
 		}},
 		AccumulatorState: map[string]any{
-			"pipeline-coordinator": map[string]any{"g1_research": true},
+			"validation-orchestrator": map[string]any{
+				"vertical_id": instanceID,
+				"gate_state":  map[string]any{"g1_research": true},
+			},
 		},
 		TimerState: []WorkflowTimerState{{
 			TimerID:   "scan_timeout",

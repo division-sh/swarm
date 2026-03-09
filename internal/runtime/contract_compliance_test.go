@@ -512,7 +512,8 @@ func TestContractCompliance(t *testing.T) {
 					errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", implPath, err))
 					continue
 				}
-				if strings.TrimSpace(sub.Subscriber) == "pipeline-coordinator" {
+				switch strings.TrimSpace(sub.Subscriber) {
+				case "pipeline-coordinator":
 					extraPaths, extraErr := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node*.go"))
 					if extraErr != nil {
 						errs = append(errs, fmt.Sprintf("glob workflow node coverage: %v", extraErr))
@@ -527,6 +528,16 @@ func TestContractCompliance(t *testing.T) {
 						for evt := range extraEvents {
 							handledEvents[evt] = struct{}{}
 						}
+					}
+				case "scoring-node":
+					extraPath := filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node_scoring.go")
+					extraEvents, parseErr := contractComplianceParseHandledEventsFromFile(repoRoot, extraPath)
+					if parseErr != nil {
+						errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", extraPath, parseErr))
+						continue
+					}
+					for evt := range extraEvents {
+						handledEvents[evt] = struct{}{}
 					}
 				}
 				handledEventsCache[implPath] = handledEvents

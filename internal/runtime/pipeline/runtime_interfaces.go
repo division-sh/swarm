@@ -25,6 +25,10 @@ type WorkflowNodeExecutor interface {
 	Handle(ctx context.Context, evt events.Event) bool
 }
 
+type BackgroundWorkflowExecutorProvider interface {
+	BackgroundWorkflowExecutor() WorkflowNodeExecutor
+}
+
 type WorkflowStateStore interface {
 	Enabled(ctx context.Context, enabled bool) bool
 	Load(ctx context.Context) PipelineStateSnapshot

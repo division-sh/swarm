@@ -2,12 +2,49 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	"empireai/internal/events"
 )
 
 type workflowNodeExecutor = WorkflowNodeExecutor
+
+func (pc *FactoryPipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []BackgroundNode {
+	if pc == nil || bus == nil {
+		return nil
+	}
+	out := make([]BackgroundNode, 0, 1)
+	for _, node := range pc.WorkflowNodes() {
+		if strings.TrimSpace(node.ExecutionType) != "workflow_node" {
+			continue
+		}
+		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
+			if bg := newBackgroundWorkflowNode(executor, bus, db); bg != nil {
+				out = append(out, bg)
+			}
+		}
+	}
+	return out
+}
+
+func (pc *FactoryPipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {
+	if pc == nil {
+		return nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	for _, executor := range pc.workflowNodeExecutors() {
+		if strings.TrimSpace(executor.NodeID()) != nodeID {
+			continue
+		}
+		provider, ok := executor.(BackgroundWorkflowExecutorProvider)
+		if !ok {
+			return nil
+		}
+		return provider.BackgroundWorkflowExecutor()
+	}
+	return nil
+}
 
 func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 	if pc == nil {
@@ -23,9 +60,9 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 	_, hasValidation := nodeIDs["validation-orchestrator"]
 	_, hasLifecycle := nodeIDs["lifecycle-orchestrator"]
 	_, hasScoring := nodeIDs[ScoringNodeID]
-	// Scoring is still a dedicated runtime node. The split-executor model owns
-	// the other four system nodes directly; scoring remains the one explicit
-	// architectural exception until Phase 3 unifies it.
+	// The split-executor model owns the four orchestration nodes directly.
+	// Scoring still keeps a dedicated background subscriber, but the surrounding
+	// runtime wiring is now genericized.
 	useSplitExecutors := !legacyCoordinator && (hasScan || hasDiscovery || hasValidation || hasLifecycle)
 
 	out := make([]workflowNodeExecutor, 0, 5)

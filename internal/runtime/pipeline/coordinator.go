@@ -141,22 +141,6 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	return pc
 }
 
-func (pc *FactoryPipelineCoordinator) OnVerticalDiscovered(ctx context.Context, evt events.Event) {
-	pc.handleScoringRequested(withPipelineSourceAgent(ctx, ScoringNodeID), evt)
-}
-
-func (pc *FactoryPipelineCoordinator) OnVerticalDerived(ctx context.Context, evt events.Event) {
-	pc.handleVerticalDerived(withPipelineSourceAgent(ctx, ScoringNodeID), evt)
-}
-
-func (pc *FactoryPipelineCoordinator) OnScoreDimensionComplete(ctx context.Context, evt events.Event) {
-	pc.handleScoreDimensionComplete(withPipelineSourceAgent(ctx, ScoringNodeID), evt)
-}
-
-func (pc *FactoryPipelineCoordinator) OnScoringContestResolved(ctx context.Context, evt events.Event) {
-	pc.handleScoringContestResolved(withPipelineSourceAgent(ctx, ScoringNodeID), evt)
-}
-
 func (pc *FactoryPipelineCoordinator) SetTestSubscribeHook(fn func()) {
 	if pc == nil {
 		return

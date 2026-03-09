@@ -55,7 +55,7 @@ type Runtime struct {
 	Bus             *EventBus
 	Logger          *RuntimeLogger
 	Pipeline        *runtimepipeline.FactoryPipelineCoordinator
-	ScoringNode     *runtimepipeline.ScoringNode
+	SystemNodes     []runtimepipeline.BackgroundNode
 	ScanCampaign    *runtimepipeline.ScanCampaignManager
 	Scheduler       *runtimepipeline.Scheduler
 	Workspace       workspace.Lifecycle
@@ -122,7 +122,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			Module:       workflowModule,
 		})
 		if rt.Pipeline != nil {
-			rt.ScoringNode = runtimepipeline.NewScoringNode(rt.Bus, rt.Pipeline, stores.SQLDB)
+			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
 		}
 	}
 
@@ -238,8 +238,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt.Pipeline != nil {
 		go rt.Pipeline.RunMaintenance(ctx)
 	}
-	if rt.ScoringNode != nil {
-		go rt.ScoringNode.Run(ctx)
+	for _, node := range rt.SystemNodes {
+		if node != nil {
+			go node.Run(ctx)
+		}
 	}
 	if rt.ScanCampaign != nil {
 		go rt.ScanCampaign.Run(ctx)

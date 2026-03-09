@@ -98,19 +98,39 @@ func boolFromAny(v any) bool {
 }
 
 func (pc *FactoryPipelineCoordinator) loadScoringSeed(ctx context.Context, verticalID string) (name, geography, mode string) {
+	name, geography, mode, _, _ = pc.loadScoringSeedDetails(ctx, verticalID)
+	return name, geography, mode
+}
+
+func (pc *FactoryPipelineCoordinator) handleVerticalDiscovered(ctx context.Context, evt events.Event) {
+	pc.handleScoringRequested(withPipelineSourceAgent(ctx, ScoringNodeID), evt)
+}
+
+func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context, verticalID string) (name, geography, mode, geographicScope string, discoveryContext map[string]any) {
 	if pc == nil || pc.db == nil {
-		return "", "", ""
+		return "", "", "", "", nil
 	}
 	var rawMode string
+	var rawSignals []byte
 	_ = dbQueryRowContext(ctx, pc.db, `
-		SELECT COALESCE(name,''), COALESCE(geography,''), COALESCE(mode,'')
+		SELECT COALESCE(name,''), COALESCE(geography,''), COALESCE(mode,''), COALESCE(raw_signals, '{}'::jsonb)
 		FROM verticals
 		WHERE id = $1::uuid
-	`, verticalID).Scan(&name, &geography, &rawMode)
+	`, verticalID).Scan(&name, &geography, &rawMode, &rawSignals)
 	if strings.TrimSpace(rawMode) == "" {
 		rawMode = "saas_gap"
 	}
-	return strings.TrimSpace(name), strings.TrimSpace(geography), normalizeScanMode(rawMode)
+	if len(rawSignals) > 0 {
+		var rs map[string]any
+		if err := json.Unmarshal(rawSignals, &rs); err == nil {
+			geographicScope = pc.scoringState.scoring.NormalizeGeographicScope(asString(rs["geographic_scope"]))
+			discoveryContext = cloneMapFromAny(rs["discovery_context"])
+			if len(discoveryContext) == 0 && pc.scoringState != nil && pc.scoringState.scoring != nil {
+				discoveryContext = pc.scoringState.scoring.BuildDiscoveryContextPayload(rs)
+			}
+		}
+	}
+	return strings.TrimSpace(name), strings.TrimSpace(geography), normalizeScanMode(rawMode), geographicScope, discoveryContext
 }
 
 func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context, evt events.Event) {

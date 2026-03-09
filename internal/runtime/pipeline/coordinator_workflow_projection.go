@@ -46,7 +46,6 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 		if instance.AccumulatorState == nil {
 			instance.AccumulatorState = map[string]any{}
 		}
-		instance.AccumulatorState["pipeline-coordinator"] = cloneStringAnyMap(state.Metadata)
 		validationStartedAt, validationCompletedAt := existingValidationProjectionTimes(instance)
 		instance.AccumulatorState["validation-orchestrator"] = encodeValidationProjection(
 			bundle,

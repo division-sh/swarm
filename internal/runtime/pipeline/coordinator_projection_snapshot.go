@@ -20,7 +20,7 @@ func (pc *FactoryPipelineCoordinator) fillTransitionSnapshotWorkflowCounts(out m
 			workflowScans++
 			workflowPending += len(pending)
 		}
-		if acc, ok := restoreScoringAccumulatorFromInstance(item); ok && acc != nil {
+		if scoringNodeProjectionPresent(item) {
 			workflowScoring++
 		}
 		if st, ok := restoreValidationStateFromInstance(item); ok && st != nil {

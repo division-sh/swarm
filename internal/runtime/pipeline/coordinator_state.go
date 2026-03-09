@@ -33,7 +33,7 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 				if st, ok := restoreValidationStateFromInstance(instance); ok {
 					workflowValidations[strings.TrimSpace(instance.InstanceID)] = st
 				}
-				if acc, ok := restoreScoringAccumulatorFromInstance(instance); ok {
+				if acc, ok := pc.loadWorkflowScoringAccumulator(ctx, strings.TrimSpace(instance.InstanceID)); ok {
 					workflowScoring[strings.TrimSpace(instance.InstanceID)] = acc
 				}
 				if acc, pending, ok := restoreScanStateFromInstance(instance); ok {

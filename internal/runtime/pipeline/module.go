@@ -11,6 +11,8 @@ type scoreDimensionResult = ScoreDimensionResult
 type contestedDimension = ContestedDimension
 type scoringComposite = ScoringComposite
 type scoringAccumulatorInput = ScoringAccumulatorInput
+type ScoringAccumulator = scoringAccumulator
+type BackgroundNode interface{ Run(context.Context) }
 type validationContextSnapshot = ValidationContextSnapshot
 type scanCompletedBuildInput = ScanCompletedBuildInput
 
@@ -319,6 +321,9 @@ type ScoringPolicy interface {
 	BuildDiscoveryContextPayload(raw map[string]any) map[string]any
 	ResolveScoringAnalysisRecipient(recipients []string, excludedAgent string) string
 	NormalizeGeographicScope(raw string) string
+	ScoringRestoreDeltaBucket() string
+	EncodeScoringRestoreDelta(acc *ScoringAccumulator) map[string]any
+	ApplyScoringRestoreDelta(acc *ScoringAccumulator, delta map[string]any)
 }
 
 type PayloadFactory interface {

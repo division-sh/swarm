@@ -19,13 +19,17 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx cont
 	if verticalID == "" {
 		return
 	}
-	encoded := encodeScoringAccumulator(acc)
+	encoded := encodeScoringCompatibilityAccumulator(acc)
+	restoreBucket := scoringRestoreDeltaBucket(pc)
+	if pc != nil && pc.scoringState != nil && pc.scoringState.scoring != nil {
+		encoded = pc.scoringState.scoring.EncodeScoringRestoreDelta((*ScoringAccumulator)(acc))
+	}
 	encodedNode := encodeScoringAccumulatorForWorkflow(pc.ContractBundle(), acc)
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		if instance.AccumulatorState == nil {
 			instance.AccumulatorState = map[string]any{}
 		}
-		instance.AccumulatorState["scoring-state"] = encoded
+		instance.AccumulatorState[restoreBucket] = encoded
 		instance.AccumulatorState["scoring-node"] = encodedNode
 	})
 }
@@ -42,7 +46,7 @@ func (pc *FactoryPipelineCoordinator) clearWorkflowScoringAccumulator(ctx contex
 		if instance.AccumulatorState == nil {
 			return
 		}
-		delete(instance.AccumulatorState, "scoring-state")
+		delete(instance.AccumulatorState, scoringRestoreDeltaBucket(pc))
 		delete(instance.AccumulatorState, "scoring-node")
 	})
 }
@@ -59,7 +63,12 @@ func (pc *FactoryPipelineCoordinator) loadWorkflowScoringAccumulator(ctx context
 	if err != nil || !ok {
 		return nil, false
 	}
-	return restoreScoringAccumulatorFromInstance(instance)
+	acc, restored := restoreScoringAccumulatorFromInstance(instance)
+	if !restored || acc == nil {
+		return nil, false
+	}
+	pc.hydrateWorkflowScoringAccumulator(ctx, acc)
+	return acc, true
 }
 
 func (pc *FactoryPipelineCoordinator) scoringAccumulatorSnapshot(ctx context.Context, verticalID string) *scoringAccumulator {
@@ -80,6 +89,38 @@ func (pc *FactoryPipelineCoordinator) scoringAccumulatorSnapshot(ctx context.Con
 		return restored
 	}
 	return nil
+}
+
+func (pc *FactoryPipelineCoordinator) hydrateWorkflowScoringAccumulator(ctx context.Context, acc *scoringAccumulator) {
+	if pc == nil || acc == nil {
+		return
+	}
+	name, geography, mode, geographicScope, discoveryContext := pc.loadScoringSeedDetails(ctx, acc.VerticalID)
+	acc.VerticalName = firstNonEmptyString(acc.VerticalName, name)
+	acc.Geography = firstNonEmptyString(acc.Geography, geography)
+	acc.GeographicScope = firstNonEmptyString(acc.GeographicScope, geographicScope)
+	acc.Mode = firstNonEmptyString(normalizeScanMode(acc.Mode), normalizeScanMode(mode))
+	if acc.Mode == "" {
+		acc.Mode = "saas_gap"
+	}
+	if len(acc.DiscoveryContext) == 0 {
+		acc.DiscoveryContext = cloneMap(discoveryContext)
+	}
+	if strings.TrimSpace(acc.Rubric) == "" && pc.scoringState != nil && pc.scoringState.scoring != nil {
+		acc.Rubric = pc.scoringState.scoring.SelectScoringRubric(acc.Mode)
+	}
+	if len(acc.Expected) == 0 && pc.scoringState != nil && pc.scoringState.scoring != nil {
+		acc.Expected = pc.scoringState.scoring.ExpectedScoringDimensions(acc.Rubric)
+	}
+	if acc.Received == nil {
+		acc.Received = map[string]scoreDimensionResult{}
+	}
+	if acc.Contested == nil {
+		acc.Contested = map[string]contestedDimension{}
+	}
+	if acc.ContestNotified == nil {
+		acc.ContestNotified = map[string]bool{}
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) persistWorkflowScanProjection(ctx context.Context, scans map[string]*scanAccumulator, pending map[string]pendingCandidate) {
@@ -170,17 +211,10 @@ func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationP
 			metadata["revision_count"] = bucket["revision_count"]
 		}
 	}
-	bucket, ok := asObject(instance.AccumulatorState["pipeline-coordinator"])
-	if ok {
-		for key, value := range bucket {
-			if _, exists := metadata[key]; !exists {
-				metadata[key] = value
-			}
-		}
-	}
 	if len(metadata) == 0 {
 		return nil, false
 	}
+	bucket, _ := asObject(instance.AccumulatorState["validation-orchestrator"])
 	verticalID := strings.TrimSpace(instance.InstanceID)
 	if verticalID == "" {
 		return nil, false
@@ -220,35 +254,25 @@ func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationP
 
 func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringAccumulator, bool) {
 	nodeBucket, nodeOK := asObject(instance.AccumulatorState["scoring-node"])
-	compatBucket, compatOK := asObject(instance.AccumulatorState["scoring-state"])
-	if (!nodeOK || len(nodeBucket) == 0) && (!compatOK || len(compatBucket) == 0) {
+	compatBucket, compatOK := scoringRestoreDeltaFromInstance(instance)
+	if !nodeOK || len(nodeBucket) == 0 {
 		return nil, false
 	}
-	bucket := map[string]any{}
-	for key, value := range compatBucket {
-		bucket[key] = value
-	}
-	for key, value := range nodeBucket {
-		bucket[key] = value
-	}
-	verticalID := strings.TrimSpace(firstNonEmptyString(asString(bucket["vertical_id"]), instance.InstanceID))
+	verticalID := strings.TrimSpace(firstNonEmptyString(asString(nodeBucket["vertical_id"]), instance.InstanceID))
 	if verticalID == "" {
 		return nil, false
 	}
 	acc := &scoringAccumulator{
 		VerticalID:       verticalID,
-		VerticalName:     strings.TrimSpace(asString(bucket["vertical_name"])),
-		Geography:        strings.TrimSpace(asString(bucket["geography"])),
-		GeographicScope:  strings.TrimSpace(asString(bucket["geographic_scope"])),
-		Mode:             normalizeScanMode(asString(bucket["mode"])),
-		Rubric:           strings.TrimSpace(asString(bucket["rubric"])),
-		DiscoveryContext: cloneMapFromAny(bucket["discovery_context"]),
-		Expected:         stringSliceFromAny(firstNonNil(bucket["dimensions_requested"], bucket["expected"])),
-		Received:         decodeScoreDimensionResults(firstNonNil(bucket["dimensions_received"], bucket["received"])),
-		Contested:        decodeContestedDimensions(bucket["contested"]),
-		RequestedAt:      parseWorkflowTime(firstNonNil(bucket["started_at"], bucket["requested_at"])),
-		LastUpdatedAt:    parseWorkflowTime(firstNonNil(bucket["completed_at"], bucket["last_updated_at"])),
-		ContestNotified:  boolMapFromAny(bucket["contest_notified"]),
+		Expected:        stringSliceFromAny(nodeBucket["dimensions_requested"]),
+		Received:        decodeScoreDimensionResults(nodeBucket["dimensions_received"]),
+		RequestedAt:     parseWorkflowTime(nodeBucket["started_at"]),
+		LastUpdatedAt:   parseWorkflowTime(nodeBucket["completed_at"]),
+		Contested:       map[string]contestedDimension{},
+		ContestNotified: map[string]bool{},
+	}
+	if compatOK && len(compatBucket) > 0 {
+		applyScoringCompatibilityDelta(acc, compatBucket)
 	}
 	if acc.Mode == "" && acc.Rubric == "" && len(acc.Expected) == 0 && len(acc.Received) == 0 && len(acc.Contested) == 0 {
 		return nil, false
@@ -263,6 +287,55 @@ func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringA
 		acc.ContestNotified = map[string]bool{}
 	}
 	return acc, true
+}
+
+func scoringRestoreDeltaBucket(pc *FactoryPipelineCoordinator) string {
+	if pc != nil && pc.scoringState != nil && pc.scoringState.scoring != nil {
+		if bucket := strings.TrimSpace(pc.scoringState.scoring.ScoringRestoreDeltaBucket()); bucket != "" {
+			return bucket
+		}
+	}
+	if module := defaultWorkflowModuleOrNil(); module != nil && module.ScoringPolicy() != nil {
+		if bucket := strings.TrimSpace(module.ScoringPolicy().ScoringRestoreDeltaBucket()); bucket != "" {
+			return bucket
+		}
+	}
+	return "scoring-restore"
+}
+
+func scoringRestoreDeltaFromInstance(instance WorkflowInstance) (map[string]any, bool) {
+	if bucket, ok := asObject(instance.AccumulatorState["scoring-restore"]); ok && len(bucket) > 0 {
+		return bucket, true
+	}
+	return nil, false
+}
+
+func applyScoringCompatibilityDelta(acc *scoringAccumulator, compatBucket map[string]any) {
+	if acc == nil || len(compatBucket) == 0 {
+		return
+	}
+	if module := defaultWorkflowModuleOrNil(); module != nil && module.ScoringPolicy() != nil {
+		module.ScoringPolicy().ApplyScoringRestoreDelta((*ScoringAccumulator)(acc), compatBucket)
+		return
+	}
+	ApplyScoringRestoreDelta((*ScoringAccumulator)(acc), compatBucket)
+}
+
+func scoringNodeProjectionPresent(instance WorkflowInstance) bool {
+	nodeBucket, ok := asObject(instance.AccumulatorState["scoring-node"])
+	if !ok || len(nodeBucket) == 0 {
+		return false
+	}
+	verticalID := strings.TrimSpace(firstNonEmptyString(asString(nodeBucket["vertical_id"]), instance.InstanceID))
+	if verticalID == "" {
+		return false
+	}
+	return len(stringSliceFromAny(nodeBucket["dimensions_requested"])) > 0 || len(asObjectLoose(nodeBucket["dimensions_received"])) > 0
+}
+
+func asObjectLoose(value any) map[string]any {
+	out, _ := asObject(value)
+	return out
 }
 
 func restoreScanStateFromInstance(instance WorkflowInstance) (*scanAccumulator, map[string]pendingCandidate, bool) {
@@ -337,6 +410,36 @@ func encodeScoringAccumulator(acc *scoringAccumulator) map[string]any {
 		out["last_updated_at"] = acc.LastUpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
 	return out
+}
+
+func encodeScoringCompatibilityAccumulator(acc *scoringAccumulator) map[string]any {
+	if acc == nil {
+		return map[string]any{}
+	}
+	return EncodeScoringRestoreDelta((*ScoringAccumulator)(acc))
+}
+
+func EncodeScoringRestoreDelta(acc *ScoringAccumulator) map[string]any {
+	if acc == nil {
+		return map[string]any{}
+	}
+	out := map[string]any{
+		"contested":        encodeContestedDimensions(acc.Contested),
+		"contest_notified": cloneBoolMap(acc.ContestNotified),
+	}
+	return out
+}
+
+func ApplyScoringRestoreDelta(acc *ScoringAccumulator, compatBucket map[string]any) {
+	if acc == nil || len(compatBucket) == 0 {
+		return
+	}
+	if len(acc.Contested) == 0 {
+		acc.Contested = decodeContestedDimensions(compatBucket["contested"])
+	}
+	if len(acc.ContestNotified) == 0 {
+		acc.ContestNotified = boolMapFromAny(compatBucket["contest_notified"])
+	}
 }
 
 func encodeScoringAccumulatorForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, acc *scoringAccumulator) map[string]any {

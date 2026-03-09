@@ -55,12 +55,8 @@ func TestFactoryPipelineCoordinator_UpdateVerticalStageProjectsWorkflowInstance(
 	if got := asInt(inst.Metadata["revision_count"]); got != 2 {
 		t.Fatalf("unexpected metadata: %+v", inst.Metadata)
 	}
-	acc, ok := inst.AccumulatorState["pipeline-coordinator"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected accumulator state bucket, got %+v", inst.AccumulatorState)
-	}
-	if got := asInt(acc["spec_version"]); got != 3 {
-		t.Fatalf("unexpected accumulator state: %+v", acc)
+	if _, ok := inst.AccumulatorState["pipeline-coordinator"]; ok {
+		t.Fatalf("expected pipeline-coordinator compatibility bucket to be absent, got %+v", inst.AccumulatorState)
 	}
 	validationBucket, ok := inst.AccumulatorState["validation-orchestrator"].(map[string]any)
 	if !ok {
@@ -145,9 +141,6 @@ func TestFactoryPipelineCoordinator_CurrentWorkflowStatePrefersWorkflowInstanceM
 				},
 				"revision_count": 3,
 			},
-			"pipeline-coordinator": map[string]any{
-				"spec_version": 2,
-			},
 		},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
@@ -191,11 +184,6 @@ func TestFactoryPipelineCoordinator_CurrentWorkflowStateIgnoresPipelineCoordinat
 				},
 				"revision_count": 3,
 			},
-			"pipeline-coordinator": map[string]any{
-				"status":         "stale",
-				"revision_count": 99,
-				"g3_cto":         true,
-			},
 		},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
@@ -210,6 +198,36 @@ func TestFactoryPipelineCoordinator_CurrentWorkflowStateIgnoresPipelineCoordinat
 	}
 	if truthyMetadataFlag(state.Metadata["g3_cto"]) {
 		t.Fatalf("expected compatibility-only g3_cto not to leak into live workflow state, got %+v", state.Metadata)
+	}
+}
+
+func TestFactoryPipelineCoordinator_EnsureStateLoadedIgnoresPipelineCoordinatorCompatibilityBucket(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(pipelineTestBus{}, db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      verticalID,
+		WorkflowName:    pc.ContractBundle().Workflow.Workflow.Name,
+		WorkflowVersion: pc.ContractBundle().Workflow.Workflow.Version,
+		CurrentStage:    "cto_spec_review",
+		AccumulatorState: map[string]any{
+			"pipeline-coordinator": map[string]any{
+				"status":         "active",
+				"revision_count": 7,
+				"g1_research":    true,
+				"g2_spec":        true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	pc.ensureStateLoaded(ctx)
+
+	if st := pc.validationGate.states[verticalID]; st != nil {
+		t.Fatalf("expected compatibility bucket alone not to restore validation state, got %+v", st)
 	}
 }
 
@@ -249,10 +267,7 @@ func TestFactoryPipelineCoordinator_EnsureStateLoadedRestoresWorkflowValidationA
 				"started_at":           time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339Nano),
 				"completed_at":         time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano),
 			},
-			"pipeline-coordinator": map[string]any{
-				"spec_version": 2,
-			},
-			"scoring-state": encodeScoringAccumulator(&scoringAccumulator{
+			"scoring-restore": encodeScoringCompatibilityAccumulator(&scoringAccumulator{
 				VerticalID:       verticalID,
 				VerticalName:     "Restored Vertical",
 				Geography:        "Asuncion, Paraguay",
@@ -330,7 +345,7 @@ func TestFactoryPipelineCoordinator_EnsureStateLoadedPrefersScoringNodeBucketOve
 				"dimensions_requested": []any{"build_complexity"},
 				"dimensions_received":  map[string]any{"build_complexity": map[string]any{"score": 91, "evidence": "node"}},
 			},
-			"scoring-state": encodeScoringAccumulator(&scoringAccumulator{
+			"scoring-restore": encodeScoringCompatibilityAccumulator(&scoringAccumulator{
 				VerticalID:       verticalID,
 				VerticalName:     "Compat Vertical",
 				Geography:        "US",
@@ -358,6 +373,124 @@ func TestFactoryPipelineCoordinator_EnsureStateLoadedPrefersScoringNodeBucketOve
 	}
 	if restoredScoring.Rubric != "universal" || restoredScoring.Mode != "saas_gap" {
 		t.Fatalf("expected compatibility bucket to backfill rubric/mode, got %+v", restoredScoring)
+	}
+	if got := restoredScoring.VerticalName; got != "Scoring Merge Vertical" {
+		t.Fatalf("expected canonical vertical row to backfill vertical_name, got %+v", restoredScoring)
+	}
+}
+
+func TestFactoryPipelineCoordinator_EnsureStateLoadedIgnoresLegacyScoringStateBucket(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(pipelineTestBus{}, db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode)
+		VALUES ($1::uuid, 'Legacy Scoring Ignore', 'legacy-scoring-ignore', 'US', 'scoring', 'saas_gap')
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      verticalID,
+		WorkflowName:    pc.ContractBundle().Workflow.Workflow.Name,
+		WorkflowVersion: pc.ContractBundle().Workflow.Workflow.Version,
+		CurrentStage:    "scoring",
+		AccumulatorState: map[string]any{
+			"scoring-node": map[string]any{
+				"vertical_id":          verticalID,
+				"dimensions_requested": []any{"build_complexity"},
+				"dimensions_received":  map[string]any{"build_complexity": map[string]any{"score": 72, "evidence": "node"}},
+			},
+			"scoring-state": encodeScoringCompatibilityAccumulator(&scoringAccumulator{
+				VerticalID:      verticalID,
+				Contested:       map[string]contestedDimension{"distribution_leverage": {Dimension: "distribution_leverage", Spread: 21}},
+				ContestNotified: map[string]bool{"distribution_leverage": true},
+			}),
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	pc.ensureStateLoaded(ctx)
+
+	acc := pc.scoringState.accumulators[verticalID]
+	if acc == nil {
+		t.Fatal("expected scoring accumulator restored from scoring-node bucket")
+	}
+	if len(acc.Contested) != 0 {
+		t.Fatalf("expected legacy scoring-state bucket to be ignored, got contested=%+v", acc.Contested)
+	}
+}
+
+func TestFactoryPipelineCoordinator_PersistWorkflowScoringAccumulatorWritesCompatibilityDeltaOnly(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(pipelineTestBus{}, db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      verticalID,
+		WorkflowName:    pc.ContractBundle().Workflow.Workflow.Name,
+		WorkflowVersion: pc.ContractBundle().Workflow.Workflow.Version,
+		CurrentStage:    "scoring",
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	acc := &scoringAccumulator{
+		VerticalID:       verticalID,
+		VerticalName:     "Compat Delta Vertical",
+		Geography:        "US",
+		GeographicScope:  "us-national",
+		Mode:             "saas_gap",
+		Rubric:           "universal",
+		DiscoveryContext: map[string]any{"analyst_id": "analyst-1", "source": "seed"},
+		Expected:         []string{"build_complexity"},
+		Received:         map[string]scoreDimensionResult{"build_complexity": {Score: 90, Evidence: "node"}},
+		Contested:        map[string]contestedDimension{"distribution_leverage": {Dimension: "distribution_leverage", Spread: 31}},
+		ContestNotified:  map[string]bool{"distribution_leverage": true},
+		RequestedAt:      time.Now().UTC().Add(-time.Minute),
+		LastUpdatedAt:    time.Now().UTC(),
+	}
+
+	pc.persistWorkflowScoringAccumulator(ctx, acc)
+
+	inst, ok, err := pc.workflowStore.Load(ctx, verticalID)
+	if err != nil || !ok {
+		t.Fatalf("load workflow instance: ok=%v err=%v", ok, err)
+	}
+	compatBucket, ok := inst.AccumulatorState["scoring-restore"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected scoring-restore compatibility bucket, got %+v", inst.AccumulatorState)
+	}
+	for _, field := range []string{"vertical_id", "vertical_name", "geography", "geographic_scope", "mode", "rubric", "discovery_context", "requested_at", "last_updated_at", "expected", "received"} {
+		if _, exists := compatBucket[field]; exists {
+			t.Fatalf("expected scoring-restore not to carry %s, got %+v", field, compatBucket)
+		}
+	}
+	if _, exists := compatBucket["contested"]; !exists {
+		t.Fatalf("expected contested compatibility data, got %+v", compatBucket)
+	}
+	if _, exists := compatBucket["contest_notified"]; !exists {
+		t.Fatalf("expected contest_notified compatibility data, got %+v", compatBucket)
+	}
+	for key := range compatBucket {
+		switch key {
+		case "contested", "contest_notified":
+		default:
+			t.Fatalf("unexpected extra scoring restore field %q in %+v", key, compatBucket)
+		}
+	}
+	nodeBucket, ok := inst.AccumulatorState["scoring-node"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected scoring-node bucket, got %+v", inst.AccumulatorState)
+	}
+	if _, exists := nodeBucket["dimensions_requested"]; !exists {
+		t.Fatalf("expected scoring-node dimensions_requested, got %+v", nodeBucket)
+	}
+	if _, exists := nodeBucket["dimensions_received"]; !exists {
+		t.Fatalf("expected scoring-node dimensions_received, got %+v", nodeBucket)
 	}
 }
 
@@ -777,6 +910,19 @@ func TestScoringState_HandleScoreDimensionComplete_RestoresAccumulatorFromWorkfl
 	`, verticalID); err != nil {
 		t.Fatalf("insert vertical: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE verticals
+		SET raw_signals = $2::jsonb
+		WHERE id = $1::uuid
+	`, verticalID, string(mustJSON(map[string]any{
+		"geographic_scope": "us-national",
+		"discovery_context": map[string]any{
+			"analyst_id": "analyst-restore",
+			"source":     "workflow-test",
+		},
+	}))); err != nil {
+		t.Fatalf("seed raw_signals: %v", err)
+	}
 	requestedAt := time.Now().UTC().Add(-2 * time.Minute)
 	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
 		InstanceID:      verticalID,
@@ -812,6 +958,18 @@ func TestScoringState_HandleScoreDimensionComplete_RestoresAccumulatorFromWorkfl
 	acc := pc.scoringState.accumulators[verticalID]
 	if acc == nil {
 		t.Fatal("expected scoring accumulator to restore from workflow instance")
+	}
+	if acc.Mode != "saas_gap" || acc.Rubric == "" {
+		t.Fatalf("expected workflow restore to hydrate mode/rubric from canonical sources, got %+v", acc)
+	}
+	if len(acc.Expected) != 3 {
+		t.Fatalf("expected workflow restore to preserve/hydrate expected dimensions, got %+v", acc.Expected)
+	}
+	if acc.GeographicScope != "local" {
+		t.Fatalf("expected workflow restore to hydrate normalized geographic scope from raw_signals, got %+v", acc)
+	}
+	if got := asString(acc.DiscoveryContext["analyst_id"]); got != "analyst-restore" {
+		t.Fatalf("expected workflow restore to hydrate discovery context from raw_signals, got %+v", acc.DiscoveryContext)
 	}
 	if got := acc.Received["build_complexity"].Score; got != 81 {
 		t.Fatalf("expected restored build_complexity score=81, got %+v", acc.Received)
@@ -857,6 +1015,49 @@ func TestFactoryPipelineCoordinator_TransitionStateSnapshotUsesWorkflowScoringCo
 
 	if got := asInt(snapshot["scoring_active"]); got != 1 {
 		t.Fatalf("expected workflow-backed scoring_active=1, got %+v", snapshot)
+	}
+}
+
+func TestFactoryPipelineCoordinator_TransitionStateSnapshotIgnoresScoringCompatibilityBucketForCounts(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(pipelineTestBus{}, db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode)
+		VALUES ($1::uuid, 'Compat Snapshot Scoring', 'compat-snapshot-scoring', 'US', 'scoring', 'saas_gap')
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      verticalID,
+		WorkflowName:    pc.ContractBundle().Workflow.Workflow.Name,
+		WorkflowVersion: pc.ContractBundle().Workflow.Workflow.Version,
+		CurrentStage:    "scoring",
+		AccumulatorState: map[string]any{
+			"scoring-state": encodeScoringCompatibilityAccumulator(&scoringAccumulator{
+				VerticalID:      verticalID,
+				Mode:            "saas_gap",
+				Rubric:          "universal",
+				Expected:        []string{"build_complexity"},
+				Received:        map[string]scoreDimensionResult{},
+				Contested:       map[string]contestedDimension{},
+				ContestNotified: map[string]bool{},
+				RequestedAt:     time.Now().UTC().Add(-time.Minute),
+			}),
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	snapshot := pc.transitionStateSnapshot("score.dimension_complete", events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("score.dimension_complete"),
+		VerticalID: verticalID,
+	}, map[string]any{"vertical_id": verticalID})
+
+	if got := asInt(snapshot["scoring_active"]); got != 0 {
+		t.Fatalf("expected scoring_active=0 when only compatibility bucket exists, got %+v", snapshot)
 	}
 }
 

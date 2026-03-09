@@ -8,7 +8,10 @@ import (
 )
 
 type scoringWorkflowRuntime interface {
+	handleScoringRequested(context.Context, events.Event)
 	handleVerticalDerived(context.Context, events.Event)
+	handleScoreDimensionComplete(context.Context, events.Event)
+	handleScoringContestResolved(context.Context, events.Event)
 	loadScoringSeed(context.Context, string) (string, string, string)
 	loadWorkflowScoringAccumulator(context.Context, string) (*scoringAccumulator, bool)
 	publish(context.Context, string, string, map[string]any)
@@ -59,6 +62,54 @@ func (n *ScoringState) Handle(ctx context.Context, evt events.Event) bool {
 		n.runtime.handleVerticalDerived(ctx, evt)
 	case "vertical.scored":
 		// Delivery filtering for this event type is handled in InterceptPolicy.
+	default:
+		return false
+	}
+	return true
+}
+
+func (n *ScoringState) BackgroundWorkflowExecutor() WorkflowNodeExecutor {
+	if n == nil || n.runtime == nil {
+		return nil
+	}
+	return newScoringBackgroundExecutor(n.runtime)
+}
+
+type scoringBackgroundExecutor struct {
+	runtime scoringWorkflowRuntime
+}
+
+func newScoringBackgroundExecutor(runtime scoringWorkflowRuntime) WorkflowNodeExecutor {
+	if runtime == nil {
+		return nil
+	}
+	return &scoringBackgroundExecutor{runtime: runtime}
+}
+
+func (e *scoringBackgroundExecutor) NodeID() string { return ScoringNodeID }
+
+func (e *scoringBackgroundExecutor) Subscriptions() []events.EventType {
+	return workflowNodeSubscriptions(ScoringNodeID)
+}
+
+func (e *scoringBackgroundExecutor) InterceptPolicy(string, events.Event) (bool, bool) {
+	return false, false
+}
+
+func (e *scoringBackgroundExecutor) Handle(ctx context.Context, evt events.Event) bool {
+	if e == nil || e.runtime == nil {
+		return false
+	}
+	ctx = withPipelineSourceAgent(ctx, ScoringNodeID)
+	switch strings.TrimSpace(string(evt.Type)) {
+	case "vertical.discovered":
+		e.runtime.handleScoringRequested(ctx, evt)
+	case "vertical.derived":
+		e.runtime.handleVerticalDerived(ctx, evt)
+	case "score.dimension_complete":
+		e.runtime.handleScoreDimensionComplete(ctx, evt)
+	case "scoring.contest_resolved":
+		e.runtime.handleScoringContestResolved(ctx, evt)
 	default:
 		return false
 	}

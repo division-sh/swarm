@@ -126,6 +126,18 @@ func (module) NormalizeGeographicScope(raw string) string {
 	return NormalizeGeographicScope(raw)
 }
 
+func (module) ScoringRestoreDeltaBucket() string {
+	return "scoring-restore"
+}
+
+func (module) EncodeScoringRestoreDelta(acc *runtimepipeline.ScoringAccumulator) map[string]any {
+	return runtimepipeline.EncodeScoringRestoreDelta(acc)
+}
+
+func (module) ApplyScoringRestoreDelta(acc *runtimepipeline.ScoringAccumulator, delta map[string]any) {
+	runtimepipeline.ApplyScoringRestoreDelta(acc, delta)
+}
+
 func (module) BuildScanAssignedPayload(scanID, campaignID, mode, geography string, source map[string]any, plannedShards int) runtimepipeline.ScanAssignedPayload {
 	return BuildScanAssignedPayload(scanID, campaignID, mode, geography, source, plannedShards)
 }
