@@ -86,3 +86,63 @@ test("resolves deep links into consolidated subviews", async ({ page }) => {
 
   expect(errors.map((error) => error.message)).toEqual([]);
 });
+
+test("agent task drilldown opens operations tasks with the selected item", async ({ page }) => {
+  const errors = trackPageErrors(page);
+  await openDashboard(page, "agents");
+
+  await expect(page.getByRole("heading", { name: "Agent Activity" })).toBeVisible();
+  await page.locator("tr.agent-row").first().click();
+  await page.locator(".agent-drop").getByRole("button", { name: "Open Task" }).first().click();
+
+  await expect(page).toHaveURL(/#operations\/tasks$/);
+  await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Human Tasks" })).toBeVisible();
+  const selectedTaskPanel = page.locator(".row.body > div").nth(1);
+  await expect(selectedTaskPanel.getByText("Selected Task")).toBeVisible();
+  await expect(selectedTaskPanel.locator(".desc-text")).toHaveText("Review Alpha AI validation package and approve or reject.");
+
+  expect(errors.map((error) => error.message)).toEqual([]);
+});
+
+test("workflow workbench buttons sync the active subview into the route", async ({ page }) => {
+  const errors = trackPageErrors(page);
+  await openDashboard(page, "workflow/flow");
+
+  await expect(page.getByText("Workflow Focus")).toBeVisible();
+
+  await page.getByRole("button", { name: "Issues", exact: true }).click();
+  await expect(page).toHaveURL(/#workflow\/issues$/);
+  await expect(page.getByRole("heading", { name: "Issues" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Compare", exact: true }).click();
+  await expect(page).toHaveURL(/#workflow\/compare$/);
+  await expect(page.getByRole("heading", { name: "Compare" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Runs", exact: true }).click();
+  await expect(page).toHaveURL(/#workflow\/runs$/);
+  await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
+
+  expect(errors.map((error) => error.message)).toEqual([]);
+});
+
+test("portfolio workbench buttons sync the active subview into the route", async ({ page }) => {
+  const errors = trackPageErrors(page);
+  await openDashboard(page, "portfolio/overview");
+
+  await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Triage", exact: true }).click();
+  await expect(page).toHaveURL(/#portfolio\/triage$/);
+  await expect(page.getByRole("heading", { name: "Portfolio Triage" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await expect(page).toHaveURL(/#portfolio\/holding$/);
+  await expect(page.getByRole("heading", { name: "Holding" })).toBeVisible();
+
+  await page.locator(".portfolio-workbench-shell > .head").getByRole("button", { name: "Funnel", exact: true }).click();
+  await expect(page).toHaveURL(/#portfolio\/pipeline$/);
+  await expect(page.getByRole("heading", { name: "Pipeline Funnel" })).toBeVisible();
+
+  expect(errors.map((error) => error.message)).toEqual([]);
+});
