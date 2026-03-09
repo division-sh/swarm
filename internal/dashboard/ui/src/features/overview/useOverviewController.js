@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { deriveOverviewState } from "./useOverviewDerivedState.js";
 
 export function useOverviewController({
   overview,
@@ -12,6 +13,14 @@ export function useOverviewController({
   holdingData,
   openView,
 }) {
+  const derived = deriveOverviewState({
+    agentsResp,
+    incidentsData,
+    mailbox,
+    tasksResp,
+    holdingData,
+  });
+
   return useMemo(() => ({
     state: {
       overview,
@@ -23,6 +32,7 @@ export function useOverviewController({
       health,
       funnel,
       holdingData,
+      derived,
     },
     actions: {
       openView,
@@ -38,5 +48,6 @@ export function useOverviewController({
     overview,
     openView,
     tasksResp,
+    derived,
   ]);
 }

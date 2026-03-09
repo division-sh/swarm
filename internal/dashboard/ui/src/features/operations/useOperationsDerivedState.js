@@ -83,6 +83,38 @@ export function deriveOperationsDerivedState({
       }
       : null;
 
+  const unifiedQueue = [
+    ...pendingMailbox.map((item) => ({
+      kind: "mailbox",
+      id: item.id,
+      priorityScore: normalizePriority(item.priority) + 10,
+      title: firstNonEmpty(item.summary, item.type, item.id),
+      vertical: item.vertical_slug || item.vertical_id || "",
+      agent: item.from_agent || "",
+      status: item.status || "",
+      priority: item.priority || "",
+      created_at: item.created_at || "",
+      record: item,
+    })),
+    ...actionableTasks.map((task) => ({
+      kind: "task",
+      id: task.id,
+      priorityScore: normalizePriority(task.priority) + (isOverdue(task.deadline) ? 10 : 0),
+      title: firstNonEmpty(task.description, task.category, task.id),
+      vertical: task.vertical_slug || "",
+      agent: task.requesting_agent || "",
+      status: task.status || "",
+      priority: task.priority || "",
+      created_at: task.created_at || "",
+      deadline: task.deadline || "",
+      record: task,
+    })),
+  ].sort((a, b) => {
+    const pri = b.priorityScore - a.priorityScore;
+    if (pri !== 0) return pri;
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+
   const related = focus
     ? {
       tasks: actionableTasks.filter((task) => focus.vertical && task.vertical_slug === focus.vertical).slice(0, 3),
@@ -106,6 +138,7 @@ export function deriveOperationsDerivedState({
       overdueTasks,
       reviewTasks,
       highPriorityTasks,
+      unified: unifiedQueue,
     },
     focus,
     related,

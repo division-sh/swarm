@@ -1,16 +1,15 @@
-import React, { useEffect, useState } from "react";
-import EventsView from "../events/EventsView.jsx";
-import IncidentsView from "../incidents/IncidentsView.jsx";
-import LogsView from "../logs/LogsView.jsx";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_INCIDENTS_FILTER,
   deriveObservabilityFocus,
   EMPTY_EVENT_FILTER,
   EMPTY_LOG_FILTER,
 } from "./focus.js";
+import ObservabilityWorkbench from "./ObservabilityWorkbench.jsx";
+import { deriveObservabilityState } from "./useObservabilityDerivedState.js";
 
 function routeToSubview(activeView) {
-  if (activeView === "events" || activeView === "logs" || activeView === "incidents") {
+  if (activeView === "events" || activeView === "logs" || activeView === "incidents" || activeView === "overview") {
     return activeView;
   }
   return "";
@@ -23,9 +22,10 @@ export default function ObservabilityView({
   events,
   logs,
   incidents,
+  actions,
 }) {
   const routeSubview = routeToSubview(activeView) || activeSubview;
-  const [subview, setSubview] = useState(routeSubview || "events");
+  const [subview, setSubview] = useState(routeSubview || "overview");
 
   useEffect(() => {
     if (!routeSubview) return;
@@ -40,10 +40,8 @@ export default function ObservabilityView({
     setViewRoute("observability", next);
   }
 
-  const eventCount = Array.isArray(events.state.filteredEvents) ? events.state.filteredEvents.length : 0;
-  const logCount = Array.isArray(logs.state.filteredLogsData) ? logs.state.filteredLogsData.length : 0;
-  const incidentCount = Array.isArray(incidents.state.incidentsData) ? incidents.state.incidentsData.length : 0;
   const focus = deriveObservabilityFocus({ events, logs, incidents });
+  const derived = useMemo(() => deriveObservabilityState({ events, logs, incidents, focus }), [events, logs, incidents, focus]);
 
   function applyAgentFocus(nextSubview) {
     if (!focus.agent) return;
@@ -148,78 +146,60 @@ export default function ObservabilityView({
     <div>
       <div className="head">
         <h2>Observability</h2>
-        <div className="stack">
-          <button className={subview === "events" ? "active" : ""} onClick={() => selectSubview("events")}>
-            Event Trace
-          </button>
-          <button className={subview === "logs" ? "active" : ""} onClick={() => selectSubview("logs")}>
-            Runtime Logs
-          </button>
-          <button className={subview === "incidents" ? "active" : ""} onClick={() => selectSubview("incidents")}>
-            Incidents
-          </button>
-        </div>
       </div>
       <div className="tiny" style={{ marginBottom: 10 }}>
-        Unified runtime tracing, log inspection, and incident triage. {eventCount} filtered events, {logCount} filtered logs, {incidentCount} incidents in the current window.
+        Unified runtime tracing, log inspection, and incident response workspace.
       </div>
-      <div className="health-card" style={{ marginBottom: 10 }}>
-        <div className="stack" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-          <div>
-            <div className="tiny">Focus Context</div>
-            <div>{focus.chips.length > 0 ? focus.chips.join(" | ") : "No active observability focus"}</div>
-          </div>
-          <div className="stack">
-            {focus.agent ? (
-              <>
-                <button className="btn-secondary" onClick={() => applyAgentFocus("events")}>Agent Events</button>
-                <button className="btn-secondary" onClick={() => applyAgentFocus("logs")}>Agent Logs</button>
-              </>
-            ) : null}
-            <button className="btn-secondary" onClick={applyRuntimeErrors}>Runtime Errors</button>
-            <button className="btn-secondary" onClick={applyMcpIncidents}>MCP Incidents</button>
-            <button className="btn-secondary" onClick={clearAll}>Reset Focus</button>
-          </div>
-        </div>
-        <div className="stack tiny">
-          <span>Agent: <span className="mono">{focus.agent || "-"}</span></span>
-          <span>Vertical: <span className="mono">{focus.vertical || "-"}</span></span>
-          <span>Component: <span className="mono">{focus.component || "-"}</span></span>
-          <span>Incident: <span className="mono">{focus.incidentCode || "-"}</span></span>
-        </div>
-      </div>
-      {subview === "events" ? (
-        <EventsView
-          state={events.state}
-          actions={{
+      <ObservabilityWorkbench
+        subview={subview}
+        setViewRoute={setViewRoute}
+        derived={derived}
+        events={{
+          state: events.state,
+          actions: {
             ...events.actions,
             openLogsForAgent,
             focusEventType,
             focusEventVertical,
-          }}
-        />
-      ) : null}
-      {subview === "logs" ? (
-        <LogsView
-          state={logs.state}
-          actions={{
+            openAgent: actions.openAgent,
+            openWorkflowForVertical: actions.openWorkflowTrace,
+            openPortfolioForVertical: actions.openPortfolio,
+          },
+        }}
+        logs={{
+          state: logs.state,
+          actions: {
             ...logs.actions,
             openEvent,
             focusAgentEvents,
             openIncidentFocus,
-          }}
-        />
-      ) : null}
-      {subview === "incidents" ? (
-        <IncidentsView
-          state={incidents.state}
-          actions={{
+            openAgent: actions.openAgent,
+            openWorkflowForVertical: actions.openWorkflowTrace,
+            openPortfolioForVertical: actions.openPortfolio,
+          },
+        }}
+        incidents={{
+          state: incidents.state,
+          actions: {
             ...incidents.actions,
             focusAgentEvents,
             focusIncidentComponent,
-          }}
-        />
-      ) : null}
+            openAgent: actions.openAgent,
+            openWorkflowForVertical: actions.openWorkflowTrace,
+            openPortfolioForVertical: actions.openPortfolio,
+          },
+        }}
+        actions={{
+          selectSubview,
+          applyAgentFocus,
+          applyRuntimeErrors,
+          applyMcpIncidents,
+          clearAll,
+          openAgent: actions.openAgent,
+          openWorkflowTrace: actions.openWorkflowTrace,
+          openPortfolio: actions.openPortfolio,
+        }}
+      />
     </div>
   );
 }

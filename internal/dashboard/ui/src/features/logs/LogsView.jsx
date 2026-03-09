@@ -63,6 +63,9 @@ export default function LogsView({ state, actions }) {
             <>
               <div className="stack" style={{ marginBottom: 10 }}>
                 <button className="btn-secondary" disabled={!selectedLog.event_id} onClick={() => actions.openEvent?.(selectedLog.event_id)}>Open Event</button>
+                <button className="btn-secondary" disabled={!selectedLog.agent_id} onClick={() => actions.openAgent?.(selectedLog.agent_id)}>Agent</button>
+                <button className="btn-secondary" disabled={!selectedLog.vertical_id} onClick={() => actions.openWorkflowForVertical?.(selectedLog.vertical_id)}>Workflow</button>
+                <button className="btn-secondary" disabled={!selectedLog.vertical_id} onClick={() => actions.openPortfolioForVertical?.(selectedLog.vertical_id)}>Portfolio</button>
                 <button className="btn-secondary" disabled={!selectedLog.agent_id} onClick={() => actions.focusAgentEvents?.(selectedLog.agent_id)}>Agent Events</button>
                 <button className="btn-secondary" disabled={!selectedLog.error_code && !selectedLog.component} onClick={() => actions.openIncidentFocus?.(selectedLog)}>Related Incidents</button>
               </div>

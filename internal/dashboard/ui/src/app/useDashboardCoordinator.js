@@ -153,6 +153,7 @@ export function useDashboardCoordinator() {
     taskActions,
     controlActions,
     healthContracts,
+    openView: ui.setViewRoute,
   });
 
   const overview = useDashboardOverviewAssembly({

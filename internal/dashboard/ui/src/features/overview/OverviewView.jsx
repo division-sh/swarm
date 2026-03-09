@@ -28,6 +28,7 @@ export default function OverviewView({ state, actions }) {
     health,
     funnel,
     holdingData,
+    derived,
   } = state;
   const { openView } = actions;
 
@@ -42,6 +43,7 @@ export default function OverviewView({ state, actions }) {
     .slice(0, 8);
   const recentIncidents = (incidentsData || []).slice(0, 8);
   const digestText = digestResp?.current?.text || "";
+  const urgentNow = derived?.urgentNow || [];
 
   return (
     <section>
@@ -80,8 +82,8 @@ export default function OverviewView({ state, actions }) {
             value={pendingMailbox}
             tone={pendingMailbox > 0 ? "health-warn" : ""}
             detail={`${openTasks} open tasks loaded`}
-            cta="Open Operations"
-            onClick={() => openView("operations", "control")}
+            cta="Open Queue"
+            onClick={() => openView("operations", "queue")}
           />
           <SummaryCard
             label="Workflow Drift"
@@ -99,6 +101,30 @@ export default function OverviewView({ state, actions }) {
             cta="Open Portfolio"
             onClick={() => openView("portfolio", "pipeline")}
           />
+        </div>
+
+        <div className="holding-detail-section" style={{ marginBottom: 10 }}>
+          <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+            <div className="tiny">Urgent Now</div>
+            <button className="btn-secondary" onClick={() => openView("operations", "queue")}>Open Queue</button>
+          </div>
+          {urgentNow.length === 0 ? (
+            <div className="empty-state">No urgent cross-surface items detected.</div>
+          ) : (
+            <table>
+              <thead><tr><th>Kind</th><th>Item</th><th>Context</th><th>Action</th></tr></thead>
+              <tbody>
+                {urgentNow.map((item) => (
+                  <tr key={`${item.kind}:${item.id}`}>
+                    <td><span className="badge">{item.kind}</span></td>
+                    <td>{item.title}</td>
+                    <td className="tiny">{item.subtitle || "-"}</td>
+                    <td><button className="btn-secondary" onClick={() => openView(item.route.view, item.route.subview)}>Open</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="row" style={{ marginBottom: 10 }}>
@@ -125,7 +151,7 @@ export default function OverviewView({ state, actions }) {
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <div className="tiny">Mailbox and Task Queue</div>
-              <button className="btn-secondary" onClick={() => openView("operations", "tasks")}>Open Operations</button>
+              <button className="btn-secondary" onClick={() => openView("operations", "queue")}>Open Queue</button>
             </div>
             <div className="health-kv"><span>Pending Mailbox</span><span className="mono">{pendingMailbox}</span></div>
             <div className="health-kv"><span>Approved</span><span className="mono">{mailbox.summary?.approved || 0}</span></div>
@@ -157,7 +183,9 @@ export default function OverviewView({ state, actions }) {
                       <td><CopyID id={agent.id} len={12} /></td>
                       <td>{agent.role || "-"}</td>
                       <td>{agent.vertical_slug || agent.vertical_id || "holding"}</td>
-                      <td className="mono">{agent.pending_events || 0}</td>
+                      <td className="mono">
+                        <button className="btn-secondary" onClick={() => openView("agents")}>{agent.pending_events || 0} pending</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -177,7 +205,7 @@ export default function OverviewView({ state, actions }) {
                 <tbody>
                   {triageVerticals.map((vertical) => (
                     <tr key={vertical.id}>
-                      <td>{vertical.slug || vertical.name || vertical.id}</td>
+                      <td><button className="btn-secondary" onClick={() => openView("portfolio", "holding")}>{vertical.slug || vertical.name || vertical.id}</button></td>
                       <td>{vertical.stage_entered_at ? relTime(vertical.stage_entered_at) : "-"}</td>
                       <td className="mono">{vertical.active_timer_count || 0}</td>
                       <td>{vertical.workflow_current_stage && vertical.workflow_current_stage !== vertical.stage ? "yes" : "no"}</td>
@@ -203,7 +231,7 @@ export default function OverviewView({ state, actions }) {
                 <tbody>
                   {recentIncidents.map((incident) => (
                     <tr key={incident.code}>
-                      <td className="mono">{incident.code}</td>
+                      <td className="mono"><button className="btn-secondary" onClick={() => openView("observability", "incidents")}>{incident.code}</button></td>
                       <td className="mono">{incident.count || 0}</td>
                       <td title={fmtTime(incident.last_seen)}>{relTime(incident.last_seen)}</td>
                     </tr>
@@ -214,8 +242,8 @@ export default function OverviewView({ state, actions }) {
           </div>
           <div className="holding-detail-section">
             <div className="stack" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-              <div className="tiny">Digest Snapshot</div>
-              <button className="btn-secondary" onClick={() => openView("digest")}>Open Digest</button>
+              <div className="tiny">Executive Snapshot</div>
+              <button className="btn-secondary" onClick={() => openView("health")}>Open Health</button>
             </div>
             <div className="tiny" style={{ marginBottom: 6 }}>
               Last compiled {digestResp?.last_compiled?.at ? relTime(digestResp.last_compiled.at) : "never"}

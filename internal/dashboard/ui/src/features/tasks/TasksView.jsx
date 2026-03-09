@@ -1,10 +1,24 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
 import { fmtTime, relTime } from "../../lib/format.js";
+import { deriveTasksDerivedState } from "./useTasksDerivedState.js";
 
-export default function TasksView({ state, actions }) {
+export default function TasksView({ state, actions, onOpenWorkflowTrace, onOpenPortfolio, onOpenRelatedMailboxForVertical }) {
   const { tasksResp, tasksStats, selectedTask, taskStatus, selectedTaskID, taskResultText, taskOutcome, taskFollowUpNeeded, taskRejectReason } = state;
   const { setTaskStatus, setSelectedTaskID, setTaskResultText, setTaskOutcome, setTaskFollowUpNeeded, setTaskRejectReason, refreshTasks, loadTaskStats, claimSelectedTask, completeSelectedTask, rejectSelectedTask } = actions;
+  const derived = deriveTasksDerivedState({ tasksResp, tasksStats });
+
+  function openTask(task) {
+    setSelectedTaskID(task?.id || "");
+  }
+
+  const guidance = selectedTask
+    ? selectedTask.status === "pending_review"
+      ? "This task is waiting on human review. Complete it when the review package is resolved."
+      : selectedTask.status === "assigned"
+        ? "This task is already assigned. Claim only if you are taking over ownership."
+        : "Use Complete when the work is done and Reject when the request cannot be executed safely."
+    : "";
 
   return (
     <section>
@@ -26,15 +40,65 @@ export default function TasksView({ state, actions }) {
           <button className="btn-secondary" onClick={() => loadTaskStats().catch(() => {})}>Stats</button>
         </div>
       </div>
-      {tasksResp.weekly_budget ? (
-        <div className="tiny" style={{ marginBottom: 8, padding: "0 16px" }}>
-          Weekly budget: {tasksResp.weekly_budget.approved_this_week || 0}/{tasksResp.weekly_budget.max_tasks_per_week || 0}
-          {" "} (reset: {tasksResp.weekly_budget.reset_day || "monday"} 00:00 UTC; week start {tasksResp.weekly_budget.week_start_utc || "-"})
+
+      <div className="metrics-grid" style={{ marginBottom: 12 }}>
+        <div className={`metric-card${derived.summary.actionable > 0 ? " warn" : ""}`}>
+          <div className="metric-label">Actionable</div>
+          <div className="metric-value">{derived.summary.actionable}</div>
+          <div className="tiny">{derived.summary.overdue} overdue, {derived.summary.review} review</div>
         </div>
-      ) : null}
-      {tasksStats ? (
-        <div className="json" style={{ maxHeight: 160, marginBottom: 8, marginLeft: 16, marginRight: 16 }}>{JSON.stringify(tasksStats, null, 2)}</div>
-      ) : null}
+        <div className={`metric-card${derived.summary.assigned > 0 ? " warn" : ""}`}>
+          <div className="metric-label">Assigned</div>
+          <div className="metric-value">{derived.summary.assigned}</div>
+          <div className="tiny">{derived.summary.loaded} loaded in this filter</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Completed</div>
+          <div className="metric-value">{derived.summary.completed}</div>
+          <div className="tiny">{derived.summary.rejected} rejected</div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-label">Weekly Budget</div>
+          <div className="metric-value">{derived.summary.budgetUsed}/{derived.summary.budgetMax || "-"}</div>
+          <div className="tiny">reset {derived.budget.resetDay} · week start {derived.budget.weekStart || "-"}</div>
+        </div>
+      </div>
+
+      <div className="row body" style={{ marginBottom: 12 }}>
+        <div className="card">
+          <div className="tiny" style={{ marginBottom: 8 }}>Needs Attention</div>
+          <div className="body" style={{ gap: 8 }}>
+            {derived.queue.overdue.length > 0 ? derived.queue.overdue.map((task) => (
+              <div key={task.id} className="health-kv">
+                <div>
+                  <div>{task.description || task.category || task.id}</div>
+                  <div className="tiny">{[task.vertical_slug, task.requesting_agent, task.deadline ? `due ${relTime(task.deadline)}` : ""].filter(Boolean).join(" · ")}</div>
+                </div>
+                <button className="btn-secondary" onClick={() => openTask(task)}>Open</button>
+              </div>
+            )) : (
+              <div className="empty-state">No overdue tasks in this filter.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="tiny" style={{ marginBottom: 8 }}>Review Queue</div>
+          <div className="body" style={{ gap: 8 }}>
+            {derived.queue.review.length > 0 ? derived.queue.review.map((task) => (
+              <div key={task.id} className="health-kv">
+                <div>
+                  <div>{task.description || task.category || task.id}</div>
+                  <div className="tiny">{[task.vertical_slug, task.requesting_agent, task.priority].filter(Boolean).join(" · ")}</div>
+                </div>
+                <button className="btn-secondary" onClick={() => openTask(task)}>Review</button>
+              </div>
+            )) : (
+              <div className="empty-state">No review tasks in this filter.</div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="row body">
         <div className="body scroll" style={{ maxHeight: "58vh", padding: 0 }}>
@@ -87,6 +151,17 @@ export default function TasksView({ state, actions }) {
                 {selectedTask.deadline ? <span>due: <span title={fmtTime(selectedTask.deadline)}>{relTime(selectedTask.deadline)}</span></span> : null}
               </div>
               <div className="body" style={{ marginTop: 8 }}>
+                <div className="card" style={{ marginBottom: 8 }}>
+                  <div className="tiny" style={{ marginBottom: 4 }}>Operator Guidance</div>
+                  <div className="tiny">{guidance}</div>
+                </div>
+                {selectedTask.vertical_slug ? (
+                  <div className="stack" style={{ marginBottom: 8 }}>
+                    <button className="btn-secondary" onClick={() => onOpenWorkflowTrace?.(selectedTask.vertical_slug)}>Workflow</button>
+                    <button className="btn-secondary" onClick={() => onOpenPortfolio?.(selectedTask.vertical_slug)}>Portfolio</button>
+                    <button className="btn-secondary" onClick={() => onOpenRelatedMailboxForVertical?.(selectedTask.vertical_slug)}>Related Mailbox</button>
+                  </div>
+                ) : null}
                 <div className="tiny">Description</div>
                 <div className="desc-text">{selectedTask.description}</div>
                 <div className="tiny" style={{ marginTop: 8 }}>Complete</div>

@@ -75,6 +75,7 @@ export function useDashboardOpsController({
   contractWorkflow,
   contractPlatform,
   contractVerification,
+  openView,
 }) {
   const control = useControlController({
     targets,
@@ -154,6 +155,7 @@ export function useDashboardOpsController({
     contractWorkflow,
     contractPlatform,
     contractVerification,
+    openView,
   });
 
   return useMemo(() => ({

@@ -5,6 +5,10 @@ import { fmtTime, relTime } from "../../lib/format.js";
 export default function IncidentsView({ state, actions }) {
   const { incidentsData, selectedIncident, incidentArtifacts, incidentLogs, incidentsFilter, selectedIncidentCode, selectedIncidentAgent } = state;
   const { refresh, resetFilters, openLogs, openConvo, setIncidentsFilter, setSelectedIncidentCode, setSelectedIncidentAgent } = actions;
+  const incidentVertical = (incidentLogs || []).find((entry) => {
+    if (!selectedIncidentAgent) return false;
+    return entry.agent_id === selectedIncidentAgent && (entry.vertical_id || "").trim() !== "";
+  })?.vertical_id || (incidentLogs || []).find((entry) => (entry.vertical_id || "").trim() !== "")?.vertical_id || "";
 
   return (
     <div className="layout-two">
@@ -125,6 +129,9 @@ export default function IncidentsView({ state, actions }) {
                   {selectedIncidentAgent ? (
                     <>
                       <button className="btn-secondary" onClick={() => openLogs(selectedIncidentAgent)}>Open Logs</button>
+                      <button className="btn-secondary" onClick={() => actions.openAgent?.(selectedIncidentAgent)}>Open Agent</button>
+                      <button className="btn-secondary" disabled={!incidentVertical} onClick={() => actions.openWorkflowForVertical?.(incidentVertical)}>Workflow</button>
+                      <button className="btn-secondary" disabled={!incidentVertical} onClick={() => actions.openPortfolioForVertical?.(incidentVertical)}>Portfolio</button>
                       <button className="btn-secondary" onClick={() => openConvo(selectedIncidentAgent)}>Open Convo</button>
                     </>
                   ) : null}

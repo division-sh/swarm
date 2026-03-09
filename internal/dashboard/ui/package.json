@@ -6,9 +6,14 @@
   "scripts": {
     "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/dockview/dist/styles/dockview.css node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/components.css src/styles/features/graph.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css",
     "check:architecture": "node scripts/check-architecture.mjs",
+    "test:control": "node --test src/features/control/*.test.js",
     "test:graph": "node --test src/features/graph/*.test.js",
+    "test:health": "node --test src/features/health/*.test.js",
+    "test:observability": "node --test src/features/observability/*.test.js",
     "test:operations": "node --test src/features/operations/*.test.js",
+    "test:overview": "node --test src/features/overview/*.test.js",
     "test:portfolio": "node --test src/features/portfolio/*.test.js",
+    "test:tasks": "node --test src/features/tasks/*.test.js",
     "test:smoke": "npm run build && playwright test"
   },
   "dependencies": {

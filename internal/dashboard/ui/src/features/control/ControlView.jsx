@@ -1,8 +1,9 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
 import { fmtTime, relTime } from "../../lib/format.js";
+import { deriveMailboxDerivedState } from "./useMailboxDerivedState.js";
 
-export default function ControlView({ state, actions }) {
+export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpenPortfolio, onOpenRelatedTaskForVertical }) {
   const {
     targets,
     mailbox,
@@ -54,6 +55,8 @@ export default function ControlView({ state, actions }) {
     quickMailboxDecide,
   } = actions;
   const resetOK = (resetConfirm || "").trim() === "RESET";
+  const mailboxDerived = deriveMailboxDerivedState({ mailbox, selectedMailboxItem });
+  const selectedMailbox = mailboxDerived.selected;
 
   return (
     <div className="layout-two">
@@ -130,11 +133,14 @@ export default function ControlView({ state, actions }) {
               <button className="btn-secondary" onClick={() => pauseRuntime()}>Pause</button>
               <button className="btn-secondary" onClick={() => resumeRuntime()}>Resume</button>
             </div>
-            <div className="stack" style={{ marginTop: 6 }}>
-              <input className="mono" placeholder='type RESET to unlock' value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} />
-              <button className="btn-danger" disabled={!resetOK} onClick={() => resetDBAndSeed(resetConfirm, setResetConfirm)}>Reset DB + Seed</button>
-              <button className="btn-danger" disabled={!resetOK} onClick={() => wipeDB(resetConfirm, setResetConfirm)}>Wipe DB</button>
-            </div>
+            <details style={{ marginTop: 8 }}>
+              <summary className="tiny" style={{ cursor: "pointer" }}>Danger Zone</summary>
+              <div className="stack" style={{ marginTop: 8 }}>
+                <input className="mono" placeholder='type RESET to unlock' value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} />
+                <button className="btn-danger" disabled={!resetOK} onClick={() => resetDBAndSeed(resetConfirm, setResetConfirm)}>Reset DB + Seed</button>
+                <button className="btn-danger" disabled={!resetOK} onClick={() => wipeDB(resetConfirm, setResetConfirm)}>Wipe DB</button>
+              </div>
+            </details>
           </div>
 
           <div className="json" style={{ maxHeight: 160 }}>{JSON.stringify(controlOutput, null, 2)}</div>
@@ -153,10 +159,74 @@ export default function ControlView({ state, actions }) {
           </select>
         </div>
         <div className="body scroll">
-          <div className="stack tiny">
-            <span className="badge">pending {mailbox.summary.pending || 0}</span>
-            <span className="badge">critical {mailbox.summary.critical || 0}</span>
-            <span className="badge">decided {mailbox.summary.decided || 0}</span>
+          <div className="metrics-grid" style={{ marginBottom: 10 }}>
+            <div className={`metric-card${mailboxDerived.summary.pending > 0 ? " warn" : ""}`}>
+              <div className="metric-label">Pending</div>
+              <div className="metric-value">{mailboxDerived.summary.pending}</div>
+              <div className="tiny">{mailbox.summary.pending || 0} reported in summary</div>
+            </div>
+            <div className={`metric-card${mailboxDerived.summary.critical > 0 ? " warn" : ""}`}>
+              <div className="metric-label">Critical</div>
+              <div className="metric-value">{mailboxDerived.summary.critical}</div>
+              <div className="tiny">Highest-priority human decisions</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-label">Decided</div>
+              <div className="metric-value">{mailboxDerived.summary.decided}</div>
+              <div className="tiny">{mailbox.summary.decided || 0} total resolved</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-label">Loaded</div>
+              <div className="metric-value">{mailboxDerived.summary.loaded}</div>
+              <div className="tiny">Current filter: {mailStatus}</div>
+            </div>
+          </div>
+
+          <div className="row body" style={{ marginBottom: 10 }}>
+            <div className="card">
+              <div className="tiny" style={{ marginBottom: 8 }}>Critical Queue</div>
+              <div className="body" style={{ gap: 8 }}>
+                {mailboxDerived.queue.critical.length > 0 ? mailboxDerived.queue.critical.map((item) => (
+                  <div key={item.id} className="health-kv">
+                    <div>
+                      <div>{item.summary || item.type || item.id}</div>
+                      <div className="tiny">{[item.from_agent, item.vertical_slug || item.vertical_id, item.priority].filter(Boolean).join(" · ")}</div>
+                    </div>
+                    <button className="btn-secondary" onClick={() => {
+                      setSelectedMailboxItem(item.id);
+                      setMailboxID(item.id);
+                    }}>Review</button>
+                  </div>
+                )) : (
+                  <div className="empty-state">No critical mailbox items in this filter.</div>
+                )}
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="tiny" style={{ marginBottom: 8 }}>Selected Request</div>
+              {selectedMailbox ? (
+                <div className="body" style={{ gap: 8 }}>
+                  <div className="health-kv"><span>Type</span><span className="badge">{selectedMailbox.type || "-"}</span></div>
+                  <div className="health-kv"><span>Status</span><span>{selectedMailbox.status || "-"}</span></div>
+                  <div className="health-kv"><span>Priority</span><span>{selectedMailbox.priority || "-"}</span></div>
+                  <div className="health-kv"><span>From</span><span className="mono">{selectedMailbox.from_agent || "-"}</span></div>
+                  <div className="health-kv"><span>Vertical</span><span className="mono">{selectedMailbox.vertical_slug || selectedMailbox.vertical_id || "-"}</span></div>
+                  <div className="tiny">{selectedMailbox.summary || "No request summary provided."}</div>
+                  <div className="stack" style={{ marginTop: 6 }}>
+                    {selectedMailbox.vertical_slug || selectedMailbox.vertical_id ? (
+                      <>
+                        <button className="btn-secondary" onClick={() => onOpenWorkflowTrace?.(selectedMailbox.vertical_slug || selectedMailbox.vertical_id)}>Workflow</button>
+                        <button className="btn-secondary" onClick={() => onOpenPortfolio?.(selectedMailbox.vertical_slug || selectedMailbox.vertical_id)}>Portfolio</button>
+                        <button className="btn-secondary" onClick={() => onOpenRelatedTaskForVertical?.(selectedMailbox.vertical_slug || selectedMailbox.vertical_id)}>Related Task</button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="empty-state">Select a mailbox item to review the request context and apply a decision.</div>
+              )}
+            </div>
           </div>
 
           <div className="tiny" style={{ marginTop: 8 }}>Mailbox Decision</div>
@@ -177,19 +247,27 @@ export default function ControlView({ state, actions }) {
 
           <div className="body scroll" style={{ maxHeight: "52vh", padding: 0 }}>
             <table>
-              <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Priority</th><th>Agent</th><th>Age</th><th>Action</th></tr></thead>
+              <thead><tr><th>ID</th><th>Request</th><th>Status</th><th>Priority</th><th>Vertical</th><th>Agent</th><th>Age</th><th>Action</th></tr></thead>
               <tbody>
                 {mailbox.items.length === 0 ? (
-                  <tr><td colSpan={7} className="empty-state">No mailbox items</td></tr>
+                  <tr><td colSpan={8} className="empty-state">No mailbox items</td></tr>
                 ) : mailbox.items.map((m) => {
                   const expanded = selectedMailboxItem === m.id;
                   return (
                     <React.Fragment key={m.id}>
-                      <tr style={{ cursor: "pointer" }} onClick={() => setSelectedMailboxItem(expanded ? "" : m.id)}>
+                      <tr style={{ cursor: "pointer" }} onClick={() => {
+                        const next = expanded ? "" : m.id;
+                        setSelectedMailboxItem(next);
+                        setMailboxID(next);
+                      }}>
                         <td><CopyID id={m.id} /></td>
-                        <td>{m.type}</td>
+                        <td>
+                          <div>{m.summary || m.type || "-"}</div>
+                          <div className="tiny">{m.type || "-"}</div>
+                        </td>
                         <td>{m.status}</td>
                         <td>{m.priority}</td>
+                        <td className="mono">{m.vertical_slug || m.vertical_id || "-"}</td>
                         <td>{m.from_agent}</td>
                         <td><span title={fmtTime(m.created_at)}>{relTime(m.created_at)}</span></td>
                         <td>
@@ -206,13 +284,30 @@ export default function ControlView({ state, actions }) {
                       </tr>
                       {expanded ? (
                         <tr>
-                          <td colSpan={7} className="agent-drop-cell">
+                          <td colSpan={8} className="agent-drop-cell">
                             <div style={{ padding: "10px 14px" }}>
-                              <div className="tiny">Request Details</div>
-                              <pre className="json" style={{ maxHeight: 240 }}>{JSON.stringify(
-                                Object.fromEntries(Object.entries(m).filter(([k]) => !["id"].includes(k))),
-                                null, 2
-                              )}</pre>
+                              <div className="tiny" style={{ marginBottom: 8 }}>Request Details</div>
+                              <div className="health-kv"><span>Status</span><span>{m.status || "-"}</span></div>
+                              <div className="health-kv"><span>Priority</span><span>{m.priority || "-"}</span></div>
+                              <div className="health-kv"><span>Vertical</span><span className="mono">{m.vertical_slug || m.vertical_id || "-"}</span></div>
+                              <div className="health-kv"><span>From</span><span className="mono">{m.from_agent || "-"}</span></div>
+                              <div className="health-kv"><span>Created</span><span title={fmtTime(m.created_at)}>{relTime(m.created_at)}</span></div>
+                              {m.summary ? <div className="tiny" style={{ marginTop: 8 }}>{m.summary}</div> : null}
+                              <div className="stack" style={{ marginTop: 8 }}>
+                                <button onClick={() => quickMailboxDecide(m.id, "approve")}>Approve</button>
+                                <button className="btn-secondary" onClick={() => quickMailboxDecide(m.id, "more-data")}>More Data</button>
+                                <button className="btn-secondary" onClick={() => {
+                                  if (!window.confirm(`Reject mailbox item from ${m.from_agent}?`)) return;
+                                  quickMailboxDecide(m.id, "reject");
+                                }}>Reject</button>
+                              </div>
+                              <details style={{ marginTop: 10 }}>
+                                <summary className="tiny" style={{ cursor: "pointer" }}>Raw Request Data</summary>
+                                <pre className="json" style={{ maxHeight: 240, marginTop: 8 }}>{JSON.stringify(
+                                  Object.fromEntries(Object.entries(m).filter(([k]) => !["id"].includes(k))),
+                                  null, 2
+                                )}</pre>
+                              </details>
                             </div>
                           </td>
                         </tr>

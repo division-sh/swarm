@@ -14,6 +14,42 @@ export default function DashboardRuntimeViews({ activeView, activeSubview, setAc
     setViewRoute("agents");
   }, [activeView, runtime, setViewRoute]);
 
+  function openAgent(agentID) {
+    const value = String(agentID || "").trim();
+    if (!value) return;
+    runtime.agents.actions.setSelectedAgentID(value);
+    setViewRoute("agents");
+  }
+
+  function openWorkflowTrace(vertical) {
+    const value = String(vertical || "").trim();
+    if (!value) {
+      setViewRoute("workflow", "flow");
+      return;
+    }
+    pipeline.flow.actions.setFlowView("runtime");
+    pipeline.flow.actions.setFlowVertical(value);
+    pipeline.flow.actions.setSelectedFlowNodeID("");
+    pipeline.flow.actions.setSelectedFlowEdgeID("");
+    setViewRoute("workflow", "flow");
+  }
+
+  function openPortfolio(vertical) {
+    const value = String(vertical || "").trim();
+    if (!value) {
+      setViewRoute("portfolio", "holding");
+      return;
+    }
+    const knownVerticals = Array.isArray(pipeline.holding.state.holdingData?.verticals)
+      ? pipeline.holding.state.holdingData.verticals
+      : [];
+    const match = knownVerticals.find((item) => item.slug === value || item.id === value);
+    if (match?.id) {
+      pipeline.holding.actions.openHoldingVerticalDetail(match.id);
+    }
+    setViewRoute("portfolio", "holding");
+  }
+
   return (
     <>
       {activeView === "agents" || activeView === "convos" ? (
@@ -32,6 +68,11 @@ export default function DashboardRuntimeViews({ activeView, activeSubview, setAc
           events={runtime.events}
           logs={runtime.logs}
           incidents={runtime.incidents}
+          actions={{
+            openAgent,
+            openWorkflowTrace,
+            openPortfolio,
+          }}
         />
       ) : null}
 

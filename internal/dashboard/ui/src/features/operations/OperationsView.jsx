@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import ControlView from "../control/ControlView.jsx";
-import TasksView from "../tasks/TasksView.jsx";
 import OperationsTriageSummary from "./OperationsTriageSummary.jsx";
+import OperationsWorkbench from "./OperationsWorkbench.jsx";
 import { deriveOperationsDerivedState } from "./useOperationsDerivedState.js";
 
 function routeToSubview(activeView) {
@@ -15,9 +14,10 @@ export default function OperationsView({
   setViewRoute,
   control,
   tasks,
+  pipeline,
 }) {
   const routeSubview = routeToSubview(activeView) || activeSubview;
-  const [subview, setSubview] = useState(routeSubview || "control");
+  const [subview, setSubview] = useState(routeSubview || "queue");
   const derived = useMemo(() => deriveOperationsDerivedState({
     mailbox: control.state.mailbox,
     tasksResp: tasks.state.tasksResp,
@@ -56,6 +56,56 @@ export default function OperationsView({
     selectSubview("tasks");
   }
 
+  const knownVerticals = Array.isArray(pipeline?.holding?.state?.holdingData?.verticals) ? pipeline.holding.state.holdingData.verticals : [];
+
+  function resolveVertical(target) {
+    const value = String(target || "").trim();
+    if (!value) return null;
+    return knownVerticals.find((vertical) => vertical.slug === value || vertical.id === value) || null;
+  }
+
+  function openWorkflowTrace(target) {
+    const vertical = resolveVertical(target);
+    const value = vertical?.slug || String(target || "").trim();
+    if (!value) return;
+    pipeline.flow.actions.setFlowView("runtime");
+    pipeline.flow.actions.setFlowVertical(value);
+    pipeline.flow.actions.setSelectedFlowNodeID("");
+    pipeline.flow.actions.setSelectedFlowEdgeID("");
+    setViewRoute("workflow", "flow");
+  }
+
+  function openPortfolio(target) {
+    const vertical = resolveVertical(target);
+    if (vertical?.id) {
+      pipeline.holding.actions.openHoldingVerticalDetail(vertical.id);
+      setViewRoute("portfolio", "holding");
+      return;
+    }
+    setViewRoute("portfolio", "holding");
+  }
+
+  function openRelatedTaskForVertical(target) {
+    const vertical = String(target || "").trim();
+    if (!vertical) {
+      selectSubview("tasks");
+      return;
+    }
+    const relatedTask = (tasks.state.tasksResp?.tasks || []).find((task) => task.vertical_slug === vertical);
+    tasks.actions.setTaskStatus("all");
+    tasks.actions.setSelectedTaskID(relatedTask?.id || "");
+    selectSubview("tasks");
+  }
+
+  function openRelatedMailboxForVertical(target) {
+    const vertical = String(target || "").trim();
+    const relatedMailbox = (control.state.mailbox?.items || []).find((item) => item.vertical_slug === vertical || item.vertical_id === vertical);
+    control.actions.setMailStatus("all");
+    control.actions.setMailboxID(relatedMailbox?.id || "");
+    control.actions.setSelectedMailboxItem(relatedMailbox?.id || "");
+    selectSubview("control");
+  }
+
   const mailboxPending = control.state.mailbox?.summary?.pending || 0;
   const taskCount = Array.isArray(tasks.state.tasksResp?.tasks) ? tasks.state.tasksResp.tasks.length : 0;
 
@@ -63,21 +113,32 @@ export default function OperationsView({
     <div>
       <div className="head">
         <h2>Operations</h2>
-        <div className="stack">
-          <button className={subview === "control" ? "active" : ""} onClick={() => selectSubview("control")}>
-            Control + Mailbox
-          </button>
-          <button className={subview === "tasks" ? "active" : ""} onClick={() => selectSubview("tasks")}>
-            Tasks
-          </button>
-        </div>
+        <span className="tiny">Human intervention console</span>
       </div>
       <div className="tiny" style={{ marginBottom: 10 }}>
         Unified mailbox, control, and human-task workflow surface. {mailboxPending} pending mailbox items, {taskCount} loaded tasks.
       </div>
-      <OperationsTriageSummary derived={derived} onOpenMailbox={openMailbox} onOpenTask={openTask} />
-      {subview === "control" ? <ControlView state={control.state} actions={control.actions} /> : null}
-      {subview === "tasks" ? <TasksView state={tasks.state} actions={tasks.actions} /> : null}
+      <OperationsTriageSummary
+        derived={derived}
+        onOpenMailbox={openMailbox}
+        onOpenTask={openTask}
+        onOpenQueue={() => selectSubview("queue")}
+        onOpenControl={() => selectSubview("control")}
+        onOpenTasksView={() => selectSubview("tasks")}
+      />
+      <OperationsWorkbench
+        subview={subview}
+        setViewRoute={setViewRoute}
+        derived={derived}
+        control={control}
+        tasks={tasks}
+        onOpenMailbox={openMailbox}
+        onOpenTask={openTask}
+        onOpenWorkflowTrace={openWorkflowTrace}
+        onOpenPortfolio={openPortfolio}
+        onOpenRelatedTaskForVertical={openRelatedTaskForVertical}
+        onOpenRelatedMailboxForVertical={openRelatedMailboxForVertical}
+      />
     </div>
   );
 }

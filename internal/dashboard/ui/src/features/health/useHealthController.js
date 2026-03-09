@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { deriveHealthState } from "./useHealthDerivedState.js";
 
 export function useHealthController({
   health,
@@ -6,7 +7,15 @@ export function useHealthController({
   contractWorkflow,
   contractPlatform,
   contractVerification,
+  openView,
 }) {
+  const derived = deriveHealthState({
+    health,
+    contractWorkflow,
+    contractPlatform,
+    contractVerification,
+  });
+
   return useMemo(() => ({
     state: {
       health,
@@ -14,7 +23,10 @@ export function useHealthController({
       contractWorkflow,
       contractPlatform,
       contractVerification,
+      derived,
     },
-    actions: {},
-  }), [contractPlatform, contractVerification, contractWorkflow, contractsData, health]);
+    actions: {
+      openView,
+    },
+  }), [contractPlatform, contractVerification, contractWorkflow, contractsData, derived, health, openView]);
 }

@@ -1,5 +1,4 @@
 import React from "react";
-import { relTime } from "../../lib/format.js";
 
 function SummaryCard({ label, value, detail, tone = "" }) {
   return (
@@ -27,8 +26,11 @@ export default function OperationsTriageSummary({
   derived,
   onOpenMailbox,
   onOpenTask,
+  onOpenQueue,
+  onOpenControl,
+  onOpenTasksView,
 }) {
-  const { summary, queue, focus, related } = derived;
+  const { summary, focus, related } = derived;
 
   return (
     <section className="card" style={{ marginBottom: 12 }}>
@@ -45,46 +47,12 @@ export default function OperationsTriageSummary({
       </div>
 
       <div className="row body">
-        <div>
-          <div className="tiny" style={{ marginBottom: 8 }}>Needs Action</div>
-          <div className="body" style={{ gap: 10 }}>
-            {queue.mailbox.length > 0 ? (
-              <div className="card">
-                <div className="tiny" style={{ marginBottom: 8 }}>Mailbox Decisions</div>
-                <div className="body" style={{ gap: 8 }}>
-                  {queue.mailbox.map((item) => (
-                    <ActionRow
-                      key={item.id}
-                      label={item.summary || item.type || item.id}
-                      meta={[item.from_agent, item.vertical_slug || item.vertical_id, item.priority].filter(Boolean).join(" · ")}
-                      actionLabel="Open Mailbox"
-                      onAction={() => onOpenMailbox(item)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {queue.tasks.length > 0 ? (
-              <div className="card">
-                <div className="tiny" style={{ marginBottom: 8 }}>Human Tasks</div>
-                <div className="body" style={{ gap: 8 }}>
-                  {queue.tasks.map((task) => (
-                    <ActionRow
-                      key={task.id}
-                      label={task.description || task.category || task.id}
-                      meta={[task.requesting_agent, task.vertical_slug, task.priority, task.deadline ? `due ${relTime(task.deadline)}` : ""].filter(Boolean).join(" · ")}
-                      actionLabel="Open Task"
-                      onAction={() => onOpenTask(task)}
-                    />
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {queue.mailbox.length === 0 && queue.tasks.length === 0 ? (
-              <div className="empty-state">No pending mailbox items or actionable tasks.</div>
-            ) : null}
+        <div className="card">
+          <div className="tiny" style={{ marginBottom: 8 }}>Workspace Shortcuts</div>
+          <div className="body" style={{ gap: 8 }}>
+            <ActionRow label="Needs Action Queue" meta="Merged mailbox and human task urgency list." actionLabel="Open Queue" onAction={onOpenQueue} />
+            <ActionRow label="Mailbox Decisions" meta={`${summary.pendingMailbox} pending items`} actionLabel="Open Mailbox" onAction={onOpenControl} />
+            <ActionRow label="Human Tasks" meta={`${summary.actionableTasks} actionable tasks`} actionLabel="Open Tasks" onAction={onOpenTasksView} />
           </div>
         </div>
 

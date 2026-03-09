@@ -44,6 +44,8 @@ Status: complete
 - improve selected-task workflow guidance
 - make task actions more explicit about outcome and follow-up
 
+Status: complete
+
 ### Phase 3: Mailbox UX Upgrade
 
 - make mailbox items summary-first
@@ -51,11 +53,15 @@ Status: complete
 - reduce raw JSON-first presentation
 - show related vertical/task context when available
 
+Status: complete
+
 ### Phase 4: Unified Human Work Queue
 
 - add a dedicated `Needs Action` subview or panel
 - sort mailbox and tasks by urgency across both systems
 - show blocked vertical / agent / workflow context in one place
+
+Status: complete
 
 ### Phase 5: Workbench Evaluation
 
@@ -64,6 +70,8 @@ Status: complete
   - `Triage`
   - `Control`
   - `Tasks`
+
+Status: complete
 
 ## Execution Order
 

@@ -51,3 +51,26 @@ test("deriveOperationsDerivedState falls back to mailbox focus when no task is s
   assert.equal(result.related.tasks.length, 1);
   assert.equal(result.related.mailbox.length, 1);
 });
+
+test("deriveOperationsDerivedState builds a unified urgency queue across mailbox and tasks", () => {
+  const result = deriveOperationsDerivedState({
+    mailbox: {
+      items: [
+        { id: "mb-1", status: "pending", priority: "critical", summary: "Critical approval", created_at: "2026-03-08T10:00:00Z" },
+      ],
+    },
+    tasksResp: {
+      tasks: [
+        { id: "task-1", status: "open", priority: "p1", description: "Overdue task", deadline: "2026-03-01T00:00:00Z", created_at: "2026-03-08T09:00:00Z" },
+      ],
+    },
+    selectedTask: null,
+    selectedMailboxItem: "",
+  });
+
+  assert.equal(result.queue.unified.length, 2);
+  assert.equal(result.queue.unified[0].kind, "mailbox");
+  assert.equal(result.queue.unified[0].id, "mb-1");
+  assert.equal(result.queue.unified[1].kind, "task");
+  assert.equal(result.queue.unified[1].id, "task-1");
+});

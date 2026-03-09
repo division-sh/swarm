@@ -10,6 +10,7 @@ export function useDashboardOpsAssembly({
   taskActions,
   controlActions,
   healthContracts,
+  openView,
 }) {
   const selectedTask = useSelectedTask({
     tasks: queryData.tasksResp.tasks,
@@ -88,5 +89,6 @@ export function useDashboardOpsAssembly({
     contractWorkflow: healthContracts.contractWorkflow,
     contractPlatform: healthContracts.contractPlatform,
     contractVerification: healthContracts.contractVerification,
+    openView,
   });
 }

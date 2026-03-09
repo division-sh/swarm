@@ -58,6 +58,9 @@ export default function EventsView({ state, actions }) {
           {selectedEvent ? (
             <div className="stack" style={{ margin: "8px 0" }}>
               <button className="btn-secondary" onClick={() => actions.openLogsForAgent?.(selectedEvent.source_agent || "")}>Open Logs</button>
+              <button className="btn-secondary" disabled={!selectedEvent.source_agent} onClick={() => actions.openAgent?.(selectedEvent.source_agent || "")}>Agent</button>
+              <button className="btn-secondary" disabled={!(selectedEvent.vertical_slug || selectedEvent.vertical_id)} onClick={() => actions.openWorkflowForVertical?.(selectedEvent.vertical_slug || selectedEvent.vertical_id || "")}>Workflow</button>
+              <button className="btn-secondary" disabled={!(selectedEvent.vertical_slug || selectedEvent.vertical_id)} onClick={() => actions.openPortfolioForVertical?.(selectedEvent.vertical_slug || selectedEvent.vertical_id || "")}>Portfolio</button>
               <button className="btn-secondary" onClick={() => actions.focusEventType?.(selectedEvent.type || "")}>Same Type</button>
               <button className="btn-secondary" onClick={() => actions.focusEventVertical?.(selectedEvent.vertical_slug || selectedEvent.vertical_id || "")}>Same Vertical</button>
             </div>
