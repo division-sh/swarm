@@ -1,7 +1,7 @@
 import React from "react";
 import DataTable from "../../components/DataTable.jsx";
 import StatusDot from "../../components/StatusDot.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 import { isEventLinkedEdgeKind } from "./graphTypes.js";
 import { compactValue, renderRawDetails, renderTagList } from "./graphInspectorUtils.jsx";
 

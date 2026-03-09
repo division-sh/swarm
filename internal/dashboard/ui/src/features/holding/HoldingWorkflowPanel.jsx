@@ -1,6 +1,6 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
-import { fmtTime, readPath, relTime } from "../../lib/format.js";
+import { fmtTime, readPath, relTime } from "../../lib/format.ts";
 
 export default function HoldingWorkflowPanel({ workflowState, workflowStateError }) {
   const activeTimers = Array.isArray(workflowState && workflowState.timer_state)

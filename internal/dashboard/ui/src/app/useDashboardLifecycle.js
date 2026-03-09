@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { getEmpireKey } from "../api/client.js";
+import { getEmpireKey } from "../api/client.ts";
 import { useDashboardPolling } from "../hooks/useDashboardPolling.js";
 import { useEventStream } from "../hooks/useEventStream.js";
 import { useFlowRuntimeStream } from "../hooks/useFlowRuntimeStream.js";
@@ -20,6 +20,23 @@ export function useDashboardLifecycle({
   loadGraph,
   loadPipelineFlow,
 }) {
+  const {
+    activeView,
+    activeSubview,
+    setStatusText,
+    setInitialLoading,
+  } = ui;
+  const {
+    graphFullscreen,
+    setGraphFullscreen,
+    flowView,
+    flowVertical,
+    flowReplayOn,
+    flowReplaySpeed,
+    setFlowReplayIndex,
+    setFlowReplayOn,
+  } = pipelineState;
+
   const refreshAll = useCallback(async () => {
     const jobs = [
       ["events", refreshers.loadEvents],
@@ -38,19 +55,19 @@ export function useDashboardLifecycle({
   }, [refreshers]);
 
   useEffect(() => {
-    if (!pipelineState.graphFullscreen) return;
+    if (!graphFullscreen) return;
     function onKey(event) {
-      if (event.key === "Escape") pipelineState.setGraphFullscreen(false);
+      if (event.key === "Escape") setGraphFullscreen(false);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pipelineState.graphFullscreen, pipelineState.setGraphFullscreen]);
+  }, [graphFullscreen, setGraphFullscreen]);
 
   useEffect(() => {
     refreshAll()
-      .catch((err) => { ui.setStatusText(`Dashboard error: ${err.message}`); })
-      .finally(() => ui.setInitialLoading(false));
-  }, [refreshAll, ui.setInitialLoading, ui.setStatusText]);
+      .catch((err) => { setStatusText(`Dashboard error: ${err.message}`); })
+      .finally(() => setInitialLoading(false));
+  }, [refreshAll, setInitialLoading, setStatusText]);
 
   useEventStream({
     eventsFilter: runtimeState.eventsFilter,
@@ -63,21 +80,21 @@ export function useDashboardLifecycle({
   });
 
   useFlowRuntimeStream({
-    activeView: ui.activeView,
-    activeSubview: ui.activeSubview,
-    flowView: pipelineState.flowView,
-    flowVertical: pipelineState.flowVertical,
+    activeView,
+    activeSubview,
+    flowView,
+    flowVertical,
     getKey: getEmpireKey,
     patchFlowEvent: workflowStream.patchRuntimeFlowEvent,
   });
 
   useReplayTicker({
-    flowView: pipelineState.flowView,
-    flowReplayOn: pipelineState.flowReplayOn,
-    flowReplaySpeed: pipelineState.flowReplaySpeed,
+    flowView,
+    flowReplayOn,
+    flowReplaySpeed,
     flowEvents,
-    setFlowReplayIndex: pipelineState.setFlowReplayIndex,
-    setFlowReplayOn: pipelineState.setFlowReplayOn,
+    setFlowReplayIndex,
+    setFlowReplayOn,
   });
 
   useDashboardPolling({
@@ -85,10 +102,10 @@ export function useDashboardLifecycle({
     loadRuntimeLogs,
     loadIncidents,
     loadConversations,
-    activeView: ui.activeView,
-    activeSubview: ui.activeSubview,
+    activeView,
+    activeSubview,
     loadGraph,
-    flowView: pipelineState.flowView,
+    flowView,
     loadPipelineFlow,
   });
 }

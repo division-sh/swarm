@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { postJSON } from "../api/client.js";
+import { postJSON } from "../api/client.ts";
 
 export function useControlActions({
   addToast,

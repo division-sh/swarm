@@ -53,7 +53,7 @@ export function StraightClippedEdge({ id, source, target, style, markerEnd }) {
   return <BaseEdge id={id} path={`M ${start.x} ${start.y} L ${end.x} ${end.y}`} style={style} markerEnd={markerEnd} />;
 }
 
-export function edgeStroke(edge) {
+function edgeStroke(edge) {
   if (edge.kind === "management") return "var(--edge-mgmt)";
   if (edge.kind === "message") return "var(--edge-message)";
   if (edge.kind === "mailbox") return "var(--edge-mailbox)";
@@ -64,7 +64,7 @@ export function edgeStroke(edge) {
   return "var(--edge-routing)";
 }
 
-export function edgeDash(edge) {
+function edgeDash(edge) {
   if (edge.kind === "management") return "2 6";
   if (edge.kind === "mailbox") return "7 4";
   if (edge.kind === "producer") return "4 5";
@@ -78,7 +78,7 @@ export function edgeDash(edge) {
   return "";
 }
 
-export function getEdgeType(forceLayout, edge) {
+function getEdgeType(forceLayout, edge) {
   if (forceLayout) return "straightClipped";
   return edge.kind === "management" ? "smoothstep" : "default";
 }

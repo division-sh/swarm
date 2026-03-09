@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { getEmpireKey } from "../api/client.js";
+import { getEmpireKey } from "../api/client.ts";
 import { useHashTab } from "../hooks/useHashTab.js";
 import { usePersistentState } from "../hooks/usePersistentState.js";
 import { VALID_TABS } from "./dashboardTabs.js";
@@ -58,5 +58,6 @@ export function useDashboardUIState() {
     addToast,
     setActiveView,
     setViewRoute,
+    setApiKey,
   ]);
 }

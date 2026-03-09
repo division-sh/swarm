@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import DataTable from "../../components/DataTable.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 function deriveRuns(verticals, events) {
   const eventGroups = new Map();
@@ -45,15 +45,15 @@ export default function WorkflowRunsPanel(props) {
   const openTopologyForVertical = params.openTopologyForVertical;
   const openFlowForVertical = params.openFlowForVertical;
   const [filter, setFilter] = useState("attention");
-
-  if (!flow || !graph) return null;
+  const flowState = flow?.state || {};
+  const graphState = graph?.state || {};
 
   const runs = useMemo(
-    () => deriveRuns(flow.state.verticals || [], flow.state.flowEvents || []),
-    [flow.state.flowEvents, flow.state.verticals],
+    () => deriveRuns(flowState.verticals || [], flowState.flowEvents || []),
+    [flowState.flowEvents, flowState.verticals],
   );
 
-  const selectedVertical = flow.state.flowVertical || graph.state.graphVertical || "";
+  const selectedVertical = flowState.flowVertical || graphState.graphVertical || "";
   const filteredRuns = useMemo(() => {
     switch (filter) {
       case "all":
@@ -116,6 +116,8 @@ export default function WorkflowRunsPanel(props) {
       cell: ({ row }) => <span className="mono">{row.original.issue_score || 0}</span>,
     },
   ]), [openFlowForVertical]);
+
+  if (!flow || !graph) return null;
 
   const summary = {
     total: runs.length,

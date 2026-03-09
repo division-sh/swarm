@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "scripts/serve-smoke-dashboard.mjs"
+  ],
+  "project": [
+    "src/**/*.{js,jsx,ts,tsx,mjs}",
+    "scripts/**/*.{js,mjs,ts}",
+    "e2e/**/*.{js,mjs,ts}"
+  ],
+  "ignore": [],
+  "ignoreFiles": [],
+  "ignoreExportsUsedInFile": true,
+  "ignoreIssues": {}
+}

@@ -1,6 +1,6 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 export default function OperationsQueueView({
   derived,

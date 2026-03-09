@@ -6,7 +6,6 @@ export default function GraphContextDrawer({
   selectedEdge,
   selectedRuntime,
   selectedEdgeContract,
-  selectedNodeEdges,
   incomingEdges,
   outgoingEdges,
   relatedNodes,

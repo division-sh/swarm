@@ -1,4 +1,4 @@
-import { useDashboardRuntimeQueries } from "./useDashboardRuntimeQueries.js";
+import { useDashboardRuntimeQueries } from "./useDashboardRuntimeQueries.ts";
 
 export function useDashboardRuntimeSources({
   activeView,

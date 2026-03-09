@@ -1,6 +1,6 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 export default function LogsView({ state, actions }) {
   const { filteredLogsData, selectedLog, logsFilter, logsRuntimeErrorsOnly, logsOrder, selectedLogID } = state;

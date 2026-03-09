@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import DataTable from "../../components/DataTable.jsx";
-import { relTime } from "../../lib/format.js";
+import { relTime } from "../../lib/format.ts";
 import { findEdgeBySelectionID } from "../graph/graphInspectorUtils.jsx";
 import { attentionScore, isAttentionAgent, sortAttentionAgents } from "../agents/triage.js";
 
@@ -66,9 +66,13 @@ export default function WorkflowIssuesPanel(props) {
   const params = props.params || {};
   const flow = params.flow;
   const graph = params.graph;
-  if (!flow || !graph) return null;
+  const flowState = flow?.state;
+  const graphState = graph?.state;
 
-  const issues = useMemo(() => deriveIssueState(flow, graph), [flow, graph]);
+  const issues = useMemo(
+    () => deriveIssueState({ state: flowState || {} }, { state: graphState || {} }),
+    [flowState, graphState],
+  );
 
   const focusLabel = issues.selectedNodeID
     ? `node:${issues.selectedNodeID}`
@@ -81,7 +85,7 @@ export default function WorkflowIssuesPanel(props) {
       accessorKey: "id",
       header: "Agent",
       cell: ({ row }) => (
-        <button className="btn-secondary mono" onClick={() => graph.actions.setSelectedGraphNodeID(row.original.id)}>
+        <button className="btn-secondary mono" onClick={() => graph?.actions?.setSelectedGraphNodeID?.(row.original.id)}>
           {row.original.id}
         </button>
       ),
@@ -107,7 +111,7 @@ export default function WorkflowIssuesPanel(props) {
       enableSorting: false,
       cell: ({ row }) => <span className="tiny">{row.original.stuck_reason || "-"}</span>,
     },
-  ]), [graph.actions]);
+  ]), [graph]);
 
   const flowEventColumns = useMemo(() => ([
     {
@@ -124,7 +128,7 @@ export default function WorkflowIssuesPanel(props) {
       accessorKey: "source_node",
       header: "Source",
       cell: ({ row }) => (
-        <button className="btn-secondary mono" onClick={() => flow.actions.setSelectedFlowNodeID(row.original.source_node || "")}>
+        <button className="btn-secondary mono" onClick={() => flow?.actions?.setSelectedFlowNodeID?.(row.original.source_node || "")}>
           {row.original.source_node || "-"}
         </button>
       ),
@@ -146,14 +150,14 @@ export default function WorkflowIssuesPanel(props) {
         </span>
       ),
     },
-  ]), [flow.actions]);
+  ]), [flow]);
 
   const disconnectedColumns = useMemo(() => ([
     {
       accessorKey: "id",
       header: "Node",
       cell: ({ row }) => (
-        <button className="btn-secondary mono" onClick={() => graph.actions.setSelectedGraphNodeID(row.original.id)}>
+        <button className="btn-secondary mono" onClick={() => graph?.actions?.setSelectedGraphNodeID?.(row.original.id)}>
           {row.original.id}
         </button>
       ),
@@ -173,7 +177,9 @@ export default function WorkflowIssuesPanel(props) {
       header: "Vertical",
       cell: ({ row }) => <span className="mono">{row.original.vertical_slug || "-"}</span>,
     },
-  ]), [graph.actions]);
+  ]), [graph]);
+
+  if (!flow || !graph) return null;
 
   return (
     <div className="workflow-dock-panel">

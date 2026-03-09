@@ -6,26 +6,29 @@ export default function WorkflowArtifactsPanel(props) {
   const params = props.params || {};
   const flow = params.flow;
   const graph = params.graph;
-  if (!flow || !graph) return null;
+  const flowState = flow?.state || {};
+  const graphState = graph?.state || {};
 
-  const flowGraph = flow.state.flowViewGraph || flow.state.flowGraph || { nodes: [], edges: [] };
-  const graphGraph = graph.state.graphViewGraph || graph.state.graph || { nodes: [], edges: [] };
-  const selectedFlowNode = (flowGraph.nodes || []).find((node) => node.id === flow.state.selectedFlowNodeID) || null;
-  const selectedGraphNode = (graphGraph.nodes || []).find((node) => node.id === graph.state.selectedGraphNodeID) || null;
-  const selectedFlowEdge = findEdgeBySelectionID(flowGraph.edges, flow.state.selectedFlowEdgeID);
-  const selectedGraphEdge = findEdgeBySelectionID(graphGraph.edges, graph.state.selectedGraphEdgeID);
+  const flowGraph = flowState.flowViewGraph || flowState.flowGraph || { nodes: [], edges: [] };
+  const graphGraph = graphState.graphViewGraph || graphState.graph || { nodes: [], edges: [] };
+  const selectedFlowNode = (flowGraph.nodes || []).find((node) => node.id === flowState.selectedFlowNodeID) || null;
+  const selectedGraphNode = (graphGraph.nodes || []).find((node) => node.id === graphState.selectedGraphNodeID) || null;
+  const selectedFlowEdge = findEdgeBySelectionID(flowGraph.edges, flowState.selectedFlowEdgeID);
+  const selectedGraphEdge = findEdgeBySelectionID(graphGraph.edges, graphState.selectedGraphEdgeID);
   const activeNode = selectedGraphNode || selectedFlowNode;
   const activeEdge = selectedGraphEdge || selectedFlowEdge;
   const promptYaml = activeNode?.system_prompt ? toYamlBlock("system_prompt", activeNode.system_prompt) : "";
 
   const metadataArtifact = useMemo(() => JSON.stringify({
-    workflow_name: flow.state.flowGraphMeta?.workflow_name || "",
-    workflow_version: flow.state.flowGraphMeta?.workflow_version || "",
-    platform_version: flow.state.flowGraphMeta?.platform_version || "",
-    workflow_stages: flow.state.flowGraphMeta?.workflow_stages || [],
-    timer_events: flow.state.flowGraphMeta?.timer_events || [],
-    sources: flow.state.flowGraphMeta?.sources || [],
-  }, null, 2), [flow.state.flowGraphMeta]);
+    workflow_name: flowState.flowGraphMeta?.workflow_name || "",
+    workflow_version: flowState.flowGraphMeta?.workflow_version || "",
+    platform_version: flowState.flowGraphMeta?.platform_version || "",
+    workflow_stages: flowState.flowGraphMeta?.workflow_stages || [],
+    timer_events: flowState.flowGraphMeta?.timer_events || [],
+    sources: flowState.flowGraphMeta?.sources || [],
+  }, null, 2), [flowState.flowGraphMeta]);
+
+  if (!flow || !graph) return null;
 
   return (
     <div className="workflow-dock-panel">
@@ -37,9 +40,9 @@ export default function WorkflowArtifactsPanel(props) {
         <div className="health-card" style={{ marginBottom: 10 }}>
           <div className="tiny">Artifact Context</div>
           <div className="health-kv"><span>Selection</span><span className="mono">{activeNode?.id || activeEdge?.event_type || activeEdge?.kind || "-"}</span></div>
-          <div className="health-kv"><span>Trace View</span><span>{flow.state.flowView}</span></div>
-          <div className="health-kv"><span>Topology Mode</span><span>{graph.state.graphMode}</span></div>
-          <div className="health-kv"><span>Vertical</span><span className="mono">{flow.state.flowVertical || graph.state.graphVertical || "-"}</span></div>
+          <div className="health-kv"><span>Trace View</span><span>{flowState.flowView}</span></div>
+          <div className="health-kv"><span>Topology Mode</span><span>{graphState.graphMode}</span></div>
+          <div className="health-kv"><span>Vertical</span><span className="mono">{flowState.flowVertical || graphState.graphVertical || "-"}</span></div>
         </div>
 
         <div className="node-detail-card">

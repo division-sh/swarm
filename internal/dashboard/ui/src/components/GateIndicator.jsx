@@ -1,8 +1,8 @@
 import React from "react";
 
-export const DEFAULT_VALIDATION_GATES = ["researching", "mvp_speccing", "cto_spec_review", "branding"];
+const DEFAULT_VALIDATION_GATES = ["researching", "mvp_speccing", "cto_spec_review", "branding"];
 
-export const VALIDATION_GATE_LABELS = {
+const VALIDATION_GATE_LABELS = {
   researching: "G1 Research",
   mvp_speccing: "G2 Spec",
   cto_spec_review: "G3 CTO",

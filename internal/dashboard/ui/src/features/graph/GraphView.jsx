@@ -185,7 +185,7 @@ export default function GraphView({ graph, graphKey, selectedNodeID, selectedEdg
   useEffect(() => {
     const hidden = new Map();
     for (const n of nodes || []) hidden.set(n.id, !!n.hidden);
-    setEdges((eds) => {
+    setEdges((_eds) => {
       const source = layout.edges || [];
       return source.map((edge) => buildEdgePresentation(
         {

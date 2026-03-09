@@ -10,8 +10,8 @@ import {
   sendAgentChat,
   sendAgentDirective,
 } from "../../api/dashboardAgentConsole.js";
-import { dashboardQueryKeys } from "../../app/dashboardQueryKeys.js";
-import { fetchConversationDetail } from "../../api/dashboardRuntime.js";
+import { dashboardQueryKeys } from "../../app/dashboardQueryKeys.ts";
+import { fetchConversationDetail } from "../../api/dashboardRuntime.ts";
 
 export function useAgentConsole({ agent, addToast, onAction }) {
   const queryClient = useQueryClient();
@@ -45,7 +45,7 @@ export function useAgentConsole({ agent, addToast, onAction }) {
   useEffect(() => {
     if (!promptQuery.data || editingPrompt) return;
     setPromptEdit(promptQuery.data.effective_prompt || "");
-  }, [editingPrompt, promptQuery.data?.effective_prompt]);
+  }, [editingPrompt, promptQuery.data]);
 
   const run = useCallback(async (key, fn) => {
     setBusy(key);

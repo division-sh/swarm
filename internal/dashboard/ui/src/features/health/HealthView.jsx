@@ -1,5 +1,5 @@
 import React from "react";
-import { formatDollars, readPath } from "../../lib/format.js";
+import { formatDollars, readPath } from "../../lib/format.ts";
 
 function HotspotRow({ item, onOpen }) {
   return (
@@ -28,7 +28,7 @@ export default function HealthView({ state, actions = {} }) {
             Health is now the deeper diagnostics page for infra state, auth, spend, contracts, workflow audits, and vertical deploy health.
           </div>
           <div className="tiny" style={{ marginTop: 6 }}>
-            Use <span className="mono">Overview</span> for live triage and "what needs attention now".
+            Use <span className="mono">Overview</span> for live triage and &quot;what needs attention now&quot;.
           </div>
         </div>
 

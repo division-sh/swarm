@@ -1,6 +1,6 @@
 import React from "react";
 import CodeViewer from "../../components/CodeViewer.jsx";
-import { edgeSelectionBase, edgeSelectionID, findEdgeBySelectionID } from "./graphSelection.js";
+import { edgeSelectionID, findEdgeBySelectionID } from "./graphSelection.js";
 
 export function compactValue(value) {
   if (value == null || value === "") return "-";
@@ -52,4 +52,4 @@ export function toYamlBlock(key, value) {
   return `${key}: |-\n${body}`;
 }
 
-export { edgeSelectionBase, edgeSelectionID, findEdgeBySelectionID };
+export { edgeSelectionID, findEdgeBySelectionID };

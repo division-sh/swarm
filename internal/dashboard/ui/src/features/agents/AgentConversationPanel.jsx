@@ -1,6 +1,6 @@
 import React from "react";
 import ChatMessages from "../../components/ChatMessages.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 export default function AgentConversationPanel({ agentID, conversation, onCopyConversation, onOpenMessage }) {
   const messages = conversation?.messages || [];

@@ -3,7 +3,7 @@ import JsonBlock from "./JsonBlock.jsx";
 
 function formatInline(text) {
   const parts = [];
-  let rest = text;
+  const rest = text;
   let k = 0;
   const rx = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|\[([^\]]+)\]\(([^)]+)\))/g;
   let lastIdx = 0;

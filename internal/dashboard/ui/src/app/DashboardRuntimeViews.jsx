@@ -4,7 +4,7 @@ import DigestView from "../features/digest/DigestView.jsx";
 import ObservabilityView from "../features/observability/ObservabilityView.jsx";
 import WorkflowView from "../features/workflow/WorkflowView.jsx";
 
-export default function DashboardRuntimeViews({ activeView, activeSubview, setActiveView, setViewRoute, runtime, pipeline }) {
+export default function DashboardRuntimeViews({ activeView, activeSubview, setActiveView: _setActiveView, setViewRoute, runtime, pipeline }) {
   useEffect(() => {
     if (activeView !== "convos") return;
     const legacyAgentID = runtime.conversations.state.selectedConv;

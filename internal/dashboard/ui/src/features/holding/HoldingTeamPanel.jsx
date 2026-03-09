@@ -1,5 +1,5 @@
 import React from "react";
-import { relTime } from "../../lib/format.js";
+import { relTime } from "../../lib/format.ts";
 
 export default function HoldingTeamPanel({ agents }) {
   return (

@@ -4,7 +4,7 @@ export function artifactIsScalar(value) {
 
 export function prettyArtifactKey(key) {
   return String(key || "")
-    .replace(/[_\.]+/g, " ")
+    .replace(/[_.]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -21,7 +21,7 @@ export function formatArtifactScalar(value) {
   return s || "-";
 }
 
-export function truncateText(text, max = 280) {
+function truncateText(text, max = 280) {
   const s = String(text || "").trim();
   if (!s) return "";
   return s.length > max ? s.slice(0, max) + "\u2026" : s;

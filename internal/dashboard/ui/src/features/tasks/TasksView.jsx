@@ -1,7 +1,7 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
-import { deriveTasksDerivedState } from "./useTasksDerivedState.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
+import { deriveTasksDerivedState } from "./useTasksDerivedState.ts";
 
 export default function TasksView({ state, actions, onOpenWorkflowTrace, onOpenPortfolio, onOpenRelatedMailboxForVertical }) {
   const { tasksResp, tasksStats, selectedTask, taskStatus, selectedTaskID, taskResultText, taskOutcome, taskFollowUpNeeded, taskRejectReason } = state;

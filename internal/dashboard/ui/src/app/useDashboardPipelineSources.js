@@ -1,5 +1,5 @@
-import { useDashboardPortfolioQueries } from "./useDashboardPortfolioQueries.js";
-import { useDashboardWorkflowQueries } from "./useDashboardWorkflowQueries.js";
+import { useDashboardPortfolioQueries } from "./useDashboardPortfolioQueries.ts";
+import { useDashboardWorkflowQueries } from "./useDashboardWorkflowQueries.ts";
 
 export function useDashboardPipelineSources({
   activeView,

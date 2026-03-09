@@ -1,5 +1,5 @@
 import { useSelectedTask } from "../features/tasks/useSelectedTask.js";
-import { useDashboardOpsController } from "./useDashboardOpsController.js";
+import { useDashboardOpsController } from "./useDashboardOpsController.ts";
 
 export function useDashboardOpsAssembly({
   taskState,

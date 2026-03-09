@@ -1,11 +1,11 @@
 import { useMemo } from "react";
 import { useDashboardActionComposition } from "./useDashboardActionComposition.js";
 import { useDashboardContractsState } from "./useDashboardContractsState.js";
-import { useDashboardCoreQueries } from "./useDashboardCoreQueries.js";
+import { useDashboardCoreQueries } from "./useDashboardCoreQueries.ts";
 import { useDashboardDomainState } from "./useDashboardDomainState.js";
 import { useDashboardLifecycle } from "./useDashboardLifecycle.js";
 import { useDashboardOpsAssembly } from "./useDashboardOpsAssembly.js";
-import { useDashboardOverviewAssembly } from "./useDashboardOverviewAssembly.js";
+import { useDashboardOverviewAssembly } from "./useDashboardOverviewAssembly.ts";
 import { useDashboardPipelineAssembly } from "./useDashboardPipelineAssembly.js";
 import { useDashboardPipelineSources } from "./useDashboardPipelineSources.js";
 import { useDashboardRuntimeAssembly } from "./useDashboardRuntimeAssembly.js";

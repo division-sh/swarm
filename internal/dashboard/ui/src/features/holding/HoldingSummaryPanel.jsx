@@ -1,5 +1,5 @@
 import React from "react";
-import { fmtTime } from "../../lib/format.js";
+import { fmtTime } from "../../lib/format.ts";
 
 export default function HoldingSummaryPanel({ vertical, businessModel, opportunity }) {
   const value = vertical || {};

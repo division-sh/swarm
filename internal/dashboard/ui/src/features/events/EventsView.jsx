@@ -1,6 +1,6 @@
 import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 export default function EventsView({ state, actions }) {
   const { filteredEvents, filteredRuntimeLogs, eventDetail, eventsFilter, eventsIncludeRuntime, eventsRuntimeErrorsOnly, selectedEventID } = state;

@@ -70,6 +70,7 @@ export function useNavigationActions({
   }, [
     setActiveView,
     setEventsFilter,
+    setEventsIncludeRuntime,
     setEventsRuntimeErrorsOnly,
     setLogsFilter,
     setLogsRuntimeErrorsOnly,

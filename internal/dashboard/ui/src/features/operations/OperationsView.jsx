@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import OperationsTriageSummary from "./OperationsTriageSummary.jsx";
 import OperationsWorkbench from "./OperationsWorkbench.jsx";
-import { deriveOperationsDerivedState } from "./useOperationsDerivedState.js";
+import { deriveOperationsDerivedState } from "./useOperationsDerivedState.ts";
 
 function routeToSubview(activeView) {
   if (activeView === "control" || activeView === "tasks") return activeView;

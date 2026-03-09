@@ -1,7 +1,7 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
-import { deriveMailboxDerivedState } from "./useMailboxDerivedState.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
+import { deriveMailboxDerivedState } from "./useMailboxDerivedState.ts";
 
 export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpenPortfolio, onOpenRelatedTaskForVertical }) {
   const {

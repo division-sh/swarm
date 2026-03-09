@@ -1,5 +1,5 @@
 import React from "react";
-import { fmtTime, formatDurationMs, relTime } from "../../lib/format.js";
+import { fmtTime, formatDurationMs, relTime } from "../../lib/format.ts";
 import StatusDot from "../../components/StatusDot.jsx";
 
 function statusLabel(agent) {

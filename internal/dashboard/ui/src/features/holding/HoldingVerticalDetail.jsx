@@ -1,5 +1,5 @@
 import React from "react";
-import { firstNonEmptyText, readPath } from "../../lib/format.js";
+import { firstNonEmptyText, readPath } from "../../lib/format.ts";
 import HoldingArtifactsPanel from "./HoldingArtifactsPanel.jsx";
 import HoldingEventsMailboxPanel from "./HoldingEventsMailboxPanel.jsx";
 import HoldingSummaryPanel from "./HoldingSummaryPanel.jsx";

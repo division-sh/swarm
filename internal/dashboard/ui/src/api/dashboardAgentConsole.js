@@ -1,4 +1,4 @@
-import { deleteJSON, fetchJSON, postJSON, putJSON } from "./client.js";
+import { deleteJSON, fetchJSON, postJSON, putJSON } from "./client.ts";
 
 export async function fetchAgentPrompt(agentID) {
   return fetchJSON(`/api/agents/${encodeURIComponent(agentID)}/prompt`);

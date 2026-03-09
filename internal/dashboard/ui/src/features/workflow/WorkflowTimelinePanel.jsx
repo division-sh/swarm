@@ -1,25 +1,26 @@
 import React, { useMemo } from "react";
 import DataTable from "../../components/DataTable.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 import { findEdgeBySelectionID } from "../graph/graphInspectorUtils.jsx";
 
 export default function WorkflowTimelinePanel(props) {
   const params = props.params || {};
   const flow = params.flow;
   const graph = params.graph;
-  if (!flow || !graph) return null;
+  const flowState = flow?.state || {};
+  const graphState = graph?.state || {};
 
-  const flowGraph = flow.state.flowViewGraph || flow.state.flowGraph || { nodes: [], edges: [] };
-  const graphGraph = graph.state.graphViewGraph || graph.state.graph || { nodes: [], edges: [] };
-  const selectedFlowNodeID = flow.state.selectedFlowNodeID || "";
-  const selectedGraphNodeID = graph.state.selectedGraphNodeID || "";
-  const selectedFlowEdge = findEdgeBySelectionID(flowGraph.edges, flow.state.selectedFlowEdgeID);
-  const selectedGraphEdge = findEdgeBySelectionID(graphGraph.edges, graph.state.selectedGraphEdgeID);
+  const flowGraph = flowState.flowViewGraph || flowState.flowGraph || { nodes: [], edges: [] };
+  const graphGraph = graphState.graphViewGraph || graphState.graph || { nodes: [], edges: [] };
+  const selectedFlowNodeID = flowState.selectedFlowNodeID || "";
+  const selectedGraphNodeID = graphState.selectedGraphNodeID || "";
+  const selectedFlowEdge = findEdgeBySelectionID(flowGraph.edges, flowState.selectedFlowEdgeID);
+  const selectedGraphEdge = findEdgeBySelectionID(graphGraph.edges, graphState.selectedGraphEdgeID);
   const activeNodeID = selectedFlowNodeID || selectedGraphNodeID || "";
   const activeEdge = selectedFlowEdge || selectedGraphEdge;
-  const allEvents = flow.state.visibleFlowEvents || flow.state.flowEvents || [];
 
   const filteredEvents = useMemo(() => {
+    const allEvents = flowState.visibleFlowEvents || flowState.flowEvents || [];
     let rows = [...allEvents];
     if (activeNodeID) {
       rows = rows.filter((row) => row.source_node === activeNodeID || (row.target_nodes || []).includes(activeNodeID));
@@ -27,13 +28,13 @@ export default function WorkflowTimelinePanel(props) {
       rows = rows.filter((row) => row.event_type === activeEdge.event_type);
     }
     return rows;
-  }, [activeEdge?.event_type, activeNodeID, allEvents]);
+  }, [activeEdge?.event_type, activeNodeID, flowState.flowEvents, flowState.visibleFlowEvents]);
 
   const focusLabel = activeNodeID
     ? `node:${activeNodeID}`
     : activeEdge?.event_type
       ? `event:${activeEdge.event_type}`
-      : (flow.state.flowVertical ? `vertical:${flow.state.flowVertical}` : "global");
+      : (flowState.flowVertical ? `vertical:${flowState.flowVertical}` : "global");
 
   const columns = useMemo(() => ([
     {
@@ -75,6 +76,8 @@ export default function WorkflowTimelinePanel(props) {
     },
   ]), []);
 
+  if (!flow || !graph) return null;
+
   return (
     <div className="workflow-dock-panel">
       <div className="head">
@@ -86,8 +89,8 @@ export default function WorkflowTimelinePanel(props) {
           <div className="tiny">Execution Timeline</div>
           <div className="health-kv"><span>Focus</span><span className="mono">{focusLabel}</span></div>
           <div className="health-kv"><span>Rows</span><span className="mono">{filteredEvents.length}</span></div>
-          <div className="health-kv"><span>View</span><span>{flow.state.flowView}</span></div>
-          <div className="health-kv"><span>Vertical</span><span className="mono">{flow.state.flowVertical || "-"}</span></div>
+          <div className="health-kv"><span>View</span><span>{flowState.flowView}</span></div>
+          <div className="health-kv"><span>Vertical</span><span className="mono">{flowState.flowVertical || "-"}</span></div>
         </div>
         <DataTable
           columns={columns}

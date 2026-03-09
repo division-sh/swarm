@@ -1,7 +1,7 @@
 const DEFAULT_FLOW_STAGE_OPTIONS = ["all", "discovery", "scoring", "validation", "mailbox", "opco", "system"];
 const DEFAULT_FLOW_RUBRIC_OPTIONS = ["all", "universal"];
 
-export function flowStageForEvent(eventType, eventStageMap) {
+function flowStageForEvent(eventType, eventStageMap) {
   const t = String(eventType || "").toLowerCase().trim();
   const contractStages = eventStageMap && typeof eventStageMap === "object" ? eventStageMap[t] || eventStageMap[eventType] : null;
   if (Array.isArray(contractStages) && contractStages.length > 0) return contractStages[0];
@@ -60,7 +60,7 @@ export function flowStageForEvent(eventType, eventStageMap) {
   return "system";
 }
 
-export function flowEventMatchesFilters(eventType, stageFilter, rubricFilter, eventStageMap) {
+function flowEventMatchesFilters(eventType, stageFilter, rubricFilter, eventStageMap) {
   const stage = flowStageForEvent(eventType, eventStageMap);
   if (stageFilter && stageFilter !== "all" && stage !== stageFilter) return false;
   if (rubricFilter && rubricFilter !== "all") {

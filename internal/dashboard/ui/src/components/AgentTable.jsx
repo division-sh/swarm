@@ -1,6 +1,6 @@
 import React from "react";
 import StatusDot from "./StatusDot.jsx";
-import { formatDurationMs } from "../lib/format.js";
+import { formatDurationMs } from "../lib/format.ts";
 import { attentionScore } from "../features/agents/triage.js";
 
 export default function AgentTable({ agents, selectedAgentID, onSelectAgent, renderDropdown, onNavigateTask, pinnedAgentIDs, onTogglePinned, sortMode = "state" }) {

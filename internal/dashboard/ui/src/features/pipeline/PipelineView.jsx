@@ -1,6 +1,6 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
-import { fmtTime, formatDollars, formatDurationMs, relTime, shardScopeSummary } from "../../lib/format.js";
+import { fmtTime, formatDollars, formatDurationMs, relTime, shardScopeSummary } from "../../lib/format.ts";
 
 export default function PipelineView({
   state,

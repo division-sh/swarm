@@ -1,5 +1,5 @@
 import React from "react";
-import { formatDollars, relTime } from "../../lib/format.js";
+import { formatDollars, relTime } from "../../lib/format.ts";
 
 export default function HoldingEventsMailboxPanel({ events, mailbox, spend }) {
   return (

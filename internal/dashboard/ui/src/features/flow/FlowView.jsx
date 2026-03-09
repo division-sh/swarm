@@ -2,7 +2,7 @@ import React from "react";
 import JsonBlock from "../../components/JsonBlock.jsx";
 import GraphView from "../graph/GraphView.jsx";
 import { findEdgeBySelectionID } from "../graph/graphInspectorUtils.jsx";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 export default function FlowView({ state, actions }) {
   const {
@@ -24,7 +24,6 @@ export default function FlowView({ state, actions }) {
     flowEnd,
     flowReplaySpeed,
     flowReplayOn,
-    flowReplayIndex,
     selectedFlowNodeID,
     selectedFlowEdgeID,
     flowViewGraph,

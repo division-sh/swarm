@@ -1,5 +1,5 @@
 import React from "react";
-import { fmtTime, relTime } from "../../lib/format.js";
+import { fmtTime, relTime } from "../../lib/format.ts";
 
 export default function PortfolioFocusCard({
   focusSummary,

@@ -6,7 +6,7 @@ import {
   EMPTY_LOG_FILTER,
 } from "./focus.js";
 import ObservabilityWorkbench from "./ObservabilityWorkbench.jsx";
-import { deriveObservabilityState } from "./useObservabilityDerivedState.js";
+import { deriveObservabilityState } from "./useObservabilityDerivedState.ts";
 
 function routeToSubview(activeView) {
   if (activeView === "events" || activeView === "logs" || activeView === "incidents" || activeView === "overview") {

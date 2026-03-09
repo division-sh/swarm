@@ -12,9 +12,11 @@ function matchesVertical(vertical, key) {
 
 export function usePortfolioFocusState({ holdingData, traceRows, traceVertical }) {
   const [portfolioFocusKey, setPortfolioFocusKey] = usePersistentState("dashboard_portfolio_focus", "");
-
-  const allVerticals = Array.isArray(holdingData?.verticals) ? holdingData.verticals : [];
   const fallbackKey = normalizeKey(traceVertical);
+  const allVerticals = useMemo(
+    () => (Array.isArray(holdingData?.verticals) ? holdingData.verticals : []),
+    [holdingData],
+  );
 
   const focusedVertical = useMemo(() => {
     const wanted = normalizeKey(portfolioFocusKey) || fallbackKey;
@@ -45,7 +47,7 @@ export function usePortfolioFocusState({ holdingData, traceRows, traceVertical }
   useEffect(() => {
     if (!portfolioFocusKey || focusedVertical) return;
     setPortfolioFocusKey(fallbackKey || "");
-  }, [fallbackKey, focusedVertical, portfolioFocusKey]);
+  }, [fallbackKey, focusedVertical, portfolioFocusKey, setPortfolioFocusKey]);
 
   return {
     portfolioFocusKey: resolvedFocusKey,

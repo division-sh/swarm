@@ -1,7 +1,7 @@
 import React from "react";
 import CopyID from "../../components/CopyID.jsx";
 import GateIndicator from "../../components/GateIndicator.jsx";
-import { formatDollars, readPath, relTime } from "../../lib/format.js";
+import { readPath, relTime } from "../../lib/format.ts";
 
 export default function HoldingView({
   state,

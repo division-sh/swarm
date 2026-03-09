@@ -1,5 +1,5 @@
 import React from "react";
-import { relTime } from "../../lib/format.js";
+import { relTime } from "../../lib/format.ts";
 
 function verticalKey(vertical) {
   return vertical?.slug || vertical?.id || "";

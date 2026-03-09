@@ -3,7 +3,7 @@ import HealthView from "../features/health/HealthView.jsx";
 import OperationsView from "../features/operations/OperationsView.jsx";
 import PortfolioView from "../features/portfolio/PortfolioView.jsx";
 
-export default function DashboardOpsViews({ activeView, activeSubview, setActiveView, setViewRoute, runtime, ops, pipeline }) {
+export default function DashboardOpsViews({ activeView, activeSubview, setActiveView: _setActiveView, setViewRoute, runtime, ops, pipeline }) {
   function openWorkflowTraceForVertical(vertical) {
     const value = String(vertical || "").trim();
     if (!value) {
