@@ -6,7 +6,9 @@
   "scripts": {
     "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/dockview/dist/styles/dockview.css node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/components.css src/styles/features/graph.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css",
     "check:architecture": "node scripts/check-architecture.mjs",
-    "test:graph": "node --test src/features/graph/*.test.js"
+    "test:graph": "node --test src/features/graph/*.test.js",
+    "test:portfolio": "node --test src/features/portfolio/*.test.js",
+    "test:smoke": "npm run build && playwright test"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
@@ -21,6 +23,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "esbuild": "0.24.2"
   }
 }

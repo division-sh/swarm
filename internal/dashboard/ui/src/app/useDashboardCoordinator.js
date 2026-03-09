@@ -61,6 +61,7 @@ export function useDashboardCoordinator() {
     refreshers,
     addToast: ui.addToast,
     loadLogs: loaders.loadLogs,
+    loadRuntimeLogs: loaders.loadRuntimeLogs,
     loadIncidents: loaders.loadIncidents,
     loadConversations: loaders.loadConversations,
     loadGraph: loaders.loadGraph,

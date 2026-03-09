@@ -177,6 +177,54 @@
   display: none;
 }
 
+.portfolio-workbench-shell {
+  margin-top: 8px;
+}
+
+.portfolio-workbench-body {
+  height: min(78vh, 1080px);
+  padding: 0;
+}
+
+.portfolio-dockview {
+  height: 100%;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.portfolio-dockview .dv-groupview {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.portfolio-dockview .dv-groupview .dv-content-container {
+  background: var(--base);
+}
+
+.portfolio-dockview .dv-tabs-and-actions-container {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.portfolio-dockview .dv-tab {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.portfolio-dockview .dv-tab.dv-active-tab {
+  color: var(--accent);
+}
+
+.portfolio-dockview .dv-sash:not(.disabled)::after {
+  background: rgba(212, 162, 74, 0.18);
+}
+
+.portfolio-dock-panel {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+}
+
 .artifact-generic {
   display: flex;
   flex-direction: column;

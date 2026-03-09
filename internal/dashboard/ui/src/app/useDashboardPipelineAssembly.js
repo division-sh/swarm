@@ -78,6 +78,7 @@ export function useDashboardPipelineAssembly({
     setGraphFullscreen: pipelineState.setGraphFullscreen,
     graph: workflowData.graph,
     graphViewGraph: pipelineState.graphViewGraph,
+    setGraphViewGraph: pipelineState.setGraphViewGraph,
     graphMode: pipelineState.graphMode,
     setGraphMode: pipelineState.setGraphMode,
     graphVertical: pipelineState.graphVertical,

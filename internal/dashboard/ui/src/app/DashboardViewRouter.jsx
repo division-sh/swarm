@@ -10,7 +10,7 @@ export default function DashboardViewRouter({ activeView, activeSubview, setActi
         <OverviewView state={overview.state} actions={overview.actions} />
       ) : null}
       <DashboardRuntimeViews activeView={activeView} activeSubview={activeSubview} setActiveView={setActiveView} setViewRoute={setViewRoute} runtime={runtime} pipeline={pipeline} />
-      <DashboardOpsViews activeView={activeView} activeSubview={activeSubview} setActiveView={setActiveView} setViewRoute={setViewRoute} ops={ops} pipeline={pipeline} />
+      <DashboardOpsViews activeView={activeView} activeSubview={activeSubview} setActiveView={setActiveView} setViewRoute={setViewRoute} runtime={runtime} ops={ops} pipeline={pipeline} />
     </main>
   );
 }

@@ -3,7 +3,7 @@ import HealthView from "../features/health/HealthView.jsx";
 import OperationsView from "../features/operations/OperationsView.jsx";
 import PortfolioView from "../features/portfolio/PortfolioView.jsx";
 
-export default function DashboardOpsViews({ activeView, activeSubview, setActiveView, setViewRoute, ops, pipeline }) {
+export default function DashboardOpsViews({ activeView, activeSubview, setActiveView, setViewRoute, runtime, ops, pipeline }) {
   return (
     <>
       {activeView === "operations" || activeView === "control" || activeView === "tasks" ? (
@@ -21,8 +21,12 @@ export default function DashboardOpsViews({ activeView, activeSubview, setActive
           activeView={activeView}
           activeSubview={activeSubview}
           setViewRoute={setViewRoute}
+          runtime={runtime}
+          ops={ops}
           pipeline={pipeline.pipeline}
           holding={pipeline.holding}
+          flow={pipeline.flow}
+          graph={pipeline.graph}
         />
       ) : null}
 

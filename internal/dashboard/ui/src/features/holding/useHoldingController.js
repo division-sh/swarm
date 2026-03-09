@@ -7,6 +7,6 @@ export function useHoldingController({
 }) {
   return useMemo(() => ({
     state: { ...domain, ...controls },
-    actions: { openHoldingVerticalDetail },
+    actions: { ...controls, openHoldingVerticalDetail },
   }), [controls, domain, openHoldingVerticalDetail]);
 }

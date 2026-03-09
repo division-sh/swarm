@@ -45,6 +45,7 @@ export function useDashboardPipelineController({
   setGraphFullscreen,
   graph,
   graphViewGraph,
+  setGraphViewGraph,
   graphMode,
   setGraphMode,
   graphVertical,

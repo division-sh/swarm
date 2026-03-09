@@ -2,9 +2,21 @@ import React from "react";
 import CopyID from "../../components/CopyID.jsx";
 import { fmtTime, formatDollars, formatDurationMs, relTime, shardScopeSummary } from "../../lib/format.js";
 
-export default function PipelineView({ state, actions }) {
+export default function PipelineView({
+  state,
+  actions,
+  portfolioFocusKey = "",
+  onFocusVertical,
+  portfolioDownstreamByKey = {},
+  onOpenHolding,
+  onOpenWorkflow,
+  onOpenOperations,
+}) {
   const { funnel, shardScans, shardScanDetails, traceRows, traceVertical, selectedShardScanID } = state;
   const { setTraceVertical, setSelectedShardScanID, traceVerticalFlow, loadShardScanDetail, shardAction } = actions;
+  const retryScans = (shardScans || []).filter((scan) => Number(scan.shards_failed || 0) > 0 || Number(scan.shards_stuck || 0) > 0);
+  const activeScans = (shardScans || []).filter((scan) => Number(scan.shards_pending || 0) > 0 || Number(scan.shards_assigned || 0) > 0);
+  const focusTraceRows = traceRows.slice(-80).reverse();
 
   return (
     <section>
@@ -12,15 +24,96 @@ export default function PipelineView({ state, actions }) {
         <h2>Pipeline Funnel</h2>
         <div className="stack">
           <input placeholder="trace vertical slug/id" value={traceVertical} onChange={(e) => setTraceVertical(e.target.value)} />
-          <button onClick={() => traceVerticalFlow(traceVertical.trim()).catch(() => {})}>Trace</button>
+          <button onClick={() => {
+            const next = traceVertical.trim();
+            if (!next) return;
+            onFocusVertical?.(next);
+            traceVerticalFlow(next).catch(() => {});
+          }}>Trace</button>
         </div>
       </div>
       <div className="body">
         <div className="row3">
-          <div><div className="tiny">Discoveries (14d)</div><div><strong>{funnel.throughput.discoveries_14d || 0}</strong></div></div>
-          <div><div className="tiny">Scoring Completion</div><div><strong>{Math.round((funnel.throughput.scoring_completion_rate || 0) * 100)}%</strong></div></div>
-          <div><div className="tiny">Approved/Live vs Killed</div><div><strong>{funnel.throughput.specs_approved_or_live || 0} / {funnel.throughput.specs_killed_total || 0}</strong></div></div>
+          <div className="health-card"><div className="tiny">Discoveries (14d)</div><div className="big-number">{funnel.throughput.discoveries_14d || 0}</div><div className="tiny">recent portfolio throughput</div></div>
+          <div className="health-card"><div className="tiny">Scoring Completion</div><div className="big-number">{Math.round((funnel.throughput.scoring_completion_rate || 0) * 100)}%</div><div className="tiny">discovered {"->"} scored</div></div>
+          <div className="health-card"><div className="tiny">Approved / Killed</div><div className="big-number">{funnel.throughput.specs_approved_or_live || 0} / {funnel.throughput.specs_killed_total || 0}</div><div className="tiny">approved-or-live vs killed</div></div>
         </div>
+
+        <div className="row" style={{ marginBottom: 12, gap: 12 }}>
+          <div className="holding-detail-section">
+            <div className="tiny" style={{ marginBottom: 6 }}>Attention Verticals</div>
+            <div className="body scroll" style={{ maxHeight: 220, padding: 0 }}>
+              <table>
+                <thead><tr><th>Vertical</th><th>Stage</th><th>Idle hrs</th><th>Action</th></tr></thead>
+                <tbody>
+                  {(funnel.stuck || []).length === 0 ? (
+                    <tr><td colSpan={4} className="empty-state">No stuck verticals</td></tr>
+                  ) : (funnel.stuck || []).map((v) => {
+                    const key = v.slug || v.id;
+                    const downstream = portfolioDownstreamByKey[key] || null;
+                    return (
+                      <tr
+                        key={key}
+                        style={{ cursor: "pointer", background: portfolioFocusKey && portfolioFocusKey === key ? "rgba(212, 162, 74, 0.08)" : undefined }}
+                        onClick={() => { onFocusVertical?.(key); setTraceVertical(key); traceVerticalFlow(key).catch(() => {}); }}
+                        title="Click to trace"
+                      >
+                        <td style={{ color: "var(--info)" }}>{key}</td>
+                        <td>{v.stage}</td>
+                        <td>{v.idle_hours}</td>
+                        <td>
+                          <div className="stack">
+                            <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(key); setTraceVertical(key); traceVerticalFlow(key).catch(() => {}); }}>Trace</button>
+                            <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(key); onOpenHolding?.(v); }}>Holding</button>
+                            <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(key); onOpenWorkflow?.(v); }}>Workflow</button>
+                            {downstream?.summary?.mailbox || downstream?.summary?.tasks ? (
+                              <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(key); onOpenOperations?.(v); }}>Ops</button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="holding-detail-section">
+            <div className="tiny" style={{ marginBottom: 6 }}>Retry Needed Shard Scans</div>
+            <div className="body scroll" style={{ maxHeight: 220, padding: 0 }}>
+              <table>
+                <thead><tr><th>Scan</th><th>Geo</th><th>Failed</th><th>Stuck</th><th>Action</th></tr></thead>
+                <tbody>
+                  {retryScans.length === 0 ? (
+                    <tr><td colSpan={5} className="empty-state">No retry-needed scans</td></tr>
+                  ) : retryScans.slice(0, 10).map((scan) => (
+                    <tr key={scan.scan_id}>
+                      <td><CopyID id={scan.scan_id} len={10} /></td>
+                      <td>{scan.geography || "-"}</td>
+                      <td className="mono">{scan.shards_failed || 0}</td>
+                      <td className={(scan.shards_stuck || 0) > 0 ? "health-warn mono" : "mono"}>{scan.shards_stuck || 0}</td>
+                      <td>
+                        <button
+                          className="btn-secondary"
+                          onClick={() => {
+                            const expanded = selectedShardScanID === scan.scan_id;
+                            const next = expanded ? "" : scan.scan_id;
+                            setSelectedShardScanID(next);
+                            if (!expanded) loadShardScanDetail(scan.scan_id).catch(() => {});
+                          }}
+                        >
+                          Inspect
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <div className="tiny" style={{ margin: "8px 0 4px" }}>Shard Scan Progress</div>
         <div className="body scroll" style={{ maxHeight: 210, padding: 0 }}>
           <table>
@@ -111,19 +204,25 @@ export default function PipelineView({ state, actions }) {
             </tbody>
           </table>
         </div>
-        <div className="tiny" style={{ margin: "8px 0 4px" }}>Stuck Verticals</div>
-        <div className="body scroll" style={{ maxHeight: 180, padding: 0 }}>
-          <table>
-            <thead><tr><th>Vertical</th><th>Stage</th><th>Idle hrs</th></tr></thead>
-            <tbody>
-              {(funnel.stuck || []).length === 0 ? (
-                <tr><td colSpan={3} className="empty-state">No stuck verticals</td></tr>
-              ) : (funnel.stuck || []).map((v) => (
-                <tr key={v.id || v.slug} style={{ cursor: "pointer" }} onClick={() => { const s = v.slug || v.id; setTraceVertical(s); traceVerticalFlow(s).catch(() => {}); }} title="Click to trace"><td style={{ color: "var(--info)" }}>{v.slug || v.id}</td><td>{v.stage}</td><td>{v.idle_hours}</td></tr>
-              ))}
-            </tbody>
-          </table>
+
+        <div className="row3" style={{ marginTop: 12 }}>
+          <div className="health-card">
+            <div className="tiny">Active Scans</div>
+            <div className="big-number">{activeScans.length}</div>
+            <div className="tiny">pending or assigned shard scans</div>
+          </div>
+          <div className="health-card">
+            <div className="tiny">Focused Vertical</div>
+            <div className="big-number">{traceVertical || portfolioFocusKey || "-"}</div>
+            <div className="tiny">current pipeline trace target</div>
+          </div>
+          <div className="health-card">
+            <div className="tiny">Trace Rows</div>
+            <div className="big-number">{traceRows.length}</div>
+            <div className="tiny">loaded lifecycle events</div>
+          </div>
         </div>
+
         <div className="tiny" style={{ margin: "8px 0 4px" }}>Lifecycle Trace</div>
         <div className="body scroll" style={{ maxHeight: 250, padding: 0 }}>
           <table>
@@ -131,7 +230,7 @@ export default function PipelineView({ state, actions }) {
             <tbody>
               {traceRows.length === 0 ? (
                 <tr><td colSpan={4} className="empty-state">Enter a vertical and click Trace</td></tr>
-              ) : traceRows.slice(-120).map((e) => (
+              ) : focusTraceRows.map((e) => (
                 <tr key={e.id}><td><span title={fmtTime(e.created_at)}>{relTime(e.created_at)}</span></td><td>{e.type}</td><td>{e.source_agent}</td><td>{e.pending_count}</td></tr>
               ))}
             </tbody>

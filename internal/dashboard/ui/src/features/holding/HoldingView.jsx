@@ -3,7 +3,18 @@ import CopyID from "../../components/CopyID.jsx";
 import GateIndicator from "../../components/GateIndicator.jsx";
 import { formatDollars, readPath, relTime } from "../../lib/format.js";
 
-export default function HoldingView({ state, actions }) {
+export default function HoldingView({
+  state,
+  actions,
+  portfolioFocusKey = "",
+  onFocusVertical,
+  onOpenFunnelTrace,
+  onOpenWorkflowTrace,
+  onOpenWorkflowTopology,
+  portfolioDownstreamByKey = {},
+  onOpenOperations,
+  onOpenAgent,
+}) {
   const {
     holdingData,
     holdingVisibleVerticals,
@@ -82,17 +93,31 @@ export default function HoldingView({ state, actions }) {
             <div className="empty-state">No visible verticals</div>
           ) : (
             <table>
-              <thead><tr><th>Vertical</th><th>Stage Age</th><th>Revisions</th><th>Timers</th><th>Drift</th></tr></thead>
+              <thead><tr><th>Vertical</th><th>Stage Age</th><th>Revisions</th><th>Timers</th><th>Drift</th><th>Actions</th></tr></thead>
               <tbody>
-                {holdingVisibleVerticals.slice(0, 12).map((v) => (
-                  <tr key={v.id} style={{ cursor: "pointer" }} onClick={() => openHoldingVerticalDetail(v.id)}>
+                {holdingVisibleVerticals.slice(0, 12).map((v) => {
+                  const downstream = portfolioDownstreamByKey[v.slug || v.id] || null;
+                  return (
+                  <tr
+                    key={v.id}
+                    style={{ cursor: "pointer", background: portfolioFocusKey && portfolioFocusKey === (v.slug || v.id) ? "rgba(212, 162, 74, 0.08)" : undefined }}
+                    onClick={() => { onFocusVertical?.(v.slug || v.id); openHoldingVerticalDetail(v.id); }}
+                  >
                     <td>{v.slug || v.name || v.id}</td>
                     <td>{v.stage_entered_at ? relTime(v.stage_entered_at) : "-"}</td>
                     <td className="mono">{readPath(v, ["revision_count"]) || "0"}</td>
                     <td className="mono">{v.active_timer_count || 0}</td>
                     <td>{v.workflow_current_stage && v.workflow_current_stage !== v.stage ? "yes" : "no"}</td>
+                    <td>
+                      <div className="stack">
+                        <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenFunnelTrace?.(v.slug || v.id); }}>Trace</button>
+                        <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenWorkflowTrace?.(v); }}>Workflow</button>
+                        {(downstream?.summary?.tasks || downstream?.summary?.mailbox) ? <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenOperations?.(v); }}>Ops</button> : null}
+                      </div>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -114,12 +139,14 @@ export default function HoldingView({ state, actions }) {
                 const scoreClass = !isNaN(score) ? (score >= 75 ? "tag-good" : score >= 50 ? "tag-warn" : "tag-bad") : "";
                 const ac = (holdingData.agent_counts || {})[v.id];
                 const workflowDrift = v.workflow_current_stage && v.workflow_current_stage !== v.stage;
+                const downstream = portfolioDownstreamByKey[v.slug || v.id] || null;
                 return (
                   <div
                     key={v.id}
                     className={`vertical-card${v.stage === "killed" ? " vertical-card-killed" : ""}`}
-                    onClick={() => openHoldingVerticalDetail(v.id)}
+                    onClick={() => { onFocusVertical?.(v.slug || v.id); openHoldingVerticalDetail(v.id); }}
                     title="Open full project details"
+                    style={portfolioFocusKey && portfolioFocusKey === (v.slug || v.id) ? { boxShadow: "0 0 0 1px rgba(212, 162, 74, 0.22), 0 0 0 3px rgba(212, 162, 74, 0.08)" } : undefined}
                   >
                     <div className="vertical-card-header">
                       <span className="vertical-card-name" title={v.name}>{v.slug || v.name}</span>
@@ -148,11 +175,22 @@ export default function HoldingView({ state, actions }) {
                         db stage {v.stage} vs workflow {v.workflow_current_stage}
                       </div>
                     ) : null}
+                    {(v.workflow_current_stage || v.stage) ? (
+                      <div className="tiny" style={{ marginTop: 4 }}>
+                        execution {v.workflow_current_stage || v.stage}
+                      </div>
+                    ) : null}
                     {v.stage === "killed" && v.kill_reason ? (
                       <div className="vertical-card-kill tiny">{v.kill_reason}</div>
                     ) : null}
                     {col.key === "validation" ? <GateIndicator stage={v.stage} stages={validationGateData.stages} labels={validationGateData.labels} /> : null}
-                    <div className="tiny" style={{ marginTop: 4, color: "var(--info)" }}>Click for full details</div>
+                    <div className="stack" style={{ marginTop: 6 }}>
+                      <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenFunnelTrace?.(v.slug || v.id); }}>Trace</button>
+                      <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenWorkflowTrace?.(v); }}>Workflow</button>
+                      <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenWorkflowTopology?.(v); }}>Topology</button>
+                      {(downstream?.summary?.tasks || downstream?.summary?.mailbox) ? <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenOperations?.(v); }}>Ops</button> : null}
+                      {downstream?.primaryAgent ? <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenAgent?.(downstream.primaryAgent.id || downstream.primaryAgent.agent_id || ""); }}>Agent</button> : null}
+                    </div>
                   </div>
                 );
               })}

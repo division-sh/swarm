@@ -14,6 +14,7 @@ export function useDashboardLifecycle({
   refreshers,
   addToast,
   loadLogs,
+  loadRuntimeLogs,
   loadIncidents,
   loadConversations,
   loadGraph,
