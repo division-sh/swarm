@@ -3,9 +3,9 @@ header {
   position: sticky;
   top: 0;
   z-index: 60;
-  background: linear-gradient(180deg, rgba(13, 20, 32, 0.88) 0%, rgba(10, 16, 24, 0.92) 100%);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  background: linear-gradient(180deg, rgba(13, 20, 32, 0.84) 0%, rgba(10, 16, 24, 0.9) 100%);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
   border-bottom: 1px solid var(--border-mid);
   padding: 14px 20px 0;
 }
@@ -25,7 +25,8 @@ header::before {
     transparent 100%
   );
   background-size: 200% 100%;
-  animation: headerShimmer 6s ease-in-out infinite;
+  animation: headerShimmer 10s ease-in-out infinite;
+  opacity: 0.7;
 }
 
 header::after {
@@ -114,64 +115,48 @@ header::after {
 
 .kpi {
   position: relative;
-  background: rgba(255, 255, 255, 0.03);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   padding: 10px 12px;
   overflow: hidden;
-  transition: border-color 0.4s, box-shadow 0.4s;
+  box-shadow: inset 0 1px 0 var(--panel-topline);
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
 }
 
 .kpi:hover {
   border-color: var(--accent-border);
-  box-shadow: 0 0 24px rgba(212, 162, 74, 0.12), inset 0 0 20px rgba(212, 162, 74, 0.04);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-/* Rotating radar sweep */
 .kpi::before {
   content: "";
   position: absolute;
-  width: 250%;
-  height: 250%;
-  top: -75%;
-  left: -75%;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    rgba(212, 162, 74, 0.06) 30deg,
-    transparent 80deg,
-    transparent 360deg
-  );
-  animation: kpiRadar 8s linear infinite;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(212, 162, 74, 0.05), transparent);
+  transform: translateX(-120%);
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.5s;
+  transition: opacity 0.25s ease;
 }
 
 .kpi:hover::before {
   opacity: 1;
+  animation: kpiScan 1.5s ease-out 1;
 }
 
-@keyframes kpiRadar {
-  to { transform: rotate(360deg); }
-}
-
-/* Horizontal scan line */
 .kpi::after {
   content: "";
   position: absolute;
-  top: 0;
-  left: -60%;
-  width: 60%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(212, 162, 74, 0.05), transparent);
-  animation: kpiScan 5s ease-in-out infinite;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 60%);
   pointer-events: none;
+  opacity: 0.6;
 }
 
 @keyframes kpiScan {
-  0% { left: -60%; }
-  100% { left: 160%; }
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
 }
 
 .kpi .label {
@@ -286,12 +271,12 @@ main {
 
 /* --- Sections / Cards --- */
 section {
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 140px), var(--surface);
   border: 1px solid var(--border-mid);
   border-radius: var(--r-lg);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  animation: sectionIn 0.3s ease-out;
+  box-shadow: var(--shadow-panel);
+  animation: sectionIn 0.22s ease-out;
 }
 
 @keyframes sectionIn {
@@ -306,7 +291,7 @@ section {
   gap: 10px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.008) 100%);
   border-left: 3px solid var(--accent-dim);
 }
 
@@ -377,7 +362,7 @@ th {
   color: var(--text-3);
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
   position: sticky;
   top: 0;
 }
@@ -391,3 +376,47 @@ tr.selected td {
   border-color: var(--accent-border);
 }
 
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) {
+  border: 1px solid var(--border-mid);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 120px), var(--surface);
+  box-shadow: var(--shadow-panel);
+}
+
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) .dv-groupview {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) .dv-groupview .dv-content-container {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 140px), var(--surface-soft);
+}
+
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) .dv-tabs-and-actions-container {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
+  border-bottom: 1px solid var(--border);
+}
+
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) .dv-tab {
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) .dv-tab.dv-active-tab {
+  color: var(--accent);
+  box-shadow: inset 0 -2px 0 0 var(--accent-border);
+}
+
+:is(.workflow-dockview, .portfolio-dockview, .operations-dockview, .observability-dockview) .dv-sash:not(.disabled)::after {
+  background: rgba(212, 162, 74, 0.16);
+  opacity: 0.7;
+}
+
+:is(.workflow-dock-panel, .portfolio-dock-panel, .operations-dock-panel, .observability-dock-panel) {
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+  background: transparent;
+}

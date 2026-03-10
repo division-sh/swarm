@@ -8,7 +8,9 @@
   --void: #060910;
   --base: #0b1018;
   --surface: #111922;
+  --surface-soft: #0f1621;
   --elevated: #172030;
+  --elevated-2: #1b2737;
   --hover: #1c2a3c;
   --active: #223248;
 
@@ -39,17 +41,22 @@
   --border: rgba(255, 255, 255, 0.06);
   --border-mid: rgba(255, 255, 255, 0.10);
   --border-strong: rgba(255, 255, 255, 0.16);
+  --panel-topline: rgba(255, 255, 255, 0.045);
 
   /* Shadows */
   --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.6);
+  --shadow-panel: 0 8px 28px rgba(0, 0, 0, 0.34);
+  --shadow-panel-hover: 0 14px 34px rgba(0, 0, 0, 0.42);
 
   /* Radius */
   --r-sm: 6px;
   --r-md: 10px;
   --r-lg: 14px;
   --r-pill: 999px;
+
+  --focus-ring: 0 0 0 3px rgba(212, 162, 74, 0.18);
 
   /* Graph */
   --graph-holding: rgba(251, 113, 133, 0.22);
@@ -74,10 +81,11 @@ html, body, #root { min-height: 100vh; }
 
 body {
   background:
-    repeating-linear-gradient(0deg, rgba(212, 162, 74, 0.012) 0px, transparent 1px, transparent 48px),
-    repeating-linear-gradient(90deg, rgba(212, 162, 74, 0.012) 0px, transparent 1px, transparent 48px),
-    radial-gradient(ellipse at 15% -5%, rgba(212, 162, 74, 0.05) 0%, transparent 45%),
-    radial-gradient(ellipse at 85% 105%, rgba(96, 165, 250, 0.03) 0%, transparent 45%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 180px),
+    repeating-linear-gradient(0deg, rgba(212, 162, 74, 0.008) 0px, transparent 1px, transparent 56px),
+    repeating-linear-gradient(90deg, rgba(212, 162, 74, 0.008) 0px, transparent 1px, transparent 56px),
+    radial-gradient(ellipse at 15% -5%, rgba(212, 162, 74, 0.045) 0%, transparent 42%),
+    radial-gradient(ellipse at 85% 105%, rgba(96, 165, 250, 0.028) 0%, transparent 42%),
     var(--void);
   color: var(--text-1);
   font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
@@ -95,8 +103,8 @@ body::after {
     0deg,
     transparent 0px,
     transparent 2px,
-    rgba(212, 162, 74, 0.008) 2px,
-    rgba(212, 162, 74, 0.008) 4px
+    rgba(212, 162, 74, 0.004) 2px,
+    rgba(212, 162, 74, 0.004) 4px
   );
   pointer-events: none;
   z-index: 50;
@@ -109,6 +117,27 @@ pre {
 
 strong {
   font-weight: 700;
+}
+
+::selection {
+  background: rgba(212, 162, 74, 0.22);
+  color: var(--text-1);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* --- Utility Classes --- */
@@ -148,4 +177,3 @@ strong {
   grid-template-columns: 1fr;
   gap: 12px;
 }
-

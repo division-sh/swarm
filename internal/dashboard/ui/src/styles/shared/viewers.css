@@ -1,0 +1,623 @@
+/* --- JSON Display --- */
+.json {
+  background: var(--base);
+  color: var(--info);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  max-height: 250px;
+  overflow: auto;
+  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  position: relative;
+}
+
+.json::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: linear-gradient(180deg, var(--accent-dim), transparent);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.code-viewer {
+  position: relative;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: #1e1e1e;
+}
+
+.code-viewer-compact {
+  margin-top: 6px;
+}
+
+.code-viewer-loading {
+  padding: 10px 12px;
+  color: var(--text-3);
+}
+
+.data-table-wrap {
+  margin-top: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 7px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-3);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.data-table-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table-head {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.data-table-sort-indicator {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+/* --- JSON Pretty View --- */
+.json-view {
+  background: var(--base);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.65;
+  position: relative;
+}
+
+.json-view::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 100%;
+  background: linear-gradient(180deg, var(--accent-dim), transparent);
+  border-radius: 2px;
+  opacity: 0.5;
+}
+
+.json-view::-webkit-scrollbar { width: 6px; }
+.json-view::-webkit-scrollbar-track { background: transparent; }
+.json-view::-webkit-scrollbar-thumb { background: var(--text-4); border-radius: 3px; }
+.json-view::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+.json-key { color: var(--accent-bright); }
+.json-str {
+  color: var(--good);
+  word-break: break-word;
+}
+.json-num { color: #f0a060; }
+.json-bool {
+  color: var(--info);
+  font-weight: 600;
+}
+.json-null {
+  color: var(--text-4);
+  font-style: italic;
+}
+.json-bracket { color: var(--text-3); }
+.json-toggle { display: inline; }
+
+.json-toggle > summary {
+  display: inline;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.json-toggle > summary::-webkit-details-marker {
+  display: none;
+}
+
+.json-collapse-hint {
+  font-size: 10px;
+  color: var(--text-4);
+  margin-left: 4px;
+  font-style: italic;
+}
+
+.json-toggle[open] > summary .json-collapse-hint {
+  display: none;
+}
+
+.json-indent {
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+  margin-left: 2px;
+}
+
+.json-entry {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* --- Modal --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.modal-container {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(0, 0, 0, 0.5);
+  width: 90vw;
+  max-width: 760px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  animation: modalIn 0.2s ease-out;
+}
+
+.modal-container.holding-detail-modal {
+  max-width: 1180px;
+  max-height: 88vh;
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid var(--accent-dim);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-family: "Syne", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-2);
+}
+
+.modal-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  border-radius: var(--r-sm);
+}
+
+.modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-body::-webkit-scrollbar { width: 6px; }
+.modal-body::-webkit-scrollbar-track { background: transparent; }
+.modal-body::-webkit-scrollbar-thumb { background: var(--text-4); border-radius: 3px; }
+
+/* --- Markdown Rendering --- */
+.md-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-1);
+}
+
+.md-h1 {
+  font-family: "Syne", sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--accent);
+  margin: 16px 0 8px;
+  letter-spacing: 0.5px;
+}
+
+.md-h2 {
+  font-family: "Syne", sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 14px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.md-h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+  margin: 12px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.md-p { margin: 4px 0; }
+
+.md-li {
+  padding-left: 16px;
+  position: relative;
+  margin: 3px 0;
+}
+
+.md-li::before {
+  content: "\2022";
+  position: absolute;
+  left: 4px;
+  color: var(--accent-dim);
+}
+
+.md-li-num::before {
+  content: none;
+}
+
+.md-blank { height: 8px; }
+
+.md-code-block {
+  background: var(--base);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin: 8px 0;
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--info);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.md-inline-code {
+  background: rgba(96, 165, 250, 0.10);
+  color: var(--info);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 11px;
+}
+
+.md-link {
+  color: var(--info);
+  text-decoration: underline;
+  text-decoration-color: rgba(96, 165, 250, 0.3);
+}
+
+/* --- Log Detail --- */
+.log-detail-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  align-items: baseline;
+}
+
+.log-detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.log-detail-value {
+  font-size: 12px;
+  color: var(--text-1);
+  word-break: break-all;
+}
+
+.log-error-text {
+  background: var(--bad-bg);
+  border: 1px solid rgba(248, 113, 113, 0.20);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin-top: 4px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--bad);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow: auto;
+}
+
+/* --- Artifact Blocks --- */
+.artifact-generic {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifact-kv-list {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.artifact-kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.artifact-kv-row span:first-child { color: var(--text-3); }
+
+.artifact-kv-row span:last-child {
+  color: var(--text-1);
+  text-align: right;
+  max-width: 68%;
+  word-break: break-word;
+}
+
+.artifact-kv-row:last-child { border-bottom: none; }
+
+.artifact-text-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.artifact-text-block {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.artifact-subsection {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.015);
+  padding: 8px;
+}
+
+.artifact-subsection > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.artifact-subsection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.artifact-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.artifact-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: auto;
+  max-height: 280px;
+}
+
+.artifact-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.artifact-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--base);
+  color: var(--text-2);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+}
+
+.artifact-table tbody td {
+  border-bottom: 1px solid var(--border);
+  padding: 7px 8px;
+  vertical-align: top;
+}
+
+.artifact-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.artifact-table tbody td:nth-child(2) {
+  font-family: "JetBrains Mono", "IBM Plex Mono", Menlo, monospace;
+  white-space: nowrap;
+}
+
+.artifact-table tbody td:nth-child(3) {
+  color: var(--text-2);
+}
+
+/* --- Chat Messages --- */
+.chat-messages {
+  max-height: 70vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+  flex: 1;
+}
+
+.chat-messages::-webkit-scrollbar { width: 5px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--text-4); border-radius: 3px; }
+
+.chat-msg {
+  border-radius: var(--r-md);
+  padding: 0;
+  border: 1px solid var(--border);
+}
+
+.chat-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.chat-summary::-webkit-details-marker { display: none; }
+
+.chat-summary::before {
+  content: "\25B8";
+  font-size: 10px;
+  color: var(--text-4);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+
+.chat-msg[open] > .chat-summary::before {
+  transform: rotate(90deg);
+}
+
+.chat-summary-text {
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-noop .chat-summary-text {
+  color: var(--text-4);
+  font-style: italic;
+}
+
+.chat-role {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  flex-shrink: 0;
+}
+
+.chat-time {
+  font-size: 10px;
+  color: var(--text-4);
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: "JetBrains Mono", Menlo, monospace;
+}
+
+.chat-content {
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  color: var(--text-1);
+  padding: 0 10px 8px;
+  margin: 0;
+  cursor: pointer;
+  border-top: 1px solid var(--border);
+}
+
+.chat-user {
+  background: var(--accent-glow);
+  border-color: var(--accent-border);
+}
+
+.chat-user .chat-role { color: var(--accent); }
+
+.chat-assistant {
+  background: var(--info-bg);
+  border-color: rgba(96, 165, 250, 0.15);
+}
+
+.chat-assistant .chat-role { color: var(--info); }
+
+.chat-system {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: var(--border);
+}
+
+.chat-system .chat-role { color: var(--text-3); }
+
+/* --- Task Description (plain text) --- */
+.desc-text {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  max-height: 140px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
