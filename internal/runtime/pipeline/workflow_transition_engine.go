@@ -32,6 +32,28 @@ type workflowTransitionShadowComparison struct {
 	Reason            string
 }
 
+type handlerExecutionPlan struct {
+	NodeID             string
+	EventType          string
+	Guard              string
+	Action             string
+	CompletionRule     string
+	AdvancesTo         string
+	SetsGate           string
+	DataAccumulation   runtimecontracts.WorkflowDataAccumulation
+	Emits              string
+	Rules              map[string]any
+	OnComplete         map[string]any
+	ExecutionOrder     []string
+}
+
+type handlerExecutionPlanShadowComparison struct {
+	FlatPlan    handlerExecutionPlan
+	DerivedPlan handlerExecutionPlan
+	Matched     bool
+	Reason      string
+}
+
 func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
 	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
@@ -289,6 +311,95 @@ func (pc *FactoryPipelineCoordinator) resolveDerivedWorkflowTransitionByEvent(
 	return workflowTransitionFromDerivedSemantic(triggerCtx.State, match), true
 }
 
+func (pc *FactoryPipelineCoordinator) resolveDerivedHandlerExecutionPlanByEvent(
+	triggerCtx workflowTriggerContext,
+) (handlerExecutionPlan, bool) {
+	if pc == nil || pc.ContractBundle() == nil {
+		return handlerExecutionPlan{}, false
+	}
+	trigger := strings.TrimSpace(string(triggerCtx.Event.Type))
+	if trigger == "" {
+		return handlerExecutionPlan{}, false
+	}
+	bundle := pc.ContractBundle()
+	owners := bundle.RuntimeEventOwners(trigger)
+	if len(owners) == 0 {
+		return handlerExecutionPlan{}, false
+	}
+	var match runtimecontracts.HandlerTransitionSemantic
+	var matched bool
+	for _, owner := range owners {
+		derived, ok := bundle.DerivedHandlerTransition(owner, trigger)
+		if !ok {
+			continue
+		}
+		if matched {
+			return handlerExecutionPlan{}, false
+		}
+		match = derived
+		matched = true
+	}
+	if !matched {
+		return handlerExecutionPlan{}, false
+	}
+	return handlerExecutionPlanFromDerivedSemantic(match), true
+}
+
+func handlerExecutionPlanFromDerivedSemantic(
+	derived runtimecontracts.HandlerTransitionSemantic,
+) handlerExecutionPlan {
+	plan := handlerExecutionPlan{
+		NodeID:           strings.TrimSpace(derived.NodeID),
+		EventType:        strings.TrimSpace(derived.EventType),
+		Guard:            strings.TrimSpace(asString(derived.Guard)),
+		Action:           strings.TrimSpace(derived.Action),
+		CompletionRule:   strings.TrimSpace(derived.CompletionRule),
+		AdvancesTo:       strings.TrimSpace(derived.AdvancesTo),
+		SetsGate:         strings.TrimSpace(asString(derived.SetsGate)),
+		DataAccumulation: derived.DataAccumulation,
+		Emits:            strings.TrimSpace(derived.Emits),
+		Rules:            cloneStringAnyMap(derived.Rules),
+		OnComplete:       cloneStringAnyMap(derived.OnComplete),
+	}
+	plan.ExecutionOrder = handlerExecutionOrderForPlan(plan)
+	return plan
+}
+
+func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
+	steps := make([]string, 0, 10)
+	if plan.Guard != "" {
+		steps = append(steps, "guard")
+	}
+	if len(plan.DataAccumulation.Writes) > 0 || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
+		steps = append(steps, "accumulate")
+	}
+	if plan.Action != "" {
+		steps = append(steps, "compute")
+	}
+	if len(plan.OnComplete) > 0 || plan.CompletionRule != "" {
+		steps = append(steps, "on_complete")
+	}
+	if plan.AdvancesTo != "" {
+		steps = append(steps, "advances_to")
+	}
+	if plan.SetsGate != "" {
+		steps = append(steps, "sets_gate")
+	}
+	if len(plan.DataAccumulation.Writes) > 0 || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
+		steps = append(steps, "data_accumulation")
+	}
+	if plan.Emits != "" {
+		steps = append(steps, "emits")
+	}
+	if len(plan.Rules) > 0 {
+		steps = append(steps, "rules")
+	}
+	if plan.Action != "" {
+		steps = append(steps, "action_hook")
+	}
+	return steps
+}
+
 func workflowTransitionFromDerivedSemantic(
 	state WorkflowState,
 	derived runtimecontracts.HandlerTransitionSemantic,
@@ -317,6 +428,60 @@ func workflowTransitionFromDerivedSemantic(
 		transition.Actions = []WorkflowAction{action}
 	}
 	return transition
+}
+
+func workflowTransitionToExecutionPlan(transition WorkflowTransition) handlerExecutionPlan {
+	plan := handlerExecutionPlan{
+		NodeID:           strings.TrimSpace(transition.Node),
+		EventType:        strings.TrimSpace(transition.Trigger),
+		DataAccumulation: transition.DataAccumulation,
+		AdvancesTo:       strings.TrimSpace(string(transition.To)),
+	}
+	if len(transition.GuardIDs) > 0 {
+		plan.Guard = strings.TrimSpace(transition.GuardIDs[0])
+	}
+	if len(transition.Actions) > 0 {
+		plan.Action = strings.TrimSpace(transition.Actions[0].Name)
+		plan.Emits = strings.TrimSpace(transition.Actions[0].Emits)
+	}
+	plan.ExecutionOrder = handlerExecutionOrderForPlan(plan)
+	return plan
+}
+
+func shadowCompareHandlerExecutionPlan(
+	flat WorkflowTransition,
+	derived handlerExecutionPlan,
+) handlerExecutionPlanShadowComparison {
+	flatPlan := workflowTransitionToExecutionPlan(flat)
+	matched, reason := handlerExecutionPlanParity(flatPlan, derived)
+	return handlerExecutionPlanShadowComparison{
+		FlatPlan:    flatPlan,
+		DerivedPlan: derived,
+		Matched:     matched,
+		Reason:      reason,
+	}
+}
+
+func handlerExecutionPlanParity(flat handlerExecutionPlan, derived handlerExecutionPlan) (bool, string) {
+	if flat.AdvancesTo != derived.AdvancesTo {
+		return false, "advances_to_mismatch"
+	}
+	if flat.EventType != derived.EventType {
+		return false, "event_mismatch"
+	}
+	if flat.NodeID != derived.NodeID {
+		return false, "node_mismatch"
+	}
+	if flat.Guard != "" && derived.Guard != "" && flat.Guard != derived.Guard {
+		return false, "guard_mismatch"
+	}
+	if flat.Action != "" && derived.Action != "" && !workflowTransitionActionAliasesMatch(flat.Action, derived.Action) {
+		return false, "action_mismatch"
+	}
+	if flat.Emits != "" && derived.Emits != "" && flat.Emits != derived.Emits {
+		return false, "emit_mismatch"
+	}
+	return true, "match"
 }
 
 func workflowTransitionSemanticParity(flat WorkflowTransition, derived WorkflowTransition) (bool, string) {

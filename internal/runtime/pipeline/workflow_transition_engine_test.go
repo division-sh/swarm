@@ -860,6 +860,164 @@ func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_Shad
 	}
 }
 
+func TestFactoryPipelineCoordinator_ResolveDerivedHandlerExecutionPlanByEvent_ResearchCompleted(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.completed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "researching",
+			Metadata: map[string]any{
+				"g1_research": true,
+			},
+		},
+	}
+
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for research.completed")
+	}
+	if plan.NodeID != "validation-orchestrator" {
+		t.Fatalf("expected validation-orchestrator plan owner, got %+v", plan)
+	}
+	if plan.AdvancesTo != "mvp_speccing" {
+		t.Fatalf("expected research.completed to advance to mvp_speccing, got %+v", plan)
+	}
+	if plan.SetsGate != "g1_research" {
+		t.Fatalf("expected research.completed to set g1_research, got %+v", plan)
+	}
+	if len(plan.ExecutionOrder) == 0 || plan.ExecutionOrder[0] != "compute" {
+		t.Fatalf("expected compute-led execution order, got %+v", plan.ExecutionOrder)
+	}
+	foundAdvance := false
+	foundSetsGate := false
+	for _, step := range plan.ExecutionOrder {
+		if step == "advances_to" {
+			foundAdvance = true
+		}
+		if step == "sets_gate" {
+			foundSetsGate = true
+		}
+	}
+	if !foundAdvance || !foundSetsGate {
+		t.Fatalf("expected advances_to and sets_gate in execution order, got %+v", plan.ExecutionOrder)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedHandlerExecutionPlanByEvent_CTOSpecApproved(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_approved"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"g2_spec": true,
+			},
+		},
+	}
+
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for cto.spec_approved")
+	}
+	if plan.SetsGate != "g3_cto" {
+		t.Fatalf("expected cto.spec_approved to set g3_cto, got %+v", plan)
+	}
+	if plan.AdvancesTo != "branding" {
+		t.Fatalf("expected cto.spec_approved to advance to branding, got %+v", plan)
+	}
+	if plan.Emits != "brand.requested" {
+		t.Fatalf("expected cto.spec_approved to emit brand.requested, got %+v", plan)
+	}
+	foundSetsGate := false
+	for _, step := range plan.ExecutionOrder {
+		if step == "sets_gate" {
+			foundSetsGate = true
+			break
+		}
+	}
+	if !foundSetsGate {
+		t.Fatalf("expected sets_gate in execution order, got %+v", plan.ExecutionOrder)
+	}
+}
+
+func TestHandlerExecutionPlanParity_ResearchCompleted(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.completed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "researching",
+			Metadata: map[string]any{
+				"g1_research": true,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected research.completed workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for research.completed")
+	}
+
+	comparison := shadowCompareHandlerExecutionPlan(transition, plan)
+	if !comparison.Matched {
+		t.Fatalf("expected research.completed execution plan parity, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanParity_SpecValidationFailedAlias(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("spec.validation_failed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 0,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected spec.validation_failed workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for spec.validation_failed")
+	}
+
+	comparison := shadowCompareHandlerExecutionPlan(transition, plan)
+	if !comparison.Matched {
+		t.Fatalf("expected spec.validation_failed execution plan alias parity, got %+v", comparison)
+	}
+}
+
 func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_FallsBackForNeedsMoreData(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
