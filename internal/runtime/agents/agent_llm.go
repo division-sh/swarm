@@ -16,7 +16,6 @@ import (
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
-	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/runtime/sharedjson"
@@ -226,7 +225,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 	if a == nil || a.conversation == nil {
 		return ""
 	}
-	mode = runtimepipeline.NormalizeScanMode(mode)
+	mode = runtimeproductpolicy.NormalizeScanMode(mode)
 	cacheKey := mode
 	if a.promptCache == nil {
 		a.promptCache = map[string]string{}
@@ -607,9 +606,9 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 }
 
 func normalizeScanMode(raw string) string {
-	return runtimepipeline.NormalizeScanMode(raw)
+	return runtimeproductpolicy.NormalizeScanMode(raw)
 }
 
 func normalizeScanPriority(raw string) string {
-	return runtimepipeline.NormalizeScanPriority(raw)
+	return runtimeproductpolicy.NormalizeScanPriority(raw)
 }

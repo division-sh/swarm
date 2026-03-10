@@ -1,0 +1,44 @@
+name: scoring
+pins:
+  inputs:
+    events:
+    - score.dimension_complete
+    - scoring.contest_resolved
+    - vertical.derived
+    - vertical.discovered
+    reads: []
+  outputs:
+    events:
+    - pipeline.dead_letter
+    - scoring.contested
+    - scoring.requested
+    - vertical.discovered
+    - vertical.marginal
+    - vertical.rejected
+    - vertical.scored
+    - vertical.shortlisted
+    writes:
+    - discovery_mode
+    - geography
+    - name
+    - opportunity_pattern
+    - raw_signals
+    - signal_strength
+initial_state: discovered
+terminal_states:
+- killed
+states:
+- discovered
+- shortlisted
+- marginal_review
+- killed
+namespace_prefix: vertical
+namespace_rule: Platform substitutes namespace_prefix with project namespace at boot. To reuse this flow for a different entity
+  type, change the namespace in package.yaml.
+required_agents:
+- role: analyst
+  subscribes_to:
+  - scoring.requested
+  emits:
+  - score.dimension_complete
+  description: Scores entity on requested dimensions

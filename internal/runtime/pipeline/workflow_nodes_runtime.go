@@ -54,46 +54,38 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 	for _, node := range pc.WorkflowNodes() {
 		nodeIDs[strings.TrimSpace(node.ID)] = struct{}{}
 	}
-	_, legacyCoordinator := nodeIDs["pipeline-coordinator"]
 	_, hasScan := nodeIDs["scan-orchestrator"]
 	_, hasDiscovery := nodeIDs["discovery-aggregator"]
 	_, hasValidation := nodeIDs["validation-orchestrator"]
 	_, hasLifecycle := nodeIDs["lifecycle-orchestrator"]
 	_, hasScoring := nodeIDs[ScoringNodeID]
-	// The split-executor model owns the four orchestration nodes directly.
-	// Scoring still keeps a dedicated background subscriber, but the surrounding
-	// runtime wiring is now genericized.
-	useSplitExecutors := !legacyCoordinator && (hasScan || hasDiscovery || hasValidation || hasLifecycle)
 
 	out := make([]workflowNodeExecutor, 0, 5)
-	if useSplitExecutors && hasScan && pc.scanCoordinator != nil {
+	if hasScan && pc.scanCoordinator != nil {
 		out = append(out, &ScanOrchestrator{coordinator: pc.scanCoordinator})
 	}
-	if useSplitExecutors && hasDiscovery && pc.scanCoordinator != nil {
+	if hasDiscovery && pc.scanCoordinator != nil {
 		out = append(out, &DiscoveryAggregator{coordinator: pc})
 	}
-	if useSplitExecutors && hasValidation && pc.validationGate != nil {
+	if hasValidation && pc.validationGate != nil {
 		out = append(out, &ValidationOrchestrator{coordinator: pc})
 	}
-	if useSplitExecutors && hasLifecycle && pc.validationGate != nil {
+	if hasLifecycle && pc.validationGate != nil {
 		out = append(out, &LifecycleOrchestrator{coordinator: pc})
 	}
-	if hasScoring && pc.scoringState != nil {
-		out = append(out, pc.scoringState)
-	}
-	if useSplitExecutors && len(out) > 0 {
-		return out
-	}
-	if pc.scanCoordinator != nil {
-		out = append(out, pc.scanCoordinator)
-	}
-	if pc.scoringState != nil {
-		out = append(out, pc.scoringState)
-	}
-	if pc.validationGate != nil {
-		out = append(out, pc.validationGate)
+	if hasScoring {
+		if scoringExecutor := pc.scoringTransitionExecutor(); scoringExecutor != nil {
+			out = append(out, scoringExecutor)
+		}
 	}
 	return out
+}
+
+func (pc *FactoryPipelineCoordinator) scoringTransitionExecutor() workflowNodeExecutor {
+	if pc == nil || pc.scoringState == nil {
+		return nil
+	}
+	return newScoringTransitionExecutor(pc)
 }
 
 func (pc *FactoryPipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {

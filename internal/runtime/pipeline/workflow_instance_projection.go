@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx context.Context, acc *scoringAccumulator) {
@@ -101,7 +102,7 @@ func (pc *FactoryPipelineCoordinator) hydrateWorkflowScoringAccumulator(ctx cont
 	acc.GeographicScope = firstNonEmptyString(acc.GeographicScope, geographicScope)
 	acc.Mode = firstNonEmptyString(normalizeScanMode(acc.Mode), normalizeScanMode(mode))
 	if acc.Mode == "" {
-		acc.Mode = "saas_gap"
+		acc.Mode = runtimeproductpolicy.DiscoveryFallbackMode()
 	}
 	if len(acc.DiscoveryContext) == 0 {
 		acc.DiscoveryContext = cloneMap(discoveryContext)
@@ -146,10 +147,10 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScanProjection(ctx context.
 		bundle := pc.ContractBundle()
 		_ = pc.workflowStore.Mutate(ctx, scanID, func(instance *WorkflowInstance) {
 			if strings.TrimSpace(instance.WorkflowName) == "" {
-				instance.WorkflowName = strings.TrimSpace(bundle.Workflow.Workflow.Name)
+				instance.WorkflowName = bundle.WorkflowName()
 			}
 			if strings.TrimSpace(instance.WorkflowVersion) == "" {
-				instance.WorkflowVersion = strings.TrimSpace(bundle.Workflow.Workflow.Version)
+				instance.WorkflowVersion = bundle.WorkflowVersion()
 			}
 			if strings.TrimSpace(instance.CurrentStage) == "" {
 				instance.CurrentStage = "scanning"

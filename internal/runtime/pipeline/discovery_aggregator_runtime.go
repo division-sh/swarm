@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -41,7 +42,7 @@ func (n *DiscoveryAggregator) handleDiscoveryReport(ctx context.Context, evt eve
 			CreatedAt:   time.Now(),
 		}
 		if acc.Mode == "" {
-			acc.Mode = "saas_gap"
+			acc.Mode = runtimeproductpolicy.DiscoveryFallbackMode()
 		}
 		sc.scans[scanID] = acc
 	}
@@ -229,7 +230,7 @@ func (n *DiscoveryAggregator) handleSynthesisResolved(ctx context.Context, evt e
 	}
 	mode := normalizeScanMode(asString(payload["mode"]))
 	if mode == "" {
-		mode = "saas_gap"
+		mode = runtimeproductpolicy.DiscoveryFallbackMode()
 	}
 	geography := strings.TrimSpace(asString(payload["geography"]))
 	if geography == "" {

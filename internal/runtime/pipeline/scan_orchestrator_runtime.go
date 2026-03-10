@@ -1,15 +1,12 @@
 package pipeline
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.Event) {
@@ -24,7 +21,7 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 	}
 	mode := normalizeScanMode(asString(payload["mode"]))
 	if mode == "" {
-		mode = "saas_gap"
+		mode = runtimeproductpolicy.DiscoveryFallbackMode()
 	}
 	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
 	if campaignID == "" {
@@ -58,43 +55,38 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 	sc.mu.Unlock()
 
 	assigned := sc.payloadFactory.BuildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
-	if plannedShardCount > 0 && (mode == "saas_gap" || mode == "saas_trend") {
+	if plannedShardCount > 0 && runtimeproductpolicy.ScanShardStage(mode) != "" {
 		return
 	}
+	assignments, err := defaultWorkflowModule().ScanPolicy().ExpandScanAssignments(mode, payload, assigned, corpusBatchSize)
+	if err != nil {
+		runtimeWarn(n.NodeID(), "scan assignment expansion failed mode=%s err=%v", mode, err)
+	}
+	if len(assignments) == 0 {
+		assignments = []ScanAssignedPayload{assigned}
+	}
 
-	switch mode {
-	case "saas_gap":
-		sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
-	case "saas_trend":
-		sc.runtime.publish(ctx, "trend_research.scan_assigned", "", payloadMap(assigned))
-	case "corpus":
-		corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
-		assigned.CorpusPath = corpusPath
-		batches, err := readJSONLFile(corpusPath, corpusBatchSize)
-		if err != nil {
-			runtimeWarn(n.NodeID(), "corpus mode read failed path=%q err=%v", corpusPath, err)
-			assigned.CorpusSignals = []map[string]any{}
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
-			return
+	switch runtimeproductpolicy.ScanDispatchKind(mode) {
+	case "market":
+		for _, expanded := range assignments {
+			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(expanded))
 		}
-		if len(batches) == 0 {
-			assigned.CorpusSignals = []map[string]any{}
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
-			return
+	case "trend":
+		for _, expanded := range assignments {
+			sc.runtime.publish(ctx, "trend_research.scan_assigned", "", payloadMap(expanded))
 		}
-		for _, batch := range batches {
-			perBatch := assigned
-			perBatch.CorpusSignals = batch
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(perBatch))
+	case "local":
+		for _, expanded := range assignments {
+			sc.runtime.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(expanded))
+			sc.runtime.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(expanded))
+			sc.runtime.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(expanded))
+			sc.runtime.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(expanded))
+			sc.runtime.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(expanded))
 		}
-	case "local_services":
-		sc.runtime.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(assigned))
-		sc.runtime.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(assigned))
 	default:
-		sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(assigned))
+		for _, expanded := range assignments {
+			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(expanded))
+		}
 	}
 }
 
@@ -184,57 +176,5 @@ func (n *ScanOrchestrator) scanCoordinator() *ScanCoordinator {
 }
 
 func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("corpus_path is required for corpus mode")
-	}
-	if batchSize <= 0 {
-		batchSize = corpusBatchSize
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	maxCapacity := max(batchSize*8*1024, 1024*1024)
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, maxCapacity)
-
-	batches := make([][]map[string]any, 0)
-	current := make([]map[string]any, 0, batchSize)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		entry, ok := parseJSONLine(line)
-		if !ok {
-			continue
-		}
-		current = append(current, entry)
-		if batchSize > 0 && len(current) >= batchSize {
-			batches = append(batches, current)
-			current = make([]map[string]any, 0, batchSize)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if len(current) > 0 {
-		batches = append(batches, current)
-	}
-	return batches, nil
-}
-
-func parseJSONLine(line string) (map[string]any, bool) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return nil, false
-	}
-	row := map[string]any{}
-	if err := json.Unmarshal([]byte(line), &row); err != nil {
-		return nil, false
-	}
-	return row, true
+	return defaultWorkflowModule().ScanPolicy().ReadJSONLBatches(path, batchSize)
 }

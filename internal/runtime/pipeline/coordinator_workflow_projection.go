@@ -26,10 +26,10 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 			enteredStageAt = instance.EnteredStageAt
 		}
 		if strings.TrimSpace(instance.WorkflowName) == "" {
-			instance.WorkflowName = strings.TrimSpace(bundle.Workflow.Workflow.Name)
+			instance.WorkflowName = bundle.WorkflowName()
 		}
 		if strings.TrimSpace(instance.WorkflowVersion) == "" {
-			instance.WorkflowVersion = strings.TrimSpace(bundle.Workflow.Workflow.Version)
+			instance.WorkflowVersion = bundle.WorkflowVersion()
 		}
 		if state.Metadata == nil {
 			state.Metadata = map[string]any{}
@@ -62,7 +62,7 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord("", nextStage, sourceEvent))
 		}
 	}); err != nil {
-		runtimeWarn("pipeline-coordinator", "workflow instance upsert failed vertical_id=%s stage=%s: %v", verticalID, nextStage, err)
+		runtimeWarn(runtimeWorkflowID, "workflow instance upsert failed vertical_id=%s stage=%s: %v", verticalID, nextStage, err)
 	}
 }
 

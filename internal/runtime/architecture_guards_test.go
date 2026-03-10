@@ -281,6 +281,8 @@ func TestNonTestGoFilesDoNotGainNewEmpireLiterals(t *testing.T) {
 		filepath.Join("internal", "dashboard", "server_control_messages.go"): {},
 		filepath.Join("internal", "dashboard", "server_conversations.go"):  {},
 		filepath.Join("internal", "dashboard", "server_tasks.go"):          {},
+		// Keep protocol wire tokens stable until we intentionally version or rename
+		// the external header/query surface.
 		filepath.Join("internal", "protocolheaders", "headers.go"):         {},
 		filepath.Join("internal", "runtime", "productpolicy", "empire", "policy.go"): {},
 	}
@@ -344,5 +346,162 @@ func TestNonTestGoFilesDoNotGainNewEmpireLiterals(t *testing.T) {
 	if len(unexpected) > 0 {
 		sort.Strings(unexpected)
 		t.Fatalf("new Empire-literal references appeared in non-test Go files: %v", unexpected)
+	}
+}
+
+func TestRetiredCoordinatorLiteralIsAbsentFromProductionCode(t *testing.T) {
+	t.Helper()
+
+	repoRoot := projectRootFromArchitectureTest(t)
+	allowed := map[string]struct{}{}
+	forbidden := []string{
+		"pipeline-coordinator",
+		"legacyPipelineCoordinatorID",
+	}
+
+	var unexpected []string
+	var missingAllowed []string
+	for _, root := range []string{
+		filepath.Join(repoRoot, "internal"),
+		filepath.Join(repoRoot, "cmd"),
+	} {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				relDir, relErr := filepath.Rel(repoRoot, path)
+				if relErr == nil && (relDir == filepath.Join("internal", "dashboard") || strings.HasPrefix(relDir, filepath.Join("internal", "dashboard")+string(os.PathSeparator))) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			src := string(data)
+			found := false
+			for _, token := range forbidden {
+				if strings.Contains(src, token) {
+					found = true
+					break
+				}
+			}
+			rel, err := filepath.Rel(repoRoot, path)
+			if err != nil {
+				return err
+			}
+			rel = filepath.Clean(rel)
+			if found {
+				if _, ok := allowed[rel]; !ok {
+					unexpected = append(unexpected, rel)
+				}
+			} else if _, ok := allowed[rel]; ok {
+				missingAllowed = append(missingAllowed, rel)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", root, err)
+		}
+	}
+
+	if len(missingAllowed) > 0 {
+		sort.Strings(missingAllowed)
+		t.Fatalf("allowed retired-coordinator exceptions are now stale and should be removed: %v", missingAllowed)
+	}
+	if len(unexpected) > 0 {
+		sort.Strings(unexpected)
+		t.Fatalf("retired coordinator references escaped the legacy compatibility file: %v", unexpected)
+	}
+}
+
+func TestWireCompatEmpireTokensAreQuarantinedToProtocolheaders(t *testing.T) {
+	t.Helper()
+
+	repoRoot := projectRootFromArchitectureTest(t)
+	allowed := map[string]struct{}{
+		filepath.Join("internal", "protocolheaders", "headers.go"): {},
+	}
+	forbidden := []string{
+		"X-Empire-Key",
+		"X-Empire-Agent-Id",
+		"X-Empire-Agent-Role",
+		"X-Empire-Agent-Mode",
+		"X-Empire-Vertical-Id",
+		"X-Empire-Allowed-Tools",
+		"X-Empire-Context-Token",
+		"X-Empire-Trace-Id",
+		"empire_agent_id",
+		"empire_agent_role",
+		"empire_agent_mode",
+		"empire_vertical_id",
+		"empire_allowed_tools",
+		"empire_ctx_token",
+		"empire_trace_id",
+	}
+
+	var unexpected []string
+	var missingAllowed []string
+	for _, root := range []string{
+		filepath.Join(repoRoot, "internal"),
+		filepath.Join(repoRoot, "cmd"),
+	} {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				relDir, relErr := filepath.Rel(repoRoot, path)
+				if relErr == nil && (relDir == filepath.Join("internal", "dashboard") || strings.HasPrefix(relDir, filepath.Join("internal", "dashboard")+string(os.PathSeparator))) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			src := string(data)
+			found := false
+			for _, token := range forbidden {
+				if strings.Contains(src, token) {
+					found = true
+					break
+				}
+			}
+			rel, err := filepath.Rel(repoRoot, path)
+			if err != nil {
+				return err
+			}
+			rel = filepath.Clean(rel)
+			if found {
+				if _, ok := allowed[rel]; !ok {
+					unexpected = append(unexpected, rel)
+				}
+			} else if _, ok := allowed[rel]; ok {
+				missingAllowed = append(missingAllowed, rel)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", root, err)
+		}
+	}
+
+	if len(missingAllowed) > 0 {
+		sort.Strings(missingAllowed)
+		t.Fatalf("allowed wire-compat exceptions are now stale and should be removed: %v", missingAllowed)
+	}
+	if len(unexpected) > 0 {
+		sort.Strings(unexpected)
+		t.Fatalf("wire-compat Empire tokens escaped the protocolheaders package: %v", unexpected)
 	}
 }

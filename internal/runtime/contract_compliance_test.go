@@ -57,7 +57,7 @@ type contractComplianceAgentConfig struct {
 }
 
 type contractComplianceCatalogEvent struct {
-	Emitter           string   `yaml:"emitter"`
+	Emitter           any      `yaml:"emitter"`
 	EmitterType       string   `yaml:"emitter_type"`
 	AlternateEmitters []string `yaml:"alternate_emitters"`
 	RuntimeHandling   string   `yaml:"runtime_handling"`
@@ -177,15 +177,16 @@ func TestContractCompliance(t *testing.T) {
 	_ = runtimetools.EventSchemaSnapshot()
 
 	repoRoot := contractComplianceRepoRoot(t)
-	contractAgents := contractComplianceLoadAgentTools(t, repoRoot)
+	bundle := contractComplianceLoadBundle(t, repoRoot)
+	contractAgents := contractComplianceLoadAgentTools(t, bundle)
 	agentConfigMap := contractComplianceLoadAgentConfigMap(t, repoRoot)
-	eventCatalog := contractComplianceLoadEventCatalog(t, repoRoot)
-	systemNodes := contractComplianceLoadSystemNodes(t, repoRoot)
+	eventCatalog := contractComplianceLoadEventCatalog(t, bundle)
+	systemNodes := contractComplianceLoadSystemNodes(t, bundle)
 	routes := contractComplianceLoadRoutes(t, repoRoot)
 	specVersion := contractComplianceLoadSpecVersion(t, repoRoot)
 	toolingLockVersion := contractComplianceLoadToolingLockVersion(t, repoRoot)
-	toolSchemas := contractComplianceLoadToolSchemas(t, repoRoot)
-	platformSpec := contractComplianceLoadPlatformSpec(t, repoRoot)
+	toolSchemas := contractComplianceLoadToolSchemas(t, bundle)
+	platformSpec := contractComplianceLoadPlatformSpec(t, bundle)
 
 	t.Run("gate1_agent_config_fields_match_contract", func(t *testing.T) {
 		ids := make([]string, 0, len(contractAgents))
@@ -347,7 +348,7 @@ func TestContractCompliance(t *testing.T) {
 				errs = append(errs, fmt.Sprintf("event-catalog emitter_type unsupported for %s (emitter_type=%q)", eventType, cat.EmitterType))
 				continue
 			}
-			emitters := append([]string{cat.Emitter}, cat.AlternateEmitters...)
+			emitters := append(contractComplianceNormalizeAnyStringList(cat.Emitter), cat.AlternateEmitters...)
 			match := false
 			for _, emitter := range emitters {
 				if (emitterType == "agent" || emitterType == "opco_agent") && contractComplianceAgentEmitterProduces(eventType, emitter) {
@@ -504,6 +505,7 @@ func TestContractCompliance(t *testing.T) {
 				errs = append(errs, fmt.Sprintf("subscriber %s missing implementation path for %s", sub.Subscriber, sub.EventType))
 				continue
 			}
+			implPath = contractComplianceResolveImplementationPath(repoRoot, strings.TrimSpace(sub.Subscriber), implPath)
 			handledEvents, ok := handledEventsCache[implPath]
 			if !ok {
 				var err error
@@ -512,25 +514,7 @@ func TestContractCompliance(t *testing.T) {
 					errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", implPath, err))
 					continue
 				}
-				switch strings.TrimSpace(sub.Subscriber) {
-				case "pipeline-coordinator":
-					extraPaths, extraErr := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node*.go"))
-					if extraErr != nil {
-						errs = append(errs, fmt.Sprintf("glob workflow node coverage: %v", extraErr))
-						continue
-					}
-					for _, extraPath := range extraPaths {
-						extraEvents, parseErr := contractComplianceParseHandledEventsFromFile(repoRoot, extraPath)
-						if parseErr != nil {
-							errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", extraPath, parseErr))
-							continue
-						}
-						for evt := range extraEvents {
-							handledEvents[evt] = struct{}{}
-						}
-					}
-				case "scoring-node":
-					extraPath := filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node_scoring.go")
+				for _, extraPath := range contractComplianceExtraImplementationPaths(repoRoot, strings.TrimSpace(sub.Subscriber)) {
 					extraEvents, parseErr := contractComplianceParseHandledEventsFromFile(repoRoot, extraPath)
 					if parseErr != nil {
 						errs = append(errs, fmt.Sprintf("parse handler coverage %s: %v", extraPath, parseErr))
@@ -733,8 +717,8 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("workflow_schema", func(t *testing.T) {
-		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
-		registry := contractComplianceLoadGuardActionRegistry(t, repoRoot)
+		workflow := contractComplianceLoadWorkflowSchema(t, bundle)
+		registry := contractComplianceLoadGuardActionRegistry(t, bundle)
 		builtinGuards := contractComplianceBuiltinIDs(platformSpec.BuiltinHooks.Guards)
 		builtinActions := contractComplianceBuiltinIDs(platformSpec.BuiltinHooks.Actions)
 		implicitPlatformActions := map[string]struct{}{
@@ -809,7 +793,7 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("workflow_nodes", func(t *testing.T) {
-		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
+		workflow := contractComplianceLoadWorkflowSchema(t, bundle)
 		validNodes := map[string]struct{}{
 			"runtime": {},
 			"human":   {},
@@ -863,7 +847,7 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("workflow_node_coverage", func(t *testing.T) {
-		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
+		workflow := contractComplianceLoadWorkflowSchema(t, bundle)
 		transitionByID := make(map[string]contractComplianceWorkflowSchemaTransition, len(workflow.Workflow.Transitions))
 		for _, tr := range workflow.Workflow.Transitions {
 			if id := strings.TrimSpace(tr.ID); id != "" {
@@ -908,8 +892,8 @@ func TestContractCompliance(t *testing.T) {
 	})
 
 	t.Run("workflow_graph", func(t *testing.T) {
-		workflow := contractComplianceLoadWorkflowSchema(t, repoRoot)
-		registry := contractComplianceLoadGuardActionRegistry(t, repoRoot)
+		workflow := contractComplianceLoadWorkflowSchema(t, bundle)
+		registry := contractComplianceLoadGuardActionRegistry(t, bundle)
 		stageIDs := map[string]struct{}{}
 		for _, stage := range workflow.Workflow.Stages {
 			if id := strings.TrimSpace(stage.ID); id != "" {
@@ -1061,6 +1045,154 @@ func TestContractCompliance(t *testing.T) {
 			t.Fatalf("workflow_graph failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 60))
 		}
 	})
+
+	t.Run("handler_transition_semantics", func(t *testing.T) {
+		errs := make([]string, 0, 32)
+		for _, tr := range bundle.DerivedHandlerTransitions() {
+			nodeID := strings.TrimSpace(tr.NodeID)
+			eventType := strings.TrimSpace(tr.EventType)
+			if nodeID == "" || eventType == "" {
+				errs = append(errs, fmt.Sprintf("derived handler transition missing node/event identity: %+v", tr))
+				continue
+			}
+			if _, ok := bundle.NodeEventHandler(nodeID, eventType); !ok {
+				errs = append(errs, fmt.Sprintf("derived handler transition %s missing backing node handler", tr.ID))
+			}
+			owners := contractComplianceNormalizeSet(bundle.RuntimeEventOwners(eventType))
+			if _, ok := owners[nodeID]; !ok {
+				errs = append(errs, fmt.Sprintf("derived handler transition %s owner %s missing from runtime event owners for %s", tr.ID, nodeID, eventType))
+			}
+			if flowID := strings.TrimSpace(tr.FlowID); flowID != "" {
+				if target := strings.TrimSpace(tr.AdvancesTo); target != "" {
+					if _, ok := contractComplianceNormalizeSet(bundle.FlowStates(flowID))[target]; !ok {
+						errs = append(errs, fmt.Sprintf("derived handler transition %s advances_to %s outside flow %s states", tr.ID, target, flowID))
+					}
+				}
+			}
+			if sourceEvent := strings.TrimSpace(tr.DataAccumulation.SourceEvent); sourceEvent != "" && sourceEvent != eventType {
+				errs = append(errs, fmt.Sprintf("derived handler transition %s source_event %s does not match %s", tr.ID, sourceEvent, eventType))
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("handler_transition_semantics failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+
+	t.Run("flat_vs_derived_transition_coverage", func(t *testing.T) {
+		workflow := contractComplianceLoadWorkflowSchema(t, bundle)
+		errs := make([]string, 0, 32)
+		for _, tr := range workflow.Workflow.Transitions {
+			nodeID := strings.TrimSpace(tr.Node)
+			trigger := strings.TrimSpace(tr.Trigger)
+			if nodeID == "" || trigger == "" {
+				continue
+			}
+			derived, ok := bundle.DerivedHandlerTransition(nodeID, trigger)
+			if !ok {
+				continue
+			}
+			to := strings.TrimSpace(tr.To)
+			if to != "" && derived.AdvancesTo != "" && to != derived.AdvancesTo {
+				errs = append(errs, fmt.Sprintf("flat transition %s to=%s disagrees with derived handler %s advances_to=%s", strings.TrimSpace(tr.ID), to, derived.ID, derived.AdvancesTo))
+			}
+		}
+		if len(errs) > 0 {
+			t.Fatalf("flat_vs_derived_transition_coverage failures (%d):\n- %s", len(errs), contractComplianceFormatErrs(errs, 40))
+		}
+	})
+
+	t.Run("package_tree_and_merged_bundle", func(t *testing.T) {
+		if strings.TrimSpace(bundle.Paths.ProjectPackageFile) == "" {
+			t.Skip("package-aware layout not active in current root contracts")
+		}
+		if len(bundle.PackageTree) == 0 {
+			t.Fatal("expected package-aware loader to populate package tree")
+		}
+		if len(bundle.FlowSchemas) == 0 {
+			t.Fatal("expected package-aware loader to populate flow schemas")
+		}
+		if len(bundle.MergedNodes) == 0 || len(bundle.MergedEvents) == 0 || len(bundle.MergedAgents) == 0 {
+			t.Fatal("expected merged target views to be populated")
+		}
+		if _, ok := bundle.MergedNodes["portfolio-node"]; !ok {
+			t.Fatal("expected merged nodes to include project-level portfolio-node")
+		}
+		if source := bundle.NodeSources["portfolio-node"]; strings.TrimSpace(source.Layer) != "project" {
+			t.Fatalf("portfolio-node source = %+v, want project provenance", source)
+		}
+		if _, ok := bundle.MergedNodes["scan-orchestrator"]; !ok {
+			t.Fatal("expected merged nodes to include flow-level scan-orchestrator")
+		}
+		if source := bundle.NodeSources["scan-orchestrator"]; strings.TrimSpace(source.Layer) != "flow" || strings.TrimSpace(source.FlowID) == "" {
+			t.Fatalf("scan-orchestrator source = %+v, want flow provenance", source)
+		}
+		if got := bundle.FlowWritePins("validation"); len(got) == 0 {
+			t.Fatal("expected semantic flow write pins to be populated")
+		}
+		if owners := bundle.WritePinOwners("validation_kit"); len(owners) != 1 || owners[0] != "validation" {
+			t.Fatalf("validation_kit owners = %v, want [validation]", owners)
+		}
+		if got := bundle.FlowRequiredAgents("operating"); len(got) == 0 {
+			t.Fatal("expected semantic required_agents to be populated")
+		}
+		if got := bundle.FlowNamespacePrefix("operating"); got == "" {
+			t.Fatal("expected semantic flow namespace_prefix to be populated")
+		}
+		if got := bundle.FlowNamespace("operating"); got == "" {
+			t.Fatal("expected semantic flow assigned namespace to be populated")
+		}
+	})
+
+	t.Run("flow_schema_semantics", func(t *testing.T) {
+		if strings.TrimSpace(bundle.Paths.ProjectPackageFile) == "" {
+			t.Skip("package-aware layout not active in current root contracts")
+		}
+		flowIDs := make([]string, 0, len(bundle.FlowSchemas))
+		for flowID := range bundle.FlowSchemas {
+			flowIDs = append(flowIDs, strings.TrimSpace(flowID))
+		}
+		sort.Strings(flowIDs)
+		for _, flowID := range flowIDs {
+			if flowID == "" {
+				continue
+			}
+			if got := bundle.FlowInitialStage(flowID); strings.TrimSpace(got) == "" {
+				t.Fatalf("flow %s missing semantic initial state", flowID)
+			}
+			if got := bundle.FlowNamespace(flowID); strings.TrimSpace(got) == "" {
+				t.Fatalf("flow %s missing semantic assigned namespace", flowID)
+			}
+			if got := bundle.FlowNamespacePrefix(flowID); strings.TrimSpace(got) == "" {
+				t.Fatalf("flow %s missing semantic namespace prefix", flowID)
+			}
+			for _, pin := range bundle.FlowWritePins(flowID) {
+				pin = strings.TrimSpace(pin)
+				if pin == "" {
+					continue
+				}
+				owners := bundle.WritePinOwners(pin)
+				if len(owners) != 1 || owners[0] != flowID {
+					t.Fatalf("flow %s write pin %s owners = %v, want [%s]", flowID, pin, owners, flowID)
+				}
+			}
+			for _, required := range bundle.FlowRequiredAgents(flowID) {
+				role := strings.TrimSpace(required.Role)
+				if role == "" {
+					t.Fatalf("flow %s required agent missing role", flowID)
+				}
+				found := false
+				for _, agent := range bundle.MergedAgents {
+					if strings.EqualFold(strings.TrimSpace(agent.Role), role) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Fatalf("flow %s required agent role %s missing from merged agents", flowID, role)
+				}
+			}
+		}
+	})
 }
 
 type contractComplianceSubscription struct {
@@ -1077,23 +1209,38 @@ func contractComplianceRepoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 }
 
-func contractComplianceLoadAgentTools(t *testing.T, repoRoot string) map[string]contractComplianceAgent {
+func contractComplianceLoadBundle(t *testing.T, repoRoot string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).AgentRegistryFile
-	raw, err := os.ReadFile(path)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot)
 	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+		t.Fatalf("LoadWorkflowContractBundle(%s) error = %v", repoRoot, err)
 	}
-	all := map[string]contractComplianceAgent{}
-	if err := yaml.Unmarshal(raw, &all); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
+	return bundle
+}
+
+func contractComplianceLoadAgentTools(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) map[string]contractComplianceAgent {
+	t.Helper()
 	out := map[string]contractComplianceAgent{}
-	for key, v := range all {
-		if strings.TrimSpace(v.ID) == "" {
+	for key, entry := range bundle.Agents {
+		id := strings.TrimSpace(key)
+		if id == "" || strings.TrimSpace(entry.ID) == "" {
 			continue
 		}
-		out[strings.TrimSpace(key)] = v
+		out[id] = contractComplianceAgent{
+			ID:                     entry.ID,
+			Type:                   entry.Type,
+			Role:                   entry.Role,
+			NodeType:               entry.NodeType,
+			ModelTier:              entry.ModelTier,
+			ConversationMode:       entry.ConversationMode,
+			MaxTurnsPerTask:        entry.MaxTurnsPerTask,
+			Subscriptions:          entry.Subscriptions,
+			SubscriptionsBootstrap: entry.SubscriptionsBootstrap,
+			SubscribesTo:           entry.SubscribesTo,
+			ToolsTier2:             entry.ToolsTier2,
+			EmitEvents:             entry.EmitEvents,
+			Implementation:         entry.Implementation,
+		}
 	}
 	return out
 }
@@ -1112,44 +1259,39 @@ func contractComplianceLoadAgentConfigMap(t *testing.T, repoRoot string) contrac
 	return out
 }
 
-func contractComplianceLoadEventCatalog(t *testing.T, repoRoot string) map[string]contractComplianceCatalogEvent {
+func contractComplianceLoadEventCatalog(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) map[string]contractComplianceCatalogEvent {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).EventCatalogFile
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	all := map[string]contractComplianceCatalogEvent{}
-	if err := yaml.Unmarshal(raw, &all); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
 	out := map[string]contractComplianceCatalogEvent{}
-	for key, v := range all {
-		if strings.TrimSpace(v.Emitter) == "" {
+	for key, v := range bundle.Events {
+		if len(contractComplianceNormalizeAnyStringList(v.Emitter)) == 0 {
 			continue
 		}
-		out[strings.TrimSpace(key)] = v
+		out[strings.TrimSpace(key)] = contractComplianceCatalogEvent{
+			Emitter:           v.Emitter,
+			EmitterType:       v.EmitterType,
+			AlternateEmitters: v.AlternateEmitters,
+			RuntimeHandling:   v.RuntimeHandling,
+			OwningNode:        v.OwningNode,
+			Payload:           v.Payload,
+		}
 	}
 	return out
 }
 
-func contractComplianceLoadSystemNodes(t *testing.T, repoRoot string) map[string]contractComplianceSystemNode {
+func contractComplianceLoadSystemNodes(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) map[string]contractComplianceSystemNode {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).SystemNodesFile
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	all := map[string]contractComplianceSystemNode{}
-	if err := yaml.Unmarshal(raw, &all); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
 	out := map[string]contractComplianceSystemNode{}
-	for key, v := range all {
+	for key, v := range bundle.Nodes {
 		if strings.TrimSpace(v.ID) == "" {
 			continue
 		}
-		out[strings.TrimSpace(key)] = v
+		out[strings.TrimSpace(key)] = contractComplianceSystemNode{
+			ID:               v.ID,
+			SubscribesTo:     v.SubscribesTo,
+			Produces:         v.Produces,
+			OwnedTransitions: v.OwnedTransitions,
+			Implementation:   v.Implementation,
+		}
 	}
 	return out
 }
@@ -1202,47 +1344,40 @@ func contractComplianceLoadToolingLockVersion(t *testing.T, repoRoot string) str
 	return strings.TrimSpace(lock.ContractFormatVersion)
 }
 
-func contractComplianceLoadToolSchemas(t *testing.T, repoRoot string) map[string]contractComplianceToolSchema {
+func contractComplianceLoadToolSchemas(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) map[string]contractComplianceToolSchema {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).ToolSchemasFile
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
 	all := map[string]contractComplianceToolSchema{}
-	if err := yaml.Unmarshal(raw, &all); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+	for key, v := range bundle.Tools {
+		all[strings.TrimSpace(key)] = contractComplianceToolSchema{InputSchema: v.InputSchema}
 	}
 	return all
 }
 
-func contractComplianceLoadWorkflowSchema(t *testing.T, repoRoot string) contractComplianceWorkflowSchema {
+func contractComplianceLoadWorkflowSchema(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) contractComplianceWorkflowSchema {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).WorkflowSchemaFile
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
 	var out contractComplianceWorkflowSchema
+	raw, err := yaml.Marshal(bundle.Workflow)
+	if err != nil {
+		t.Fatalf("marshal workflow schema from bundle: %v", err)
+	}
 	if err := yaml.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+		t.Fatalf("unmarshal workflow schema from bundle: %v", err)
 	}
 	return out
 }
 
-func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) contractComplianceGuardActionRegistry {
+func contractComplianceLoadGuardActionRegistry(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) contractComplianceGuardActionRegistry {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).GuardRegistryFile
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
 	var doc struct {
 		Guards  []contractComplianceGuardActionEntry `yaml:"guards"`
 		Actions []contractComplianceGuardActionEntry `yaml:"actions"`
 	}
+	raw, err := yaml.Marshal(bundle.Hooks)
+	if err != nil {
+		t.Fatalf("marshal guard/action registry from bundle: %v", err)
+	}
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+		t.Fatalf("unmarshal guard/action registry from bundle: %v", err)
 	}
 	out := contractComplianceGuardActionRegistry{
 		Guards:  make(map[string]contractComplianceGuardActionEntry, len(doc.Guards)),
@@ -1261,16 +1396,15 @@ func contractComplianceLoadGuardActionRegistry(t *testing.T, repoRoot string) co
 	return out
 }
 
-func contractComplianceLoadPlatformSpec(t *testing.T, repoRoot string) contractCompliancePlatformSpec {
+func contractComplianceLoadPlatformSpec(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) contractCompliancePlatformSpec {
 	t.Helper()
-	path := runtimecontracts.ResolveWorkflowContractPaths(repoRoot).PlatformSpecFile
-	raw, err := os.ReadFile(path)
+	raw, err := yaml.Marshal(bundle.Platform)
 	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
+		t.Fatalf("marshal platform spec from bundle: %v", err)
 	}
 	var out contractCompliancePlatformSpec
 	if err := yaml.Unmarshal(raw, &out); err != nil {
-		t.Fatalf("parse %s: %v", path, err)
+		t.Fatalf("unmarshal platform spec from bundle: %v", err)
 	}
 	return out
 }
@@ -1427,9 +1561,11 @@ func contractComplianceTransitionNodeCanSeeTrigger(node, trigger string, contrac
 		return true
 	}
 	if evt, ok := catalog[trigger]; ok {
-		emitter := strings.TrimSpace(evt.Emitter)
-		if emitter == node {
-			return true
+		emitters := contractComplianceNormalizeAnyStringList(evt.Emitter)
+		for _, emitter := range emitters {
+			if emitter == node {
+				return true
+			}
 		}
 		if owner := strings.TrimSpace(evt.OwningNode); owner != "" && owner == node {
 			return true
@@ -1440,9 +1576,11 @@ func contractComplianceTransitionNodeCanSeeTrigger(node, trigger string, contrac
 				return true
 			}
 		}
-		if ag, ok := contractAgents[emitter]; ok {
-			if strings.TrimSpace(ag.Role) == node {
-				return true
+		for _, emitter := range emitters {
+			if ag, ok := contractAgents[emitter]; ok {
+				if strings.TrimSpace(ag.Role) == node {
+					return true
+				}
 			}
 		}
 	}
@@ -1681,6 +1819,28 @@ func contractComplianceNormalizeList(in []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func contractComplianceNormalizeAnyStringList(v any) []string {
+	switch typed := v.(type) {
+	case nil:
+		return nil
+	case string:
+		if item := strings.TrimSpace(typed); item != "" {
+			return []string{item}
+		}
+		return nil
+	case []string:
+		return contractComplianceNormalizeList(typed)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, contractComplianceNormalizeAnyStringList(item)...)
+		}
+		return contractComplianceNormalizeList(out)
+	default:
+		return nil
+	}
 }
 
 func contractComplianceNormalizeSet(in []string) map[string]struct{} {
@@ -2107,6 +2267,54 @@ func contractComplianceCatalogEmitterToCommgraphRole(emitter string) string {
 		return v
 	}
 	return emitter
+}
+
+func contractComplianceResolveImplementationPath(repoRoot, subscriber, implPath string) string {
+	subscriber = strings.TrimSpace(subscriber)
+	implPath = strings.TrimSpace(implPath)
+	if implPath == "" {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, implPath)); err == nil {
+		return implPath
+	}
+	for _, alt := range contractComplianceImplementationAliases(subscriber, implPath) {
+		if _, err := os.Stat(filepath.Join(repoRoot, alt)); err == nil {
+			return alt
+		}
+	}
+	return implPath
+}
+
+func contractComplianceImplementationAliases(subscriber, implPath string) []string {
+	subscriber = strings.TrimSpace(subscriber)
+	implPath = strings.TrimSpace(implPath)
+	if subscriber != "" && implPath != "" {
+		base := filepath.Base(implPath)
+		dir := filepath.Dir(implPath)
+		if dir == filepath.Join("internal", "runtime", "pipeline") && strings.HasSuffix(base, "_node.go") && !strings.HasPrefix(base, "workflow_node_") {
+			stem := strings.TrimSuffix(base, ".go")
+			if strings.HasSuffix(stem, "_node") {
+				name := strings.TrimSuffix(stem, "_node")
+				return []string{filepath.Join(dir, "workflow_node_"+name+".go")}
+			}
+		}
+	}
+	return nil
+}
+
+func contractComplianceExtraImplementationPaths(repoRoot, subscriber string) []string {
+	subscriber = strings.TrimSpace(subscriber)
+	switch subscriber {
+	case "pipeline-coordinator":
+		extraPaths, err := filepath.Glob(filepath.Join(repoRoot, "internal", "runtime", "pipeline", "workflow_node*.go"))
+		if err != nil {
+			return nil
+		}
+		return extraPaths
+	default:
+		return nil
+	}
 }
 
 func containsString(values []string, target string) bool {

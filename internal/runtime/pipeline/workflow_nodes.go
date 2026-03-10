@@ -139,7 +139,7 @@ func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []s
 	}
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(bundle.Nodes))
-	for _, transition := range bundle.Workflow.Workflow.Transitions {
+	for _, transition := range bundle.WorkflowTransitions() {
 		nodeID := strings.TrimSpace(transition.Node)
 		if nodeID == "" {
 			continue
@@ -162,6 +162,23 @@ func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []s
 			continue
 		}
 		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		seen[nodeID] = struct{}{}
+		out = append(out, nodeID)
+	}
+	for _, transition := range bundle.DerivedHandlerTransitions() {
+		nodeID := strings.TrimSpace(transition.NodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, ok := bundle.Nodes[nodeID]; !ok {
+			continue
+		}
+		if _, ok := seen[nodeID]; ok {
+			continue
+		}
+		if strings.TrimSpace(transition.AdvancesTo) == "" {
 			continue
 		}
 		seen[nodeID] = struct{}{}
@@ -227,22 +244,48 @@ func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBu
 			out[name] = struct{}{}
 		}
 	}
-	for eventType, entry := range bundle.Events {
-		if strings.TrimSpace(entry.OwningNode) != nodeID {
+	for eventType := range bundle.Events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
 			continue
 		}
+		for _, owner := range bundle.RuntimeEventOwners(eventType) {
+			if strings.TrimSpace(owner) == nodeID {
+				out[eventType] = struct{}{}
+				break
+			}
+		}
+	}
+	for eventType := range bundle.NodeEventHandlers(nodeID) {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
-	for _, transition := range bundle.Workflow.Workflow.Transitions {
+	for _, transition := range bundle.WorkflowTransitions() {
 		if strings.TrimSpace(transition.Node) != nodeID {
 			continue
 		}
 		trigger := strings.TrimSpace(transition.Trigger)
 		if trigger != "" {
 			out[trigger] = struct{}{}
+		}
+	}
+	if source, ok := bundle.NodeContractSource(nodeID); ok {
+		flowID := strings.TrimSpace(source.FlowID)
+		if flowID != "" {
+			for _, eventType := range bundle.FlowInputEvents(flowID) {
+				eventType = strings.TrimSpace(eventType)
+				if eventType != "" {
+					out[eventType] = struct{}{}
+				}
+			}
+			for _, eventType := range bundle.FlowOutputEvents(flowID) {
+				eventType = strings.TrimSpace(eventType)
+				if eventType != "" {
+					out[eventType] = struct{}{}
+				}
+			}
 		}
 	}
 	if len(out) == 0 {
@@ -252,29 +295,16 @@ func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBu
 }
 
 func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventPolicy, bool) {
-	switch strings.TrimSpace(nodeID) {
-	case "pipeline-coordinator":
-		switch strings.TrimSpace(eventType) {
-		case "timer.portfolio_digest":
-			return WorkflowEventPolicy{Consume: true}, true
-		case "runtime.reset":
-			return WorkflowEventPolicy{Consume: false}, true
-		case "spec.revision_requested":
-			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
-		case "spec.validation_passed", "spec.validation_failed":
-			return WorkflowEventPolicy{Consume: true, RequireVertical: true}, true
-		case "brand.revision_needed":
-			return WorkflowEventPolicy{Consume: true, RequireVertical: true}, true
-		}
+	nodeID = strings.TrimSpace(nodeID)
+	eventType = strings.TrimSpace(eventType)
+	switch nodeID {
 	case "scoring-node":
-		switch strings.TrimSpace(eventType) {
-		case "vertical.derived":
-			return WorkflowEventPolicy{Consume: true}, true
+		switch eventType {
 		case "score.dimension_complete", "scoring.contest_resolved":
 			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
 		}
 	case "validation-orchestrator":
-		switch strings.TrimSpace(eventType) {
+		switch eventType {
 		case "spec.validation_passed", "spec.validation_failed":
 			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
 		}
@@ -288,11 +318,23 @@ func workflowNodeTransitionTriggers(bundle *runtimecontracts.WorkflowContractBun
 		return out
 	}
 	nodeID = strings.TrimSpace(nodeID)
-	for _, transition := range bundle.Workflow.Workflow.Transitions {
+	for _, transition := range bundle.WorkflowTransitions() {
 		if strings.TrimSpace(transition.Node) != nodeID {
 			continue
 		}
 		trigger := strings.TrimSpace(transition.Trigger)
+		if trigger != "" {
+			out[trigger] = true
+		}
+	}
+	for _, transition := range bundle.DerivedHandlerTransitions() {
+		if strings.TrimSpace(transition.NodeID) != nodeID {
+			continue
+		}
+		if strings.TrimSpace(transition.AdvancesTo) == "" {
+			continue
+		}
+		trigger := strings.TrimSpace(transition.EventType)
 		if trigger != "" {
 			out[trigger] = true
 		}

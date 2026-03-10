@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
@@ -18,50 +19,11 @@ func (sc *ScanCoordinator) handleDiscoveryReport(ctx context.Context, evt events
 	}
 }
 
-type discoveryCandidate struct {
-	Mode    string
-	Signal  float64
-	Payload map[string]any
-}
+type discoveryCandidate = DiscoveryCandidate
 
-func buildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []discoveryCandidate {
-	baseMode := normalizeScanMode(firstNonEmptyString(asString(payload["mode"]), scanMode))
-	if baseMode == "" {
-		baseMode = "saas_gap"
-	}
-	basePayload := cloneMap(payload)
-	basePayload["mode"] = baseMode
-	candidates := []discoveryCandidate{{
-		Mode:    baseMode,
-		Signal:  asFloat(basePayload["signal_strength"]),
-		Payload: basePayload,
-	}}
-
-	autoRaw, _ := payload["automation_micro"].(map[string]any)
-	if len(autoRaw) == 0 {
-		return candidates
-	}
-
-	autoPayload := cloneMap(payload)
-	// Let automation-micro propose its own candidate name from its own hypothesis.
-	delete(autoPayload, "vertical_name")
-	delete(autoPayload, "name")
-	delete(autoPayload, "title")
-	autoPayload["mode"] = "automation_micro"
-	autoPayload["automation_micro"] = autoRaw
-	autoPayload["signal_strength"] = autoRaw["signal_strength"]
-	if v := strings.TrimSpace(asString(autoRaw["opportunity_hypothesis"])); v != "" {
-		autoPayload["opportunity_hypothesis"] = v
-	}
-	if v := strings.TrimSpace(asString(autoRaw["evidence"])); v != "" {
-		autoPayload["evidence"] = v
-	}
-	candidates = append(candidates, discoveryCandidate{
-		Mode:    "automation_micro",
-		Signal:  asFloat(autoRaw["signal_strength"]),
-		Payload: autoPayload,
-	})
-	return candidates
+func buildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []DiscoveryCandidate {
+	module := defaultWorkflowModule()
+	return module.DiscoveryPolicy().BuildDiscoveryCandidatesForReport(scanMode, payload)
 }
 
 func (pc *FactoryPipelineCoordinator) logPrefilterSkip(ctx context.Context, evt events.Event, scanID, campaignID, reason, mode string, payload map[string]any, rawSignal, adjustedSignal float64) {
@@ -252,7 +214,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 		discoveryMode = strings.ToLower(strings.TrimSpace(asString(payload["mode"])))
 	}
 	if discoveryMode == "" {
-		discoveryMode = "saas_gap"
+		discoveryMode = runtimeproductpolicy.DiscoveryFallbackMode()
 	}
 	opportunityPattern := pc.discoveryPolicy.NormalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
 	if opportunityPattern == "" {

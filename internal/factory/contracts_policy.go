@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"gopkg.in/yaml.v3"
 )
 
@@ -95,7 +96,7 @@ func loadFactoryScanModes(repoRoot string, policy *factoryContractPolicy) error 
 		}
 		policy.scanModeCases = append(policy.scanModeCases, modeCase)
 		policy.scanModeSet[mode] = struct{}{}
-		if policy.defaultScanMode == "" && mode == "local_services" {
+		if policy.defaultScanMode == "" && mode == strings.TrimSpace(runtimeproductpolicy.DefaultScanMode()) {
 			policy.defaultScanMode = mode
 		}
 	}
@@ -174,49 +175,39 @@ func factoryRepoRoot() (string, error) {
 
 func normalizeFactoryScanMode(mode string) string {
 	policy := loadFactoryContractPolicy()
-	mode = strings.TrimSpace(strings.ToLower(mode))
+	mode = strings.TrimSpace(runtimeproductpolicy.NormalizeScanMode(mode))
 	if _, ok := policy.scanModeSet[mode]; ok {
 		return mode
-	}
-	switch mode {
-	case "automation_micro":
-		if _, ok := policy.scanModeSet["automation_micro"]; ok {
-			return "automation_micro"
-		}
-		if _, ok := policy.scanModeSet["saas_gap"]; ok {
-			return "saas_gap"
-		}
 	}
 	if strings.TrimSpace(policy.defaultScanMode) != "" {
 		return policy.defaultScanMode
 	}
-	return "local_services"
+	return strings.TrimSpace(runtimeproductpolicy.DefaultScanMode())
 }
 
 func defaultFactoryScanMode() string {
-	return normalizeFactoryScanMode("")
+	mode := normalizeFactoryScanMode("")
+	if mode != "" {
+		return mode
+	}
+	return strings.TrimSpace(runtimeproductpolicy.DefaultScanMode())
 }
 
 func factoryModeUsesSaaSRubric(mode string) bool {
-	switch normalizeFactoryScanMode(mode) {
-	case "saas_gap", "saas_trend", "automation_micro", "corpus":
-		return true
-	default:
-		return false
-	}
+	return strings.TrimSpace(runtimeproductpolicy.RubricNameForScanMode(mode)) == "saas"
 }
 
 func factoryRubricName(mode string) string {
-	if factoryModeUsesSaaSRubric(mode) {
-		return "saas"
+	if rubric := strings.TrimSpace(runtimeproductpolicy.RubricNameForScanMode(mode)); rubric != "" {
+		return rubric
 	}
 	return defaultFactoryScanMode()
 }
 
 func factoryEmitsCategorySignals(mode string) bool {
-	return normalizeFactoryScanMode(mode) == "saas_gap"
+	return runtimeproductpolicy.EmitsCategorySignals(mode)
 }
 
 func factoryEmitsTrendSignals(mode string) bool {
-	return normalizeFactoryScanMode(mode) == "saas_trend"
+	return runtimeproductpolicy.EmitsTrendSignals(mode)
 }

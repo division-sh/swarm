@@ -205,6 +205,13 @@ Exit criteria:
 - architecture docs reflect the final boundary
 
 ## Phase 10: Lock The Boundary
+
+### File-Level Migration Matrix
+By the end of Phase 10, the following outcomes are expected:
+- delete entirely: `coordinator_scan_compat.go`, `coordinator_validation_compat.go`
+- move irreducible product logic into approved Empire packages from the remaining product-shaped files in `internal/runtime/pipeline`, `internal/runtime`, and `internal/factory`
+- genericize in place the remaining platform coordination/projection/validation files
+- keep only `internal/protocolheaders/headers.go` as the allowed non-product wire-compat exception
 Goal:
 - prevent regression after cleanup
 

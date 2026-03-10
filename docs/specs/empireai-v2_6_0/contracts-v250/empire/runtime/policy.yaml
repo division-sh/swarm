@@ -1,0 +1,202 @@
+# EmpireAI — Merged Policy (runtime compatibility) v2.6.0
+
+permission_bundles:
+  coordinator:
+    description: Full control — top-level workflow coordinator
+    permissions:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
+    - configure_routing
+    - approve_spend
+    - message_all
+    - mailbox_send
+    - human_task_request
+  lead:
+    description: Domain/team lead — can manage team and routing
+    permissions:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
+    - configure_routing
+    - message_domain
+    - mailbox_send
+    - human_task_request
+  specialist:
+    description: Skilled agent — can message domain and send to mailbox
+    permissions:
+    - message_domain
+    - mailbox_send
+    - configure_routing
+  worker:
+    description: Execution agent — can message peers only
+    permissions:
+    - message_peers
+  system_node:
+    description: Deterministic node — no permissions (platform handles internally)
+    permissions: []
+mra_self_filter_threshold: 40
+evidence_url_minimum: 2
+composite_marginal_low: 55
+composite_marginal_high: 74
+tier1_dimension_floor: 50
+tier1_subscore_floor: 60
+marginal_tier1_dimensions_above_70: 2
+marginal_kill_days: 60
+max_derivations_per_parent: 2
+max_generation_depth: 2
+derivation_trigger_threshold: 65
+corpus_batch_size: 25
+tier1_weight_percent: 60
+tier2_weight_percent: 30
+tier3_weight_percent: 10
+hard_gates:
+- build_complexity
+- automation_completeness
+blocking_red_flags:
+- complex_integration
+- high_feature_count
+- phone_led_sales
+- enterprise_procurement
+- relationship_networking
+- physical_presence_required
+- support_mode_phone_video
+passthrough_red_flags:
+- one_time_setup
+- accuracy_liability
+opportunity_patterns:
+- platform_parasitic
+- freelancer_replacement
+- data_asymmetry
+- api_middleware
+- compliance_regulatory
+- ai_wrapper
+- workflow_automation
+- unknown
+retention_primitives:
+- recurring_data
+- workflow_embedding
+- integration_lock_in
+- compliance_cadence
+- team_collaboration
+workflow_anchor_tokens:
+- schedule
+- booking
+- invoice
+- payroll
+- lead
+- dispatch
+- inventory
+- compliance
+- reporting
+tier1_capabilities:
+- Web UI
+- Go backend
+- LLM integration (document parsing, classification, generation)
+- Postgres
+- Stripe payments
+- External API integration (QuickBooks, Xero, MLS, Procore)
+- Document generation (PDF/CSV)
+- OAuth authentication
+- Web scraping
+tier2_capabilities:
+- name: Email sending
+  provider: SendGrid/Postmark
+  cost: ~$0.001/email
+  status: planned
+- name: SMS
+  provider: Twilio
+  cost: ~$0.008/message
+  status: planned
+- name: WhatsApp Business API
+  cost: ~$0.005-0.08/conversation
+  status: planned
+tier3_capabilities:
+- name: Voice AI
+  provider: Bland.ai/Vapi/Retell
+  cost: $0.07-0.15/minute
+  status: future
+- name: Browser automation
+  provider: Playwright
+  status: future
+model_tiers:
+  empire_coordinator: sonnet
+  factory_cto: sonnet
+  analysis_agent: sonnet
+  market_research_agent: sonnet
+  trend_research_agent: sonnet
+  scanner_agent: haiku
+  spec_auditor: sonnet
+  default_opco: haiku_or_sonnet
+scan_timeout_minutes: 90
+campaign_timeout_hours: 24
+budget_warning_percent: 80
+budget_throttle_percent: 90
+budget_emergency_percent: 100
+opco_agent_count: 13
+bootstrap_route_count: 20
+seeded_route_count: 7
+mailbox_types:
+- vertical_approval
+- migration_approval
+- domain_approval
+- spend_request
+- escalation
+- review
+- digest
+- budget_increase
+mailbox_priorities:
+- low
+- normal
+- high
+- critical
+scan_modes:
+  local_services:
+    rubric: local_services_rubric
+    emits_category_signals: true
+    emits_trend_signals: false
+    priority: normal
+  saas_gap:
+    rubric: saas_gap_rubric
+    emits_category_signals: true
+    emits_trend_signals: false
+    priority: normal
+  saas_trend:
+    rubric: saas_trend_rubric
+    emits_category_signals: false
+    emits_trend_signals: true
+    priority: normal
+  corpus:
+    rubric: corpus_rubric
+    emits_category_signals: true
+    emits_trend_signals: false
+    priority: low
+default_scan_mode: saas_gap
+signal_threshold: 55
+composite_shortlist: 75
+hard_gate_floor: 50
+contest_spread_threshold: 30
+tier1_dimensions:
+- name: icp_crispness
+  weight: 15
+- name: distribution_leverage
+  weight: 15
+- name: time_to_value
+  weight: 15
+- name: operational_drag
+  weight: 15
+tier2_dimensions:
+- name: pain_severity
+  weight: 10
+- name: competition_gap
+  weight: 10
+- name: monetization_clarity
+  weight: 10
+tier3_dimensions:
+- name: retention_architecture
+  weight: 5
+- name: expansion_potential
+  weight: 5
+inner_revision_max: 3
+marginal_park_days: 14
+pipeline_capacity_max: 3

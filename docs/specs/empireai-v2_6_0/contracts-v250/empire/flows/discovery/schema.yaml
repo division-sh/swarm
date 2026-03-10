@@ -1,0 +1,51 @@
+name: discovery
+pins:
+  inputs:
+    events:
+    - category.assessed
+    - dedup.resolved
+    - market_research.scan_complete
+    - scan.requested
+    - scanner.directories.scan_complete
+    - scanner.google_maps.scan_complete
+    - scanner.instagram.scan_complete
+    - scanner.reviews.scan_complete
+    - scanner.yelp.scan_complete
+    - source.scraped
+    - synthesis.resolved
+    - timer.campaign_deadline
+    - timer.scan_timeout
+    - trend.identified
+    - trend_research.scan_complete
+    reads: []
+  outputs:
+    events:
+    - campaign.completed
+    - dedup.ambiguous
+    - pipeline.dead_letter
+    - scan.completed
+    - synthesis.needed
+    - vertical.discovered
+    writes: []
+namespace_prefix: vertical
+namespace_rule: Platform substitutes namespace_prefix with project namespace at boot. To reuse this flow for a different entity
+  type, change the namespace in package.yaml.
+required_agents:
+- role: market_researcher
+  subscribes_to:
+  - scan.requested
+  emits:
+  - category.assessed
+  description: Researches market categories from scan results
+- role: trend_researcher
+  subscribes_to:
+  - scan.requested
+  emits:
+  - trend.identified
+  description: Identifies trends from scan results
+- role: scanner
+  subscribes_to:
+  - scan.requested
+  emits:
+  - source.scraped
+  description: Scrapes data sources for signals

@@ -19,7 +19,7 @@ type scanWorkflowRuntime interface {
 	loadWorkflowScanProjection(context.Context, string) (*scanAccumulator, map[string]pendingCandidate, bool)
 }
 
-func (n *ScanCoordinator) NodeID() string { return "pipeline-coordinator" }
+func (n *ScanCoordinator) NodeID() string { return "scan-orchestrator" }
 
 func (n *ScanCoordinator) Subscriptions() []events.EventType {
 	return workflowNodeSubscriptions(n.NodeID())

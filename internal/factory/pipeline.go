@@ -27,6 +27,12 @@ type Pipeline struct {
 	Scoring  ScoringEngine
 }
 
+const (
+	factoryDiscoveryNodeID  = "discovery-aggregator"
+	factoryScoringNodeID    = "scoring-node"
+	factoryValidationNodeID = "validation-orchestrator"
+)
+
 type Summary struct {
 	Discovered     int
 	Scored         int
@@ -185,7 +191,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 					"existing_stage":      existingStage,
 				}),
 				CreatedAt: time.Now(),
-			}, []string{"pipeline-coordinator"})
+			}, deliveryRecipientsForEvent("vertical.discovered"))
 			continue
 		}
 
@@ -226,7 +232,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 				"dedup":               false,
 			}),
 			CreatedAt: time.Now(),
-		}, []string{"pipeline-coordinator"})
+		}, deliveryRecipientsForEvent("vertical.discovered"))
 	}
 	if depth == "discovery" {
 		return out, nil
@@ -347,7 +353,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 	_ = p.emit(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scoring.requested"),
-		SourceAgent: "pipeline-coordinator",
+		SourceAgent: factoryScoringNodeID,
 		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"vertical_id":  verticalID,
@@ -370,7 +376,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 				"rubric_used": rubricUsed,
 			}),
 			CreatedAt: time.Now(),
-		}, []string{"pipeline-coordinator"})
+		}, deliveryRecipientsForEvent("score.dimension_complete"))
 	}
 
 	stage := "marginal_review"
@@ -422,7 +428,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 	_ = p.emit(ctx, events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.scored"),
-		SourceAgent: "pipeline-coordinator",
+		SourceAgent: factoryScoringNodeID,
 		VerticalID:  verticalID,
 		Payload:     scores,
 		CreatedAt:   time.Now(),
@@ -432,16 +438,16 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 		_ = p.emit(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.shortlisted"),
-			SourceAgent: "pipeline-coordinator",
+			SourceAgent: factoryScoringNodeID,
 			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),
-		}, []string{"validation-coordinator"})
+		}, []string{factoryValidationNodeID})
 	case "marginal":
 		_ = p.emit(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.marginal"),
-			SourceAgent: "pipeline-coordinator",
+			SourceAgent: factoryScoringNodeID,
 			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),
@@ -450,7 +456,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 		_ = p.emit(ctx, events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.rejected"),
-			SourceAgent: "pipeline-coordinator",
+			SourceAgent: factoryScoringNodeID,
 			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),

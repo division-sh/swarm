@@ -366,7 +366,7 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 	if store == nil || workflow == nil || workflow.ContractBundle() == nil {
 		return nil
 	}
-	for _, timer := range workflow.ContractBundle().Workflow.Workflow.Timers {
+	for _, timer := range workflow.ContractBundle().WorkflowTimers() {
 		if !timer.Recurring {
 			continue
 		}

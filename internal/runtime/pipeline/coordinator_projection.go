@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +20,7 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, ve
 	}
 	sourceAgent := pipelineSourceAgent(ctx)
 	if sourceAgent == "" {
-		sourceAgent = "pipeline-coordinator"
+		sourceAgent = runtimeWorkflowID
 	}
 	emitted := events.Event{
 		ID:          uuid.NewString(),
@@ -35,7 +36,7 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, ve
 	}
 	if pc.bus == nil {
 		runtimeWarn(
-			"pipeline-coordinator",
+			runtimeWorkflowID,
 			"dropping emit because event bus is nil event_type=%s vertical_id=%s",
 			strings.TrimSpace(eventType),
 			strings.TrimSpace(verticalID),
@@ -44,7 +45,7 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, ve
 	}
 	if err := pc.bus.Publish(ctx, emitted); err != nil {
 		runtimeWarn(
-			"pipeline-coordinator",
+			runtimeWorkflowID,
 			"failed to publish runtime event event_type=%s event_id=%s vertical_id=%s: %v",
 			strings.TrimSpace(eventType),
 			strings.TrimSpace(emitted.ID),
@@ -68,7 +69,7 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 	}
 	sourceAgent := pipelineSourceAgent(ctx)
 	if sourceAgent == "" {
-		sourceAgent = "pipeline-coordinator"
+		sourceAgent = runtimeWorkflowID
 	}
 	emitted := events.Event{
 		ID:          uuid.NewString(),
@@ -84,7 +85,7 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 	}
 	if pc.bus == nil {
 		runtimeWarn(
-			"pipeline-coordinator",
+			runtimeWorkflowID,
 			"dropping direct emit because event bus is nil event_type=%s vertical_id=%s recipients=%v",
 			strings.TrimSpace(eventType),
 			strings.TrimSpace(verticalID),
@@ -94,7 +95,7 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 	}
 	if err := pc.bus.PublishDirect(ctx, emitted, recipients); err != nil {
 		runtimeWarn(
-			"pipeline-coordinator",
+			runtimeWorkflowID,
 			"failed to publish direct runtime event event_type=%s event_id=%s vertical_id=%s recipients=%v: %v",
 			strings.TrimSpace(eventType),
 			strings.TrimSpace(emitted.ID),
@@ -195,7 +196,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 	if workflow != nil {
 		if _, ok := workflow.Transition(workflowState, to); !ok && !workflow.CanTransition(workflowState, to) {
 			runtimeWarn(
-				"pipeline-coordinator",
+				runtimeWorkflowID,
 				"non-canonical stage transition vertical_id=%s from=%s to=%s source_event=%s",
 				verticalID,
 				strings.TrimSpace(currentStage),
@@ -255,14 +256,10 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 }
 
 func expectedAgents(mode string) int {
-	switch normalizeScanMode(mode) {
-	case "automation_micro", "saas_gap", "saas_trend", "corpus":
-		return 1
-	case "local_services":
-		return localServicesScannerExpected
-	default:
-		return 1
+	if expected := runtimeproductpolicy.ExpectedScannerCount(mode); expected > 0 {
+		return expected
 	}
+	return 1
 }
 
 func firstNonEmptyString(vals ...string) string {
@@ -311,7 +308,7 @@ func (pc *FactoryPipelineCoordinator) recordTransition(
 	input := PipelineTransitionInput{
 		EventID:       strings.TrimSpace(evt.ID),
 		EventType:     eventType,
-		Handler:       "pipeline-coordinator",
+		Handler:       pc.runtimeHandlerID(eventType),
 		PipelineType:  pipelineType,
 		PipelineID:    pipelineID,
 		Action:        strings.TrimSpace(action),

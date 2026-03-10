@@ -1,0 +1,271 @@
+scan.requested:
+  payload:
+    geography: string
+    mode: string
+    taxonomy_categories:
+      type: array
+      items: string
+    sources:
+      type: array
+      items: string
+    depth: string
+    campaign_id: string
+    campaign_context:
+      type: object
+      properties:
+        directive_id: string
+        modes:
+          type: array
+          items: string
+        strategic_context: string
+    corpus_path: string
+market_research.scan_complete:
+  payload:
+    scan_id: string
+    categories_assessed: integer
+    high_signal_count: integer
+    geography: string
+trend_research.scan_complete:
+  payload:
+    scan_id: string
+    trends_identified: string
+    geography: string
+scanner.google_maps.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.instagram.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.reviews.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.directories.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.yelp.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+timer.scan_timeout:
+  payload:
+    scan_id: string
+    elapsed_minutes: integer
+timer.campaign_deadline:
+  payload:
+    campaign_id: string
+    elapsed_hours: integer
+scan.completed:
+  payload:
+    mode: string
+    geography: string
+    reports_received: integer
+    agents_expected: integer
+    agents_complete: integer
+    verticals_discovered: integer
+    campaign_id: string
+    verticals_skipped: integer
+pipeline.dead_letter:
+  payload:
+    event_id: string
+    node_id: string
+    event_type: string
+    retry_count: integer
+    last_error: string
+campaign.completed:
+  payload:
+    campaign_id: string
+    geography: string
+    modes_completed: string
+    verticals_discovered: integer
+    verticals_shortlisted: integer
+    verticals_skipped: integer
+category.assessed:
+  payload:
+    scan_id: string
+    category: string
+    subcategory: string
+    geography: string
+    signal_strength: integer
+    opportunity_name: string
+    preliminary_icp: string
+    build_sketch:
+      type: object
+      properties:
+        core_features:
+          type: array
+          items: string
+        key_integrations:
+          type: array
+          items: string
+        red_flags:
+          type: array
+          items:
+            type: object
+            properties:
+              notes: string
+              source_url: string
+              type: string
+    evidence:
+      type: object
+      properties:
+        buyer_communities:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              source_url: string
+        competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              pricing: string
+              source_url: string
+        pain_signals:
+          type: array
+          items:
+            type: object
+            properties:
+              signal: string
+              source_url: string
+        regulatory:
+          type: array
+          items:
+            type: object
+            properties:
+              detail: string
+              source_url: string
+    opportunity_hypothesis: string
+    geographic_scope: string
+    opportunity_pattern: string
+    signal_sources:
+      type: array
+      items:
+        type: object
+        properties:
+          signal_type: string
+          source: string
+          url: string
+    required_capabilities:
+      type: object
+      properties:
+        automation_with_unlock: number
+        current:
+          type: array
+          items: string
+        would_unlock: string
+trend.identified:
+  payload:
+    scan_id: string
+    trend_category: string
+    geography: string
+    signal_strength: integer
+    opportunity_name: string
+    preliminary_icp: string
+    build_sketch:
+      type: object
+      properties:
+        core_features:
+          type: array
+          items: string
+        key_integrations:
+          type: array
+          items: string
+        red_flags:
+          type: array
+          items:
+            type: object
+            properties:
+              notes: string
+              source_url: string
+              type: string
+    evidence:
+      type: object
+      properties:
+        buyer_communities:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              source_url: string
+        competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              pricing: string
+              source_url: string
+        pain_signals:
+          type: array
+          items:
+            type: object
+            properties:
+              signal: string
+              source_url: string
+        regulatory:
+          type: array
+          items:
+            type: object
+            properties:
+              detail: string
+              source_url: string
+    trend_description: string
+    opportunity_hypothesis: string
+    geographic_scope: string
+source.scraped:
+  payload:
+    scan_id: string
+    source: string
+    evidence: string
+    geography: string
+dedup.resolved:
+  payload:
+    dedup_id: string
+    action: string
+    reasoning: string
+synthesis.resolved:
+  payload:
+    resolved_assessment: string
+vertical.discovered:
+  payload:
+    vertical_name: string
+    raw_signals:
+      type: object
+    geography: string
+    mode: string
+    discovery_context:
+      type: object
+    geographic_scope: string
+synthesis.needed:
+  payload:
+    conflicting_reports: string
+    context: object
+dedup.ambiguous:
+  payload:
+    dedup_id: string
+    new_candidate: string
+    existing_vertical: string
+    similarity: string

@@ -312,6 +312,24 @@ type DiscoveryPolicy interface {
 	EvaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string)
 	BuildPrefilterSkipDetail(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any
 	NormalizeOpportunityPattern(raw string) string
+	BuildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []DiscoveryCandidate
+}
+
+type DiscoveryCandidate struct {
+	Mode    string
+	Signal  float64
+	Payload map[string]any
+}
+
+type ScanPolicy interface {
+	ExpandScanAssignments(mode string, payload map[string]any, assigned ScanAssignedPayload, batchSize int) ([]ScanAssignedPayload, error)
+	ReadJSONLBatches(path string, batchSize int) ([][]map[string]any, error)
+	ParseDirective(text string) ParsedDirective
+	ParseDirectiveGeography(text string) (name, country, region string)
+	SanitizeGeographyPhrase(text string) string
+	IsComplexDirectiveText(text string) bool
+	ResolveDirectiveCorpusPath(mode string, parsed ParsedDirective, payload map[string]any) (string, error)
+	ExtractCorpusPathFromStrategicContext(strategic map[string]any) string
 }
 
 type ScoringPolicy interface {
@@ -379,6 +397,7 @@ type WorkflowModule interface {
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
 	WorkflowHooks() WorkflowHookExecutor
+	ScanPolicy() ScanPolicy
 	DiscoveryPolicy() DiscoveryPolicy
 	ScoringPolicy() ScoringPolicy
 	PayloadFactory() PayloadFactory

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -185,8 +186,8 @@ func compactSQLSnippet(q string) string {
 	return q
 }
 
-func normalizeScanMode(raw string) string     { return NormalizeScanMode(raw) }
-func normalizeScanPriority(raw string) string { return NormalizeScanPriority(raw) }
+func normalizeScanMode(raw string) string     { return runtimeproductpolicy.NormalizeScanMode(raw) }
+func normalizeScanPriority(raw string) string { return runtimeproductpolicy.NormalizeScanPriority(raw) }
 
 func coalesce(values ...string) string {
 	for _, v := range values {

@@ -861,7 +861,7 @@ func TestFactoryPipelineCoordinator_CheckPackagingTimeoutsRetryAndPark(t *testin
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM mailbox
-		WHERE vertical_id = $1::uuid AND from_agent = 'pipeline-coordinator' AND type = 'vertical_approval'
+		WHERE vertical_id = $1::uuid AND from_agent = 'validation-orchestrator' AND type = 'vertical_approval'
 	`, verticalPark).Scan(&mailboxCount); err != nil {
 		t.Fatalf("count mailbox park escalation: %v", err)
 	}

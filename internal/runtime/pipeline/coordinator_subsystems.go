@@ -20,7 +20,7 @@ func NewScanCoordinator() *ScanCoordinator {
 
 type ScoringState struct {
 	accumulators map[string]*scoringAccumulator
-	runtime      scoringWorkflowRuntime
+	runtime      scoringStateRuntime
 	scoring      ScoringPolicy
 	payloadFactory *PipelinePayloadFactory
 	mu           *sync.Mutex

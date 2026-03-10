@@ -209,6 +209,140 @@ func (policy) ValidateEmitTransition(role string, inbound events.Event, emitted 
 	return nil
 }
 
+func (policy) NormalizeScanMode(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus", "derived":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "local_underserved":
+		return "local_services"
+	case "discovery", "scan", "default", "automation", "micro", "automation-micro", "saas":
+		return "saas_gap"
+	case "trend", "trend_scan", "saas-trend", "trend_opportunity", "adjacent_opportunity":
+		return "saas_trend"
+	case "local", "local_service", "local-services", "services":
+		return "local_services"
+	case "corpus_mode", "signal_corpus":
+		return "corpus"
+	default:
+		return ""
+	}
+}
+
+func (policy) NormalizeScanPriority(raw string) string {
+	return normalizeScanPriorityCompat(raw)
+}
+
+func (policy) DefaultScanMode() string {
+	return "local_services"
+}
+
+func (policy) DiscoveryFallbackMode() string {
+	return "saas_gap"
+}
+
+func (p policy) RubricNameForScanMode(mode string) string {
+	if p.EmitsCategorySignals(mode) || p.EmitsTrendSignals(mode) || normalizeScanModeCompat(mode) == "automation_micro" || normalizeScanModeCompat(mode) == "corpus" {
+		return "saas"
+	}
+	return p.DefaultScanMode()
+}
+
+func (policy) EmitsCategorySignals(mode string) bool {
+	return normalizeScanModeCompat(mode) == "saas_gap"
+}
+
+func (policy) EmitsTrendSignals(mode string) bool {
+	return normalizeScanModeCompat(mode) == "saas_trend"
+}
+
+func (policy) ExpectedScannerCount(mode string) int {
+	switch normalizeScanModeCompat(mode) {
+	case "automation_micro", "saas_gap", "saas_trend", "corpus":
+		return 1
+	case "local_services":
+		return 5
+	default:
+		return 1
+	}
+}
+
+func (policy) ScanDispatchKind(mode string) string {
+	switch normalizeScanModeCompat(mode) {
+	case "saas_gap", "automation_micro", "derived":
+		return "market"
+	case "saas_trend":
+		return "trend"
+	case "corpus":
+		return "corpus"
+	case "local_services":
+		return "local"
+	default:
+		return "market"
+	}
+}
+
+func (policy) ScanShardStage(mode string) string {
+	switch normalizeScanModeCompat(mode) {
+	case "saas_gap":
+		return "market_research"
+	case "saas_trend":
+		return "trend_research"
+	default:
+		return ""
+	}
+}
+
+func (policy) IsCorpusScanMode(mode string) bool {
+	return normalizeScanModeCompat(mode) == "corpus"
+}
+
+func (p policy) CampaignModesForDirective(initialMode string, explicit bool) []string {
+	initialMode = p.NormalizeScanMode(initialMode)
+	if initialMode == "" {
+		initialMode = "saas_gap"
+	}
+	if explicit {
+		return []string{initialMode}
+	}
+	cycle := []string{"saas_gap", "saas_trend", "local_services"}
+	if initialMode == "corpus" {
+		return []string{}
+	}
+	idx := 0
+	for i, mode := range cycle {
+		if mode == initialMode {
+			idx = i
+			break
+		}
+	}
+	out := []string{initialMode}
+	for i := idx + 1; i < len(cycle); i++ {
+		out = append(out, cycle[i])
+	}
+	return out
+}
+
+func (policy) ParseDirectiveMode(text string) (mode string, explicit bool) {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return "saas_gap", false
+	}
+	switch {
+	case strings.Contains(t, "corpus_path"), strings.Contains(t, " mode corpus"), strings.HasPrefix(t, "corpus"), strings.Contains(t, ".jsonl"), strings.Contains(t, ", corpus"), strings.Contains(t, " corpus "):
+		return "corpus", true
+	case strings.Contains(t, "automation_micro"), (strings.Contains(t, "automation") && strings.Contains(t, "micro")):
+		return "saas_gap", true
+	case strings.Contains(t, "local_services"), strings.Contains(t, "local service"):
+		return "local_services", true
+	case strings.Contains(t, "saas_trend"), (strings.Contains(t, "saas") && strings.Contains(t, "trend")):
+		return "saas_trend", true
+	case strings.Contains(t, "saas_gap"), strings.Contains(t, "gap scan"):
+		return "saas_gap", true
+	default:
+		return "saas_gap", false
+	}
+}
+
 func (policy) InterceptRuntimeHandledDirective(agent models.AgentConfig, inbound events.Event) bool {
 	if strings.TrimSpace(agent.Role) != "empire-coordinator" {
 		return false
@@ -287,6 +421,29 @@ func (policy) DiagnosticWorkspaceClass(role string) string {
 		return "factory"
 	default:
 		return ""
+	}
+}
+
+func (policy) PromptSchemaGuards() []productpolicy.PromptSchemaGuard {
+	return []productpolicy.PromptSchemaGuard{
+		{
+			PromptFile:       "market-research-agent.md",
+			EmitTool:         "emit_category_assessed",
+			RequiredTopLevel: []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence", "opportunity_hypothesis", "opportunity_pattern", "signal_sources", "required_capabilities"},
+			ForbiddenTokens:  []string{"automation_micro", "market_intersection", "urgency"},
+		},
+		{
+			PromptFile:       "market-research-agent.corpus.md",
+			EmitTool:         "emit_category_assessed",
+			RequiredTopLevel: []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence", "opportunity_hypothesis", "opportunity_pattern", "signal_sources", "required_capabilities"},
+			ForbiddenTokens:  []string{"automation_micro", "market_intersection", "urgency"},
+		},
+		{
+			PromptFile:       "trend-research-agent.md",
+			EmitTool:         "emit_trend_identified",
+			RequiredTopLevel: []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence", "trend_description", "opportunity_hypothesis", "geographic_scope"},
+			ForbiddenTokens:  []string{"market_intersection", "urgency"},
+		},
 	}
 }
 

@@ -15,7 +15,7 @@ type validationWorkflowRuntime interface {
 	specVersionMatches(string, map[string]any) bool
 }
 
-func (n *ValidationGate) NodeID() string { return "pipeline-coordinator" }
+func (n *ValidationGate) NodeID() string { return "validation-orchestrator" }
 
 func (n *ValidationGate) Subscriptions() []events.EventType {
 	return workflowNodeSubscriptions(n.NodeID())

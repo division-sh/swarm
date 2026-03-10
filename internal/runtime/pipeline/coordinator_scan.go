@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -138,10 +139,10 @@ func detectShardsTable(ctx context.Context, db *sql.DB) bool {
 }
 
 func shardStageForScanMode(mode string) string {
-	switch normalizeScanMode(mode) {
-	case "saas_gap":
+	switch runtimeproductpolicy.ScanShardStage(mode) {
+	case "market_research":
 		return ShardStageMarketResearch
-	case "saas_trend":
+	case "trend_research":
 		return ShardStageTrendResearch
 	default:
 		return ""

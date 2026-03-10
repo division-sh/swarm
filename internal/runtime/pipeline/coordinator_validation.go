@@ -270,7 +270,7 @@ func (vg *ValidationGate) handleValidationMoreData(ctx context.Context, evt even
 }
 
 func (vg *ValidationGate) handleBrandRevision(ctx context.Context, evt events.Event) {
-	if strings.TrimSpace(evt.SourceAgent) == "pipeline-coordinator" {
+	if isRuntimeWorkflowSource(evt.SourceAgent) {
 		return
 	}
 	verticalID := strings.TrimSpace(evt.VerticalID)
@@ -471,13 +471,13 @@ func (pc *FactoryPipelineCoordinator) parkVerticalWithMailbox(ctx context.Contex
 	}
 	contextPayload := map[string]any{
 		"vertical_id": verticalID,
-		"source":      "pipeline-coordinator",
+		"source":      "validation-orchestrator",
 		"details":     details,
 	}
 	_, _ = dbExecContext(ctx, pc.db, `
 		INSERT INTO mailbox (event_id, vertical_id, from_agent, type, priority, status, context, summary, created_at)
-		VALUES (NULL, NULLIF($1,'')::uuid, 'pipeline-coordinator', 'vertical_approval', 'high', 'pending', $2::jsonb, $3, now())
-	`, strings.TrimSpace(verticalID), string(mustJSON(contextPayload)), strings.TrimSpace(summary))
+		VALUES (NULL, NULLIF($1,'')::uuid, $2, 'vertical_approval', 'high', 'pending', $3::jsonb, $4, now())
+	`, strings.TrimSpace(verticalID), "validation-orchestrator", string(mustJSON(contextPayload)), strings.TrimSpace(summary))
 	pc.updateVerticalStage(ctx, verticalID, "ready_for_review", "")
 }
 

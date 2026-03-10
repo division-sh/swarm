@@ -359,6 +359,13 @@ func TestPipelineCoordinatorContractSemantics_DerivedEventMaterializesChildVerti
 	bus := NewEventBus(InMemoryEventStore{})
 	pc := NewFactoryPipelineCoordinator(bus, db)
 	bus.SetInterceptors(pc)
+	scoringNode := NewScoringNode(bus, pc, db)
+	if scoringNode == nil {
+		t.Fatal("expected scoring node")
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go scoringNode.Run(runCtx)
 
 	parentID := uuid.NewString()
 	insertTestVertical(t, db, parentID, "Parent Vertical Derived Integration", "argentina")

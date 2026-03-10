@@ -1,0 +1,56 @@
+name: operating
+pins:
+  inputs:
+    events:
+    - build_complete
+    - launch_ready
+    - mailbox.item_decided
+    - opco.ceo_ready
+    - opco.growth_stabilized
+    - opco.growth_triggered
+    - opco.steady_state_reached
+    - opco.teardown_requested
+    - qa.validation_passed
+    - review.deploy_feedback
+    - timer.marginal_kill
+    - timer.marginal_review
+    - vertical.approved
+    - vertical.killed
+    - vertical.resumed
+    reads: []
+  outputs:
+    events:
+    - opco.spinup_requested
+    - pipeline.dead_letter
+    - vertical.killed
+    - vertical.approved
+    writes: []
+initial_state: approved
+terminal_states:
+- killed
+states:
+- approved
+- full_speccing
+- building
+- pre_launch
+- launched
+- operating
+- expanding
+- winding_down
+namespace_prefix: opco
+namespace_rule: Platform substitutes namespace_prefix with project namespace at boot. To reuse this flow for a different entity
+  type, change the namespace in package.yaml.
+required_agents:
+- role: tech_lead
+  subscribes_to:
+  - opco.ceo_ready
+  emits:
+  - build_complete
+  - launch_ready
+  description: Builds and deploys the product
+- role: product_lead
+  subscribes_to:
+  - build_complete
+  emits:
+  - opco.steady_state_reached
+  description: Manages product lifecycle

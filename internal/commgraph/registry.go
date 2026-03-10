@@ -433,11 +433,38 @@ func producerRolesForEvent(entry runtimecontracts.EventCatalogEntry) []string {
 	if strings.TrimSpace(strings.ToLower(entry.EmitterType)) != "agent" {
 		return roles
 	}
-	if emitter := strings.TrimSpace(entry.Emitter); emitter != "" {
-		roles = append(roles, emitter)
-	}
+	roles = append(roles, normalizeCatalogStringList(entry.Emitter)...)
 	roles = append(roles, entry.AlternateEmitters...)
 	return roles
+}
+
+func normalizeCatalogStringList(v any) []string {
+	switch typed := v.(type) {
+	case nil:
+		return nil
+	case string:
+		item := strings.TrimSpace(typed)
+		if item == "" {
+			return nil
+		}
+		return []string{item}
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, normalizeCatalogStringList(item)...)
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func appendUniqueSortedEvent(events []string, eventType string) []string {

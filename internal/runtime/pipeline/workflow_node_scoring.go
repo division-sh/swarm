@@ -2,16 +2,38 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 
 	"empireai/internal/events"
 )
 
-type scoringWorkflowRuntime interface {
+const ScoringNodeID = "scoring-node"
+
+func scoringTransitionSubscriptions() []events.EventType {
+	return []events.EventType{
+		events.EventType("vertical.scored"),
+	}
+}
+
+func scoringBackgroundSubscriptions() []events.EventType {
+	return []events.EventType{
+		events.EventType("vertical.discovered"),
+		events.EventType("vertical.derived"),
+		events.EventType("score.dimension_complete"),
+		events.EventType("scoring.contest_resolved"),
+	}
+}
+
+type scoringBackgroundRuntime interface {
 	handleScoringRequested(context.Context, events.Event)
 	handleVerticalDerived(context.Context, events.Event)
 	handleScoreDimensionComplete(context.Context, events.Event)
 	handleScoringContestResolved(context.Context, events.Event)
+}
+
+type scoringStateRuntime interface {
+	scoringBackgroundRuntime
 	loadScoringSeed(context.Context, string) (string, string, string)
 	loadWorkflowScoringAccumulator(context.Context, string) (*scoringAccumulator, bool)
 	publish(context.Context, string, string, map[string]any)
@@ -22,13 +44,46 @@ type scoringWorkflowRuntime interface {
 	clearWorkflowScoringAccumulator(context.Context, string)
 }
 
-func (n *ScoringState) NodeID() string { return "scoring-node" }
-
-func (n *ScoringState) Subscriptions() []events.EventType {
-	return workflowNodeSubscriptions(n.NodeID())
+func NewScoringNode(bus systemNodeBus, runtime scoringBackgroundRuntime, db *sql.DB) *backgroundWorkflowNode {
+	if bus == nil || runtime == nil {
+		return nil
+	}
+	executor := newScoringBackgroundExecutor(runtime)
+	return newBackgroundWorkflowNode(executor, bus, db)
 }
 
-func (n *ScoringState) InterceptPolicy(eventType string, evt events.Event) (bool, bool) {
+type scoringTransitionExecutor struct {
+	runtime scoringBackgroundRuntime
+}
+
+type scoringBackgroundExecutor struct {
+	runtime scoringBackgroundRuntime
+}
+
+func newScoringBackgroundExecutor(runtime scoringBackgroundRuntime) WorkflowNodeExecutor {
+	if runtime == nil {
+		return nil
+	}
+	return &scoringBackgroundExecutor{runtime: runtime}
+}
+
+func newScoringTransitionExecutor(runtime scoringBackgroundRuntime) WorkflowNodeExecutor {
+	if runtime == nil {
+		return nil
+	}
+	return &scoringTransitionExecutor{runtime: runtime}
+}
+
+func (e *scoringTransitionExecutor) NodeID() string { return ScoringNodeID }
+
+func (e *scoringTransitionExecutor) Subscriptions() []events.EventType {
+	return scoringTransitionSubscriptions()
+}
+
+func (e *scoringTransitionExecutor) InterceptPolicy(eventType string, evt events.Event) (bool, bool) {
+	if e == nil {
+		return false, false
+	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		eventType = strings.TrimSpace(string(evt.Type))
@@ -43,7 +98,7 @@ func (n *ScoringState) InterceptPolicy(eventType string, evt events.Event) (bool
 			return false, true
 		}
 	}
-	policy, ok := workflowNodeEventPolicy(n.NodeID(), eventType)
+	policy, ok := workflowNodeEventPolicy(ScoringNodeID, eventType)
 	if !ok {
 		return false, false
 	}
@@ -53,13 +108,11 @@ func (n *ScoringState) InterceptPolicy(eventType string, evt events.Event) (bool
 	return policy.Consume, true
 }
 
-func (n *ScoringState) Handle(ctx context.Context, evt events.Event) bool {
-	if n == nil || n.runtime == nil {
+func (e *scoringTransitionExecutor) Handle(ctx context.Context, evt events.Event) bool {
+	if e == nil || e.runtime == nil {
 		return false
 	}
 	switch strings.TrimSpace(string(evt.Type)) {
-	case "vertical.derived":
-		n.runtime.handleVerticalDerived(ctx, evt)
 	case "vertical.scored":
 		// Delivery filtering for this event type is handled in InterceptPolicy.
 	default:
@@ -68,28 +121,17 @@ func (n *ScoringState) Handle(ctx context.Context, evt events.Event) bool {
 	return true
 }
 
-func (n *ScoringState) BackgroundWorkflowExecutor() WorkflowNodeExecutor {
-	if n == nil || n.runtime == nil {
+func (e *scoringTransitionExecutor) BackgroundWorkflowExecutor() WorkflowNodeExecutor {
+	if e == nil || e.runtime == nil {
 		return nil
 	}
-	return newScoringBackgroundExecutor(n.runtime)
-}
-
-type scoringBackgroundExecutor struct {
-	runtime scoringWorkflowRuntime
-}
-
-func newScoringBackgroundExecutor(runtime scoringWorkflowRuntime) WorkflowNodeExecutor {
-	if runtime == nil {
-		return nil
-	}
-	return &scoringBackgroundExecutor{runtime: runtime}
+	return newScoringBackgroundExecutor(e.runtime)
 }
 
 func (e *scoringBackgroundExecutor) NodeID() string { return ScoringNodeID }
 
 func (e *scoringBackgroundExecutor) Subscriptions() []events.EventType {
-	return workflowNodeSubscriptions(ScoringNodeID)
+	return scoringBackgroundSubscriptions()
 }
 
 func (e *scoringBackgroundExecutor) InterceptPolicy(string, events.Event) (bool, bool) {

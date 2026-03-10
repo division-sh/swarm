@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +40,7 @@ type ScanCampaignHooks struct {
 	Warnf                    func(component, format string, args ...any)
 	RecordTransition         func(ctx context.Context, db *sql.DB, in ScanCampaignTransitionInput) error
 	EnsureDirectiveGeography func(ctx context.Context, db *sql.DB, name, country, region string) (string, error)
+	ScanPolicy               ScanPolicy
 	Now                      func() time.Time
 }
 
@@ -69,6 +69,9 @@ func NewScanCampaignManager(bus ScanCampaignBus, store ScanCampaignPersistence, 
 	if hooks.EnsureDirectiveGeography == nil {
 		hooks.EnsureDirectiveGeography = EnsureDirectiveGeography
 	}
+	if hooks.ScanPolicy == nil {
+		hooks.ScanPolicy = defaultWorkflowModule().ScanPolicy()
+	}
 	return &ScanCampaignManager{
 		bus:               bus,
 		store:             store,
@@ -76,6 +79,13 @@ func NewScanCampaignManager(bus ScanCampaignBus, store ScanCampaignPersistence, 
 		hooks:             hooks,
 		maxPendingMailbox: 5,
 	}
+}
+
+func (m *ScanCampaignManager) scanPolicy() ScanPolicy {
+	if m == nil || m.hooks.ScanPolicy == nil {
+		return defaultWorkflowModule().ScanPolicy()
+	}
+	return m.hooks.ScanPolicy
 }
 
 func (m *ScanCampaignManager) Run(ctx context.Context) {
@@ -272,7 +282,7 @@ func (m *ScanCampaignManager) tick(ctx context.Context) {
 		geoLabel = "unspecified"
 	}
 	strategicContext := parsePayloadMapRaw(c.StrategicContext)
-	corpusPath := ExtractCorpusPathFromStrategicContext(strategicContext)
+	corpusPath := m.scanPolicy().ExtractCorpusPathFromStrategicContext(strategicContext)
 	payload := map[string]any{
 		"campaign_id":         c.ID,
 		"geography_id":        c.GeographyID,
@@ -398,8 +408,8 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	if text == "" {
 		return
 	}
-	parsed := (DirectiveParser{}).Parse(text)
-	if IsComplexDirectiveText(text) {
+	parsed := m.scanPolicy().ParseDirective(text)
+	if m.scanPolicy().IsComplexDirectiveText(text) {
 		forwardedPayload := map[string]any{
 			"directive_text":   text,
 			"timestamp":        m.now().Format(time.RFC3339),
@@ -415,12 +425,9 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	}
 	mode, explicitMode := parsed.Mode, parsed.ExplicitMode
 	geoName, country, region := parsed.Geography, parsed.Country, parsed.Region
-	corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
-	if corpusPath == "" {
-		corpusPath = strings.TrimSpace(parsed.CorpusPath)
-	}
-	if mode == "corpus" && corpusPath == "" {
-		m.warnf("scan-campaign-manager", "directive requested corpus mode without corpus_path event_id=%s", strings.TrimSpace(evt.ID))
+	corpusPath, err := m.scanPolicy().ResolveDirectiveCorpusPath(mode, parsed, payload)
+	if err != nil {
+		m.warnf("scan-campaign-manager", "directive corpus resolution failed event_id=%s: %v", strings.TrimSpace(evt.ID), err)
 		return
 	}
 	geoID, err := m.hooks.EnsureDirectiveGeography(ctx, m.db, geoName, country, region)
@@ -448,7 +455,7 @@ func (m *ScanCampaignManager) ensureQueuedCampaign(ctx context.Context, geograph
 		return nil
 	}
 	geographyID = strings.TrimSpace(geographyID)
-	mode = NormalizeScanMode(mode)
+	mode = runtimeproductpolicy.NormalizeScanMode(mode)
 	if geographyID == "" || mode == "" {
 		return nil
 	}
@@ -468,183 +475,20 @@ func (m *ScanCampaignManager) ensureQueuedCampaign(ctx context.Context, geograph
 }
 
 func RemainingCampaignModes(initialMode string) []string {
-	cycle := []string{"saas_gap", "saas_trend", "local_services"}
-	initialMode = NormalizeScanMode(initialMode)
-	if initialMode == "corpus" {
+	modes := runtimeproductpolicy.CampaignModesForDirective(initialMode, false)
+	if len(modes) <= 1 {
 		return []string{}
 	}
-	if initialMode == "" {
-		initialMode = "saas_gap"
-	}
-	idx := 0
-	for i, mode := range cycle {
-		if mode == initialMode {
-			idx = i
-			break
-		}
-	}
-	out := make([]string, 0, len(cycle)-1)
-	for i := idx + 1; i < len(cycle); i++ {
-		out = append(out, cycle[i])
-	}
-	return out
+	return append([]string(nil), modes[1:]...)
 }
 
 func CampaignModesForDirective(initialMode string, explicit bool) []string {
-	initialMode = NormalizeScanMode(initialMode)
-	if initialMode == "" {
-		initialMode = "saas_gap"
-	}
-	if explicit {
-		return []string{initialMode}
-	}
-	modes := []string{initialMode}
-	modes = append(modes, RemainingCampaignModes(initialMode)...)
-	return modes
+	modes := runtimeproductpolicy.CampaignModesForDirective(initialMode, explicit)
+	return append([]string(nil), modes...)
 }
 
 func ParseDirectiveMode(text string) (mode string, explicit bool) {
-	t := strings.ToLower(strings.TrimSpace(text))
-	if t == "" {
-		return "saas_gap", false
-	}
-	switch {
-	case strings.Contains(t, "corpus_path"), strings.Contains(t, " mode corpus"), strings.HasPrefix(t, "corpus"), strings.Contains(t, ".jsonl"), strings.Contains(t, ", corpus"), strings.Contains(t, " corpus "):
-		return "corpus", true
-	case strings.Contains(t, "automation_micro"), (strings.Contains(t, "automation") && strings.Contains(t, "micro")):
-		return "saas_gap", true
-	case strings.Contains(t, "local_services"), strings.Contains(t, "local service"):
-		return "local_services", true
-	case strings.Contains(t, "saas_trend"), (strings.Contains(t, "saas") && strings.Contains(t, "trend")):
-		return "saas_trend", true
-	case strings.Contains(t, "saas_gap"), strings.Contains(t, "gap scan"):
-		return "saas_gap", true
-	default:
-		return "saas_gap", false
-	}
-}
-
-func ExtractCorpusPathFromStrategicContext(strategic map[string]any) string {
-	if len(strategic) == 0 {
-		return ""
-	}
-	if path := strings.TrimSpace(asString(strategic["corpus_path"])); path != "" {
-		return path
-	}
-	parsed, ok := strategic["parsed"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(asString(parsed["corpus_path"]))
-}
-
-func IsComplexDirectiveText(text string) bool {
-	t := strings.ToLower(strings.TrimSpace(text))
-	if t == "" {
-		return false
-	}
-	complexHints := []string{"latam", "across", "countries", "country with", "internet penetration", "focus on", "exclude", "excluding", "greater than", "less than", ">", "<", "compared to"}
-	for _, hint := range complexHints {
-		if strings.Contains(t, hint) {
-			return true
-		}
-	}
-	return false
-}
-
-var (
-	directiveInPattern = regexp.MustCompile(`(?i)\bin\s+([a-z][a-z\s-]{1,})`)
-	directiveGeoAlias  = map[string]string{
-		"paraguay":                 "Paraguay",
-		"argentina":                "Argentina",
-		"brazil":                   "Brazil",
-		"mexico":                   "Mexico",
-		"chile":                    "Chile",
-		"peru":                     "Peru",
-		"colombia":                 "Colombia",
-		"uruguay":                  "Uruguay",
-		"us":                       "United States",
-		"usa":                      "United States",
-		"united states":            "United States",
-		"united states of america": "United States",
-	}
-)
-
-func ParseDirectiveGeography(text string) (name, country, region string) {
-	raw := strings.TrimSpace(text)
-	if raw == "" {
-		return "unspecified", "unspecified", ""
-	}
-	if token := strings.TrimSpace(strings.SplitN(raw, ",", 2)[0]); token != "" {
-		if label, ok := canonicalDirectiveGeography(token); ok {
-			return label, label, ""
-		}
-	}
-	lower := strings.ToLower(raw)
-	for needle, label := range directiveGeoAlias {
-		if containsDirectiveAlias(lower, needle) {
-			return label, label, ""
-		}
-	}
-	m := directiveInPattern.FindStringSubmatch(raw)
-	if len(m) == 2 {
-		part := SanitizeGeographyPhrase(m[1])
-		if part != "" {
-			if label, ok := canonicalDirectiveGeography(part); ok {
-				return label, label, ""
-			}
-			return part, part, ""
-		}
-	}
-	return "unspecified", "unspecified", ""
-}
-
-func containsDirectiveAlias(haystack, alias string) bool {
-	haystack = strings.ToLower(strings.TrimSpace(haystack))
-	alias = strings.ToLower(strings.TrimSpace(alias))
-	if haystack == "" || alias == "" {
-		return false
-	}
-	pattern := `\b` + regexp.QuoteMeta(alias) + `\b`
-	return regexp.MustCompile(pattern).MatchString(haystack)
-}
-
-func canonicalDirectiveGeography(v string) (string, bool) {
-	norm := strings.ToLower(strings.TrimSpace(v))
-	norm = strings.Trim(norm, `"'`)
-	norm = strings.ReplaceAll(norm, ".", "")
-	norm = strings.ReplaceAll(norm, "_", " ")
-	norm = strings.Join(strings.Fields(norm), " ")
-	if norm == "" {
-		return "", false
-	}
-	label, ok := directiveGeoAlias[norm]
-	return label, ok
-}
-
-func SanitizeGeographyPhrase(v string) string {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return ""
-	}
-	lower := strings.ToLower(v)
-	for _, cut := range []string{" for ", " with ", " using ", " where ", ".", ","} {
-		if idx := strings.Index(lower, cut); idx >= 0 {
-			v = strings.TrimSpace(v[:idx])
-			lower = strings.ToLower(v)
-		}
-	}
-	if v == "" {
-		return ""
-	}
-	parts := strings.Fields(strings.ToLower(v))
-	for i := range parts {
-		if len(parts[i]) == 0 {
-			continue
-		}
-		parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
-	}
-	return strings.Join(parts, " ")
+	return runtimeproductpolicy.ParseDirectiveMode(text)
 }
 
 func EnsureDirectiveGeography(ctx context.Context, db *sql.DB, name, country, region string) (string, error) {

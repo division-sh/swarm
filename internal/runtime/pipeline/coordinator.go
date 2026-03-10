@@ -49,6 +49,27 @@ func pipelineSourceAgent(ctx context.Context) string {
 	return ""
 }
 
+func (pc *FactoryPipelineCoordinator) runtimeHandlerID(eventType string) string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType != "" {
+		if bundle := pc.ContractBundle(); bundle != nil {
+			if entry, ok := bundle.Events[eventType]; ok {
+				if owner := strings.TrimSpace(entry.OwningNode); owner != "" {
+					return owner
+				}
+			}
+		}
+		for _, node := range pc.WorkflowNodes() {
+			if _, ok := node.Policies[eventType]; ok {
+				if nodeID := strings.TrimSpace(node.ID); nodeID != "" {
+					return nodeID
+				}
+			}
+		}
+	}
+	return runtimeWorkflowID
+}
+
 // FactoryPipelineCoordinator handles deterministic factory state-machine work
 // (scan assignment/aggregation and validation gate orchestration) so LLM agents
 // focus on judgment tasks.
@@ -459,7 +480,7 @@ func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt even
 }
 
 func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
-	return pc.bus.Subscribe("pipeline-coordinator", workflowSubscriptions(pc.WorkflowNodes())...)
+	return pc.bus.Subscribe(runtimeWorkflowID, workflowSubscriptions(pc.WorkflowNodes())...)
 }
 
 func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) {

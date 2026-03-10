@@ -8,7 +8,7 @@ import (
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -127,5 +127,5 @@ func asString(v any) string {
 }
 
 func normalizeScanMode(raw string) string {
-	return runtimepipeline.NormalizeScanMode(raw)
+	return runtimeproductpolicy.NormalizeScanMode(raw)
 }

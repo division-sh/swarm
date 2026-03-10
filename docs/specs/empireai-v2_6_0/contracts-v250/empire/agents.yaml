@@ -1,0 +1,130 @@
+# EmpireAI — Project-Level Agents v2.6.0
+# Agents that span multiple flows.
+
+empire-coordinator:
+  id: empire-coordinator
+  type: holding
+  role: empire_coordinator
+  model_tier: sonnet
+  conversation_mode: session
+  max_turns_per_task: 40
+  subscriptions:
+  - system.started
+  - system.directive
+  - campaign.completed
+  - vertical.scored
+  - vertical.marginal
+  - vertical.approved
+  - vertical.killed
+  - template.version_published
+  - template.migration_approved
+  - template.migration_completed
+  - template.migration_failed
+  - opco.ceo_ready
+  - opco.launched
+  - opco.ceo_report
+  - opco.steady_state_reached
+  - opco.teardown_complete
+  - opco.escalation
+  - human_task.requested
+  - human_task.expired
+  - budget.threshold_crossed
+  - scoring.contested
+  - devops.capacity_warning
+  - cto.extraction_recommended
+  - board.directive
+  - board.chat
+  - timer.portfolio_digest
+  - timer.marginal_review
+  tools_tier2:
+  - schedule
+  - human_task_decide
+  emit_events:
+  - scan.requested
+  - opco.spinup_requested
+  - template.migration_planned
+  - template.migration_completed
+  - template.migration_failed
+  - vertical.health_warning
+  - vertical.resumed
+  - portfolio.digest_compiled
+  - budget.warning
+  - budget.throttle
+  - budget.emergency
+  - budget.resumed
+  - human_task.approved
+  - human_task.rejected
+  - human_task.deferred
+  - scoring.contest_resolved
+  - opco.escalation_response
+  permissions_bundle: coordinator
+  permissions:
+  - agent_hire
+  - agent_fire
+  - agent_reconfigure
+  - configure_routing
+  - approve_spend
+  - message_all
+  - mailbox_send
+  - human_task_request
+  workspace_class: holding
+  manager_fallback: null
+operations-analyst:
+  id: operations-analyst
+  type: holding
+  role: operations_analyst
+  model_tier: sonnet
+  conversation_mode: session
+  max_turns_per_task: 30
+  subscriptions:
+  - opco.ceo_report
+  - opco.steady_state_reached
+  - budget.threshold_crossed
+  - pipeline.dead_letter
+  tools_tier2: []
+  emit_events:
+  - analyst.bootstrap_upgrade_proposal
+  - analyst.prompt_refinement_proposal
+  - analyst.anti_pattern_advisory
+  permissions_bundle: specialist
+  permissions: &id001
+  - message_domain
+  - mailbox_send
+  - configure_routing
+  workspace_class: holding
+  manager_fallback: empire-coordinator
+holding-devops:
+  id: holding-devops
+  type: holding
+  role: devops
+  model_tier: haiku
+  conversation_mode: task
+  max_turns_per_task: 20
+  subscriptions:
+  - devops.deploy_requested
+  - devops.health_check_failed
+  - devops.rollback_requested
+  - spend.approved
+  - spend.rejected
+  - timer.infra_health_check
+  - ops.agent_failed
+  - devops.infra_change_needed
+  - devops.rollback_failed
+  tools_tier2:
+  - nginx_reload
+  - systemd_control
+  - certbot_execute
+  - dns_configure
+  emit_events:
+  - devops.deploy_complete
+  - devops.deploy_failed
+  - devops.rollback_complete
+  - devops.rollback_failed
+  - devops.capacity_warning
+  - devops.infra_change_needed
+  - devops.ssl_provisioned
+  - devops.health_check_failed
+  permissions_bundle: specialist
+  permissions: *id001
+  workspace_class: holding
+  manager_fallback: empire-coordinator

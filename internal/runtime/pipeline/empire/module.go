@@ -82,6 +82,10 @@ func (*module) DiscoveryPolicy() runtimepipeline.DiscoveryPolicy {
 	return module{}
 }
 
+func (*module) ScanPolicy() runtimepipeline.ScanPolicy {
+	return module{}
+}
+
 func (*module) ScoringPolicy() runtimepipeline.ScoringPolicy {
 	return module{}
 }
@@ -100,6 +104,10 @@ func (module) BuildPrefilterSkipDetail(payload map[string]any, rawSignal, adjust
 
 func (module) NormalizeOpportunityPattern(raw string) string {
 	return NormalizeOpportunityPattern(raw)
+}
+
+func (module) BuildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []runtimepipeline.DiscoveryCandidate {
+	return BuildDiscoveryCandidatesForReport(scanMode, payload)
 }
 
 func (module) ExpectedScoringDimensions(rubric string) []string {

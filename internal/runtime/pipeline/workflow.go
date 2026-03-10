@@ -188,20 +188,21 @@ func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*W
 		return nil, fmt.Errorf("workflow contract bundle is nil")
 	}
 	path := bundle.Paths.WorkflowSchemaFile
-	doc := bundle.Workflow
-	name := strings.TrimSpace(doc.Workflow.Name)
+	name := bundle.WorkflowName()
 	if name == "" {
 		return nil, fmt.Errorf("workflow.name missing in %s", path)
 	}
-	terminal := make(map[string]struct{}, len(doc.Workflow.TerminalStages))
-	for _, stageID := range doc.Workflow.TerminalStages {
+	terminalStages := bundle.WorkflowTerminalStages()
+	terminal := make(map[string]struct{}, len(terminalStages))
+	for _, stageID := range terminalStages {
 		stageID = strings.TrimSpace(stageID)
 		if stageID != "" {
 			terminal[stageID] = struct{}{}
 		}
 	}
-	stages := make([]WorkflowStage, 0, len(doc.Workflow.Stages))
-	for _, stage := range doc.Workflow.Stages {
+	stageContracts := bundle.WorkflowStages()
+	stages := make([]WorkflowStage, 0, len(stageContracts))
+	for _, stage := range stageContracts {
 		stageID := strings.TrimSpace(stage.ID)
 		if stageID == "" {
 			continue
@@ -214,16 +215,18 @@ func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*W
 			Terminal:    isTerminal,
 		})
 	}
-	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Actions))
-	for _, action := range bundle.Hooks.Actions {
+	actionEntries := bundle.ActionEntries()
+	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(actionEntries))
+	for _, action := range actionEntries {
 		id := strings.TrimSpace(action.ID)
 		if id == "" {
 			continue
 		}
 		actionDefs[id] = action
 	}
-	transitions := make([]WorkflowTransition, 0, len(doc.Workflow.Transitions))
-	for _, transition := range doc.Workflow.Transitions {
+	transitionContracts := bundle.WorkflowTransitions()
+	transitions := make([]WorkflowTransition, 0, len(transitionContracts))
+	for _, transition := range transitionContracts {
 		id := strings.TrimSpace(transition.ID)
 		to := strings.TrimSpace(transition.To)
 		if id == "" || to == "" {

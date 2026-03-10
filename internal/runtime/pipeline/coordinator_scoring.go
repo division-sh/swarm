@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -118,7 +119,7 @@ func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context
 		WHERE id = $1::uuid
 	`, verticalID).Scan(&name, &geography, &rawMode, &rawSignals)
 	if strings.TrimSpace(rawMode) == "" {
-		rawMode = "saas_gap"
+		rawMode = runtimeproductpolicy.DiscoveryFallbackMode()
 	}
 	if len(rawSignals) > 0 {
 		var rs map[string]any
@@ -145,7 +146,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 		mode = normalizeScanMode(dbMode)
 	}
 	if mode == "" {
-		mode = "saas_gap"
+		mode = runtimeproductpolicy.DiscoveryFallbackMode()
 	}
 	rubric := pc.scoringState.scoring.SelectScoringRubric(mode)
 	expected := pc.scoringState.scoring.ExpectedScoringDimensions(rubric)
@@ -415,7 +416,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 		acc.Geography = geo
 		acc.Mode = mode
 		if acc.Mode == "" {
-			acc.Mode = "saas_gap"
+			acc.Mode = runtimeproductpolicy.DiscoveryFallbackMode()
 		}
 		acc.Rubric = ss.scoring.SelectScoringRubric(acc.Mode)
 		acc.Expected = ss.scoring.ExpectedScoringDimensions(acc.Rubric)

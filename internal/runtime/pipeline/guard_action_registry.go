@@ -75,9 +75,10 @@ func NewContractGuardRegistry(bundle *runtimecontracts.WorkflowContractBundle) G
 	if bundle == nil {
 		return contractGuardRegistry{}
 	}
-	guards := make(map[string]struct{}, len(bundle.Hooks.Guards))
-	guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Guards))
-	for _, guard := range bundle.Hooks.Guards {
+	entries := bundle.GuardEntries()
+	guards := make(map[string]struct{}, len(entries))
+	guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(entries))
+	for _, guard := range entries {
 		id := strings.TrimSpace(guard.ID)
 		if id != "" {
 			guards[id] = struct{}{}
@@ -94,9 +95,10 @@ func NewContractActionRegistry(bundle *runtimecontracts.WorkflowContractBundle) 
 	if bundle == nil {
 		return contractActionRegistry{}
 	}
-	actions := make(map[string]struct{}, len(bundle.Hooks.Actions))
-	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(bundle.Hooks.Actions))
-	for _, action := range bundle.Hooks.Actions {
+	entries := bundle.ActionEntries()
+	actions := make(map[string]struct{}, len(entries))
+	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(entries))
+	for _, action := range entries {
 		id := strings.TrimSpace(action.ID)
 		if id != "" {
 			actions[id] = struct{}{}

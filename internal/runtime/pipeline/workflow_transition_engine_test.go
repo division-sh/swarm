@@ -215,6 +215,7 @@ func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_RequiresHumanAp
 	assertVerticalStage(t, ctx, db, verticalID, "approved")
 }
 
+
 func TestFactoryPipelineCoordinator_HandleScoringRequested_ProjectsScoringStage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)

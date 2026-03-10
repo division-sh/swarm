@@ -7,59 +7,39 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func ValidatePromptSchemaGuards(repoRoot string) error {
 	promptsDir := ResolveWorkflowContractPaths(repoRoot).PromptsDir
 	schemas := EventSchemaRegistry()
 
-	type guardCase struct {
-		promptFile       string
-		emitTool         string
-		requiredTopLevel []string
-		forbiddenTokens  []string
+	policy := runtimeproductpolicy.DefaultOrNil()
+	if policy == nil {
+		return nil
 	}
-
-	cases := []guardCase{
-		{
-			promptFile:       "market-research-agent.md",
-			emitTool:         "emit_category_assessed",
-			requiredTopLevel: []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence", "opportunity_hypothesis", "opportunity_pattern", "signal_sources", "required_capabilities"},
-			forbiddenTokens:  []string{"automation_micro", "market_intersection", "urgency"},
-		},
-		{
-			promptFile:       "market-research-agent.corpus.md",
-			emitTool:         "emit_category_assessed",
-			requiredTopLevel: []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence", "opportunity_hypothesis", "opportunity_pattern", "signal_sources", "required_capabilities"},
-			forbiddenTokens:  []string{"automation_micro", "market_intersection", "urgency"},
-		},
-		{
-			promptFile:       "trend-research-agent.md",
-			emitTool:         "emit_trend_identified",
-			requiredTopLevel: []string{"opportunity_name", "preliminary_icp", "build_sketch", "evidence", "trend_description", "opportunity_hypothesis", "geographic_scope"},
-			forbiddenTokens:  []string{"market_intersection", "urgency"},
-		},
-	}
+	cases := policy.PromptSchemaGuards()
 
 	for _, tc := range cases {
-		path := filepath.Join(promptsDir, tc.promptFile)
+		path := filepath.Join(promptsDir, tc.PromptFile)
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 		text := string(raw)
 
-		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.emitTool, "emit_"), "_", ".")
+		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.EmitTool, "emit_"), "_", ".")
 		schema, ok := schemas[eventType]
 		if !ok {
-			return fmt.Errorf("unknown emit tool %s", tc.emitTool)
+			return fmt.Errorf("unknown emit tool %s", tc.EmitTool)
 		}
 		props := schemaProperties(schema.Schema["properties"])
 		if len(props) == 0 {
 			return fmt.Errorf("schema for %s has no properties", eventType)
 		}
 
-		fields := extractPromptEmitTopLevelFields(text, tc.emitTool)
+		fields := extractPromptEmitTopLevelFields(text, tc.EmitTool)
 		if len(fields) > 0 {
 			invalid := make([]string, 0)
 			for _, f := range fields {
@@ -69,19 +49,19 @@ func ValidatePromptSchemaGuards(repoRoot string) error {
 			}
 			if len(invalid) > 0 {
 				sort.Strings(invalid)
-				return fmt.Errorf("prompt %s: fields not in %s schema: %v", tc.promptFile, eventType, invalid)
+				return fmt.Errorf("prompt %s: fields not in %s schema: %v", tc.PromptFile, eventType, invalid)
 			}
 		}
 
-		for _, required := range tc.requiredTopLevel {
+		for _, required := range tc.RequiredTopLevel {
 			if !promptMentionsField(text, fields, required) {
-				return fmt.Errorf("prompt %s: missing required top-level field %q for %s", tc.promptFile, required, tc.emitTool)
+				return fmt.Errorf("prompt %s: missing required top-level field %q for %s", tc.PromptFile, required, tc.EmitTool)
 			}
 		}
 
-		for _, forbidden := range tc.forbiddenTokens {
+		for _, forbidden := range tc.ForbiddenTokens {
 			if promptContainsToken(text, forbidden) {
-				return fmt.Errorf("prompt %s: contains forbidden legacy token %q", tc.promptFile, forbidden)
+				return fmt.Errorf("prompt %s: contains forbidden legacy token %q", tc.PromptFile, forbidden)
 			}
 		}
 	}
