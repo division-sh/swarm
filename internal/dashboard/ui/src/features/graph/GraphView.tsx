@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Background,
   Controls,
+  type EdgeTypes,
   MiniMap,
   ReactFlow,
   ViewportPortal,
@@ -309,7 +310,7 @@ export default function GraphView({ graph, graphKey, selectedNodeID, selectedEdg
   }, [onJumpToHumans, onJumpToSelection, onJumpToStuck, resetLayout]);
 
   const nodeTypes = useMemo(() => ({ agent: AgentNode, event: EventNode, control: ControlNode }), []);
-  const edgeTypes = useMemo(() => ({ straightClipped: StraightClippedEdge as any }), []);
+  const edgeTypes = useMemo<EdgeTypes>(() => ({ straightClipped: StraightClippedEdge }), []);
 
   return (
     <div className={`graph-wrap ${isFullscreen ? "graph-fullscreen" : ""}`} aria-label="Workflow graph view">
@@ -367,7 +368,7 @@ export default function GraphView({ graph, graphKey, selectedNodeID, selectedEdg
               zoomable
               className="rf-minimap"
               nodeColor={(n) => {
-                const nodeData = (n.data || {}) as Record<string, any>;
+                const nodeData = (n.data || {}) as { runtime?: { state?: string }; kind?: string };
                 const rt = nodeData.runtime;
                 if (!rt) return nodeData.kind === "event" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.22)";
                 if (rt.state === "stuck") return "#f87171";

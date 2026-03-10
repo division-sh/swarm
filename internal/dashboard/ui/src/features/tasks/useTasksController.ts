@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import type { TasksResponse } from "../../types/core.ts";
+import type { TaskRecord, TasksResponse, TaskStats } from "../../types/core.ts";
 
 type AsyncAction = () => Promise<unknown>;
 
 type TasksControllerInput = {
   tasksResp: TasksResponse;
-  tasksStats: Record<string, any>;
-  selectedTask: Record<string, any> | null;
+  tasksStats: TaskStats | null;
+  selectedTask: TaskRecord | null;
   taskStatus: string;
   selectedTaskID: string;
   taskResultText: string;

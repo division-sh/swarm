@@ -1,9 +1,74 @@
 import React from "react";
 import { formatDollars, readPath } from "../../lib/format.ts";
+import type { HealthResponse } from "../../types/core.ts";
 
 type OpenView = (view: string, subview?: string) => void;
+type HealthDerivedState = {
+  hotspots?: Array<{
+    kind: string;
+    title: string;
+    detail: string;
+    route: { view: string; subview: string };
+  }>;
+  unhealthyVerticals?: HealthResponse["vertical_health"];
+  warnings?: string[];
+  authErrors1h?: number;
+  authErrors24h?: number;
+  contractSummary?: {
+    workflowVersion?: string;
+    platformVersion?: string;
+    verificationCount?: number;
+    mustPass?: number;
+  };
+};
+
+type HealthContractsData = {
+  error?: string;
+  paths?: {
+    workflow?: string;
+    platform?: string;
+    verification?: string;
+  };
+};
+
+type HealthContractWorkflow = {
+  name?: string;
+  version?: string;
+  stage_ids?: string[];
+  transition_count?: number;
+  timer_count?: number;
+};
+
+type HealthContractPlatform = {
+  version?: string;
+  compliance_rule_count?: number;
+};
+
+type HealthContractVerification = {
+  count?: number;
+  status?: string;
+  latest_results?: string;
+  priority_counts?: Record<string, unknown>;
+};
+
+export type HealthViewState = {
+  health: HealthResponse & {
+    postgres?: {
+      active_connections?: number;
+      max_connections?: number;
+    };
+    containers?: Array<{ name?: string; status?: string }>;
+    container_error?: string;
+  };
+  contractsData: HealthContractsData;
+  contractWorkflow: HealthContractWorkflow;
+  contractPlatform: HealthContractPlatform;
+  contractVerification: HealthContractVerification;
+  derived: HealthDerivedState;
+};
+
 type HealthViewProps = {
-  state: Record<string, any>;
+  state: HealthViewState;
   actions?: {
     openView?: OpenView;
     openWorkflowTraceForVertical?: (vertical: string) => void;
@@ -11,7 +76,24 @@ type HealthViewProps = {
   };
 };
 
-function HotspotRow({ item, onOpen }) {
+type HotspotRowProps = {
+  item: NonNullable<HealthDerivedState["hotspots"]>[number];
+  onOpen?: OpenView;
+};
+
+function asText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : "-";
+}
+
+function asRouteKey(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function asCents(value: unknown) {
+  return typeof value === "number" ? value : Number(value || 0);
+}
+
+function HotspotRow({ item, onOpen }: HotspotRowProps) {
   return (
     <div className="health-kv">
       <div>
@@ -28,6 +110,7 @@ export default function HealthView({ state, actions = {} }: HealthViewProps) {
   const { openView, openWorkflowTraceForVertical, openPortfolioForVertical } = actions;
   const unhealthyVerticals = Array.isArray(derived?.unhealthyVerticals) ? derived.unhealthyVerticals : [];
   const workflowWarnings = Array.isArray(derived?.warnings) ? derived.warnings : [];
+  const containers = Array.isArray(health.containers) ? health.containers : [];
   return (
     <section>
       <div className="head"><h2>Health</h2><span className="tiny">deep diagnostics + contract state</span></div>
@@ -91,7 +174,7 @@ export default function HealthView({ state, actions = {} }: HealthViewProps) {
             </div>
             <div className="health-kv">
               <span>Loaded Agents</span>
-              <span className="mono">{health.runtime?.loaded_agents || 0}</span>
+              <span className="mono">{asCents(health.runtime?.loaded_agents)}</span>
             </div>
             <div className="health-kv">
               <span>Postgres</span>
@@ -112,7 +195,7 @@ export default function HealthView({ state, actions = {} }: HealthViewProps) {
               <span>Auth Errors (24h)</span>
               <span className={(health.auth?.auth_errors_24h || 0) > 0 ? "health-warn mono" : "mono"}>{health.auth?.auth_errors_24h || 0}</span>
             </div>
-            {(health.containers || []).length === 0 ? <div className="empty-state">No container data</div> : (health.containers || []).map((x) => (
+            {containers.length === 0 ? <div className="empty-state">No container data</div> : containers.map((x) => (
               <div className="health-kv" key={x.name}>
                 <span>{x.name}</span>
                 <span className={x.status === "running" ? "health-good mono" : "health-warn mono"}>{x.status}</span>
@@ -132,19 +215,19 @@ export default function HealthView({ state, actions = {} }: HealthViewProps) {
             <div className="tiny">Spend (24h)</div>
             <div className="health-kv">
               <span>API Cost</span>
-              <span className="mono">{formatDollars(health.spend?.api_cost_24h_cents)}</span>
+              <span className="mono">{formatDollars(asCents(health.spend?.api_cost_24h_cents))}</span>
             </div>
             <div className="health-kv">
               <span>API Avg (7d)</span>
-              <span className="mono">{formatDollars(health.spend?.api_cost_daily_avg_7d_cents)}</span>
+              <span className="mono">{formatDollars(asCents(health.spend?.api_cost_daily_avg_7d_cents))}</span>
             </div>
             <div className="health-kv">
               <span>Infra</span>
-              <span className="mono">{formatDollars(health.spend?.infra_cost_24h_cents)}</span>
+              <span className="mono">{formatDollars(asCents(health.spend?.infra_cost_24h_cents))}</span>
             </div>
             <div className="health-kv">
               <span>Ledger</span>
-              <span className="mono">{formatDollars(health.spend?.spend_ledger_24h_cents)}</span>
+              <span className="mono">{formatDollars(asCents(health.spend?.spend_ledger_24h_cents))}</span>
             </div>
           </div>
           <div className="health-card">
@@ -190,11 +273,11 @@ export default function HealthView({ state, actions = {} }: HealthViewProps) {
             </div>
             <div className="health-kv">
               <span>Status</span>
-              <span>{contractVerification.status || "-"}</span>
+              <span>{asText(contractVerification.status)}</span>
             </div>
             <div className="health-kv">
               <span>Latest Gate Results</span>
-              <span>{contractVerification.latest_results || "-"}</span>
+              <span>{asText(contractVerification.latest_results)}</span>
             </div>
             <div className="stack" style={{ marginTop: 8 }}>
               <button className="btn-secondary" onClick={() => openView?.("workflow", "artifacts")}>Open Workflow Artifacts</button>
@@ -246,13 +329,13 @@ export default function HealthView({ state, actions = {} }: HealthViewProps) {
               <tbody>
                 {(health.vertical_health || []).slice(0, 200).map((v) => (
                   <tr key={`${v.vertical_id}-${v.slug}`}>
-                    <td><button className="btn-secondary" onClick={() => openPortfolioForVertical?.(v.slug || v.vertical_id || "")}>{v.slug}</button></td>
+                    <td><button className="btn-secondary" onClick={() => openPortfolioForVertical?.(asRouteKey(v.slug || v.vertical_id))}>{asText(v.slug || v.vertical_id)}</button></td>
                     <td><span className={v.health_status === "healthy" ? "health-good" : "health-warn"}>{v.health_status}</span></td>
                     <td><span className="mono">{v.deploy_status}</span></td>
                     <td>
                       <div className="stack">
-                        <button className="btn-secondary" onClick={() => openPortfolioForVertical?.(v.slug || v.vertical_id || "")}>Portfolio</button>
-                        <button className="btn-secondary" onClick={() => openWorkflowTraceForVertical?.(v.slug || v.vertical_id || "")}>Workflow</button>
+                        <button className="btn-secondary" onClick={() => openPortfolioForVertical?.(asRouteKey(v.slug || v.vertical_id))}>Portfolio</button>
+                        <button className="btn-secondary" onClick={() => openWorkflowTraceForVertical?.(asRouteKey(v.slug || v.vertical_id))}>Workflow</button>
                       </div>
                     </td>
                   </tr>

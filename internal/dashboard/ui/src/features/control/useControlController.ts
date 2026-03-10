@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { MailboxResponse, TargetRecord } from "../../types/core.ts";
+import type { ControlResult, MailboxResponse, TargetRecord } from "../../types/core.ts";
 
 type AsyncAction = () => Promise<unknown>;
 type StringSetter = (value: string) => void;
@@ -7,7 +7,7 @@ type StringSetter = (value: string) => void;
 type ControlControllerInput = {
   targets: TargetRecord[];
   mailbox: MailboxResponse;
-  controlOutput: string;
+  controlOutput: ControlResult;
   controlTarget: string;
   directiveMessage: string;
   chatMessage: string;
@@ -50,7 +50,7 @@ type ControlControllerInput = {
   resetDBAndSeed: AsyncAction;
   wipeDB: AsyncAction;
   decideMailbox: AsyncAction;
-  quickMailboxDecide: (action: string) => Promise<unknown>;
+  quickMailboxDecide: (id: string, action: string) => Promise<void>;
 };
 
 export function useControlController({

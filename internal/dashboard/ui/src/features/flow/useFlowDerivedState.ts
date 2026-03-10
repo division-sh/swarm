@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import type { WorkflowFlowMeta, WorkflowFlowResponse, GraphResponse } from "../../types/workflow.ts";
 import { edgeSelectionID } from "../graph/graphInspectorUtils.tsx";
 import {
   getFlowActiveEdgeKeys,
@@ -22,6 +23,19 @@ export function useFlowDerivedState({
   setSelectedFlowNodeID,
   selectedFlowEdgeID,
   setSelectedFlowEdgeID,
+}: {
+  flowGraphMeta: WorkflowFlowMeta;
+  flowEvents: WorkflowFlowResponse["flow_events"];
+  flowView: string;
+  flowReplayIndex: number;
+  flowStage: string;
+  flowRubric: string;
+  flowGraph: GraphResponse;
+  flowViewGraph: GraphResponse;
+  selectedFlowNodeID: string;
+  setSelectedFlowNodeID: (value: string) => void;
+  selectedFlowEdgeID: string;
+  setSelectedFlowEdgeID: (value: string) => void;
 }) {
   const flowStageOptions = useMemo(() => getFlowStageOptions(flowGraphMeta), [flowGraphMeta]);
   const flowRubricOptions = useMemo(() => getFlowRubricOptions(flowGraphMeta), [flowGraphMeta]);

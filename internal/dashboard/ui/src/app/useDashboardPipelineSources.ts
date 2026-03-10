@@ -5,7 +5,38 @@ type PipelineSourcesInput = {
   activeView: string;
   activeSubview: string;
   addToast: (message: string, type?: string) => void;
-  pipelineState: Record<string, any>;
+  pipelineState: {
+    selectedShardScanID: string;
+    setSelectedShardScanID: (value: string) => void;
+    traceVertical: string;
+    graphVertical: string;
+    setGraphVertical: (value: string) => void;
+    flowVertical: string;
+    setFlowVertical: (value: string) => void;
+    setHoldingDetailModal: (value: {
+      open: boolean;
+      loading: boolean;
+      id: string;
+      error: string;
+      data: Record<string, unknown> | null;
+    } | ((prev: {
+      open: boolean;
+      loading: boolean;
+      id: string;
+      error: string;
+      data: Record<string, unknown> | null;
+    }) => {
+      open: boolean;
+      loading: boolean;
+      id: string;
+      error: string;
+      data: Record<string, unknown> | null;
+    })) => void;
+    graphMode: string;
+    flowView: string;
+    flowStart: string;
+    flowEnd: string;
+  };
 };
 
 export function useDashboardPipelineSources({

@@ -1,7 +1,8 @@
 import { useMemo } from "react";
+import type { TaskRecord } from "../../types/core.ts";
 
 type SelectedTaskInput = {
-  tasks: Record<string, any>[];
+  tasks: TaskRecord[];
   selectedTaskID: string;
 };
 

@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import type { AgentRecord } from "../../types/core.ts";
-import type { GraphResponse, WorkflowFlowResponse } from "../../types/workflow.ts";
+import type { VerticalRecord } from "../../types/portfolio.ts";
+import type { GraphResponse, WorkflowFlowMeta, WorkflowFlowResponse } from "../../types/workflow.ts";
+import type { FlowEventSummary } from "./helpers.ts";
 
 type AsyncAction = () => Promise<unknown>;
 type StringSetter = (value: string) => void;
@@ -9,13 +11,13 @@ type NumberSetter = (value: number) => void;
 type ReplayIndexSetter = (value: number | ((prev: number) => number)) => void;
 
 type FlowControllerInput = {
-  verticals: Record<string, any>[];
-  visibleFlowEvents: Record<string, any>[];
+  verticals: VerticalRecord[];
+  visibleFlowEvents: WorkflowFlowResponse["flow_events"];
   flowEvents: WorkflowFlowResponse["flow_events"];
   flowGraph: GraphResponse;
-  flowGraphMeta: Record<string, any>;
+  flowGraphMeta: WorkflowFlowMeta;
   flowActiveEdgeKeys: Set<string>;
-  selectedFlowSummary: Record<string, any> | null;
+  selectedFlowSummary: FlowEventSummary;
   agents: AgentRecord[];
   flowView: string;
   flowStage: string;

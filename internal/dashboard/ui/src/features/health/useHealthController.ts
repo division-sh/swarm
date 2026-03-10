@@ -1,15 +1,15 @@
 import { useMemo } from "react";
-import type { HealthResponse } from "../../types/core.ts";
+import type { HealthResponse, LooseRecord } from "../../types/core.ts";
 import { deriveHealthState } from "./useHealthDerivedState.ts";
 
 type OpenView = (view: string, subview?: string) => void;
 
 type HealthControllerInput = {
   health: HealthResponse;
-  contractsData: Record<string, any>;
-  contractWorkflow: Record<string, any>;
-  contractPlatform: Record<string, any>;
-  contractVerification: Record<string, any>;
+  contractsData: LooseRecord;
+  contractWorkflow: LooseRecord;
+  contractPlatform: LooseRecord;
+  contractVerification: LooseRecord;
   openView: OpenView;
 };
 

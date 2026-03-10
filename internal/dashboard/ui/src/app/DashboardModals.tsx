@@ -2,18 +2,11 @@ import React from "react";
 import MarkdownBlock from "../components/MarkdownBlock.tsx";
 import Modal from "../components/Modal.tsx";
 import HoldingVerticalDetail from "../features/holding/HoldingVerticalDetail.tsx";
-
-type HoldingDetailModalState = {
-  open: boolean;
-  loading: boolean;
-  id: string;
-  error: string;
-  data: Record<string, any> | null;
-};
+import type { HoldingDetailModalState, ModalContent } from "./useDashboardUIState.ts";
 
 type DashboardModalsProps = {
-  modalContent: Record<string, any> | null;
-  setModalContent: (value: Record<string, any> | null) => void;
+  modalContent: ModalContent | null;
+  setModalContent: (value: ModalContent | null) => void;
   holdingDetailModal: HoldingDetailModalState;
   setHoldingDetailModal: (value: HoldingDetailModalState) => void;
 };

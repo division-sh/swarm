@@ -1,19 +1,19 @@
 import { useEffect, useMemo } from "react";
 import { usePersistentState } from "../../hooks/usePersistentState.ts";
-import type { HoldingResponse } from "../../types/portfolio.ts";
+import type { HoldingResponse, TraceRecord, VerticalRecord } from "../../types/portfolio.ts";
 
 function normalizeKey(value: unknown) {
   return String(value || "").trim();
 }
 
-function matchesVertical(vertical: Record<string, any>, key: string) {
+function matchesVertical(vertical: VerticalRecord, key: string) {
   if (!vertical || !key) return false;
   return normalizeKey(vertical.slug) === key || normalizeKey(vertical.id) === key;
 }
 
 type PortfolioFocusStateInput = {
   holdingData: HoldingResponse;
-  traceRows: Record<string, any>[];
+  traceRows: TraceRecord[];
   traceVertical: string;
 };
 

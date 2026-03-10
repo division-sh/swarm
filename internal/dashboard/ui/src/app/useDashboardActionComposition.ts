@@ -3,12 +3,50 @@ import { useActionRunner } from "../hooks/useActionRunner.ts";
 import { useControlActions } from "../hooks/useControlActions.ts";
 import { useNavigationActions } from "../hooks/useNavigationActions.ts";
 import { useTaskActions } from "../hooks/useTaskActions.ts";
+import type { ModalContent } from "./useDashboardUIState.ts";
+
+type UIActionState = {
+  activeSubview: string;
+  setActiveView: (value: string) => void;
+  setViewRoute: (view: string, subview?: string) => void;
+  setModalContent: (value: ModalContent) => void;
+};
+
+type TaskActionState = {
+  selectedTaskID: string;
+  setSelectedTaskID: (value: string) => void;
+  setTaskStatus: (value: string) => void;
+  taskResultText: string;
+  setTaskResultText: (value: string) => void;
+  taskOutcome: string;
+  setTaskOutcome: (value: string) => void;
+  taskFollowUpNeeded: boolean;
+  setTaskFollowUpNeeded: (value: boolean) => void;
+  taskRejectReason: string;
+  setTaskRejectReason: (value: string) => void;
+};
+
+type RuntimeActionState = {
+  setSelectedEventID: (value: string) => void;
+  setSelectedConv: (value: string) => void;
+  setEventsFilter: (value: unknown) => void;
+  setEventsIncludeRuntime: (value: boolean) => void;
+  setEventsRuntimeErrorsOnly: (value: boolean) => void;
+  setLogsFilter: (value: unknown) => void;
+  setLogsRuntimeErrorsOnly: (value: boolean) => void;
+};
+
+type OpsActionState = {
+  setControlOutput: (value: unknown) => void;
+  setControlTarget: (value: string) => void;
+  setSelectedAgentID: (value: string) => void;
+};
 
 type DashboardActionCompositionInput = {
-  ui: Record<string, any>;
-  taskState: Record<string, any>;
-  runtimeState: Record<string, any>;
-  opsState: Record<string, any>;
+  ui: UIActionState;
+  taskState: TaskActionState;
+  runtimeState: RuntimeActionState;
+  opsState: OpsActionState;
   addToast: (message: string, type?: string) => void;
   loadAgents: () => Promise<unknown>;
   loadTasks: () => Promise<unknown>;

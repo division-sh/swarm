@@ -22,7 +22,7 @@ export async function fetchPipelineFlow({
     if (flowStart) p.set("start", flowStart);
     if (flowEnd) p.set("end", flowEnd);
   }
-  const d = await fetchJSON<Record<string, any>>(`/api/pipeline/graph?${p.toString()}`);
+  const d = await fetchJSON<Partial<WorkflowFlowResponse>>(`/api/pipeline/graph?${p.toString()}`);
   return {
     nodes: d.nodes || [],
     edges: d.edges || [],

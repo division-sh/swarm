@@ -12,13 +12,15 @@ import {
   fetchRuntimeLogs,
 } from "../api/dashboardRuntime.ts";
 import { dashboardQueryKeys } from "./dashboardQueryKeys.ts";
-import type { ConversationDetail, EventFilter, IncidentFilter, LogFilter } from "../types/runtime.ts";
+import type { ConversationDetail, ConversationRecord, EventDetail, EventFilter, IncidentFilter, LogFilter } from "../types/runtime.ts";
 
 async function runRefetch<T>(refetch: () => Promise<QueryObserverResult<T, Error>>): Promise<T | undefined> {
   const result = await refetch();
   if (result.error) throw result.error;
   return result.data;
 }
+
+type StringUpdater = (value: string | ((current: string) => string)) => void;
 
 export function useDashboardRuntimeQueries({
   activeView,
@@ -46,11 +48,11 @@ export function useDashboardRuntimeQueries({
   logsRuntimeErrorsOnly: boolean;
   incidentsFilter: IncidentFilter;
   selectedIncidentCode: string;
-  setSelectedIncidentCode: (fn: any) => void;
+  setSelectedIncidentCode: StringUpdater;
   selectedIncidentAgent: string;
-  setSelectedIncidentAgent: (fn: any) => void;
+  setSelectedIncidentAgent: StringUpdater;
   selectedConv: string;
-  setSelectedConv: (fn: any) => void;
+  setSelectedConv: StringUpdater;
   selectedEventID: string;
 }) {
   const observabilitySubview = activeView === "observability" ? (activeSubview || "events") : activeView;
@@ -89,12 +91,12 @@ export function useDashboardRuntimeQueries({
     queryFn: () => fetchIncidentArtifacts(selectedIncidentAgent),
     enabled: incidentsActive && !!selectedIncidentAgent,
   });
-  const eventDetailQuery = useQuery({
+  const eventDetailQuery = useQuery<EventDetail | null>({
     queryKey: dashboardQueryKeys.eventDetail(selectedEventID),
     queryFn: () => fetchEventDetail(selectedEventID),
     enabled: !!selectedEventID,
   });
-  const conversationsQuery = useQuery({
+  const conversationsQuery = useQuery<ConversationRecord[]>({
     queryKey: dashboardQueryKeys.conversations(),
     queryFn: fetchConversations,
     enabled: agentsActive,
@@ -109,15 +111,15 @@ export function useDashboardRuntimeQueries({
     const items = incidentsQuery.data || [];
     setSelectedIncidentCode((cur: string) => {
       if (!cur) return items.length > 0 ? items[0].code : "";
-      return items.some((item: Record<string, any>) => item.code === cur) ? cur : (items[0]?.code || "");
+      return items.some((item) => item.code === cur) ? cur : (items[0]?.code || "");
     });
   }, [incidentsQuery.data, setSelectedIncidentCode]);
 
   useEffect(() => {
     const rows = incidentLogsQuery.data || [];
     setSelectedIncidentAgent((cur: string) => {
-      if (cur && rows.some((row: Record<string, any>) => row.agent_id === cur)) return cur;
-      const first = rows.find((row: Record<string, any>) => (row.agent_id || "").trim() !== "");
+      if (cur && rows.some((row) => row.agent_id === cur)) return cur;
+      const first = rows.find((row) => (row.agent_id || "").trim() !== "");
       return first ? first.agent_id : "";
     });
   }, [incidentLogsQuery.data, setSelectedIncidentAgent]);

@@ -1,3 +1,5 @@
+import type { MailboxItem, MailboxResponse, TaskRecord, TasksResponse } from "../../types/core.ts";
+
 function normalizePriority(value: unknown): number {
   const v = String(value || "").toLowerCase();
   if (v === "critical") return 4;
@@ -7,11 +9,14 @@ function normalizePriority(value: unknown): number {
   return 0;
 }
 
-function isPendingMailbox(item: Record<string, any> | null | undefined): boolean {
+type OperationsTask = TaskRecord;
+type OperationsMailboxItem = MailboxItem;
+
+function isPendingMailbox(item: OperationsMailboxItem | null | undefined): boolean {
   return String(item?.status || "").toLowerCase() === "pending";
 }
 
-function isActionableTask(task: Record<string, any> | null | undefined): boolean {
+function isActionableTask(task: OperationsTask | null | undefined): boolean {
   const status = String(task?.status || "").toLowerCase();
   return status === "open" || status === "pending_review" || status === "assigned";
 }
@@ -22,13 +27,13 @@ function isOverdue(deadline: unknown): boolean {
   return Number.isFinite(d.getTime()) && d.getTime() < Date.now();
 }
 
-function mailboxSort(a: Record<string, any>, b: Record<string, any>): number {
+function mailboxSort(a: OperationsMailboxItem, b: OperationsMailboxItem): number {
   const pri = normalizePriority(b.priority) - normalizePriority(a.priority);
   if (pri !== 0) return pri;
   return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
 }
 
-function taskSort(a: Record<string, any>, b: Record<string, any>): number {
+function taskSort(a: OperationsTask, b: OperationsTask): number {
   const overdue = Number(isOverdue(b.deadline)) - Number(isOverdue(a.deadline));
   if (overdue !== 0) return overdue;
   const pri = normalizePriority(b.priority) - normalizePriority(a.priority);
@@ -50,9 +55,9 @@ export function deriveOperationsDerivedState({
   selectedTask,
   selectedMailboxItem,
 }: {
-  mailbox: Record<string, any>;
-  tasksResp: Record<string, any>;
-  selectedTask: Record<string, any> | null;
+  mailbox: MailboxResponse;
+  tasksResp: TasksResponse;
+  selectedTask: OperationsTask | null;
   selectedMailboxItem: string;
 }) {
   const mailboxItems = Array.isArray(mailbox?.items) ? mailbox.items : [];

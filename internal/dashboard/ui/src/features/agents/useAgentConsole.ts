@@ -23,6 +23,20 @@ type AgentConsoleInput = {
 };
 
 type BusyState = "" | "chat" | "directive" | "restart" | "replay" | "save-prompt" | "revert-prompt";
+type AgentPromptState = {
+  effective_prompt?: string;
+  [key: string]: unknown;
+};
+type AgentPromptDiffState = {
+  current?: string;
+  previous?: string;
+  diff?: string;
+  [key: string]: unknown;
+};
+type AgentActionResult = {
+  message?: string;
+  [key: string]: unknown;
+};
 
 export function useAgentConsole({ agent, addToast, onAction }: AgentConsoleInput) {
   const queryClient = useQueryClient();
@@ -52,8 +66,8 @@ export function useAgentConsole({ agent, addToast, onAction }: AgentConsoleInput
     queryFn: () => fetchAgentPromptDiff(agent.id),
     enabled: false,
   });
-  const promptData = (promptQuery.data || null) as Record<string, any> | null;
-  const promptDiffData = (promptDiffQuery.data || null) as Record<string, any> | null;
+  const promptData = (promptQuery.data || null) as AgentPromptState | null;
+  const promptDiffData = (promptDiffQuery.data || null) as AgentPromptDiffState | null;
 
   useEffect(() => {
     if (!promptData || editingPrompt) return;
@@ -64,7 +78,7 @@ export function useAgentConsole({ agent, addToast, onAction }: AgentConsoleInput
     setBusy(key);
     try {
       const out = await fn();
-      addToast((out as Record<string, any>)?.message || "Done", "success");
+      addToast((out as AgentActionResult)?.message || "Done", "success");
       if (onAction) onAction();
       return out;
     } catch (err) {

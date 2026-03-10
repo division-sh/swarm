@@ -59,7 +59,7 @@ export default function AgentsView({ state, actions }) {
                 <strong>Attention Queue</strong>
                 <span className="badge">total {triage.attentionAgents.length}</span>
                 <span className="badge b-stuck"><StatusDot state="stuck" />stuck {counts(triage.attentionAgents).stuck || 0}</span>
-                <span className="badge b-running">pending {triage.attentionAgents.filter((agent) => (agent.pending_events || 0) > 0).length}</span>
+                <span className="badge b-running">pending {triage.attentionAgents.filter((agent) => Number(agent.pending_events || 0) > 0).length}</span>
                 <span className="badge b-idle">leases {triage.attentionAgents.filter((agent) => !!agent.lock_owner || !!agent.in_flight_turn).length}</span>
               </div>
             </summary>

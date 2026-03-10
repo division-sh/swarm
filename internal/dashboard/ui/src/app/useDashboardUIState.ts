@@ -3,11 +3,26 @@ import { getEmpireKey } from "../api/client.ts";
 import { useHashTab } from "../hooks/useHashTab.ts";
 import { usePersistentState } from "../hooks/usePersistentState.ts";
 import { VALID_TABS } from "./dashboardTabs.ts";
+import type { HoldingVerticalDetail } from "../types/portfolio.ts";
 
 type ToastItem = {
   id: number;
   msg: string;
   type: string;
+};
+
+export type ModalContent = {
+  title?: string;
+  text?: string;
+  [key: string]: unknown;
+};
+
+export type HoldingDetailModalState = {
+  open: boolean;
+  loading: boolean;
+  id: string;
+  error: string;
+  data: HoldingVerticalDetail | null;
 };
 
 export function useDashboardUIState() {
@@ -22,7 +37,7 @@ export function useDashboardUIState() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [agentSearch, setAgentSearch] = useState("");
   const [selectedMailboxItem, setSelectedMailboxItem] = useState("");
-  const [modalContent, setModalContent] = useState<Record<string, any> | null>(null);
+  const [modalContent, setModalContent] = useState<ModalContent | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastSeq = useRef(0);
 

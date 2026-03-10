@@ -4,13 +4,33 @@ import { useDashboardPolling } from "../hooks/useDashboardPolling.ts";
 import { useEventStream } from "../hooks/useEventStream.ts";
 import { useFlowRuntimeStream } from "../hooks/useFlowRuntimeStream.ts";
 import { useReplayTicker } from "../hooks/useReplayTicker.ts";
+import type { FlowEventRecord } from "../types/workflow.ts";
+import type { EventFilter } from "../types/runtime.ts";
 
 type DashboardLifecycleInput = {
-  ui: Record<string, any>;
-  runtimeState: Record<string, any>;
-  pipelineState: Record<string, any>;
-  workflowStream: { patchRuntimeFlowEvent: (item: Record<string, any>) => void };
-  flowEvents: Record<string, any>[];
+  ui: {
+    activeView: string;
+    activeSubview: string;
+    setStatusText: (value: string) => void;
+    setInitialLoading: (value: boolean) => void;
+  };
+  runtimeState: {
+    eventsFilter: EventFilter;
+    eventsIncludeRuntime: boolean;
+    eventsRuntimeErrorsOnly: boolean;
+  };
+  pipelineState: {
+    graphFullscreen: boolean;
+    setGraphFullscreen: (value: boolean) => void;
+    flowView: string;
+    flowVertical: string;
+    flowReplayOn: boolean;
+    flowReplaySpeed: number;
+    setFlowReplayIndex: (value: number | ((prev: number) => number)) => void;
+    setFlowReplayOn: (value: boolean) => void;
+  };
+  workflowStream: { patchRuntimeFlowEvent: (item: FlowEventRecord) => void };
+  flowEvents: FlowEventRecord[];
   refreshers: {
     loadEvents: () => Promise<unknown>;
     loadRuntimeLogs: () => Promise<unknown>;

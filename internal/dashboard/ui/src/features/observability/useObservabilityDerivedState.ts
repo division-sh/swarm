@@ -1,4 +1,31 @@
-function hasRuntimeError(item: Record<string, any> | null | undefined): boolean {
+import type { EventRecord, IncidentRecord, RuntimeLogRecord } from "../../types/runtime.ts";
+
+type ObservabilityFocus = {
+  agent?: string;
+  vertical?: string;
+  component?: string;
+  incidentCode?: string;
+  chips?: string[];
+};
+
+type ObservabilityState<T> = {
+  state?: T;
+};
+
+type EventsState = {
+  filteredEvents?: EventRecord[];
+  filteredRuntimeLogs?: RuntimeLogRecord[];
+};
+
+type LogsState = {
+  filteredLogsData?: RuntimeLogRecord[];
+};
+
+type IncidentsState = {
+  incidentsData?: IncidentRecord[];
+};
+
+function hasRuntimeError(item: RuntimeLogRecord | null | undefined): boolean {
   if (!item || typeof item !== "object") return false;
   if ((item.error_code || "").trim() !== "") return true;
   const level = String(item.level || "").toLowerCase();
@@ -6,7 +33,7 @@ function hasRuntimeError(item: Record<string, any> | null | undefined): boolean 
   return (item.error || "").trim() !== "";
 }
 
-function hasEventError(item: Record<string, any> | null | undefined): boolean {
+function hasEventError(item: EventRecord | null | undefined): boolean {
   if (!item || typeof item !== "object") return false;
   return Number(item.error_count || 0) > 0 || Number(item.dead_count || 0) > 0;
 }
@@ -21,10 +48,10 @@ export function deriveObservabilityState({
   incidents,
   focus,
 }: {
-  events: Record<string, any>;
-  logs: Record<string, any>;
-  incidents: Record<string, any>;
-  focus: Record<string, any>;
+  events: ObservabilityState<EventsState>;
+  logs: ObservabilityState<LogsState>;
+  incidents: ObservabilityState<IncidentsState>;
+  focus: ObservabilityFocus;
 }) {
   const filteredEvents = Array.isArray(events?.state?.filteredEvents) ? events.state.filteredEvents : [];
   const filteredRuntimeLogs = Array.isArray(events?.state?.filteredRuntimeLogs) ? events.state.filteredRuntimeLogs : [];

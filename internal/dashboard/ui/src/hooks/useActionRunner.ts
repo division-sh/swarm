@@ -1,8 +1,9 @@
 import { useCallback } from "react";
+import type { ControlResult } from "../types/core.ts";
 
 type ActionRunnerInput = {
   addToast: (message: string, type?: string) => void;
-  setControlOutput: (value: Record<string, any>) => void;
+  setControlOutput: (value: ControlResult) => void;
   refreshAfterControl: () => Promise<unknown>;
 };
 
@@ -11,11 +12,11 @@ export function useActionRunner({
   setControlOutput,
   refreshAfterControl,
 }: ActionRunnerInput) {
-  const runControl = useCallback(async (fn: () => Promise<Record<string, any>>) => {
+  const runControl = useCallback(async (fn: () => Promise<ControlResult>) => {
     try {
       const out = await fn();
       setControlOutput(out);
-      addToast(out.message || "Action completed", "success");
+      addToast(String(out.message || "Action completed"), "success");
       await refreshAfterControl();
       return out;
     } catch (err) {

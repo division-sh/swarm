@@ -1,8 +1,8 @@
 import { fetchJSON } from "./client.ts";
-import type { HoldingResponse } from "../types/portfolio.ts";
+import type { HoldingResponse, HoldingVerticalDetail } from "../types/portfolio.ts";
 
 export async function fetchHolding(): Promise<HoldingResponse> {
-  const d = await fetchJSON<Record<string, any>>("/dashboard/api/holding");
+  const d = await fetchJSON<Partial<HoldingResponse>>("/dashboard/api/holding");
   return {
     campaigns: d.campaigns || [],
     verticals: d.verticals || [],
@@ -12,8 +12,8 @@ export async function fetchHolding(): Promise<HoldingResponse> {
   };
 }
 
-export async function fetchHoldingVerticalDetail(verticalID: string): Promise<Record<string, any> | null> {
+export async function fetchHoldingVerticalDetail(verticalID: string): Promise<HoldingVerticalDetail | null> {
   const id = String(verticalID || "").trim();
   if (!id) return null;
-  return fetchJSON<Record<string, any>>(`/dashboard/api/holding/vertical?id=${encodeURIComponent(id)}`);
+  return fetchJSON<HoldingVerticalDetail>(`/dashboard/api/holding/vertical?id=${encodeURIComponent(id)}`);
 }

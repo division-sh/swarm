@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery, useQueryClient, type QueryObserverResult } from "@tanstack/react-query";
 import { fetchGraph, fetchWorkflowFlow } from "../api/dashboardWorkflow.ts";
 import { dashboardQueryKeys } from "./dashboardQueryKeys.ts";
-import type { WorkflowFlowResponse } from "../types/workflow.ts";
+import type { FlowEventRecord, WorkflowFlowResponse } from "../types/workflow.ts";
 
 async function runRefetch<T>(refetch: () => Promise<QueryObserverResult<T, Error>>): Promise<T | undefined> {
   const result = await refetch();
@@ -53,7 +53,7 @@ export function useDashboardWorkflowQueries({
     refetchInterval: flowView === "runtime" ? false : 22000,
   });
 
-  const patchRuntimeFlowEvent = useMemo(() => (item: Record<string, any>) => {
+  const patchRuntimeFlowEvent = useMemo(() => (item: FlowEventRecord) => {
     queryClient.setQueryData<WorkflowFlowResponse | undefined>(
       dashboardQueryKeys.workflowFlow(flowView, flowVertical, flowStart, flowEnd),
       (prev) => {

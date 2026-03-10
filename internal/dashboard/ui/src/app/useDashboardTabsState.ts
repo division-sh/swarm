@@ -1,12 +1,16 @@
+import type { AgentsResponse, MailboxResponse } from "../types/core.ts";
+import type { FunnelResponse, HoldingResponse } from "../types/portfolio.ts";
+import type { IncidentRecord } from "../types/runtime.ts";
+import type { FlowEventRecord } from "../types/workflow.ts";
 import { useDashboardDerivedState } from "./useDashboardDerivedState.ts";
 
 type TabsStateInput = {
-  agentsResp: Record<string, any>;
-  incidentsData: Record<string, any>[];
-  flowEvents: Record<string, any>[];
-  mailbox: Record<string, any>;
-  funnel: Record<string, any>;
-  holdingData: Record<string, any>;
+  agentsResp: AgentsResponse;
+  incidentsData: IncidentRecord[];
+  flowEvents: FlowEventRecord[];
+  mailbox: MailboxResponse;
+  funnel: FunnelResponse;
+  holdingData: HoldingResponse;
 };
 
 export function useDashboardTabsState({

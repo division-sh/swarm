@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import type { FunnelResponse } from "../../types/portfolio.ts";
+import type { FunnelResponse, ShardDetailRecord, ShardScanRecord, TraceRecord } from "../../types/portfolio.ts";
 
 type StringSetter = (value: string) => void;
 type PipelineControllerInput = {
   funnel: FunnelResponse;
-  shardScans: Record<string, any>[];
-  shardScanDetails: Record<string, any>;
-  traceRows: Record<string, any>[];
+  shardScans: ShardScanRecord[];
+  shardScanDetails: Record<string, ShardDetailRecord[]>;
+  traceRows: TraceRecord[];
   traceVertical: string;
   selectedShardScanID: string;
   setTraceVertical: StringSetter;

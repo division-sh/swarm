@@ -1,8 +1,9 @@
 import { useCallback } from "react";
 import { postJSON } from "../api/client.ts";
+import type { ControlResult } from "../types/core.ts";
 
 type TaskActionsInput = {
-  runControl: (fn: () => Promise<Record<string, any>>) => Promise<Record<string, any>>;
+  runControl: (fn: () => Promise<ControlResult>) => Promise<ControlResult>;
   loadTasks: () => Promise<unknown>;
   loadTaskStats: () => Promise<unknown>;
   selectedTaskID: string;

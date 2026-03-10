@@ -41,7 +41,7 @@ export function normalizeScoreRows(raw) {
     return raw
       .map((item, index) => {
         if (!item || typeof item !== "object") return null;
-        const record = item as Record<string, any>;
+        const record = item as Record<string, unknown>;
         const dimension = record.dimension || record.name || record.key || `Dimension ${index + 1}`;
         const score = record.score ?? record.resolved_score ?? record.value ?? record.points;
         const notes = record.evidence || record.reason || record.rationale || record.comment || "";
@@ -59,7 +59,7 @@ export function normalizeScoreRows(raw) {
         return { dimension: prettyArtifactKey(dimension), score: value, notes: "" };
       }
       if (value && typeof value === "object") {
-        const record = value as Record<string, any>;
+        const record = value as Record<string, unknown>;
         return {
           dimension: prettyArtifactKey(dimension),
           score: record.score ?? record.resolved_score ?? record.value ?? "",

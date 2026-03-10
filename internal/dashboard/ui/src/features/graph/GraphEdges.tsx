@@ -1,5 +1,6 @@
 import React from "react";
 import { BaseEdge, MarkerType, useInternalNode } from "@xyflow/react";
+import type { EdgeProps } from "@xyflow/react";
 
 function clipLineToRect(x1, y1, x2, y2, rx, ry, rw, rh) {
   const cx = rx + rw / 2;
@@ -31,7 +32,7 @@ function clipLineToRect(x1, y1, x2, y2, rx, ry, rw, rh) {
   return { x: x1 + dx * tMin, y: y1 + dy * tMin };
 }
 
-export function StraightClippedEdge({ id, source, target, style, markerEnd }) {
+export function StraightClippedEdge({ id, source, target, style, markerEnd }: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
   if (!sourceNode || !targetNode) return null;

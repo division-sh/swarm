@@ -1,5 +1,12 @@
-import Editor, { DiffEditor } from "@monaco-editor/react";
+import Editor, { DiffEditor, loader } from "@monaco-editor/react";
 import React from "react";
+import type { editor } from "monaco-editor";
+
+loader.config({
+  paths: {
+    vs: "/vs",
+  },
+});
 
 type ViewerHeight = number | `${number}px` | `${number}vh` | `${number}vw` | `${number}%`;
 
@@ -20,7 +27,7 @@ type DiffCodeViewerProps = {
   compact?: boolean;
 };
 
-const DEFAULT_OPTIONS = {
+const DEFAULT_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
   readOnly: true,
   minimap: { enabled: false },
   scrollBeyondLastLine: false,
@@ -53,7 +60,7 @@ export default function CodeViewer({
         value={String(value ?? "")}
         height={height}
         loading={<div className="code-viewer-loading tiny">Loading editor…</div>}
-        options={DEFAULT_OPTIONS as any}
+        options={DEFAULT_OPTIONS}
       />
     </div>
   );
@@ -82,7 +89,7 @@ export function DiffCodeViewer({
           readOnly: true,
           originalEditable: false,
           diffWordWrap: "on",
-        } as any}
+        } satisfies editor.IStandaloneDiffEditorConstructionOptions}
       />
     </div>
   );

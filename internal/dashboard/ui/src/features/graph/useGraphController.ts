@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import type { AgentRecord } from "../../types/core.ts";
+import type { VerticalRecord } from "../../types/portfolio.ts";
 import type { GraphResponse } from "../../types/workflow.ts";
 
 type StringSetter = (value: string) => void;
 type BoolSetter = (value: boolean) => void;
 type AsyncAction = () => Promise<unknown>;
 type GraphControllerInput = {
-  verticals: Record<string, any>[];
+  verticals: VerticalRecord[];
   graph: GraphResponse;
   graphViewGraph: GraphResponse;
   agents: AgentRecord[];

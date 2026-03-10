@@ -11,6 +11,15 @@ import {
   shardActionRequest,
 } from "../api/dashboardPortfolio.ts";
 import { dashboardQueryKeys } from "./dashboardQueryKeys.ts";
+import type { FunnelResponse, HoldingResponse, HoldingVerticalDetail, ShardDetailRecord, ShardScanRecord, TraceRecord, VerticalRecord } from "../types/portfolio.ts";
+
+type HoldingDetailModalState = {
+  open: boolean;
+  loading: boolean;
+  id: string;
+  error: string;
+  data: HoldingVerticalDetail | null;
+};
 
 async function runRefetch<T>(refetch: () => Promise<QueryObserverResult<T, Error>>): Promise<T | undefined> {
   const result = await refetch();
@@ -36,37 +45,37 @@ export function useDashboardPortfolioQueries({
   setGraphVertical: (value: string) => void;
   flowVertical: string;
   setFlowVertical: (value: string) => void;
-  setHoldingDetailModal: (value: any) => void;
+  setHoldingDetailModal: (value: HoldingDetailModalState) => void;
   addToast: (message: string, type?: string) => void;
 }) {
   const queryClient = useQueryClient();
 
-  const funnelQuery = useQuery({
+  const funnelQuery = useQuery<FunnelResponse>({
     queryKey: dashboardQueryKeys.funnel(),
     queryFn: fetchFunnel,
     refetchInterval: 22000,
   });
-  const shardScansQuery = useQuery({
+  const shardScansQuery = useQuery<ShardScanRecord[]>({
     queryKey: dashboardQueryKeys.shardScans(),
     queryFn: fetchShardScans,
     refetchInterval: 22000,
   });
-  const shardScanDetailQuery = useQuery({
+  const shardScanDetailQuery = useQuery<ShardDetailRecord[]>({
     queryKey: dashboardQueryKeys.shardScanDetail(selectedShardScanID),
     queryFn: () => fetchShardScanDetail(selectedShardScanID),
     enabled: !!selectedShardScanID,
   });
-  const traceQuery = useQuery({
+  const traceQuery = useQuery<TraceRecord[]>({
     queryKey: dashboardQueryKeys.trace(traceVertical),
     queryFn: () => fetchTrace(traceVertical),
     enabled: !!traceVertical,
   });
-  const holdingQuery = useQuery({
+  const holdingQuery = useQuery<HoldingResponse>({
     queryKey: dashboardQueryKeys.holding(),
     queryFn: fetchHolding,
     refetchInterval: 22000,
   });
-  const verticalsQuery = useQuery({
+  const verticalsQuery = useQuery<VerticalRecord[]>({
     queryKey: dashboardQueryKeys.verticals(),
     queryFn: fetchVerticals,
     refetchInterval: 22000,
@@ -75,7 +84,7 @@ export function useDashboardPortfolioQueries({
   useEffect(() => {
     const scans = shardScansQuery.data || [];
     if (!selectedShardScanID) return;
-    if (!scans.some((scan: Record<string, any>) => scan.scan_id === selectedShardScanID)) {
+    if (!scans.some((scan) => scan.scan_id === selectedShardScanID)) {
       setSelectedShardScanID("");
     }
   }, [selectedShardScanID, setSelectedShardScanID, shardScansQuery.data]);
@@ -130,12 +139,12 @@ export function useDashboardPortfolioQueries({
           queryFn: () => fetchHoldingVerticalDetail(id),
         });
         setHoldingDetailModal({ open: true, loading: false, id, error: "", data: data || null });
-      } catch (err: any) {
+      } catch (err: unknown) {
         setHoldingDetailModal({
           open: true,
           loading: false,
           id,
-          error: err?.message || "failed to load vertical detail",
+          error: err instanceof Error ? err.message : "failed to load vertical detail",
           data: null,
         });
       }

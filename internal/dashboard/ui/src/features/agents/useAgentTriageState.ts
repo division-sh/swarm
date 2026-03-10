@@ -89,14 +89,14 @@ export function useAgentTriageState({ groupedAgents, agentsResp }: AgentTriageSt
     total: allAgents.length,
     attention: attentionAgents.length,
     pinned: pinnedAgents.length,
-    pending: allAgents.filter((agent) => (agent.pending_events || 0) > 0).length,
+    pending: allAgents.filter((agent) => Number(agent.pending_events || 0) > 0).length,
     leases: allAgents.filter((agent) => !!agent.lock_owner || !!agent.in_flight_turn).length,
     breaker: allAgents.filter((agent) => !!agent.near_breaker).length,
     failedTools: allAgents.filter((agent) => agent.last_tool && agent.last_tool.ok === false).length,
     stuck: agentsResp.states?.stuck || 0,
   }), [agentsResp.states?.stuck, allAgents, attentionAgents.length, pinnedAgents.length]);
 
-  const togglePinned = useCallback((agentID) => {
+  const togglePinned = useCallback((agentID: string) => {
     const next = new Set(pinnedSet);
     if (next.has(agentID)) next.delete(agentID);
     else next.add(agentID);

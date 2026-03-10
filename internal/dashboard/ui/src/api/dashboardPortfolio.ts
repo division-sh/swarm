@@ -1,36 +1,36 @@
 import { fetchJSON, postJSON } from "./client.ts";
 import { fetchHolding, fetchHoldingVerticalDetail } from "./holding.ts";
-import type { FunnelResponse } from "../types/portfolio.ts";
+import type { FunnelResponse, ShardDetailRecord, ShardScanRecord, TraceRecord, VerticalRecord } from "../types/portfolio.ts";
 
 export async function fetchFunnel(): Promise<FunnelResponse> {
-  const d = await fetchJSON<Record<string, any>>("/dashboard/api/funnel");
+  const d = await fetchJSON<Partial<FunnelResponse>>("/dashboard/api/funnel");
   return {
     throughput: d.throughput || {},
     stuck: d.stuck || [],
   };
 }
 
-export async function fetchShardScans(): Promise<Record<string, any>[]> {
-  const d = await fetchJSON<Record<string, any>>("/dashboard/api/pipeline/shards?limit=30");
+export async function fetchShardScans(): Promise<ShardScanRecord[]> {
+  const d = await fetchJSON<{ scans?: ShardScanRecord[] }>("/dashboard/api/pipeline/shards?limit=30");
   return d.scans || [];
 }
 
-export async function fetchShardScanDetail(scanID?: string): Promise<Record<string, any>[]> {
+export async function fetchShardScanDetail(scanID?: string): Promise<ShardDetailRecord[]> {
   const id = String(scanID || "").trim();
   if (!id) return [];
-  const d = await fetchJSON<Record<string, any>>(`/dashboard/api/pipeline/shards/${encodeURIComponent(id)}`);
+  const d = await fetchJSON<{ shards?: ShardDetailRecord[] }>(`/dashboard/api/pipeline/shards/${encodeURIComponent(id)}`);
   return d.shards || [];
 }
 
-export async function fetchTrace(vertical?: string): Promise<Record<string, any>[]> {
+export async function fetchTrace(vertical?: string): Promise<TraceRecord[]> {
   const value = String(vertical || "").trim();
   if (!value) return [];
-  const d = await fetchJSON<Record<string, any>>(`/dashboard/api/verticals/${encodeURIComponent(value)}/trace`);
+  const d = await fetchJSON<{ trace?: TraceRecord[] }>(`/dashboard/api/verticals/${encodeURIComponent(value)}/trace`);
   return d.trace || [];
 }
 
-export async function fetchVerticals(): Promise<Record<string, any>[]> {
-  const d = await fetchJSON<Record<string, any>>("/api/verticals");
+export async function fetchVerticals(): Promise<VerticalRecord[]> {
+  const d = await fetchJSON<{ verticals?: VerticalRecord[] }>("/api/verticals");
   return d.verticals || [];
 }
 

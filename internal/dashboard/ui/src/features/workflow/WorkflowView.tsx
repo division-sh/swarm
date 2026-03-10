@@ -162,6 +162,29 @@ export default function WorkflowView({
 
   useEffect(() => {
     const api = dockApiRef.current;
+    if (!api || !subview) return;
+    const activate = () => api.getPanel(subview)?.api?.setActive();
+    activate();
+    window.requestAnimationFrame(activate);
+  }, [subview]);
+
+  useEffect(() => {
+    const isWorkflowRoute = activeView === "workflow" || activeView === "flow" || activeView === "graph";
+    if (!isWorkflowRoute || !subview || activeSubview === subview) return;
+    setViewRoute("workflow", subview);
+  }, [activeSubview, activeView, setViewRoute, subview]);
+
+  useEffect(() => {
+    const isWorkflowRoute = activeView === "workflow" || activeView === "flow" || activeView === "graph";
+    if (!isWorkflowRoute || !subview) return;
+    const desiredHash = `#workflow/${subview}`;
+    if (window.location.hash !== desiredHash) {
+      window.location.hash = desiredHash;
+    }
+  }, [activeView, subview]);
+
+  useEffect(() => {
+    const api = dockApiRef.current;
     if (!api) return;
     ["flow", "graph", "timeline", "artifacts", "issues", "compare", "runs"].forEach((panelID) => {
       const panel = api.getPanel(panelID);
@@ -176,6 +199,7 @@ export default function WorkflowView({
   const handleReady = useCallback((event) => {
     const api = event.api;
     dockApiRef.current = api;
+    let initializing = true;
     if (!dockInitRef.current) {
       dockInitRef.current = true;
       const graphPanel = api.addPanel({
@@ -247,12 +271,21 @@ export default function WorkflowView({
     }
     dockDisposerRef.current?.dispose?.();
     dockDisposerRef.current = api.onDidActivePanelChange((panel) => {
+      if (initializing) return;
       const next = panel?.id || "flow";
       setSubview(next);
       setViewRoute("workflow", next);
     });
     const activeTarget = routeSubview || subview || "flow";
-    api.getPanel(activeTarget)?.api?.setActive();
+    const activateTarget = () => api.getPanel(activeTarget)?.api?.setActive();
+    activateTarget();
+    window.requestAnimationFrame(() => {
+      activateTarget();
+      initializing = false;
+      const next = api.activePanel?.id || activeTarget;
+      setSubview(next);
+      setViewRoute("workflow", next);
+    });
   }, [dockParams, routeSubview, setViewRoute, subview]);
 
   return (

@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { usePersistentState } from "../../hooks/usePersistentState.ts";
+import type { ShardScanRecord, VerticalRecord } from "../../types/portfolio.ts";
 
 const SLOT_COUNT = 3;
 
@@ -49,15 +50,50 @@ export function normalizePortfolioViews(raw: unknown): Array<SavedPortfolioView 
 }
 
 type PortfolioPresetsInput = {
-  triage: Record<string, any>;
+  triage: {
+    summary?: {
+      drift?: number;
+      timers?: number;
+      revisions?: number;
+      stale?: number;
+      humanNeeded?: number;
+      retryScans?: number;
+    };
+    lists?: {
+      driftedVerticals?: VerticalRecord[];
+      timerHeavyVerticals?: VerticalRecord[];
+      revisionedVerticals?: VerticalRecord[];
+      staleVerticals?: VerticalRecord[];
+      humanNeededVerticals?: VerticalRecord[];
+      retryShardScans?: ShardScanRecord[];
+    };
+  };
   subview: string;
   setSubview: (value: PortfolioSubview) => void;
-  focusSummary: Record<string, any>;
+  focusSummary: {
+    key?: string;
+    vertical?: VerticalRecord | null;
+  };
   setPortfolioFocusKey: (value: string) => void;
-  holdingState: Record<string, any>;
-  holdingActions: Record<string, any>;
-  pipelineState: Record<string, any>;
-  pipelineActions: Record<string, any>;
+  holdingState: {
+    holdingWorkflowFilter?: string;
+    holdingSort?: string;
+  };
+  holdingActions: {
+    setHoldingSearch?: (value: string) => void;
+    setHoldingWorkflowFilter?: (value: string) => void;
+    setHoldingSort?: (value: string) => void;
+  };
+  pipelineState: {
+    traceVertical?: string;
+    selectedShardScanID?: string;
+  };
+  pipelineActions: {
+    setTraceVertical?: (value: string) => void;
+    setSelectedShardScanID?: (value: string) => void;
+    traceVerticalFlow?: (vertical?: string) => Promise<unknown>;
+    loadShardScanDetail?: (scanID?: string) => Promise<unknown>;
+  };
 };
 
 export function usePortfolioPresets({

@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import type { AgentsResponse } from "../types/core.ts";
-import type { FunnelResponse } from "../types/portfolio.ts";
-import type { GraphResponse, WorkflowFlowResponse } from "../types/workflow.ts";
+import type { FunnelResponse, HoldingResponse, ShardDetailRecord, ShardScanRecord, TraceRecord, VerticalRecord } from "../types/portfolio.ts";
+import type { GraphResponse, WorkflowFlowMeta, WorkflowFlowResponse } from "../types/workflow.ts";
+import type { FlowEventSummary } from "../features/flow/helpers.ts";
 import { useFlowController } from "../features/flow/useFlowController.ts";
 import { useGraphController } from "../features/graph/useGraphController.ts";
 import { useHoldingController } from "../features/holding/useHoldingController.ts";
@@ -10,15 +11,38 @@ import { usePipelineController } from "../features/pipeline/usePipelineControlle
 type AsyncAction = () => Promise<unknown>;
 type StringSetter = (value: string) => void;
 type BoolSetter = (value: boolean) => void;
+type GraphSetter = (value: GraphResponse) => void;
+
+type HoldingViewState = {
+  domain: {
+    holdingData: HoldingResponse;
+    holdingVisibleVerticals: VerticalRecord[];
+    holdingWorkflowSummary: {
+      drift: number;
+      timers: number;
+      revisions: number;
+    };
+    holdingColumns: Array<{ key: string; label: string; stages: string[]; items: VerticalRecord[] }>;
+    validationGateData: { stages: string[] };
+  };
+  controls: {
+    holdingSearch: string;
+    setHoldingSearch: StringSetter;
+    holdingWorkflowFilter: string;
+    setHoldingWorkflowFilter: StringSetter;
+    holdingSort: string;
+    setHoldingSort: StringSetter;
+  };
+};
 
 type DashboardPipelineControllerInput = {
-  verticals: Record<string, any>[];
-  visibleFlowEvents: Record<string, any>[];
+  verticals: VerticalRecord[];
+  visibleFlowEvents: WorkflowFlowResponse["flow_events"];
   flowEvents: WorkflowFlowResponse["flow_events"];
   flowGraph: GraphResponse;
-  flowGraphMeta: Record<string, any>;
+  flowGraphMeta: WorkflowFlowMeta;
   flowActiveEdgeKeys: Set<string>;
-  selectedFlowSummary: Record<string, any> | null;
+  selectedFlowSummary: FlowEventSummary;
   agentsResp: AgentsResponse;
   flowView: string;
   setFlowView: StringSetter;
@@ -47,12 +71,12 @@ type DashboardPipelineControllerInput = {
   selectedFlowEdgeID: string;
   setSelectedFlowEdgeID: StringSetter;
   flowViewGraph: GraphResponse;
-  setFlowViewGraph: (value: GraphResponse) => void;
+  setFlowViewGraph: GraphSetter;
   graphFullscreen: boolean;
   setGraphFullscreen: BoolSetter;
   graph: GraphResponse;
   graphViewGraph: GraphResponse;
-  setGraphViewGraph: (value: GraphResponse) => void;
+  setGraphViewGraph: GraphSetter;
   graphMode: string;
   setGraphMode: StringSetter;
   graphVertical: string;
@@ -68,9 +92,9 @@ type DashboardPipelineControllerInput = {
   inspectAgent: (agentID: string) => void;
   navigateToTask: (taskID: string) => void;
   funnel: FunnelResponse;
-  shardScans: Record<string, any>[];
-  shardScanDetails: Record<string, any>;
-  traceRows: Record<string, any>[];
+  shardScans: ShardScanRecord[];
+  shardScanDetails: Record<string, ShardDetailRecord[]>;
+  traceRows: TraceRecord[];
   traceVertical: string;
   setTraceVertical: StringSetter;
   selectedShardScanID: string;
@@ -78,7 +102,7 @@ type DashboardPipelineControllerInput = {
   loadTrace: (vertical?: string) => Promise<unknown>;
   loadShardScanDetail: (scanID?: string) => Promise<unknown>;
   shardAction: (scanID: string, shardID: string, action: string) => Promise<void>;
-  holdingViewState: { domain: any; controls: any };
+  holdingViewState: HoldingViewState;
   openHoldingVerticalDetail: (verticalID: string) => Promise<void> | void;
 };
 

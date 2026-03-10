@@ -1,3 +1,7 @@
+import type { AgentsResponse, MailboxResponse, TasksResponse } from "../../types/core.ts";
+import type { HoldingResponse } from "../../types/portfolio.ts";
+import type { IncidentRecord } from "../../types/runtime.ts";
+
 function clampPriority(n: number): number {
   return Number.isFinite(n) ? n : 0;
 }
@@ -18,11 +22,11 @@ export function deriveOverviewState({
   tasksResp,
   holdingData,
 }: {
-  agentsResp: Record<string, any>;
-  incidentsData: any[];
-  mailbox: Record<string, any>;
-  tasksResp: Record<string, any>;
-  holdingData: Record<string, any>;
+  agentsResp: AgentsResponse;
+  incidentsData: IncidentRecord[];
+  mailbox: MailboxResponse;
+  tasksResp: TasksResponse;
+  holdingData: HoldingResponse;
 }): { urgentNow: UrgentItem[] } {
   const agents = Array.isArray(agentsResp?.agents) ? agentsResp.agents : [];
   const incidents = Array.isArray(incidentsData) ? incidentsData : [];

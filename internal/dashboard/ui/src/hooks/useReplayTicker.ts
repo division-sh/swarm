@@ -1,10 +1,11 @@
 import { useEffect } from "react";
+import type { FlowEventRecord } from "../types/workflow.ts";
 
 type ReplayTickerInput = {
   flowView: string;
   flowReplayOn: boolean;
   flowReplaySpeed: number;
-  flowEvents: Record<string, any>[];
+  flowEvents: FlowEventRecord[];
   setFlowReplayIndex: (value: number | ((prev: number) => number)) => void;
   setFlowReplayOn: (value: boolean) => void;
 };

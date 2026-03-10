@@ -1,3 +1,5 @@
+import type { EventFilter, IncidentFilter, LogFilter } from "../../types/runtime.ts";
+
 export const EMPTY_EVENT_FILTER = { type: "", source: "", vertical: "", component: "", level: "", subscriber: "" };
 export const EMPTY_LOG_FILTER = { type: "", source: "", vertical: "", component: "", level: "", subscriber: "" };
 export const DEFAULT_INCIDENTS_FILTER = { sinceHours: 24, mcpOnly: true, level: "warn", component: "" };
@@ -7,9 +9,26 @@ function trim(value: unknown) {
 }
 
 type FocusInput = {
-  events: { state?: Record<string, any> };
-  logs: { state?: Record<string, any> };
-  incidents: { state?: Record<string, any> };
+  events: {
+    state?: {
+      eventsFilter?: EventFilter;
+      eventsRuntimeErrorsOnly?: boolean;
+      eventsIncludeRuntime?: boolean;
+    };
+  };
+  logs: {
+    state?: {
+      logsFilter?: LogFilter;
+      logsRuntimeErrorsOnly?: boolean;
+    };
+  };
+  incidents: {
+    state?: {
+      incidentsFilter?: IncidentFilter;
+      selectedIncidentCode?: string;
+      selectedIncidentAgent?: string;
+    };
+  };
 };
 
 export function deriveObservabilityFocus({ events, logs, incidents }: FocusInput) {

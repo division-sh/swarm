@@ -1,5 +1,21 @@
 import React, { useCallback } from "react";
 import AgentDropdown from "../features/agents/AgentDropdown.tsx";
+import type { AgentRecord } from "../types/core.ts";
+import type { ConversationMessage, EventFilter, LogFilter } from "../types/runtime.ts";
+
+type ModalContent = {
+  title?: string;
+  text?: string;
+  [key: string]: unknown;
+};
+
+type AgentNavigationOptions = {
+  eventID?: string;
+  convID?: string;
+  agentID?: string;
+  eventsSubscriber?: string;
+  logsAgent?: string;
+};
 
 type NavigationActionsInput = {
   addToast: (message: string, type?: string) => void;
@@ -8,17 +24,17 @@ type NavigationActionsInput = {
   activeSubview: string;
   setActiveView: (view: string) => void;
   setViewRoute: (view: string, subview?: string) => void;
-  setModalContent: (value: Record<string, any>) => void;
+  setModalContent: (value: ModalContent) => void;
   setControlTarget: (value: string) => void;
   setSelectedAgentID: (value: string) => void;
   setSelectedTaskID: (value: string) => void;
   setTaskStatus: (value: string) => void;
   setSelectedEventID: (value: string) => void;
   setSelectedConv: (value: string) => void;
-  setEventsFilter: (value: Record<string, any>) => void;
+  setEventsFilter: (value: EventFilter) => void;
   setEventsIncludeRuntime: (value: boolean) => void;
   setEventsRuntimeErrorsOnly: (value: boolean) => void;
-  setLogsFilter: (value: Record<string, any>) => void;
+  setLogsFilter: (value: LogFilter) => void;
   setLogsRuntimeErrorsOnly: (value: boolean) => void;
 };
 
@@ -62,7 +78,7 @@ export function useNavigationActions({
     }
   }, []);
 
-  const handleAgentNavigate = useCallback((view: string, opts?: Record<string, any>) => {
+  const handleAgentNavigate = useCallback((view: string, opts?: AgentNavigationOptions) => {
     let forcedSubview = "";
     if (opts && opts.eventID) {
       setSelectedEventID(opts.eventID);
@@ -102,7 +118,7 @@ export function useNavigationActions({
     routeForView,
   ]);
 
-  const copyConversation = useCallback((agentID: string, messages: Record<string, any>[]) => {
+  const copyConversation = useCallback((agentID: string, messages: ConversationMessage[]) => {
     const msgs = messages || [];
     if (msgs.length === 0) {
       addToast("No messages to copy", "error");
@@ -114,7 +130,7 @@ export function useNavigationActions({
       const content = typeof m.content === "string"
         ? m.content
         : Array.isArray(m.content)
-          ? m.content.map((c: Record<string, any>) => c.text || c.type || "").join("\n")
+          ? m.content.map((c) => c.text || c.type || "").join("\n")
           : JSON.stringify(m.content, null, 2);
       return `[${label}]\n${content}`;
     }).join("\n\n---\n\n");
@@ -137,14 +153,14 @@ export function useNavigationActions({
     setViewRoute("operations", "tasks");
   }, [setSelectedTaskID, setTaskStatus, setViewRoute]);
 
-  const renderAgentDropdown = useCallback((agent: Record<string, any>) => React.createElement(AgentDropdown, {
+  const renderAgentDropdown = useCallback((agent: AgentRecord) => React.createElement(AgentDropdown, {
     agent,
     addToast,
     defaultSection: activeSubview === "conversation" || activeSubview === "actions" ? activeSubview : "context",
     onNavigate: handleAgentNavigate,
     onOpenControl: openControl,
     onNavigateTask: navigateToTask,
-    onOpenMessage: (message: Record<string, any>) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
+    onOpenMessage: (message: ConversationMessage) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
     onCopyConversation: copyConversation,
     onAction: () => {
       loadAgents().catch(() => {});

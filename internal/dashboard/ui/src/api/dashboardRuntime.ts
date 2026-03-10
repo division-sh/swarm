@@ -1,8 +1,11 @@
 import { fetchJSON } from "./client.ts";
 import type {
   ConversationDetail,
+  ConversationRecord,
+  EventDetail,
   EventFilter,
   EventRecord,
+  IncidentArtifacts,
   IncidentFilter,
   IncidentRecord,
   LogFilter,
@@ -16,7 +19,7 @@ export async function fetchEvents(eventsFilter?: EventFilter): Promise<EventReco
   if (eventsFilter?.vertical) p.set("vertical", eventsFilter.vertical);
   if (eventsFilter?.subscriber) p.set("subscriber", eventsFilter.subscriber);
   p.set("limit", "200");
-  const d = await fetchJSON<Record<string, any>>(`/api/events?${p.toString()}`);
+  const d = await fetchJSON<{ events?: EventRecord[] }>(`/api/events?${p.toString()}`);
   return d.events || [];
 }
 
@@ -30,7 +33,7 @@ export async function fetchRuntimeLogs(eventsFilter?: EventFilter, eventsRuntime
   if (eventsFilter?.level) p.set("level", eventsFilter.level);
   else if (eventsRuntimeErrorsOnly) p.set("level", "error");
   p.set("limit", "200");
-  const d = await fetchJSON<Record<string, any>>(`/api/runtime/logs?${p.toString()}`);
+  const d = await fetchJSON<{ runtime_logs?: RuntimeLogRecord[] }>(`/api/runtime/logs?${p.toString()}`);
   return d.runtime_logs || [];
 }
 
@@ -45,7 +48,7 @@ export async function fetchLogs(logsFilter?: LogFilter, logsOrder?: string, logs
   else if (logsRuntimeErrorsOnly) p.set("level", "error");
   p.set("order", logsOrder || "desc");
   p.set("limit", "200");
-  const d = await fetchJSON<Record<string, any>>(`/api/runtime/logs?${p.toString()}`);
+  const d = await fetchJSON<{ runtime_logs?: RuntimeLogRecord[] }>(`/api/runtime/logs?${p.toString()}`);
   return d.runtime_logs || [];
 }
 
@@ -56,7 +59,7 @@ export async function fetchIncidents(incidentsFilter?: IncidentFilter): Promise<
   if (incidentsFilter?.level) p.set("level", incidentsFilter.level);
   if (incidentsFilter?.component) p.set("component", incidentsFilter.component);
   p.set("limit", "2000");
-  const d = await fetchJSON<Record<string, any>>(`/api/runtime/incidents?${p.toString()}`);
+  const d = await fetchJSON<{ incidents?: IncidentRecord[] }>(`/api/runtime/incidents?${p.toString()}`);
   return d.incidents || [];
 }
 
@@ -67,30 +70,30 @@ export async function fetchIncidentLogs(code?: string): Promise<RuntimeLogRecord
   p.set("error_code", c);
   p.set("order", "desc");
   p.set("limit", "250");
-  const d = await fetchJSON<Record<string, any>>(`/api/runtime/logs?${p.toString()}`);
+  const d = await fetchJSON<{ runtime_logs?: RuntimeLogRecord[] }>(`/api/runtime/logs?${p.toString()}`);
   return d.runtime_logs || [];
 }
 
-export async function fetchIncidentArtifacts(agentID?: string): Promise<Record<string, any> | null> {
+export async function fetchIncidentArtifacts(agentID?: string): Promise<IncidentArtifacts | null> {
   const id = String(agentID || "").trim();
   if (!id) return null;
-  return fetchJSON<Record<string, any>>(`/dashboard/api/conversations/${encodeURIComponent(id)}/artifacts?lines=120`);
+  return fetchJSON<IncidentArtifacts>(`/dashboard/api/conversations/${encodeURIComponent(id)}/artifacts?lines=120`);
 }
 
-export async function fetchEventDetail(id?: string): Promise<Record<string, any> | null> {
+export async function fetchEventDetail(id?: string): Promise<EventDetail | null> {
   const value = String(id || "").trim();
   if (!value) return null;
-  return fetchJSON<Record<string, any>>(`/api/events/${encodeURIComponent(value)}`);
+  return fetchJSON<EventDetail>(`/api/events/${encodeURIComponent(value)}`);
 }
 
-export async function fetchConversations(): Promise<Record<string, any>[]> {
-  const d = await fetchJSON<Record<string, any>>("/dashboard/api/conversations?limit=100");
+export async function fetchConversations(): Promise<ConversationRecord[]> {
+  const d = await fetchJSON<{ conversations?: ConversationRecord[] }>("/dashboard/api/conversations?limit=100");
   return d.conversations || [];
 }
 
 export async function fetchConversationDetail(agentID?: string): Promise<ConversationDetail> {
   const id = String(agentID || "").trim();
   if (!id) return { messages: [], turns: [] };
-  const d = await fetchJSON<Record<string, any>>(`/dashboard/api/conversations/${encodeURIComponent(id)}`);
+  const d = await fetchJSON<Partial<ConversationDetail>>(`/dashboard/api/conversations/${encodeURIComponent(id)}`);
   return { messages: d.messages || [], turns: d.turns || [] };
 }

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { FunnelResponse, HoldingResponse } from "../../types/portfolio.ts";
+import type { FunnelResponse, FunnelStuckRecord, HoldingResponse, ShardScanRecord, VerticalRecord } from "../../types/portfolio.ts";
 
 const STALE_STAGE_HOURS = 72;
 
@@ -10,7 +10,9 @@ function ageHours(timestamp: string | null | undefined) {
   return Math.max(0, Math.floor((Date.now() - value) / 3600000));
 }
 
-function sortVerticals(rows: Record<string, any>[]) {
+type StaleVerticalRecord = VerticalRecord & { stage_age_hours: number };
+
+function sortVerticals(rows: VerticalRecord[]) {
   return [...rows].sort((a, b) => (
     Number(b.active_timer_count || 0) - Number(a.active_timer_count || 0)
       || Number(b.revision_count || 0) - Number(a.revision_count || 0)
@@ -22,7 +24,7 @@ function sortVerticals(rows: Record<string, any>[]) {
 type PortfolioDerivedStateInput = {
   holdingData: HoldingResponse;
   funnel: FunnelResponse;
-  shardScans: Record<string, any>[];
+  shardScans: ShardScanRecord[];
 };
 
 export function usePortfolioDerivedState({ holdingData, funnel, shardScans }: PortfolioDerivedStateInput) {
@@ -40,7 +42,7 @@ export function usePortfolioDerivedState({ holdingData, funnel, shardScans }: Po
     const revisionedVerticals = sortVerticals(
       verticals.filter((vertical) => Number(vertical.revision_count || 0) > 0),
     );
-    const staleVerticals = sortVerticals(
+    const staleVerticals: StaleVerticalRecord[] = sortVerticals(
       verticals.filter((vertical) => vertical.stage !== "killed" && ageHours(vertical.stage_entered_at) >= STALE_STAGE_HOURS),
     ).map((vertical) => ({ ...vertical, stage_age_hours: ageHours(vertical.stage_entered_at) }));
     const humanNeededVerticals = sortVerticals(
@@ -70,7 +72,7 @@ export function usePortfolioDerivedState({ holdingData, funnel, shardScans }: Po
         revisionedVerticals,
         staleVerticals,
         humanNeededVerticals,
-        stuckVerticals: stuck,
+        stuckVerticals: stuck as FunnelStuckRecord[],
         retryShardScans,
       },
     };

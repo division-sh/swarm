@@ -1,9 +1,24 @@
 import { useDashboardRuntimeQueries } from "./useDashboardRuntimeQueries.ts";
+import type { EventFilter, IncidentFilter, LogFilter } from "../types/runtime.ts";
 
 type RuntimeSourcesInput = {
   activeView: string;
   activeSubview: string;
-  runtimeState: Record<string, any>;
+  runtimeState: {
+    eventsFilter: EventFilter;
+    eventsRuntimeErrorsOnly: boolean;
+    logsFilter: LogFilter;
+    logsOrder: string;
+    logsRuntimeErrorsOnly: boolean;
+    incidentsFilter: IncidentFilter;
+    selectedIncidentCode: string;
+    setSelectedIncidentCode: (value: string | ((current: string) => string)) => void;
+    selectedIncidentAgent: string;
+    setSelectedIncidentAgent: (value: string | ((current: string) => string)) => void;
+    selectedConv: string;
+    setSelectedConv: (value: string | ((current: string) => string)) => void;
+    selectedEventID: string;
+  };
 };
 
 export function useDashboardRuntimeSources({

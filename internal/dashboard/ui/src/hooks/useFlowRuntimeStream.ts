@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { FlowEventRecord } from "../types/workflow.ts";
 
 type FlowRuntimeStreamInput = {
   activeView: string;
@@ -6,7 +7,7 @@ type FlowRuntimeStreamInput = {
   flowView: string;
   flowVertical: string;
   getKey: () => string;
-  patchFlowEvent: (item: Record<string, any>) => void;
+  patchFlowEvent: (item: FlowEventRecord) => void;
 };
 
 export function useFlowRuntimeStream({ activeView, activeSubview, flowView, flowVertical, getKey, patchFlowEvent }: FlowRuntimeStreamInput) {

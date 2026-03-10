@@ -1,11 +1,38 @@
 import { useMemo } from "react";
-import type { AgentRecord, TargetRecord, TasksResponse, MailboxResponse } from "../../types/core.ts";
+import type { AgentRecord, MailboxItem, MailboxResponse, TargetRecord, TaskRecord, TasksResponse } from "../../types/core.ts";
+import type { VerticalRecord } from "../../types/portfolio.ts";
 
 function normalize(value: unknown) {
   return String(value || "").trim();
 }
 
-function verticalKeys(vertical: Record<string, any>) {
+type PortfolioFocusSummary = {
+  key?: string;
+  vertical?: VerticalRecord | null;
+};
+
+type VerticalLinkedRecord = Partial<VerticalRecord & TaskRecord & MailboxItem & TargetRecord & AgentRecord>;
+
+type DownstreamSnapshot = {
+  vertical: VerticalRecord | null;
+  relatedTasks: TaskRecord[];
+  relatedMailbox: MailboxItem[];
+  relatedTargets: TargetRecord[];
+  relatedAgents: AgentRecord[];
+  primaryTask: TaskRecord | null;
+  primaryMailbox: MailboxItem | null;
+  primaryTarget: TargetRecord | null;
+  primaryAgent: AgentRecord | TargetRecord | null;
+  summary: {
+    tasks: number;
+    mailbox: number;
+    pendingMailbox: number;
+    agents: number;
+    targets: number;
+  };
+};
+
+function verticalKeys(vertical: VerticalRecord) {
   const keys = new Set<string>();
   const slug = normalize(vertical?.slug);
   const id = normalize(vertical?.id);
@@ -14,7 +41,7 @@ function verticalKeys(vertical: Record<string, any>) {
   return keys;
 }
 
-function itemVerticalKeys(item: Record<string, any>) {
+function itemVerticalKeys(item: VerticalLinkedRecord) {
   const keys = new Set<string>();
   [
     item?.vertical_slug,
@@ -28,7 +55,7 @@ function itemVerticalKeys(item: Record<string, any>) {
   return keys;
 }
 
-function matchesVertical(item: Record<string, any> | null | undefined, keys: Set<string>) {
+function matchesVertical(item: VerticalLinkedRecord | null | undefined, keys: Set<string>) {
   if (!item || keys.size === 0) return false;
   for (const key of itemVerticalKeys(item)) {
     if (keys.has(key)) return true;
@@ -55,8 +82,7 @@ function sortMailbox(items: MailboxResponse["items"]) {
   ));
 }
 
-function sortAgents(agents: Array<AgentRecord | TargetRecord>) {
-  return [...agents].sort((a, b) => {
+function compareRolePriority(a: { role?: string; state?: string; id?: string; agent_id?: string }, b: { role?: string; state?: string; id?: string; agent_id?: string }) {
     const aRole = String(a.role || "");
     const bRole = String(b.role || "");
     const aScore = aRole.includes("ceo") ? 0 : aRole.includes("coordinator") ? 1 : 2;
@@ -64,7 +90,14 @@ function sortAgents(agents: Array<AgentRecord | TargetRecord>) {
     return aScore - bScore
       || `${a.state || ""}`.localeCompare(`${b.state || ""}`)
       || `${a.id || a.agent_id || ""}`.localeCompare(`${b.id || b.agent_id || ""}`);
-  });
+}
+
+function sortTargets(targets: TargetRecord[]) {
+  return [...targets].sort(compareRolePriority);
+}
+
+function sortAgents(agents: AgentRecord[]) {
+  return [...agents].sort(compareRolePriority);
 }
 
 export function derivePortfolioDownstreamState({
@@ -75,8 +108,8 @@ export function derivePortfolioDownstreamState({
   targets,
   agents,
 }: {
-  verticals: Record<string, any>[];
-  focusSummary: Record<string, any>;
+  verticals: VerticalRecord[];
+  focusSummary: PortfolioFocusSummary;
   tasks: TasksResponse["tasks"];
   mailboxItems: MailboxResponse["items"];
   targets: TargetRecord[];
@@ -88,7 +121,7 @@ export function derivePortfolioDownstreamState({
   const allTargets = Array.isArray(targets) ? targets : [];
   const allAgents = Array.isArray(agents) ? agents : [];
 
-  const byKey: Record<string, any> = {};
+  const byKey: Record<string, DownstreamSnapshot> = {};
 
   for (const vertical of rows) {
     const keys = verticalKeys(vertical);
@@ -96,10 +129,10 @@ export function derivePortfolioDownstreamState({
 
     const relatedTasks = sortTasks(allTasks.filter((task) => matchesVertical(task, keys)));
     const relatedMailbox = sortMailbox(allMailbox.filter((item) => matchesVertical(item, keys)));
-    const relatedTargets = sortAgents(allTargets.filter((target) => matchesVertical(target, keys)));
+    const relatedTargets = sortTargets(allTargets.filter((target) => matchesVertical(target, keys)));
     const relatedAgents = sortAgents(allAgents.filter((agent) => matchesVertical(agent, keys)));
 
-    const snapshot = {
+    const snapshot: DownstreamSnapshot = {
       vertical,
       relatedTasks,
       relatedMailbox,
@@ -151,8 +184,8 @@ export function usePortfolioDownstreamState({
   targets,
   agents,
 }: {
-  verticals: Record<string, any>[];
-  focusSummary: Record<string, any>;
+  verticals: VerticalRecord[];
+  focusSummary: PortfolioFocusSummary;
   tasks: TasksResponse["tasks"];
   mailboxItems: MailboxResponse["items"];
   targets: TargetRecord[];

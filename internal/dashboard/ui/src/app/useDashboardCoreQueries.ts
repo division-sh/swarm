@@ -12,7 +12,7 @@ import {
 } from "../api/dashboardCore.ts";
 import { relTime } from "../lib/format.ts";
 import { dashboardQueryKeys } from "./dashboardQueryKeys.ts";
-import type { AgentsResponse, DigestResponse, HealthResponse, MailboxResponse, OverviewResponse, TargetRecord, TasksResponse } from "../types/core.ts";
+import type { AgentsResponse, DigestResponse, HealthResponse, MailboxResponse, OverviewResponse, TargetRecord, TaskStats, TasksResponse } from "../types/core.ts";
 
 async function runRefetch<T>(refetch: () => Promise<QueryObserverResult<T, Error>>): Promise<T | undefined> {
   const result = await refetch();
@@ -55,7 +55,7 @@ export function useDashboardCoreQueries({
     queryFn: () => fetchTasks(taskStatus),
     refetchInterval: 15000,
   });
-  const taskStatsQuery = useQuery<Record<string, any> | null>({
+  const taskStatsQuery = useQuery<TaskStats | null>({
     queryKey: dashboardQueryKeys.taskStats(),
     queryFn: fetchTaskStats,
     enabled: false,

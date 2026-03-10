@@ -1,3 +1,5 @@
+import type { MailboxItem, MailboxResponse } from "../../types/core.ts";
+
 function normalizePriority(value: unknown): number {
   const v = String(value || "").toLowerCase();
   if (v === "critical") return 4;
@@ -7,7 +9,7 @@ function normalizePriority(value: unknown): number {
   return 0;
 }
 
-function mailboxSort(a: Record<string, any>, b: Record<string, any>): number {
+function mailboxSort(a: MailboxItem, b: MailboxItem): number {
   const pri = normalizePriority(b.priority) - normalizePriority(a.priority);
   if (pri !== 0) return pri;
   return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
@@ -17,7 +19,7 @@ export function deriveMailboxDerivedState({
   mailbox,
   selectedMailboxItem,
 }: {
-  mailbox: Record<string, any>;
+  mailbox: MailboxResponse;
   selectedMailboxItem: string;
 }) {
   const items = Array.isArray(mailbox?.items) ? mailbox.items : [];

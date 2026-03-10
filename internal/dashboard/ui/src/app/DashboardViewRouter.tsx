@@ -3,15 +3,20 @@ import OverviewView from "../features/overview/OverviewView.tsx";
 import DashboardOpsViews from "./DashboardOpsViews.tsx";
 import DashboardRuntimeViews from "./DashboardRuntimeViews.tsx";
 
+type OverviewControllerShape = Parameters<typeof OverviewView>[0];
+
 type DashboardViewRouterProps = {
   activeView: string;
   activeSubview: string;
   setActiveView: (value: string) => void;
   setViewRoute: (view: string, subview?: string) => void;
-  overview: Record<string, any>;
-  runtime: Record<string, any>;
-  pipeline: Record<string, any>;
-  ops: Record<string, any>;
+  overview: OverviewControllerShape["state"] extends never ? never : {
+    state: OverviewControllerShape["state"];
+    actions: OverviewControllerShape["actions"];
+  };
+  runtime: Parameters<typeof DashboardRuntimeViews>[0]["runtime"];
+  pipeline: Parameters<typeof DashboardRuntimeViews>[0]["pipeline"] & Parameters<typeof DashboardOpsViews>[0]["pipeline"];
+  ops: Parameters<typeof DashboardOpsViews>[0]["ops"];
 };
 
 export default function DashboardViewRouter({

@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import type { ControlResult } from "../types/core.ts";
+import type { HoldingVerticalDetail } from "../types/portfolio.ts";
 import type { EventFilter, IncidentFilter, LogFilter } from "../types/runtime.ts";
 import type { GraphResponse } from "../types/workflow.ts";
 
@@ -104,7 +106,7 @@ export function useDashboardOpsState() {
   const [mailboxAction, setMailboxAction] = useState("approve");
   const [mailboxNotes, setMailboxNotes] = useState("");
   const [resetConfirm, setResetConfirm] = useState("");
-  const [controlOutput, setControlOutput] = useState<Record<string, any>>({ ok: true, message: "Ready." });
+  const [controlOutput, setControlOutput] = useState<ControlResult>({ ok: true, message: "Ready." });
 
   return useMemo(() => ({
     mailStatus,
@@ -185,7 +187,7 @@ export function useDashboardPipelineState() {
     loading: false,
     id: "",
     error: "",
-    data: null as Record<string, any> | null,
+    data: null as HoldingVerticalDetail | null,
   });
 
   return useMemo(() => ({

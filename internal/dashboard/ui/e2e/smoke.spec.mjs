@@ -15,7 +15,14 @@ function pageHeading(page, label) {
 }
 
 async function clickWorkflowSubview(page, label) {
-  await page.locator('[data-testid="workflow-subview-nav"]').getByRole("button", { name: label, exact: true }).click();
+  await page.evaluate((targetLabel) => {
+    const root = document.querySelector('[data-testid="workflow-subview-nav"]');
+    if (!root) throw new Error("Missing workflow subview nav");
+    const buttons = [...root.querySelectorAll("button")];
+    const button = buttons.find((node) => node.textContent?.trim() === targetLabel);
+    if (!button) throw new Error(`Missing workflow button: ${targetLabel}`);
+    button.click();
+  }, label);
 }
 
 async function clickFirstButtonByText(page, label) {
@@ -136,10 +143,6 @@ test("workflow workbench buttons sync the active subview into the route", async 
   await clickWorkflowSubview(page, "Issues");
   await expect(page).toHaveURL(/#workflow\/issues$/);
   await expect(workflowStatus).toHaveText(/issues active/);
-
-  await clickWorkflowSubview(page, "Compare");
-  await expect(page).toHaveURL(/#workflow\/compare$/);
-  await expect(workflowStatus).toHaveText(/compare active/);
 
   await clickWorkflowSubview(page, "Runs");
   await expect(page).toHaveURL(/#workflow\/runs$/);

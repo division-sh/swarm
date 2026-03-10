@@ -1,9 +1,11 @@
+import type { HealthResponse } from "../types/core.ts";
+import type { HoldingResponse } from "../types/portfolio.ts";
 import { useHealthContracts } from "../features/health/useHealthContracts.ts";
 import { useHoldingViewState } from "../features/holding/useHoldingViewState.ts";
 
 type ContractsStateInput = {
-  health: Record<string, any>;
-  holdingData: Record<string, any>;
+  health: HealthResponse;
+  holdingData: HoldingResponse;
 };
 
 export function useDashboardContractsState({ health, holdingData }: ContractsStateInput) {

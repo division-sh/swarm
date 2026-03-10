@@ -14,7 +14,7 @@ export async function fetchGraph({
   if ((graphMode || "holding") === "opco" && graphVertical) {
     p.set("vertical", graphVertical);
   }
-  const d = await fetchJSON<Record<string, any>>(`/api/graph?${p.toString()}`);
+  const d = await fetchJSON<GraphResponse>(`/api/graph?${p.toString()}`);
   return (d || { nodes: [], edges: [] }) as GraphResponse;
 }
 

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { HealthResponse, MailboxResponse, TargetRecord, TasksResponse } from "../types/core.ts";
+import type { ControlResult, HealthResponse, LooseRecord, MailboxResponse, TargetRecord, TaskRecord, TaskStats, TasksResponse } from "../types/core.ts";
 import { useControlController } from "../features/control/useControlController.ts";
 import { useHealthController } from "../features/health/useHealthController.ts";
 import { useTasksController } from "../features/tasks/useTasksController.ts";
@@ -12,7 +12,7 @@ type BoolSetter = (value: boolean) => void;
 type DashboardOpsControllerInput = {
   targets: TargetRecord[];
   mailbox: MailboxResponse;
-  controlOutput: string;
+  controlOutput: ControlResult;
   controlTarget: string;
   setControlTarget: StringSetter;
   directiveMessage: string;
@@ -55,10 +55,10 @@ type DashboardOpsControllerInput = {
   resetDBAndSeed: AsyncAction;
   wipeDB: AsyncAction;
   decideMailbox: AsyncAction;
-  quickMailboxDecide: (action: string) => Promise<unknown>;
+  quickMailboxDecide: (id: string, action: string) => Promise<void>;
   tasksResp: TasksResponse;
-  tasksStats: Record<string, any>;
-  selectedTask: Record<string, any> | null;
+  tasksStats: TaskStats | null;
+  selectedTask: TaskRecord | null;
   taskStatus: string;
   setTaskStatus: StringSetter;
   selectedTaskID: string;
@@ -77,10 +77,10 @@ type DashboardOpsControllerInput = {
   completeSelectedTask: AsyncAction;
   rejectSelectedTask: AsyncAction;
   health: HealthResponse;
-  contractsData: Record<string, any>;
-  contractWorkflow: Record<string, any>;
-  contractPlatform: Record<string, any>;
-  contractVerification: Record<string, any>;
+  contractsData: LooseRecord;
+  contractWorkflow: LooseRecord;
+  contractPlatform: LooseRecord;
+  contractVerification: LooseRecord;
   openView: OpenView;
 };
 

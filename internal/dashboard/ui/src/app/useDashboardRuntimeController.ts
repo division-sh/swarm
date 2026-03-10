@@ -1,23 +1,29 @@
 import { useMemo } from "react";
-import type { AgentsResponse, DigestResponse } from "../types/core.ts";
+import type { ReactNode } from "react";
+import type { AgentRecord, AgentsResponse, DigestResponse } from "../types/core.ts";
 import type {
   ConversationDetail,
+  ConversationMessage,
+  ConversationRecord,
+  EventDetail,
   EventFilter,
   EventRecord,
+  IncidentArtifacts,
   IncidentFilter,
   IncidentRecord,
   LogFilter,
   RuntimeLogRecord,
 } from "../types/runtime.ts";
 import { useAgentsController } from "../features/agents/useAgentsController.ts";
+import type { ModalContent } from "./useDashboardUIState.ts";
 
 type AsyncAction = () => Promise<unknown>;
 type StringSetter = (value: string) => void;
 type NullableStringSetter = (value: string | null) => void;
 type FilterSetter<T> = (value: T | ((prev: T) => T)) => void;
 type GroupedAgents = {
-  holding: Record<string, any>[];
-  opcos: Array<{ slug?: string; agents: Record<string, any>[] }>;
+  holding: AgentRecord[];
+  opcos: Array<{ slug?: string; agents: AgentRecord[] }>;
 };
 
 type DashboardRuntimeControllerInput = {
@@ -27,14 +33,14 @@ type DashboardRuntimeControllerInput = {
   setAgentSearch: StringSetter;
   selectedAgentID: string;
   setSelectedAgentID: StringSetter;
-  renderAgentDropdown: (agent: Record<string, any>) => unknown;
+  renderAgentDropdown: (agent: AgentRecord) => ReactNode;
   navigateToTask: (taskID: string) => void;
   digestResp: DigestResponse;
   loadDigest: AsyncAction;
   addToast: (message: string, type?: string) => void;
   filteredEvents: EventRecord[];
   filteredRuntimeLogs: RuntimeLogRecord[];
-  eventDetail: Record<string, any> | null;
+  eventDetail: EventDetail | null;
   eventsFilter: EventFilter;
   setEventsFilter: FilterSetter<EventFilter>;
   eventsIncludeRuntime: boolean;
@@ -58,7 +64,7 @@ type DashboardRuntimeControllerInput = {
   loadLogs: AsyncAction;
   incidentsData: IncidentRecord[];
   selectedIncident: IncidentRecord | null;
-  incidentArtifacts: Record<string, any>[];
+  incidentArtifacts: IncidentArtifacts | null;
   incidentLogs: RuntimeLogRecord[];
   incidentsFilter: IncidentFilter;
   setIncidentsFilter: FilterSetter<IncidentFilter>;
@@ -69,13 +75,13 @@ type DashboardRuntimeControllerInput = {
   loadIncidents: AsyncAction;
   openLogsForAgent: (agentID: string) => void;
   openConvoForAgent: (agentID: string) => void;
-  conversations: Record<string, any>[];
+  conversations: ConversationRecord[];
   conversationDetail: ConversationDetail;
   selectedConv: string;
   setSelectedConv: StringSetter;
   loadConversationDetail: (conversationID: string) => Promise<unknown>;
-  copyConversation: (agentID: string, messages: Record<string, any>[]) => void;
-  setModalContent: (value: Record<string, any>) => void;
+  copyConversation: (agentID: string, messages: ConversationMessage[]) => void;
+  setModalContent: (value: ModalContent) => void;
 };
 
 export function useDashboardRuntimeController({
@@ -200,7 +206,7 @@ export function useDashboardRuntimeController({
         setSelectedConv,
         openConversation: loadConversationDetail,
         copyConversation,
-        openMessage: (message: Record<string, any>) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
+        openMessage: (message: ConversationMessage) => setModalContent({ title: `Message — ${message.role}`, text: message.text }),
       },
     },
   }), [agents, addToast, digestResp, filteredEvents, filteredRuntimeLogs, eventDetail, eventsFilter, eventsIncludeRuntime, eventsRuntimeErrorsOnly, selectedEventID, loadDigest, setEventsFilter, setEventsIncludeRuntime, setEventsRuntimeErrorsOnly, setSelectedEventID, loadEvents, loadRuntimeLogs, filteredLogsData, selectedLog, logsFilter, logsRuntimeErrorsOnly, logsOrder, selectedLogID, setLogsFilter, setLogsRuntimeErrorsOnly, setLogsOrder, setSelectedLogID, loadLogs, incidentsData, selectedIncident, incidentArtifacts, incidentLogs, incidentsFilter, selectedIncidentCode, selectedIncidentAgent, setIncidentsFilter, setSelectedIncidentCode, setSelectedIncidentAgent, loadIncidents, openLogsForAgent, openConvoForAgent, conversations, conversationDetail, selectedConv, setSelectedConv, loadConversationDetail, copyConversation, setModalContent]);

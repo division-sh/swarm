@@ -3,8 +3,22 @@ function trim(value: unknown) {
 }
 
 type FocusInput = {
-  flow: { state?: Record<string, any> };
-  graph: { state?: Record<string, any> };
+  flow: {
+    state?: {
+      flowView?: string;
+      flowVertical?: string;
+      flowStage?: string;
+      flowRubric?: string;
+      selectedFlowNodeID?: string;
+    };
+  };
+  graph: {
+    state?: {
+      graphMode?: string;
+      graphVertical?: string;
+      selectedGraphNodeID?: string;
+    };
+  };
   subview: string;
 };
 

@@ -1,16 +1,37 @@
 import React from "react";
+import type { HealthViewState } from "../features/health/HealthView.tsx";
 import HealthView from "../features/health/HealthView.tsx";
 import OperationsView from "../features/operations/OperationsView.tsx";
 import PortfolioView from "../features/portfolio/PortfolioView.tsx";
+import type { VerticalRecord } from "../types/portfolio.ts";
+
+type RuntimeControllerShape = Parameters<typeof PortfolioView>[0]["runtime"];
+type OpsControllerShape = {
+  control: Parameters<typeof OperationsView>[0]["control"];
+  tasks: Parameters<typeof OperationsView>[0]["tasks"];
+  health: {
+    state: HealthViewState;
+    actions: NonNullable<Parameters<typeof HealthView>[0]["actions"]>;
+  };
+};
+type PipelineControllerShape = {
+  pipeline: Parameters<typeof PortfolioView>[0]["pipeline"];
+  flow: Parameters<typeof PortfolioView>[0]["flow"];
+  graph: Parameters<typeof PortfolioView>[0]["graph"];
+  holding: {
+    state: { holdingData?: { verticals?: VerticalRecord[] } };
+    actions: { openHoldingVerticalDetail: (verticalID: string) => Promise<void> | void };
+  };
+};
 
 type DashboardOpsViewsProps = {
   activeView: string;
   activeSubview: string;
   setActiveView: (value: string) => void;
   setViewRoute: (view: string, subview?: string) => void;
-  runtime: Record<string, any>;
-  ops: Record<string, any>;
-  pipeline: Record<string, any>;
+  runtime: RuntimeControllerShape;
+  ops: OpsControllerShape;
+  pipeline: PipelineControllerShape;
 };
 
 export default function DashboardOpsViews({
@@ -40,7 +61,7 @@ export default function DashboardOpsViews({
     const knownVerticals = Array.isArray(pipeline.holding.state.holdingData?.verticals)
       ? pipeline.holding.state.holdingData.verticals
       : [];
-    const match = knownVerticals.find((item: Record<string, any>) => item.slug === value || item.id === value);
+    const match = knownVerticals.find((item) => item.slug === value || item.id === value);
     if (match?.id) {
       pipeline.holding.actions.openHoldingVerticalDetail(match.id);
     }

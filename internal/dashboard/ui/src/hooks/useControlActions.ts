@@ -1,9 +1,21 @@
 import { useCallback } from "react";
 import { postJSON } from "../api/client.ts";
+import type { ControlResult } from "../types/core.ts";
+
+type CreateVerticalPayload = {
+  name?: string;
+  geography?: string;
+  slug?: string;
+};
+
+type RequeueEventPayload = {
+  eventID?: string;
+  agentID?: string;
+};
 
 type ControlActionsInput = {
   addToast: (message: string, type?: string) => void;
-  runControl: (fn: () => Promise<Record<string, any>>) => Promise<Record<string, any>>;
+  runControl: (fn: () => Promise<ControlResult>) => Promise<ControlResult>;
   loadAgents: () => Promise<unknown>;
   loadMailbox: () => Promise<unknown>;
 };
@@ -47,7 +59,7 @@ export function useControlActions({
     await runControl(() => postJSON("/dashboard/api/control/agents/replay", { agent_id: agentID }));
   }, [runControl]);
 
-  const createVertical = useCallback(async (payload: Record<string, any>) => {
+  const createVertical = useCallback(async (payload: CreateVerticalPayload) => {
     await runControl(() => postJSON("/dashboard/api/control/verticals/create", {
       name: (payload && payload.name ? payload.name : "").trim(),
       geography: (payload && payload.geography ? payload.geography : "").trim(),
@@ -55,7 +67,7 @@ export function useControlActions({
     }));
   }, [runControl]);
 
-  const requeueEvent = useCallback(async (payload: Record<string, any>) => {
+  const requeueEvent = useCallback(async (payload: RequeueEventPayload) => {
     await runControl(() => postJSON("/dashboard/api/control/events/requeue", {
       event_id: (payload && payload.eventID ? payload.eventID : "").trim(),
       agent_id: payload && payload.agentID ? payload.agentID : undefined,
@@ -76,7 +88,7 @@ export function useControlActions({
 
   const resetDBAndSeed = useCallback(async (confirmText: string, clearConfirm: (value: string) => void) => {
     await runControl(async () => {
-      const out = await postJSON("/dashboard/api/control/runtime", { action: "reset_db", confirm: (confirmText || "").trim(), seed_org: true });
+      const out = await postJSON<ControlResult>("/dashboard/api/control/runtime", { action: "reset_db", confirm: (confirmText || "").trim(), seed_org: true });
       clearConfirm("");
       return out;
     });
@@ -84,7 +96,7 @@ export function useControlActions({
 
   const wipeDB = useCallback(async (confirmText: string, clearConfirm: (value: string) => void) => {
     await runControl(async () => {
-      const out = await postJSON("/dashboard/api/control/runtime", { action: "reset_state", confirm: (confirmText || "").trim() });
+      const out = await postJSON<ControlResult>("/dashboard/api/control/runtime", { action: "reset_state", confirm: (confirmText || "").trim() });
       clearConfirm("");
       return out;
     });

@@ -1,13 +1,109 @@
 import type { AgentsResponse } from "../types/core.ts";
+import type { FunnelResponse, HoldingResponse, ShardDetailRecord, ShardScanRecord, TraceRecord, VerticalRecord } from "../types/portfolio.ts";
+import type { GraphResponse, WorkflowFlowMeta, WorkflowFlowResponse } from "../types/workflow.ts";
 import { useFlowDerivedState } from "../features/flow/useFlowDerivedState.ts";
 import { useGraphSelection } from "../features/graph/useGraphSelection.ts";
 import { useDashboardPipelineController } from "./useDashboardPipelineController.ts";
 
+type StringSetter = (value: string) => void;
+type BoolSetter = (value: boolean) => void;
+type GraphSetter = (value: GraphResponse) => void;
+
+type PipelineState = {
+  flowView: string;
+  setFlowView: StringSetter;
+  flowStage: string;
+  setFlowStage: StringSetter;
+  flowRubric: string;
+  setFlowRubric: StringSetter;
+  flowVertical: string;
+  setFlowVertical: StringSetter;
+  flowStart: string;
+  setFlowStart: StringSetter;
+  flowEnd: string;
+  setFlowEnd: StringSetter;
+  flowReplaySpeed: number;
+  setFlowReplaySpeed: (value: number) => void;
+  flowReplayOn: boolean;
+  setFlowReplayOn: BoolSetter;
+  flowReplayIndex: number;
+  setFlowReplayIndex: (value: number | ((prev: number) => number)) => void;
+  selectedFlowNodeID: string;
+  setSelectedFlowNodeID: StringSetter;
+  selectedFlowEdgeID: string;
+  setSelectedFlowEdgeID: StringSetter;
+  flowViewGraph: GraphResponse;
+  setFlowViewGraph: GraphSetter;
+  graphFullscreen: boolean;
+  setGraphFullscreen: BoolSetter;
+  graphViewGraph: GraphResponse;
+  setGraphViewGraph: GraphSetter;
+  graphMode: string;
+  setGraphMode: StringSetter;
+  graphVertical: string;
+  setGraphVertical: StringSetter;
+  selectedGraphNodeID: string;
+  setSelectedGraphNodeID: StringSetter;
+  selectedGraphEdgeID: string;
+  setSelectedGraphEdgeID: StringSetter;
+  traceVertical: string;
+  setTraceVertical: StringSetter;
+  selectedShardScanID: string;
+  setSelectedShardScanID: StringSetter;
+};
+
+type PortfolioData = {
+  verticals: VerticalRecord[];
+  funnel: FunnelResponse;
+  shardScans: ShardScanRecord[];
+  shardScanDetails: Record<string, ShardDetailRecord[]>;
+  traceRows: TraceRecord[];
+};
+
+type WorkflowData = {
+  graph: GraphResponse;
+  flowGraph: GraphResponse;
+  flowGraphMeta: WorkflowFlowMeta;
+  flowEvents: WorkflowFlowResponse["flow_events"];
+};
+
+type PipelineNavigationActions = {
+  openControl: (agentID: string) => void;
+  inspectAgent: (agentID: string) => void;
+  navigateToTask: (taskID: string) => void;
+};
+
+type PipelineControlActions = {
+  restartAgent: (agentID: string) => void;
+};
+
+type HoldingViewState = {
+  domain: {
+    holdingData: HoldingResponse;
+    holdingVisibleVerticals: VerticalRecord[];
+    holdingWorkflowSummary: {
+      drift: number;
+      timers: number;
+      revisions: number;
+    };
+    holdingColumns: Array<{ key: string; label: string; stages: string[]; items: VerticalRecord[] }>;
+    validationGateData: { stages: string[] };
+  };
+  controls: {
+    holdingSearch: string;
+    setHoldingSearch: StringSetter;
+    holdingWorkflowFilter: string;
+    setHoldingWorkflowFilter: StringSetter;
+    holdingSort: string;
+    setHoldingSort: StringSetter;
+  };
+};
+
 type PipelineAssemblyInput = {
   agentsResp: AgentsResponse;
-  pipelineState: Record<string, any>;
-  portfolioData: Record<string, any>;
-  workflowData: Record<string, any>;
+  pipelineState: PipelineState;
+  portfolioData: PortfolioData;
+  workflowData: WorkflowData;
   loaders: {
     loadVerticals: () => Promise<unknown>;
     loadGraph: () => Promise<unknown>;
@@ -18,9 +114,9 @@ type PipelineAssemblyInput = {
     openHoldingVerticalDetail: (verticalID: string) => Promise<void> | void;
   };
   addToast: (message: string, type?: string) => void;
-  navigationActions: Record<string, any>;
-  controlActions: Record<string, any>;
-  holdingViewState: { domain: any; controls: any };
+  navigationActions: PipelineNavigationActions;
+  controlActions: PipelineControlActions;
+  holdingViewState: HoldingViewState;
 };
 
 export function useDashboardPipelineAssembly({
@@ -64,7 +160,7 @@ export function useDashboardPipelineAssembly({
     flowEvents: workflowData.flowEvents,
     flowGraph: workflowData.flowGraph,
     flowGraphMeta: workflowData.flowGraphMeta,
-    flowActiveEdgeKeys: flowDerived.flowActiveEdgeKeys as Set<string>,
+    flowActiveEdgeKeys: flowDerived.flowActiveEdgeKeys,
     selectedFlowSummary: flowDerived.selectedFlowSummary,
     agentsResp,
     flowView: pipelineState.flowView,

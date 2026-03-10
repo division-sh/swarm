@@ -3,14 +3,33 @@ import AgentsView from "../features/agents/AgentsView.tsx";
 import DigestView from "../features/digest/DigestView.tsx";
 import ObservabilityView from "../features/observability/ObservabilityView.tsx";
 import WorkflowView from "../features/workflow/WorkflowView.tsx";
+import type { VerticalRecord } from "../types/portfolio.ts";
+
+type RuntimeControllerShape = {
+  agents: Parameters<typeof AgentsView>[0];
+  conversations: { state: { selectedConv: string } };
+  digest: Parameters<typeof DigestView>[0];
+  events: Parameters<typeof ObservabilityView>[0]["events"];
+  logs: Parameters<typeof ObservabilityView>[0]["logs"];
+  incidents: Parameters<typeof ObservabilityView>[0]["incidents"];
+};
+
+type PipelineControllerShape = {
+  flow: Parameters<typeof WorkflowView>[0]["flow"];
+  graph: Parameters<typeof WorkflowView>[0]["graph"];
+  holding: {
+    state: { holdingData?: { verticals?: VerticalRecord[] } };
+    actions: { openHoldingVerticalDetail: (verticalID: string) => Promise<void> | void };
+  };
+};
 
 type DashboardRuntimeViewsProps = {
   activeView: string;
   activeSubview: string;
   setActiveView: (value: string) => void;
   setViewRoute: (view: string, subview?: string) => void;
-  runtime: Record<string, any>;
-  pipeline: Record<string, any>;
+  runtime: RuntimeControllerShape;
+  pipeline: PipelineControllerShape;
 };
 
 export default function DashboardRuntimeViews({
@@ -59,7 +78,7 @@ export default function DashboardRuntimeViews({
     const knownVerticals = Array.isArray(pipeline.holding.state.holdingData?.verticals)
       ? pipeline.holding.state.holdingData.verticals
       : [];
-    const match = knownVerticals.find((item: Record<string, any>) => item.slug === value || item.id === value);
+    const match = knownVerticals.find((item) => item.slug === value || item.id === value);
     if (match?.id) {
       pipeline.holding.actions.openHoldingVerticalDetail(match.id);
     }

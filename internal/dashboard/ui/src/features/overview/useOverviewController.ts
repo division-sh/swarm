@@ -8,6 +8,7 @@ import type {
   TasksResponse,
 } from "../../types/core.ts";
 import type { FunnelResponse, HoldingResponse } from "../../types/portfolio.ts";
+import type { IncidentRecord } from "../../types/runtime.ts";
 import { deriveOverviewState } from "./useOverviewDerivedState.ts";
 
 type OpenView = (view: string, subview?: string) => void;
@@ -16,7 +17,7 @@ type OverviewControllerInput = {
   overview: OverviewResponse;
   digestResp: DigestResponse;
   agentsResp: AgentsResponse;
-  incidentsData: Record<string, any>[];
+  incidentsData: IncidentRecord[];
   mailbox: MailboxResponse;
   tasksResp: TasksResponse;
   health: HealthResponse;
