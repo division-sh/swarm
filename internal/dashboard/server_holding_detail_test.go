@@ -73,6 +73,24 @@ func TestDashboard_HoldingVerticalDetail_ReturnsArtifactsAndRelatedRecords(t *te
 		t.Fatalf("seed spend_ledger: %v", err)
 	}
 
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_stage, entered_stage_at,
+			transition_history, accumulator_state, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'empire_vertical_pipeline', '2.1.0', 'ready_for_review', now() - interval '15 minutes',
+			$2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, now(), now()
+		)
+	`,
+		verticalID,
+		`[{"transition_id":"branding_to_ready","from":"branding","to":"ready_for_review","trigger_event_id":"evt-1","fired_at":"2026-03-07T18:40:00Z","guards_evaluated":["gate_g4_branding"]}]`,
+		`{"pipeline-coordinator":{"gates":{"research":true,"spec":true,"cto":true,"brand":true}}}`,
+		`[{"timer_id":"portfolio_digest_timer","created_at":"2026-03-07T18:45:00Z","fires_at":"2026-03-08T00:45:00Z","cancelled":false}]`,
+		`{"revision_count":2,"source":"test"}`,
+	); err != nil {
+		t.Fatalf("seed workflow_instances: %v", err)
+	}
+
 	pg := &store.PostgresStore{DB: db}
 	srv := NewServer(db, &config.Config{}, pg, pg, nil)
 	h := srv.Handler()
@@ -122,6 +140,19 @@ func TestDashboard_HoldingVerticalDetail_ReturnsArtifactsAndRelatedRecords(t *te
 	}
 	if got, ok := spend["all_time_cents"].(float64); !ok || got < 3200 {
 		t.Fatalf("expected all_time_cents >= 3200, got %#v", spend["all_time_cents"])
+	}
+	workflowState, _ := out["workflow_state"].(map[string]any)
+	if workflowState == nil {
+		t.Fatalf("missing workflow_state payload: %s", w.Body.String())
+	}
+	if got := workflowState["workflow_version"]; got != "2.1.0" {
+		t.Fatalf("expected workflow_version 2.1.0, got %#v", got)
+	}
+	if got, ok := workflowState["transition_count"].(float64); !ok || got != 1 {
+		t.Fatalf("expected transition_count 1, got %#v", workflowState["transition_count"])
+	}
+	if got, ok := workflowState["active_timer_count"].(float64); !ok || got != 1 {
+		t.Fatalf("expected active_timer_count 1, got %#v", workflowState["active_timer_count"])
 	}
 }
 

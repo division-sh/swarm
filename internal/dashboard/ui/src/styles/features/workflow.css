@@ -1,0 +1,30 @@
+/* --- Workflow Workbench --- */
+.workflow-workbench-shell {
+  min-height: 76vh;
+}
+
+.workflow-workbench-body {
+  height: 76vh;
+  padding: 0;
+}
+
+.workflow-dockview {
+  height: 100%;
+  width: 100%;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+
+.workflow-dockview .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 0 var(--accent-border);
+}
+
+.workflow-dock-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 180px;
+  padding: 16px;
+  text-align: center;
+  color: var(--text-2);
+}

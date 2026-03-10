@@ -27,23 +27,29 @@ type graphNode struct {
 }
 
 type graphEdge struct {
-	From              string   `json:"from"`
-	To                string   `json:"to"`
-	Kind              string   `json:"kind"`   // routing | management | subscription | producer | message | mailbox
-	Label             string   `json:"label"`  // e.g. event_pattern or "manages"
-	Status            string   `json:"status"` // active | proposed | deactivated
-	Source            string   `json:"source"` // bootstrap | seeded | discovered | template
-	Reason            string   `json:"reason,omitempty"`
-	EventType         string   `json:"event_type,omitempty"`
-	Stages            []string `json:"stages,omitempty"`
-	Rubrics           []string `json:"rubrics,omitempty"`
-	Producers         []string `json:"producers,omitempty"`
-	Consumers         []string `json:"consumers,omitempty"`
-	SchemaRequired    []string `json:"schema_required,omitempty"`
-	SchemaProperties  []string `json:"schema_properties,omitempty"`
-	InterceptorHandle string   `json:"interceptor_handler,omitempty"`
-	Intercepted       bool     `json:"intercepted,omitempty"`
-	Passthrough       bool     `json:"passthrough,omitempty"`
+	From              string           `json:"from"`
+	To                string           `json:"to"`
+	Kind              string           `json:"kind"`   // routing | management | subscription | producer | message | mailbox
+	Label             string           `json:"label"`  // e.g. event_pattern or "manages"
+	Status            string           `json:"status"` // active | proposed | deactivated
+	Source            string           `json:"source"` // bootstrap | seeded | discovered | template
+	Reason            string           `json:"reason,omitempty"`
+	EventType         string           `json:"event_type,omitempty"`
+	Stages            []string         `json:"stages,omitempty"`
+	Rubrics           []string         `json:"rubrics,omitempty"`
+	Producers         []string         `json:"producers,omitempty"`
+	Consumers         []string         `json:"consumers,omitempty"`
+	SchemaRequired    []string         `json:"schema_required,omitempty"`
+	SchemaProperties  []string         `json:"schema_properties,omitempty"`
+	InterceptorHandle string           `json:"interceptor_handler,omitempty"`
+	Intercepted       bool             `json:"intercepted,omitempty"`
+	Passthrough       bool             `json:"passthrough,omitempty"`
+	TransitionIDs     []string         `json:"transition_ids,omitempty"`
+	TransitionOwners  []string         `json:"transition_owners,omitempty"`
+	TransitionDetails []map[string]any `json:"transition_details,omitempty"`
+	TimerIDs          []string         `json:"timer_ids,omitempty"`
+	TimerOwners       []string         `json:"timer_owners,omitempty"`
+	TimerDetails      []map[string]any `json:"timer_details,omitempty"`
 }
 
 type flowEventView struct {

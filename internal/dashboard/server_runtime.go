@@ -118,6 +118,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	containers, dockerErr := dockerContainers(ctx)
+	contractSummary := dashboardContractSummary()
+	workflowVersion := ""
+	if workflow, ok := contractSummary["workflow"].(map[string]any); ok {
+		workflowVersion = strings.TrimSpace(asString(workflow["version"]))
+	}
 	out := map[string]any{
 		"generated_at":    s.now().UTC(),
 		"postgres":        postgres,
@@ -125,6 +130,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"auth":            auth,
 		"runtime":         runtimeHealth,
 		"containers":      containers,
+		"contracts":       contractSummary,
+		"workflow_audit":  workflowAuditSummary(ctx, s.db, workflowVersion, s.now()),
 		"vertical_health": verticalHealth,
 	}
 	if dockerErr != nil {
@@ -182,11 +189,11 @@ func (s *Server) handlePipelineHealth(w http.ResponseWriter, r *http.Request) {
 	var validationActive, validationPackaged, validationParked, validationRejected, validationApproved int
 	_ = s.db.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE stage IN ('researching','mvp_speccing','spec_review','cto_spec_review','branding')) AS active,
+			COUNT(*) FILTER (WHERE stage IN ('researching','mvp_speccing','cto_spec_review','branding')) AS active,
 			COUNT(*) FILTER (WHERE stage = 'ready_for_review') AS packaged,
 			COUNT(*) FILTER (WHERE stage = 'marginal_review') AS parked,
 			COUNT(*) FILTER (WHERE stage = 'killed') AS rejected,
-			COUNT(*) FILTER (WHERE stage IN ('approved','building','pre_launch','launched','operating','expanding')) AS approved
+			COUNT(*) FILTER (WHERE stage IN ('approved','full_speccing','building','pre_launch','launched','operating','expanding')) AS approved
 		FROM verticals
 	`).Scan(&validationActive, &validationPackaged, &validationParked, &validationRejected, &validationApproved)
 	validations["active"] = validationActive
@@ -229,7 +236,7 @@ func (s *Server) handlePipelineHealth(w http.ResponseWriter, r *http.Request) {
 	validationAlerts, err := s.db.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(slug, ''), id::text), stage, updated_at
 		FROM verticals
-		WHERE stage IN ('researching','mvp_speccing','spec_review','cto_spec_review','branding','ready_for_review')
+		WHERE stage IN ('researching','mvp_speccing','cto_spec_review','branding','ready_for_review')
 		  AND updated_at <= now() - interval '2 hours'
 		ORDER BY updated_at ASC
 		LIMIT 25

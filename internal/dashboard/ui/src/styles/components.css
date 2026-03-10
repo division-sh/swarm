@@ -1,0 +1,89 @@
+/* --- Toast Notifications --- */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 380px;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  border: 1px solid var(--border-mid);
+  background: var(--elevated);
+  color: var(--text-1);
+  box-shadow: var(--shadow-lg);
+  animation: toastIn 0.3s ease-out;
+  pointer-events: auto;
+}
+
+.toast-success {
+  border-color: rgba(52, 211, 153, 0.30);
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.12) 0%, var(--elevated) 100%);
+  color: var(--good);
+}
+
+.toast-error {
+  border-color: rgba(248, 113, 113, 0.30);
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.12) 0%, var(--elevated) 100%);
+  color: var(--bad);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* --- Copy ID --- */
+.copy-id {
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.copy-id:hover {
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.copy-id.copied {
+  color: var(--good);
+  background: var(--good-bg);
+}
+
+/* --- Tab Badges --- */
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.tab-badge-danger {
+  background: var(--bad-bg);
+  color: var(--bad);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.tab-badge-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}

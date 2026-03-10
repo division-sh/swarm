@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
 func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
@@ -18,6 +20,17 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	parseJSONDoc := func(raw []byte) any {
+		trimmed := strings.TrimSpace(string(raw))
+		if trimmed == "" || trimmed == "null" || trimmed == "{}" || trimmed == "[]" {
+			return nil
+		}
+		var out any
+		if err := json.Unmarshal([]byte(trimmed), &out); err != nil {
+			return trimmed
+		}
+		return out
+	}
 
 	// Q1 — Campaigns
 	campaigns := make([]map[string]any, 0, 50)
@@ -77,8 +90,16 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		       v.stage, COALESCE(v.mode,'factory'),
 		       COALESCE((v.scores->>'composite_score')::text,''),
 		       COALESCE(v.kill_reason,''), COALESCE(v.killed_at_stage,''),
-		       COALESCE(v.created_at, now()), COALESCE(v.updated_at, now()), v.approved_at, v.parked_at, v.launched_at
-		FROM verticals v ORDER BY v.updated_at DESC LIMIT 500
+		       COALESCE(v.created_at, now()), COALESCE(v.updated_at, now()), v.approved_at, v.parked_at, v.launched_at,
+		       COALESCE(wi.workflow_name, ''), COALESCE(wi.workflow_version, ''), COALESCE(wi.current_stage, ''),
+		       wi.entered_stage_at,
+		       COALESCE(wi.metadata, '{}'::jsonb),
+		       COALESCE(wi.timer_state, '[]'::jsonb),
+		       COALESCE(wi.transition_history, '[]'::jsonb)
+		FROM verticals v
+		LEFT JOIN workflow_instances wi ON wi.instance_id = v.id
+		ORDER BY v.updated_at DESC
+		LIMIT 500
 	`)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -87,10 +108,14 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 	for vertRows.Next() {
 		var id, slug, name, geo, stage, mode, composite, killReason, killedAtStage string
 		var createdAt, updatedAt time.Time
-		var approvedAt, parkedAt, launchedAt sql.NullTime
+		var approvedAt, parkedAt, launchedAt, enteredStageAt sql.NullTime
+		var workflowName, workflowVersion, workflowCurrentStage string
+		var workflowMetaRaw, workflowTimerRaw, workflowTransitionsRaw []byte
 		if err := vertRows.Scan(&id, &slug, &name, &geo, &stage, &mode,
 			&composite, &killReason, &killedAtStage,
-			&createdAt, &updatedAt, &approvedAt, &parkedAt, &launchedAt); err != nil {
+			&createdAt, &updatedAt, &approvedAt, &parkedAt, &launchedAt,
+			&workflowName, &workflowVersion, &workflowCurrentStage, &enteredStageAt,
+			&workflowMetaRaw, &workflowTimerRaw, &workflowTransitionsRaw); err != nil {
 			vertRows.Close()
 			writeErr(w, http.StatusInternalServerError, err)
 			return
@@ -107,6 +132,38 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 			"killed_at_stage": killedAtStage,
 			"created_at":      createdAt,
 			"updated_at":      updatedAt,
+		}
+		if strings.TrimSpace(workflowName) != "" {
+			v["workflow_name"] = workflowName
+		}
+		if strings.TrimSpace(workflowVersion) != "" {
+			v["workflow_version"] = workflowVersion
+		}
+		if strings.TrimSpace(workflowCurrentStage) != "" {
+			v["workflow_current_stage"] = workflowCurrentStage
+		}
+		if enteredStageAt.Valid {
+			v["stage_entered_at"] = enteredStageAt.Time
+		}
+		if metadata, ok := parseJSONDoc(workflowMetaRaw).(map[string]any); ok {
+			v["workflow_metadata"] = metadata
+			if revisionCount := metadata["revision_count"]; revisionCount != nil {
+				v["revision_count"] = revisionCount
+			}
+		}
+		if timers, ok := parseJSONDoc(workflowTimerRaw).([]any); ok {
+			activeTimers := 0
+			for _, raw := range timers {
+				timer, _ := raw.(map[string]any)
+				cancelled, _ := timer["cancelled"].(bool)
+				if !cancelled {
+					activeTimers++
+				}
+			}
+			v["active_timer_count"] = activeTimers
+		}
+		if transitions, ok := parseJSONDoc(workflowTransitionsRaw).([]any); ok {
+			v["transition_count"] = len(transitions)
 		}
 		if approvedAt.Valid {
 			v["approved_at"] = approvedAt.Time
@@ -154,6 +211,27 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		FROM verticals
 	`).Scan(&sTotal, &sInPipeline, &sKilled, &sDiscovered)
 
+	workflowSummary := map[string]int{
+		"drift":             0,
+		"active_timers":     0,
+		"revisioned":        0,
+		"stage_entered_set": 0,
+	}
+	for _, raw := range verts {
+		if workflowStage := strings.TrimSpace(asString(raw["workflow_current_stage"])); workflowStage != "" && workflowStage != strings.TrimSpace(asString(raw["stage"])) {
+			workflowSummary["drift"]++
+		}
+		if n := intFromAny(raw["active_timer_count"]); n > 0 {
+			workflowSummary["active_timers"]++
+		}
+		if n := intFromAny(raw["revision_count"]); n > 0 {
+			workflowSummary["revisioned"]++
+		}
+		if raw["stage_entered_at"] != nil {
+			workflowSummary["stage_entered_set"]++
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"generated_at": s.now().UTC(),
 		"campaigns":    campaigns,
@@ -165,6 +243,7 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 			"killed":      sKilled,
 			"discovered":  sDiscovered,
 		},
+		"workflow_summary": workflowSummary,
 	})
 }
 
@@ -466,7 +545,7 @@ func (s *Server) handleHoldingVerticalDetail(w http.ResponseWriter, r *http.Requ
 		WHERE COALESCE(vertical_id::text,'') = $1
 	`, verticalID).Scan(&spendAll, &spendLast30)
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"generated_at": s.now().UTC(),
 		"vertical":     vertical,
 		"agents":       agents,
@@ -476,7 +555,36 @@ func (s *Server) handleHoldingVerticalDetail(w http.ResponseWriter, r *http.Requ
 			"all_time_cents": spendAll,
 			"last_30d_cents": spendLast30,
 		},
-	})
+	}
+
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(s.db)
+	if instance, ok, err := workflowStore.Load(ctx, verticalID); err == nil && ok {
+		activeTimers := 0
+		for _, timer := range instance.TimerState {
+			if !timer.Cancelled {
+				activeTimers++
+			}
+		}
+		response["workflow_state"] = map[string]any{
+			"instance_id":        instance.InstanceID,
+			"workflow_name":      instance.WorkflowName,
+			"workflow_version":   instance.WorkflowVersion,
+			"current_stage":      instance.CurrentStage,
+			"entered_stage_at":   instance.EnteredStageAt,
+			"transition_history": instance.TransitionHistory,
+			"transition_count":   len(instance.TransitionHistory),
+			"accumulator_state":  instance.AccumulatorState,
+			"timer_state":        instance.TimerState,
+			"active_timer_count": activeTimers,
+			"metadata":           instance.Metadata,
+			"created_at":         instance.CreatedAt,
+			"updated_at":         instance.UpdatedAt,
+		}
+	} else if err != nil {
+		response["workflow_state_error"] = err.Error()
+	}
+
+	writeJSON(w, http.StatusOK, response)
 }
 
 func enrichHoldingVerticalArtifacts(vertical map[string]any, recentEvents []map[string]any) {
@@ -754,4 +862,19 @@ func (s *Server) handleVerticalTrace(w http.ResponseWriter, r *http.Request) {
 		"last_event":  last,
 		"trace":       trace,
 	})
+}
+
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		return parseInt(strings.TrimSpace(n), 0)
+	default:
+		return 0
+	}
 }

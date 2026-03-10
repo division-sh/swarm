@@ -1,0 +1,131 @@
+/* --- Event Timeline --- */
+.timeline-item {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-left-color 0.2s;
+  border-left: 3px solid transparent;
+}
+
+.timeline-item:hover {
+  background: rgba(255, 255, 255, 0.02);
+  border-left-color: var(--accent-dim);
+}
+
+.timeline-item.selected {
+  background: var(--accent-glow);
+  border-left-color: var(--accent);
+}
+
+.runtime-log-item {
+  border-left-color: rgba(96, 165, 250, 0.55);
+  background: linear-gradient(180deg, rgba(96, 165, 250, 0.08) 0%, rgba(96, 165, 250, 0.03) 100%);
+}
+
+.runtime-level {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border: 1px solid var(--border);
+}
+
+.runtime-level.rl-debug {
+  color: var(--text-3);
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.runtime-level.rl-info {
+  color: var(--info);
+  background: var(--info-bg);
+  border-color: rgba(96, 165, 250, 0.24);
+}
+
+.runtime-level.rl-warn {
+  color: var(--warn);
+  background: var(--warn-bg);
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.runtime-level.rl-error {
+  color: var(--bad);
+  background: var(--bad-bg);
+  border-color: rgba(248, 113, 113, 0.24);
+}
+
+.event-type {
+  font-weight: 700;
+  color: var(--info);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+/* --- Observability Filters --- */
+.obs-filterbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.8fr) auto;
+  gap: 8px;
+  width: 100%;
+}
+
+.obs-filtergroup {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.obs-filtergroup-actions {
+  grid-template-columns: 1fr;
+  align-content: start;
+  min-width: 112px;
+}
+
+.obs-filterlabel {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.obs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-2);
+}
+
+.obs-toggle input {
+  flex-shrink: 0;
+}
+
+/* --- Observability Workbench --- */
+.observability-workbench-shell {
+  margin-top: 8px;
+}
+
+.observability-workbench-body {
+  height: min(74vh, 1000px);
+  padding: 0;
+}
+
+.observability-dockview {
+  height: 100%;
+}

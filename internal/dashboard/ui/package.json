@@ -4,14 +4,54 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild src/main.jsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/@xyflow/react/dist/style.css src/styles.css > dist/dashboard.css"
+    "build": "esbuild src/main.tsx --bundle --minify --format=iife --target=es2020 --outfile=dist/dashboard.app.js && cat node_modules/dockview/dist/styles/dockview.css node_modules/@xyflow/react/dist/style.css src/styles/base.css src/styles/layout.css src/styles/shared/primitives.css src/styles/shared/viewers.css src/styles/shared/cards.css src/styles/components.css src/styles/features/agents.css src/styles/features/workflow.css src/styles/features/graph.css src/styles/features/portfolio.css src/styles/features/operations.css src/styles/features/observability.css src/styles/features/holding.css src/styles/responsive.css > dist/dashboard.css",
+    "check:architecture": "node scripts/check-architecture.mjs",
+    "check:deps": "knip --no-progress",
+    "check:static": "npm run typecheck && npm run lint && npm run check:deps && npm run check:architecture",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "test:control": "tsx --test src/features/control/*.test.ts",
+    "test:a11y": "npm run build && playwright test e2e/a11y.spec.mjs",
+    "test:graph": "tsx --test src/features/graph/*.test.ts",
+    "test:health": "tsx --test src/features/health/*.test.ts",
+    "test:observability": "tsx --test src/features/observability/*.test.ts",
+    "test:operations": "tsx --test src/features/operations/*.test.ts",
+    "test:overview": "tsx --test src/features/overview/*.test.ts",
+    "test:portfolio": "tsx --test src/features/portfolio/*.test.ts",
+    "test:tasks": "tsx --test src/features/tasks/*.test.ts",
+    "test:smoke": "npm run build && playwright test"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@tanstack/react-query": "^5.90.21",
+    "@tanstack/react-table": "^8.21.3",
     "@xyflow/react": "12.8.4",
+    "dagre": "^0.8.5",
+    "dockview": "^5.1.0",
+    "monaco-editor": "^0.55.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
-    "esbuild": "0.24.2"
+    "@axe-core/playwright": "^4.11.1",
+    "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.58.2",
+    "@tanstack/eslint-plugin-query": "^5.91.4",
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "esbuild": "0.24.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.4.0",
+    "knip": "^5.86.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.57.0"
   }
 }
