@@ -65,14 +65,14 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
         <div className="body scroll">
           <div className="control-card">
             <div className="tiny">Target Agent</div>
-            <select value={controlTarget} onChange={(e) => setControlTarget(e.target.value)} style={{ width: "100%", marginTop: 4 }}>
+            <select aria-label="Control target agent" value={controlTarget} onChange={(e) => setControlTarget(e.target.value)} style={{ width: "100%", marginTop: 4 }}>
               {targets.map((t) => <option key={t.agent_id} value={t.agent_id}>{t.agent_id} | {t.role || "-"} | {t.vertical_slug || t.status || "-"}</option>)}
             </select>
           </div>
 
           <div className="control-card">
             <div className="tiny">Directive</div>
-            <textarea style={{ width: "100%", marginTop: 4 }} placeholder="Message to agent" value={directiveMessage} onChange={(e) => setDirectiveMessage(e.target.value)} />
+            <textarea aria-label="Directive message" style={{ width: "100%", marginTop: 4 }} placeholder="Message to agent" value={directiveMessage} onChange={(e) => setDirectiveMessage(e.target.value)} />
             <div className="stack" style={{ marginTop: 6 }}>
               <button disabled={!directiveMessage.trim()} onClick={() => sendDirective(controlTarget, directiveMessage)}>Send Directive</button>
             </div>
@@ -80,9 +80,9 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
 
           <div className="control-card">
             <div className="tiny">Chat</div>
-            <textarea style={{ width: "100%", marginTop: 4 }} placeholder="Chat message" value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} />
+            <textarea aria-label="Chat message" style={{ width: "100%", marginTop: 4 }} placeholder="Chat message" value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} />
             <div className="stack" style={{ marginTop: 6 }}>
-              <select value={chatMode} onChange={(e) => setChatMode(e.target.value)}>
+              <select aria-label="Chat mode" value={chatMode} onChange={(e) => setChatMode(e.target.value)}>
                 <option value="live">live</option>
                 <option value="async">async</option>
               </select>
@@ -107,9 +107,9 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
           <div className="control-card">
             <div className="tiny">Create Vertical + OpCo</div>
             <div className="stack" style={{ marginTop: 4 }}>
-              <input placeholder="Vertical name" value={verticalName} onChange={(e) => setVerticalName(e.target.value)} />
-              <input placeholder="Geography" value={verticalGeo} onChange={(e) => setVerticalGeo(e.target.value)} />
-              <input placeholder="slug (optional)" value={verticalSlug} onChange={(e) => setVerticalSlug(e.target.value)} />
+              <input aria-label="Vertical name" placeholder="Vertical name" value={verticalName} onChange={(e) => setVerticalName(e.target.value)} />
+              <input aria-label="Vertical geography" placeholder="Geography" value={verticalGeo} onChange={(e) => setVerticalGeo(e.target.value)} />
+              <input aria-label="Vertical slug" placeholder="slug (optional)" value={verticalSlug} onChange={(e) => setVerticalSlug(e.target.value)} />
               <button onClick={() => createVertical({ name: verticalName, geography: verticalGeo, slug: verticalSlug })}>Create</button>
             </div>
           </div>
@@ -117,8 +117,8 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
           <div className="control-card">
             <div className="tiny">Event Requeue</div>
             <div className="stack" style={{ marginTop: 4 }}>
-              <input className="mono" style={{ minWidth: 180 }} placeholder="event id" value={requeueEventID} onChange={(e) => setRequeueEventID(e.target.value)} />
-              <select value={requeueAgentID} onChange={(e) => setRequeueAgentID(e.target.value)}>
+              <input aria-label="Requeue event id" className="mono" style={{ minWidth: 180 }} placeholder="event id" value={requeueEventID} onChange={(e) => setRequeueEventID(e.target.value)} />
+              <select aria-label="Requeue target agent" value={requeueAgentID} onChange={(e) => setRequeueAgentID(e.target.value)}>
                 <option value="">all delivered recipients</option>
                 {targets.map((t) => <option key={t.agent_id} value={t.agent_id}>{t.agent_id}</option>)}
               </select>
@@ -136,7 +136,7 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
             <details style={{ marginTop: 8 }}>
               <summary className="tiny" style={{ cursor: "pointer" }}>Danger Zone</summary>
               <div className="stack" style={{ marginTop: 8 }}>
-                <input className="mono" placeholder='type RESET to unlock' value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} />
+                <input aria-label="Reset confirmation" className="mono" placeholder='type RESET to unlock' value={resetConfirm} onChange={(e) => setResetConfirm(e.target.value)} />
                 <button className="btn-danger" disabled={!resetOK} onClick={() => resetDBAndSeed(resetConfirm, setResetConfirm)}>Reset DB + Seed</button>
                 <button className="btn-danger" disabled={!resetOK} onClick={() => wipeDB(resetConfirm, setResetConfirm)}>Wipe DB</button>
               </div>
@@ -150,7 +150,7 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
       <section>
         <div className="head">
           <h2>Mailbox + Decisions</h2>
-          <select value={mailStatus} onChange={(e) => setMailStatus(e.target.value)}>
+          <select aria-label="Mailbox status filter" value={mailStatus} onChange={(e) => setMailStatus(e.target.value)}>
             <option value="all">all</option>
             <option value="pending">pending</option>
             <option value="approved">approved</option>
@@ -231,8 +231,8 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
 
           <div className="tiny" style={{ marginTop: 8 }}>Mailbox Decision</div>
           <div className="stack" style={{ marginBottom: 8 }}>
-            <input className="mono" style={{ minWidth: 120 }} placeholder="mailbox id" value={mailboxID} onChange={(e) => setMailboxID(e.target.value)} />
-            <select value={mailboxAction} onChange={(e) => setMailboxAction(e.target.value)}>
+            <input aria-label="Mailbox item id" className="mono" style={{ minWidth: 120 }} placeholder="mailbox id" value={mailboxID} onChange={(e) => setMailboxID(e.target.value)} />
+            <select aria-label="Mailbox decision action" value={mailboxAction} onChange={(e) => setMailboxAction(e.target.value)}>
               <option value="approve">approve</option>
               <option value="reject">reject</option>
               <option value="more-data">more-data</option>
@@ -241,7 +241,7 @@ export default function ControlView({ state, actions, onOpenWorkflowTrace, onOpe
               <option value="skip">skip</option>
               <option value="respond">respond</option>
             </select>
-            <input placeholder="notes" value={mailboxNotes} onChange={(e) => setMailboxNotes(e.target.value)} />
+            <input aria-label="Mailbox decision notes" placeholder="notes" value={mailboxNotes} onChange={(e) => setMailboxNotes(e.target.value)} />
             <button onClick={() => decideMailbox(mailboxID, mailboxAction, mailboxNotes)}>Decide</button>
           </div>
 

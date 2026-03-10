@@ -25,7 +25,7 @@ export default function TasksView({ state, actions, onOpenWorkflowTrace, onOpenP
       <div className="head">
         <h2>Human Tasks</h2>
         <div className="stack">
-          <select value={taskStatus} onChange={(e) => setTaskStatus(e.target.value)}>
+          <select aria-label="Task status filter" value={taskStatus} onChange={(e) => setTaskStatus(e.target.value)}>
             <option value="open">open</option>
             <option value="pending_review">pending_review</option>
             <option value="approved">approved</option>
@@ -101,7 +101,7 @@ export default function TasksView({ state, actions, onOpenWorkflowTrace, onOpenP
       </div>
 
       <div className="row body">
-        <div className="body scroll" style={{ maxHeight: "58vh", padding: 0 }}>
+        <div className="body scroll" style={{ maxHeight: "58vh", padding: 0 }} tabIndex={0} aria-label="Task list">
           <table>
             <thead>
               <tr>
@@ -166,18 +166,19 @@ export default function TasksView({ state, actions, onOpenWorkflowTrace, onOpenP
                 <div className="desc-text">{selectedTask.description}</div>
                 <div className="tiny" style={{ marginTop: 8 }}>Complete</div>
                 <textarea
+                  aria-label="Task completion result"
                   placeholder="Result text (what happened, what you learned, next steps)..."
                   value={taskResultText}
                   onChange={(e) => setTaskResultText(e.target.value)}
                 />
                 <div className="stack" style={{ marginTop: 6 }}>
-                  <select value={taskOutcome} onChange={(e) => setTaskOutcome(e.target.value)}>
+                  <select aria-label="Task completion outcome" value={taskOutcome} onChange={(e) => setTaskOutcome(e.target.value)}>
                     <option value="success">success</option>
                     <option value="partial">partial</option>
                     <option value="failed">failed</option>
                   </select>
                   <label className="tiny" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                    <input type="checkbox" checked={taskFollowUpNeeded} onChange={(e) => setTaskFollowUpNeeded(e.target.checked)} />
+                    <input aria-label="Task follow up needed" type="checkbox" checked={taskFollowUpNeeded} onChange={(e) => setTaskFollowUpNeeded(e.target.checked)} />
                     follow_up_needed
                   </label>
                 </div>
@@ -187,6 +188,7 @@ export default function TasksView({ state, actions, onOpenWorkflowTrace, onOpenP
                 </div>
                 <div className="tiny" style={{ marginTop: 10 }}>Reject (human pushback)</div>
                 <textarea
+                  aria-label="Task rejection reason"
                   placeholder="Why you can't do it / what blocks execution..."
                   value={taskRejectReason}
                   onChange={(e) => setTaskRejectReason(e.target.value)}

@@ -36,7 +36,7 @@ export default function DashboardHeader({
       <header>
         <div className="header-top">
           <div className="header-brand">
-            <div className="title">EMPIREAI</div>
+            <h1 className="title">EMPIREAI</h1>
             <div className="sub">{statusText}</div>
             <LiveClock />
           </div>
@@ -46,6 +46,7 @@ export default function DashboardHeader({
               type="password"
               className="mono"
               placeholder="Enter key..."
+              aria-label="Dashboard API key"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               style={{ marginTop: 6 }}

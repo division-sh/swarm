@@ -55,22 +55,22 @@ export default function FlowView({ state, actions }) {
           <div className="obs-filterbar">
             <div className="obs-filtergroup">
               <div className="obs-filterlabel">View</div>
-              <select value={flowView} onChange={(e) => { setFlowView(e.target.value); setFlowReplayOn(false); setFlowReplayIndex(0); setSelectedFlowEdgeID(""); }}>
+              <select aria-label="Workflow trace view mode" value={flowView} onChange={(e) => { setFlowView(e.target.value); setFlowReplayOn(false); setFlowReplayIndex(0); setSelectedFlowEdgeID(""); }}>
                 <option value="design">design map</option>
                 <option value="runtime">live runtime</option>
                 <option value="replay">historical replay</option>
               </select>
-              <select value={flowStage} onChange={(e) => { setFlowStage(e.target.value); setSelectedFlowEdgeID(""); }}>
+              <select aria-label="Workflow stage filter" value={flowStage} onChange={(e) => { setFlowStage(e.target.value); setSelectedFlowEdgeID(""); }}>
                 {flowStageOptions.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
-              <select value={flowRubric} onChange={(e) => { setFlowRubric(e.target.value); setSelectedFlowEdgeID(""); }}>
+              <select aria-label="Workflow rubric filter" value={flowRubric} onChange={(e) => { setFlowRubric(e.target.value); setSelectedFlowEdgeID(""); }}>
                 {flowRubricOptions.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div className="obs-filtergroup">
               <div className="obs-filterlabel">Scope</div>
               {(flowView === "runtime" || flowView === "replay") ? (
-                <select value={flowVertical} onChange={(e) => { setFlowVertical(e.target.value); setSelectedFlowEdgeID(""); }}>
+                <select aria-label="Workflow vertical scope" value={flowVertical} onChange={(e) => { setFlowVertical(e.target.value); setSelectedFlowEdgeID(""); }}>
                   <option value="">all verticals</option>
                   {(verticals || []).map((v) => (
                     <option key={v.id || v.slug} value={v.slug || v.id}>
@@ -84,12 +84,14 @@ export default function FlowView({ state, actions }) {
               {flowView === "replay" ? (
                 <>
                   <input
+                    aria-label="Workflow replay start"
                     type="datetime-local"
                     value={flowStart}
                     onChange={(e) => setFlowStart(e.target.value)}
                     title="start (local time)"
                   />
                   <input
+                    aria-label="Workflow replay end"
                     type="datetime-local"
                     value={flowEnd}
                     onChange={(e) => setFlowEnd(e.target.value)}
@@ -102,7 +104,7 @@ export default function FlowView({ state, actions }) {
               <div className="obs-filterlabel">Replay</div>
               {flowView === "replay" ? (
                 <>
-                  <select value={String(flowReplaySpeed)} onChange={(e) => setFlowReplaySpeed(Number(e.target.value || "10"))}>
+                  <select aria-label="Workflow replay speed" value={String(flowReplaySpeed)} onChange={(e) => setFlowReplaySpeed(Number(e.target.value || "10"))}>
                     <option value="10">10x</option>
                     <option value="50">50x</option>
                     <option value="100">100x</option>

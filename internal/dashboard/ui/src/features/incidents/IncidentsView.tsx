@@ -19,6 +19,7 @@ export default function IncidentsView({ state, actions }) {
             <div className="obs-filtergroup">
               <div className="obs-filterlabel">Window</div>
               <select
+                aria-label="Incident time window"
                 value={String(incidentsFilter.sinceHours)}
                 onChange={(e) => setIncidentsFilter((p) => ({ ...p, sinceHours: Number(e.target.value || "24") }))}
               >
@@ -29,6 +30,7 @@ export default function IncidentsView({ state, actions }) {
                 <option value="168">Last 7d</option>
               </select>
               <select
+                aria-label="Incident severity level"
                 value={incidentsFilter.level}
                 onChange={(e) => setIncidentsFilter((p) => ({ ...p, level: e.target.value }))}
               >
@@ -40,12 +42,14 @@ export default function IncidentsView({ state, actions }) {
             <div className="obs-filtergroup">
               <div className="obs-filterlabel">Scope</div>
               <input
+                aria-label="Incident component filter"
                 placeholder="component"
                 value={incidentsFilter.component}
                 onChange={(e) => setIncidentsFilter((p) => ({ ...p, component: e.target.value }))}
               />
               <label className="obs-toggle">
                 <input
+                  aria-label="Show MCP incidents only"
                   type="checkbox"
                   checked={incidentsFilter.mcpOnly}
                   onChange={(e) => setIncidentsFilter((p) => ({ ...p, mcpOnly: e.target.checked }))}

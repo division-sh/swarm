@@ -15,21 +15,21 @@ export default function EventsView({ state, actions }) {
         <div className="obs-filterbar">
           <div className="obs-filtergroup">
             <div className="obs-filterlabel">Trace</div>
-            <input placeholder="type prefix" value={eventsFilter.type} onChange={(e) => setEventsFilter((p) => ({ ...p, type: e.target.value }))} />
-            <input placeholder="source" value={eventsFilter.source} onChange={(e) => setEventsFilter((p) => ({ ...p, source: e.target.value }))} />
-            <input placeholder="agent subscriber" value={eventsFilter.subscriber} onChange={(e) => setEventsFilter((p) => ({ ...p, subscriber: e.target.value }))} />
-            <input placeholder="vertical slug/id" value={eventsFilter.vertical} onChange={(e) => setEventsFilter((p) => ({ ...p, vertical: e.target.value }))} />
+            <input aria-label="Event type prefix" placeholder="type prefix" value={eventsFilter.type} onChange={(e) => setEventsFilter((p) => ({ ...p, type: e.target.value }))} />
+            <input aria-label="Event source filter" placeholder="source" value={eventsFilter.source} onChange={(e) => setEventsFilter((p) => ({ ...p, source: e.target.value }))} />
+            <input aria-label="Event subscriber filter" placeholder="agent subscriber" value={eventsFilter.subscriber} onChange={(e) => setEventsFilter((p) => ({ ...p, subscriber: e.target.value }))} />
+            <input aria-label="Event vertical filter" placeholder="vertical slug/id" value={eventsFilter.vertical} onChange={(e) => setEventsFilter((p) => ({ ...p, vertical: e.target.value }))} />
           </div>
           <div className="obs-filtergroup">
             <div className="obs-filterlabel">Runtime</div>
-            <input placeholder="component" value={eventsFilter.component} onChange={(e) => setEventsFilter((p) => ({ ...p, component: e.target.value }))} />
-            <input placeholder="level" value={eventsFilter.level} onChange={(e) => setEventsFilter((p) => ({ ...p, level: e.target.value }))} />
+            <input aria-label="Runtime component filter" placeholder="component" value={eventsFilter.component} onChange={(e) => setEventsFilter((p) => ({ ...p, component: e.target.value }))} />
+            <input aria-label="Runtime level filter" placeholder="level" value={eventsFilter.level} onChange={(e) => setEventsFilter((p) => ({ ...p, level: e.target.value }))} />
             <label className="obs-toggle">
-              <input type="checkbox" checked={eventsIncludeRuntime} onChange={(e) => setEventsIncludeRuntime(e.target.checked)} />
+              <input aria-label="Include runtime logs" type="checkbox" checked={eventsIncludeRuntime} onChange={(e) => setEventsIncludeRuntime(e.target.checked)} />
               include runtime logs
             </label>
             <label className="obs-toggle">
-              <input type="checkbox" checked={eventsRuntimeErrorsOnly} onChange={(e) => setEventsRuntimeErrorsOnly(e.target.checked)} />
+              <input aria-label="Show runtime errors only" type="checkbox" checked={eventsRuntimeErrorsOnly} onChange={(e) => setEventsRuntimeErrorsOnly(e.target.checked)} />
               runtime errors only
             </label>
           </div>

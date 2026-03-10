@@ -18,6 +18,8 @@ export default function OperationsView({
 }) {
   const routeSubview = routeToSubview(activeView) || activeSubview;
   const [subview, setSubview] = useState(routeSubview || "queue");
+  const [pendingMailboxSelection, setPendingMailboxSelection] = useState("");
+  const [pendingTaskSelection, setPendingTaskSelection] = useState("");
   const derived = useMemo(() => deriveOperationsDerivedState({
     mailbox: control.state.mailbox,
     tasksResp: tasks.state.tasksResp,
@@ -44,15 +46,19 @@ export default function OperationsView({
   }
 
   function openMailbox(item) {
+    const nextID = item?.id || "";
     control.actions.setMailStatus("all");
-    control.actions.setMailboxID(item?.id || "");
-    control.actions.setSelectedMailboxItem(item?.id || "");
+    control.actions.setMailboxID(nextID);
+    control.actions.setSelectedMailboxItem(nextID);
+    setPendingMailboxSelection(nextID);
     selectSubview("control");
   }
 
   function openTask(task) {
-    tasks.actions.setTaskStatus("all");
-    tasks.actions.setSelectedTaskID(task?.id || "");
+    const nextID = task?.id || "";
+    tasks.actions.setTaskStatus(String(task?.status || "all"));
+    tasks.actions.setSelectedTaskID(nextID);
+    setPendingTaskSelection(nextID);
     selectSubview("tasks");
   }
 
@@ -92,19 +98,48 @@ export default function OperationsView({
       return;
     }
     const relatedTask = (tasks.state.tasksResp?.tasks || []).find((task) => task.vertical_slug === vertical);
-    tasks.actions.setTaskStatus("all");
-    tasks.actions.setSelectedTaskID(relatedTask?.id || "");
+    const nextID = relatedTask?.id || "";
+    tasks.actions.setTaskStatus(String(relatedTask?.status || "all"));
+    tasks.actions.setSelectedTaskID(nextID);
+    setPendingTaskSelection(nextID);
     selectSubview("tasks");
   }
 
   function openRelatedMailboxForVertical(target) {
     const vertical = String(target || "").trim();
     const relatedMailbox = (control.state.mailbox?.items || []).find((item) => item.vertical_slug === vertical || item.vertical_id === vertical);
+    const nextID = relatedMailbox?.id || "";
     control.actions.setMailStatus("all");
-    control.actions.setMailboxID(relatedMailbox?.id || "");
-    control.actions.setSelectedMailboxItem(relatedMailbox?.id || "");
+    control.actions.setMailboxID(nextID);
+    control.actions.setSelectedMailboxItem(nextID);
+    setPendingMailboxSelection(nextID);
     selectSubview("control");
   }
+
+  useEffect(() => {
+    if (subview === "control" && pendingMailboxSelection) {
+      control.actions.setMailboxID(pendingMailboxSelection);
+      control.actions.setSelectedMailboxItem(pendingMailboxSelection);
+    }
+  }, [control.actions, pendingMailboxSelection, subview]);
+
+  useEffect(() => {
+    if (subview === "tasks" && pendingTaskSelection) {
+      tasks.actions.setSelectedTaskID(pendingTaskSelection);
+    }
+  }, [pendingTaskSelection, subview, tasks.actions]);
+
+  useEffect(() => {
+    if (pendingMailboxSelection && control.state.selectedMailboxItem === pendingMailboxSelection) {
+      setPendingMailboxSelection("");
+    }
+  }, [control.state.selectedMailboxItem, pendingMailboxSelection]);
+
+  useEffect(() => {
+    if (pendingTaskSelection && tasks.state.selectedTaskID === pendingTaskSelection) {
+      setPendingTaskSelection("");
+    }
+  }, [pendingTaskSelection, tasks.state.selectedTaskID]);
 
   const mailboxPending = control.state.mailbox?.summary?.pending || 0;
   const taskCount = Array.isArray(tasks.state.tasksResp?.tasks) ? tasks.state.tasksResp.tasks.length : 0;

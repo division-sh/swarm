@@ -1,5 +1,6 @@
 import { DockviewReact, themeAbyssSpaced } from "dockview";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import useDockviewPanelVisibility from "../../hooks/useDockviewPanelVisibility.ts";
 import ControlView from "../control/ControlView.tsx";
 import TasksView from "../tasks/TasksView.tsx";
 import OperationsQueueView from "./OperationsQueueView.tsx";
@@ -19,6 +20,8 @@ function OperationsQueuePanel(props) {
 
 function OperationsControlPanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Control panel loads on first open.</div>;
   return (
     <div className="operations-dock-panel">
       <ControlView
@@ -34,6 +37,8 @@ function OperationsControlPanel(props) {
 
 function OperationsTasksPanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Tasks panel loads on first open.</div>;
   return (
     <div className="operations-dock-panel">
       <TasksView

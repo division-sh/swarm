@@ -21,13 +21,13 @@ export default function AgentsView({ state, actions }) {
       <div className="head">
         <h2>Agent Activity</h2>
         <div className="stack tiny">
-          <input className="agent-search" placeholder="Search agents…" value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)} />
-          <select value={triage.focus} onChange={(e) => triage.setFocus(e.target.value)} title="Focus">
+          <input className="agent-search" aria-label="Search agents" placeholder="Search agents…" value={agentSearch} onChange={(e) => setAgentSearch(e.target.value)} />
+          <select aria-label="Agent focus mode" value={triage.focus} onChange={(e) => triage.setFocus(e.target.value)} title="Focus">
             <option value="all">all agents</option>
             <option value="attention">attention queue</option>
             <option value="pinned">pinned only</option>
           </select>
-          <select value={triage.stateFilter} onChange={(e) => triage.setStateFilter(e.target.value)} title="State">
+          <select aria-label="Agent state filter" value={triage.stateFilter} onChange={(e) => triage.setStateFilter(e.target.value)} title="State">
             <option value="all">all states</option>
             <option value="stuck">stuck</option>
             <option value="running">running</option>

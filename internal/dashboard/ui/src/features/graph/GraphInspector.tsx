@@ -371,7 +371,7 @@ export default function GraphInspector({
   const selectionTitle = selectedEdge ? "Connection Details" : "Node Details";
 
   return (
-    <aside className="graph-workspace-inspector">
+    <div className="graph-workspace-inspector">
       <section>
         <div className="head">
           <h2>{selectionTitle}</h2>
@@ -409,6 +409,6 @@ export default function GraphInspector({
           )}
         </div>
       </section>
-    </aside>
+    </div>
   );
 }

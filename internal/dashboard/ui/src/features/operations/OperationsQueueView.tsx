@@ -34,7 +34,7 @@ export default function OperationsQueueView({
         </div>
       </div>
 
-      <div className="body scroll" style={{ maxHeight: "62vh", padding: 0 }}>
+      <div className="body scroll" style={{ maxHeight: "62vh", padding: 0 }} tabIndex={0} aria-label="Operations queue list">
         <table>
           <thead>
             <tr>

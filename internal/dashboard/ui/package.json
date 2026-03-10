@@ -12,6 +12,7 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "test:control": "tsx --test src/features/control/*.test.ts",
+    "test:a11y": "npm run build && playwright test e2e/a11y.spec.mjs",
     "test:graph": "tsx --test src/features/graph/*.test.ts",
     "test:health": "tsx --test src/features/health/*.test.ts",
     "test:observability": "tsx --test src/features/observability/*.test.ts",
@@ -34,6 +35,7 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.58.2",
     "@tanstack/eslint-plugin-query": "^5.91.4",

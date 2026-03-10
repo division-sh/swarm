@@ -1,5 +1,6 @@
 import { DockviewReact, themeAbyssSpaced } from "dockview";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import useDockviewPanelVisibility from "../../hooks/useDockviewPanelVisibility.ts";
 import HoldingView from "../holding/HoldingView.tsx";
 import PipelineView from "../pipeline/PipelineView.tsx";
 import PortfolioDownstreamCard from "./PortfolioDownstreamCard.tsx";
@@ -57,6 +58,8 @@ function PortfolioTriagePanel(props) {
 
 function PortfolioHoldingPanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Board panel loads on first open.</div>;
   return (
     <div className="portfolio-dock-panel">
       <HoldingView
@@ -77,6 +80,8 @@ function PortfolioHoldingPanel(props) {
 
 function PortfolioPipelinePanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Funnel panel loads on first open.</div>;
   return (
     <div className="portfolio-dock-panel">
       <PipelineView

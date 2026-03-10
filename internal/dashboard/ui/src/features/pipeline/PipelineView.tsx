@@ -23,7 +23,7 @@ export default function PipelineView({
       <div className="head">
         <h2>Pipeline Funnel</h2>
         <div className="stack">
-          <input placeholder="trace vertical slug/id" value={traceVertical} onChange={(e) => setTraceVertical(e.target.value)} />
+          <input aria-label="Pipeline trace vertical" placeholder="trace vertical slug/id" value={traceVertical} onChange={(e) => setTraceVertical(e.target.value)} />
           <button onClick={() => {
             const next = traceVertical.trim();
             if (!next) return;

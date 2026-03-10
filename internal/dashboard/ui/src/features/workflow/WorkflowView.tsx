@@ -1,5 +1,6 @@
 import { DockviewReact, themeAbyssSpaced } from "dockview";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import useDockviewPanelVisibility from "../../hooks/useDockviewPanelVisibility.ts";
 import FlowView from "../flow/FlowView.tsx";
 import GraphPage from "../graph/GraphPage.tsx";
 import { deriveWorkflowFocus } from "./focus.ts";
@@ -17,7 +18,9 @@ function routeToSubview(activeView) {
 function FlowDockPanel(props) {
   const params = props.params || {};
   const flow = params.flow;
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
   if (!flow) return null;
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Trace panel loads on first open.</div>;
   return (
     <div className="workflow-dock-panel">
       <FlowView
@@ -34,7 +37,9 @@ function FlowDockPanel(props) {
 function GraphDockPanel(props) {
   const params = props.params || {};
   const graph = params.graph;
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
   if (!graph) return null;
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Topology panel loads on first open.</div>;
   return (
     <div className="workflow-dock-panel">
       <GraphPage
@@ -49,22 +54,32 @@ function GraphDockPanel(props) {
 }
 
 function TimelineDockPanel(props) {
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Timeline panel loads on first open.</div>;
   return <WorkflowTimelinePanel {...props} />;
 }
 
 function ArtifactsDockPanel(props) {
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Artifacts panel loads on first open.</div>;
   return <WorkflowArtifactsPanel {...props} />;
 }
 
 function IssuesDockPanel(props) {
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Issues panel loads on first open.</div>;
   return <WorkflowIssuesPanel {...props} />;
 }
 
 function CompareDockPanel(props) {
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Compare panel loads on first open.</div>;
   return <WorkflowComparePanel {...props} />;
 }
 
 function RunsDockPanel(props) {
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Runs panel loads on first open.</div>;
   return <WorkflowRunsPanel {...props} />;
 }
 

@@ -158,6 +158,7 @@ const runtimeLogs = [
     message: "Validation timer exceeded.",
     error_code: "MCP_TIMEOUT",
     vertical: "alpha-ai",
+    vertical_id: "alpha-ai",
     agent_id: "holding-manager",
   },
   {
@@ -171,6 +172,7 @@ const runtimeLogs = [
     message: "Coordinator healthy.",
     error_code: "",
     vertical: "",
+    vertical_id: "",
     agent_id: "empire-coordinator",
   },
 ];
@@ -329,16 +331,46 @@ function json(body, status = 200) {
   };
 }
 
-function filterTasks(status) {
-  if (!status || status === "all") return tasks;
-  return tasks.filter((task) => task.status === status);
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
-function filterLogs(searchParams) {
+function filterTasks(items, status) {
+  if (!status || status === "all") return items;
+  return items.filter((task) => task.status === status);
+}
+
+function deriveTaskStats(items) {
+  return items.reduce((acc, task) => {
+    const key = String(task.status || "").trim() || "unknown";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function deriveMailboxSummary(items) {
+  return items.reduce((acc, item) => {
+    const status = String(item.status || "").toLowerCase();
+    if (status === "pending") acc.pending += 1;
+    if (status === "approved") acc.approved += 1;
+    if (status === "rejected") acc.rejected += 1;
+    if (status === "deferred") acc.deferred += 1;
+    if (status !== "pending") acc.decided += 1;
+    if (status === "pending" && String(item.priority || "").toLowerCase() === "critical") acc.critical += 1;
+    return acc;
+  }, { pending: 0, approved: 0, rejected: 0, deferred: 0, critical: 0, decided: 0 });
+}
+
+function filterMailbox(items, status) {
+  if (!status || status === "all") return items;
+  return items.filter((item) => String(item.status || "") === status);
+}
+
+function filterLogs(items, searchParams) {
   const source = searchParams.get("source") || "";
   const level = searchParams.get("level") || "";
   const errorCode = searchParams.get("error_code") || "";
-  return runtimeLogs.filter((log) => {
+  return items.filter((log) => {
     if (source && log.source !== source) return false;
     if (level && log.level !== level) return false;
     if (errorCode && log.error_code !== errorCode) return false;
@@ -347,6 +379,10 @@ function filterLogs(searchParams) {
 }
 
 export async function installDashboardMocks(page) {
+  const taskState = deepClone(tasks);
+  const mailboxState = deepClone(mailboxItems);
+  const runtimeLogState = deepClone(runtimeLogs);
+
   await page.addInitScript(() => {
     class MockEventSource {
       constructor(url) {
@@ -377,6 +413,49 @@ export async function installDashboardMocks(page) {
     const path = url.pathname;
 
     if (req.method() !== "GET") {
+      if (path.startsWith("/api/tasks/")) {
+        const [, , , taskID, action] = path.split("/");
+        const task = taskState.find((item) => item.id === taskID);
+        if (!task) {
+          await route.fulfill(json({ error: `Unknown task ${taskID}` }, 404));
+          return;
+        }
+        if (action === "claim") {
+          task.status = "assigned";
+          task.assigned_to = "operator";
+        } else if (action === "complete") {
+          const body = req.postDataJSON?.() || {};
+          task.status = "completed";
+          task.result_text = body.result_text || "";
+          task.outcome = body.outcome || "success";
+          task.follow_up_needed = !!body.follow_up_needed;
+        } else if (action === "reject") {
+          const body = req.postDataJSON?.() || {};
+          task.status = "rejected";
+          task.reject_reason = body.reason || "";
+        }
+        await route.fulfill(json({ ok: true, task }));
+        return;
+      }
+
+      if (path.startsWith("/api/mailbox/") && path.endsWith("/decide")) {
+        const [, , , mailboxID] = path.split("/");
+        const item = mailboxState.find((entry) => entry.id === mailboxID);
+        if (!item) {
+          await route.fulfill(json({ error: `Unknown mailbox item ${mailboxID}` }, 404));
+          return;
+        }
+        const body = req.postDataJSON?.() || {};
+        const action = String(body.action || "").trim();
+        item.decided_action = action;
+        if (action === "approve") item.status = "approved";
+        else if (action === "reject" || action === "kill") item.status = "rejected";
+        else if (action === "more-data" || action === "defer" || action === "revise") item.status = "deferred";
+        else if (action) item.status = "approved";
+        await route.fulfill(json({ ok: true, item }));
+        return;
+      }
+
       await route.fulfill(json({ ok: true, message: "mock action completed" }));
       return;
     }
@@ -406,7 +485,7 @@ export async function installDashboardMocks(page) {
     if (path === "/api/tasks") {
       const status = url.searchParams.get("status") || "open";
       await route.fulfill(json({
-        tasks: filterTasks(status),
+        tasks: filterTasks(taskState, status),
         weekly_budget: {
           approved_this_week: 1,
           max_tasks_per_week: 5,
@@ -417,24 +496,14 @@ export async function installDashboardMocks(page) {
       return;
     }
     if (path === "/api/tasks/stats") {
-      await route.fulfill(json({
-        open: 1,
-        completed: 1,
-        rejected: 0,
-      }));
+      await route.fulfill(json(deriveTaskStats(taskState)));
       return;
     }
     if (path === "/api/mailbox") {
+      const status = url.searchParams.get("status") || "all";
       await route.fulfill(json({
-        summary: {
-          pending: 1,
-          approved: 2,
-          rejected: 1,
-          deferred: 0,
-          critical: 1,
-          decided: 3,
-        },
-        items: mailboxItems,
+        summary: deriveMailboxSummary(mailboxState),
+        items: filterMailbox(mailboxState, status),
       }));
       return;
     }
@@ -516,7 +585,7 @@ export async function installDashboardMocks(page) {
         artifacts: [],
         agents,
         events,
-        mailbox: mailboxItems,
+        mailbox: mailboxState,
         spend: { last_30d_cents: 1234, all_time_cents: 3456 },
       }));
       return;
@@ -537,7 +606,7 @@ export async function installDashboardMocks(page) {
       return;
     }
     if (path === "/api/runtime/logs") {
-      await route.fulfill(json({ runtime_logs: filterLogs(url.searchParams) }));
+      await route.fulfill(json({ runtime_logs: filterLogs(runtimeLogState, url.searchParams) }));
       return;
     }
     if (path === "/api/runtime/incidents") {

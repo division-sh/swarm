@@ -14,17 +14,17 @@ export default function LogsView({ state, actions }) {
           <div className="obs-filterbar">
             <div className="obs-filtergroup">
               <div className="obs-filterlabel">Trace</div>
-              <input placeholder="event type" value={logsFilter.type} onChange={(e) => setLogsFilter((p) => ({ ...p, type: e.target.value }))} />
-              <input placeholder="agent" value={logsFilter.subscriber} onChange={(e) => setLogsFilter((p) => ({ ...p, subscriber: e.target.value }))} />
-              <input placeholder="source" value={logsFilter.source} onChange={(e) => setLogsFilter((p) => ({ ...p, source: e.target.value }))} />
-              <input placeholder="vertical" value={logsFilter.vertical} onChange={(e) => setLogsFilter((p) => ({ ...p, vertical: e.target.value }))} />
+              <input aria-label="Log event type filter" placeholder="event type" value={logsFilter.type} onChange={(e) => setLogsFilter((p) => ({ ...p, type: e.target.value }))} />
+              <input aria-label="Log agent filter" placeholder="agent" value={logsFilter.subscriber} onChange={(e) => setLogsFilter((p) => ({ ...p, subscriber: e.target.value }))} />
+              <input aria-label="Log source filter" placeholder="source" value={logsFilter.source} onChange={(e) => setLogsFilter((p) => ({ ...p, source: e.target.value }))} />
+              <input aria-label="Log vertical filter" placeholder="vertical" value={logsFilter.vertical} onChange={(e) => setLogsFilter((p) => ({ ...p, vertical: e.target.value }))} />
             </div>
             <div className="obs-filtergroup">
               <div className="obs-filterlabel">Runtime</div>
-              <input placeholder="component" value={logsFilter.component} onChange={(e) => setLogsFilter((p) => ({ ...p, component: e.target.value }))} />
-              <input placeholder="level" value={logsFilter.level} onChange={(e) => setLogsFilter((p) => ({ ...p, level: e.target.value }))} />
+              <input aria-label="Log component filter" placeholder="component" value={logsFilter.component} onChange={(e) => setLogsFilter((p) => ({ ...p, component: e.target.value }))} />
+              <input aria-label="Log level filter" placeholder="level" value={logsFilter.level} onChange={(e) => setLogsFilter((p) => ({ ...p, level: e.target.value }))} />
               <label className="obs-toggle">
-                <input type="checkbox" checked={logsRuntimeErrorsOnly} onChange={(e) => setLogsRuntimeErrorsOnly(e.target.checked)} />
+                <input aria-label="Show runtime errors only" type="checkbox" checked={logsRuntimeErrorsOnly} onChange={(e) => setLogsRuntimeErrorsOnly(e.target.checked)} />
                 runtime errors only
               </label>
               <button className="btn-secondary" onClick={() => setLogsOrder((o) => o === "desc" ? "asc" : "desc")}>{logsOrder === "desc" ? "Newest first" : "Oldest first"}</button>

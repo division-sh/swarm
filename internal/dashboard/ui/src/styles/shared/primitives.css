@@ -9,9 +9,9 @@
   font-weight: 700;
   letter-spacing: 0.3px;
   text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-2);
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e4ebf5;
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .b-running {
@@ -22,7 +22,7 @@
 
 .b-idle {
   background: rgba(255, 255, 255, 0.04);
-  color: var(--text-3);
+  color: #d2dae6;
   border-color: var(--border);
 }
 
@@ -40,7 +40,7 @@
 
 .b-terminated {
   background: rgba(255, 255, 255, 0.03);
-  color: var(--text-4);
+  color: #c0cad8;
   border-color: var(--border);
 }
 

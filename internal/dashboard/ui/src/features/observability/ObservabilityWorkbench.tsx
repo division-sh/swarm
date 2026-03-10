@@ -1,5 +1,6 @@
 import { DockviewReact, themeAbyssSpaced } from "dockview";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import useDockviewPanelVisibility from "../../hooks/useDockviewPanelVisibility.ts";
 import EventsView from "../events/EventsView.tsx";
 import IncidentsView from "../incidents/IncidentsView.tsx";
 import LogsView from "../logs/LogsView.tsx";
@@ -105,6 +106,8 @@ function ObservabilityOverviewPanel(props) {
 
 function ObservabilityEventsPanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Event trace panel loads on first open.</div>;
   return (
     <div className="observability-dock-panel">
       <EventsView state={params.events.state} actions={params.events.actions} />
@@ -114,6 +117,8 @@ function ObservabilityEventsPanel(props) {
 
 function ObservabilityLogsPanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Runtime logs panel loads on first open.</div>;
   return (
     <div className="observability-dock-panel">
       <LogsView state={params.logs.state} actions={params.logs.actions} />
@@ -123,6 +128,8 @@ function ObservabilityLogsPanel(props) {
 
 function ObservabilityIncidentsPanel(props) {
   const params = props.params || {};
+  const { hasRendered } = useDockviewPanelVisibility(props.api);
+  if (!hasRendered) return <div className="workflow-dock-placeholder tiny">Incidents panel loads on first open.</div>;
   return (
     <div className="observability-dock-panel">
       <IncidentsView state={params.incidents.state} actions={params.incidents.actions} />

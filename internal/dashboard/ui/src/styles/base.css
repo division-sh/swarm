@@ -148,8 +148,8 @@ strong {
 
 .tiny {
   font-size: 11px;
-  color: var(--text-3);
-  font-weight: 500;
+  color: #c0cad8;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 

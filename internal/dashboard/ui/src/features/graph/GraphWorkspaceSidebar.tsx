@@ -22,7 +22,7 @@ export default function GraphWorkspaceSidebar({
   onInspectAgent,
 }) {
   return (
-    <aside className="graph-workspace-sidebar">
+    <div className="graph-workspace-sidebar">
       <section>
         <div className="head">
           <h2>Investigation</h2>
@@ -49,7 +49,7 @@ export default function GraphWorkspaceSidebar({
         <div className="body">
           <div className="obs-filtergroup">
             <div className="obs-filterlabel">Topology Mode</div>
-            <select value={graphMode} onChange={(e) => onChangeMode(e.target.value)}>
+            <select aria-label="Graph topology mode" value={graphMode} onChange={(e) => onChangeMode(e.target.value)}>
               <option value="holding">holding map</option>
               <option value="template">template map</option>
               <option value="opco">live opco</option>
@@ -58,7 +58,7 @@ export default function GraphWorkspaceSidebar({
           <div className="obs-filtergroup graph-sidebar-group">
             <div className="obs-filterlabel">Vertical Scope</div>
             {graphMode === "opco" ? (
-              <select value={graphVertical} onChange={(e) => onChangeVertical(e.target.value)}>
+              <select aria-label="Graph vertical scope" value={graphVertical} onChange={(e) => onChangeVertical(e.target.value)}>
                 <option value="">select vertical…</option>
                 {(verticals || []).map((vertical) => (
                   <option key={vertical.id || vertical.slug} value={vertical.slug || vertical.id}>
@@ -107,6 +107,6 @@ export default function GraphWorkspaceSidebar({
           )}
         </div>
       </section>
-    </aside>
+    </div>
   );
 }

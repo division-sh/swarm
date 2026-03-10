@@ -38,15 +38,15 @@ export default function HoldingView({
           <span>visible {holdingVisibleVerticals.length} &middot; drift {holdingWorkflowSummary.drift} &middot; timers {holdingWorkflowSummary.timers} &middot; revisions {holdingWorkflowSummary.revisions}</span>
         </div>
         <div className="stack">
-          <input className="agent-search" placeholder="Search verticals…" value={holdingSearch} onChange={(e) => setHoldingSearch(e.target.value)} />
-          <select value={holdingWorkflowFilter} onChange={(e) => setHoldingWorkflowFilter(e.target.value)}>
+          <input className="agent-search" aria-label="Search verticals" placeholder="Search verticals…" value={holdingSearch} onChange={(e) => setHoldingSearch(e.target.value)} />
+          <select aria-label="Holding workflow filter" value={holdingWorkflowFilter} onChange={(e) => setHoldingWorkflowFilter(e.target.value)}>
             <option value="all">all workflow states</option>
             <option value="drift">drift only</option>
             <option value="timers">with timers</option>
             <option value="revisions">with revisions</option>
             <option value="stale">entered stage set</option>
           </select>
-          <select value={holdingSort} onChange={(e) => setHoldingSort(e.target.value)}>
+          <select aria-label="Holding sort order" value={holdingSort} onChange={(e) => setHoldingSort(e.target.value)}>
             <option value="updated_desc">sort: updated</option>
             <option value="stage_age_desc">sort: oldest stage</option>
             <option value="revisions_desc">sort: revisions</option>
