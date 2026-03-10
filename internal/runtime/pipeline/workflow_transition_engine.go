@@ -54,6 +54,13 @@ type handlerExecutionPlanShadowComparison struct {
 	Reason      string
 }
 
+type handlerExecutionPlanSafetyComparison struct {
+	FlatPlan    handlerExecutionPlan
+	DerivedPlan handlerExecutionPlan
+	Safe        bool
+	Reason      string
+}
+
 func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
 	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
@@ -92,9 +99,21 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.C
 		return workflowTransitionOutcome{}, false
 	}
 
-	pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
-	actionsExecuted := pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
-	pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
+	actionsExecuted := []string{}
+	if plan, planOK := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx); planOK && handlerExecutionOrderEnabled(triggerCtx.Event.Type) {
+		if safety := classifyHandlerExecutionPlanSafety(transition, plan); safety.Safe {
+			actionsExecuted = pc.executeHandlerExecutionPlanPreStage(ctx, triggerCtx, plan)
+			pc.updateVerticalStage(ctx, verticalID, plan.AdvancesTo, string(evt.Type))
+		} else {
+			pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
+			actionsExecuted = pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
+			pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
+		}
+	} else {
+		pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
+		actionsExecuted = pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
+		pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
+	}
 	nextState := pc.currentWorkflowState(ctx, verticalID)
 	actionsExecuted = append(actionsExecuted, pc.executeWorkflowTransitionActions(ctx, workflowTriggerContext{
 		Event:           evt,
@@ -249,8 +268,20 @@ func handlerFirstCandidateEnabled(trigger string) bool {
 	case "vertical.shortlisted", "research.completed", "cto.spec_approved",
 		"opco.steady_state_reached", "opco.growth_triggered", "opco.growth_stabilized",
 		"build_complete", "launch_ready", "opco.teardown_requested",
-		"vertical.ready_for_review", "research.vertical_rejected",
+		"vertical.ready_for_review", "research.vertical_rejected", "cto.spec_vetoed",
 		"spec.validation_failed", "cto.spec_revision_needed":
+		return true
+	default:
+		return false
+	}
+}
+
+func handlerExecutionOrderEnabled(eventType events.EventType) bool {
+	switch strings.TrimSpace(string(eventType)) {
+	case "opco.steady_state_reached", "opco.growth_triggered", "opco.growth_stabilized", "opco.teardown_requested",
+		"build_complete", "launch_ready",
+		"spec.validation_failed", "cto.spec_revision_needed",
+		"research.vertical_rejected", "cto.spec_vetoed":
 		return true
 	default:
 		return false
@@ -482,6 +513,134 @@ func handlerExecutionPlanParity(flat handlerExecutionPlan, derived handlerExecut
 		return false, "emit_mismatch"
 	}
 	return true, "match"
+}
+
+func classifyHandlerExecutionPlanSafety(
+	flat WorkflowTransition,
+	derived handlerExecutionPlan,
+) handlerExecutionPlanSafetyComparison {
+	flatPlan := workflowTransitionToExecutionPlan(flat)
+	safe, reason := handlerExecutionPlanExecutionSafety(flatPlan, derived)
+	return handlerExecutionPlanSafetyComparison{
+		FlatPlan:    flatPlan,
+		DerivedPlan: derived,
+		Safe:        safe,
+		Reason:      reason,
+	}
+}
+
+func handlerExecutionPlanExecutionSafety(flat handlerExecutionPlan, derived handlerExecutionPlan) (bool, string) {
+	if flat.AdvancesTo != derived.AdvancesTo {
+		return false, "advances_to_mismatch"
+	}
+	if flat.EventType != derived.EventType {
+		return false, "event_mismatch"
+	}
+	if flat.NodeID != derived.NodeID {
+		return false, "node_mismatch"
+	}
+	if !workflowExecutionGuardAliasesMatch(flat, derived) {
+		return false, "guard_mismatch"
+	}
+	if !workflowExecutionActionAliasesMatch(flat.Action, derived.Action) {
+		return false, "action_mismatch"
+	}
+	if flat.SetsGate != derived.SetsGate {
+		return false, "sets_gate_mismatch"
+	}
+	if strings.TrimSpace(flat.DataAccumulation.SourceEvent) != strings.TrimSpace(derived.DataAccumulation.SourceEvent) {
+		return false, "data_accumulation_source_mismatch"
+	}
+	if !equalStringSlices(flat.DataAccumulation.Writes, derived.DataAccumulation.Writes) {
+		return false, "data_accumulation_writes_mismatch"
+	}
+	if !workflowExecutionEmitAliasesMatch(flat, derived) {
+		return false, "emit_mismatch"
+	}
+	return true, "safe"
+}
+
+func workflowExecutionGuardAliasesMatch(flat handlerExecutionPlan, derived handlerExecutionPlan) bool {
+	if flat.Guard == derived.Guard {
+		return true
+	}
+	switch {
+	case strings.TrimSpace(derived.Guard) == "" &&
+		strings.TrimSpace(derived.Action) == "advance_operating" &&
+		(strings.TrimSpace(flat.Guard) == "qa_passed" || strings.TrimSpace(flat.Guard) == "deploy_approved"):
+		return true
+	default:
+		return false
+	}
+}
+
+func workflowExecutionActionAliasesMatch(flatAction string, derivedAction string) bool {
+	flatAction = strings.TrimSpace(flatAction)
+	derivedAction = strings.TrimSpace(derivedAction)
+	if workflowTransitionActionAliasesMatch(flatAction, derivedAction) {
+		return true
+	}
+	switch {
+	case flatAction == "" && derivedAction == "advance_operating":
+		return true
+	case flatAction == "" && derivedAction == "kill_vertical":
+		return true
+	default:
+		return false
+	}
+}
+
+func workflowExecutionEmitAliasesMatch(flat handlerExecutionPlan, derived handlerExecutionPlan) bool {
+	if flat.Emits == derived.Emits {
+		return true
+	}
+	switch {
+	case strings.TrimSpace(flat.Emits) == "" &&
+		strings.TrimSpace(derived.Emits) == "spec.revision_requested" &&
+		(strings.TrimSpace(flat.Action) == "increment_revision_count" || strings.TrimSpace(derived.Action) == "revision_loop"):
+		return true
+	case strings.TrimSpace(flat.Emits) == "" &&
+		strings.TrimSpace(derived.Emits) == "vertical.killed" &&
+		strings.TrimSpace(derived.Action) == "kill_vertical":
+		return true
+	default:
+		return false
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) executeHandlerExecutionPlanPreStage(
+	ctx context.Context,
+	triggerCtx workflowTriggerContext,
+	plan handlerExecutionPlan,
+) []string {
+	switch strings.TrimSpace(plan.Action) {
+	case "advance_operating":
+		// Structural stage advance only. Keep this side-effect free.
+		return nil
+	case "revision_loop":
+		if pc.executeWorkflowAction(ctx, triggerCtx, "increment_revision_count") {
+			return []string{"increment_revision_count"}
+		}
+		return nil
+	case "kill_vertical":
+		// The surrounding validation/lifecycle handlers already emit vertical.killed after
+		// applyWorkflowEventTransition returns, so pre-stage behavior stays side-effect free.
+		return nil
+	default:
+		return nil
+	}
+}
+
+func equalStringSlices(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if strings.TrimSpace(left[i]) != strings.TrimSpace(right[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func workflowTransitionSemanticParity(flat WorkflowTransition, derived WorkflowTransition) (bool, string) {

@@ -1,0 +1,182 @@
+scan-orchestrator:
+  id: scan-orchestrator
+  execution_type: system_node
+  description: 'Manages scan campaigns: dispatches scan.requested to scanner agents, tracks scan completion, handles scan
+    timeouts. Pre-workflow — produces events that feed into discovery aggregation.'
+  subscribes_to:
+  - market_research.scan_complete
+  - scan.source_dispatch
+  - scan.requested
+  - scanner.reviews.scan_complete
+  - scanner.yelp.scan_complete
+  - trend_research.scan_complete
+  - scan.category_dispatch
+  - scan.trend_dispatch
+  - scanner.google_maps.scan_complete
+  - scanner.directories.scan_complete
+  - timer.campaign_deadline
+  - scanner.instagram.scan_complete
+  - timer.scan_timeout
+  - '*.scan_complete'
+  produces:
+  - scan.completed
+  - pipeline.dead_letter
+  - campaign.completed
+  timers:
+  - scan_timeout
+  - campaign_deadline
+  state_table: scan_accumulators
+  event_handlers:
+    scan.requested:
+      description: Route by mode, fan out to agents per subcategory
+      rules:
+        saas_gap:
+          condition: payload.mode == saas_gap
+          emits:
+          - scan.category_dispatch
+          - scan.source_dispatch
+        saas_trend:
+          condition: payload.mode == saas_trend
+          emits: scan.trend_dispatch
+        local_services:
+          condition: payload.mode == local_services
+          emits:
+          - scan.source_dispatch
+          - scan.category_dispatch
+        corpus:
+          condition: payload.mode == corpus
+          emits: scan.category_dispatch
+    '*.scan_complete':
+      action: accumulate_scan
+      description: Track scanner completion. When all scanners report or timeout, emit scan.completed
+      emits: scan.completed
+    timer.scan_timeout:
+      action: force_scan_complete
+      description: 'Timeout: emit scan.completed with partial results'
+      emits: scan.completed
+    timer.campaign_deadline:
+      action: force_campaign_complete
+      description: Global 24h safety net. Force-complete the campaign.
+      emits: campaign.completed
+    scan.category_dispatch:
+      description: Fan out subcategories to market research agents
+      fan_out:
+        items_from: payload.subcategories
+        target: discovery/market-research-agent
+        emit_per_item: market_research.scan_assigned
+      data_accumulation:
+        writes:
+        - scan_expected_count
+        source_event: fan_out.count
+    scan.trend_dispatch:
+      description: Fan out trend topics to trend research agents
+      fan_out:
+        items_from: payload.trend_topics
+        target: discovery/trend-research-agent
+        emit_per_item: trend_research.scan_assigned
+      data_accumulation:
+        writes:
+        - scan_expected_count
+        source_event: fan_out.count
+    scan.source_dispatch:
+      description: Fan out data sources to scanner agents
+      fan_out:
+        items_from: payload.sources
+        target: discovery/scanner-agent
+        emit_per_item: scanner.scan_assigned
+      data_accumulation:
+        writes:
+        - scan_expected_count
+        source_event: fan_out.count
+  state_schema:
+    description: Tracks active scans and accumulates scanner completions
+    fields:
+      scan_id: uuid (primary key)
+      campaign_id: uuid
+      geography: text
+      mode: text
+      expected_scanners: text[] (scanner types dispatched)
+      completed_scanners: text[] (scanner types reported)
+      started_at: timestamptz
+      completed_at: timestamptz (null until done)
+      status: text (active | completed | timeout)
+discovery-aggregator:
+  id: discovery-aggregator
+  execution_type: system_node
+  description: Accumulates category.assessed, trend.identified, source.scraped signals. Runs dedup/synthesis. Produces vertical.discovered
+    when threshold met. Pre-workflow — feeds into scoring-node.
+  subscribes_to:
+  - category.assessed
+  - trend.identified
+  - source.scraped
+  - dedup.resolved
+  - synthesis.resolved
+  produces:
+  - vertical.discovered
+  - synthesis.needed
+  - pipeline.dead_letter
+  - dedup.ambiguous
+  timers: []
+  state_table: pending_dedup_candidates
+  event_handlers:
+    category.assessed:
+      action: accumulate_signal
+      description: Accumulate discovery signal into scan batch.
+    trend.identified:
+      action: accumulate_signal
+      description: Accumulate discovery signal into scan batch.
+    source.scraped:
+      action: accumulate_signal
+      description: Accumulate discovery signal into scan batch.
+    dedup.resolved:
+      description: Apply merge strategy decided by discovery-coordinator agent
+      rules:
+        keep_first:
+          condition: payload.strategy == keep_first
+          data_accumulation:
+            writes:
+            - merged_signal
+            source: payload.signal_a
+        keep_best:
+          condition: payload.strategy == keep_best
+          data_accumulation:
+            writes:
+            - merged_signal
+            source: payload.best_signal
+        merge_fields:
+          condition: payload.strategy == merge_fields
+          data_accumulation:
+            writes:
+            - merged_signal
+            source: payload.merged
+    synthesis.resolved:
+      description: Apply resolution decided by discovery-coordinator agent
+      rules:
+        accept_a:
+          condition: payload.resolution == accept_a
+          data_accumulation:
+            writes:
+            - resolved_signal
+            source: payload.signal_a
+        accept_b:
+          condition: payload.resolution == accept_b
+          data_accumulation:
+            writes:
+            - resolved_signal
+            source: payload.signal_b
+        synthesize:
+          condition: payload.resolution == synthesize
+          data_accumulation:
+            writes:
+            - resolved_signal
+            source: payload.synthesized
+  state_schema:
+    description: Holds signals pending dedup resolution
+    fields:
+      id: uuid
+      opportunity_name: text
+      signal_strength: integer
+      evidence: jsonb
+      status: text (pending | resolved | discarded)
+      matched_vertical_id: uuid (null if no match)
+      created_at: timestamptz

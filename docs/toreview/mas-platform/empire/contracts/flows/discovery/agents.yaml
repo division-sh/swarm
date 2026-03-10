@@ -1,0 +1,84 @@
+discovery-coordinator:
+  id: discovery-coordinator
+  type: factory
+  role: discovery_coordinator
+  model_tier: sonnet
+  conversation_mode: task
+  max_turns_per_task: 10
+  subscriptions:
+  - dedup.ambiguous
+  - synthesis.needed
+  tools_tier2: []
+  emit_events:
+  - dedup.resolved
+  - synthesis.resolved
+  permissions_bundle: specialist
+  permissions:
+  - message_domain
+  - mailbox_send
+  - configure_routing
+  workspace_class: factory
+  manager_fallback: empire-coordinator
+market-research-agent:
+  id: market-research-agent
+  type: factory
+  role: market_research
+  model_tier: sonnet
+  conversation_mode: session
+  max_turns_per_task: 40
+  subscriptions:
+  - market_research.scan_assigned
+  tools_tier2: []
+  emit_events:
+  - category.assessed
+  - market_research.scan_complete
+  permissions_bundle: worker
+  permissions: &id001
+  - message_peers
+  workspace_class: factory
+  manager_fallback: discovery-coordinator
+trend-research-agent:
+  id: trend-research-agent
+  type: factory
+  role: trend_research
+  model_tier: sonnet
+  conversation_mode: session
+  max_turns_per_task: 40
+  subscriptions:
+  - trend_research.scan_assigned
+  tools_tier2: []
+  emit_events:
+  - trend.identified
+  - trend_research.scan_complete
+  permissions_bundle: worker
+  permissions: *id001
+  workspace_class: factory
+  manager_fallback: discovery-coordinator
+scanner-agent:
+  id: scanner-{type}-{scan_id}
+  type: factory
+  role: scanner
+  model_tier: haiku
+  conversation_mode: task
+  max_turns_per_task: 15
+  subscriptions:
+  - scanner.google_maps.scan_assigned
+  - scanner.instagram.scan_assigned
+  - scanner.reviews.scan_assigned
+  - scanner.directories.scan_assigned
+  - scanner.yelp.scan_assigned
+  - scanner.scan_assigned
+  tools_tier2: []
+  emit_events:
+  - source.scraped
+  - scanner.google_maps.scan_complete
+  - scanner.instagram.scan_complete
+  - scanner.reviews.scan_complete
+  - scanner.directories.scan_complete
+  - scanner.yelp.scan_complete
+  _note: Ephemeral — spawned per scan type. Each instance subscribes to ONE scan_assigned and emits ONE scan_complete. All
+    5 listed for xval completeness.
+  permissions_bundle: worker
+  permissions: *id001
+  workspace_class: factory
+  manager_fallback: discovery-coordinator

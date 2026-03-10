@@ -1018,6 +1018,664 @@ func TestHandlerExecutionPlanParity_SpecValidationFailedAlias(t *testing.T) {
 	}
 }
 
+func TestHandlerExecutionPlanSafety_ResearchCompleted_IsNotExecutionSafeYet(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.completed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "researching",
+			Metadata: map[string]any{
+				"g1_research": true,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected research.completed workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for research.completed")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if comparison.Safe {
+		t.Fatalf("expected research.completed to remain execution-unsafe, got %+v", comparison)
+	}
+	if comparison.Reason == "safe" {
+		t.Fatalf("expected non-safe reason for research.completed, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_CTOSpecApproved_IsNotExecutionSafeYet(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_approved"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"g3_cto": true,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected cto.spec_approved workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for cto.spec_approved")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if comparison.Safe {
+		t.Fatalf("expected cto.spec_approved to remain execution-unsafe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_BuildComplete_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("build_complete"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"status": "passed"}),
+		},
+		State: WorkflowState{Stage: "building"},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected build_complete workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for build_complete")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected build_complete execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected build_complete safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_LaunchReady_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("launch_ready"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"decision": "approved"}),
+		},
+		State: WorkflowState{Stage: "pre_launch"},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected launch_ready workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for launch_ready")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected launch_ready execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected launch_ready safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_ReadyForReview_IsNotExecutionSafeYet(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.ready_for_review"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "branding",
+			Metadata: map[string]any{
+				"g4_brand":    true,
+				"g1_research": true,
+				"g2_spec":     true,
+				"g3_cto":      true,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected vertical.ready_for_review workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for vertical.ready_for_review")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if comparison.Safe {
+		t.Fatalf("expected vertical.ready_for_review to remain execution-unsafe, got %+v", comparison)
+	}
+	if comparison.Reason != "guard_mismatch" {
+		t.Fatalf("expected vertical.ready_for_review guard mismatch, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_ResearchRejected_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.vertical_rejected"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "researching"},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected research.vertical_rejected workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for research.vertical_rejected")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected research.vertical_rejected execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected research.vertical_rejected safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_CTOVetoed_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_vetoed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "cto_spec_review"},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected cto.spec_vetoed workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for cto.spec_vetoed")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected cto.spec_vetoed execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected cto.spec_vetoed safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_SpecValidationFailed_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("spec.validation_failed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 1,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected spec.validation_failed workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for spec.validation_failed")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected spec.validation_failed execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected spec.validation_failed safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_CTORevisionNeeded_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_revision_needed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 1,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected cto.spec_revision_needed workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for cto.spec_revision_needed")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected cto.spec_revision_needed execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected cto.spec_revision_needed safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestHandlerExecutionPlanSafety_OperatingAdvanceSet_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	cases := []struct {
+		name      string
+		eventType events.EventType
+		stage     PipelineStage
+	}{
+		{name: "steady_state", eventType: events.EventType("opco.steady_state_reached"), stage: PipelineStage("launched")},
+		{name: "growth_triggered", eventType: events.EventType("opco.growth_triggered"), stage: StageOperating},
+		{name: "growth_stabilized", eventType: events.EventType("opco.growth_stabilized"), stage: PipelineStage("expanding")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			triggerCtx := workflowTriggerContext{
+				Event: events.Event{
+					ID:         uuid.NewString(),
+					Type:       tc.eventType,
+					VerticalID: uuid.NewString(),
+				},
+				State: WorkflowState{Stage: tc.stage},
+			}
+
+			transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+			if !ok {
+				t.Fatalf("expected %s workflow transition", tc.eventType)
+			}
+			plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+			if !ok {
+				t.Fatalf("expected derived handler execution plan for %s", tc.eventType)
+			}
+
+			comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+			if !comparison.Safe {
+				t.Fatalf("expected %s execution safety, got %+v", tc.eventType, comparison)
+			}
+			if comparison.Reason != "safe" {
+				t.Fatalf("expected %s safety reason safe, got %+v", tc.eventType, comparison)
+			}
+		})
+	}
+}
+
+func TestHandlerExecutionPlanSafety_TeardownRequested_IsExecutionSafe(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("opco.teardown_requested"),
+			VerticalID:  uuid.NewString(),
+			SourceAgent: "human",
+			Payload:     mustJSON(map[string]any{"mailbox_decision_id": uuid.NewString()}),
+		},
+		State: WorkflowState{Stage: StageOperating},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected opco.teardown_requested workflow transition")
+	}
+	plan, ok := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived handler execution plan for opco.teardown_requested")
+	}
+
+	comparison := classifyHandlerExecutionPlanSafety(transition, plan)
+	if !comparison.Safe {
+		t.Fatalf("expected opco.teardown_requested execution safety, got %+v", comparison)
+	}
+	if comparison.Reason != "safe" {
+		t.Fatalf("expected opco.teardown_requested safety reason safe, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForOperatingAdvanceSubset(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Launch Stage Co', 'launch-stage-co', 'us', 'launched', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("opco.steady_state_reached"),
+		VerticalID: verticalID,
+	})
+	if !ok {
+		t.Fatal("expected opco.steady_state_reached workflow transition")
+	}
+	if outcome.Transition.Name != "launched_to_operating" {
+		t.Fatalf("expected launched_to_operating transition, got %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "operating")
+	if len(outcome.ActionsExecuted) != 0 {
+		t.Fatalf("expected no flat transition actions executed for operating advance alias, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForTeardownRequested(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Teardown Stage Co', 'teardown-stage-co', 'us', 'operating', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("opco.teardown_requested"),
+		VerticalID:  verticalID,
+		SourceAgent: "human",
+		Payload:     mustJSON(map[string]any{"mailbox_decision_id": uuid.NewString()}),
+	})
+	if !ok {
+		t.Fatal("expected opco.teardown_requested workflow transition")
+	}
+	if outcome.Transition.Name != "operating_to_winding_down" {
+		t.Fatalf("expected operating_to_winding_down transition, got %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "winding_down")
+	if len(outcome.ActionsExecuted) == 0 || outcome.ActionsExecuted[len(outcome.ActionsExecuted)-1] != "begin_teardown" {
+		t.Fatalf("expected begin_teardown action to execute post-stage, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForBuildComplete(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Build Stage Co', 'build-stage-co', 'us', 'building', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("build_complete"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"status": "passed"}),
+	})
+	if !ok {
+		t.Fatal("expected build_complete workflow transition")
+	}
+	if outcome.Transition.Name != "building_to_pre_launch" {
+		t.Fatalf("expected building_to_pre_launch transition, got %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "pre_launch")
+	if len(outcome.ActionsExecuted) != 0 {
+		t.Fatalf("expected no flat transition actions executed for build_complete handler-order alias, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForLaunchReady(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Launch Ready Co', 'launch-ready-co', 'us', 'pre_launch', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("launch_ready"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"decision": "approved"}),
+	})
+	if !ok {
+		t.Fatal("expected launch_ready workflow transition")
+	}
+	if outcome.Transition.Name != "pre_launch_to_launched" {
+		t.Fatalf("expected pre_launch_to_launched transition, got %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "launched")
+	if len(outcome.ActionsExecuted) != 0 {
+		t.Fatalf("expected no flat transition actions executed for launch_ready handler-order alias, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForSpecValidationFailed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Revision Loop Co', 'revision-loop-co', 'us', 'cto_spec_review', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	pc.validationGate.states[verticalID] = &validationPipelineState{
+		VerticalID:    verticalID,
+		Status:        "active",
+		G1Research:    true,
+		G2Spec:        true,
+		G3CTO:         true,
+		RevisionCount: 0,
+		SpecVersion:   1,
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("spec.validation_failed"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"status": "blocker"}),
+	})
+	if !ok {
+		t.Fatal("expected spec.validation_failed workflow transition")
+	}
+	if outcome.Transition.Name != "validation_failed_to_speccing" {
+		t.Fatalf("unexpected transition: %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "mvp_speccing")
+	if got := pc.validationGate.states[verticalID].RevisionCount; got != 1 {
+		t.Fatalf("expected revision_count=1, got %d", got)
+	}
+	if len(outcome.ActionsExecuted) == 0 || outcome.ActionsExecuted[len(outcome.ActionsExecuted)-1] != "increment_revision_count" {
+		t.Fatalf("expected increment_revision_count post-stage action, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForCTORevisionNeeded(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'CTO Revision Co', 'cto-revision-co', 'us', 'cto_spec_review', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	pc.validationGate.states[verticalID] = &validationPipelineState{
+		VerticalID:    verticalID,
+		Status:        "active",
+		G1Research:    true,
+		G2Spec:        true,
+		G3CTO:         true,
+		RevisionCount: 0,
+		SpecVersion:   1,
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("cto.spec_revision_needed"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"reason": "needs_more_detail"}),
+	})
+	if !ok {
+		t.Fatal("expected cto.spec_revision_needed workflow transition")
+	}
+	if outcome.Transition.Name != "cto_revision_to_speccing" {
+		t.Fatalf("unexpected transition: %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "mvp_speccing")
+	if got := pc.validationGate.states[verticalID].RevisionCount; got != 1 {
+		t.Fatalf("expected revision_count=1, got %d", got)
+	}
+	if len(outcome.ActionsExecuted) == 0 || outcome.ActionsExecuted[len(outcome.ActionsExecuted)-1] != "increment_revision_count" {
+		t.Fatalf("expected increment_revision_count post-stage action, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForResearchRejected(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Rejected Co', 'rejected-co', 'us', 'researching', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("research.vertical_rejected"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"reason": "market too small"}),
+	})
+	if !ok {
+		t.Fatal("expected research.vertical_rejected workflow transition")
+	}
+	if outcome.Transition.Name != "researching_to_killed" {
+		t.Fatalf("unexpected transition: %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "killed")
+	if len(outcome.ActionsExecuted) != 0 {
+		t.Fatalf("expected no flat transition actions executed for research.vertical_rejected handler-order alias, got %+v", outcome.ActionsExecuted)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanForCTOVetoed(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'Vetoed Co', 'vetoed-co', 'us', 'cto_spec_review', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("insert vertical: %v", err)
+	}
+
+	outcome, ok := pc.applyWorkflowEventTransition(ctx, events.Event{
+		ID:         uuid.NewString(),
+		Type:       events.EventType("cto.spec_vetoed"),
+		VerticalID: verticalID,
+		Payload:    mustJSON(map[string]any{"reason": "cto veto"}),
+	})
+	if !ok {
+		t.Fatal("expected cto.spec_vetoed workflow transition")
+	}
+	if outcome.Transition.Name != "cto_vetoed_to_killed" {
+		t.Fatalf("unexpected transition: %+v", outcome.Transition)
+	}
+	assertVerticalStage(t, ctx, db, verticalID, "killed")
+	if len(outcome.ActionsExecuted) != 0 {
+		t.Fatalf("expected no flat transition actions executed for cto.spec_vetoed handler-order alias, got %+v", outcome.ActionsExecuted)
+	}
+}
+
 func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_FallsBackForNeedsMoreData(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)

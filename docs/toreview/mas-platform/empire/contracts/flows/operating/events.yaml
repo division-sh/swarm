@@ -1,0 +1,270 @@
+vertical.approved:
+  payload:
+    vertical_id: string
+    brand_choice: string
+    founder_directives: string
+vertical.resumed:
+  payload:
+    vertical_id: string
+opco.ceo_ready:
+  payload:
+    vertical_id: string
+    agent_count: number
+timer.marginal_review:
+  payload:
+    parked_marginals_summary: string
+timer.marginal_kill:
+  payload:
+    vertical_id: string
+    parked_days: integer
+build_complete:
+  payload:
+    feature: string
+    environment: string
+launch_ready:
+  payload:
+    vertical_id: string
+    version: number
+    deploy_url: string
+    test_results: object
+qa.validation_passed:
+  payload:
+    test_summary: string
+    coverage_notes: string
+    staging_url: string
+review.deploy_feedback:
+  payload:
+    vertical_id: string
+    feedback: string
+    reviewer: string
+opco.steady_state_reached:
+  payload:
+    vertical_id: string
+opco.growth_triggered:
+  payload:
+    vertical_id: string
+    trigger_reason: string
+opco.growth_stabilized:
+  payload:
+    vertical_id: string
+    stabilization_metrics: object
+opco.teardown_requested:
+  payload:
+    vertical_id: string
+    reason: string
+mailbox.item_decided:
+  payload:
+    item_id: string
+    decision: string
+    decided_by: string
+    vertical_id: string
+    original_event_type: string
+bug_fix_deployed:
+  payload:
+    vertical_id: string
+    bug_id: string
+    version: number
+    resolution: string
+bug_reported:
+  payload:
+    description: string
+    severity: number
+    reproduction_steps: string
+build_blocked:
+  payload:
+    task: string
+    blocker: string
+    severity: string
+build_progress:
+  payload:
+    task: string
+    progress_pct: integer
+    status: string
+channel_blocked:
+  payload:
+    channel: string
+    reason: string
+channel_update:
+  payload:
+    channel: string
+    status: string
+    metrics: object
+churn_risk:
+  payload:
+    customer_id: string
+    risk_score: number
+    signals: array
+cross_domain_report:
+  payload:
+    domains: array
+    summary: string
+cto.tech_spec_review_requested:
+  payload:
+    vertical_id: string
+    spec_content: string
+cycle_reset:
+  payload:
+    reason: string
+deploy_requested:
+  payload:
+    vertical_id: string
+    component: string
+    version: number
+    deploy_config: string
+feature_deployed:
+  payload:
+    feature: string
+    version: string
+feature_request:
+  payload:
+    source: string
+    description: string
+    priority: string
+founder_input.response:
+  payload:
+    request_id: string
+    response: string
+    decision: string
+growth_escalation:
+  payload:
+    issue: string
+    severity: string
+growth_report:
+  payload:
+    period: string
+    metrics: object
+    experiments: array
+mandate_updated:
+  payload:
+    vertical_id: string
+    changes: object
+market_feedback:
+  payload:
+    source: string
+    feedback: string
+    sentiment: string
+market_signals:
+  payload:
+    signal_type: string
+    data: object
+opco.deploy_review:
+  payload:
+    deployment_id: string
+    review_notes: string
+opco.founder_input:
+  payload:
+    question: string
+    context: string
+opco.product_spec_review:
+  payload:
+    spec_id: string
+    review_result: string
+    feedback: string
+opco.spend_request:
+  payload:
+    vertical_id: string
+    amount: number
+    reason: string
+outreach_digest:
+  payload:
+    messages_sent: string
+    responses: string
+    response_rate: string
+    leads_converted: string
+    best_channel: string
+    intelligence: string
+prelaunch_ready:
+  payload:
+    checklist: object
+    blockers: array
+product_escalation:
+  payload:
+    issue: string
+    severity: string
+    context: object
+product_report:
+  payload:
+    period: string
+    metrics: object
+    highlights: string
+product_spec_ready:
+  payload:
+    spec_id: string
+    feature: string
+qa.validation_failed:
+  payload:
+    failures: string
+    expected_vs_actual: string
+    severity: number
+    reproduction_steps: string
+spend_needed:
+  payload:
+    requester: string
+    amount: number
+    reason: string
+spend_request:
+  payload:
+    vertical_id: string
+    amount: string
+    currency: string
+    purpose: string
+    justification: string
+support_critical:
+  payload:
+    ticket_id: string
+    issue: string
+    customer: string
+support_digest:
+  payload:
+    period: string
+    ticket_count: integer
+    themes: array
+technical_spec_ready:
+  payload:
+    spec_id: string
+    feature: string
+user_onboarded:
+  payload:
+    user_id: string
+    channel: string
+opco.terminated:
+  payload:
+    vertical_id: string
+    instance_id: string
+    teardown_summary: string
+    terminated_at: timestamp
+deploy.completed:
+  payload:
+    deployment_id: string
+    environment: string
+    status: string
+timer.operating_timeout:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    elapsed_hours: integer
+operating.timeout_escalation:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    action: string
+backend.task_complete:
+  payload:
+    task: string
+    status: string
+    details: string
+backend.blocked:
+  payload:
+    task: string
+    status: string
+    details: string
+frontend.task_complete:
+  payload:
+    task: string
+    status: string
+    details: string
+frontend.blocked:
+  payload:
+    task: string
+    status: string
+    details: string

@@ -1,0 +1,350 @@
+analyst.anti_pattern_advisory:
+  payload:
+    pattern: string
+    affected_verticals: array
+    severity: number
+    recommendation: string
+analyst.bootstrap_upgrade_proposal:
+  payload:
+    proposal_type: string
+    affected_routes: array
+    evidence: object
+    recommendation: string
+analyst.prompt_refinement_proposal:
+  payload:
+    agent_role: string
+    current_behavior: string
+    proposed_change: string
+    evidence: object
+board.chat:
+  payload:
+    message: string
+    context: object
+    response_requested: boolean
+board.directive:
+  payload:
+    directive_type: string
+    target: string
+    parameters: object
+    priority: string
+budget.emergency:
+  payload:
+    level: string
+    message: string
+    action_taken: string
+budget.resumed:
+  payload:
+    previous_level: number
+    message: string
+budget.threshold_crossed:
+  payload:
+    level: string
+    current_spend: number
+    budget_cap: number
+    percentage: number
+budget.throttle:
+  payload:
+    throttle_level: number
+    affected_agents: array
+budget.warning:
+  payload:
+    level: string
+    message: string
+cto.architecture_directive:
+  payload:
+    directive: string
+    affected_verticals: array
+    rationale: string
+cto.extraction_recommended:
+  payload:
+    pattern_id: string
+    affected_verticals: array
+    recommendation: string
+cycle_limit_reached:
+  payload:
+    vertical_id: string
+    event_pattern: string
+    count: integer
+    window_hours: string
+    agents_involved:
+      type: array
+      items: string
+    recommendation: string
+  _status: planned
+devops.capacity_warning:
+  payload:
+    resource: string
+    current_usage: string
+    threshold: string
+    recommendation: string
+devops.deploy_complete:
+  payload:
+    vertical_id: string
+    environment: string
+    url: string
+    version: number
+devops.deploy_failed:
+  payload:
+    vertical_id: string
+    environment: string
+    error: string
+devops.deploy_requested:
+  payload:
+    vertical_id: string
+    manifest:
+      type: object
+    environment: string
+    requesting_agent: string
+devops.health_check_failed:
+  payload:
+    vertical_id: string
+    endpoint: string
+    error: string
+devops.infra_change_needed:
+  payload:
+    change_type: string
+    reason: string
+    estimated_cost: number
+devops.rollback_complete:
+  payload:
+    vertical_id: string
+    environment: string
+    active_version: integer
+devops.rollback_failed:
+  payload:
+    vertical_id: string
+    environment: string
+    error: string
+devops.rollback_requested:
+  payload:
+    vertical_id: string
+    target_version: integer
+    requesting_agent: string
+devops.ssl_provisioned:
+  payload:
+    vertical_id: string
+    domain: string
+    expiry: string
+human_task.approved:
+  payload:
+    task_id: string
+    notes: string
+human_task.completed:
+  payload:
+    task_id: string
+    result: object
+  _status: planned
+human_task.deferred:
+  payload:
+    task_id: string
+    defer_until: string
+    reason: string
+human_task.expired:
+  payload:
+    task_id: string
+human_task.rejected:
+  payload:
+    task_id: string
+    reason: string
+human_task.requested:
+  payload:
+    task_id: string
+    requesting_agent: string
+    task_type: string
+    description: string
+inbound.email:
+  payload:
+    vertical_id: string
+    from: string
+    subject: string
+    body: string
+    attachments:
+      type: array
+      items: string
+  _status: planned
+inbound.whatsapp_message:
+  payload:
+    vertical_id: string
+    from: string
+    message: string
+    timestamp: string
+    media_urls:
+      type: array
+      items: string
+  _status: planned
+opco.ceo_report:
+  payload:
+    vertical_id: string
+    phase: string
+    metrics: object
+    decisions: string
+opco.escalation:
+  payload:
+    vertical_id: string
+    issue: string
+    recommendation: string
+opco.escalation_response:
+  payload:
+    vertical_id: string
+    original_escalation_id: string
+    directive: string
+    priority: string
+opco.launched:
+  payload:
+    vertical_id: string
+    launch_url: string
+    metrics: object
+opco.teardown_complete:
+  payload:
+    vertical_id: string
+ops.agent_failed:
+  payload:
+    agent_id: string
+    vertical_id: string
+    error: string
+    retry_count: number
+    last_event_type: string
+ops.agent_panic:
+  payload:
+    agent_id: string
+    vertical_id: string
+    error: string
+    stack_trace: string
+    conversation_id: string
+  _status: planned
+portfolio.digest_compiled:
+  payload:
+    digest_text: string
+    trigger_reason: string
+    action_required_count: integer
+spend.approved:
+  payload:
+    amount: string
+    purpose: string
+spend.rejected:
+  payload:
+    reason: string
+system.directive:
+  payload:
+    directive_text: string
+    timestamp: string
+system.started:
+  payload:
+    timestamp: string
+    config_version: string
+    agent_count: number
+    is_cold_start: boolean
+template.migration_approved:
+  payload:
+    template_version: string
+    verticals: string
+template.migration_completed:
+  payload:
+    template_version: string
+    vertical_id: string
+    result: object
+template.migration_failed:
+  payload:
+    template_version: string
+    vertical_id: string
+    error: string
+template.migration_planned:
+  payload:
+    template_version: string
+    migration_plan:
+      type: object
+    affected_verticals:
+      type: array
+      items: string
+template.version_published:
+  payload:
+    template_version: string
+    changelog: string
+timer.infra_health_check:
+  payload:
+    check_type: string
+timer.portfolio_digest:
+  payload:
+    trigger_reason: string
+vertical.health_warning:
+  payload:
+    vertical_id: string
+    severity: string
+    metrics: object
+    recommendation: string
+opco.routing_updated:
+  payload:
+    vertical_id: string
+    event_pattern: string
+    subscriber_id: string
+    installed_by: string
+    reason: string
+    status: string
+    source: string
+    bootstrap_version: integer
+    runtime_tool_event: boolean
+  _status: planned
+human_task.assigned:
+  payload:
+    task_id: string
+    requesting_agent: string
+    vertical_id: string
+    assigned_to: string
+  _status: planned
+runtime.reset:
+  payload:
+    source: string
+    timestamp: string
+review.product_spec_feedback:
+  payload:
+    vertical_id: string
+    feedback: string
+    reviewer: string
+  _status: planned
+budget.adjustment_requested:
+  payload:
+    vertical_id: string
+    adjustment_type: string
+    amount: number
+    reason: string
+policy.change_requested:
+  payload:
+    policy_key: string
+    new_value: string
+    reason: string
+    requested_by: string
+directive.unhandled:
+  payload:
+    directive_text: string
+    directive_type: string
+    reason: string
+pipeline.dead_letter:
+  payload:
+    original_event: string
+    error: string
+    flow: string
+opco.spinup_requested:
+  payload:
+    vertical_id: string
+    mandate:
+      type: object
+    brand:
+      type: object
+    founder_directives: string
+scan.requested:
+  payload:
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+vertical.resumed:
+  payload:
+    vertical_id: string
+    reason: string
+    resumed_from: string
+scoring.contest_resolved:
+  payload:
+    vertical_id: string
+    score_a: number
+    score_b: number
+    winner: string

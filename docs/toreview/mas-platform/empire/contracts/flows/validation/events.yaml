@@ -1,0 +1,156 @@
+research.completed:
+  payload:
+    vertical_id: string
+    business_brief: object
+spec.revision_requested:
+  payload:
+    vertical_id: string
+    cto_feedback: string
+spec.approved:
+  payload:
+    vertical_id: string
+    final_spec: string
+spec.validation_passed:
+  payload:
+    vertical_id: string
+    validation_notes: string
+spec.validation_failed:
+  payload:
+    vertical_id: string
+    issues:
+      type: array
+      items:
+        type: object
+    severity: string
+cto.spec_approved:
+  payload:
+    vertical_id: string
+    cto_notes: string
+cto.spec_revision_needed:
+  payload:
+    vertical_id: string
+    technical_issues: string
+cto.spec_vetoed:
+  payload:
+    vertical_id: string
+    reason: string
+brand.candidates_ready:
+  payload:
+    vertical_id: string
+    candidates: array
+brand.revision_needed:
+  payload:
+    vertical_id: string
+    feedback: string
+vertical.ready_for_review:
+  payload:
+    vertical_id: string
+    validation_kit:
+      type: object
+vertical.needs_more_data:
+  payload:
+    vertical_id: string
+    questions: string
+research.vertical_rejected:
+  payload:
+    vertical_id: string
+    rejection_reason: string
+    evidence: object
+spec.revision_needed:
+  payload:
+    vertical_id: string
+    misalignment_details: string
+validation.started:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    scoring_context: string
+spec.validation_requested:
+  payload:
+    spec_content: string
+    spec_tier: string
+    vertical_id: string
+cto.spec_review_requested:
+  payload:
+    vertical_id: string
+    mvp_spec: string
+    business_brief: object
+    vertical_context: object
+brand.requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    business_brief: object
+validation.more_data_needed:
+  payload:
+    vertical_id: string
+    questions: string
+validation.package_ready:
+  payload:
+    vertical_id: string
+    research: string
+    spec: string
+    cto_notes: string
+    brand: string
+vertical.killed:
+  payload:
+    vertical_id: string
+    reason: string
+    source: string
+cto.pattern_detected:
+  payload:
+    pattern_type: string
+    verticals: string
+    description: string
+cto.tech_spec_feedback:
+  payload:
+    vertical_id: string
+    feedback: string
+    severity: number
+spec.contradiction_detected:
+  payload:
+    agent_id: string
+    contradiction_type: string
+    detail: object
+spec.draft_ready:
+  payload:
+    vertical_id: string
+    mvp_spec: string
+spec.requested:
+  payload:
+    vertical_id: string
+    business_brief: object
+spec_review.issues_found:
+  payload:
+    vertical_id: string
+    issues: array
+spec_review.passed:
+  payload:
+    vertical_id: string
+    review_notes: string
+spec_review.requested:
+  payload:
+    vertical_id: string
+    mvp_spec: string
+    business_brief: object
+template.publish_requested:
+  payload:
+    template_version: string
+    changes: string
+timer.validation_timeout:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    elapsed_hours: integer
+validation.timeout_escalation:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    action: string
+validation.revision_limit_reached:
+  payload:
+    vertical_id: string
+    gate: string
+    revision_count: integer

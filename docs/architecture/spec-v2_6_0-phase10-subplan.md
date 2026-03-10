@@ -11,7 +11,7 @@ The key rule for this phase:
 
 ## Current Safe Boundary
 
-### Promoted handler-first candidate set
+### Candidate-promoted set
 
 - `vertical.shortlisted`
 - `research.completed`
@@ -27,16 +27,68 @@ The key rule for this phase:
 - `launch_ready`
 - `opco.teardown_requested`
 
+### Execution-order-safe set
+
+- `opco.steady_state_reached`
+- `opco.growth_triggered`
+- `opco.growth_stabilized`
+- `opco.teardown_requested`
+- `build_complete`
+- `launch_ready`
+- `spec.validation_failed`
+- `cto.spec_revision_needed`
+
+These currently execute through handler-order pre-stage semantics while still returning the same flat transition outcome shape.
+
+### Candidate-safe but execution-unsafe set
+
+- `vertical.shortlisted`
+- `research.completed`
+- `cto.spec_approved`
+- `vertical.ready_for_review`
+- `research.vertical_rejected`
+
+Current mismatch reasons:
+
+- `vertical.ready_for_review` -> `guard_mismatch`
+- `research.vertical_rejected` -> `action_mismatch`
+- `research.completed` -> gate/data mismatch
+- `cto.spec_approved` -> gate/emit mismatch
+
 ### Intentionally flat-first set
 
 - `vertical.approved`
 - `vertical.needs_more_data`
 
+## Current Checkpoint
+
+Already complete:
+
+- handler-first candidate promotion for the candidate-promoted set above
+- shadow parity classification for promoted vs flat transitions
+- mismatch inventory for the intentionally flat-first set
+- normalized revision-loop alias handling for candidate parity:
+  - `spec.validation_failed`
+  - `cto.spec_revision_needed`
+- execution-safe normalization for:
+  - `build_complete`
+  - `launch_ready`
+  - `spec.validation_failed`
+  - `cto.spec_revision_needed`
+- shadow-only execution-plan model in the transition engine
+- focused execution-plan parity coverage for:
+  - `research.completed`
+  - `cto.spec_approved`
+  - `vertical.ready_for_review`
+  - `research.vertical_rejected`
+
 ## Steps
 
-### 1. Introduce a handler-execution plan type
+### 1. Finish the shadow execution-plan lane
 
-Build a normalized internal representation for one handler execution:
+Keep the execution-plan model read-only, but extend it enough to support a safe first promotion tranche.
+
+This includes:
 
 - guard
 - accumulate
@@ -50,16 +102,26 @@ Build a normalized internal representation for one handler execution:
 - action hook
 
 Done when:
-- the transition engine can construct a handler execution plan without executing it
+- the transition engine can construct and compare handler execution plans for the promoted subset without executing them
 
-### 2. Build a read-only execution-plan shadow path
+### 2. Classify the promoted subset by execution-order safety
 
-For promoted events only, derive the execution plan and compare it to the current flat transition execution shape.
+Split the promoted subset into:
+
+- execution-order-safe now
+- candidate-safe but execution-order-risky
+
+Current proven safe tranche:
+
+- `opco.steady_state_reached`
+- `opco.growth_triggered`
+- `opco.growth_stabilized`
+- `opco.teardown_requested`
 
 Done when:
-- shadow comparisons can classify plan-shape parity without changing runtime behavior
+- the first execution-order-safe tranche is explicitly documented and covered by tests
 
-### 3. Promote the first execution-order-safe subset
+### 3. Introduce pre-stage handler-order execution for the first safe tranche
 
 Move a narrow subset of promoted events from:
 - handler-first candidate selection only
@@ -67,20 +129,22 @@ Move a narrow subset of promoted events from:
 to:
 - handler-first execution-plan ordering for the pre-stage semantic steps
 
-Likely initial subset:
-- `research.completed`
-- `cto.spec_approved`
-- `build_complete`
-- `launch_ready`
+Scope for the first cut:
+
+- allow handler-order execution only for the explicitly safe tranche
+- still return or mirror the same flat transition outcome shape
+- keep stage update and post-stage hooks stable
 
 Done when:
 - the first safe subset executes through the new plan ordering and still passes the full suite
 
-### 4. Preserve flat fallback for the unsafe set
+### 4. Preserve flat fallback for the unresolved set
 
 Keep these events flat-first:
 - `vertical.approved`
 - `vertical.needs_more_data`
+
+Also keep any promoted-but-not-yet-execution-safe events on candidate-only promotion until their execution parity is proven.
 
 Done when:
 - the engine explicitly routes these through the old flat path by design
@@ -96,16 +160,17 @@ Add tests for:
 Done when:
 - the promoted/fallback boundary is fully locked by tests
 
-### 6. Close Phase 10 only when execution order is real
+### 6. Close Phase 10 only when handler-order execution is real
 
 Phase 10 is complete when:
 - a nontrivial promoted subset actually executes through handler-order semantics
 - fallback remains explicit for unresolved cases
+- the promoted execution-order-safe tranche is documented
 - full suite is green
 
 ## Acceptance Gate
 
 ```bash
-go test ./internal/runtime/pipeline -run 'TestFactoryPipelineCoordinator_Resolve(WorkflowTransitionByEvent|DerivedWorkflowTransitionByEvent)' -count=1
+go test ./internal/runtime/pipeline -run 'Test(FactoryPipelineCoordinator_Resolve(WorkflowTransitionByEvent|DerivedWorkflowTransitionByEvent|DerivedHandlerExecutionPlanByEvent)|HandlerExecutionPlan(Parity|Safety)_|FactoryPipelineCoordinator_ApplyWorkflowEventTransition_UsesHandlerExecutionPlanFor(OperatingAdvanceSubset|TeardownRequested|BuildComplete|LaunchReady|SpecValidationFailed|CTORevisionNeeded))' -count=1
 go test ./... -count=1
 ```
