@@ -11,6 +11,880 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesShortlisted(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.shortlisted"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"vertical_id": uuid.NewString()}),
+		},
+		State: WorkflowState{Stage: "shortlisted"},
+	}
+
+	flat, guardsEvaluated, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat shortlisted transition")
+	}
+	if len(guardsEvaluated) == 0 {
+		t.Fatal("expected shortlisted transition to evaluate guards")
+	}
+	derived, ok := pc.resolveDerivedWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected derived shortlisted transition candidate")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected shadow shortlisted transition match, flat=%+v derived=%+v", flat, derived)
+	}
+	if comparison.Reason != "emit_match" {
+		t.Fatalf("expected shortlisted parity via shared emit, got %+v", comparison)
+	}
+	if derived.To != "researching" {
+		t.Fatalf("expected derived shortlisted target researching, got %+v", derived)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesDerivedShortlistedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.shortlisted"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"vertical_id": uuid.NewString()}),
+		},
+		State: WorkflowState{Stage: "shortlisted"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted shortlisted transition")
+	}
+	if transition.Name != "shortlisted_to_researching" {
+		t.Fatalf("expected flat shortlisted transition name, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "has_vertical_id" {
+		t.Fatalf("expected flat shortlisted guard evaluation, got %+v", guards)
+	}
+	if len(transition.Actions) == 0 || transition.Actions[0].Name != "emit_validation_started" {
+		t.Fatalf("expected flat shortlisted action payload, got %+v", transition.Actions)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesResearchCompletedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.completed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "researching",
+			Metadata: map[string]any{
+				"g1_research": true,
+			},
+		},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted research.completed transition")
+	}
+	if transition.Name != "researching_to_mvp_speccing" {
+		t.Fatalf("expected flat research.completed transition name, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "gate_g1_research" {
+		t.Fatalf("expected flat research.completed guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesCTOApprovedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_approved"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"g3_cto": true,
+			},
+		},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted cto.spec_approved transition")
+	}
+	if transition.Name != "cto_review_to_branding" {
+		t.Fatalf("expected flat cto.spec_approved transition name, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "gate_g3_cto" {
+		t.Fatalf("expected flat cto.spec_approved guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesSpecValidationFailedAliasToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("spec.validation_failed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 0,
+			},
+		},
+	}
+
+	transition, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted validation_failed transition")
+	}
+	if transition.Name != "validation_failed_to_speccing" {
+		t.Fatalf("expected promoted flat validation_failed transition, got %+v", transition)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_FallsBackForNonPromotedVerticalApproved(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("vertical.approved"),
+			VerticalID:  uuid.NewString(),
+			SourceAgent: "human",
+			Payload:     mustJSON(map[string]any{"mailbox_decision_id": uuid.NewString()}),
+		},
+		State: WorkflowState{Stage: "ready_for_review"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat vertical.approved transition")
+	}
+	if transition.Name != "ready_to_approved" {
+		t.Fatalf("expected fallback flat vertical.approved transition, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "has_human_decision" {
+		t.Fatalf("expected flat vertical.approved guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowClassifiesValidationFailedAsAliasMatch(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("spec.validation_failed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "cto_spec_review"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted validation_failed transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected validation_failed shadow comparison to match alias semantics, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected validation_failed semantic match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesResearchCompleted(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.completed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "researching",
+			Metadata: map[string]any{
+				"g1_research": true,
+			},
+		},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat research.completed transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected research.completed shadow comparison to be parity-safe, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected research.completed semantic match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesCTOApproved(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_approved"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"g3_cto": true,
+			},
+		},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat cto.spec_approved transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected cto.spec_approved shadow comparison to be parity-safe, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected cto.spec_approved semantic match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_FailsOnAmbiguousOwners(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	trigger := "vertical.shortlisted"
+	bundle := pc.ContractBundle()
+	bundle.Semantics.EventOwners[trigger] = append([]string{}, bundle.Semantics.EventOwners[trigger]...)
+	bundle.Semantics.EventOwners[trigger] = append(bundle.Semantics.EventOwners[trigger], "shadow-node")
+	if bundle.Semantics.HandlerTransitionIndex == nil {
+		bundle.Semantics.HandlerTransitionIndex = map[string]map[string]runtimecontracts.HandlerTransitionSemantic{}
+	}
+	bundle.Semantics.HandlerTransitionIndex["shadow-node"] = map[string]runtimecontracts.HandlerTransitionSemantic{
+		trigger: {
+			ID:        "shadow-node:" + trigger,
+			NodeID:    "shadow-node",
+			EventType: trigger,
+			AdvancesTo:"researching",
+		},
+	}
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType(trigger),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "shortlisted"},
+	}
+
+	if _, ok := pc.resolveDerivedWorkflowTransitionByEvent(triggerCtx); ok {
+		t.Fatal("expected ambiguous derived transition ownership to fail closed")
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowClassifiesMismatch(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.approved"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "ready_for_review"},
+	}
+
+	flat := WorkflowTransition{
+		Name:    "ready_to_approved",
+		From:    []PipelineStage{"ready_for_review"},
+		To:      "approved",
+		Trigger: "vertical.approved",
+		Node:    "lifecycle-orchestrator",
+		GuardIDs: []string{"has_human_decision"},
+		Actions: []WorkflowAction{{Name: "emit_opco_spinup_requested"}},
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if comparison.Matched {
+		t.Fatalf("expected vertical.approved shadow comparison to surface mismatch, got %+v", comparison)
+	}
+	if comparison.Reason == "" || comparison.Reason == "match" {
+		t.Fatalf("expected concrete mismatch reason, got %+v", comparison)
+	}
+	if comparison.Reason != "action_mismatch" {
+		t.Fatalf("expected vertical.approved action mismatch, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesSteadyStateReached(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("opco.steady_state_reached"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "launched"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat opco.steady_state_reached transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected opco.steady_state_reached parity, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected opco.steady_state_reached match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesGrowthTriggered(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("opco.growth_triggered"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "operating"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat opco.growth_triggered transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected opco.growth_triggered parity, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected opco.growth_triggered match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesGrowthStabilized(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("opco.growth_stabilized"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "expanding"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat opco.growth_stabilized transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected opco.growth_stabilized parity, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected opco.growth_stabilized match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesBuildComplete(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("build_complete"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"status": "passed"}),
+		},
+		State: WorkflowState{Stage: "building"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat build_complete transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected build_complete parity, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected build_complete match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesLaunchReady(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("launch_ready"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"decision": "approved"}),
+		},
+		State: WorkflowState{Stage: "pre_launch"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat launch_ready transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected launch_ready parity, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected launch_ready match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesTeardownRequested(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("opco.teardown_requested"),
+			VerticalID:  uuid.NewString(),
+			SourceAgent: "human",
+			Payload:     mustJSON(map[string]any{"mailbox_decision_id": uuid.NewString()}),
+		},
+		State: WorkflowState{Stage: "operating"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat opco.teardown_requested transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected opco.teardown_requested parity, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected opco.teardown_requested match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesReadyForReview(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.ready_for_review"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "branding",
+			Metadata: map[string]any{
+				"g4_brand":    true,
+				"g1_research": true,
+				"g2_spec":     true,
+				"g3_cto":      true,
+			},
+		},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat vertical.ready_for_review transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected vertical.ready_for_review parity, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowMatchesResearchRejected(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.vertical_rejected"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "researching"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat research.vertical_rejected transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected research.vertical_rejected parity, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesSteadyStateReachedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("opco.steady_state_reached"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "launched"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted opco.steady_state_reached transition")
+	}
+	if transition.Name != "launched_to_operating" {
+		t.Fatalf("expected flat launched_to_operating transition, got %+v", transition)
+	}
+	if len(guards) != 0 {
+		t.Fatalf("expected no guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesGrowthTriggeredToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("opco.growth_triggered"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "operating"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted opco.growth_triggered transition")
+	}
+	if transition.Name != "operating_to_expanding" {
+		t.Fatalf("expected flat operating_to_expanding transition, got %+v", transition)
+	}
+	if len(guards) != 0 {
+		t.Fatalf("expected no guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesGrowthStabilizedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("opco.growth_stabilized"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "expanding"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted opco.growth_stabilized transition")
+	}
+	if transition.Name != "expanding_to_operating" {
+		t.Fatalf("expected flat expanding_to_operating transition, got %+v", transition)
+	}
+	if len(guards) != 0 {
+		t.Fatalf("expected no guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesBuildCompleteToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("build_complete"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"status": "passed"}),
+		},
+		State: WorkflowState{Stage: "building"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted build_complete transition")
+	}
+	if transition.Name != "building_to_pre_launch" {
+		t.Fatalf("expected flat building_to_pre_launch transition, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "qa_passed" {
+		t.Fatalf("expected qa_passed guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesLaunchReadyToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("launch_ready"),
+			VerticalID: uuid.NewString(),
+			Payload:    mustJSON(map[string]any{"decision": "approved"}),
+		},
+		State: WorkflowState{Stage: "pre_launch"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted launch_ready transition")
+	}
+	if transition.Name != "pre_launch_to_launched" {
+		t.Fatalf("expected flat pre_launch_to_launched transition, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "deploy_approved" {
+		t.Fatalf("expected deploy_approved guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesTeardownRequestedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("opco.teardown_requested"),
+			VerticalID:  uuid.NewString(),
+			SourceAgent: "human",
+			Payload:     mustJSON(map[string]any{"mailbox_decision_id": uuid.NewString()}),
+		},
+		State: WorkflowState{Stage: "operating"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted opco.teardown_requested transition")
+	}
+	if transition.Name != "operating_to_winding_down" {
+		t.Fatalf("expected flat operating_to_winding_down transition, got %+v", transition)
+	}
+	if len(guards) == 0 || guards[0] != "has_human_decision" {
+		t.Fatalf("expected has_human_decision guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesReadyForReviewToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.ready_for_review"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "branding",
+			Metadata: map[string]any{
+				"g4_brand":    true,
+				"g1_research": true,
+				"g2_spec":     true,
+				"g3_cto":      true,
+			},
+		},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted vertical.ready_for_review transition")
+	}
+	if transition.Name != "branding_to_ready" {
+		t.Fatalf("expected flat branding_to_ready transition, got %+v", transition)
+	}
+	if len(guards) != 2 || guards[0] != "gate_g4_brand" || guards[1] != "all_gates_met" {
+		t.Fatalf("expected branding guards, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesCTORevisionNeededToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_revision_needed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 0,
+			},
+		},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted cto.spec_revision_needed transition")
+	}
+	if transition.Name != "cto_revision_to_speccing" {
+		t.Fatalf("expected promoted cto_revision_to_speccing transition, got %+v", transition)
+	}
+	if len(guards) != 1 || guards[0] != "inner_revision_count_below_limit" {
+		t.Fatalf("expected revision guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowClassifiesCTORevisionNeededAsAliasMatch(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("cto.spec_revision_needed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 0,
+			},
+		},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted cto.spec_revision_needed transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected cto.spec_revision_needed alias match, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected cto.spec_revision_needed semantic match, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesResearchRejectedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("research.vertical_rejected"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "researching"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted research.vertical_rejected transition")
+	}
+	if transition.Name != "researching_to_killed" {
+		t.Fatalf("expected flat researching_to_killed transition, got %+v", transition)
+	}
+	if len(guards) != 0 {
+		t.Fatalf("expected no guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowClassifiesNeedsMoreDataNodeMismatch(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.needs_more_data"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "ready_for_review"},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat vertical.needs_more_data transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if comparison.Matched {
+		t.Fatalf("expected vertical.needs_more_data mismatch, got %+v", comparison)
+	}
+	if comparison.Reason != "node_mismatch" {
+		t.Fatalf("expected vertical.needs_more_data node mismatch, got %+v", comparison)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_FallsBackForNeedsMoreData(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("vertical.needs_more_data"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{Stage: "ready_for_review"},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected flat vertical.needs_more_data transition")
+	}
+	if transition.Name != "ready_to_researching" {
+		t.Fatalf("expected fallback ready_to_researching transition, got %+v", transition)
+	}
+	if len(guards) != 0 {
+		t.Fatalf("expected no guard evaluation, got %+v", guards)
+	}
+}
+
 func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_ValidationStarted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
@@ -96,6 +970,67 @@ func TestFactoryPipelineCoordinator_ApplyWorkflowEventTransition_IncrementsRevis
 	}
 	if got := asInt(bucket["revision_count"]); got != 1 {
 		t.Fatalf("expected validation-orchestrator revision_count=1, got %+v", bucket)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveWorkflowTransitionByEvent_PromotesSpecValidationFailedToFlatTransition(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("spec.validation_failed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 0,
+			},
+		},
+	}
+
+	transition, guards, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted spec.validation_failed transition")
+	}
+	if transition.Name != "validation_failed_to_speccing" {
+		t.Fatalf("expected promoted validation_failed_to_speccing transition, got %+v", transition)
+	}
+	if len(guards) != 1 || guards[0] != "inner_revision_count_below_limit" {
+		t.Fatalf("expected revision guard evaluation, got %+v", guards)
+	}
+}
+
+func TestFactoryPipelineCoordinator_ResolveDerivedWorkflowTransitionByEvent_ShadowClassifiesSpecValidationFailedAsAliasMatch(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pc := NewFactoryPipelineCoordinator(NewEventBus(InMemoryEventStore{}), db)
+
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("spec.validation_failed"),
+			VerticalID: uuid.NewString(),
+		},
+		State: WorkflowState{
+			Stage: "cto_spec_review",
+			Metadata: map[string]any{
+				"revision_count": 0,
+			},
+		},
+	}
+
+	flat, _, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		t.Fatal("expected promoted spec.validation_failed transition")
+	}
+	comparison := pc.shadowCompareDerivedWorkflowTransition(triggerCtx, flat)
+	if !comparison.Matched {
+		t.Fatalf("expected spec.validation_failed alias match, got %+v", comparison)
+	}
+	if comparison.Reason != "match" {
+		t.Fatalf("expected spec.validation_failed semantic match, got %+v", comparison)
 	}
 }
 

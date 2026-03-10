@@ -50,6 +50,27 @@ Candidate safe subset should likely be chosen from validation/lifecycle events w
 Done when:
 - a narrow subset runs handler-first without changing observed behavior
 
+Current promoted subset:
+
+- `vertical.shortlisted`
+- `research.completed`
+- `cto.spec_approved`
+- `vertical.ready_for_review`
+- `research.vertical_rejected`
+- `opco.steady_state_reached`
+- `opco.growth_triggered`
+- `opco.growth_stabilized`
+- `build_complete`
+- `launch_ready`
+- `opco.teardown_requested`
+
+Current shadow-only mismatch inventory:
+
+- `spec.validation_failed` -> `action_mismatch`
+- `vertical.approved` -> mismatch, not yet promotable
+- `cto.spec_revision_needed` -> `action_mismatch`
+- `vertical.needs_more_data` -> node mismatch / stays flat-first
+
 ### 4. Keep guard/action execution and timers unchanged initially
 
 Do not rewrite execution ordering yet.

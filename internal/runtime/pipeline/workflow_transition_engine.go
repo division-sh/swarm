@@ -25,6 +25,13 @@ type workflowTriggerContext struct {
 	ValidationState *validationPipelineState
 }
 
+type workflowTransitionShadowComparison struct {
+	FlatTransition    WorkflowTransition
+	DerivedTransition WorkflowTransition
+	Matched           bool
+	Reason            string
+}
+
 func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
 	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
@@ -155,6 +162,9 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 	if workflow == nil {
 		return WorkflowTransition{}, nil, false
 	}
+	if promoted, evaluated, ok := pc.resolvePromotedDerivedWorkflowTransition(triggerCtx, workflow, trigger); ok {
+		return promoted, evaluated, true
+	}
 	transition, ok := workflow.TransitionByTrigger(triggerCtx.State, trigger, func(candidate WorkflowTransition) bool {
 		passed, evaluated := pc.evaluateWorkflowTransitionGuards(triggerCtx, candidate)
 		if passed {
@@ -165,7 +175,190 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 	if !ok {
 		return WorkflowTransition{}, nil, false
 	}
+	_ = pc.shadowCompareDerivedWorkflowTransition(triggerCtx, transition)
 	return transition, guardsEvaluated, true
+}
+
+func (pc *FactoryPipelineCoordinator) resolvePromotedDerivedWorkflowTransition(
+	triggerCtx workflowTriggerContext,
+	workflow *WorkflowDefinition,
+	trigger string,
+) (WorkflowTransition, []string, bool) {
+	if !handlerFirstCandidateEnabled(trigger) {
+		return WorkflowTransition{}, nil, false
+	}
+	derived, ok := pc.resolveDerivedWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		return WorkflowTransition{}, nil, false
+	}
+	stateStage := workflow.NormalizeStage(string(triggerCtx.State.Stage))
+	var matched WorkflowTransition
+	var matchedGuards []string
+	var found bool
+	for _, candidate := range workflow.transitions {
+		if strings.TrimSpace(candidate.Trigger) != trigger {
+			continue
+		}
+		if !containsPipelineStage(candidate.From, stateStage) {
+			continue
+		}
+		if matched, _ := workflowTransitionSemanticParity(candidate, derived); !matched {
+			continue
+		}
+		passed, evaluated := pc.evaluateWorkflowTransitionGuards(triggerCtx, candidate)
+		if !passed {
+			continue
+		}
+		if found {
+			return WorkflowTransition{}, nil, false
+		}
+		matched = candidate
+		matchedGuards = evaluated
+		found = true
+	}
+	if !found {
+		return WorkflowTransition{}, nil, false
+	}
+	return matched, matchedGuards, true
+}
+
+func handlerFirstCandidateEnabled(trigger string) bool {
+	switch strings.TrimSpace(trigger) {
+	case "vertical.shortlisted", "research.completed", "cto.spec_approved",
+		"opco.steady_state_reached", "opco.growth_triggered", "opco.growth_stabilized",
+		"build_complete", "launch_ready", "opco.teardown_requested",
+		"vertical.ready_for_review", "research.vertical_rejected",
+		"spec.validation_failed", "cto.spec_revision_needed":
+		return true
+	default:
+		return false
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) shadowCompareDerivedWorkflowTransition(
+	triggerCtx workflowTriggerContext,
+	flat WorkflowTransition,
+) workflowTransitionShadowComparison {
+	derived, ok := pc.resolveDerivedWorkflowTransitionByEvent(triggerCtx)
+	if !ok {
+		return workflowTransitionShadowComparison{FlatTransition: flat, Reason: "no_derived_candidate"}
+	}
+	matched, reason := workflowTransitionSemanticParity(flat, derived)
+	return workflowTransitionShadowComparison{
+		FlatTransition:    flat,
+		DerivedTransition: derived,
+		Matched:           matched,
+		Reason:            reason,
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) resolveDerivedWorkflowTransitionByEvent(
+	triggerCtx workflowTriggerContext,
+) (WorkflowTransition, bool) {
+	if pc == nil || pc.ContractBundle() == nil {
+		return WorkflowTransition{}, false
+	}
+	trigger := strings.TrimSpace(string(triggerCtx.Event.Type))
+	if trigger == "" {
+		return WorkflowTransition{}, false
+	}
+	bundle := pc.ContractBundle()
+	owners := bundle.RuntimeEventOwners(trigger)
+	if len(owners) == 0 {
+		return WorkflowTransition{}, false
+	}
+	var match runtimecontracts.HandlerTransitionSemantic
+	var matched bool
+	for _, owner := range owners {
+		derived, ok := bundle.DerivedHandlerTransition(owner, trigger)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(derived.AdvancesTo) == "" {
+			continue
+		}
+		if matched {
+			return WorkflowTransition{}, false
+		}
+		match = derived
+		matched = true
+	}
+	if !matched {
+		return WorkflowTransition{}, false
+	}
+	return workflowTransitionFromDerivedSemantic(triggerCtx.State, match), true
+}
+
+func workflowTransitionFromDerivedSemantic(
+	state WorkflowState,
+	derived runtimecontracts.HandlerTransitionSemantic,
+) WorkflowTransition {
+	transition := WorkflowTransition{
+		Name:             strings.TrimSpace(derived.ID),
+		From:             []PipelineStage{NormalizePipelineStage(string(state.Stage))},
+		To:               NormalizePipelineStage(strings.TrimSpace(derived.AdvancesTo)),
+		Trigger:          strings.TrimSpace(derived.EventType),
+		Node:             strings.TrimSpace(derived.NodeID),
+		DataAccumulation: derived.DataAccumulation,
+	}
+	if guardID := strings.TrimSpace(asString(derived.Guard)); guardID != "" {
+		transition.GuardIDs = []string{guardID}
+	}
+	actionID := strings.TrimSpace(derived.Action)
+	emitID := strings.TrimSpace(derived.Emits)
+	if actionID != "" || emitID != "" {
+		action := WorkflowAction{Name: actionID}
+		if emitID != "" {
+			action.Emits = emitID
+			if action.Name == "" {
+				action.Name = "emit:" + emitID
+			}
+		}
+		transition.Actions = []WorkflowAction{action}
+	}
+	return transition
+}
+
+func workflowTransitionSemanticParity(flat WorkflowTransition, derived WorkflowTransition) (bool, string) {
+	if NormalizePipelineStage(string(flat.To)) != NormalizePipelineStage(string(derived.To)) {
+		return false, "target_mismatch"
+	}
+	if strings.TrimSpace(flat.Trigger) != strings.TrimSpace(derived.Trigger) {
+		return false, "trigger_mismatch"
+	}
+	if strings.TrimSpace(flat.Node) != strings.TrimSpace(derived.Node) {
+		return false, "node_mismatch"
+	}
+	if len(flat.GuardIDs) > 0 && len(derived.GuardIDs) > 0 && strings.TrimSpace(flat.GuardIDs[0]) != strings.TrimSpace(derived.GuardIDs[0]) {
+		return false, "guard_mismatch"
+	}
+	if len(flat.Actions) > 0 && len(derived.Actions) > 0 {
+		flatAction := strings.TrimSpace(flat.Actions[0].Name)
+		derivedAction := strings.TrimSpace(derived.Actions[0].Name)
+		flatEmit := strings.TrimSpace(flat.Actions[0].Emits)
+		derivedEmit := strings.TrimSpace(derived.Actions[0].Emits)
+		if flatEmit != "" && derivedEmit != "" && flatEmit == derivedEmit {
+			return true, "emit_match"
+		}
+		if flatAction != "" && derivedAction != "" && !workflowTransitionActionAliasesMatch(flatAction, derivedAction) {
+			return false, "action_mismatch"
+		}
+	}
+	return true, "match"
+}
+
+func workflowTransitionActionAliasesMatch(flatAction string, derivedAction string) bool {
+	flatAction = strings.TrimSpace(flatAction)
+	derivedAction = strings.TrimSpace(derivedAction)
+	if flatAction == derivedAction {
+		return true
+	}
+	switch {
+	case flatAction == "increment_revision_count" && derivedAction == "revision_loop":
+		return true
+	default:
+		return false
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) evaluateWorkflowTransitionGuards(
