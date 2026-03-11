@@ -1,0 +1,9 @@
+processing-node:
+  id: processing-node
+  execution_type: workflow_node
+  subscribes_to:
+    - item.review_requested
+    - item.rejected
+  produces:
+    - item.completed
+    - item.rejected

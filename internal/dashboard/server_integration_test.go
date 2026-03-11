@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	empireconfig "empireai/internal/empire/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
@@ -90,16 +91,16 @@ func TestDashboardServer_EndToEndCoreAPIs(t *testing.T) {
 				Retries:      1,
 			},
 		},
-		Budget: config.BudgetConfig{
+		Extensions: map[string]any{"budget": empireconfig.BudgetConfig{
 			FactoryMonthlyCap:     50000,
 			PerVerticalMonthlyCap: 20000,
 			PortfolioMonthlyCap:   100000,
-			HumanTasks: config.HumanTasksConfig{
+			HumanTasks: empireconfig.HumanTasksConfig{
 				MaxTasksPerWeek: 3,
 				BudgetReset:     "monday",
 				AutoExpireHours: 168,
 			},
-		},
+		}},
 	}
 
 	bus := rt.NewEventBus(pg)

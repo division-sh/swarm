@@ -1,0 +1,9 @@
+coordinator:
+  id: coordinator
+  role: coordinator
+worker-a:
+  id: worker-a
+  role: worker
+worker-b:
+  id: worker-b
+  role: worker

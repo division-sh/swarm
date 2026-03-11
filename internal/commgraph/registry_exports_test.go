@@ -30,12 +30,47 @@ func TestRegistryExportHelpers_ReturnCopies(t *testing.T) {
 	}
 
 	roundTrips := MailboxRoundTrips()
-	if len(roundTrips) == 0 {
-		t.Fatal("expected mailbox round-trips")
+	if len(roundTrips) > 0 {
+		origType := roundTrips[0].MailboxType
+		roundTrips[0].MailboxType = "mutated"
+		if MailboxRoundTrips()[0].MailboxType != origType {
+			t.Fatal("MailboxRoundTrips should return a defensive copy")
+		}
 	}
-	origType := roundTrips[0].MailboxType
-	roundTrips[0].MailboxType = "mutated"
-	if MailboxRoundTrips()[0].MailboxType != origType {
-		t.Fatal("MailboxRoundTrips should return a defensive copy")
+
+	humanTaskRoles := HumanTaskDecisionRoles()
+	if len(humanTaskRoles) > 0 {
+		origRole := humanTaskRoles[0]
+		humanTaskRoles[0] = "mutated"
+		if HumanTaskDecisionRoles()[0] != origRole {
+			t.Fatal("HumanTaskDecisionRoles should return a defensive copy")
+		}
+	}
+
+	routing := RoutingAuthorities()
+	if len(routing) > 0 {
+		origRoutingRole := routing[0].ActorRole
+		routing[0].ActorRole = "mutated"
+		if RoutingAuthorities()[0].ActorRole != origRoutingRole {
+			t.Fatal("RoutingAuthorities should return a defensive copy")
+		}
+	}
+
+	management := ManagementAuthorities()
+	if len(management) > 0 {
+		origManagementRole := management[0].ActorRole
+		management[0].ActorRole = "mutated"
+		if ManagementAuthorities()[0].ActorRole != origManagementRole {
+			t.Fatal("ManagementAuthorities should return a defensive copy")
+		}
+	}
+
+	mailboxRoles := MailboxSendRoles()
+	if len(mailboxRoles) > 0 {
+		origMailboxRole := mailboxRoles[0]
+		mailboxRoles[0] = "mutated"
+		if MailboxSendRoles()[0] != origMailboxRole {
+			t.Fatal("MailboxSendRoles should return a defensive copy")
+		}
 	}
 }

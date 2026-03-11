@@ -118,9 +118,9 @@ func runBudgetSubcommand(args []string) error {
 	`, monthStart).Scan(&spent); err != nil {
 		return fmt.Errorf("load budget spend: %w", err)
 	}
-	portfolioCap := cfg.Budget.PortfolioMonthlyCap
-	perVerticalCap := cfg.Budget.PerVerticalMonthlyCap
-	factoryCap := cfg.Budget.FactoryMonthlyCap
+	portfolioCap := cfg.Budget().PortfolioMonthlyCap
+	perVerticalCap := cfg.Budget().PerVerticalMonthlyCap
+	factoryCap := cfg.Budget().FactoryMonthlyCap
 	portfolioPct := 0.0
 	if portfolioCap > 0 {
 		portfolioPct = (float64(spent) / float64(portfolioCap)) * 100

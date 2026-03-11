@@ -31,31 +31,26 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 		if strings.TrimSpace(instance.WorkflowVersion) == "" {
 			instance.WorkflowVersion = bundle.WorkflowVersion()
 		}
-		if state.Metadata == nil {
-			state.Metadata = map[string]any{}
-		}
+		metadata := cloneStringAnyMap(state.Metadata)
 		if strings.TrimSpace(state.Status) != "" {
-			state.Metadata["status"] = strings.TrimSpace(state.Status)
+			metadata["status"] = strings.TrimSpace(state.Status)
 		}
 		if sourceEvent != "" {
-			state.Metadata["last_source_event"] = sourceEvent
+			metadata["last_source_event"] = sourceEvent
 		}
 		instance.CurrentStage = nextStage
 		instance.EnteredStageAt = enteredStageAt
-		instance.Metadata = cloneStringAnyMap(state.Metadata)
-		if instance.AccumulatorState == nil {
-			instance.AccumulatorState = map[string]any{}
-		}
+		instance.Metadata = metadata
 		validationStartedAt, validationCompletedAt := existingValidationProjectionTimes(instance)
-		instance.AccumulatorState["validation-orchestrator"] = encodeValidationProjection(
+		workflowSetStateBucket(instance, workflowStateBucketValidationOrchestrator, encodeValidationProjection(
 			bundle,
 			verticalID,
-			state.Metadata,
+			metadata,
 			enteredStageAt,
 			nextStage,
 			validationStartedAt,
 			validationCompletedAt,
-		)
+		))
 		if currentStage != "" && currentStage != nextStage {
 			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(currentStage, nextStage, sourceEvent))
 		} else if currentStage == "" && len(instance.TransitionHistory) == 0 {
@@ -64,13 +59,14 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 	}); err != nil {
 		runtimeWarn(runtimeWorkflowID, "workflow instance upsert failed vertical_id=%s stage=%s: %v", verticalID, nextStage, err)
 	}
+	pc.reconcileWorkflowStageTimers(ctx, verticalID, currentStage, nextStage, sourceEvent)
 }
 
 func existingValidationProjectionTimes(instance *WorkflowInstance) (time.Time, time.Time) {
 	if instance == nil {
 		return time.Time{}, time.Time{}
 	}
-	bucket, ok := asObject(instance.AccumulatorState["validation-orchestrator"])
+	bucket, ok := workflowValidationProjectionBucket(*instance)
 	if !ok {
 		return time.Time{}, time.Time{}
 	}
@@ -78,7 +74,7 @@ func existingValidationProjectionTimes(instance *WorkflowInstance) (time.Time, t
 }
 
 func encodeValidationProjection(bundle *runtimecontracts.WorkflowContractBundle, verticalID string, metadata map[string]any, enteredStageAt time.Time, nextStage string, existingStartedAt, existingCompletedAt time.Time) map[string]any {
-	fields := workflowSystemNodeStateSchemaFields(bundle, "validation-orchestrator")
+	fields := workflowSystemNodeStateSchemaFields(bundle, workflowStateBucketValidationOrchestrator)
 	if len(fields) == 0 {
 		return map[string]any{}
 	}

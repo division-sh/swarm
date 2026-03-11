@@ -1,0 +1,250 @@
+id: scenario6-human-rejects-mailbox
+agents:
+  - id: market-research-agent
+    role: market-research-agent
+    mode: factory
+    subscriptions: [market_research.scan_assigned]
+    responses:
+      - when_event: market_research.scan_assigned
+        tool_calls:
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: mailbox_cycle
+              signal_strength: 71
+              opportunity_name: Clinic Billing Exception Coordinator
+              preliminary_icp: Billing manager at SMB clinics handling invoice reporting workflow
+              build_sketch:
+                core_features: [exception queue, compliance checks]
+                key_integrations: [quickbooks]
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp S6
+                    pricing: "$149/mo"
+                    source_url: https://example.com/s6
+                pain_signals:
+                  - signal: exception backlog
+                    source_url: https://example.com/s61
+                regulatory:
+                  - detail: remittance correction audit trail requirements
+                    source_url: https://example.com/s6-reg
+                buyer_communities:
+                  - name: Clinic billing managers
+                    source_url: https://example.com/s62
+              opportunity_hypothesis: Exception workflow coordinator for recurring reconciliation operations.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_market_research_scan_complete
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              categories_assessed: 1
+              high_signal_count: 1
+
+  - id: analysis-agent
+    role: analysis-agent
+    mode: factory
+    subscriptions: [scoring.requested]
+    responses:
+      - when_event: scoring.requested
+        tool_calls:
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: build_complexity, score: 78, evidence: s6 first build, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: automation_completeness, score: 78, evidence: s6 first automation, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: icp_crispness, score: 78, evidence: s6 first icp, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: distribution_leverage, score: 78, evidence: s6 first distribution, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: time_to_value, score: 78, evidence: s6 first ttv, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: operational_drag, score: 78, evidence: s6 first drag, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: pain_severity, score: 78, evidence: s6 first pain, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: competition_gap, score: 78, evidence: s6 first gap, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: monetization_clarity, score: 78, evidence: s6 first monetization, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: retention_architecture, score: 78, evidence: s6 first retention, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: expansion_potential, score: 78, evidence: s6 first expansion, confidence: high}
+      - when_event: scoring.requested
+        tool_calls:
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: build_complexity, score: 79, evidence: s6 second build, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: automation_completeness, score: 79, evidence: s6 second automation, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: icp_crispness, score: 79, evidence: s6 second icp, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: distribution_leverage, score: 79, evidence: s6 second distribution, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: time_to_value, score: 79, evidence: s6 second ttv, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: operational_drag, score: 79, evidence: s6 second drag, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: pain_severity, score: 79, evidence: s6 second pain, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: competition_gap, score: 79, evidence: s6 second gap, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: monetization_clarity, score: 79, evidence: s6 second monetization, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: retention_architecture, score: 79, evidence: s6 second retention, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: expansion_potential, score: 79, evidence: s6 second expansion, confidence: high}
+
+  - id: business-research-agent
+    role: business-research-agent
+    mode: factory
+    subscriptions: [validation.started, research.additional_requested, spec.draft_ready, spec_review.passed]
+    responses:
+      - when_event: validation.started
+        tool_calls:
+          - name: emit_research_completed
+            arguments: {vertical_id: "{{vertical_id}}", business_brief: {problem: exception backlog, cycle: 1}}
+      - when_event: spec.draft_ready
+        tool_calls:
+          - name: emit_spec_review_requested
+            arguments: {vertical_id: "{{vertical_id}}", mvp_spec: s6-cycle1}
+      - when_event: spec_review.passed
+        tool_calls:
+          - name: emit_spec_approved
+            arguments: {vertical_id: "{{vertical_id}}", final_spec: s6-cycle1}
+      - when_event: research.additional_requested
+        tool_calls:
+          - name: emit_research_completed
+            arguments: {vertical_id: "{{vertical_id}}", business_brief: {problem: exception backlog, cycle: 2}}
+      - when_event: spec.draft_ready
+        tool_calls:
+          - name: emit_spec_review_requested
+            arguments: {vertical_id: "{{vertical_id}}", mvp_spec: s6-cycle2}
+      - when_event: spec_review.passed
+        tool_calls:
+          - name: emit_spec_approved
+            arguments: {vertical_id: "{{vertical_id}}", final_spec: s6-cycle2}
+
+  - id: lightweight-spec-agent
+    role: lightweight-spec-agent
+    mode: factory
+    subscriptions: [spec.requested]
+    responses:
+      - when_event: spec.requested
+        tool_calls:
+          - name: emit_spec_draft_ready
+            arguments: {vertical_id: "{{vertical_id}}", mvp_spec: s6 draft 1}
+      - when_event: spec.requested
+        tool_calls:
+          - name: emit_spec_draft_ready
+            arguments: {vertical_id: "{{vertical_id}}", mvp_spec: s6 draft 2}
+
+  - id: spec-reviewer
+    role: spec-reviewer
+    mode: factory
+    subscriptions: [spec_review.requested]
+    responses:
+      - when_event: spec_review.requested
+        tool_calls:
+          - name: emit_spec_review_passed
+            arguments: {vertical_id: "{{vertical_id}}", review_notes: s6 pass1}
+      - when_event: spec_review.requested
+        tool_calls:
+          - name: emit_spec_review_passed
+            arguments: {vertical_id: "{{vertical_id}}", review_notes: s6 pass2}
+
+  - id: spec-auditor
+    role: spec-auditor
+    mode: factory
+    subscriptions: [spec.validation_requested]
+    responses:
+      - when_event: spec.validation_requested
+        tool_calls:
+          - name: emit_spec_validation_passed
+            arguments: {vertical_id: "{{vertical_id}}", validation_notes: s6 pass1}
+      - when_event: spec.validation_requested
+        tool_calls:
+          - name: emit_spec_validation_passed
+            arguments: {vertical_id: "{{vertical_id}}", validation_notes: s6 pass2}
+
+  - id: factory-cto
+    role: factory-cto
+    mode: factory
+    subscriptions: [cto.spec_review_requested]
+    responses:
+      - when_event: cto.spec_review_requested
+        tool_calls:
+          - name: emit_spec_validation_requested
+            arguments: {vertical_id: "{{vertical_id}}", spec_content: "{{mvp_spec}}", spec_tier: cto_gate}
+      - when_event: cto.spec_review_requested
+        tool_calls:
+          - name: emit_cto_spec_approved
+            arguments: {vertical_id: "{{vertical_id}}", cto_notes: s6 cto pass1}
+      - when_event: cto.spec_review_requested
+        tool_calls:
+          - name: emit_spec_validation_requested
+            arguments: {vertical_id: "{{vertical_id}}", spec_content: "{{mvp_spec}}", spec_tier: cto_gate}
+      - when_event: cto.spec_review_requested
+        tool_calls:
+          - name: emit_cto_spec_approved
+            arguments: {vertical_id: "{{vertical_id}}", cto_notes: s6 cto pass2}
+
+  - id: pre-brand-agent
+    role: pre-brand-agent
+    mode: factory
+    subscriptions: [brand.requested]
+    responses:
+      - when_event: brand.requested
+        tool_calls:
+          - name: emit_brand_candidates_ready
+            arguments: {vertical_id: "{{vertical_id}}", candidates: [{name: CycleOne}]}
+      - when_event: brand.requested
+        tool_calls:
+          - name: emit_brand_candidates_ready
+            arguments: {vertical_id: "{{vertical_id}}", candidates: [{name: CycleTwo}]}
+
+  - id: validation-coordinator
+    role: validation-coordinator
+    mode: factory
+    subscriptions: [validation.package_ready]
+    responses:
+      - when_event: validation.package_ready
+        tool_calls:
+          - name: mailbox_send
+            arguments:
+              vertical_id: "{{vertical_id}}"
+              type: vertical_approval
+              priority: normal
+              summary: Scenario6 cycle1 ready.
+              context: {cycle: 1}
+          - name: emit_vertical_ready_for_review
+            arguments: {vertical_id: "{{vertical_id}}"}
+      - when_event: validation.package_ready
+        tool_calls:
+          - name: mailbox_send
+            arguments:
+              vertical_id: "{{vertical_id}}"
+              type: vertical_approval
+              priority: normal
+              summary: Scenario6 cycle2 ready.
+              context: {cycle: 2}
+          - name: emit_vertical_ready_for_review
+            arguments: {vertical_id: "{{vertical_id}}"}
+
+  - id: empire-coordinator
+    role: empire-coordinator
+    mode: holding
+    subscriptions: [vertical.approved]
+    responses: []
+expected:
+  event_counts:
+    vertical.ready_for_review: 2
+    vertical.approved: 1
+    opco.spinup_requested: 1

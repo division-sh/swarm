@@ -1,0 +1,189 @@
+validation-orchestrator:
+  id: validation-orchestrator
+  execution_type: system_node
+  description: Manages the 4-gate validation pipeline. Projects stage transitions as gates are satisfied. Handles revision
+    loops and rejection paths.
+  subscribes_to:
+  - brand.candidates_ready
+  - brand.revision_needed
+  - cto.spec_approved
+  - cto.spec_revision_needed
+  - cto.spec_vetoed
+  - research.completed
+  - research.vertical_rejected
+  - spec.approved
+  - spec.draft_ready
+  - spec.revision_needed
+  - spec.revision_requested
+  - spec.validation_failed
+  - spec.validation_passed
+  - spec_review.issues_found
+  - spec_review.passed
+  - timer.validation_timeout
+  - vertical.needs_more_data
+  - vertical.ready_for_review
+  - vertical.shortlisted
+  produces:
+  - brand.requested
+  - cto.spec_review_requested
+  - mailbox.review_requested
+  - research.additional_requested
+  - spec.requested
+  - spec.revision_requested
+  - spec_review.requested
+  - validation.package_ready
+  - validation.started
+  - validation.timeout_escalation
+  - vertical.killed
+  - vertical.killed_backprop
+  timers:
+  - id: validation_gate_timeout
+    event: timer.validation_timeout
+    delay: '{{validation_gate_timeout_hours}}h'
+    start_on: state:researching
+    cancel_on: state:ready_for_review
+    recurring: false
+  state_table: validation_pipelines
+  gate_state:
+    description: Tracks 4 validation gates per vertical
+    gates:
+    - g1_research
+    - g2_spec
+    - g3_cto
+    - g4_brand
+    storage: validation_pipelines.gate_state JSONB
+  event_handlers:
+    vertical.shortlisted:
+      description: Vertical arrived from scoring. Begin validation pipeline.
+      advances_to: researching
+      emits: validation.started
+    research.completed:
+      description: Research gate passed. Write brief, advance to spec writing.
+      sets_gate: g1_research
+      data_accumulation:
+        writes:
+        - business_brief
+        - research_context
+        source_event: research.completed
+      advances_to: mvp_speccing
+      emits: spec.requested
+    spec.approved:
+      description: Legacy event. Data recorded but no routing. Review path is spec_review.passed → CTO.
+      data_accumulation:
+        writes:
+        - source_field: final_spec
+          target_field: mvp_spec
+        source_event: spec.approved
+    cto.spec_approved:
+      description: CTO approved spec. Write notes, advance to branding.
+      sets_gate: g3_cto
+      data_accumulation:
+        writes:
+        - source_field: cto_notes
+          target_field: cto_feasibility
+        source_event: cto.spec_approved
+      advances_to: branding
+      emits: brand.requested
+    brand.candidates_ready:
+      description: Brand gate passed. Write brand, advance to ready_for_review.
+      sets_gate: g4_brand
+      data_accumulation:
+        writes:
+        - source_field: candidates
+          target_field: brand
+        source_event: brand.candidates_ready
+      advances_to: ready_for_review
+      emits:
+      - validation.package_ready
+      - mailbox.review_requested
+    spec.validation_failed:
+      emits: spec.revision_requested
+      advances_to: mvp_speccing
+      guard:
+        id: revision_count_below_limit
+        check: entity.revision_count < policy.inner_revision_max
+        on_fail: escalate:validation.revision_limit_reached
+    cto.spec_revision_needed:
+      emits: spec.revision_requested
+      advances_to: mvp_speccing
+      guard:
+        id: revision_count_below_limit
+        check: entity.revision_count < policy.inner_revision_max
+        on_fail: escalate:validation.revision_limit_reached
+    research.vertical_rejected:
+      description: Research rejects vertical. Kill it.
+      advances_to: killed
+      emits:
+      - vertical.killed
+      - vertical.killed_backprop
+    cto.spec_vetoed:
+      description: CTO vetoes spec. Kill vertical.
+      advances_to: killed
+      emits:
+      - vertical.killed
+      - vertical.killed_backprop
+    spec.validation_passed:
+      description: Legacy alias for spec_review.passed.
+      sets_gate: g2_spec
+      advances_to: cto_review
+      emits: cto.spec_review_requested
+    vertical.ready_for_review:
+      description: All gates passed. Package validation kit for human review.
+      advances_to: ready_for_review
+      emits: mailbox.review_requested
+    vertical.needs_more_data:
+      description: Human requests more data. Reset gates, return to researching.
+      clear_gates: true
+      advances_to: researching
+      emits: research.additional_requested
+    brand.revision_needed:
+      description: Brand candidates rejected. Request new candidates.
+      emits: brand.requested
+      guard:
+        id: brand_revision_limit
+        check: entity.brand_revision_count < policy.max_brand_revisions
+        on_fail: escalate:validation.revision_limit_reached
+    spec.revision_requested:
+      description: Spec needs revision. Return to spec writing.
+      advances_to: mvp_speccing
+      emits: spec.requested
+    spec.revision_needed:
+      description: Spec needs revision (from CTO or reviewer). Trigger revision loop.
+      advances_to: mvp_speccing
+      guard:
+        id: revision_count_below_limit
+        check: entity.revision_count < policy.inner_revision_max
+        on_fail: escalate:validation.revision_limit_reached
+      emits: spec.revision_requested
+    timer.validation_timeout:
+      description: Validation gate timed out. Escalate or kill.
+      emits: validation.timeout_escalation
+    spec.draft_ready:
+      description: Spec agent completed draft. Route to spec-reviewer.
+      emits: spec_review.requested
+    spec_review.passed:
+      description: Spec review passed. Spec is approved. Advance to CTO review.
+      sets_gate: g2_spec
+      data_accumulation:
+        writes:
+        - source_field: final_spec
+          target_field: mvp_spec
+        source_event: spec_review.passed
+      advances_to: cto_review
+      emits: cto.spec_review_requested
+    spec_review.issues_found:
+      description: Spec review found issues. Loop back to spec writing.
+      guard:
+        id: spec_revision_limit
+        check: entity.revision_count < policy.inner_revision_max
+        on_fail: escalate:validation.revision_limit_reached
+      advances_to: mvp_speccing
+      emits: spec.revision_requested
+  state_schema:
+    description: Tracks 4 validation gates and revision count per vertical
+    fields:
+      vertical_id: uuid
+      gate_state: 'jsonb ({g1_research: bool, g2_spec: bool, g3_cto: bool, g4_brand: bool})'
+      revision_count: integer default 0
+      started_at: timestamptz
+      completed_at: timestamptz (null until all gates or killed)

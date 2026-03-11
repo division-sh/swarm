@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	empirestore "empireai/internal/empire/store"
 	mailboxsvc "empireai/internal/mailbox"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
-	"empireai/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -242,7 +242,7 @@ func (s *Server) queueGeographyExpansionValidation(
 	if err != nil {
 		return "", req, "", err
 	}
-	pg := &store.PostgresStore{DB: s.db}
+	pg := &empirestore.PostgresStore{DB: s.db}
 	campaign, err := pg.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
 		GeographyID: geoID,
 		Mode:        req.Mode,

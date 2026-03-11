@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
@@ -17,16 +19,18 @@ type EventInterceptor interface {
 }
 
 type EventBus struct {
-	mu            sync.RWMutex
-	channels      map[events.EventType]map[string]chan events.Event
-	agentChans    map[string]chan events.Event
-	subscriptions map[string][]events.EventType
-	routingTable  map[string]*RoutingTable
-	interceptors  []EventInterceptor
+	mu                  sync.RWMutex
+	channels            map[events.EventType]map[string]chan events.Event
+	agentChans          map[string]chan events.Event
+	subscriptions       map[string][]events.EventType
+	routeTable          *RouteTable
+	legacyRoutingTables map[string]*RoutingTable
+	interceptors        []EventInterceptor
 	interceptorProvider func() []EventInterceptor
-	cycleTracker  *OpCoCycleTracker
-	store         EventStore
-	logger        LoggerHook
+	cycleTracker        *OpCoCycleTracker
+	store               EventStore
+	logger              LoggerHook
+	contractBundle      *runtimecontracts.WorkflowContractBundle
 }
 
 type EventBusOptions struct {
@@ -34,6 +38,8 @@ type EventBusOptions struct {
 	CycleTracker        *OpCoCycleTracker
 	Interceptors        []EventInterceptor
 	InterceptorProvider func() []EventInterceptor
+	ContractBundle      *runtimecontracts.WorkflowContractBundle
+	RouteTable          *RouteTable
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -58,22 +64,36 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 	if store == nil {
 		store = InMemoryEventStore{}
 	}
+	contractBundle := opts.ContractBundle
+	if contractBundle == nil {
+		contractBundle = runtimepipeline.DefaultWorkflowContractBundleOrNil()
+	}
 	filtered := make([]EventInterceptor, 0, len(opts.Interceptors))
 	for _, it := range opts.Interceptors {
 		if it != nil {
 			filtered = append(filtered, it)
 		}
 	}
+	routeTable := opts.RouteTable
+	if routeTable == nil {
+		derived, err := DeriveRouteTable(contractBundle)
+		if err != nil {
+			panic(err)
+		}
+		routeTable = derived
+	}
 	return &EventBus{
-		channels:      make(map[events.EventType]map[string]chan events.Event),
-		agentChans:    make(map[string]chan events.Event),
-		subscriptions: make(map[string][]events.EventType),
-		routingTable:  make(map[string]*RoutingTable),
-		store:         store,
-		logger:        opts.Logger,
-		cycleTracker:  opts.CycleTracker,
-		interceptors:  filtered,
+		channels:            make(map[events.EventType]map[string]chan events.Event),
+		agentChans:          make(map[string]chan events.Event),
+		subscriptions:       make(map[string][]events.EventType),
+		routeTable:          routeTable,
+		legacyRoutingTables: make(map[string]*RoutingTable),
+		store:               store,
+		logger:              opts.Logger,
+		cycleTracker:        opts.CycleTracker,
+		interceptors:        filtered,
 		interceptorProvider: opts.InterceptorProvider,
+		contractBundle:      contractBundle,
 	}
 }
 
@@ -82,6 +102,28 @@ func (eb *EventBus) Store() EventStore {
 		return nil
 	}
 	return eb.store
+}
+
+func (eb *EventBus) RouteTable() *RouteTable {
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.routeTable
+}
+
+func (eb *EventBus) AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return errors.New("route table is not initialized")
+	}
+	return table.AddFlowInstance(template, instancePath)
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {
@@ -130,7 +172,8 @@ func (eb *EventBus) ResetInMemoryState() {
 	eb.channels = make(map[events.EventType]map[string]chan events.Event)
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
-	eb.routingTable = make(map[string]*RoutingTable)
+	eb.routeTable = eb.deriveBootRouteTableLocked()
+	eb.legacyRoutingTables = make(map[string]*RoutingTable)
 	if eb.cycleTracker != nil {
 		eb.cycleTracker.ResetAll(context.Background())
 	}
@@ -178,18 +221,10 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 	}
 }
 
-func (eb *EventBus) SetRoutingTable(verticalID string, table *RoutingTable) error {
-	if verticalID == "" || table == nil {
-		return errors.New("verticalID and table are required")
+func (eb *EventBus) deriveBootRouteTableLocked() *RouteTable {
+	derived, err := DeriveRouteTable(eb.contractBundle)
+	if err != nil {
+		panic(err)
 	}
-	eb.mu.Lock()
-	defer eb.mu.Unlock()
-	eb.routingTable[verticalID] = table
-	return nil
-}
-
-func (eb *EventBus) GetRoutingTable(verticalID string) *RoutingTable {
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
-	return eb.routingTable[verticalID]
+	return derived
 }

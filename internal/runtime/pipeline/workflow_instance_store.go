@@ -3,13 +3,20 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"path"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type WorkflowInstance struct {
 	InstanceID        string
+	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
 	CurrentStage      string
@@ -33,14 +40,19 @@ type WorkflowTransitionRecord struct {
 
 type WorkflowTimerState struct {
 	TimerID   string    `json:"timer_id"`
+	EventType string    `json:"event_type,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	FiresAt   time.Time `json:"fires_at"`
+	StartedBy string    `json:"started_by,omitempty"`
+	Recurring bool      `json:"recurring,omitempty"`
 	Cancelled bool      `json:"cancelled,omitempty"`
 }
 
 type WorkflowInstanceStore struct {
 	db *sql.DB
 }
+
+var workflowInstancePathNamespace = uuid.MustParse("5e7507c8-bd4f-46e0-a098-b016dc31df23")
 
 func NewWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
 	return &WorkflowInstanceStore{db: db}
@@ -63,6 +75,10 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 		timerState        []byte
 		metadata          []byte
 	)
+	keys := workflowInstanceLookupKeys(instanceID)
+	if len(keys) == 0 {
+		return WorkflowInstance{}, false, nil
+	}
 	err := s.db.QueryRowContext(ctx, `
 		SELECT
 			instance_id::text,
@@ -77,8 +93,10 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 			created_at,
 			updated_at
 		FROM workflow_instances
-		WHERE instance_id = $1::uuid
-	`, instanceID).Scan(
+		WHERE instance_id = ANY($1::uuid[])
+		ORDER BY created_at DESC, instance_id DESC
+		LIMIT 1
+	`, pqStringArray(keys)).Scan(
 		&out.InstanceID,
 		&out.WorkflowName,
 		&out.WorkflowVersion,
@@ -115,6 +133,8 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if out.Metadata == nil {
 		out.Metadata = map[string]any{}
 	}
+	out.StorageRef = workflowInstanceStorageRef(out)
+	out.InstanceID = workflowInstanceLogicalID(out.InstanceID, out.Metadata)
 	return out, true, nil
 }
 
@@ -186,6 +206,8 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 		if item.Metadata == nil {
 			item.Metadata = map[string]any{}
 		}
+		item.StorageRef = workflowInstanceStorageRef(item)
+		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -203,11 +225,33 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	instance.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 	instance.CurrentStage = strings.TrimSpace(instance.CurrentStage)
 	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentStage == "" {
-		return nil
+		return fmt.Errorf(
+			"workflow instance requires instance_id, workflow_name, workflow_version, and current_stage (id=%q workflow=%q version=%q stage=%q)",
+			instance.InstanceID,
+			instance.WorkflowName,
+			instance.WorkflowVersion,
+			instance.CurrentStage,
+		)
 	}
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = time.Now().UTC()
 	}
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
+	}
+	instance.StorageRef = strings.TrimSpace(instance.StorageRef)
+	storageRef := workflowInstanceStorageRef(instance)
+	if storageRef == "" {
+		return nil
+	}
+	rowID := workflowInstanceRowID(storageRef)
+	if rowID == "" {
+		return nil
+	}
+	if strings.TrimSpace(asString(instance.Metadata["instance_id"])) == "" {
+		instance.Metadata["instance_id"] = instance.InstanceID
+	}
+	instance.Metadata["storage_ref"] = storageRef
 	transitionHistory, err := json.Marshal(instance.TransitionHistory)
 	if err != nil {
 		return err
@@ -263,7 +307,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 			metadata = EXCLUDED.metadata,
 			updated_at = now()
 	`,
-		instance.InstanceID,
+		rowID,
 		instance.WorkflowName,
 		instance.WorkflowVersion,
 		instance.CurrentStage,
@@ -298,8 +342,85 @@ func (s *WorkflowInstanceStore) Delete(ctx context.Context, instanceID string) e
 		return nil
 	}
 	ctx = withoutSQLTxContext(ctx)
-	_, err := dbExecContext(ctx, s.db, `DELETE FROM workflow_instances WHERE instance_id = $1::uuid`, instanceID)
+	keys := workflowInstanceLookupKeys(instanceID)
+	if len(keys) == 0 {
+		return nil
+	}
+	_, err := dbExecContext(ctx, s.db, `DELETE FROM workflow_instances WHERE instance_id = ANY($1::uuid[])`, pqStringArray(keys))
 	return err
+}
+
+func workflowInstanceStorageRef(instance WorkflowInstance) string {
+	if storageRef := strings.TrimSpace(instance.StorageRef); storageRef != "" {
+		return storageRef
+	}
+	if flowPath := strings.TrimSpace(asString(instance.Metadata["flow_path"])); flowPath != "" {
+		return flowPath
+	}
+	if storageRef := strings.TrimSpace(asString(instance.Metadata["storage_ref"])); storageRef != "" {
+		return storageRef
+	}
+	return strings.TrimSpace(instance.InstanceID)
+}
+
+func workflowInstanceLogicalID(fallback string, metadata map[string]any) string {
+	if logicalID := strings.TrimSpace(asString(metadata["instance_id"])); logicalID != "" {
+		return logicalID
+	}
+	if flowPath := strings.TrimSpace(asString(metadata["flow_path"])); flowPath != "" {
+		return strings.TrimSpace(path.Base(flowPath))
+	}
+	if storageRef := strings.TrimSpace(asString(metadata["storage_ref"])); storageRef != "" {
+		if strings.Contains(storageRef, "/") {
+			return strings.TrimSpace(path.Base(storageRef))
+		}
+		return storageRef
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func workflowInstanceLookupKeys(ref string) []string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+	keys := make([]string, 0, 2)
+	if parsed, err := uuid.Parse(ref); err == nil {
+		keys = append(keys, parsed.String())
+	}
+	if rowID := workflowInstanceRowID(ref); rowID != "" && !containsString(keys, rowID) {
+		keys = append(keys, rowID)
+	}
+	return keys
+}
+
+func workflowInstanceRowID(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	if !strings.Contains(ref, "/") {
+		if parsed, err := uuid.Parse(ref); err == nil {
+			return parsed.String()
+		}
+	}
+	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(ref)).String()
+}
+
+func containsString(items []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, item := range items {
+		if strings.TrimSpace(item) == target {
+			return true
+		}
+	}
+	return false
+}
+
+type pqStringArray []string
+
+func (a pqStringArray) Value() (driver.Value, error) {
+	return pq.Array([]string(a)).Value()
 }
 
 func jsonOrDefault(raw []byte, fallback string) string {

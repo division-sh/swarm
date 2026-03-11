@@ -9,8 +9,141 @@ import (
 	"time"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
+
+type workflowStateBucketOwnership string
+
+const (
+	workflowStateBucketOwnershipUnknown        workflowStateBucketOwnership = ""
+	workflowStateBucketOwnershipPlatform       workflowStateBucketOwnership = "platform"
+	workflowStateBucketOwnershipProductDerived workflowStateBucketOwnership = "product"
+	workflowStateBucketOwnershipCompatibility  workflowStateBucketOwnership = "compatibility"
+
+	workflowStateBucketValidationOrchestrator = "validation-orchestrator"
+	workflowStateBucketEntityProjection       = "entity_projection"
+	workflowStateBucketScoringNode            = "scoring-node"
+	workflowStateBucketBuildOrchestrator      = "build-orchestrator"
+	workflowStateBucketScoringRestore         = "scoring-restore"
+	workflowStateBucketScanState              = "scan-state"
+	workflowStateBucketPendingDedup           = "pending-dedup"
+	workflowStateBucketDiscoveryAggregator    = "discovery-aggregator"
+)
+
+func classifyWorkflowStateBucket(bucket string) workflowStateBucketOwnership {
+	switch strings.TrimSpace(bucket) {
+	case workflowStateBucketValidationOrchestrator, workflowStateBucketEntityProjection:
+		return workflowStateBucketOwnershipPlatform
+	case workflowStateBucketScoringNode, workflowStateBucketDiscoveryAggregator, workflowStateBucketBuildOrchestrator:
+		return workflowStateBucketOwnershipProductDerived
+	case workflowStateBucketScoringRestore, workflowStateBucketScanState, workflowStateBucketPendingDedup:
+		return workflowStateBucketOwnershipCompatibility
+	default:
+		return workflowStateBucketOwnershipUnknown
+	}
+}
+
+func workflowStateBucketValue(instance WorkflowInstance, bucket string) (any, bool) {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" || len(instance.AccumulatorState) == 0 {
+		return nil, false
+	}
+	value, ok := instance.AccumulatorState[bucket]
+	return value, ok
+}
+
+func workflowStateBucketObject(instance WorkflowInstance, bucket string) (map[string]any, bool) {
+	value, ok := workflowStateBucketValue(instance, bucket)
+	if !ok {
+		return nil, false
+	}
+	return asObject(value)
+}
+
+func workflowMutableStateBucket(instance *WorkflowInstance, bucket string) map[string]any {
+	if instance == nil {
+		return map[string]any{}
+	}
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return map[string]any{}
+	}
+	if instance.AccumulatorState == nil {
+		instance.AccumulatorState = map[string]any{}
+	}
+	current, _ := workflowStateBucketObject(*instance, bucket)
+	out := cloneStringAnyMap(current)
+	if out == nil {
+		out = map[string]any{}
+	}
+	return out
+}
+
+func workflowSetStateBucket(instance *WorkflowInstance, bucket string, value any) {
+	if instance == nil {
+		return
+	}
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	if instance.AccumulatorState == nil {
+		instance.AccumulatorState = map[string]any{}
+	}
+	instance.AccumulatorState[bucket] = value
+}
+
+func workflowDeleteStateBucket(instance *WorkflowInstance, bucket string) {
+	if instance == nil || len(instance.AccumulatorState) == 0 {
+		return
+	}
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" {
+		return
+	}
+	delete(instance.AccumulatorState, bucket)
+}
+
+func workflowStateBucketEntries(instance WorkflowInstance, bucket string) []map[string]any {
+	value, ok := workflowStateBucketValue(instance, bucket)
+	if !ok {
+		return nil
+	}
+	return sliceOfMapsFromAny(value)
+}
+
+func workflowMetadataSnapshot(instance WorkflowInstance) map[string]any {
+	return cloneStringAnyMap(instance.Metadata)
+}
+
+func workflowMutableMetadata(instance *WorkflowInstance) map[string]any {
+	if instance == nil {
+		return map[string]any{}
+	}
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
+	}
+	return instance.Metadata
+}
+
+func workflowValidationProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
+	return workflowStateBucketObject(instance, workflowStateBucketValidationOrchestrator)
+}
+
+func workflowEntityProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
+	return workflowStateBucketObject(instance, workflowStateBucketEntityProjection)
+}
+
+func workflowScoringProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
+	return workflowStateBucketObject(instance, workflowStateBucketScoringNode)
+}
+
+func workflowBuildProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
+	return workflowStateBucketObject(instance, workflowStateBucketBuildOrchestrator)
+}
+
+func workflowScanProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
+	return workflowStateBucketObject(instance, workflowStateBucketScanState)
+}
 
 func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx context.Context, acc *scoringAccumulator) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || acc == nil {
@@ -27,11 +160,8 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx cont
 	}
 	encodedNode := encodeScoringAccumulatorForWorkflow(pc.ContractBundle(), acc)
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
-		if instance.AccumulatorState == nil {
-			instance.AccumulatorState = map[string]any{}
-		}
-		instance.AccumulatorState[restoreBucket] = encoded
-		instance.AccumulatorState["scoring-node"] = encodedNode
+		workflowSetStateBucket(instance, restoreBucket, encoded)
+		workflowSetStateBucket(instance, workflowStateBucketScoringNode, encodedNode)
 	})
 }
 
@@ -44,11 +174,8 @@ func (pc *FactoryPipelineCoordinator) clearWorkflowScoringAccumulator(ctx contex
 		return
 	}
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
-		if instance.AccumulatorState == nil {
-			return
-		}
-		delete(instance.AccumulatorState, scoringRestoreDeltaBucket(pc))
-		delete(instance.AccumulatorState, "scoring-node")
+		workflowDeleteStateBucket(instance, scoringRestoreDeltaBucket(pc))
+		workflowDeleteStateBucket(instance, workflowStateBucketScoringNode)
 	})
 }
 
@@ -102,7 +229,7 @@ func (pc *FactoryPipelineCoordinator) hydrateWorkflowScoringAccumulator(ctx cont
 	acc.GeographicScope = firstNonEmptyString(acc.GeographicScope, geographicScope)
 	acc.Mode = firstNonEmptyString(normalizeScanMode(acc.Mode), normalizeScanMode(mode))
 	if acc.Mode == "" {
-		acc.Mode = runtimeproductpolicy.DiscoveryFallbackMode()
+		acc.Mode = bundleDefaultScanMode(pc.ContractBundle())
 	}
 	if len(acc.DiscoveryContext) == 0 {
 		acc.DiscoveryContext = cloneMap(discoveryContext)
@@ -155,16 +282,11 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScanProjection(ctx context.
 			if strings.TrimSpace(instance.CurrentStage) == "" {
 				instance.CurrentStage = "scanning"
 			}
-			if instance.AccumulatorState == nil {
-				instance.AccumulatorState = map[string]any{}
-			}
-			instance.AccumulatorState["scan-state"] = encodedScan
-			instance.AccumulatorState["pending-dedup"] = encodedPending
-			instance.AccumulatorState["discovery-aggregator"] = encodedDiscovery
-			if instance.Metadata == nil {
-				instance.Metadata = map[string]any{}
-			}
-			instance.Metadata["instance_kind"] = "scan"
+			workflowSetStateBucket(instance, workflowStateBucketScanState, encodedScan)
+			workflowSetStateBucket(instance, workflowStateBucketPendingDedup, encodedPending)
+			workflowSetStateBucket(instance, workflowStateBucketDiscoveryAggregator, encodedDiscovery)
+			metadata := workflowMutableMetadata(instance)
+			metadata["instance_kind"] = "scan"
 		})
 	}
 	items, err := pc.workflowStore.List(ctx)
@@ -199,8 +321,8 @@ func (pc *FactoryPipelineCoordinator) loadWorkflowScanProjection(ctx context.Con
 }
 
 func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationPipelineState, bool) {
-	metadata := cloneStringAnyMap(instance.Metadata)
-	if bucket, ok := asObject(instance.AccumulatorState["validation-orchestrator"]); ok {
+	metadata := workflowMetadataSnapshot(instance)
+	if bucket, ok := workflowValidationProjectionBucket(instance); ok {
 		if gateState, ok := asObject(bucket["gate_state"]); ok {
 			for _, gate := range []string{"g1_research", "g2_spec", "g3_cto", "g4_brand"} {
 				if _, exists := metadata[gate]; !exists {
@@ -215,7 +337,7 @@ func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationP
 	if len(metadata) == 0 {
 		return nil, false
 	}
-	bucket, _ := asObject(instance.AccumulatorState["validation-orchestrator"])
+	bucket, _ := workflowValidationProjectionBucket(instance)
 	verticalID := strings.TrimSpace(instance.InstanceID)
 	if verticalID == "" {
 		return nil, false
@@ -254,7 +376,7 @@ func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationP
 }
 
 func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringAccumulator, bool) {
-	nodeBucket, nodeOK := asObject(instance.AccumulatorState["scoring-node"])
+	nodeBucket, nodeOK := workflowScoringProjectionBucket(instance)
 	compatBucket, compatOK := scoringRestoreDeltaFromInstance(instance)
 	if !nodeOK || len(nodeBucket) == 0 {
 		return nil, false
@@ -264,7 +386,7 @@ func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringA
 		return nil, false
 	}
 	acc := &scoringAccumulator{
-		VerticalID:       verticalID,
+		VerticalID:      verticalID,
 		Expected:        stringSliceFromAny(nodeBucket["dimensions_requested"]),
 		Received:        decodeScoreDimensionResults(nodeBucket["dimensions_received"]),
 		RequestedAt:     parseWorkflowTime(nodeBucket["started_at"]),
@@ -301,14 +423,24 @@ func scoringRestoreDeltaBucket(pc *FactoryPipelineCoordinator) string {
 			return bucket
 		}
 	}
-	return "scoring-restore"
+	return workflowStateBucketScoringRestore
 }
 
 func scoringRestoreDeltaFromInstance(instance WorkflowInstance) (map[string]any, bool) {
-	if bucket, ok := asObject(instance.AccumulatorState["scoring-restore"]); ok && len(bucket) > 0 {
-		return bucket, true
+	for _, bucketName := range scoringRestoreDeltaBucketNames() {
+		if bucket, ok := workflowStateBucketObject(instance, bucketName); ok && len(bucket) > 0 {
+			return bucket, true
+		}
 	}
 	return nil, false
+}
+
+func scoringRestoreDeltaBucketNames() []string {
+	primary := strings.TrimSpace(scoringRestoreDeltaBucket(nil))
+	if primary == "" || primary == workflowStateBucketScoringRestore {
+		return []string{workflowStateBucketScoringRestore}
+	}
+	return []string{primary, workflowStateBucketScoringRestore}
 }
 
 func applyScoringCompatibilityDelta(acc *scoringAccumulator, compatBucket map[string]any) {
@@ -323,7 +455,7 @@ func applyScoringCompatibilityDelta(acc *scoringAccumulator, compatBucket map[st
 }
 
 func scoringNodeProjectionPresent(instance WorkflowInstance) bool {
-	nodeBucket, ok := asObject(instance.AccumulatorState["scoring-node"])
+	nodeBucket, ok := workflowScoringProjectionBucket(instance)
 	if !ok || len(nodeBucket) == 0 {
 		return false
 	}
@@ -340,7 +472,7 @@ func asObjectLoose(value any) map[string]any {
 }
 
 func restoreScanStateFromInstance(instance WorkflowInstance) (*scanAccumulator, map[string]pendingCandidate, bool) {
-	bucket, ok := asObject(instance.AccumulatorState["scan-state"])
+	bucket, ok := workflowScanProjectionBucket(instance)
 	if !ok || len(bucket) == 0 {
 		return nil, nil, false
 	}
@@ -353,7 +485,7 @@ func restoreScanStateFromInstance(instance WorkflowInstance) (*scanAccumulator, 
 		CampaignID:  strings.TrimSpace(asString(bucket["campaign_id"])),
 		Mode:        normalizeScanMode(asString(bucket["mode"])),
 		Geography:   strings.TrimSpace(asString(bucket["geography"])),
-		Expected:    maxInt(asInt(bucket["expected"]), len(stringSliceFromAny(firstNonNil(bucket["expected_scanners"], bucket["expected"])))),
+		Expected:    scanProjectionExpectedCount(normalizeScanMode(asString(bucket["mode"])), stringSliceFromAny(firstNonNil(bucket["expected_scanners"], bucket["expected"])), asInt(bucket["expected"])),
 		Reports:     asInt(bucket["reports"]),
 		Discovered:  asInt(bucket["discovered"]),
 		Skipped:     asInt(bucket["skipped"]),
@@ -368,7 +500,7 @@ func restoreScanStateFromInstance(instance WorkflowInstance) (*scanAccumulator, 
 		acc.ReportData = append(acc.ReportData, item)
 	}
 	pending := map[string]pendingCandidate{}
-	for _, raw := range sliceOfMapsFromAny(instance.AccumulatorState["pending-dedup"]) {
+	for _, raw := range workflowStateBucketEntries(instance, workflowStateBucketPendingDedup) {
 		cand := pendingCandidate{
 			DedupEventID: strings.TrimSpace(firstNonEmptyString(asString(raw["dedup_event_id"]), asString(raw["id"]))),
 			ExistingID:   strings.TrimSpace(firstNonEmptyString(asString(raw["existing_id"]), asString(raw["matched_vertical_id"]))),
@@ -573,18 +705,108 @@ func scanDispatchKeysForMode(bundle *runtimecontracts.WorkflowContractBundle, mo
 	if !ok {
 		return nil
 	}
-	raw, ok := handler.ModeToScanners[normalizeScanMode(mode)]
-	if !ok {
+	return scanDispatchKeysFromTypedRules(node.EventHandlers, handler.Rules, normalizeScanMode(mode))
+}
+
+func scanDispatchKeysFromTypedRules(handlers map[string]runtimecontracts.SystemNodeEventHandler, rules []runtimecontracts.HandlerRuleEntry, mode string) []string {
+	if len(rules) == 0 || mode == "" {
 		return nil
 	}
-	return stringSliceFromAny(raw)
+	evaluator := newWorkflowExpressionEvaluator()
+	payload := map[string]any{"mode": mode}
+	var fallback *runtimecontracts.HandlerRuleEntry
+	for i := range rules {
+		rule := &rules[i]
+		condition := strings.TrimSpace(rule.Condition)
+		if strings.EqualFold(condition, "else") {
+			fallback = rule
+			continue
+		}
+		if condition == "" {
+			continue
+		}
+		passed, err := evaluator.EvalBool(condition, workflowExpressionContext{Payload: payload})
+		if err != nil {
+			continue
+		}
+		if passed {
+			return scanDispatchKeysFromTypedRule(handlers, rule)
+		}
+	}
+	if fallback != nil {
+		return scanDispatchKeysFromTypedRule(handlers, fallback)
+	}
+	return nil
+}
+
+func scanDispatchKeysFromTypedRule(handlers map[string]runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 4)
+	for _, eventType := range rule.Emits.Values() {
+		handler, ok := handlers[strings.TrimSpace(eventType)]
+		if !ok {
+			continue
+		}
+		target := ""
+		if handler.FanOut != nil {
+			target = strings.TrimSpace(handler.FanOut.Target)
+		}
+		key := scanDispatchKeyFromTarget(target)
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
+}
+
+func scanDispatchKeyFromTarget(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	parts := strings.Split(target, "/")
+	key := strings.TrimSpace(parts[len(parts)-1])
+	key = strings.TrimSuffix(key, "-agent")
+	key = strings.ReplaceAll(key, "-", "_")
+	return key
+}
+
+func eventEmissionList(raw any) []string {
+	switch t := raw.(type) {
+	case string:
+		if value := strings.TrimSpace(t); value != "" {
+			return []string{value}
+		}
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if value := strings.TrimSpace(asString(item)); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	case []string:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if value := strings.TrimSpace(item); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func scanProjectionStatus(acc *scanAccumulator, expectedScanners []string) string {
 	if acc == nil {
 		return ""
 	}
-	expected := maxInt(acc.Expected, len(expectedScanners))
+	expected := maxInt(acc.Expected, scanProjectionExpectedCount(acc.Mode, expectedScanners, 0))
 	if expected <= 0 {
 		expected = 1
 	}
@@ -592,6 +814,10 @@ func scanProjectionStatus(acc *scanAccumulator, expectedScanners []string) strin
 		return "completed"
 	}
 	return "active"
+}
+
+func scanProjectionExpectedCount(mode string, expectedScanners []string, storedExpected int) int {
+	return compatibilityExpectedScannerCount(mode, expectedScanners, storedExpected)
 }
 
 func firstNonNil(vals ...any) any {
@@ -626,7 +852,7 @@ func encodePendingCandidates(candidates []pendingCandidate) []map[string]any {
 
 func encodePendingCandidatesForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, candidates []pendingCandidate) []map[string]any {
 	out := encodePendingCandidates(candidates)
-	fields := workflowSystemNodeStateSchemaFields(bundle, "discovery-aggregator")
+	fields := workflowSystemNodeStateSchemaFields(bundle, workflowStateBucketDiscoveryAggregator)
 	if len(fields) == 0 {
 		return out
 	}
@@ -662,7 +888,7 @@ func encodePendingCandidatesForWorkflow(bundle *runtimecontracts.WorkflowContrac
 }
 
 func encodeDiscoveryStateForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, candidates []pendingCandidate) []map[string]any {
-	fields := workflowSystemNodeStateSchemaFields(bundle, "discovery-aggregator")
+	fields := workflowSystemNodeStateSchemaFields(bundle, workflowStateBucketDiscoveryAggregator)
 	if len(fields) == 0 || len(candidates) == 0 {
 		return []map[string]any{}
 	}

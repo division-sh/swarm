@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/config"
+	empireconfig "empireai/internal/empire/config"
 )
 
 const (
@@ -40,7 +40,7 @@ type shardStageRuntimeConfig struct {
 	PerShardBudgetCents int
 }
 
-func NewShardPlanner(cfg config.ShardingConfig) *ShardPlanner {
+func NewShardPlanner(cfg empireconfig.ShardingConfig) *ShardPlanner {
 	stageCfg := map[string]shardStageRuntimeConfig{
 		ShardStageMarketResearch: {
 			TargetItemsPerShard: cfg.Stages.MarketResearch.TargetItemsPerShard,

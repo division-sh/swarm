@@ -16,22 +16,37 @@ type ToolAuthorizer struct {
 	bus EventPublisher
 }
 
+type toolOwnershipClass string
+
+const (
+	toolOwnershipPlatformBuiltin    toolOwnershipClass = "platform_builtin"
+	toolOwnershipWorkflowRegistered toolOwnershipClass = "workflow_registered"
+)
+
+type toolAuthorizationClass string
+
+const (
+	toolAuthorizationUniversal    toolAuthorizationClass = "universal"
+	toolAuthorizationEmitAllowed  toolAuthorizationClass = "emit_allowed"
+	toolAuthorizationActorConfig  toolAuthorizationClass = "actor_config"
+	toolAuthorizationDefaultAllow toolAuthorizationClass = "default_allow"
+	toolAuthorizationDenied       toolAuthorizationClass = "denied"
+)
+
+type toolAuthorizationDecision struct {
+	ownership   toolOwnershipClass
+	class       toolAuthorizationClass
+	allowed     bool
+	constrained bool
+}
+
 func NewToolAuthorizer(bus EventPublisher) *ToolAuthorizer {
 	return &ToolAuthorizer{bus: bus}
 }
 
 func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig, toolName string) error {
-	if IsUniversal(toolName) {
-		return nil
-	}
-	if IsEmitToolAllowedForRole(actor.Role, toolName) {
-		return nil
-	}
-	allowed, constrained := extractAllowedToolsFromConfig(actor)
-	if !constrained {
-		return nil
-	}
-	if _, ok := allowed[toolName]; ok {
+	decision := classifyToolAuthorization(actor, toolName)
+	if decision.allowed {
 		return nil
 	}
 	err := fmt.Errorf("tool %s is not allowed for agent %s", toolName, actor.ID)
@@ -64,6 +79,43 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 		}
 	}
 	return err
+}
+
+func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+	decision := toolAuthorizationDecision{
+		ownership: toolOwnershipForName(toolName),
+		class:     toolAuthorizationDenied,
+	}
+	if IsUniversal(toolName) {
+		decision.class = toolAuthorizationUniversal
+		decision.allowed = true
+		return decision
+	}
+	if IsEmitToolAllowedForRole(actor.Role, toolName) {
+		decision.class = toolAuthorizationEmitAllowed
+		decision.allowed = true
+		return decision
+	}
+	allowed, constrained := extractAllowedToolsFromConfig(actor)
+	if !constrained {
+		decision.class = toolAuthorizationDefaultAllow
+		decision.allowed = true
+		return decision
+	}
+	decision.constrained = true
+	if _, ok := allowed[toolName]; ok {
+		decision.class = toolAuthorizationActorConfig
+		decision.allowed = true
+		return decision
+	}
+	return decision
+}
+
+func toolOwnershipForName(toolName string) toolOwnershipClass {
+	if IsUniversal(toolName) {
+		return toolOwnershipPlatformBuiltin
+	}
+	return toolOwnershipWorkflowRegistered
 }
 
 func extractAllowedToolsFromConfig(actor models.AgentConfig) (map[string]struct{}, bool) {

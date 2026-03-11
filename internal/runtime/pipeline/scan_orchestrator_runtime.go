@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.Event) {
@@ -21,7 +21,7 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 	}
 	mode := normalizeScanMode(asString(payload["mode"]))
 	if mode == "" {
-		mode = runtimeproductpolicy.DiscoveryFallbackMode()
+		mode = scanOrchestratorFallbackMode()
 	}
 	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
 	if campaignID == "" {
@@ -55,7 +55,8 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 	sc.mu.Unlock()
 
 	assigned := sc.payloadFactory.BuildScanAssignedPayload(scanID, campaignID, mode, geography, payload, plannedShardCount)
-	if plannedShardCount > 0 && runtimeproductpolicy.ScanShardStage(mode) != "" {
+	assignmentEvents := scanOrchestratorAssignmentEvents(mode)
+	if plannedShardCount > 0 && scanOrchestratorUsesShardedDispatch(assignmentEvents) {
 		return
 	}
 	assignments, err := defaultWorkflowModule().ScanPolicy().ExpandScanAssignments(mode, payload, assigned, corpusBatchSize)
@@ -66,26 +67,9 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 		assignments = []ScanAssignedPayload{assigned}
 	}
 
-	switch runtimeproductpolicy.ScanDispatchKind(mode) {
-	case "market":
-		for _, expanded := range assignments {
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(expanded))
-		}
-	case "trend":
-		for _, expanded := range assignments {
-			sc.runtime.publish(ctx, "trend_research.scan_assigned", "", payloadMap(expanded))
-		}
-	case "local":
-		for _, expanded := range assignments {
-			sc.runtime.publish(ctx, "scanner.google_maps.scan_assigned", "", payloadMap(expanded))
-			sc.runtime.publish(ctx, "scanner.instagram.scan_assigned", "", payloadMap(expanded))
-			sc.runtime.publish(ctx, "scanner.reviews.scan_assigned", "", payloadMap(expanded))
-			sc.runtime.publish(ctx, "scanner.directories.scan_assigned", "", payloadMap(expanded))
-			sc.runtime.publish(ctx, "scanner.yelp.scan_assigned", "", payloadMap(expanded))
-		}
-	default:
-		for _, expanded := range assignments {
-			sc.runtime.publish(ctx, "market_research.scan_assigned", "", payloadMap(expanded))
+	for _, expanded := range assignments {
+		for _, eventType := range assignmentEvents {
+			sc.runtime.publish(ctx, eventType, "", payloadMap(expanded))
 		}
 	}
 }
@@ -177,4 +161,123 @@ func (n *ScanOrchestrator) scanCoordinator() *ScanCoordinator {
 
 func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
 	return defaultWorkflowModule().ScanPolicy().ReadJSONLBatches(path, batchSize)
+}
+
+func scanOrchestratorFallbackMode() string {
+	if bundle := scanOrchestratorContractBundle(); bundle != nil {
+		if pv, ok := bundle.MergedPolicy.Values["default_scan_mode"]; ok {
+			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
+				return normalizeScanMode(mode)
+			}
+		}
+		if pv, ok := bundle.Policy.Values["default_scan_mode"]; ok {
+			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
+				return normalizeScanMode(mode)
+			}
+		}
+	}
+	return bundleDefaultScanMode(nil)
+}
+
+func scanOrchestratorAssignmentEvents(mode string) []string {
+	mode = normalizeScanMode(mode)
+	if mode == "" {
+		mode = scanOrchestratorFallbackMode()
+	}
+	if bundle := scanOrchestratorContractBundle(); bundle != nil {
+		if events := scanOrchestratorAssignmentEventsFromBundle(bundle, mode); len(events) > 0 {
+			return events
+		}
+	}
+	return scanOrchestratorAssignmentEventsFallback(mode)
+}
+
+func scanOrchestratorUsesShardedDispatch(assignmentEvents []string) bool {
+	for _, eventType := range assignmentEvents {
+		switch strings.TrimSpace(eventType) {
+		case "market_research.scan_assigned", "trend_research.scan_assigned":
+			return true
+		}
+	}
+	return false
+}
+
+func scanOrchestratorContractBundle() *runtimecontracts.WorkflowContractBundle {
+	module := defaultWorkflowModuleOrNil()
+	if module == nil {
+		return nil
+	}
+	return module.ContractBundle()
+}
+
+func scanOrchestratorAssignmentEventsFromBundle(bundle *runtimecontracts.WorkflowContractBundle, mode string) []string {
+	handler, ok := bundle.NodeEventHandler("scan-orchestrator", "scan.requested")
+	if !ok {
+		return nil
+	}
+	dispatchEvents := scanOrchestratorDispatchEventsForMode(handler, mode)
+	if len(dispatchEvents) == 0 {
+		dispatchEvents = handler.Emits.Values()
+	}
+	assignmentEvents := make([]string, 0, len(dispatchEvents))
+	for _, dispatchEvent := range dispatchEvents {
+		dispatchEvent = strings.TrimSpace(dispatchEvent)
+		if dispatchEvent == "" {
+			continue
+		}
+		dispatchHandler, ok := bundle.NodeEventHandler("scan-orchestrator", dispatchEvent)
+		if !ok {
+			continue
+		}
+		assignmentEvents = append(assignmentEvents, scanOrchestratorFanOutTargets(dispatchHandler.FanOut)...)
+	}
+	return uniqueStrings(assignmentEvents)
+}
+
+func scanOrchestratorDispatchEventsForMode(handler runtimecontracts.SystemNodeEventHandler, mode string) []string {
+	if len(handler.Rules) == 0 {
+		return nil
+	}
+	mode = normalizeScanMode(mode)
+	if mode == "" {
+		return nil
+	}
+	// Look for a rule matching the mode ID
+	for _, rule := range handler.Rules {
+		if strings.EqualFold(strings.TrimSpace(rule.ID), mode) {
+			return rule.Emits.Values()
+		}
+	}
+	// Fall back to the "else" rule
+	for _, rule := range handler.Rules {
+		if strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
+			return rule.Emits.Values()
+		}
+	}
+	return nil
+}
+
+func scanOrchestratorFanOutTargets(fanOut *runtimecontracts.FanOutSpec) []string {
+	if fanOut == nil {
+		return nil
+	}
+	emitPerItem := strings.TrimSpace(fanOut.EmitPerItem)
+	switch emitPerItem {
+	case "":
+		return nil
+	case "scanner.scan_assigned":
+		return []string{
+			"scanner.google_maps.scan_assigned",
+			"scanner.instagram.scan_assigned",
+			"scanner.reviews.scan_assigned",
+			"scanner.directories.scan_assigned",
+			"scanner.yelp.scan_assigned",
+		}
+	default:
+		return []string{emitPerItem}
+	}
+}
+
+func scanOrchestratorAssignmentEventsFallback(mode string) []string {
+	return []string{"market_research.scan_assigned"}
 }

@@ -16,7 +16,6 @@ import (
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/runtime/sharedjson"
 	runtimetools "empireai/internal/runtime/tools"
@@ -225,7 +224,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 	if a == nil || a.conversation == nil {
 		return ""
 	}
-	mode = runtimeproductpolicy.NormalizeScanMode(mode)
+	mode = runtimetools.NormalizeScanModeCompat(mode)
 	cacheKey := mode
 	if a.promptCache == nil {
 		a.promptCache = map[string]string{}
@@ -339,13 +338,7 @@ func (a *LLMAgent) attemptPostTurnContractRemediation(ctx context.Context, inbou
 
 func (a *LLMAgent) enforcePostTurnExpectations(inbound events.Event, recorder *runtimebus.EmittedEventsRecorder) error {
 	eventsOut := recorder.Snapshot()
-	role := canonicalRuntimeRole(a.cfg.Role)
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		if err := policy.EnforcePostTurn(role, inbound, eventsOut); err != nil {
-			return err
-		}
-	}
-	return nil
+	return runtimetools.EnforceRequiredEmitContract(a.cfg.Role, inbound, eventsOut)
 }
 
 func isHumanTaskOutcomeEvent(t events.EventType) bool {
@@ -528,10 +521,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 		toolsLine = strings.Join(emitTools, ", ")
 	}
 	strictRequirement := ""
-	role := canonicalRuntimeRole(cfg.Role)
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		strictRequirement = policy.AdditionalTurnRequirement(role, evt)
-	}
+	strictRequirement = runtimetools.RequiredEmitToolContractText(cfg.Role, evt)
 	return fmt.Sprintf(
 		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- vertical_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s",
 		cfg.ID,
@@ -553,11 +543,7 @@ func canonicalRuntimeRole(role string) string {
 }
 
 func contractRemediationPrompt(cfg models.AgentConfig, evt events.Event, contractErr error) (string, bool) {
-	role := canonicalRuntimeRole(cfg.Role)
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		return policy.ContractRemediationPrompt(role, evt, contractErr)
-	}
-	return "", false
+	return runtimetools.EmitContractRemediationPrompt(cfg.Role, evt, contractErr)
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {
@@ -606,9 +592,9 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 }
 
 func normalizeScanMode(raw string) string {
-	return runtimeproductpolicy.NormalizeScanMode(raw)
+	return runtimetools.NormalizeScanModeCompat(raw)
 }
 
 func normalizeScanPriority(raw string) string {
-	return runtimeproductpolicy.NormalizeScanPriority(raw)
+	return runtimetools.NormalizeScanPriorityCompat(raw)
 }

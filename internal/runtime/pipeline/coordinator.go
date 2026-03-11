@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 const (
@@ -96,6 +97,10 @@ type FactoryPipelineCoordinator struct {
 
 	shardPlanner       *ShardPlanner
 	payloadFactory     *PipelinePayloadFactory
+	expressionEval     *workflowExpressionEvaluator
+	instanceActivator  FlowInstanceActivator
+	timerScheduler     *Scheduler
+	timerScheduleStore SchedulePersistence
 	shardsTableChecked bool
 	shardsTableEnabled bool
 
@@ -108,9 +113,23 @@ type FactoryPipelineCoordinator struct {
 }
 
 type FactoryPipelineCoordinatorOptions struct {
-	ShardPlanner *ShardPlanner
-	Module       WorkflowModule
+	ShardPlanner      *ShardPlanner
+	Module            WorkflowModule
+	InstanceActivator FlowInstanceActivator
 }
+
+type FlowInstanceActivationRequest struct {
+	ContractBundle *runtimecontracts.WorkflowContractBundle
+	TemplateID     string
+	InstanceID     string
+	VerticalID     string
+	FlowPath       string
+	InitialState   string
+	Config         map[string]any
+	TriggerEvent   events.Event
+}
+
+type FlowInstanceActivator func(context.Context, FlowInstanceActivationRequest) error
 
 func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryPipelineCoordinatorOptions) *FactoryPipelineCoordinator {
 	if bus == nil {
@@ -124,17 +143,19 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	scoringPolicy := module.ScoringPolicy()
 	payloads := module.PayloadFactory()
 	pc := &FactoryPipelineCoordinator{
-		bus:             bus,
-		db:              db,
-		scanCoordinator: NewScanCoordinator(),
-		scoringState:    NewScoringState(),
-		validationGate:  NewValidationGate(),
-		module:          module,
-		discoveryPolicy: discoveryPolicy,
-		scoringPolicy:   scoringPolicy,
-		payloads:        payloads,
-		processed:       make(map[string]struct{}),
-		shardPlanner:    opts.ShardPlanner,
+		bus:               bus,
+		db:                db,
+		scanCoordinator:   NewScanCoordinator(),
+		scoringState:      NewScoringState(),
+		validationGate:    NewValidationGate(),
+		module:            module,
+		discoveryPolicy:   discoveryPolicy,
+		scoringPolicy:     scoringPolicy,
+		payloads:          payloads,
+		processed:         make(map[string]struct{}),
+		shardPlanner:      opts.ShardPlanner,
+		expressionEval:    newWorkflowExpressionEvaluator(),
+		instanceActivator: opts.InstanceActivator,
 	}
 	pc.stateStore = NewPipelineStateStore(db, &pc.mu)
 	pc.workflowStore = NewWorkflowInstanceStore(db)
@@ -142,7 +163,6 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	pc.scanCoordinator.discovery = discoveryPolicy
 	pc.scoringState.runtime = pc
 	pc.scoringState.scoring = scoringPolicy
-	pc.validationGate.runtime = pc
 	pc.payloadFactory = NewPipelinePayloadFactory(payloads, scoringPolicy, pc)
 	pc.scanCoordinator.payloadFactory = pc.payloadFactory
 	pc.scoringState.payloadFactory = pc.payloadFactory
@@ -177,6 +197,25 @@ func (pc *FactoryPipelineCoordinator) SetTestVerticalStageHook(fn func(verticalI
 	}
 	pc.mu.Lock()
 	pc.testVerticalStageHook = fn
+	pc.mu.Unlock()
+}
+
+func (pc *FactoryPipelineCoordinator) SetInstanceActivator(activator FlowInstanceActivator) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	pc.instanceActivator = activator
+	pc.mu.Unlock()
+}
+
+func (pc *FactoryPipelineCoordinator) SetTimerScheduling(scheduler *Scheduler, store SchedulePersistence) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	pc.timerScheduler = scheduler
+	pc.timerScheduleStore = store
 	pc.mu.Unlock()
 }
 
@@ -348,7 +387,7 @@ func (pc *FactoryPipelineCoordinator) RunMaintenance(ctx context.Context) {
 		case <-ticker.C:
 			pc.checkScanTimeouts(ctx, time.Now().UTC())
 			pc.checkScoringTimeouts(ctx, time.Now().UTC())
-			pc.checkPackagingTimeouts(ctx, time.Now().UTC())
+			(&ValidationOrchestrator{coordinator: pc}).checkPackagingTimeouts(ctx, time.Now().UTC())
 			pc.persistRuntimeState(ctx)
 		}
 	}
@@ -383,8 +422,12 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 	}
 
 	if eventType == "spec.revision_needed" && strings.TrimSpace(evt.VerticalID) != "" {
-		escalated := pc.handleInnerSpecRevision(ctx, evt)
-		pc.checkPackagingTimeouts(ctx, time.Now().UTC())
+		escalated := false
+		if pc.validationGate != nil {
+			validator := &ValidationOrchestrator{coordinator: pc}
+			escalated = validator.handleInnerSpecRevision(ctx, evt)
+			validator.checkPackagingTimeouts(ctx, time.Now().UTC())
+		}
 		if escalated {
 			record("consumed", "", nil, nil)
 		} else {
@@ -408,7 +451,7 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 	// Opportunistic timer checks while events are flowing.
 	pc.checkScanTimeouts(ictx, time.Now().UTC())
 	pc.checkScoringTimeouts(ictx, time.Now().UTC())
-	pc.checkPackagingTimeouts(ictx, time.Now().UTC())
+	(&ValidationOrchestrator{coordinator: pc}).checkPackagingTimeouts(ictx, time.Now().UTC())
 
 	if consume {
 		record("consumed", "", emitted, nil)
@@ -496,7 +539,7 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 		if pc.dispatchWorkflowNodeEvent(ctx, evt) {
 			return
 		}
-		pc.handleRuntimeReset(ctx, evt)
+		(&LifecycleOrchestrator{coordinator: pc}).Handle(ctx, evt)
 		return
 	default:
 		_ = pc.dispatchWorkflowNodeEvent(ctx, evt)

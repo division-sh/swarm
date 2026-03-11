@@ -50,33 +50,26 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 	if pc == nil {
 		return nil
 	}
-	nodeIDs := make(map[string]struct{})
-	for _, node := range pc.WorkflowNodes() {
-		nodeIDs[strings.TrimSpace(node.ID)] = struct{}{}
+	bundle := pc.ContractBundle()
+	if bundle == nil {
+		return nil
 	}
-	_, hasScan := nodeIDs["scan-orchestrator"]
-	_, hasDiscovery := nodeIDs["discovery-aggregator"]
-	_, hasValidation := nodeIDs["validation-orchestrator"]
-	_, hasLifecycle := nodeIDs["lifecycle-orchestrator"]
-	_, hasScoring := nodeIDs[ScoringNodeID]
-
-	out := make([]workflowNodeExecutor, 0, 5)
-	if hasScan && pc.scanCoordinator != nil {
-		out = append(out, &ScanOrchestrator{coordinator: pc.scanCoordinator})
-	}
-	if hasDiscovery && pc.scanCoordinator != nil {
-		out = append(out, &DiscoveryAggregator{coordinator: pc})
-	}
-	if hasValidation && pc.validationGate != nil {
-		out = append(out, &ValidationOrchestrator{coordinator: pc})
-	}
-	if hasLifecycle && pc.validationGate != nil {
-		out = append(out, &LifecycleOrchestrator{coordinator: pc})
-	}
-	if hasScoring {
-		if scoringExecutor := pc.scoringTransitionExecutor(); scoringExecutor != nil {
-			out = append(out, scoringExecutor)
+	nodes := pc.WorkflowNodes()
+	out := make([]workflowNodeExecutor, 0, len(nodes))
+	for _, node := range nodes {
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" {
+			continue
 		}
+		contract, ok := bundle.Nodes[nodeID]
+		if !ok {
+			continue
+		}
+		executor := NewNode(contract, newCoordinatorHandlerExecutionEngine(pc, nodeID), nil)
+		if executor == nil {
+			continue
+		}
+		out = append(out, executor)
 	}
 	return out
 }

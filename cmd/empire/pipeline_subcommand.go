@@ -12,7 +12,7 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/events"
-	"empireai/internal/factory"
+	"empireai/internal/empire/factory"
 	"empireai/internal/specaudit"
 	"github.com/google/uuid"
 )

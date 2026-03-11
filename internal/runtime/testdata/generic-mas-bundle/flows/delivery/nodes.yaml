@@ -1,0 +1,8 @@
+delivery-node:
+  id: delivery-node
+  execution_type: workflow_node
+  subscribes_to:
+    - item.completed
+    - timer.item.timeout
+  produces:
+    - item.completed

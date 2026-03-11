@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/specaudit"
 	"empireai/internal/templateops"
 	"github.com/google/uuid"
@@ -224,10 +224,27 @@ func (s *Server) handleControlCreateVertical(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := s.manager.SpawnOpCo(verticalID, models.MandateDocument{VerticalID: verticalID}); err != nil {
-		_, _ = s.db.ExecContext(r.Context(), `DELETE FROM verticals WHERE id = $1::uuid`, verticalID)
-		writeErr(w, http.StatusInternalServerError, fmt.Errorf("spawn opco: %w", err))
-		return
+	if s.manager != nil {
+		if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
+			if _, ok := bundle.FlowContracts["operating"]; ok {
+				if err := s.manager.ActivateFlowInstance(r.Context(), runtimepipeline.FlowInstanceActivationRequest{
+					ContractBundle: bundle,
+					TemplateID:     "operating",
+					InstanceID:     verticalID,
+					VerticalID:     verticalID,
+					FlowPath:       "operating/" + verticalID,
+					InitialState:   "approved",
+					Config: map[string]any{
+						"vertical_name": req.Name,
+						"geography":     req.Geography,
+					},
+				}); err != nil {
+					_, _ = s.db.ExecContext(r.Context(), `DELETE FROM verticals WHERE id = $1::uuid`, verticalID)
+					writeErr(w, http.StatusInternalServerError, fmt.Errorf("activate operating flow: %w", err))
+					return
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":          true,

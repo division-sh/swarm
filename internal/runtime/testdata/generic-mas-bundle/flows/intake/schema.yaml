@@ -1,0 +1,37 @@
+name: intake
+mode: static
+initial_state: queued
+states:
+  - queued
+  - collecting
+  - ready
+  - rejected
+terminal_states:
+  - rejected
+pins:
+  inputs:
+    events:
+      - item.created
+      - item.processed
+      - item.rejected
+    reads:
+      - priority
+  outputs:
+    events:
+      - item.processed
+      - item.review_requested
+      - item.rejected
+    writes:
+      - priority
+      - results
+required_agents:
+  - role: coordinator
+    subscribes_to:
+      - item.review_requested
+    emits:
+      - item.created
+  - role: worker
+    subscribes_to:
+      - item.processed
+    emits:
+      - item.processed

@@ -1,0 +1,290 @@
+# AUTO-GENERATED — DO NOT EDIT DIRECTLY
+permission_bundles:
+  coordinator:
+    description: Full control — top-level workflow coordinator
+    permissions:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
+    - configure_routing
+    - approve_spend
+    - message_all
+    - mailbox_send
+    - human_task_request
+  lead:
+    description: Domain/team lead — can manage team and routing
+    permissions:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
+    - configure_routing
+    - message_domain
+    - mailbox_send
+    - human_task_request
+  specialist:
+    description: Skilled agent — can message domain and send to mailbox
+    permissions:
+    - message_domain
+    - mailbox_send
+    - configure_routing
+  worker:
+    description: Execution agent — can message peers only
+    permissions:
+    - message_peers
+  system_node:
+    description: Deterministic node — no permissions (platform handles internally)
+    permissions: []
+mra_self_filter_threshold: 40
+evidence_url_minimum: 2
+composite_marginal_high: 74
+tier1_dimension_floor: 50
+tier1_subscore_floor: 60
+marginal_tier1_dimensions_above_70: 2
+marginal_kill_days: 60
+max_derivations_per_parent: 2
+derivation_trigger_threshold: 65
+corpus_batch_size: 25
+blocking_red_flags:
+- complex_integration
+- high_feature_count
+- phone_led_sales
+- enterprise_procurement
+- relationship_networking
+- physical_presence_required
+- support_mode_phone_video
+passthrough_red_flags:
+- one_time_setup
+- accuracy_liability
+opportunity_patterns:
+- platform_parasitic
+- freelancer_replacement
+- data_asymmetry
+- api_middleware
+- compliance_regulatory
+- ai_wrapper
+- workflow_automation
+- unknown
+retention_primitives:
+- recurring_data
+- workflow_embedding
+- integration_lock_in
+- compliance_cadence
+- team_collaboration
+workflow_anchor_tokens:
+- schedule
+- booking
+- invoice
+- payroll
+- lead
+- dispatch
+- inventory
+- compliance
+- reporting
+tier1_capabilities:
+- Web UI
+- Go backend
+- LLM integration (document parsing, classification, generation)
+- Postgres
+- Stripe payments
+- External API integration (QuickBooks, Xero, MLS, Procore)
+- Document generation (PDF/CSV)
+- OAuth authentication
+- Web scraping
+tier2_capabilities:
+- name: Email sending
+  provider: SendGrid/Postmark
+  cost: ~$0.001/email
+  status: planned
+- name: SMS
+  provider: Twilio
+  cost: ~$0.008/message
+  status: planned
+- name: WhatsApp Business API
+  cost: ~$0.005-0.08/conversation
+  status: planned
+tier3_capabilities:
+- name: Voice AI
+  provider: Bland.ai/Vapi/Retell
+  cost: $0.07-0.15/minute
+  status: future
+- name: Browser automation
+  provider: Playwright
+  status: future
+model_tiers:
+  description: LLM model assignment per agent role
+  roles:
+    discovery-coordinator: sonnet
+    market-research-agent: sonnet
+    trend-research-agent: sonnet
+    scanner-agent: haiku
+    analysis-agent: sonnet
+    validation-coordinator: sonnet
+    business-research-agent: sonnet
+    lightweight-spec-agent: sonnet
+    spec-reviewer: haiku
+    factory-cto: sonnet
+    pre-brand-agent: sonnet
+    spec-auditor: sonnet
+    opco-ceo: sonnet
+    opco-chief-of-staff: haiku_or_sonnet
+    opco-head-of-product: haiku_or_sonnet
+    opco-head-of-growth: haiku_or_sonnet
+    opco-pm: sonnet
+    opco-cto: sonnet
+    opco-tech-writer: sonnet
+    opco-backend: sonnet
+    opco-frontend: sonnet
+    opco-qa: haiku
+    opco-devops: haiku
+    opco-marketing: sonnet
+    opco-support: haiku
+    empire-coordinator: sonnet
+    operations-analyst: sonnet
+    holding-devops: haiku
+  _note: Derived from agents.yaml model_tier (authoritative). This is a convenience lookup.
+scan_timeout_minutes: 90
+campaign_timeout_hours: 24
+budget_warning_percent: 80
+budget_throttle_percent: 90
+budget_emergency_percent: 100
+opco_agent_count: 13
+bootstrap_route_count: 20
+seeded_route_count: 7
+mailbox_types:
+- vertical_approval
+- migration_approval
+- domain_approval
+- spend_request
+- escalation
+- review
+- digest
+- budget_increase
+mailbox_priorities:
+- low
+- normal
+- high
+- critical
+marginal_park_days: 14
+pipeline_capacity_max: 50
+scan_modes:
+  local_services:
+    rubric: local_services_rubric
+    emits_category_signals: true
+    emits_trend_signals: false
+    priority: normal
+  saas_gap:
+    rubric: saas_gap_rubric
+    emits_category_signals: true
+    emits_trend_signals: false
+    priority: normal
+  saas_trend:
+    rubric: saas_trend_rubric
+    emits_category_signals: false
+    emits_trend_signals: true
+    priority: normal
+  corpus:
+    rubric: corpus_rubric
+    emits_category_signals: true
+    emits_trend_signals: false
+    priority: low
+default_scan_mode: saas_gap
+signal_threshold: 55
+composite_shortlist: 75
+hard_gate_floor: 50
+contest_spread_threshold: 30
+tier1_dimensions:
+- build_complexity
+- automation_completeness
+- icp_crispness
+- distribution_leverage
+- time_to_value
+- operational_drag
+tier2_dimensions:
+- pain_severity
+- competition_gap
+- monetization_clarity
+tier3_dimensions:
+- retention_architecture
+- expansion_potential
+analyst_anti_bias:
+  description: When assigning an analyst for a derived vertical, use a different analyst than the parent scorer.
+  rule: derived_vertical.analyst != parent_vertical.analyst
+competition_gap_anchors:
+  dimension: competition_gap
+  tier: 2
+  anchors:
+    '20': 'Dominant incumbent(s) with direct feature overlap at comparable or lower price points. No viable differentiation
+      axis — not on features, not on price, not on segment.
+
+      '
+    '50': 'Multiple competitors exist with partial overlap. EITHER differentiation possible on features/segment but competitors
+      price at comparable levels, OR competitors price high (3x+ EmpireAI''s viable price) but one or more already offer a
+      credible downmarket tier.
+
+      '
+    '80': 'Clear open niche (few/no competitors) OR multiple competitors exist but ALL priced at 3x+ EmpireAI''s viable price
+      point ($150+/month) with no credible downmarket offering AND an identifiable underserved segment that can''t justify
+      incumbent pricing.
+
+      '
+  evaluation_rules:
+  - id: price_floor_comparison
+    rule: 'Analyst MUST identify cheapest viable competitor''s price point and compare to EmpireAI''s viable range ($29-99/month).
+      Required evidence, not optional context.
+
+      '
+  - id: price_gap_threshold
+    rule: 'If cheapest incumbent with comparable features is ≥3x EmpireAI''s viable price (~$150+/month) AND no incumbent
+      offers credible budget/starter tier, analyst evaluates price-disruption wedge. Can elevate score 15-20 points above
+      pure competitor-count analysis.
+
+      '
+  - id: segment_specificity
+    rule: 'Price disruption alone insufficient. Analyst must identify specific underserved segment (e.g., "solo appliance
+      repair techs doing <$500k revenue who can''t justify $300/month ServiceTitan") — not just "small businesses who want
+      it cheaper."
+
+      '
+  - id: downmarket_tier_check
+    rule: 'If any competitor offers $29-79/month starter tier (even limited), price disruption thesis weakened. Score as if
+      that tier is the relevant competitor.
+
+      '
+  - id: cost_structure_moat
+    rule: 'Disruption thesis depends on incumbents being structurally unable to match price. Indicators: sales-led motion,
+      enterprise focus (SOC2/SSO/dedicated CSM), VC-funded with burn rate expectations, complex onboarding requiring professional
+      services. Lean bootstrapped tool at $49/month = no cost structure moat.
+
+      '
+  derivation_interaction: 'When analyst scores competition_gap <65 due to competitor count but observes significant price
+    gap, can emit vertical.derived with modification_type=''feature_reframe'' targeting competition_gap improvement via price-disruption
+    wedge.
+
+    '
+max_derivation_depth: 2
+tier1_weight: 0.6
+tier2_weight: 0.3
+tier3_weight: 0.1
+hard_gate_dimensions:
+- build_complexity
+- automation_completeness
+min_derivation_signal: 40
+min_icp_score: 50
+min_evidence_for_derivation: 3
+min_retention_score: 40
+inner_revision_max: 3
+max_brand_revisions: 3
+validation_gate_timeout_hours: 72
+operating_state_timeout_hours: 168
+opco_max_concurrent_builds: 3
+build_timeout_hours: 336
+deploy_timeout_hours: 24
+qa_timeout_hours: 48
+monthly_budget_usd: 500
+budget_alert_threshold_pct: 80
+escalation_wait_hours: 4
+steady_state_criteria:
+  min_active_users: 10
+  min_revenue_usd: 100
+  max_churn_pct: 20
+  min_uptime_pct: 99

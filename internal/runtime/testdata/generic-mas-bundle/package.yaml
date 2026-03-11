@@ -1,0 +1,38 @@
+name: test-platform
+version: "1.0.0"
+platform_version: ">=1.0.0"
+description: Generic MAS bundle for contract-driven runtime tests.
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+          primary: true
+        - name: status
+          type: string
+          indexed: true
+        - name: priority
+          type: string
+        - name: score
+          type: number
+          nullable: true
+        - name: gates
+          type: object
+          nullable: true
+runtime_contracts:
+  nodes: runtime/nodes.yaml
+  events: runtime/events.yaml
+  agents: runtime/agents.yaml
+  tools: runtime/tools.yaml
+  policy: runtime/policy.yaml
+flows:
+  - id: intake
+    flow: intake
+    mode: static
+  - id: processing
+    flow: processing
+    mode: static
+  - id: delivery
+    flow: delivery
+    mode: template

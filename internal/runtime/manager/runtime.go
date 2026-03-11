@@ -13,6 +13,7 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
@@ -141,12 +142,56 @@ func deterministicOutputEventID(inbound events.Event, agentID string, index int,
 }
 
 func (am *AgentManager) defaultManagerAgentID(cfg models.AgentConfig) string {
+	if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
+		if managerID == "coordinator" {
+			return "empire-coordinator"
+		}
+		return managerID
+	}
+	if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
+		if _, entry, ok := runtimecontracts.ResolveAgentRegistryEntry(bundle, cfg); ok {
+			if managerID := normalizedManagerFallback(cfg, strings.TrimSpace(entry.ManagerFallback)); managerID != "" {
+				if managerID == "coordinator" {
+					return "empire-coordinator"
+				}
+				return managerID
+			}
+		}
+	}
 	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		if managerID := strings.TrimSpace(policy.ManagerFallbackAgentID(cfg)); managerID != "" {
+		if managerID := normalizedManagerFallback(cfg, strings.TrimSpace(policy.ManagerFallbackAgentID(cfg))); managerID != "" {
+			if managerID == "coordinator" {
+				return "empire-coordinator"
+			}
 			return managerID
 		}
 	}
+	return "empire-coordinator"
+}
+
+func managerFallbackFromConfig(cfg models.AgentConfig) string {
+	if len(cfg.Config) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
+		return ""
+	}
+	if value, ok := payload["manager_fallback"].(string); ok {
+		return strings.TrimSpace(value)
+	}
 	return ""
+}
+
+func normalizedManagerFallback(cfg models.AgentConfig, managerID string) string {
+	managerID = strings.TrimSpace(managerID)
+	if managerID == "" {
+		return ""
+	}
+	if strings.TrimSpace(cfg.Mode) == "operating" && strings.TrimSpace(cfg.VerticalID) != "" && strings.HasPrefix(managerID, "opco-") && !strings.Contains(managerID, "/") {
+		return opCoAgentID(managerID, cfg.VerticalID)
+	}
+	return managerID
 }
 
 type eventExistenceReader interface {
@@ -627,10 +672,11 @@ func (am *AgentManager) startControlLoop(parent context.Context) {
 	am.controlCancel = cancel
 	am.runMu.Unlock()
 
-	ch := am.bus.Subscribe("agent-manager-controller",
-		events.EventType("opco.spinup_requested"),
-		events.EventType("opco.teardown_requested"),
-	)
+	subscriptions := []events.EventType{events.EventType("opco.teardown_requested")}
+	if !am.disableSpinupControl {
+		subscriptions = append([]events.EventType{events.EventType("opco.spinup_requested")}, subscriptions...)
+	}
+	ch := am.bus.Subscribe("agent-manager-controller", subscriptions...)
 	am.runWG.Add(1)
 	go func() {
 		defer am.runWG.Done()

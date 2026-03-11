@@ -1,0 +1,157 @@
+lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  description: Manages factory→operating handoff (vertical.approved → OpCo spinup) and operating lifecycle transitions. Also
+    handles marginal review, vertical kill/resume, and runtime reset.
+  subscribes_to:
+  - vertical.approved
+  - vertical.killed
+  - vertical.resumed
+  - opco.ceo_ready
+  - timer.marginal_review
+  - timer.marginal_kill
+  - build_complete
+  - launch_ready
+  - opco.steady_state_reached
+  - opco.growth_triggered
+  - opco.growth_stabilized
+  - opco.teardown_requested
+  - mailbox.item_decided
+  - opco.teardown_complete
+  - timer.operating_timeout
+  produces:
+  - opco.spinup_requested
+  - opco.terminated
+  - operating.timeout_escalation
+  - pipeline.dead_letter
+  - vertical.approved
+  - vertical.killed
+  - vertical.marginal_review_due
+  timers:
+  - id: operating_state_timeout
+    event: timer.operating_timeout
+    delay: '{{operating_state_timeout_hours}}h'
+    start_on: state:building
+    cancel_on: state:operating
+    recurring: false
+  state_table: null
+  event_handlers:
+    vertical.approved:
+      description: Vertical approved by human. Advance and request OpCo creation.
+      advances_to: approved
+      emits: opco.spinup_requested
+    vertical.killed:
+      description: Vertical killed. Advance to terminal.
+      advances_to: killed
+    vertical.resumed:
+      description: Marginal vertical resumed by directive.
+      guard:
+        id: pipeline_has_capacity
+        check: count(verticals in [researching..ready_for_review]) < {{pipeline_capacity_max}}
+        policy_ref: policy.yaml → pipeline_capacity_max
+      advances_to: building
+    opco.ceo_ready:
+      description: OpCo instance created, CEO ready. Begin building.
+      advances_to: building
+    timer.marginal_review:
+      description: Marginal review timer fired. Escalate to empire-coordinator.
+      emits: vertical.marginal_review_due
+    timer.marginal_kill:
+      description: Marginal kill timer fired. Auto-kill stale vertical.
+      advances_to: killed
+      emits: vertical.killed
+    build_complete:
+      description: Build phase complete. Advance to pre-launch.
+      advances_to: pre_launch
+    launch_ready:
+      description: Launch preparation complete. Advance to launched.
+      advances_to: launched
+    opco.steady_state_reached:
+      description: OpCo reached steady state. Advance to operating.
+      advances_to: operating
+    opco.growth_triggered:
+      description: Growth phase initiated.
+      advances_to: growth
+    opco.growth_stabilized:
+      description: Growth stabilized. Return to operating.
+      advances_to: operating
+    opco.teardown_requested:
+      description: Teardown requested. Begin winding down.
+      advances_to: winding_down
+    mailbox.item_decided:
+      description: Human mailbox decision received.
+      rules:
+        approved:
+          condition: decision == approve
+          emits: vertical.approved
+        rejected:
+          condition: decision == reject
+          emits: vertical.killed
+    opco.teardown_complete:
+      description: Teardown finished. Advance to terminal state.
+      advances_to: killed
+      emits: opco.terminated
+    timer.operating_timeout:
+      description: Operating state timed out. Escalate to empire-coordinator.
+      emits: operating.timeout_escalation
+build-orchestrator:
+  id: build-orchestrator
+  execution_type: system_node
+  description: Manages the build pipeline within the building state. Enforces spec→build→QA→deploy ordering via gates. Fires
+    build_complete to signal lifecycle-orchestrator.
+  subscribes_to:
+  - product_spec_ready
+  - technical_spec_ready
+  - qa.validation_passed
+  - deploy.requested
+  - review.deploy_feedback
+  - build_progress
+  - build_blocked
+  produces:
+  - build.escalation
+  - build_complete
+  - deploy.authorized
+  gate_state:
+    g_product_spec: PM completed product spec
+    g_tech_spec: CTO completed tech spec
+    g_qa_passed: QA validated the build
+  event_handlers:
+    product_spec_ready:
+      description: 'PM completed product spec. Gate: allow tech spec.'
+      sets_gate: g_product_spec
+    technical_spec_ready:
+      description: 'CTO completed tech spec. Gate: allow coding to begin.'
+      guard:
+        id: need_product_spec_first
+        check: entity.gates.g_product_spec == true
+        on_fail: reject
+      sets_gate: g_tech_spec
+    build_progress:
+      description: Engineering progress update. Record for tracking.
+      action: record_evidence
+    build_blocked:
+      description: Engineering blocked. Escalate to CTO.
+      emits: build.escalation
+    qa.validation_passed:
+      description: QA approved the build.
+      guard:
+        id: need_build_first
+        check: entity.gates.g_tech_spec == true
+        on_fail: reject
+      sets_gate: g_qa_passed
+      emits: build_complete
+    deploy.requested:
+      description: 'Deploy requested. Guard: QA must have passed.'
+      guard:
+        id: qa_gate
+        check: entity.gates.g_qa_passed == true
+        on_fail: reject
+      emits: deploy.authorized
+    review.deploy_feedback:
+      description: Post-deploy review feedback. Record evidence.
+      action: record_evidence
+  state_schema:
+    description: Tracks build pipeline progress per entity
+    fields:
+      vertical_id: uuid
+      build_evidence: jsonb (append-only progress log)

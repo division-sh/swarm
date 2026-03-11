@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
@@ -206,15 +205,15 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	discoveryMode := normalizeScanMode(mode)
+	discoveryMode := resolvePipelineScanMode(pc.ContractBundle(), mode)
 	if discoveryMode == "" {
 		discoveryMode = strings.ToLower(strings.TrimSpace(mode))
 	}
 	if discoveryMode == "" {
-		discoveryMode = strings.ToLower(strings.TrimSpace(asString(payload["mode"])))
+		discoveryMode = resolvePipelineScanMode(pc.ContractBundle(), asString(payload["mode"]))
 	}
 	if discoveryMode == "" {
-		discoveryMode = runtimeproductpolicy.DiscoveryFallbackMode()
+		discoveryMode = defaultPipelineScanMode(pc.ContractBundle())
 	}
 	opportunityPattern := pc.discoveryPolicy.NormalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
 	if opportunityPattern == "" {

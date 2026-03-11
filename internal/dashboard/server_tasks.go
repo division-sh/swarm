@@ -233,11 +233,11 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 	maxPerWeek := 0
 	resetDay := "monday"
 	if s.cfg != nil {
-		if strings.TrimSpace(s.cfg.Budget.HumanTasks.BudgetReset) != "" {
-			resetDay = strings.TrimSpace(s.cfg.Budget.HumanTasks.BudgetReset)
+		if strings.TrimSpace(s.cfg.Budget().HumanTasks.BudgetReset) != "" {
+			resetDay = strings.TrimSpace(s.cfg.Budget().HumanTasks.BudgetReset)
 		}
 		weekStart = runtime.WeekStartUTC(s.now(), resetDay)
-		maxPerWeek = s.cfg.Budget.HumanTasks.MaxTasksPerWeek
+		maxPerWeek = s.cfg.Budget().HumanTasks.MaxTasksPerWeek
 	}
 	var approvedThisWeek int
 	_ = s.db.QueryRowContext(ctx, `
@@ -309,8 +309,8 @@ func (s *Server) handleTaskReject(w http.ResponseWriter, r *http.Request, taskID
 	req.Reason = strings.TrimSpace(req.Reason)
 
 	requeueAt := runtime.NextWeekResetUTC(s.now(), func() string {
-		if s.cfg != nil && strings.TrimSpace(s.cfg.Budget.HumanTasks.BudgetReset) != "" {
-			return strings.TrimSpace(s.cfg.Budget.HumanTasks.BudgetReset)
+		if s.cfg != nil && strings.TrimSpace(s.cfg.Budget().HumanTasks.BudgetReset) != "" {
+			return strings.TrimSpace(s.cfg.Budget().HumanTasks.BudgetReset)
 		}
 		return "monday"
 	}()).UTC().Format(time.RFC3339)
@@ -374,10 +374,10 @@ func (s *Server) handleTaskStats(w http.ResponseWriter, r *http.Request) {
 	resetDay := "monday"
 	maxPerWeek := 0
 	if s.cfg != nil {
-		if strings.TrimSpace(s.cfg.Budget.HumanTasks.BudgetReset) != "" {
-			resetDay = strings.TrimSpace(s.cfg.Budget.HumanTasks.BudgetReset)
+		if strings.TrimSpace(s.cfg.Budget().HumanTasks.BudgetReset) != "" {
+			resetDay = strings.TrimSpace(s.cfg.Budget().HumanTasks.BudgetReset)
 		}
-		maxPerWeek = s.cfg.Budget.HumanTasks.MaxTasksPerWeek
+		maxPerWeek = s.cfg.Budget().HumanTasks.MaxTasksPerWeek
 	}
 	weekStart := runtime.WeekStartUTC(s.now(), resetDay)
 	var approvedThisWeek int

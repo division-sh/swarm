@@ -1,0 +1,9 @@
+intake-router:
+  id: intake-router
+  execution_type: workflow_node
+  subscribes_to:
+    - item.created
+    - item.processed
+  produces:
+    - item.processed
+    - item.review_requested

@@ -3,6 +3,10 @@ package commgraph
 type Policy interface {
 	MessageAuthorities() []MessageAuthority
 	MailboxRoundTrips() []MailboxRoundTrip
+	HumanTaskDecisionRoles() []string
+	RoutingAuthorities() []RoutingAuthority
+	ManagementAuthorities() []ManagementAuthority
+	MailboxSendRoles() []string
 }
 
 var defaultPolicyFactory func() Policy

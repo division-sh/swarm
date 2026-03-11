@@ -64,7 +64,7 @@ func dashboardContractBundle() (*runtimecontracts.WorkflowContractBundle, string
 	if repoRoot == "" {
 		return nil, "", os.ErrNotExist
 	}
-	bundle, err := runtimecontracts.LoadEmpireWorkflowContractBundle(repoRoot)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot)
 	return bundle, repoRoot, err
 }
 
@@ -164,13 +164,19 @@ func dashboardContractSummary() map[string]any {
 
 	complianceGroups := map[string]int{}
 	complianceTotal := 0
-	for group, rules := range bundle.Platform.ComplianceRules {
-		name := strings.TrimSpace(group)
-		if name == "" {
-			continue
+	if bundle.Platform.ComplianceRules.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(bundle.Platform.ComplianceRules.Content); i += 2 {
+			name := strings.TrimSpace(bundle.Platform.ComplianceRules.Content[i].Value)
+			if name == "" {
+				continue
+			}
+			rules := bundle.Platform.ComplianceRules.Content[i+1]
+			if rules.Kind != yaml.SequenceNode {
+				continue
+			}
+			complianceGroups[name] = len(rules.Content)
+			complianceTotal += len(rules.Content)
 		}
-		complianceGroups[name] = len(rules)
-		complianceTotal += len(rules)
 	}
 
 	verificationSummary := map[string]any{

@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	workspace "empireai/internal/runtime/workspace"
 )
 
@@ -322,10 +321,7 @@ func resolveDiagnosticContainer(ctx context.Context, db *sql.DB, role, verticalI
 }
 
 func diagnosticWorkspaceClass(role string) string {
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		return strings.TrimSpace(policy.DiagnosticWorkspaceClass(role))
-	}
-	return ""
+	return workspace.RoleWorkspaceRouteClass(role)
 }
 
 func findSessionProjectFileInContainer(ctx context.Context, container, sessionID string) (string, error) {

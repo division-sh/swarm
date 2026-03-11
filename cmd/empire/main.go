@@ -21,8 +21,9 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/dashboard"
+	"empireai/internal/empire/factory"
+	empirestore "empireai/internal/empire/store"
 	"empireai/internal/events"
-	"empireai/internal/factory"
 	"empireai/internal/mailbox"
 	"empireai/internal/protocolheaders"
 	"empireai/internal/runtime"
@@ -31,6 +32,9 @@ import (
 	runtimellm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	empirepipeline "empireai/internal/runtime/pipeline/empire"
+	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	empireproductpolicy "empireai/internal/runtime/productpolicy/empire"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -117,6 +121,10 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		WorkspaceLifecycle: workspaceLifecycle,
 		EnableToolGateway:  toolGatewayAddr != "",
 		ToolGatewayToken:   strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")),
+		WorkflowModule:     empirepipeline.NewModule(),
+		ProductPolicy: func() runtimeproductpolicy.Policy {
+			return empireproductpolicy.New()
+		},
 	})
 	if err != nil {
 		return err
@@ -151,6 +159,9 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 	}
 	if err := syncRuntimeGlobalAgents(ctx, stores.ManagerStore); err != nil {
 		log.Printf("global agents sync failed (continuing): %v", err)
+	}
+	if err := ensureRuntimeLifecycleSchedules(ctx, stores.ScheduleStore); err != nil {
+		log.Printf("runtime lifecycle schedule ensure failed: %v", err)
 	}
 	if err := rotateGlobalAgentSessions(ctx, stores.ManagerStore, stores.SessionRegistry, cfg.LLM.RuntimeMode); err != nil {
 		log.Printf("global session rotate after sync failed (continuing): %v", err)
@@ -190,6 +201,22 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 
 	fmt.Println("empire runtime bootstrap ready")
 	rt.Wait(ctx)
+	return nil
+}
+
+func ensureRuntimeLifecycleSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
+	if store == nil {
+		return nil
+	}
+	if err := store.UpsertSchedule(ctx, runtimepipeline.Schedule{
+		AgentID:   "lifecycle-orchestrator",
+		EventType: "timer.portfolio_digest",
+		Mode:      "cron",
+		Cron:      "0 9 * * *",
+		Payload:   []byte(`{"trigger_reason":"portfolio_digest_daily"}`),
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -551,6 +578,7 @@ func buildStores(
 			}
 		}
 		sr := sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL)
+		epg := empirestore.NewPostgresStore(pg.DB)
 		return storeBundle{
 			SQLDB:             pg.DB,
 			EventStore:        pg,
@@ -558,11 +586,11 @@ func buildStores(
 			ConversationStore: pg,
 			ManagerStore:      pg,
 			ScheduleStore:     pg,
-			MailboxStore:      pg,
+			MailboxStore:      epg,
 			InboundStore:      pg,
 			DigestStore:       pg,
 			TurnStore:         pg,
-			ScanCampaignStore: pg,
+			ScanCampaignStore: epg,
 		}
 	case "inmemory":
 		fallthrough

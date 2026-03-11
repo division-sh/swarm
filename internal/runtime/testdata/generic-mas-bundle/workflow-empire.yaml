@@ -1,0 +1,87 @@
+workflow:
+  name: test-platform
+  version: "1.0.0"
+  entity: item
+  entity_table: items
+  state_field: status
+  initial_stage: queued
+  terminal_stages:
+    - completed
+    - rejected
+  stages:
+    - id: queued
+      phase: intake
+      description: Item has been accepted.
+    - id: collecting
+      phase: intake
+      description: Worker fan-out is collecting results.
+    - id: ready
+      phase: processing
+      description: Intake has completed and processing can begin.
+    - id: approved
+      phase: delivery
+      description: Item passed automated review.
+    - id: completed
+      phase: terminal
+      description: Delivery finished.
+    - id: rejected
+      phase: terminal
+      description: Item was rejected.
+  transitions:
+    - id: receive-item
+      from: queued
+      to: collecting
+      trigger: item.created
+      node: intake-router
+      data_accumulation:
+        source_event: item.created
+        writes:
+          - target_field: status
+            value:
+              literal: collecting
+          - target_field: priority
+            source_field: payload.priority
+    - id: complete-intake
+      from: collecting
+      to: ready
+      trigger: item.processed
+      node: intake-router
+      data_accumulation:
+        source_event: item.processed
+        writes:
+          - target_field: status
+            value:
+              literal: ready
+          - target_field: results
+            source_field: payload.result
+    - id: approve-item
+      from: ready
+      to: approved
+      trigger: item.review_requested
+      node: processing-node
+      data_accumulation:
+        source_event: item.review_requested
+        writes:
+          - target_field: score
+            source_field: payload.score
+    - id: deliver-item
+      from: approved
+      to: completed
+      trigger: item.completed
+      node: delivery-node
+    - id: reject-item
+      from:
+        - collecting
+        - ready
+        - approved
+      to: rejected
+      trigger: item.rejected
+      node: processing-node
+  timers:
+    - id: item_timeout
+      stage: approved
+      event: timer.item.timeout
+      owner: delivery-node
+      start_on: state:approved
+      cancel_on: state:completed
+      delay_minutes: 30

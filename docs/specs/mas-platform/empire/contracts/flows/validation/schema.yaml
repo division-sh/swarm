@@ -1,0 +1,100 @@
+name: validation
+pins:
+  inputs:
+    events:
+    - brand.candidates_ready
+    - brand.revision_needed
+    - cto.spec_approved
+    - cto.spec_revision_needed
+    - cto.spec_vetoed
+    - research.completed
+    - research.vertical_rejected
+    - spec.approved
+    - spec.revision_needed
+    - spec.revision_requested
+    - spec.validation_failed
+    - spec.validation_passed
+    - vertical.needs_more_data
+    - vertical.ready_for_review
+    - vertical.shortlisted
+    reads: []
+  outputs:
+    events:
+    - brand.requested
+    - brand.revision_needed
+    - cto.spec_review_requested
+    - pipeline.dead_letter
+    - spec.revision_requested
+    - spec.validation_requested
+    - validation.more_data_needed
+    - validation.package_ready
+    - validation.started
+    - vertical.killed
+    - vertical.killed_backprop
+    writes:
+    - brand
+    - business_brief
+    - cto_feasibility
+    - mvp_spec
+    - validation_kit
+initial_state: researching
+terminal_states:
+- killed
+states:
+- researching
+- mvp_speccing
+- cto_review
+- branding
+- ready_for_review
+- killed
+required_agents:
+- role: validation-coordinator
+  subscribes_to:
+  - validation.package_ready
+  emits:
+  - vertical.ready_for_review
+  description: Coordinates validation pipeline
+- role: business-research-agent
+  subscribes_to:
+  - validation.started
+  emits:
+  - research.completed
+  - research.vertical_rejected
+  description: Deep-dive business research
+- role: lightweight-spec-agent
+  subscribes_to:
+  - spec.requested
+  emits:
+  - spec.draft_ready
+  description: Writes MVP specification
+- role: spec-reviewer
+  subscribes_to:
+  - spec_review.requested
+  emits:
+  - spec_review.passed
+  - spec_review.issues_found
+  description: Reviews spec quality
+- role: factory-cto
+  subscribes_to:
+  - cto.spec_review_requested
+  emits:
+  - cto.spec_approved
+  - cto.spec_revision_needed
+  - cto.spec_vetoed
+  description: Technical feasibility review
+- role: pre-brand-agent
+  subscribes_to:
+  - brand.requested
+  emits:
+  - brand.candidates_ready
+  description: Creates brand candidates
+- role: spec-auditor
+  subscribes_to:
+  - spec.validation_requested
+  - spec.contradiction_detected
+  emits:
+  - spec.validation_passed
+  - spec.validation_failed
+  description: Audits specification completeness
+_internal_events_note: Schema pins declare external interface only. Internal agent-to-agent events (spec.requested, spec.draft_ready,
+  spec_review.requested, etc.) exist in events.yaml but are not listed in pins. They are implementation details.

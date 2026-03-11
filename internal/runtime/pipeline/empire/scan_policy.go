@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func asString(v any) string {
@@ -31,7 +30,7 @@ func maxInt(a, b int) int {
 }
 
 func (module) ExpandScanAssignments(mode string, payload map[string]any, assigned runtimepipeline.ScanAssignedPayload, batchSize int) ([]runtimepipeline.ScanAssignedPayload, error) {
-	mode = runtimeproductpolicy.NormalizeScanMode(mode)
+	mode = normalizeEmpireScanMode(mode)
 	if mode != "corpus" {
 		return []runtimepipeline.ScanAssignedPayload{assigned}, nil
 	}
@@ -61,7 +60,7 @@ func (module) ReadJSONLBatches(path string, batchSize int) ([][]map[string]any, 
 
 func (module) ParseDirective(text string) runtimepipeline.ParsedDirective {
 	raw := strings.TrimSpace(text)
-	mode, explicit := runtimeproductpolicy.ParseDirectiveMode(raw)
+	mode, explicit := runtimepipeline.ParseDirectiveMode(raw)
 	geoName, country, region := ParseDirectiveGeography(raw)
 	out := runtimepipeline.ParsedDirective{
 		Raw:             raw,
@@ -107,10 +106,33 @@ func (module) ResolveDirectiveCorpusPath(mode string, parsed runtimepipeline.Par
 	if corpusPath == "" {
 		corpusPath = strings.TrimSpace(parsed.CorpusPath)
 	}
-	if runtimeproductpolicy.NormalizeScanMode(mode) == "corpus" && corpusPath == "" {
+	if normalizeEmpireScanMode(mode) == "corpus" && corpusPath == "" {
 		return "", fmt.Errorf("corpus_path is required for corpus mode")
 	}
 	return corpusPath, nil
+}
+
+func normalizeEmpireScanMode(raw string) string {
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	if mode == "" {
+		return ""
+	}
+	mode = strings.ReplaceAll(mode, "-", "_")
+	mode = strings.Join(strings.Fields(mode), "_")
+	switch mode {
+	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus", "derived":
+		return mode
+	case "local_underserved", "local", "local_service", "services":
+		return "local_services"
+	case "discovery", "scan", "default", "automation", "micro", "saas":
+		return "saas_gap"
+	case "trend", "trend_scan", "trend_opportunity", "adjacent_opportunity":
+		return "saas_trend"
+	case "corpus_mode", "signal_corpus":
+		return "corpus"
+	default:
+		return ""
+	}
 }
 
 func (module) ExtractCorpusPathFromStrategicContext(strategic map[string]any) string {
@@ -287,6 +309,13 @@ func ExtractCorpusPathFromStrategicContext(strategic map[string]any) string {
 	}
 	if path := strings.TrimSpace(asString(strategic["corpus_path"])); path != "" {
 		return path
+	}
+	if directive, ok := strategic["directive"].(map[string]any); ok && len(directive) > 0 {
+		if params, ok := directive["parameters"].(map[string]any); ok && len(params) > 0 {
+			if path := strings.TrimSpace(asString(params["corpus_path"])); path != "" {
+				return path
+			}
+		}
 	}
 	parsed, ok := strategic["parsed"].(map[string]any)
 	if !ok {

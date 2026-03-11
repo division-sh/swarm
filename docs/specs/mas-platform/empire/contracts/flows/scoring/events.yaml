@@ -1,0 +1,77 @@
+vertical.derived:
+  payload:
+    opportunity_id: string
+    parent_id: string
+    generation_depth: integer
+    generator_agent_id: string
+    campaign_id: string
+    derivation_rationale:
+      type: object
+    opportunity_name: string
+    preliminary_icp: string
+    build_sketch:
+      type: object
+    evidence:
+      type: object
+    geographic_scope: string
+    signal_strength: number
+    discovery_context:
+      type: object
+score.dimension_complete:
+  payload:
+    vertical_id: string
+    dimension: string
+    score:
+      type: integer
+      minimum: 0
+      maximum: 100
+    evidence: string
+    confidence: string
+scoring.requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    mode: string
+    rubric: string
+    dimensions_requested:
+      type: array
+      items: string
+    discovery_context:
+      type: object
+    assigned_analysis_agent_id: string
+    excluded_analysis_agent_id: string
+  _note: rubric is derived from mode by scoring-node rules. Both fields set at emit time.
+vertical.shortlisted:
+  payload:
+    vertical_id: string
+    composite_score: number
+    viability_score: number
+    scoring_payload:
+      type: object
+vertical.marginal:
+  payload:
+    vertical_id: string
+    composite_score: number
+    viability_score: number
+    dimensions:
+      type: object
+    promotion_eligible: boolean
+vertical.rejected:
+  payload:
+    vertical_id: string
+    reason: string
+  _status: planned
+vertical.killed_backprop:
+  payload:
+    vertical_id: string
+    kill_reason: string
+    killed_by_flow: string
+  _note: Back-propagation from validation. Scoring node advances entity to killed.
+scoring.derived_requested:
+  payload:
+    vertical_id: string
+    dimensions_requested: array
+    rubric: string
+    mode: string
+  _note: 'Routed to analysis-agent-secondary (anti-bias: different agent pool from parent scorer)'

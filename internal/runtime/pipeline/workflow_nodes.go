@@ -122,7 +122,7 @@ func LoadWorkflowNodes(bundle *runtimecontracts.WorkflowContractBundle) ([]Workf
 			Subscriptions:    subscriptions,
 			Produces:         produces,
 			OwnedTransitions: append([]string{}, entry.OwnedTransitions...),
-			Timers:           append([]string{}, entry.Timers...),
+			Timers:           workflowNodeTimerIDs(entry.Timers),
 			ExecutionType:    strings.TrimSpace(entry.ExecutionType),
 			Implementation:   strings.TrimSpace(entry.Implementation),
 			StateTable:       strings.TrimSpace(entry.StateTable),
@@ -232,6 +232,19 @@ func buildWorkflowNodePolicies(bundle *runtimecontracts.WorkflowContractBundle, 
 	return policies
 }
 
+func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []string {
+	if len(timers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(timers))
+	for _, timer := range timers {
+		if id := strings.TrimSpace(timer.ID); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBundle, nodeID string, subscriptions []events.EventType) map[string]struct{} {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" || bundle == nil {
@@ -298,6 +311,18 @@ func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventP
 	nodeID = strings.TrimSpace(nodeID)
 	eventType = strings.TrimSpace(eventType)
 	switch nodeID {
+	case "portfolio-node":
+		switch eventType {
+		case "timer.portfolio_digest", "runtime.reset", "system.directive":
+			return WorkflowEventPolicy{Consume: true}, true
+		case "budget.threshold_crossed":
+			return WorkflowEventPolicy{Consume: false, VisibleDownstream: true}, true
+		}
+	case "scan-orchestrator":
+		switch eventType {
+		case "scan.requested":
+			return WorkflowEventPolicy{Consume: true}, true
+		}
 	case "scoring-node":
 		switch eventType {
 		case "score.dimension_complete", "scoring.contest_resolved":

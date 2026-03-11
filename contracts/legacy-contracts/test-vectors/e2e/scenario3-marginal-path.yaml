@@ -1,0 +1,167 @@
+id: scenario3-marginal-path
+agents:
+  - id: market-research-agent
+    role: market-research-agent
+    mode: factory
+    subscriptions: [market_research.scan_assigned]
+    responses:
+      - when_event: market_research.scan_assigned
+        tool_calls:
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: marginal_a
+              signal_strength: 69
+              opportunity_name: Clinic Denial Queue Assistant
+              preliminary_icp: Billing manager at SMB clinic groups handling invoice reporting workflow
+              build_sketch:
+                core_features: [denial queue, reconciliation]
+                key_integrations: [quickbooks]
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp A
+                    pricing: "$129/mo"
+                    source_url: https://example.com/m3a
+                pain_signals:
+                  - signal: denial churn
+                    source_url: https://example.com/m3a1
+                regulatory:
+                  - detail: remittance response timing guidance
+                    source_url: https://example.com/m3a-reg
+                buyer_communities:
+                  - name: Clinic Billing Managers
+                    source_url: https://example.com/m3a2
+              opportunity_hypothesis: Recurring denial workflow with embedded reconciliation queue.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: rejected_b
+              signal_strength: 66
+              opportunity_name: Claims Notes Organizer
+              preliminary_icp: Billing manager at SMB clinic groups handling invoice reporting workflow
+              build_sketch:
+                core_features: [notes tagging]
+                key_integrations: []
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp B
+                    pricing: "$79/mo"
+                    source_url: https://example.com/m3b
+                pain_signals:
+                  - signal: fragmented notes
+                    source_url: https://example.com/m3b1
+                regulatory:
+                  - detail: claim note audit expectations
+                    source_url: https://example.com/m3b-reg
+                buyer_communities:
+                  - name: Clinic Billing Managers
+                    source_url: https://example.com/m3b2
+              opportunity_hypothesis: Lightweight workflow notes organizer.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_market_research_scan_complete
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              categories_assessed: 2
+              high_signal_count: 2
+
+  - id: analysis-agent
+    role: analysis-agent
+    mode: factory
+    subscriptions: [scoring.requested]
+    responses:
+      - when_event: scoring.requested
+        tool_calls:
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: build_complexity, score: 80, evidence: m3 marginal build, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: automation_completeness, score: 80, evidence: m3 marginal automation, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: icp_crispness, score: 72, evidence: m3 marginal icp, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: distribution_leverage, score: 72, evidence: m3 marginal distribution, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: time_to_value, score: 60, evidence: m3 marginal ttv, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: operational_drag, score: 60, evidence: m3 marginal drag, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: pain_severity, score: 60, evidence: m3 marginal pain, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: competition_gap, score: 60, evidence: m3 marginal gap, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: monetization_clarity, score: 60, evidence: m3 marginal monetization, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: retention_architecture, score: 60, evidence: m3 marginal retention, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: expansion_potential, score: 60, evidence: m3 marginal expansion, confidence: high}
+
+      - when_event: scoring.requested
+        tool_calls:
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: build_complexity, score: 45, evidence: m3 reject build, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: automation_completeness, score: 45, evidence: m3 reject automation, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: icp_crispness, score: 45, evidence: m3 reject icp, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: distribution_leverage, score: 45, evidence: m3 reject distribution, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: time_to_value, score: 45, evidence: m3 reject ttv, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: operational_drag, score: 45, evidence: m3 reject drag, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: pain_severity, score: 45, evidence: m3 reject pain, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: competition_gap, score: 45, evidence: m3 reject gap, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: monetization_clarity, score: 45, evidence: m3 reject monetization, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: retention_architecture, score: 45, evidence: m3 reject retention, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: expansion_potential, score: 45, evidence: m3 reject expansion, confidence: high}
+
+  - id: empire-coordinator
+    role: empire-coordinator
+    mode: holding
+    subscriptions: [vertical.marginal, timer.marginal_review]
+    responses:
+      - when_event: vertical.marginal
+        tool_calls:
+          - name: schedule
+            arguments:
+              event_type: timer.marginal_review
+              mode: once
+              at: "2099-01-01T00:00:00Z"
+              vertical_id: "{{vertical_id}}"
+              payload:
+                vertical_id: "{{vertical_id}}"
+                parked_marginals_summary: scenario3
+
+      - when_event: timer.marginal_review
+        tool_calls:
+          - name: emit_vertical_resumed
+            arguments:
+              vertical_id: "{{vertical_id}}"
+expected:
+  event_counts:
+    vertical.discovered: 2
+    scoring.requested: 2
+    vertical.marginal: 1
+    vertical.rejected: 1
+  absent_events:
+    - vertical.shortlisted

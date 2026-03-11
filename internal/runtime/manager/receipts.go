@@ -174,17 +174,6 @@ func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Even
 	return policy.InterceptRuntimeHandledDirective(cfg, evt)
 }
 
-func directiveRequiresCoordinator(evt events.Event) bool {
-	if strings.TrimSpace(evt.SourceAgent) == "scan-campaign-manager" {
-		return true
-	}
-	text := ExtractDirectiveText(evt.Payload)
-	if text == "" {
-		return false
-	}
-	return runtimepipeline.IsComplexDirectiveText(text)
-}
-
 func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event) (bool, string) {
 	am.mu.RLock()
 	cfg, ok := am.agentCfg[agentID]
@@ -460,6 +449,9 @@ func (am *AgentManager) resolveManagerAgentID(agentID string) string {
 	if ok {
 		if p := strings.TrimSpace(cfg.ParentAgent); p != "" {
 			return p
+		}
+		if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
+			return managerID
 		}
 		if strings.TrimSpace(cfg.Mode) == "operating" && strings.TrimSpace(cfg.VerticalID) != "" && strings.TrimSpace(cfg.Role) != "opco-ceo" {
 			return opCoAgentID("opco-ceo", cfg.VerticalID)

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -40,6 +39,7 @@ type ScanCampaignHooks struct {
 	Warnf                    func(component, format string, args ...any)
 	RecordTransition         func(ctx context.Context, db *sql.DB, in ScanCampaignTransitionInput) error
 	EnsureDirectiveGeography func(ctx context.Context, db *sql.DB, name, country, region string) (string, error)
+	ControlPlaneRecipient    func() string
 	ScanPolicy               ScanPolicy
 	Now                      func() time.Time
 }
@@ -53,10 +53,6 @@ type ScanCampaignManager struct {
 	maxPendingMailbox  int
 	budgetPaused       bool
 	backpressurePaused bool
-}
-
-func controlPlaneDirectiveRecipient() string {
-	return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
 }
 
 const DefaultCampaignTimeCap = 24 * time.Hour
@@ -295,7 +291,7 @@ func (m *ScanCampaignManager) tick(ctx context.Context) {
 		"strategic_context":   strategicContext,
 		"campaign_context": map[string]any{
 			"modes":             []string{strings.TrimSpace(c.Mode)},
-			"strategic_context": strings.TrimSpace(asString(strategicContext["directive_text"])),
+			"strategic_context": directiveContextStringFromPayloadMap(strategicContext),
 			"directive_id":      strings.TrimSpace(c.DirectiveID),
 		},
 	}
@@ -401,14 +397,19 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	if err := json.Unmarshal(evt.Payload, &payload); err != nil {
 		m.warnf("scan-campaign-manager", "failed to parse directive payload event_id=%s: %v", strings.TrimSpace(evt.ID), err)
 	}
-	text := strings.TrimSpace(asString(payload["directive_text"]))
-	if text == "" {
-		text = strings.TrimSpace(asString(payload["message"]))
+	if directive, ok := asObject(payload["directive"]); ok && len(directive) > 0 {
+		// MAS owns structured system.directive routing in portfolio-node. The
+		// campaign manager only keeps the legacy free-text bridge.
+		if strings.TrimSpace(asString(payload["directive_text"])) == "" && strings.TrimSpace(asString(payload["message"])) == "" {
+			return
+		}
 	}
+	text := directiveContextStringFromPayloadMap(payload)
 	if text == "" {
 		return
 	}
 	parsed := m.scanPolicy().ParseDirective(text)
+	structuredDirective := structuredScanDirectiveFromParsed(text, parsed)
 	if m.scanPolicy().IsComplexDirectiveText(text) {
 		forwardedPayload := map[string]any{
 			"directive_text":   text,
@@ -417,10 +418,31 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 			"original_event":   evt.ID,
 			"parsed_directive": parsed,
 		}
-		recipient := controlPlaneDirectiveRecipient()
+		if len(structuredDirective) > 0 {
+			forwardedPayload["directive"] = structuredDirective
+		}
+		recipient := strings.TrimSpace(m.controlPlaneRecipient())
+		if recipient == "" {
+			m.warnf("scan-campaign-manager", "failed to forward complex directive: no control-plane recipient configured event_id=%s", strings.TrimSpace(evt.ID))
+			return
+		}
 		if err := m.bus.PublishDirect(ctx, events.Event{ID: uuid.NewString(), Type: events.EventType("system.directive"), SourceAgent: "scan-campaign-manager", Payload: mustJSONBytes(forwardedPayload), CreatedAt: m.now()}, []string{recipient}); err != nil {
 			m.warnf("scan-campaign-manager", "failed to forward complex directive to control-plane agent event_id=%s: %v", strings.TrimSpace(evt.ID), err)
 		}
+		return
+	}
+	m.queueDirectiveCampaigns(ctx, evt, payload, text, structuredDirective, parsed)
+}
+
+func (m *ScanCampaignManager) queueDirectiveCampaigns(
+	ctx context.Context,
+	evt events.Event,
+	payload map[string]any,
+	text string,
+	directive map[string]any,
+	parsed ParsedDirective,
+) {
+	if m == nil || m.db == nil || m.store == nil {
 		return
 	}
 	mode, explicitMode := parsed.Mode, parsed.ExplicitMode
@@ -436,6 +458,12 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 		return
 	}
 	strategic := map[string]any{"directive_text": text, "parsed": parsed}
+	if len(directive) == 0 {
+		directive = structuredScanDirectiveFromParsed(text, parsed)
+	}
+	if len(directive) > 0 {
+		strategic["directive"] = directive
+	}
 	if sentBy := strings.TrimSpace(asString(payload["sent_by"])); sentBy != "" {
 		strategic["sent_by"] = sentBy
 	}
@@ -450,12 +478,72 @@ func (m *ScanCampaignManager) onDirective(ctx context.Context, evt events.Event)
 	}
 }
 
+func (m *ScanCampaignManager) controlPlaneRecipient() string {
+	if m == nil || m.hooks.ControlPlaneRecipient == nil {
+		return ""
+	}
+	return strings.TrimSpace(m.hooks.ControlPlaneRecipient())
+}
+
+func structuredScanDirectiveFromParsed(text string, parsed ParsedDirective) map[string]any {
+	if strings.TrimSpace(parsed.Mode) == "" && strings.TrimSpace(parsed.Geography) == "" && strings.TrimSpace(parsed.CorpusPath) == "" {
+		return nil
+	}
+	parameters := map[string]any{}
+	if mode := normalizeCampaignScanMode(strings.TrimSpace(parsed.Mode)); mode != "" {
+		parameters["mode"] = mode
+	}
+	if geography := strings.TrimSpace(parsed.Geography); geography != "" {
+		parameters["geography"] = geography
+	}
+	if country := strings.TrimSpace(parsed.Country); country != "" {
+		parameters["country"] = country
+	}
+	if region := strings.TrimSpace(parsed.Region); region != "" {
+		parameters["region"] = region
+	}
+	if corpusPath := strings.TrimSpace(parsed.CorpusPath); corpusPath != "" {
+		parameters["corpus_path"] = corpusPath
+	}
+	out := map[string]any{
+		"type":       "scan",
+		"parameters": parameters,
+	}
+	if text = strings.TrimSpace(text); text != "" {
+		out["text"] = text
+	}
+	return out
+}
+
+func directiveContextStringFromPayloadMap(payload map[string]any) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	if text := strings.TrimSpace(asString(payload["directive_text"])); text != "" {
+		return text
+	}
+	if text := strings.TrimSpace(asString(payload["message"])); text != "" {
+		return text
+	}
+	directive, ok := asObject(payload["directive"])
+	if !ok || len(directive) == 0 {
+		return ""
+	}
+	if text := strings.TrimSpace(asString(directive["text"])); text != "" {
+		return text
+	}
+	if data, err := json.Marshal(directive); err == nil {
+		return string(data)
+	}
+	return fmt.Sprintf("%v", directive)
+}
+
 func (m *ScanCampaignManager) ensureQueuedCampaign(ctx context.Context, geographyID, mode, directiveID string, strategic json.RawMessage, deadline *time.Time) error {
 	if m == nil || m.db == nil || m.store == nil {
 		return nil
 	}
 	geographyID = strings.TrimSpace(geographyID)
-	mode = runtimeproductpolicy.NormalizeScanMode(mode)
+	mode = normalizeCampaignScanMode(mode)
 	if geographyID == "" || mode == "" {
 		return nil
 	}
@@ -475,7 +563,7 @@ func (m *ScanCampaignManager) ensureQueuedCampaign(ctx context.Context, geograph
 }
 
 func RemainingCampaignModes(initialMode string) []string {
-	modes := runtimeproductpolicy.CampaignModesForDirective(initialMode, false)
+	modes := campaignModesForDirectiveCompat(initialMode, false)
 	if len(modes) <= 1 {
 		return []string{}
 	}
@@ -483,12 +571,76 @@ func RemainingCampaignModes(initialMode string) []string {
 }
 
 func CampaignModesForDirective(initialMode string, explicit bool) []string {
-	modes := runtimeproductpolicy.CampaignModesForDirective(initialMode, explicit)
+	modes := campaignModesForDirectiveCompat(initialMode, explicit)
 	return append([]string(nil), modes...)
 }
 
 func ParseDirectiveMode(text string) (mode string, explicit bool) {
-	return runtimeproductpolicy.ParseDirectiveMode(text)
+	return parseDirectiveModeCompat(text)
+}
+
+func normalizeCampaignScanMode(raw string) string {
+	return resolvePipelineScanMode(nil, raw)
+}
+
+func campaignModesForDirectiveCompat(initialMode string, explicit bool) []string {
+	initialMode = normalizeCampaignScanMode(initialMode)
+	if initialMode == "" {
+		initialMode = pipelineModeName("saas", "gap")
+	}
+	if explicit {
+		return []string{initialMode}
+	}
+	if initialMode == "corpus" {
+		return []string{}
+	}
+	cycle := []string{
+		pipelineModeName("saas", "gap"),
+		pipelineModeName("saas", "trend"),
+		pipelineModeName("local", "services"),
+	}
+	idx := 0
+	for i, mode := range cycle {
+		if mode == initialMode {
+			idx = i
+			break
+		}
+	}
+	out := []string{initialMode}
+	for i := idx + 1; i < len(cycle); i++ {
+		out = append(out, cycle[i])
+	}
+	return out
+}
+
+func parseDirectiveModeCompat(text string) (mode string, explicit bool) {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if t == "" {
+		return pipelineModeName("saas", "gap"), false
+	}
+	switch {
+	case strings.Contains(t, "corpus_path"),
+		strings.Contains(t, " mode corpus"),
+		strings.HasPrefix(t, "corpus"),
+		strings.Contains(t, ".jsonl"),
+		strings.Contains(t, ", corpus"),
+		strings.Contains(t, " corpus "):
+		return "corpus", true
+	case strings.Contains(t, "automation_micro"),
+		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
+		return pipelineModeName("saas", "gap"), true
+	case strings.Contains(t, pipelineModeName("local", "services")),
+		strings.Contains(t, "local service"):
+		return pipelineModeName("local", "services"), true
+	case strings.Contains(t, pipelineModeName("saas", "trend")),
+		(strings.Contains(t, "saas") && strings.Contains(t, "trend")):
+		return pipelineModeName("saas", "trend"), true
+	case strings.Contains(t, pipelineModeName("saas", "gap")),
+		strings.Contains(t, "gap scan"):
+		return pipelineModeName("saas", "gap"), true
+	default:
+		return pipelineModeName("saas", "gap"), false
+	}
 }
 
 func EnsureDirectiveGeography(ctx context.Context, db *sql.DB, name, country, region string) (string, error) {

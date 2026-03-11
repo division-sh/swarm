@@ -61,7 +61,7 @@ func (s *Scheduler) Register(sc Schedule) error {
 		s.mu.Unlock()
 		return errors.New("scheduler stopped")
 	}
-	key := scheduleKey(sc.AgentID, sc.EventType)
+	key := scheduleKey(sc)
 	if existing, ok := s.tasks[key]; ok {
 		close(existing.stop)
 		delete(s.tasks, key)
@@ -93,7 +93,24 @@ func (s *Scheduler) Cancel(agentID string, eventType string) error {
 	if agentID == "" || eventType == "" {
 		return errors.New("agent_id and event_type are required")
 	}
-	key := scheduleKey(agentID, eventType)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prefix := schedulePrefix(agentID, eventType)
+	for key, task := range s.tasks {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		close(task.stop)
+		delete(s.tasks, key)
+	}
+	return nil
+}
+
+func (s *Scheduler) CancelExact(sc Schedule) error {
+	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
+		return errors.New("agent_id and event_type are required")
+	}
+	key := scheduleKey(sc)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	task, ok := s.tasks[key]
@@ -181,8 +198,17 @@ func (s *Scheduler) unregisterTask(key string, task *scheduledTask) {
 	delete(s.tasks, key)
 }
 
-func scheduleKey(agentID, eventType string) string {
-	return agentID + "|" + eventType
+func scheduleKey(sc Schedule) string {
+	return strings.Join([]string{
+		strings.TrimSpace(sc.AgentID),
+		strings.TrimSpace(sc.EventType),
+		strings.TrimSpace(sc.VerticalID),
+		strings.TrimSpace(sc.TaskID),
+	}, "|")
+}
+
+func schedulePrefix(agentID, eventType string) string {
+	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(eventType) + "|"
 }
 
 func parseCronSpec(expr string) (cronSpec, error) {

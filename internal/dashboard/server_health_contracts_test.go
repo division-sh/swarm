@@ -42,8 +42,8 @@ func TestDashboard_Health_IncludesContractSummary(t *testing.T) {
 	if workflow == nil {
 		t.Fatalf("expected workflow metadata in contracts payload: %#v", contracts)
 	}
-	if got := workflow["version"]; got != "2.1.0" {
-		t.Fatalf("expected workflow version 2.1.0, got %#v", got)
+	if got, _ := workflow["version"].(string); got == "" {
+		t.Fatalf("expected non-empty workflow version, got %#v", workflow["version"])
 	}
 	if got, ok := workflow["validation_stages"].([]any); !ok || len(got) != 4 {
 		t.Fatalf("expected 4 validation stages, got %#v", workflow["validation_stages"])

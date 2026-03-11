@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	empireconfig "empireai/internal/empire/config"
 )
 
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
@@ -57,21 +59,26 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if cfg.LLM.RuntimeMode != "cli_test" {
 		t.Fatalf("unexpected runtime mode: %q", cfg.LLM.RuntimeMode)
 	}
-	// Defaults should be applied.
-	if cfg.Budget.HumanTasks.AutoExpireHours != 168 {
-		t.Fatalf("expected default auto_expire_hours 168, got %d", cfg.Budget.HumanTasks.AutoExpireHours)
-	}
-	if cfg.Budget.HumanTasks.BudgetReset != "monday" {
-		t.Fatalf("expected default budget_reset monday, got %q", cfg.Budget.HumanTasks.BudgetReset)
-	}
 	if cfg.LLM.Session.LockTTL <= 0*time.Second {
 		t.Fatalf("expected lock ttl > 0")
 	}
-	if cfg.Sharding.MaxShardsPerScan != 8 {
-		t.Fatalf("expected default sharding.max_shards_per_scan=8, got %d", cfg.Sharding.MaxShardsPerScan)
+
+	var empire empireconfig.EmpireConfig
+	if err := cfg.DecodeExtensions(&empire); err != nil {
+		t.Fatalf("DecodeExtensions: %v", err)
 	}
-	if cfg.Sharding.Stages.MarketResearch.TargetItemsPerShard != 13 {
-		t.Fatalf("expected default sharding.stages.market_research.target_items_per_shard=13, got %d", cfg.Sharding.Stages.MarketResearch.TargetItemsPerShard)
+	empire.ApplyDefaults()
+	if empire.Budget.HumanTasks.AutoExpireHours != 168 {
+		t.Fatalf("expected default auto_expire_hours 168, got %d", empire.Budget.HumanTasks.AutoExpireHours)
+	}
+	if empire.Budget.HumanTasks.BudgetReset != "monday" {
+		t.Fatalf("expected default budget_reset monday, got %q", empire.Budget.HumanTasks.BudgetReset)
+	}
+	if empire.Sharding.MaxShardsPerScan != 8 {
+		t.Fatalf("expected default sharding.max_shards_per_scan=8, got %d", empire.Sharding.MaxShardsPerScan)
+	}
+	if empire.Sharding.Stages.MarketResearch.TargetItemsPerShard != 13 {
+		t.Fatalf("expected default sharding.stages.market_research.target_items_per_shard=13, got %d", empire.Sharding.Stages.MarketResearch.TargetItemsPerShard)
 	}
 }
 
@@ -100,13 +107,8 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	}
 }
 
-func TestValidate_ShardingDefaultsAndClamps(t *testing.T) {
-	c := &Config{}
-	c.LLM.RuntimeMode = "api"
-	c.LLM.Session.LockTTL = time.Second
-	c.LLM.Session.RotateAfterTurns = 1
-	c.LLM.Session.RotateOnParseFailures = 1
-
+func TestEmpireConfig_ApplyDefaultsAndClamps(t *testing.T) {
+	c := &empireconfig.EmpireConfig{}
 	c.Sharding.MaxShardsPerScan = 6
 	c.Sharding.MaxConcurrentShards = 0
 	c.Sharding.PerShardTimeout = 0
@@ -115,9 +117,7 @@ func TestValidate_ShardingDefaultsAndClamps(t *testing.T) {
 	c.Sharding.CircuitBreakerThreshold = 2.0
 	c.Sharding.Stages.MarketResearch.MaxShards = 99
 
-	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
+	c.ApplyDefaults()
 	if c.Sharding.MaxConcurrentShards != 12 {
 		t.Fatalf("expected default max_concurrent_shards=12, got %d", c.Sharding.MaxConcurrentShards)
 	}

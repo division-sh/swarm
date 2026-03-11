@@ -1,0 +1,27 @@
+router-node:
+  id: router-node
+  execution_type: workflow_node
+  subscribes_to: [work.started]
+  produces: [review.requested]
+  owned_transitions: [activate]
+  event_handlers:
+    work.started:
+      advances_to: active
+      emits: review.requested
+
+review-node:
+  id: review-node
+  execution_type: workflow_node
+  subscribes_to: [review.requested, review.approved, review.rejected]
+  produces: [review.ready, workflow.completed, workflow.rejected]
+  owned_transitions: [request-review, approve, reject]
+  event_handlers:
+    review.requested:
+      advances_to: awaiting_review
+      emits: review.ready
+    review.approved:
+      advances_to: completed
+      emits: workflow.completed
+    review.rejected:
+      advances_to: rejected
+      emits: workflow.rejected

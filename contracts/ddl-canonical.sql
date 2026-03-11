@@ -1,8 +1,5 @@
--- EmpireAI Canonical DDL — authoritative schema definition
+-- EmpireAI canonical DDL snapshot
 -- Generated from spec v2.0.28, v2.0.33, v2.0.44, v2.0.46 (indexes), v2.0.48
---
--- This file is AUTHORITATIVE. `empire init` executes this directly.
--- If the spec prose disagrees with this file, this file wins.
 --
 -- Execution order: tables ordered for FK dependency resolution.
 -- routing_rules and bootstrap_versions execute after verticals + agents.

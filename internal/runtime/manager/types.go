@@ -145,8 +145,10 @@ type BudgetGuard interface {
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
-	Workspaces  workspace.Lifecycle
-	Sessions    sessions.Registry
-	RuntimeMode string
-	Budget      BudgetGuard
+	Workspaces                workspace.Lifecycle
+	Sessions                  sessions.Registry
+	RuntimeMode               string
+	Budget                    BudgetGuard
+	DisableSpinupControl      bool
+	EnableLegacySpinupControl bool
 }

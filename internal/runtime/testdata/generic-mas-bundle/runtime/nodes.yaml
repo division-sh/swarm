@@ -1,0 +1,260 @@
+intake-router:
+  id: intake-router
+  description: Generic intake fan-out node.
+  execution_type: workflow_node
+  implementation: test.intake-router
+  subscribes_to:
+    - item.created
+    - item.processed
+  produces:
+    - item.processed
+    - item.review_requested
+  owned_transitions:
+    - receive-item
+    - complete-intake
+  state_table: intake_state
+  idempotency_table: intake_idempotency
+  state_schema:
+    description: Tracks intake progress.
+    fields:
+      - name: status
+        type: string
+      - name: priority
+        type: string
+      - name: results
+        type: object
+      - name: intake_ready
+        type: bool
+  event_handlers:
+    item.created:
+      action: record_state_change
+      description: Accept work, persist item metadata, and fan out to workers.
+      guard: accept_item
+      advances_to: collecting
+      emits: item.processed
+      sets_gate: intake_open
+      data_accumulation:
+        source_event: item.created
+        writes:
+          - target_field: status
+            value:
+              literal: collecting
+          - target_field: priority
+            source_field: payload.priority
+      fan_out:
+        items_from: payload.items
+        target: worker-a
+        emit_per_item: item.processed
+        emit_mapping:
+          item_id: item.id
+          priority: payload.priority
+      branch:
+        - condition: payload.priority == 'urgent'
+          then:
+            emits: item.review_requested
+          else:
+            emits: item.processed
+    item.processed:
+      action: record_state_change
+      description: Collect worker responses until the batch is complete.
+      emits: item.processed
+      advances_to: ready
+      sets_gate:
+        name: intake_ready
+        value: true
+      clear_gates:
+        - needs_revision
+      data_accumulation:
+        source_event: item.processed
+        writes:
+          - target_field: results
+            source_field: payload.result
+      accumulate:
+        expected_from: payload.expected_workers
+        completion: all
+        on_complete:
+          id: intake-complete
+          condition: entity.received_count >= payload.expected_workers
+          advances_to: ready
+          emits: item.review_requested
+          data_accumulation:
+            source_event: item.processed
+            writes:
+              - target_field: status
+                value:
+                  literal: ready
+
+processing-node:
+  id: processing-node
+  description: Generic scoring and gating node.
+  execution_type: workflow_node
+  implementation: test.processing-node
+  subscribes_to:
+    - item.review_requested
+    - item.rejected
+  produces:
+    - item.completed
+    - item.rejected
+  owned_transitions:
+    - approve-item
+    - reject-item
+  state_table: processing_state
+  idempotency_table: processing_idempotency
+  state_schema:
+    description: Stores review inputs and scoring state.
+    fields:
+      - name: status
+        type: string
+      - name: score
+        type: number
+      - name: score_ready
+        type: bool
+      - name: gates
+        type: object
+  event_handlers:
+    item.review_requested:
+      action: record_state_change
+      description: Score the item and branch into approval or rejection.
+      guard:
+        check: payload.score >= 50
+        on_fail: blocked
+        checks:
+          - id: not_rejected
+            check: entity.status != 'rejected'
+          - id: delivery_enabled
+            check: policy.delivery_enabled == true
+      data_accumulation:
+        source_event: item.review_requested
+        writes:
+          - target_field: score
+            source_field: payload.score
+      compute:
+        operation: weighted_sum
+        store_as: score
+        tiers:
+          - dimensions:
+              - payload.quality
+              - payload.completeness
+            weight: 0.7
+          - dimensions:
+              - payload.risk
+            weight: 0.3
+      rules:
+        - id: approve
+          condition: payload.score >= 80
+          advances_to: approved
+          emits: item.completed
+          data_accumulation:
+            source_event: item.review_requested
+            writes:
+              - target_field: status
+                value:
+                  literal: approved
+        - id: reject
+          condition: payload.score < 80
+          advances_to: rejected
+          emits: item.rejected
+          data_accumulation:
+            source_event: item.review_requested
+            writes:
+              - target_field: status
+                value:
+                  literal: rejected
+      sets_gate:
+        name: score_ready
+        value: true
+      clear_gates:
+        - intake_open
+      branch:
+        - condition: payload.priority == 'urgent'
+          then:
+            emits: item.completed
+          else:
+            emits: item.review_requested
+    item.rejected:
+      action: record_state_change
+      description: Reject the item and clear downstream gates.
+      advances_to: rejected
+      emits: item.rejected
+      clear_gates:
+        - intake_ready
+        - score_ready
+        - delivery_ready
+      data_accumulation:
+        source_event: item.rejected
+        writes:
+          - target_field: status
+            value:
+              literal: rejected
+
+delivery-node:
+  id: delivery-node
+  description: Generic delivery and timeout node.
+  execution_type: workflow_node
+  implementation: test.delivery-node
+  subscribes_to:
+    - item.completed
+    - timer.item.timeout
+  produces:
+    - item.completed
+  owned_transitions:
+    - deliver-item
+  state_table: delivery_state
+  idempotency_table: delivery_idempotency
+  timers:
+    - id: item_timeout
+      event: timer.item.timeout
+      owner: delivery-node
+      start_on: state:approved
+      cancel_on: state:completed
+      delay_minutes: 30
+  state_schema:
+    description: Tracks terminal delivery state.
+    fields:
+      - name: status
+        type: string
+      - name: timed_out
+        type: bool
+      - name: delivery_ready
+        type: bool
+  event_handlers:
+    item.completed:
+      action: record_state_change
+      description: Mark the item delivered when score and state gates permit it.
+      guard:
+        check: entity.status != 'rejected'
+        checks:
+          - id: score_ready
+            check: entity.gates.score_ready == true
+      advances_to: completed
+      emits: item.completed
+      sets_gate: delivery_ready
+      clear_gates:
+        - intake_ready
+        - score_ready
+      data_accumulation:
+        source_event: item.completed
+        writes:
+          - target_field: status
+            value:
+              literal: completed
+      branch:
+        - condition: payload.manual_review == true
+          then:
+            emits: item.review_requested
+          else:
+            emits: item.completed
+    timer.item.timeout:
+      action: record_state_change
+      description: Force completion on timeout and record timeout metadata.
+      advances_to: completed
+      emits: item.completed
+      data_accumulation:
+        source_event: timer.item.timeout
+        writes:
+          - target_field: timed_out
+            value:
+              literal: true
+          - target_field: status
+            value:
+              literal: completed

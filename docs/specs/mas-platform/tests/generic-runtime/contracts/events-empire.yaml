@@ -1,0 +1,51 @@
+work.started:
+  emitter: [coordinator]
+  consumer: [router-node]
+  owning_node: router-node
+  payload:
+    type: object
+  required: [entity_id]
+
+review.requested:
+  emitter: [router-node]
+  consumer: [review-node]
+  owning_node: review-node
+  payload:
+    type: object
+
+review.ready:
+  emitter: [review-node]
+  consumer: [reviewer]
+  owning_node: review-node
+  payload:
+    type: object
+
+review.approved:
+  emitter: [reviewer]
+  consumer: [review-node]
+  owning_node: review-node
+  payload:
+    type: object
+  required: [entity_id, decision]
+
+review.rejected:
+  emitter: [reviewer]
+  consumer: [review-node]
+  owning_node: review-node
+  payload:
+    type: object
+  required: [entity_id, decision]
+
+workflow.completed:
+  emitter: [review-node]
+  consumer: [observer]
+  owning_node: review-node
+  payload:
+    type: object
+
+workflow.rejected:
+  emitter: [review-node]
+  consumer: [observer]
+  owning_node: review-node
+  payload:
+    type: object

@@ -13,6 +13,11 @@ type SchedulePersistence interface {
 	MarkScheduleFired(ctx context.Context, sc Schedule) error
 }
 
+type ExactSchedulePersistence interface {
+	CancelScheduleExact(ctx context.Context, sc Schedule) error
+	MarkScheduleFiredExact(ctx context.Context, sc Schedule) error
+}
+
 type ScanCampaign struct {
 	ID               string
 	GeographyID      string

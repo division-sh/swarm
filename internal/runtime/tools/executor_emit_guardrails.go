@@ -7,7 +7,6 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func (e *Executor) enforceMigrationGuardrail(ctx context.Context, actor models.AgentConfig, eventType string, payload map[string]any) error {
@@ -98,10 +97,8 @@ func (e *Executor) trackTransitionPrerequisites(actor models.AgentConfig, inboun
 
 func (e *Executor) validateEmitTransition(actor models.AgentConfig, inbound events.Event, emitted events.Event) error {
 	role := canonicalRuntimeRole(actor.Role)
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		if err := policy.ValidateEmitTransition(role, inbound, emitted); err != nil {
-			return err
-		}
+	if err := validateEmitTransitionSemantics(role, inbound, emitted); err != nil {
+		return err
 	}
 	inboundType := strings.TrimSpace(string(inbound.Type))
 	emittedType := strings.TrimSpace(string(emitted.Type))
@@ -139,6 +136,95 @@ func (e *Executor) validateEmitTransition(actor models.AgentConfig, inbound even
 			return fmt.Errorf("guardrail_violation duplicate_emission: spec.approved already emitted for context=%s", key)
 		}
 		e.markOneShotEmitted(actor.ID, emittedType, key)
+	}
+	return nil
+}
+
+func EnforceRequiredEmitContract(role string, inbound events.Event, emitted []events.Event) error {
+	req := emitTurnRequirementFor(role, inbound)
+	if req == nil {
+		return nil
+	}
+	for _, evt := range emitted {
+		if req.matches(evt) {
+			return nil
+		}
+	}
+	return fmt.Errorf(req.violation)
+}
+
+func RequiredEmitToolContractText(role string, inbound events.Event) string {
+	req := emitTurnRequirementFor(role, inbound)
+	if req == nil {
+		return ""
+	}
+	return req.requirement
+}
+
+func EmitContractRemediationPrompt(role string, inbound events.Event, _ error) (string, bool) {
+	req := emitTurnRequirementFor(role, inbound)
+	if req == nil || strings.TrimSpace(req.remediation) == "" {
+		return "", false
+	}
+	return req.remediation, true
+}
+
+type emitTurnRequirement struct {
+	requirement string
+	remediation string
+	violation   string
+	matches     func(events.Event) bool
+}
+
+func emitTurnRequirementFor(role string, inbound events.Event) *emitTurnRequirement {
+	role = canonicalRuntimeRole(role)
+	inboundType := strings.TrimSpace(string(inbound.Type))
+	switch {
+	case role == "empire-coordinator" && inboundType == "system.directive" && emitDirectiveRequiresScanRequest(inbound):
+		return &emitTurnRequirement{
+			requirement: "\n- REQUIRED for this turn: call emit_scan_requested exactly once (with mode, geography_id when known, and priority).",
+			remediation: "Runtime contract remediation: your prior response did not satisfy the required event emission.\n" +
+				"Call emit_scan_requested exactly once now with valid arguments (include mode; include priority; include geography_id when known).\n" +
+				"Do not return prose. Use the tool call now.",
+			violation: "system.directive handling must emit scan.requested via emit_scan_requested",
+			matches: func(evt events.Event) bool {
+				return strings.TrimSpace(string(evt.Type)) == "scan.requested"
+			},
+		}
+	case role == "empire-coordinator" && inboundType == "budget.threshold_crossed":
+		return &emitTurnRequirement{
+			requirement: "\n- REQUIRED for this turn: call exactly one emit_budget_* tool to reflect the threshold decision.",
+			remediation: "Runtime contract remediation: your prior response did not satisfy the required event emission.\n" +
+				"Call exactly one emit_budget_* tool now to reflect the budget decision.\n" +
+				"Do not return prose. Use the tool call now.",
+			violation: "budget.threshold_crossed handling must emit one budget.* event via emit_budget_* tool",
+			matches: func(evt events.Event) bool {
+				return strings.HasPrefix(strings.TrimSpace(string(evt.Type)), "budget.")
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func validateEmitTransitionSemantics(role string, inbound events.Event, emitted events.Event) error {
+	role = canonicalRuntimeRole(role)
+	inboundType := strings.TrimSpace(string(inbound.Type))
+	emittedType := strings.TrimSpace(string(emitted.Type))
+	switch {
+	case role == "empire-coordinator" && emittedType == "opco.spinup_requested":
+		if inboundType != "vertical.approved" {
+			return fmt.Errorf("guardrail_violation transition_violation: opco.spinup_requested requires inbound vertical.approved, got %s", inboundType)
+		}
+	case role == "empire-coordinator" && emittedType == "template.migration_completed":
+		if inboundType != "template.migration_approved" {
+			return fmt.Errorf("guardrail_violation transition_violation: template.migration_completed requires inbound template.migration_approved, got %s", inboundType)
+		}
+	case role == "empire-coordinator" && strings.HasPrefix(emittedType, "budget.") && inboundType == "budget.threshold_crossed":
+		expected := strings.TrimSpace(string(budgetEventTypeFromThresholdPayload(inbound.Payload)))
+		if expected != "" && expected != emittedType {
+			return fmt.Errorf("guardrail_violation transition_violation: expected %s for inbound budget.threshold_crossed, got %s", expected, emittedType)
+		}
 	}
 	return nil
 }

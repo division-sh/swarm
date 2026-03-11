@@ -26,8 +26,8 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 	eventID := uuid.NewString()
 	err := pg.AppendEvent(ctx, events.Event{
 		ID:          eventID,
-		Type:        events.EventType("vertical.discovered"),
-		SourceAgent: "discovery-coordinator",
+		Type:        events.EventType("review.requested"),
+		SourceAgent: "coordinator",
 		TaskID:      "legacy-task-key",
 		VerticalID:  "pry_hc_telemedicine_001",
 		Payload:     []byte(`{"name":"Telemedicine Platform"}`),
@@ -109,7 +109,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	for _, id := range []string{"empire-coordinator", "spec-auditor"} {
+	for _, id := range []string{"coordinator", "reviewer"} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
 			VALUES ($1, 'stub', $1, 'holding', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
@@ -135,7 +135,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 		_ = tx.Rollback()
 		t.Fatalf("AppendEventTx: %v", err)
 	}
-	if err := pg.InsertEventDeliveriesTx(ctx, tx, eventID, []string{"empire-coordinator", "spec-auditor"}); err != nil {
+	if err := pg.InsertEventDeliveriesTx(ctx, tx, eventID, []string{"coordinator", "reviewer"}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("InsertEventDeliveriesTx: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('empire-coordinator', 'stub', 'empire-coordinator', 'holding', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
+		VALUES ('coordinator', 'stub', 'coordinator', 'holding', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 		SourceAgent: "human",
 		Payload:     []byte(`{"directive":"SaaS in Argentina"}`),
 		CreatedAt:   time.Now().UTC(),
-	}, []string{" empire-coordinator ", "", "empire-coordinator"}); err != nil {
+	}, []string{" coordinator ", "", "coordinator"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries success path: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 
 	id, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
-		FromAgent:  "empire-coordinator",
+		FromAgent:  "coordinator",
 		Type:       "spend_request",
 		Summary:    "need approval",
 	})
@@ -458,7 +458,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 
 	expID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
-		FromAgent:  "empire-coordinator",
+		FromAgent:  "coordinator",
 		Type:       "review",
 		Priority:   "critical",
 		Status:     "pending",
@@ -487,7 +487,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 
 	critID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		VerticalID: verticalID,
-		FromAgent:  "empire-coordinator",
+		FromAgent:  "coordinator",
 		Type:       "spend_request",
 		Priority:   "critical",
 		Status:     "pending",
@@ -583,7 +583,7 @@ func TestSubscriptionMatchPatterns(t *testing.T) {
 	if subscriptionMatch("board.chat", "board.chats") {
 		t.Fatalf("exact should not match different")
 	}
-	if !matchesAnySubscription("inbound.a", []events.EventType{"board.*", "inbound.*"}) {
+	if !matchesAnySubscription("inbound.a", []events.EventType{"review.*", "inbound.*"}) {
 		t.Fatalf("matchesAnySubscription expected true")
 	}
 }
@@ -595,7 +595,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'empire-coordinator', 'holding', 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'coordinator', 'holding', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -651,6 +651,93 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 	}
 }
 
+func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	verticalID := uuid.NewString()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid, 'V', 'v', 'us', 'approved', 'factory', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("seed vertical: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
+		VALUES ('validation-orchestrator', 'stub', 'validation-orchestrator', 'holding', 'active', '{}'::jsonb, now(), now())
+		ON CONFLICT (id) DO NOTHING
+	`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+
+	first := runtimepipeline.Schedule{
+		AgentID:    "validation-orchestrator",
+		EventType:  "timer.validation_timeout",
+		Mode:       "once",
+		At:         time.Now().Add(30 * time.Minute).UTC(),
+		VerticalID: verticalID,
+		TaskID:     "timer-a",
+		Payload:    []byte(`{"timer_id":"timer-a"}`),
+	}
+	second := runtimepipeline.Schedule{
+		AgentID:    "validation-orchestrator",
+		EventType:  "timer.validation_timeout",
+		Mode:       "once",
+		At:         time.Now().Add(60 * time.Minute).UTC(),
+		VerticalID: verticalID,
+		TaskID:     "timer-b",
+		Payload:    []byte(`{"timer_id":"timer-b"}`),
+	}
+	if err := pg.UpsertSchedule(ctx, first); err != nil {
+		t.Fatalf("upsert first exact schedule: %v", err)
+	}
+	if err := pg.UpsertSchedule(ctx, second); err != nil {
+		t.Fatalf("upsert second exact schedule: %v", err)
+	}
+
+	active, err := pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("load schedules: %v", err)
+	}
+	var exact []runtimepipeline.Schedule
+	for _, sc := range active {
+		if sc.AgentID == "validation-orchestrator" && sc.EventType == "timer.validation_timeout" && sc.VerticalID == verticalID {
+			exact = append(exact, sc)
+		}
+	}
+	if len(exact) != 2 {
+		t.Fatalf("expected two exact schedules to coexist, got %+v", exact)
+	}
+	seen := map[string]string{}
+	for _, sc := range exact {
+		seen[sc.TaskID] = string(sc.Payload)
+	}
+	if seen["timer-a"] != `{"timer_id":"timer-a"}` {
+		t.Fatalf("first exact schedule payload/task mismatch: %+v", seen)
+	}
+	if seen["timer-b"] != `{"timer_id":"timer-b"}` {
+		t.Fatalf("second exact schedule payload/task mismatch: %+v", seen)
+	}
+
+	if err := pg.CancelScheduleExact(ctx, first); err != nil {
+		t.Fatalf("cancel first exact schedule: %v", err)
+	}
+	active, err = pg.LoadActiveSchedules(ctx)
+	if err != nil {
+		t.Fatalf("load schedules after exact cancel: %v", err)
+	}
+	exact = exact[:0]
+	for _, sc := range active {
+		if sc.AgentID == "validation-orchestrator" && sc.EventType == "timer.validation_timeout" && sc.VerticalID == verticalID {
+			exact = append(exact, sc)
+		}
+	}
+	if len(exact) != 1 || exact[0].TaskID != "timer-b" {
+		t.Fatalf("expected only timer-b to remain active, got %+v", exact)
+	}
+}
+
 func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -665,7 +752,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, vertical_id, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'empire-coordinator', 'holding', NULL, 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'coordinator', 'holding', NULL, 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -734,8 +821,8 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
 		VALUES
-			('a1', 'stub', 'market-research-agent', 'factory', 'active', '{}'::jsonb, now(), now()),
-			('a2', 'stub', 'market-research-agent', 'factory', 'active', '{}'::jsonb, now(), now())
+			('a1', 'stub', 'worker', 'factory', 'active', '{}'::jsonb, now(), now()),
+			('a2', 'stub', 'worker', 'factory', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agents: %v", err)
@@ -1171,11 +1258,11 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         "ephemeral-shard-1",
-			Role:       "market-research-agent",
+			Role:       "worker",
 			Mode:       "factory",
 			Type:       "sonnet",
 			VerticalID: "",
-			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["market_research.scan_assigned"]}`),
+			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["review.ready"]}`),
 		},
 		Status:          "ephemeral",
 		HiredBy:         "runtime",
@@ -1197,15 +1284,15 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		}
 	}
 
-	ceoID := "opco-ceo-" + verticalID
+	ceoID := "operator-" + verticalID
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         ceoID,
-			Role:       "opco-ceo",
+			Role:       "operator",
 			Mode:       "operating",
 			Type:       "sonnet",
 			VerticalID: verticalID,
-			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["board.*"]}`),
+			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["review.*"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -1214,7 +1301,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	})
 	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
 		VerticalID:   verticalID,
-		EventPattern: "board.*",
+		EventPattern: "review.*",
 		SubscriberID: ceoID,
 		InstalledBy:  ceoID,
 		Reason:       "tests",
@@ -1229,7 +1316,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	evt := events.Event{
 		ID:          uuid.NewString(),
-		Type:        "board.directive",
+		Type:        "review.requested",
 		SourceAgent: "human",
 		VerticalID:  verticalID,
 		Payload:     json.RawMessage(`{"x":1}`),
@@ -1246,7 +1333,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("ListPendingEventsForAgent err=%v len=%d", err, len(pending))
 	}
 
-	subPending, err := pg.ListPendingSubscribedEvents(ctx, ceoID, []events.EventType{"board.*"}, time.Now().Add(-24*time.Hour), 10)
+	subPending, err := pg.ListPendingSubscribedEvents(ctx, ceoID, []events.EventType{"review.*"}, time.Now().Add(-24*time.Hour), 10)
 	if err != nil || len(subPending) == 0 {
 		t.Fatalf("ListPendingSubscribedEvents err=%v len=%d", err, len(subPending))
 	}
@@ -1323,13 +1410,13 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:   "agent-cleanup-1",
-			Role: "market-research-agent",
+			Role: "worker",
 			Mode: "factory",
 			Type: "sonnet",
 			Config: json.RawMessage(`{
-				"system_prompt":"x",
-				"subscriptions":["market_research.scan_assigned"]
-			}`),
+			"system_prompt":"x",
+			"subscriptions":["review.ready"]
+		}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -1398,10 +1485,10 @@ func TestManagerHelpers_MatchingAndRedaction(t *testing.T) {
 	if normalizeJSONPayload([]byte(`{"b":1,"a":2}`)) == "" {
 		t.Fatal("expected normalized json")
 	}
-	if !matchesAnySubscription("board.chat", []events.EventType{"board.*"}) {
+	if !matchesAnySubscription("review.chat", []events.EventType{"review.*"}) {
 		t.Fatal("expected subscription match")
 	}
-	if subscriptionMatch("board.*", "budget.alert") {
+	if subscriptionMatch("review.*", "budget.alert") {
 		t.Fatal("unexpected match")
 	}
 	if nullable("", "x") != "x" {

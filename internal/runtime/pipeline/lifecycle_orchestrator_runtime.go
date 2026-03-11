@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -13,28 +14,121 @@ func (n *LifecycleOrchestrator) handleVerticalApproved(ctx context.Context, evt 
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	n.coordinator.validationGate.handleVerticalApproved(ctx, evt)
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		return
+	}
+	n.coordinator.validationGate.mu.Lock()
+	st := n.coordinator.validationGate.getStateLocked(verticalID)
+	st.Status = "approved"
+	st.PackagingRequested = false
+	st.PackagingRequestedAt = nil
+	st.PackagingRetries = 0
+	n.coordinator.validationGate.mu.Unlock()
+	if _, ok := n.coordinator.applyWorkflowEventTransition(ctx, evt); !ok {
+		n.coordinator.updateVerticalStage(ctx, verticalID, "approved", "")
+	}
 }
 
 func (n *LifecycleOrchestrator) handleVerticalKilled(ctx context.Context, evt events.Event) {
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	n.coordinator.validationGate.handleVerticalKilled(ctx, evt)
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		return
+	}
+	n.coordinator.validationGate.mu.Lock()
+	st := n.coordinator.validationGate.getStateLocked(verticalID)
+	st.Status = "rejected"
+	st.PackagingRequested = false
+	st.PackagingRequestedAt = nil
+	st.PackagingRetries = 0
+	n.coordinator.validationGate.mu.Unlock()
+	if _, ok := n.coordinator.applyWorkflowEventTransition(ctx, evt); !ok {
+		n.coordinator.updateVerticalStage(ctx, verticalID, "killed", string(evt.Type))
+	}
 }
 
 func (n *LifecycleOrchestrator) handleVerticalResumed(ctx context.Context, evt events.Event) {
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	n.coordinator.validationGate.handleVerticalResumed(ctx, evt)
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		return
+	}
+	n.coordinator.validationGate.mu.Lock()
+	st := n.coordinator.validationGate.getStateLocked(verticalID)
+	st.Status = "active"
+	st.RevisionCount = 0
+	st.PackagingRequested = false
+	st.PackagingRequestedAt = nil
+	st.PackagingRetries = 0
+	missingG1 := !st.G1Research
+	missingG2 := !st.G2Spec
+	missingG3 := !st.G3CTO
+	missingG4 := !st.G4Brand
+	all := st.G1Research && st.G2Spec && st.G3CTO && st.G4Brand
+	stage := n.coordinator.validationGate.stageForState(st)
+	scoringRaw := cloneRaw(st.ScoringPayload)
+	var bundle ValidationPackageReadyPayload
+	hasBundle := false
+	if all {
+		now := time.Now().UTC()
+		hasBundle = true
+		bundle = n.coordinator.payloadFactory.BuildValidationPackageReadyPayload(ctx, verticalID, validationContextSnapshot{
+			Research:    parsePayloadMap(st.ResearchPayload),
+			Spec:        parsePayloadMap(st.SpecPayload),
+			CTONotes:    parsePayloadMap(st.CTOPayload),
+			Brand:       parsePayloadMap(st.BrandPayload),
+			Scoring:     parsePayloadMap(st.ScoringPayload),
+			SpecVersion: st.SpecVersion,
+		})
+		st.PackagingRequested = true
+		st.PackagingRequestedAt = &now
+	}
+	n.coordinator.validationGate.mu.Unlock()
+	if _, ok := n.coordinator.applyWorkflowEventTransition(ctx, evt); !ok {
+		n.coordinator.updateVerticalStage(ctx, verticalID, stage, "")
+	}
+
+	resumePayload := parsePayloadMap(evt.Payload)
+	snap := n.coordinator.payloadFactory.ValidationContext(verticalID)
+	if missingG1 {
+		scoringPayload := parsePayloadMap(scoringRaw)
+		if len(scoringPayload) == 0 {
+			scoringPayload = parsePayloadMap(evt.Payload)
+		}
+		n.coordinator.publish(ctx, "validation.started", verticalID, payloadMap(n.coordinator.payloadFactory.BuildValidationStartedPayload(ctx, verticalID, scoringPayload, resumePayload)))
+	}
+	if missingG2 {
+		n.coordinator.publish(ctx, "spec.revision_requested", verticalID, payloadMap(n.coordinator.payloadFactory.BuildSpecRevisionRequestedPayload(ctx, verticalID, "resume", resumePayload)))
+	}
+	if missingG3 {
+		n.coordinator.publish(ctx, "cto.spec_review_requested", verticalID, payloadMap(n.coordinator.payloadFactory.BuildCTOSpecReviewRequestedPayload(ctx, verticalID, resumePayload)))
+	}
+	if missingG4 {
+		n.coordinator.publish(ctx, "brand.requested", verticalID, payloadMap(n.coordinator.payloadFactory.BuildBrandRequestedPayload(ctx, verticalID, snap.Scoring, snap.Research)))
+	}
+	if hasBundle {
+		n.coordinator.publish(ctx, "validation.package_ready", verticalID, payloadMap(bundle))
+	}
 }
 
 func (n *LifecycleOrchestrator) handleOpCoCEOReady(ctx context.Context, evt events.Event) {
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	n.coordinator.validationGate.handleOpCoCEOReady(ctx, evt)
+	verticalID := strings.TrimSpace(evt.VerticalID)
+	if verticalID == "" {
+		payload := parsePayloadMap(evt.Payload)
+		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
+	}
+	if verticalID == "" {
+		return
+	}
+	n.coordinator.updateVerticalStage(ctx, verticalID, "operating", "")
 }
 
 func (n *LifecycleOrchestrator) handleRuntimeReset(ctx context.Context) {
@@ -70,6 +164,13 @@ func (n *LifecycleOrchestrator) handleMailboxItemDecided(ctx context.Context, ev
 		return
 	}
 	n.coordinator.handleLifecycleMailboxDecision(ctx, evt)
+}
+
+func (n *LifecycleOrchestrator) handleBuildOrchestratorEvent(ctx context.Context, evt events.Event) bool {
+	if n == nil || n.coordinator == nil {
+		return false
+	}
+	return n.coordinator.executeNodeHandlerPlan(ctx, "build-orchestrator", evt)
 }
 
 func (n *LifecycleOrchestrator) handleQAValidationPassed(ctx context.Context, evt events.Event) {
@@ -158,6 +259,40 @@ func (pc *FactoryPipelineCoordinator) forwardSystemDirective(ctx context.Context
 	pc.publishDirect(ctx, string(evt.Type), strings.TrimSpace(evt.VerticalID), parsePayloadMap(evt.Payload), recipients)
 }
 
+func (pc *FactoryPipelineCoordinator) handlePortfolioSystemDirective(ctx context.Context, evt events.Event) {
+	if pc == nil {
+		return
+	}
+	payload := parsePayloadMap(evt.Payload)
+	if _, ok := asObject(payload["directive"]); !ok {
+		pc.forwardSystemDirective(ctx, evt)
+		return
+	}
+	if pc.ContractBundle() == nil {
+		return
+	}
+	handler, ok := pc.ContractBundle().NodeEventHandler("portfolio-node", string(evt.Type))
+	if !ok || len(handler.Rules) == 0 {
+		return
+	}
+	triggerCtx := workflowTriggerContext{
+		Event: evt,
+		State: WorkflowState{},
+	}
+	match, ok := pc.matchTypedRules(triggerCtx, handler.Rules)
+	if !ok {
+		return
+	}
+	for _, emitEvent := range match.Emits {
+		emitEvent = strings.TrimSpace(emitEvent)
+		if emitEvent == "" {
+			continue
+		}
+		verticalID, emitPayload := portfolioDirectiveEmitPayload(evt, emitEvent)
+		pc.publish(ctx, emitEvent, verticalID, emitPayload)
+	}
+}
+
 func (pc *FactoryPipelineCoordinator) applyLifecycleStageEvent(ctx context.Context, evt events.Event, fallbackStage string) {
 	if pc == nil {
 		return
@@ -173,6 +308,71 @@ func (pc *FactoryPipelineCoordinator) applyLifecycleStageEvent(ctx context.Conte
 	if strings.TrimSpace(fallbackStage) != "" {
 		pc.updateVerticalStage(ctx, verticalID, fallbackStage, string(evt.Type))
 	}
+}
+
+func portfolioDirectiveEmitPayload(evt events.Event, emitEvent string) (string, map[string]any) {
+	payload := parsePayloadMap(evt.Payload)
+	directive, _ := asObject(payload["directive"])
+	params, _ := asObject(directive["parameters"])
+	out := cloneStringAnyMap(params)
+	if out == nil {
+		out = map[string]any{}
+	}
+	directiveType := strings.TrimSpace(asString(directive["type"]))
+	directiveID := strings.TrimSpace(evt.ID)
+	switch strings.TrimSpace(emitEvent) {
+	case "scan.requested":
+		if strings.TrimSpace(asString(out["campaign_id"])) == "" {
+			out["campaign_id"] = firstNonEmptyString(directiveID, evt.ID)
+		}
+		if _, ok := out["campaign_context"]; !ok {
+			mode := strings.TrimSpace(asString(out["mode"]))
+			modes := []string{}
+			if mode != "" {
+				modes = append(modes, mode)
+			}
+			out["campaign_context"] = map[string]any{
+				"directive_id":      directiveID,
+				"modes":             modes,
+				"strategic_context": portfolioDirectiveContextString(directive),
+			}
+		}
+		return "", out
+	case "budget.adjustment_requested":
+		return strings.TrimSpace(asString(out["vertical_id"])), out
+	case "policy.change_requested":
+		if strings.TrimSpace(asString(out["requested_by"])) == "" {
+			out["requested_by"] = strings.TrimSpace(evt.SourceAgent)
+		}
+		return "", out
+	case "vertical.resumed":
+		verticalID := strings.TrimSpace(firstNonEmptyString(asString(out["vertical_id"]), evt.VerticalID))
+		if verticalID != "" && strings.TrimSpace(asString(out["vertical_id"])) == "" {
+			out["vertical_id"] = verticalID
+		}
+		if strings.TrimSpace(asString(out["reason"])) == "" {
+			out["reason"] = "system.directive"
+		}
+		return verticalID, out
+	case "directive.unhandled":
+		return "", map[string]any{
+			"directive_text": portfolioDirectiveContextString(directive),
+			"directive_type": directiveType,
+			"reason":         "no_matching_rule",
+		}
+	default:
+		return strings.TrimSpace(asString(out["vertical_id"])), out
+	}
+}
+
+func portfolioDirectiveContextString(directive map[string]any) string {
+	if len(directive) == 0 {
+		return ""
+	}
+	if data, err := json.Marshal(directive); err == nil {
+		return string(data)
+	}
+	return fmt.Sprintf("%v", directive)
 }
 
 func (pc *FactoryPipelineCoordinator) applyLifecycleTeardownEvent(ctx context.Context, evt events.Event) {
@@ -264,14 +464,57 @@ func (pc *FactoryPipelineCoordinator) forwardPortfolioDigestTimer(ctx context.Co
 	pc.publishDirect(ctx, "timer.portfolio_digest", strings.TrimSpace(evt.VerticalID), payloadMap(payload), recipients)
 }
 
-func (pc *FactoryPipelineCoordinator) handleLifecycleBudgetThreshold(context.Context, events.Event) {
-	// 2.2.0 lifecycle compatibility hook. Budget reactions still live in the
-	// broader runtime and campaign manager while the system-node contract lands.
+func (pc *FactoryPipelineCoordinator) handleLifecycleBudgetThreshold(ctx context.Context, evt events.Event) {
+	if pc == nil {
+		return
+	}
+	payload := parsePayloadMap(evt.Payload)
+	entityID := firstNonEmptyString(
+		strings.TrimSpace(evt.VerticalID),
+		strings.TrimSpace(asString(payload["vertical_id"])),
+		strings.TrimSpace(asString(payload["entity_id"])),
+	)
+	alertType := firstNonEmptyString(
+		strings.TrimSpace(asString(payload["state"])),
+		strings.TrimSpace(asString(payload["level"])),
+		"warning",
+	)
+	pc.publish(ctx, "budget.alert_sent", strings.TrimSpace(evt.VerticalID), map[string]any{
+		"entity_id":  entityID,
+		"alert_type": alertType,
+		"details":    payload,
+	})
 }
 
-func (pc *FactoryPipelineCoordinator) handleLifecycleMailboxDecision(context.Context, events.Event) {
-	// 2.2.0 lifecycle compatibility hook. Mailbox resolution continues to drive
-	// follow-on work through existing manager and campaign paths.
+func (pc *FactoryPipelineCoordinator) handleLifecycleMailboxDecision(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.ContractBundle() == nil {
+		return
+	}
+	handler, ok := pc.ContractBundle().NodeEventHandler("lifecycle-orchestrator", string(evt.Type))
+	if !ok || len(handler.Rules) == 0 {
+		return
+	}
+	payload := parsePayloadMap(evt.Payload)
+	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	triggerCtx := workflowTriggerContext{
+		Event:           evt,
+		State:           pc.currentWorkflowState(ctx, verticalID),
+		ValidationState: pc.validationStateSnapshot(verticalID),
+	}
+	match, ok := pc.matchTypedRules(triggerCtx, handler.Rules)
+	if !ok {
+		return
+	}
+	if verticalID != "" && match.AdvancesTo != "" {
+		pc.updateVerticalStage(ctx, verticalID, match.AdvancesTo, string(evt.Type))
+	}
+	for _, emitEvent := range match.Emits {
+		emitEvent = strings.TrimSpace(emitEvent)
+		if emitEvent == "" {
+			continue
+		}
+		pc.publish(ctx, emitEvent, verticalID, cloneStringAnyMap(payload))
+	}
 }
 
 func (pc *FactoryPipelineCoordinator) applyMarginalKillTimer(ctx context.Context, evt events.Event) {

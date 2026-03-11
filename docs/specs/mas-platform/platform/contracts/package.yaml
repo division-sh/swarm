@@ -1,0 +1,6 @@
+name: mas-platform
+version: 1.1.0
+description: Multi-Agent System orchestration platform — workflow engine, event routing, agent lifecycle, tool serving
+author: youmew
+contracts:
+  spec: platform-spec.yaml

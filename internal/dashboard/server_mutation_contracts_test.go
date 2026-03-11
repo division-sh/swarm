@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"empireai/internal/config"
+	empireconfig "empireai/internal/empire/config"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -124,12 +125,12 @@ func TestDashboardMutationContracts_TaskActions(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := &config.Config{
-		Budget: config.BudgetConfig{
-			HumanTasks: config.HumanTasksConfig{
+		Extensions: map[string]any{"budget": empireconfig.BudgetConfig{
+			HumanTasks: empireconfig.HumanTasksConfig{
 				MaxTasksPerWeek: 5,
 				BudgetReset:     "monday",
 			},
-		},
+		}},
 	}
 
 	verticalID := uuid.NewString()

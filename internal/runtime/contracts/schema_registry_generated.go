@@ -164,6 +164,45 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 			"type": "object"
 		}
 	},
+	"budget.adjustment_requested": {
+		"Description": "Generated from contracts/event-catalog.yaml for budget.adjustment_requested.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"adjustment_type": {
+					"type": "string"
+				},
+				"amount": {
+					"type": "number"
+				},
+				"reason": {
+					"type": "string"
+				},
+				"vertical_id": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
+	"budget.alert_sent": {
+		"Description": "Generated from contracts/event-catalog.yaml for budget.alert_sent.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"alert_type": {
+					"type": "string"
+				},
+				"details": {
+					"type": "object"
+				},
+				"entity_id": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
 	"budget.emergency": {
 		"Description": "Generated from contracts/event-catalog.yaml for budget.emergency.",
 		"Schema": {
@@ -1093,6 +1132,24 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 			"type": "object"
 		}
 	},
+	"directive.unhandled": {
+		"Description": "Generated from contracts/event-catalog.yaml for directive.unhandled.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"directive_text": {
+					"type": "string"
+				},
+				"directive_type": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string"
+				}
+			},
+			"type": "object"
+		}
+	},
 	"feature_deployed": {
 		"Description": "Generated from contracts/event-catalog.yaml for feature_deployed.",
 		"Schema": {
@@ -1933,6 +1990,27 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 				"retry_count",
 				"last_error"
 			],
+			"type": "object"
+		}
+	},
+	"policy.change_requested": {
+		"Description": "Generated from contracts/event-catalog.yaml for policy.change_requested.",
+		"Schema": {
+			"additionalProperties": false,
+			"properties": {
+				"new_value": {
+					"type": "string"
+				},
+				"policy_key": {
+					"type": "string"
+				},
+				"reason": {
+					"type": "string"
+				},
+				"requested_by": {
+					"type": "string"
+				}
+			},
 			"type": "object"
 		}
 	},
@@ -3006,8 +3084,9 @@ var generatedContractEventSchemaRegistry = mustLoadGeneratedContractEventSchemaR
 		"Schema": {
 			"additionalProperties": false,
 			"properties": {
-				"directive_text": {
-					"type": "string"
+				"directive": {
+					"additionalProperties": true,
+					"type": "object"
 				},
 				"timestamp": {
 					"type": "string"

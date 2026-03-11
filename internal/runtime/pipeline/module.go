@@ -385,18 +385,12 @@ type WorkflowHookRuntime interface {
 	OpcoSpinupRequestedPayload(ctx context.Context, verticalID string, approvalPayload map[string]any) map[string]any
 }
 
-type WorkflowHookExecutor interface {
-	EvaluateWorkflowGuard(ctx context.Context, runtime WorkflowHookRuntime, hookCtx WorkflowHookContext, guard runtimecontracts.GuardActionEntry) (bool, bool)
-	ExecuteWorkflowAction(ctx context.Context, runtime WorkflowHookRuntime, hookCtx WorkflowHookContext, action runtimecontracts.GuardActionEntry) (bool, bool)
-}
-
 type WorkflowModule interface {
 	ContractBundle() *runtimecontracts.WorkflowContractBundle
 	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
-	WorkflowHooks() WorkflowHookExecutor
 	ScanPolicy() ScanPolicy
 	DiscoveryPolicy() DiscoveryPolicy
 	ScoringPolicy() ScoringPolicy
@@ -422,4 +416,16 @@ func defaultWorkflowModuleOrNil() WorkflowModule {
 		return nil
 	}
 	return defaultWorkflowModuleFactory()
+}
+
+func DefaultWorkflowModuleOrNil() WorkflowModule {
+	return defaultWorkflowModuleOrNil()
+}
+
+func DefaultWorkflowContractBundleOrNil() *runtimecontracts.WorkflowContractBundle {
+	module := defaultWorkflowModuleOrNil()
+	if module == nil {
+		return nil
+	}
+	return module.ContractBundle()
 }

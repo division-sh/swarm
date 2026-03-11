@@ -15,10 +15,14 @@ import (
 
 type Service struct {
 	DB      *sql.DB
-	Mailbox runtimetools.MailboxPersistence
+	Mailbox mailboxWriter
 }
 
-func NewService(db *sql.DB, mailbox runtimetools.MailboxPersistence) *Service {
+type mailboxWriter interface {
+	InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error)
+}
+
+func NewService(db *sql.DB, mailbox mailboxWriter) *Service {
 	return &Service{DB: db, Mailbox: mailbox}
 }
 

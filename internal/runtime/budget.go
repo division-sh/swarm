@@ -13,7 +13,6 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -54,13 +53,12 @@ type BudgetTracker struct {
 }
 
 func NewBudgetTracker(db *sql.DB, bus *EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence) *BudgetTracker {
-	mailboxFrom := runtimeproductpolicy.ControlPlaneAgentID()
 	return &BudgetTracker{
 		db:          db,
 		bus:         bus,
 		cfg:         cfg,
 		mailbox:     mailbox,
-		mailboxFrom: mailboxFrom,
+		mailboxFrom: "runtime",
 		lastState:   make(map[string]string),
 	}
 }
@@ -328,22 +326,22 @@ func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, verticalID string) 
 	verticalID = strings.TrimSpace(verticalID)
 
 	// Portfolio cap applies to all spend across all verticals + factory.
-	if t.cfg.Budget.PortfolioMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "portfolio", "", t.cfg.Budget.PortfolioMonthlyCap); err != nil {
+	if t.cfg.Budget().PortfolioMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, "portfolio", "", t.cfg.Budget().PortfolioMonthlyCap); err != nil {
 			return err
 		}
 	}
 
 	// Per-vertical cap.
-	if verticalID != "" && t.cfg.Budget.PerVerticalMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "vertical", verticalID, t.cfg.Budget.PerVerticalMonthlyCap); err != nil {
+	if verticalID != "" && t.cfg.Budget().PerVerticalMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, "vertical", verticalID, t.cfg.Budget().PerVerticalMonthlyCap); err != nil {
 			return err
 		}
 	}
 
 	// Factory/global cap (spend rows with NULL vertical_id).
-	if verticalID == "" && t.cfg.Budget.FactoryMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "factory", "", t.cfg.Budget.FactoryMonthlyCap); err != nil {
+	if verticalID == "" && t.cfg.Budget().FactoryMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, "factory", "", t.cfg.Budget().FactoryMonthlyCap); err != nil {
 			return err
 		}
 	}

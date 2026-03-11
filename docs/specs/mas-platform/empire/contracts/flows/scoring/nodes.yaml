@@ -1,0 +1,136 @@
+scoring-node:
+  id: scoring-node
+  execution_type: system_node
+  description: Multi-dimension scoring with weighted composite. Handles accumulation, classification, derivation, and contest
+    resolution.
+  subscribes_to:
+  - vertical.discovered
+  - vertical.derived
+  - score.dimension_complete
+  - vertical.killed_backprop
+  produces:
+  - pipeline.dead_letter
+  - scoring.derived_requested
+  - scoring.requested
+  - vertical.discovered
+  - vertical.marginal
+  - vertical.rejected
+  - vertical.shortlisted
+  event_handlers:
+    vertical.discovered:
+      description: Select rubric by mode, write entity fields, emit scoring.requested
+      data_accumulation:
+        writes:
+        - source_field: vertical_name
+          target_field: name
+        - geography
+        - raw_signals
+        - signal_strength
+        - source_field: mode
+          target_field: discovery_mode
+        - opportunity_pattern
+        source_event: vertical.discovered
+      rules:
+        saas_gap:
+          condition: payload.mode == saas_gap
+          data_accumulation:
+            writes:
+            - scoring_rubric
+            value: saas_gap_rubric
+        saas_trend:
+          condition: payload.mode == saas_trend
+          data_accumulation:
+            writes:
+            - scoring_rubric
+            value: saas_trend_rubric
+        local_services:
+          condition: payload.mode == local_services
+          data_accumulation:
+            writes:
+            - scoring_rubric
+            value: local_services_rubric
+        corpus:
+          condition: payload.mode == corpus
+          data_accumulation:
+            writes:
+            - scoring_rubric
+            value: corpus_rubric
+      emits: scoring.requested
+      _note: Rubric is mode-specific. Each discovery_mode maps to its own rubric via rules.
+    vertical.derived:
+      description: Run 8 pre-filter checks. All must pass. If passes, emit vertical.discovered for child scoring.
+      guard:
+        checks:
+        - id: depth_cap
+          check: entity.generation_depth <= policy.max_derivation_depth
+        - id: child_count
+          check: entity.child_count < 2
+        - id: signal_strength
+          check: payload.signal_strength >= policy.min_derivation_signal
+        - id: no_red_flags
+          check: entity.red_flag_count == 0
+        - id: icp_positive
+          check: entity.scores.icp_crispness >= policy.min_icp_score
+        - id: evidence_completeness
+          check: entity.evidence_count >= policy.min_evidence_for_derivation
+        - id: retention_primitive
+          check: entity.scores.retention_architecture >= policy.min_retention_score
+        - id: name_dedup
+          check: query_entities(name == payload.opportunity_name).count == 0
+        on_fail: discard
+      emits: scoring.derived_requested
+    score.dimension_complete:
+      description: Add dimension score to accumulator.
+      on_complete:
+        composite_above_shortlist:
+          condition: composite_score >= {{composite_shortlist}} AND build_complexity >= {{hard_gate_floor}} AND automation_completeness
+            >= {{hard_gate_floor}}
+          emits: vertical.shortlisted
+          advances_to: shortlisted
+        composite_marginal_eligible:
+          condition: composite_score >= {{hard_gate_floor}} AND composite_score < {{composite_shortlist}} AND count(tier1_dims
+            >= 70) >= 2
+          emits: vertical.marginal
+          advances_to: marginal_review
+        composite_below_marginal:
+          condition: else
+          emits: vertical.rejected
+          advances_to: killed
+      compute:
+        operation: weighted_average
+        description: Weighted average across 3 tiers
+        tiers:
+        - dimensions:
+          - build_complexity
+          - automation_completeness
+          - icp_crispness
+          - distribution_leverage
+          - time_to_value
+          - operational_drag
+          weight: 0.6
+        - dimensions:
+          - pain_severity
+          - competition_gap
+          - monetization_clarity
+          weight: 0.3
+        - dimensions:
+          - retention_architecture
+          - expansion_potential
+          weight: 0.1
+        store_as: entity.composite_score
+      accumulate:
+        expected_from: entity.dimensions_requested
+        completion: all
+        description: all dimensions in scoring.requested.dimensions_requested have been received
+    vertical.killed_backprop:
+      description: Validation killed this vertical. Update scoring entity state.
+      advances_to: killed
+  state_schema:
+    description: Accumulates dimension scores until all received
+    fields:
+      vertical_id: uuid
+      dimensions_requested: text[]
+      dimensions_received: 'jsonb ({dimension: {score, evidence, confidence}})'
+      analyst_id: text
+      started_at: timestamptz
+      completed_at: timestamptz (null until all dimensions in)

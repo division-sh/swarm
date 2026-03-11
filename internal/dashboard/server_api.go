@@ -290,9 +290,9 @@ func (s *Server) handleAPIBudget(w http.ResponseWriter, r *http.Request) {
 
 	caps := map[string]any{}
 	if s.cfg != nil {
-		caps["factory_monthly_cap_cents"] = s.cfg.Budget.FactoryMonthlyCap
-		caps["per_vertical_monthly_cap_cents"] = s.cfg.Budget.PerVerticalMonthlyCap
-		caps["portfolio_monthly_cap_cents"] = s.cfg.Budget.PortfolioMonthlyCap
+		caps["factory_monthly_cap_cents"] = s.cfg.Budget().FactoryMonthlyCap
+		caps["per_vertical_monthly_cap_cents"] = s.cfg.Budget().PerVerticalMonthlyCap
+		caps["portfolio_monthly_cap_cents"] = s.cfg.Budget().PortfolioMonthlyCap
 	}
 	out := map[string]any{
 		"generated_at": s.now().UTC(),

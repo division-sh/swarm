@@ -1,182 +1,63 @@
 package contracts
 
-// contractEventPayloadFields is generated from contracts/event-catalog.yaml.
-// It is used to enforce exhaustive-exact payload key parity in EventSchemaRegistry.
-var eventPayloadFields = map[string][]string{
-	"analyst.anti_pattern_advisory":      {"pattern", "affected_verticals", "severity", "recommendation"},
-	"analyst.bootstrap_upgrade_proposal": {"proposal_type", "affected_routes", "evidence", "recommendation"},
-	"analyst.prompt_refinement_proposal": {"agent_role", "current_behavior", "proposed_change", "evidence"},
-	"board.chat":                         {"message", "context", "response_requested"},
-	"board.directive":                    {"directive_type", "target", "parameters", "priority"},
-	"brand.candidates_ready":             {"vertical_id", "candidates"},
-	"brand.requested":                    {"vertical_id", "vertical_name", "geography", "business_brief"},
-	"brand.revision_needed":              {"vertical_id", "feedback"},
-	"budget.emergency":                   {"level", "message", "action_taken"},
-	"budget.resumed":                     {"previous_level", "message"},
-	"budget.threshold_crossed":           {"level", "current_spend", "budget_cap", "percentage"},
-	"budget.throttle":                    {"throttle_level", "affected_agents"},
-	"budget.warning":                     {"level", "message"},
-	"bug_fix_deployed":                   {"vertical_id", "bug_id", "version", "resolution"},
-	"bug_reported":                       {"description", "severity", "reproduction_steps"},
-	"build_blocked":                      {"vertical_id", "blocker", "blocked_task", "severity"},
-	"build_complete":                     {"feature", "environment"},
-	"build_progress":                     {"vertical_id", "milestone", "completion_pct"},
-	"campaign.completed":                 {"campaign_id", "geography", "modes_completed", "verticals_discovered", "verticals_shortlisted", "verticals_skipped"},
-	"category.assessed":                  {"scan_id", "category", "subcategory", "geography", "signal_strength", "opportunity_name", "preliminary_icp", "build_sketch", "evidence", "opportunity_hypothesis", "geographic_scope", "opportunity_pattern", "signal_sources", "required_capabilities"},
-	"channel_blocked":                    {"channel", "reason", "severity"},
-	"channel_update":                     {"vertical_id", "channel", "metrics", "status"},
-	"churn_risk":                         {"vertical_id", "customer_id", "risk_level", "indicators"},
-	"cross_domain_report":                {"vertical_id", "product_status", "growth_status", "risks", "recommendations"},
-	"cto.architecture_directive":         {"directive", "affected_verticals", "rationale"},
-	"cto.extraction_recommended":         {"pattern_id", "affected_verticals", "recommendation"},
-	"cto.pattern_detected":               {"pattern_type", "verticals", "description"},
-	"cto.spec_approved":                  {"vertical_id", "cto_notes"},
-	"cto.spec_review_requested":          {"vertical_id", "mvp_spec", "business_brief", "vertical_context"},
-	"cto.spec_revision_needed":           {"vertical_id", "technical_issues"},
-	"cto.spec_vetoed":                    {"vertical_id", "reason"},
-	"cto.tech_spec_feedback":             {"vertical_id", "feedback", "severity"},
-	"cto.tech_spec_review_requested":     {"vertical_id", "spec_content"},
-	"cycle_limit_reached":                {"vertical_id", "event_pattern", "count", "window_hours", "agents_involved", "recommendation"},
-	"cycle_reset":                        {"event_pattern", "reason"},
-	"dedup.ambiguous":                    {"dedup_id", "new_candidate", "existing_vertical", "similarity"},
-	"dedup.resolved":                     {"dedup_id", "action", "reasoning"},
-	"deploy_requested":                   {"vertical_id", "component", "version", "deploy_config"},
-	"devops.capacity_warning":            {"resource", "current_usage", "threshold", "recommendation"},
-	"devops.deploy_complete":             {"vertical_id", "environment", "url", "version"},
-	"devops.deploy_failed":               {"vertical_id", "environment", "error"},
-	"devops.deploy_requested":            {"vertical_id", "manifest", "environment", "requesting_agent"},
-	"devops.health_check_failed":         {"vertical_id", "endpoint", "error"},
-	"devops.infra_change_needed":         {"change_type", "reason", "estimated_cost"},
-	"devops.rollback_complete":           {"vertical_id", "environment", "active_version"},
-	"devops.rollback_failed":             {"vertical_id", "environment", "error"},
-	"devops.rollback_requested":          {"vertical_id", "target_version", "requesting_agent"},
-	"devops.ssl_provisioned":             {"vertical_id", "domain", "expiry"},
-	"feature_deployed":                   {"vertical_id", "feature_id", "version", "release_notes"},
-	"feature_request":                    {"description", "requester_context"},
-	"founder_input.response":             {"vertical_id", "item_id", "decision", "notes"},
-	"growth_escalation":                  {"vertical_id", "issue", "recommendation"},
-	"growth_report":                      {"phase", "metrics", "decisions"},
-	"human_task.approved":                {"task_id", "notes"},
-	"human_task.assigned":                {"task_id", "requesting_agent", "vertical_id", "assigned_to"},
-	"human_task.completed":               {"task_id", "result"},
-	"human_task.deferred":                {"task_id", "defer_until", "reason"},
-	"human_task.expired":                 {"task_id"},
-	"human_task.rejected":                {"task_id", "reason"},
-	"human_task.requested":               {"task_id", "requesting_agent", "task_type", "description"},
-	"inbound.email":                      {"vertical_id", "from", "subject", "body", "attachments"},
-	"inbound.whatsapp_message":           {"vertical_id", "from", "message", "timestamp", "media_urls"},
-	"launch_ready":                       {"vertical_id", "version", "deploy_url", "test_results"},
-	"mailbox.item_decided":               {"item_id", "decision", "decided_by", "vertical_id", "original_event_type"},
-	"mandate_updated":                    {"vertical_id", "mandate", "priorities", "budget_allocation"},
-	"market_feedback":                    {"vertical_id", "feedback_type", "summary", "frequency", "severity"},
-	"market_research.scan_assigned":      {"geography", "scan_id", "taxonomy_categories", "shard", "mode", "corpus_signals"},
-	"market_research.scan_complete":      {"scan_id", "categories_assessed", "high_signal_count", "geography"},
-	"market_signals":                     {"vertical_id", "signal_type", "description", "evidence"},
-	"opco.ceo_ready":                     {"vertical_id", "agent_count"},
-	"opco.ceo_report":                    {"vertical_id", "phase", "metrics", "decisions"},
-	"opco.deploy_review":                 {"vertical_id", "deploy_id", "review_type"},
-	"opco.escalation":                    {"vertical_id", "issue", "recommendation"},
-	"opco.escalation_response":           {"vertical_id", "original_escalation_id", "directive", "priority"},
-	"opco.founder_input":                 {"vertical_id", "question", "context", "urgency"},
-	"opco.launched":                      {"vertical_id", "launch_url", "metrics"},
-	"opco.product_spec_review":           {"vertical_id", "spec_summary", "review_request"},
-	"opco.routing_updated":               {"vertical_id", "event_pattern", "subscriber_id", "installed_by", "reason", "status", "source", "bootstrap_version", "runtime_tool_event"},
-	"opco.spend_request":                 {"vertical_id", "amount", "purpose", "vendor"},
-	"opco.spinup_requested":              {"vertical_id", "mandate", "brand", "founder_directives"},
-	"opco.steady_state_reached":          {"vertical_id"},
-	"opco.teardown_complete":             {"vertical_id"},
-	"opco.teardown_requested":            {"vertical_id", "reason"},
-	"ops.agent_failed":                   {"agent_id", "vertical_id", "error", "retry_count", "last_event_type"},
-	"ops.agent_panic":                    {"agent_id", "vertical_id", "error", "stack_trace", "conversation_id"},
-	"outreach_digest":                    {"messages_sent", "responses", "response_rate", "leads_converted", "best_channel", "intelligence"},
-	"pipeline.dead_letter":               {"event_id", "node_id", "event_type", "retry_count", "last_error"},
-	"portfolio.digest_compiled":          {"digest_text", "trigger_reason", "action_required_count"},
-	"prelaunch_ready":                    {"vertical_id", "channels_ready", "landing_page_url"},
-	"product_escalation":                 {"vertical_id", "issue", "recommendation"},
-	"product_report":                     {"phase", "metrics", "decisions"},
-	"product_spec_ready":                 {"vertical_id", "spec_version", "features", "acceptance_criteria"},
-	"qa.validation_failed":               {"failures", "expected_vs_actual", "severity", "reproduction_steps"},
-	"qa.validation_passed":               {"test_summary", "coverage_notes", "staging_url"},
-	"research.completed":                 {"vertical_id", "business_brief"},
-	"research.vertical_rejected":         {"vertical_id", "rejection_reason", "evidence"},
-	"review.deploy_feedback":             {"vertical_id", "feedback", "reviewer"},
-	"review.product_spec_feedback":       {"vertical_id", "feedback", "reviewer"},
-	"runtime.reset":                      {"source", "timestamp"},
-	"scan.completed":                     {"mode", "geography", "reports_received", "agents_expected", "agents_complete", "verticals_discovered", "campaign_id", "verticals_skipped"},
-	"scan.requested":                     {"geography", "mode", "taxonomy_categories", "sources", "depth", "campaign_id", "campaign_context", "corpus_path"},
-	"scanner.directories.scan_assigned":  {"scan_id", "vertical_id", "geography", "subcategory", "source_config"},
-	"scanner.directories.scan_complete":  {"scan_id", "vertical_id", "sources_found", "sources_scraped", "errors"},
-	"scanner.google_maps.scan_assigned":  {"scan_id", "vertical_id", "geography", "subcategory", "source_config"},
-	"scanner.google_maps.scan_complete":  {"scan_id", "vertical_id", "sources_found", "sources_scraped", "errors"},
-	"scanner.instagram.scan_assigned":    {"scan_id", "vertical_id", "geography", "subcategory", "source_config"},
-	"scanner.instagram.scan_complete":    {"scan_id", "vertical_id", "sources_found", "sources_scraped", "errors"},
-	"scanner.reviews.scan_assigned":      {"scan_id", "vertical_id", "geography", "subcategory", "source_config"},
-	"scanner.reviews.scan_complete":      {"scan_id", "vertical_id", "sources_found", "sources_scraped", "errors"},
-	"scanner.yelp.scan_assigned":         {"scan_id", "vertical_id", "geography", "subcategory", "source_config"},
-	"scanner.yelp.scan_complete":         {"scan_id", "vertical_id", "sources_found", "sources_scraped", "errors"},
-	"score.dimension_complete":           {"vertical_id", "dimension", "score", "evidence", "confidence"},
-	"scoring.contest_resolved":           {"vertical_id", "dimension", "resolved_score", "reasoning"},
-	"scoring.contested":                  {"vertical_id", "dimension", "scores", "evidence", "spread"},
-	"scoring.requested":                  {"vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested", "discovery_context", "assigned_analysis_agent_id", "excluded_analysis_agent_id"},
-	"source.scraped":                     {"scan_id", "source", "evidence", "geography"},
-	"spec.approved":                      {"vertical_id", "final_spec"},
-	"spec.contradiction_detected":        {"agent_id", "contradiction_type", "detail"},
-	"spec.draft_ready":                   {"vertical_id", "mvp_spec"},
-	"spec.requested":                     {"vertical_id", "business_brief"},
-	"spec.revision_needed":               {"vertical_id", "misalignment_details"},
-	"spec.revision_requested":            {"vertical_id", "cto_feedback"},
-	"spec.validation_failed":             {"vertical_id", "issues", "severity"},
-	"spec.validation_passed":             {"vertical_id", "validation_notes"},
-	"spec.validation_requested":          {"spec_content", "spec_tier", "vertical_id"},
-	"spec_review.issues_found":           {"vertical_id", "issues"},
-	"spec_review.passed":                 {"vertical_id", "review_notes"},
-	"spec_review.requested":              {"vertical_id", "mvp_spec", "business_brief"},
-	"spend.approved":                     {"amount", "purpose"},
-	"spend.rejected":                     {"reason"},
-	"spend_needed":                       {"vertical_id", "amount", "purpose", "vendor"},
-	"spend_request":                      {"vertical_id", "amount", "currency", "purpose", "justification"},
-	"support_critical":                   {"severity", "description", "customer_impact"},
-	"support_digest":                     {"open_tickets", "resolved", "csat", "common_issues", "churn_risk_signals"},
-	"synthesis.needed":                   {"conflicting_reports", "context"},
-	"synthesis.resolved":                 {"resolved_assessment"},
-	"system.directive":                   {"directive_text", "timestamp"},
-	"system.started":                     {"timestamp", "config_version", "agent_count", "is_cold_start"},
-	"technical_spec_ready":               {"vertical_id", "spec_version", "components", "api_contracts"},
-	"template.migration_approved":        {"template_version", "verticals"},
-	"template.migration_completed":       {"template_version", "vertical_id", "result"},
-	"template.migration_failed":          {"template_version", "vertical_id", "error"},
-	"template.migration_planned":         {"template_version", "migration_plan", "affected_verticals"},
-	"template.publish_requested":         {"template_version", "changes"},
-	"template.version_published":         {"template_version", "changelog"},
-	"timer.infra_health_check":           {"check_type"},
-	"timer.marginal_review":              {"parked_marginals_summary"},
-	"timer.portfolio_digest":             {"trigger_reason"},
-	"trend.identified":                   {"scan_id", "trend_category", "geography", "signal_strength", "opportunity_name", "preliminary_icp", "build_sketch", "evidence", "trend_description", "opportunity_hypothesis", "geographic_scope"},
-	"trend_research.scan_assigned":       {"geography", "scan_id"},
-	"trend_research.scan_complete":       {"scan_id", "trends_identified", "geography"},
-	"user_onboarded":                     {"vertical_id", "user_id", "channel"},
-	"validation.more_data_needed":        {"vertical_id", "questions"},
-	"validation.package_ready":           {"vertical_id", "research", "spec", "cto_notes", "brand"},
-	"validation.started":                 {"vertical_id", "vertical_name", "geography", "scoring_context"},
-	"vertical.approved":                  {"vertical_id", "brand_choice", "founder_directives"},
-	"vertical.derived":                   {"opportunity_id", "parent_id", "generation_depth", "generator_agent_id", "campaign_id", "derivation_rationale", "opportunity_name", "preliminary_icp", "build_sketch", "evidence", "geographic_scope", "signal_strength", "discovery_context"},
-	"vertical.discovered":                {"vertical_name", "raw_signals", "geography", "mode", "discovery_context", "geographic_scope"},
-	"vertical.health_warning":            {"vertical_id", "severity", "metrics", "recommendation"},
-	"vertical.killed":                    {"vertical_id", "reason", "source"},
-	"vertical.marginal":                  {"vertical_id", "composite_score", "viability_score", "dimensions", "promotion_eligible"},
-	"vertical.needs_more_data":           {"vertical_id", "questions"},
-	"vertical.ready_for_review":          {"vertical_id", "validation_kit"},
-	"vertical.rejected":                  {"vertical_id", "reason"},
-	"vertical.resumed":                   {"vertical_id"},
-	"vertical.scored":                    {"vertical_id", "result", "composite_score", "viability_score", "market_score", "dimensions", "rubric"},
-	"vertical.shortlisted":               {"vertical_id", "composite_score", "viability_score", "scoring_payload"},
+import (
+	"sort"
+	"strings"
+	"sync"
+)
+
+var (
+	eventPayloadFieldsOnce sync.Once
+	eventPayloadFields     map[string][]string
+)
+
+// EventPayloadFields is derived from the generated schema registry rather than
+// maintained as a second parallel artifact. It preserves a stable copy of the
+// generated top-level payload property names for parity checks and emit schemas.
+func EventPayloadFields() map[string][]string {
+	eventPayloadFieldsOnce.Do(func() {
+		eventPayloadFields = deriveEventPayloadFields(generatedContractEventSchemaRegistry)
+	})
+	return cloneEventPayloadFields(eventPayloadFields)
 }
 
-func EventPayloadFields() map[string][]string {
-	out := make(map[string][]string, len(eventPayloadFields))
-	for eventType, fields := range eventPayloadFields {
-		cp := append([]string(nil), fields...)
-		out[eventType] = cp
+func deriveEventPayloadFields(registry map[string]EventSchema) map[string][]string {
+	out := make(map[string][]string, len(registry))
+	for eventType, entry := range registry {
+		fields := payloadFieldNamesForSchema(entry.Schema)
+		sort.Strings(fields)
+		out[eventType] = fields
+	}
+	return out
+}
+
+func payloadFieldNamesForSchema(schema map[string]any) []string {
+	if len(schema) == 0 {
+		return nil
+	}
+	rawProps, ok := schema["properties"]
+	if !ok || rawProps == nil {
+		return nil
+	}
+	props, ok := rawProps.(map[string]any)
+	if !ok {
+		return nil
+	}
+	fields := make([]string, 0, len(props))
+	for field := range props {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	return fields
+}
+
+func cloneEventPayloadFields(in map[string][]string) map[string][]string {
+	out := make(map[string][]string, len(in))
+	for eventType, fields := range in {
+		out[eventType] = append([]string(nil), fields...)
 	}
 	return out
 }

@@ -136,28 +136,6 @@ func (eb *EventBus) publishTransactional(
 		}
 	}
 
-	deferredPlans := make([]eventDeliveryPlan, 0, len(deferred))
-	for _, d := range deferred {
-		plan, perr := eb.buildDeliveryPlan(ctx, d)
-		if perr != nil {
-			return perr
-		}
-		if err := txStore.AppendEventTx(ctx, tx, d); err != nil {
-			return fmt.Errorf("persist deferred event: %w", err)
-		}
-		if len(plan.PersistedRecipients) > 0 {
-			if err := txStore.InsertEventDeliveriesTx(ctx, tx, d.ID, plan.PersistedRecipients); err != nil {
-				return fmt.Errorf("persist deferred deliveries: %w", err)
-			}
-		}
-		if receiptTableExists {
-			if err := txStore.UpsertPipelineReceiptTx(ctx, tx, d.ID, "processed", ""); err != nil {
-				return fmt.Errorf("persist deferred pipeline receipt: %w", err)
-			}
-		}
-		deferredPlans = append(deferredPlans, plan)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit publish tx: %w", err)
 	}
@@ -185,23 +163,10 @@ func (eb *EventBus) publishTransactional(
 	}
 	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 
-	for _, plan := range deferredPlans {
-		if len(plan.Recipients) > 0 {
-			eb.deliverToAgents(ctx, plan.Event, plan.Recipients)
-			eb.logDelivery(ctx, plan.Event, plan.Recipients, plan.ExtraDetail)
+	for _, d := range deferred {
+		if err := eb.publishDeferred(ctx, d); err != nil {
+			return err
 		}
-		if plan.BlockedByCycle && plan.CycleEscalation != nil {
-			if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
-				return err
-			}
-		}
-		if strings.TrimSpace(plan.ContradictionReason) != "" {
-			_ = eb.emitContradiction(ctx, plan.Event, plan.ContradictionReason)
-		}
-		if !receiptTableExists {
-			eb.markPipelineReceipt(ctx, plan.Event.ID, "processed", "")
-		}
-		eb.logPublished(ctx, plan.Event, 0)
 	}
 	return nil
 }
@@ -256,6 +221,63 @@ func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	if evt.Type == "" {
+		return errors.New("deferred event type is required")
+	}
+	if !isValidEventTypeName(string(evt.Type)) {
+		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type)))
+	}
+	if evt.ID == "" {
+		evt.ID = uuid.NewString()
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now()
+	}
+	if strings.TrimSpace(evt.SourceAgent) == "" {
+		evt.SourceAgent = "runtime"
+	}
+	persisted := false
+	defer func() {
+		if !persisted {
+			return
+		}
+		status := "processed"
+		errText := ""
+		if err != nil {
+			status = "error"
+			errText = err.Error()
+		}
+		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+	}()
+	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	if err != nil {
+		return err
+	}
+	if passthrough {
+		if err := eb.routeAndDeliver(ctx, evt); err != nil {
+			return err
+		}
+		persisted = true
+	} else {
+		if err := eb.persistEventRecord(ctx, evt, nil); err != nil {
+			return err
+		}
+		persisted = true
+	}
+	eb.logPublished(ctx, evt, 0)
+	for _, d := range deferred {
+		if err := eb.publishDeferredNoIntercept(ctx, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.Event) (err error) {
 	ctx = WithCurrentRuntimeEpoch(ctx)
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
@@ -374,33 +396,14 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 		return plan, nil
 	}
 
-	if !eb.isFactoryEvent(evt.Type) {
-		// OpCo events are delivered via per-vertical routing tables to operating agents.
-		// Holding/factory agents may also subscribe to OpCo event patterns and should receive
-		// them live without bypassing the vertical routing contract.
-		opcoRecipients := eb.resolveOpCoRecipients(evt)
-
-		// Subscribers are filtered to avoid accidentally delivering to operating agents
-		// in the same vertical that weren't routed (routing is the source of truth for OpCo).
-		subscribed := eb.resolveSubscribedRecipients(string(evt.Type))
-		subscribed = filterOutAgentIDs(subscribed, opcoRecipients)
-		if strings.TrimSpace(evt.VerticalID) != "" {
-			subscribed = filterOutVerticalScopedAgentIDs(subscribed, evt.VerticalID)
-		}
-
-		plan.Recipients = uniqueStrings(append(opcoRecipients, subscribed...))
-		plan.PersistedRecipients = plan.Recipients
-		plan.ExtraDetail = map[string]any{"opco_routed": len(opcoRecipients)}
-		if len(plan.Recipients) == 0 {
-			plan.ContradictionReason = "opco event resolved zero recipients"
-		} else if len(opcoRecipients) == 0 {
-			plan.ContradictionReason = "opco event resolved zero opco recipients"
-		}
-		return plan, nil
-	}
-
-	plan.Recipients = uniqueStrings(eb.resolveSubscribedRecipients(string(evt.Type)))
+	plan.Recipients = uniqueStrings(append(
+		eb.resolveRoutedRecipients(string(evt.Type)),
+		eb.resolveSubscribedRecipients(string(evt.Type))...,
+	))
 	plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
+	if len(plan.Recipients) == 0 {
+		plan.ContradictionReason = "contract route resolved zero recipients"
+	}
 	return plan, nil
 }
 

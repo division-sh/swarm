@@ -42,14 +42,15 @@ type AgentManager struct {
 	inFlightMu  sync.Mutex
 	inFlight    map[string]struct{}
 
-	runMu              sync.Mutex
-	running            bool
-	authBreakerTripped bool
-	runCtx             context.Context
-	cancelRun          context.CancelFunc
-	loopCancel         map[string]context.CancelFunc
-	controlCancel      context.CancelFunc
-	runWG              sync.WaitGroup
+	runMu                sync.Mutex
+	running              bool
+	authBreakerTripped   bool
+	runCtx               context.Context
+	cancelRun            context.CancelFunc
+	loopCancel           map[string]context.CancelFunc
+	controlCancel        context.CancelFunc
+	runWG                sync.WaitGroup
+	disableSpinupControl bool
 
 	poisonMu          sync.Mutex
 	poisonPanicCounts map[string]int
@@ -71,21 +72,29 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 	if len(stores) > 0 {
 		store = stores[0]
 	}
+	disableSpinupControl := true
+	if opts.EnableLegacySpinupControl {
+		disableSpinupControl = false
+	}
+	if opts.DisableSpinupControl {
+		disableSpinupControl = true
+	}
 	return &AgentManager{
-		agents:            make(map[string]Agent),
-		agentCfg:          make(map[string]models.AgentConfig),
-		agentUpAt:         make(map[string]time.Time),
-		routeMeta:         make(map[string]PersistedRoutingRule),
-		bus:               bus,
-		factory:           factory,
-		store:             store,
-		workspaces:        opts.Workspaces,
-		sessions:          opts.Sessions,
-		runtimeMode:       strings.TrimSpace(opts.RuntimeMode),
-		budget:            opts.Budget,
-		inFlight:          make(map[string]struct{}),
-		loopCancel:        make(map[string]context.CancelFunc),
-		poisonPanicCounts: make(map[string]int),
+		agents:               make(map[string]Agent),
+		agentCfg:             make(map[string]models.AgentConfig),
+		agentUpAt:            make(map[string]time.Time),
+		routeMeta:            make(map[string]PersistedRoutingRule),
+		bus:                  bus,
+		factory:              factory,
+		store:                store,
+		workspaces:           opts.Workspaces,
+		sessions:             opts.Sessions,
+		runtimeMode:          strings.TrimSpace(opts.RuntimeMode),
+		budget:               opts.Budget,
+		disableSpinupControl: disableSpinupControl,
+		inFlight:             make(map[string]struct{}),
+		loopCancel:           make(map[string]context.CancelFunc),
+		poisonPanicCounts:    make(map[string]int),
 	}
 }
 
@@ -261,6 +270,7 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) models.Agent
 	if prompt == "" {
 		return cfg
 	}
+	prompt = ExpandConfigPromptTemplate(prompt, cfg.Config)
 	cfg.Config = withSystemPrompt(cfg.Config, prompt)
 	return cfg
 }

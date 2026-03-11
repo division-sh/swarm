@@ -18,9 +18,7 @@ import (
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	empirepipeline "empireai/internal/runtime/pipeline/empire"
 	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
-	empireproductpolicy "empireai/internal/runtime/productpolicy/empire"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -46,6 +44,8 @@ type RuntimeOptions struct {
 	WorkspaceLifecycle workspace.Lifecycle
 	EnableToolGateway  bool
 	ToolGatewayToken   string
+	WorkflowModule     runtimepipeline.WorkflowModule
+	ProductPolicy      func() runtimeproductpolicy.Policy
 }
 
 type Runtime struct {
@@ -75,6 +75,27 @@ func cycleTrackerForDB(db *sql.DB) *runtimebus.OpCoCycleTracker {
 	return runtimebus.NewOpCoCycleTracker(db)
 }
 
+func ensureWorkflowBootWiring(opts RuntimeOptions) error {
+	if opts.WorkflowModule == nil {
+		return fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
+	}
+	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
+		return opts.WorkflowModule
+	})
+	return runtimepipeline.ValidateWorkflowContracts(opts.WorkflowModule.ContractBundle())
+}
+
+func ensureProductPolicyBootWiring(opts RuntimeOptions) error {
+	if opts.ProductPolicy == nil {
+		return fmt.Errorf("product policy is required: configure RuntimeOptions.ProductPolicy")
+	}
+	runtimeproductpolicy.SetDefaultFactory(opts.ProductPolicy)
+	if runtimeproductpolicy.DefaultOrNil() == nil {
+		return fmt.Errorf("product policy factory returned nil")
+	}
+	return nil
+}
+
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
@@ -89,15 +110,11 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		}
 		log.Printf("emit schema hardening warning: %d agent-emitted event schemas are missing explicit definitions; add explicit schemas (sample: %s)", len(generated), strings.Join(sample, ", "))
 	}
-	workflowModule := empirepipeline.NewModule()
-	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
-		return workflowModule
-	})
-	runtimeproductpolicy.SetDefaultFactory(func() runtimeproductpolicy.Policy {
-		return empireproductpolicy.New()
-	})
-	if err := runtimepipeline.ValidateWorkflowContracts(workflowModule.ContractBundle()); err != nil {
+	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
+	}
+	if err := ensureProductPolicyBootWiring(opts); err != nil {
+		return nil, err
 	}
 
 	rt := &Runtime{
@@ -118,8 +135,8 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	})
 	if stores.SQLDB != nil {
 		rt.Pipeline = runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.FactoryPipelineCoordinatorOptions{
-			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding),
-			Module:       workflowModule,
+			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding()),
+			Module:       opts.WorkflowModule,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
@@ -148,6 +165,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 				})
 			},
 			EnsureDirectiveGeography: runtimepipeline.EnsureDirectiveGeography,
+			ControlPlaneRecipient: func() string {
+				return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
+			},
 		}
 		rt.ScanCampaign = runtimepipeline.NewScanCampaignManager(rt.Bus, stores.ScanCampaignStore, hooks, stores.SQLDB)
 	}
@@ -171,7 +191,11 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			log.Printf("schedule publish failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 		}
 		if stores.ScheduleStore != nil {
-			if err := stores.ScheduleStore.MarkScheduleFired(callbackCtx, sc); err != nil {
+			if exactStore, ok := stores.ScheduleStore.(runtimepipeline.ExactSchedulePersistence); ok {
+				if err := exactStore.MarkScheduleFiredExact(callbackCtx, sc); err != nil {
+					log.Printf("mark schedule fired failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
+				}
+			} else if err := stores.ScheduleStore.MarkScheduleFired(callbackCtx, sc); err != nil {
 				log.Printf("mark schedule fired failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 			}
 		}
@@ -206,12 +230,19 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions())
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
-		Workspaces:  rt.Workspace,
-		Sessions:    stores.SessionRegistry,
-		RuntimeMode: cfg.LLM.RuntimeMode,
-		Budget:      rt.Budget,
+		Workspaces:           rt.Workspace,
+		Sessions:             stores.SessionRegistry,
+		RuntimeMode:          cfg.LLM.RuntimeMode,
+		Budget:               rt.Budget,
+		DisableSpinupControl: true,
 	}, stores.ManagerStore)
 	managerRef = rt.Manager
+	if rt.Pipeline != nil && rt.Manager != nil {
+		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
+	}
+	if rt.Pipeline != nil {
+		rt.Pipeline.SetTimerScheduling(rt.Scheduler, stores.ScheduleStore)
+	}
 
 	if stores.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, stores.InboundStore)
@@ -220,7 +251,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger))
 	}
 	if stores.SQLDB != nil {
-		rt.ShardDispatcher = runtimepipeline.NewShardDispatcher(stores.SQLDB, rt.Bus, rt.Manager, cfg.Sharding)
+		rt.ShardDispatcher = runtimepipeline.NewShardDispatcher(stores.SQLDB, rt.Bus, rt.Manager, cfg.Sharding())
 	}
 
 	return rt, nil
@@ -255,6 +286,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			if err := rt.Scheduler.Register(sc); err != nil {
 				log.Printf("restore schedule failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 			}
+		}
+		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
+			log.Printf("workflow lifecycle schedule ensure failed: %v", err)
 		}
 		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Pipeline); err != nil {
 			log.Printf("workflow recurring schedule ensure failed: %v", err)
@@ -392,8 +426,66 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 	return nil
 }
 
+func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
+	if store == nil || workflow == nil || workflow.ContractBundle() == nil {
+		return nil
+	}
+	instanceStore := workflow.WorkflowInstanceStore()
+	if instanceStore == nil || !instanceStore.Enabled() {
+		return nil
+	}
+	instances, err := instanceStore.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, instance := range instances {
+		verticalID := strings.TrimSpace(instance.InstanceID)
+		for _, timerState := range instance.TimerState {
+			if timerState.Cancelled {
+				continue
+			}
+			timerID := strings.TrimSpace(timerState.TimerID)
+			if timerID == "" {
+				continue
+			}
+			timer, ok := workflow.ContractBundle().WorkflowTimerByID(timerID)
+			if !ok || timer.Recurring {
+				continue
+			}
+			owner := strings.TrimSpace(timer.Owner)
+			eventType := strings.TrimSpace(timer.Event)
+			if owner == "" || eventType == "" {
+				continue
+			}
+			sc := runtimepipeline.Schedule{
+				AgentID:    owner,
+				EventType:  eventType,
+				Mode:       "once",
+				At:         timerState.FiresAt,
+				VerticalID: verticalID,
+				TaskID:     timerID,
+				Payload:    mustJSON(map[string]any{"timer_id": timerID, "trigger_reason": timerID}),
+			}
+			if err := store.UpsertSchedule(ctx, sc); err != nil {
+				return err
+			}
+			if scheduler != nil {
+				if err := scheduler.Register(sc); err != nil {
+					log.Printf("rehydrate lifecycle schedule failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func recurringWorkflowTimerSpec(timer runtimecontracts.WorkflowTimerContract) (string, bool) {
 	var interval time.Duration
+	if delay := strings.TrimSpace(timer.Delay); delay != "" && !strings.Contains(delay, "{") {
+		if parsed, err := time.ParseDuration(delay); err == nil && parsed > 0 {
+			interval += parsed
+		}
+	}
 	interval += time.Duration(timer.DelaySeconds) * time.Second
 	interval += time.Duration(timer.DelayMinutes) * time.Minute
 	interval += time.Duration(timer.DelayHours) * time.Hour

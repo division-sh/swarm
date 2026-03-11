@@ -1,0 +1,37 @@
+name: processing
+mode: static
+initial_state: ready
+states:
+  - ready
+  - approved
+  - rejected
+terminal_states:
+  - rejected
+pins:
+  inputs:
+    events:
+      - item.review_requested
+      - item.rejected
+    reads:
+      - results
+      - priority
+  outputs:
+    events:
+      - item.completed
+      - item.rejected
+    writes:
+      - score
+      - status
+required_agents:
+  - role: coordinator
+    subscribes_to:
+      - item.completed
+      - item.rejected
+    emits:
+      - item.created
+  - role: worker
+    subscribes_to:
+      - item.review_requested
+    emits:
+      - item.completed
+      - item.rejected

@@ -1,0 +1,10 @@
+item.completed:
+  emitter:
+    - processing-node
+  consumer:
+    - delivery-node
+timer.item.timeout:
+  emitter:
+    - sys:runtime
+  consumer:
+    - delivery-node

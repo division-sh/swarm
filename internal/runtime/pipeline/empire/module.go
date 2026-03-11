@@ -1,6 +1,7 @@
 package empire
 
 import (
+	"path/filepath"
 	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
@@ -24,7 +25,11 @@ func NewModule() runtimepipeline.WorkflowModule {
 func (m *module) init() {
 	m.once.Do(func() {
 		repoRoot := runtimepipeline.WorkflowRepoRoot()
-		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundle(repoRoot)
+		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+			repoRoot,
+			filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"),
+			filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml"),
+		)
 		if m.loadErr != nil {
 			return
 		}
@@ -72,10 +77,6 @@ func (m *module) GuardRegistry() runtimepipeline.GuardRegistry {
 func (m *module) ActionRegistry() runtimepipeline.ActionRegistry {
 	m.init()
 	return m.actionRegistry
-}
-
-func (m *module) WorkflowHooks() runtimepipeline.WorkflowHookExecutor {
-	return m
 }
 
 func (*module) DiscoveryPolicy() runtimepipeline.DiscoveryPolicy {

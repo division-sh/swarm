@@ -28,22 +28,59 @@ func (pf *PipelinePayloadFactory) ValidationContext(verticalID string) validatio
 	}
 	st := pf.coordinator.validationStateSnapshot(verticalID)
 	if st == nil {
-		return validationContextSnapshot{
+		return pf.validationContextFromWorkflowProjection(verticalID, validationContextSnapshot{
 			Research: map[string]any{},
 			Spec:     map[string]any{},
 			CTONotes: map[string]any{},
 			Brand:    map[string]any{},
 			Scoring:  map[string]any{},
-		}
+		})
 	}
-	return validationContextSnapshot{
+	return pf.validationContextFromWorkflowProjection(verticalID, validationContextSnapshot{
 		Research:    parsePayloadMap(st.ResearchPayload),
 		Spec:        parsePayloadMap(st.SpecPayload),
 		CTONotes:    parsePayloadMap(st.CTOPayload),
 		Brand:       parsePayloadMap(st.BrandPayload),
 		Scoring:     parsePayloadMap(st.ScoringPayload),
 		SpecVersion: st.SpecVersion,
+	})
+}
+
+func (pf *PipelinePayloadFactory) validationContextFromWorkflowProjection(verticalID string, snap validationContextSnapshot) validationContextSnapshot {
+	if pf == nil || pf.coordinator == nil || pf.coordinator.workflowStore == nil || !pf.coordinator.workflowStore.Enabled() {
+		return snap
 	}
+	instance, ok, err := pf.coordinator.workflowStore.Load(context.Background(), verticalID)
+	if err != nil || !ok {
+		return snap
+	}
+	entityProjection, _ := workflowEntityProjectionBucket(instance)
+	if len(entityProjection) == 0 {
+		return snap
+	}
+	if len(snap.Research) == 0 {
+		if brief, ok := asObject(entityProjection["business_brief"]); ok && len(brief) > 0 {
+			snap.Research = cloneStringAnyMap(brief)
+		} else if researchContext, ok := asObject(entityProjection["research_context"]); ok && len(researchContext) > 0 {
+			snap.Research = cloneStringAnyMap(researchContext)
+		}
+	}
+	if len(snap.Spec) == 0 {
+		if spec, ok := asObject(entityProjection["mvp_spec"]); ok && len(spec) > 0 {
+			snap.Spec = cloneStringAnyMap(spec)
+		}
+	}
+	if len(snap.CTONotes) == 0 {
+		if ctoNotes, ok := asObject(entityProjection["cto_feasibility"]); ok && len(ctoNotes) > 0 {
+			snap.CTONotes = cloneStringAnyMap(ctoNotes)
+		}
+	}
+	if len(snap.Brand) == 0 {
+		if brand, ok := asObject(entityProjection["brand"]); ok && len(brand) > 0 {
+			snap.Brand = cloneStringAnyMap(brand)
+		}
+	}
+	return snap
 }
 
 func (pf *PipelinePayloadFactory) identityForPayload(ctx context.Context, verticalID string) (string, string) {

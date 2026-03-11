@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
@@ -188,6 +189,46 @@ func compactSQLSnippet(q string) string {
 
 func normalizeScanMode(raw string) string     { return runtimeproductpolicy.NormalizeScanMode(raw) }
 func normalizeScanPriority(raw string) string { return runtimeproductpolicy.NormalizeScanPriority(raw) }
+
+func bundleDefaultScanMode(bundle *runtimecontracts.WorkflowContractBundle) string {
+	if bundle != nil {
+		if pv, ok := bundle.MergedPolicy.Values["default_scan_mode"]; ok {
+			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
+				return normalizeScanMode(mode)
+			}
+		}
+		if pv, ok := bundle.Policy.Values["default_scan_mode"]; ok {
+			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
+				return normalizeScanMode(mode)
+			}
+		}
+	}
+	return normalizeScanMode(runtimeproductpolicy.DiscoveryFallbackMode())
+}
+
+func compatibilityExpectedScannerCount(mode string, expectedScanners []string, storedExpected int) int {
+	if storedExpected > 0 {
+		return storedExpected
+	}
+	if len(expectedScanners) == 1 && strings.TrimSpace(expectedScanners[0]) == "scanner" {
+		if expected := runtimeproductpolicy.ExpectedScannerCount(mode); expected > 0 {
+			return expected
+		}
+	}
+	return len(expectedScanners)
+}
+
+func scanDispatchExpectedAgents(mode string, expectedScanners []string) int {
+	if strings.TrimSpace(mode) != "" && len(expectedScanners) > 0 {
+		if expected := runtimeproductpolicy.ExpectedScannerCount(mode); expected > 0 {
+			return expected
+		}
+	}
+	if len(expectedScanners) > 0 {
+		return len(expectedScanners)
+	}
+	return 1
+}
 
 func coalesce(values ...string) string {
 	for _, v := range values {

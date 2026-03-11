@@ -1,0 +1,13 @@
+delivery_enabled:
+  value: true
+  description: Allow delivery completion paths to execute.
+
+budget_state:
+  value: normal
+  description: Current generic budget mode.
+
+suppression_states:
+  value:
+    - throttle
+    - emergency
+  description: Budget states that suppress downstream work.

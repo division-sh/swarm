@@ -52,10 +52,12 @@ type contractProducerRegistry struct {
 }
 
 var (
-	contractRegistryOnce sync.Once
-	contractRegistryData contractProducerRegistry
-	messageAuthorityOnce sync.Once
-	messageAuthorityData []MessageAuthority
+	contractRegistryOnce  sync.Once
+	contractRegistryData  contractProducerRegistry
+	messageAuthorityOnce  sync.Once
+	messageAuthorityData  []MessageAuthority
+	humanTaskDecisionOnce sync.Once
+	humanTaskDecisionData []string
 )
 
 var roleAliases = map[string]string{
@@ -107,6 +109,26 @@ func MailboxRoundTrips() []MailboxRoundTrip {
 	return out
 }
 
+func HumanTaskDecisionRoles() []string {
+	humanTaskDecisionOnce.Do(func() {
+		humanTaskDecisionData = cloneRoles(baseHumanTaskDecisionRoles())
+	})
+	return cloneRoles(humanTaskDecisionData)
+}
+
+func CanDecideHumanTasks(role string) bool {
+	role = canonicalRole(role)
+	if role == "" {
+		return false
+	}
+	for _, candidate := range HumanTaskDecisionRoles() {
+		if canonicalRole(candidate) == role {
+			return true
+		}
+	}
+	return false
+}
+
 type templateAgentNode struct {
 	Role       string `yaml:"role"`
 	ParentRole string `yaml:"parent_role"`
@@ -131,6 +153,14 @@ func baseMailboxRoundTrips() []MailboxRoundTrip {
 		return nil
 	}
 	return policy.MailboxRoundTrips()
+}
+
+func baseHumanTaskDecisionRoles() []string {
+	policy := defaultPolicyOrNil()
+	if policy == nil {
+		return nil
+	}
+	return policy.HumanTaskDecisionRoles()
 }
 
 func ProducerEventsForRole(role string) []string {
@@ -425,6 +455,24 @@ func cloneAuthorities(in []MessageAuthority) []MessageAuthority {
 			Scope:          rule.Scope,
 		}
 	}
+	return out
+}
+
+func cloneRoles(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, role := range in {
+		role = canonicalRole(role)
+		if role == "" {
+			continue
+		}
+		if _, ok := seen[role]; ok {
+			continue
+		}
+		seen[role] = struct{}{}
+		out = append(out, role)
+	}
+	sort.Strings(out)
 	return out
 }
 

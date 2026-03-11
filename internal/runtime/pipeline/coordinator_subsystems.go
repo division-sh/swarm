@@ -3,12 +3,12 @@ package pipeline
 import "sync"
 
 type ScanCoordinator struct {
-	scans        map[string]*scanAccumulator
-	pendingDedup map[string]pendingCandidate
-	runtime      scanWorkflowRuntime
-	discovery    DiscoveryPolicy
+	scans          map[string]*scanAccumulator
+	pendingDedup   map[string]pendingCandidate
+	runtime        scanWorkflowRuntime
+	discovery      DiscoveryPolicy
 	payloadFactory *PipelinePayloadFactory
-	mu           *sync.Mutex
+	mu             *sync.Mutex
 }
 
 func NewScanCoordinator() *ScanCoordinator {
@@ -19,11 +19,11 @@ func NewScanCoordinator() *ScanCoordinator {
 }
 
 type ScoringState struct {
-	accumulators map[string]*scoringAccumulator
-	runtime      scoringStateRuntime
-	scoring      ScoringPolicy
+	accumulators   map[string]*scoringAccumulator
+	runtime        scoringStateRuntime
+	scoring        ScoringPolicy
 	payloadFactory *PipelinePayloadFactory
-	mu           *sync.Mutex
+	mu             *sync.Mutex
 }
 
 func NewScoringState() *ScoringState {
@@ -31,10 +31,9 @@ func NewScoringState() *ScoringState {
 }
 
 type ValidationGate struct {
-	states map[string]*validationPipelineState
-	runtime validationWorkflowRuntime
+	states         map[string]*validationPipelineState
 	payloadFactory *PipelinePayloadFactory
-	mu     *sync.Mutex
+	mu             *sync.Mutex
 }
 
 func NewValidationGate() *ValidationGate {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	empireconfig "empireai/internal/empire/config"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
@@ -28,8 +29,10 @@ func TestTelegramTaskCommands_EndToEndAgainstPostgres(t *testing.T) {
 			},
 			ClaudeCLI: config.ClaudeCLIConfig{Command: "true", OutputFormat: "json"},
 		},
-		Budget: config.BudgetConfig{
-			HumanTasks: config.HumanTasksConfig{BudgetReset: "monday", MaxTasksPerWeek: 3, AutoExpireHours: 168},
+		Extensions: map[string]any{
+			"budget": empireconfig.BudgetConfig{
+				HumanTasks: empireconfig.HumanTasksConfig{BudgetReset: "monday", MaxTasksPerWeek: 3, AutoExpireHours: 168},
+			},
 		},
 	}
 

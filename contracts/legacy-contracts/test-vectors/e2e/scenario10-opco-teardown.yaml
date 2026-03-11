@@ -1,0 +1,9 @@
+id: scenario10-opco-teardown
+agents: []
+expected:
+  event_counts:
+    opco.spinup_requested: 1
+    operating/*/opco.ceo_ready: 1
+    opco.teardown_requested: 1
+    opco.teardown_complete: 1
+    vertical.killed: 1

@@ -1,0 +1,45 @@
+name: delivery
+mode: template
+initial_state: approved
+states:
+  - approved
+  - completed
+  - rejected
+terminal_states:
+  - completed
+  - rejected
+instance_variables:
+  description: Dynamic delivery instance values.
+  variables:
+    instance_id:
+      type: string
+      description: Delivery instance id.
+    item_label:
+      type: string
+      description: Human label for the item.
+auto_emit_on_create:
+  event: item.completed
+  description: Seed delivery completion checks when a template instance is created.
+pins:
+  inputs:
+    events:
+      - item.completed
+      - timer.item.timeout
+    reads:
+      - score
+  outputs:
+    events:
+      - item.completed
+    writes:
+      - status
+required_agents:
+  - role: coordinator
+    subscribes_to:
+      - item.completed
+    emits:
+      - item.created
+  - role: worker
+    subscribes_to:
+      - item.completed
+    emits:
+      - item.completed

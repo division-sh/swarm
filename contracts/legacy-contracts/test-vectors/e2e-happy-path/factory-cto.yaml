@@ -1,0 +1,15 @@
+role: factory-cto
+responses:
+  - when_event: cto.spec_review_requested
+    tool_calls:
+      - name: emit_spec_validation_requested
+        arguments:
+          vertical_id: "{{vertical_id}}"
+          spec_content: "{{mvp_spec}}"
+          spec_tier: "cto_gate"
+  - when_event: cto.spec_review_requested
+    tool_calls:
+      - name: emit_cto_spec_approved
+        arguments:
+          vertical_id: "{{vertical_id}}"
+          cto_notes: "Approved: MVP architecture fits integration and reliability constraints."

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"empireai/internal/commgraph"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -55,9 +55,9 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	if in.Category == "" {
 		return nil, errors.New("category is required")
 	}
-	if cfg != nil && len(cfg.Budget.HumanTasks.CategoriesEnabled) > 0 {
+	if cfg != nil && len(cfg.Budget().HumanTasks.CategoriesEnabled) > 0 {
 		enabled := false
-		for _, c := range cfg.Budget.HumanTasks.CategoriesEnabled {
+		for _, c := range cfg.Budget().HumanTasks.CategoriesEnabled {
 			if strings.EqualFold(strings.TrimSpace(c), in.Category) {
 				enabled = true
 				break
@@ -155,7 +155,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	if e.bus == nil {
 		return nil, errors.New("event bus is not configured")
 	}
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy == nil || !policy.AllowHumanTaskDecision(actor) {
+	if !commgraph.CanDecideHumanTasks(actor.Role) {
 		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
 	}
 
@@ -195,13 +195,13 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 		return nil, fmt.Errorf("unknown decision: %s", in.Decision)
 	}
 
-	if newStatus == "approved" && cfg != nil && cfg.Budget.HumanTasks.MaxTasksPerWeek > 0 {
+	if newStatus == "approved" && cfg != nil && cfg.Budget().HumanTasks.MaxTasksPerWeek > 0 {
 		var requeueCount int
 		_ = db.QueryRowContext(ctx, `SELECT COALESCE(requeue_count, 0) FROM human_tasks WHERE id = $1::uuid`, in.TaskID).Scan(&requeueCount)
 		if requeueCount > 0 {
 			goto skipBudget
 		}
-		weekStart := WeekStartUTC(time.Now(), cfg.Budget.HumanTasks.BudgetReset)
+		weekStart := WeekStartUTC(time.Now(), cfg.Budget().HumanTasks.BudgetReset)
 		var approvedThisWeek int
 		if err := db.QueryRowContext(ctx, `
 			SELECT COALESCE(count(*), 0)
@@ -209,7 +209,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 			WHERE reviewed_at >= $1
 			  AND status IN ('approved', 'assigned', 'completed')
 		`, weekStart).Scan(&approvedThisWeek); err == nil {
-			if approvedThisWeek >= cfg.Budget.HumanTasks.MaxTasksPerWeek {
+			if approvedThisWeek >= cfg.Budget().HumanTasks.MaxTasksPerWeek {
 				newStatus = "deferred"
 				evtType = events.EventType("human_task.deferred")
 				if in.Reason == "" {
@@ -218,7 +218,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 					in.Reason = "weekly human task budget exhausted: " + in.Reason
 				}
 				if in.RequeueDate == "" {
-					in.RequeueDate = NextWeekResetUTC(time.Now(), cfg.Budget.HumanTasks.BudgetReset).Format(time.RFC3339)
+					in.RequeueDate = NextWeekResetUTC(time.Now(), cfg.Budget().HumanTasks.BudgetReset).Format(time.RFC3339)
 				}
 			}
 		}

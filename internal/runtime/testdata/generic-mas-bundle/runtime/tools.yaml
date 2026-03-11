@@ -1,0 +1,11 @@
+emit_event:
+  category: platform
+  description: Emit a generic runtime event.
+  input_schema:
+    type: object
+
+mailbox_send:
+  category: platform
+  description: Send a generic mailbox request.
+  input_schema:
+    type: object

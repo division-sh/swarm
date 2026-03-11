@@ -1,11 +1,11 @@
 package tools
 
 import (
+	"encoding/json"
 	"strings"
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func (e *Executor) preNormalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {
@@ -19,10 +19,8 @@ func (e *Executor) preNormalizeEmitPayload(actor models.AgentConfig, inbound eve
 		return preNormalizeVerticalDerivedPayload(payload)
 	}
 	role := canonicalRuntimeRole(actor.Role)
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		if out, ok := policy.PreNormalizeEmitPayload(role, inbound, eventType, payload); ok {
-			return out
-		}
+	if out, ok := preNormalizeEmitPayloadSemantics(role, inbound, eventType, payload); ok {
+		return out
 	}
 	if shouldFlattenLegacyNestedEmitPayload(eventType) {
 		return preNormalizeLegacyNestedEmitPayload(payload)
@@ -50,10 +48,8 @@ func (e *Executor) normalizeEmitPayload(actor models.AgentConfig, inbound events
 		payload = map[string]any{}
 	}
 	role := canonicalRuntimeRole(actor.Role)
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		if out, ok := policy.NormalizeEmitPayload(role, inbound, eventType, payload); ok {
-			payload = out
-		}
+	if out, ok := normalizeEmitPayloadSemantics(role, inbound, eventType, payload); ok {
+		payload = out
 	}
 	if eventType == "portfolio.digest_compiled" {
 		msg := strings.TrimSpace(asString(payload["message"]))
@@ -66,6 +62,124 @@ func (e *Executor) normalizeEmitPayload(actor models.AgentConfig, inbound events
 		}
 	}
 	return payload
+}
+
+func preNormalizeEmitPayloadSemantics(role string, inbound events.Event, eventType string, payload map[string]any) (map[string]any, bool) {
+	if role != "empire-coordinator" || strings.TrimSpace(eventType) != "scan.requested" {
+		return nil, false
+	}
+	return normalizeCoordinatorScanRequestedPayload(inbound, payload, true), true
+}
+
+func normalizeEmitPayloadSemantics(role string, inbound events.Event, eventType string, payload map[string]any) (map[string]any, bool) {
+	switch {
+	case role == "empire-coordinator" && strings.TrimSpace(eventType) == "scan.requested":
+		return normalizeCoordinatorScanRequestedPayload(inbound, payload, false), true
+	case role == "empire-coordinator" && strings.HasPrefix(strings.TrimSpace(eventType), "budget.") && strings.TrimSpace(string(inbound.Type)) == "budget.threshold_crossed":
+		out := cloneEmitPayload(payload)
+		out["event_type"] = strings.TrimSpace(eventType)
+		if _, ok := out["threshold_event_id"]; !ok {
+			out["threshold_event_id"] = strings.TrimSpace(inbound.ID)
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func normalizeCoordinatorScanRequestedPayload(inbound events.Event, payload map[string]any, preSchema bool) map[string]any {
+	out := cloneEmitPayload(payload)
+	directiveText := emitDirectiveTextFromInbound(inbound)
+	if nested, ok := asObject(out["payload"]); ok {
+		for k, v := range nested {
+			if existing, exists := out[k]; !exists || strings.TrimSpace(asString(existing)) == "" {
+				out[k] = v
+			}
+		}
+	}
+	modeRaw := asString(out["mode"])
+	if mode := NormalizeScanModeCompat(modeRaw); mode != "" {
+		out["mode"] = mode
+	} else if preSchema {
+		if strings.TrimSpace(modeRaw) != "" {
+			out["mode"] = inferEmitDiscoveryMode(directiveText)
+		}
+	} else {
+		out["mode"] = defaultString(inferEmitDiscoveryMode(directiveText), "saas_gap")
+	}
+	if priority := NormalizeScanPriorityCompat(asString(out["priority"])); priority != "" {
+		out["priority"] = priority
+	} else if !preSchema {
+		out["priority"] = "normal"
+	}
+	if strings.TrimSpace(asString(out["geography"])) == "" && strings.TrimSpace(asString(out["geography_id"])) == "" {
+		if geo := inferEmitGeographyHint(directiveText); geo != "" {
+			out["geography"] = geo
+		} else if !preSchema {
+			out["geography"] = "unspecified"
+		}
+	}
+	if _, ok := out["campaign_context"]; !ok {
+		mode := strings.TrimSpace(asString(out["mode"]))
+		if mode == "" {
+			mode = "saas_gap"
+		}
+		strategicContext := strings.TrimSpace(asString(out["strategic_context"]))
+		if strategicContext == "" {
+			strategicContext = directiveText
+		}
+		directiveID := strings.TrimSpace(asString(out["directive_id"]))
+		if directiveID == "" {
+			directiveID = strings.TrimSpace(inbound.ID)
+		}
+		out["campaign_context"] = map[string]any{
+			"modes":             []string{mode},
+			"strategic_context": strategicContext,
+			"directive_id":      directiveID,
+		}
+	}
+	if !preSchema {
+		if _, ok := out["taxonomy_categories"]; !ok {
+			out["taxonomy_categories"] = extractEmitCategoryList(out)
+		}
+	}
+	delete(out, "vertical")
+	delete(out, "focus")
+	delete(out, "criteria")
+	delete(out, "payload")
+	return out
+}
+
+func NormalizeScanModeCompat(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus", "derived":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "local_underserved":
+		return "local_services"
+	case "discovery", "scan", "default", "automation", "micro", "automation-micro", "saas":
+		return "saas_gap"
+	case "trend", "trend_scan", "saas-trend", "trend_opportunity", "adjacent_opportunity":
+		return "saas_trend"
+	case "local", "local_service", "local-services", "services":
+		return "local_services"
+	case "corpus_mode", "signal_corpus":
+		return "corpus"
+	default:
+		return ""
+	}
+}
+
+func NormalizeScanPriorityCompat(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "low", "normal", "high", "critical":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "med", "medium", "default":
+		return "normal"
+	case "urgent":
+		return "critical"
+	default:
+		return ""
+	}
 }
 
 func shouldFlattenLegacyNestedEmitPayload(eventType string) bool {
@@ -184,4 +298,165 @@ func asObject(v any) (map[string]any, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func cloneEmitPayload(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func emitDirectiveTextFromInbound(inbound events.Event) string {
+	if len(inbound.Payload) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(inbound.Payload, &payload); err != nil {
+		return ""
+	}
+	if text := strings.TrimSpace(asString(payload["directive_text"])); text != "" {
+		return text
+	}
+	if text := strings.TrimSpace(asString(payload["message"])); text != "" {
+		return text
+	}
+	directive, _ := asObject(payload["directive"])
+	if len(directive) == 0 {
+		return ""
+	}
+	if text := strings.TrimSpace(asString(directive["text"])); text != "" {
+		return text
+	}
+	raw, err := json.Marshal(directive)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func emitDirectiveTypeFromInbound(inbound events.Event) string {
+	if len(inbound.Payload) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(inbound.Payload, &payload); err != nil {
+		return ""
+	}
+	directive, _ := asObject(payload["directive"])
+	return strings.TrimSpace(asString(directive["type"]))
+}
+
+func emitDirectiveRequiresScanRequest(evt events.Event) bool {
+	if strings.TrimSpace(string(evt.Type)) != "system.directive" {
+		return false
+	}
+	if strings.TrimSpace(evt.SourceAgent) == "scan-campaign-manager" {
+		return true
+	}
+	if emitDirectiveTypeFromInbound(evt) != "" {
+		return false
+	}
+	return strings.TrimSpace(emitDirectiveTextFromInbound(evt)) != ""
+}
+
+func inferEmitDiscoveryMode(text string) string {
+	t := strings.ToLower(strings.TrimSpace(text))
+	switch {
+	case strings.Contains(t, "automation_micro"),
+		(strings.Contains(t, "automation") && strings.Contains(t, "micro")):
+		return "saas_gap"
+	case strings.Contains(t, "local service"), strings.Contains(t, "local_services"):
+		return "local_services"
+	case strings.Contains(t, "trend"), strings.Contains(t, "saas_trend"):
+		return "saas_trend"
+	default:
+		return "saas_gap"
+	}
+}
+
+func inferEmitGeographyHint(text string) string {
+	t := strings.TrimSpace(text)
+	if t == "" {
+		return ""
+	}
+	low := strings.ToLower(t)
+	for _, geo := range []string{"paraguay", "argentina", "brazil", "mexico", "chile", "peru", "colombia", "uruguay"} {
+		if strings.Contains(low, geo) {
+			return geo
+		}
+	}
+	return t
+}
+
+func extractEmitCategoryList(payload map[string]any) []string {
+	toList := func(v any) []string {
+		switch t := v.(type) {
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				s := strings.TrimSpace(asString(item))
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		case []string:
+			out := make([]string, 0, len(t))
+			for _, item := range t {
+				s := strings.TrimSpace(item)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		default:
+			return nil
+		}
+	}
+	if out := toList(payload["taxonomy_categories"]); len(out) > 0 {
+		return out
+	}
+	if out := toList(payload["categories"]); len(out) > 0 {
+		return out
+	}
+	return []string{}
+}
+
+func budgetEventTypeFromThresholdPayload(raw []byte) events.EventType {
+	state := strings.ToLower(strings.TrimSpace(fieldStringFromJSON(raw, "state")))
+	switch state {
+	case "emergency":
+		return events.EventType("budget.emergency")
+	case "throttle":
+		return events.EventType("budget.throttle")
+	case "warning":
+		return events.EventType("budget.warning")
+	case "ok", "resumed":
+		return events.EventType("budget.resumed")
+	default:
+		return ""
+	}
+}
+
+func fieldStringFromJSON(raw []byte, key string) string {
+	if len(raw) == 0 || strings.TrimSpace(key) == "" {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil || obj == nil {
+		return ""
+	}
+	return strings.TrimSpace(asString(obj[key]))
+}
+
+func defaultString(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(fallback)
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	empireconfig "empireai/internal/empire/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
 	rt "empireai/internal/runtime"
@@ -95,11 +96,11 @@ func TestDashboardServer_APIAliases_Work(t *testing.T) {
 				Retries:      1,
 			},
 		},
-		Budget: config.BudgetConfig{
+		Extensions: map[string]any{"budget": empireconfig.BudgetConfig{
 			FactoryMonthlyCap:     50000,
 			PerVerticalMonthlyCap: 20000,
 			PortfolioMonthlyCap:   100000,
-		},
+		}},
 	}
 
 	// Seed required agents so event delivery FK constraints don't explode.

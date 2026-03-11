@@ -31,3 +31,49 @@ func (policy) MailboxRoundTrips() []commgraph.MailboxRoundTrip {
 		{SenderRole: "empire-coordinator", MailboxType: "human_task", DecisionEvents: []string{"human_task.completed"}, ReturnToRole: "requesting-agent", Timeout: "auto_expire_hours"},
 	}
 }
+
+func (policy) HumanTaskDecisionRoles() []string {
+	return []string{"empire-coordinator"}
+}
+
+func (policy) RoutingAuthorities() []commgraph.RoutingAuthority {
+	productRoles := []string{"vp-product", "cto-agent", "pm-agent", "support-agent", "tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}
+	growthRoles := []string{"vp-growth", "marketing-agent"}
+	engRoles := []string{"tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}
+	return []commgraph.RoutingAuthority{
+		{ActorRole: "empire-coordinator"},
+		{ActorRole: "opco-ceo"},
+		{ActorRole: "chief-of-staff", AllowedStatuses: []string{"proposed"}, StatusDenyReason: "chief-of-staff can only propose routing (status=proposed)"},
+		{ActorRole: "vp-product", AllowedTargetRoles: productRoles, TargetDenyReason: "vp-product can only configure product-side routing"},
+		{ActorRole: "vp-growth", AllowedTargetRoles: growthRoles, TargetDenyReason: "vp-growth can only configure growth-side routing"},
+		{ActorRole: "cto-agent", AllowedTargetRoles: engRoles, TargetDenyReason: "cto-agent can only configure engineering-side routing"},
+	}
+}
+
+func (policy) ManagementAuthorities() []commgraph.ManagementAuthority {
+	productRoles := []string{"vp-product", "cto-agent", "pm-agent", "support-agent", "tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}
+	growthRoles := []string{"vp-growth", "marketing-agent"}
+	engRoles := []string{"tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}
+	return []commgraph.ManagementAuthority{
+		{ActorRole: "empire-coordinator", AllowCrossVertical: true},
+		{ActorRole: "opco-ceo", AllowCrossVertical: false, CrossVerticalDenyReason: "cross-vertical management is not allowed"},
+		{ActorRole: "vp-product", AllowedTargetRoles: productRoles, AllowCrossVertical: false, CrossVerticalDenyReason: "cross-vertical management is not allowed", TargetDenyReason: "vp-product can only manage product domain agents"},
+		{ActorRole: "vp-growth", AllowedTargetRoles: growthRoles, AllowCrossVertical: false, CrossVerticalDenyReason: "cross-vertical management is not allowed", TargetDenyReason: "vp-growth can only manage growth domain agents"},
+		{ActorRole: "cto-agent", AllowedTargetRoles: engRoles, AllowCrossVertical: false, CrossVerticalDenyReason: "cross-vertical management is not allowed", TargetDenyReason: "cto-agent can only manage engineering agents"},
+	}
+}
+
+func (policy) MailboxSendRoles() []string {
+	return []string{
+		"empire-coordinator",
+		"opco-ceo",
+		"vp-product",
+		"vp-growth",
+		"support-agent",
+		"marketing-agent",
+		"validation-coordinator",
+		"factory-cto",
+		"holding-devops",
+		"operations-analyst",
+	}
+}

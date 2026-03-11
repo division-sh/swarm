@@ -143,6 +143,10 @@ func MustJSON(v any) []byte {
 	return raw
 }
 
+func mustJSON(v any) []byte {
+	return MustJSON(v)
+}
+
 func FirstNonEmptyString(vals ...string) string {
 	for _, val := range vals {
 		if trimmed := strings.TrimSpace(val); trimmed != "" {
@@ -213,6 +217,49 @@ func WithSystemPrompt(raw json.RawMessage, prompt string) json.RawMessage {
 	return json.RawMessage(b)
 }
 
+func ExpandConfigPromptTemplate(prompt string, raw json.RawMessage) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" || len(raw) == 0 {
+		return prompt
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
+		return prompt
+	}
+	replacer := make([]string, 0, len(obj)*2)
+	for key, value := range obj {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		rendered := stringifyPromptTemplateValue(value)
+		replacer = append(replacer,
+			"{{"+key+"}}", rendered,
+			"{"+key+"}", rendered,
+		)
+	}
+	if len(replacer) == 0 {
+		return prompt
+	}
+	return strings.NewReplacer(replacer...).Replace(prompt)
+}
+
+func stringifyPromptTemplateValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case json.RawMessage:
+		return strings.TrimSpace(string(typed))
+	default:
+		if raw, err := json.MarshalIndent(value, "", "  "); err == nil {
+			return strings.TrimSpace(string(raw))
+		}
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
 func DeterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
 	seed := strings.Join([]string{
 		strings.TrimSpace(inbound.ID),
@@ -235,6 +282,15 @@ func ExtractDirectiveText(payload []byte) string {
 	text, _ := obj["directive_text"].(string)
 	if strings.TrimSpace(text) == "" {
 		text, _ = obj["message"].(string)
+	}
+	if strings.TrimSpace(text) == "" {
+		if directive, ok := obj["directive"].(map[string]any); ok && len(directive) > 0 {
+			if structured, _ := directive["text"].(string); strings.TrimSpace(structured) != "" {
+				text = structured
+			} else if encoded, err := json.Marshal(directive); err == nil {
+				text = string(encoded)
+			}
+		}
 	}
 	return strings.TrimSpace(text)
 }

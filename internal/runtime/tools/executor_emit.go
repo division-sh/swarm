@@ -118,6 +118,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if emitted.VerticalID == "" {
 		emitted.VerticalID = strings.TrimSpace(inbound.VerticalID)
 	}
+	if strings.TrimSpace(asString(payloadMap["vertical_id"])) == "" && emitted.VerticalID != "" {
+		payloadMap["vertical_id"] = emitted.VerticalID
+		emitted.Payload = mustJSON(payloadMap)
+	}
 
 	if err := e.validateEmitTransition(actor, inbound, emitted); err != nil {
 		return nil, WrapRuntimeError(

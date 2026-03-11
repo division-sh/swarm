@@ -7,16 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
 	llm "empireai/internal/runtime/llm"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -664,92 +663,16 @@ func (e *Executor) ExecEmailAPIDirect(ctx context.Context, actor models.AgentCon
 	return e.execEmailAPI(ctx, actor, input)
 }
 
-var (
-	productRoles = []string{"vp-product", "cto-agent", "pm-agent", "support-agent", "tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}
-	growthRoles  = []string{"vp-growth", "marketing-agent"}
-	engRoles     = []string{"tech-writer", "backend-agent", "frontend-agent", "qa-agent", "devops-agent"}
-)
-
 func authorizeRouting(actor, target models.AgentConfig, status string) error {
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil && policy.AllowGlobalRouting(actor) {
-		return nil
-	}
-	switch actor.Role {
-	case "opco-ceo":
-		return nil
-	case "chief-of-staff":
-		if status != "proposed" {
-			return errors.New("chief-of-staff can only propose routing (status=proposed)")
-		}
-		return nil
-	case "vp-product":
-		if target.Role == "" || !slices.Contains(productRoles, target.Role) {
-			return errors.New("vp-product can only configure product-side routing")
-		}
-		return nil
-	case "vp-growth":
-		if target.Role == "" || !slices.Contains(growthRoles, target.Role) {
-			return errors.New("vp-growth can only configure growth-side routing")
-		}
-		return nil
-	case "cto-agent":
-		if target.Role == "" || !slices.Contains(engRoles, target.Role) {
-			return errors.New("cto-agent can only configure engineering-side routing")
-		}
-		return nil
-	default:
-		return fmt.Errorf("role %s is not authorized to configure routing", actor.Role)
-	}
+	return commgraph.AuthorizeRouting(actor, target, status)
 }
 
 func authorizeManage(actor models.AgentConfig, targetRole, targetVerticalID string) error {
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil && policy.AllowGlobalManagement(actor) {
-		return nil
-	}
-	if actor.VerticalID != "" && targetVerticalID != "" && actor.VerticalID != targetVerticalID {
-		return errors.New("cross-vertical management is not allowed")
-	}
-	switch actor.Role {
-	case "opco-ceo":
-		return nil
-	case "vp-product":
-		if slices.Contains(productRoles, targetRole) {
-			return nil
-		}
-		return errors.New("vp-product can only manage product domain agents")
-	case "vp-growth":
-		if slices.Contains(growthRoles, targetRole) {
-			return nil
-		}
-		return errors.New("vp-growth can only manage growth domain agents")
-	case "cto-agent":
-		if slices.Contains(engRoles, targetRole) {
-			return nil
-		}
-		return errors.New("cto-agent can only manage engineering agents")
-	default:
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
-	}
+	return commgraph.AuthorizeManagement(actor, targetRole, targetVerticalID)
 }
 
 func authorizeMailboxSend(actor models.AgentConfig) error {
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil && policy.AllowMailboxSend(actor) {
-		return nil
-	}
-	switch actor.Role {
-	case "opco-ceo",
-		"vp-product",
-		"vp-growth",
-		"support-agent",
-		"marketing-agent",
-		"validation-coordinator",
-		"factory-cto",
-		"holding-devops",
-		"operations-analyst":
-		return nil
-	default:
-		return fmt.Errorf("role %s is not authorized to send mailbox items", actor.Role)
-	}
+	return commgraph.AuthorizeMailboxSend(actor)
 }
 
 func coalesce(values ...string) string {

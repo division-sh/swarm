@@ -230,18 +230,24 @@ func syncRuntimeGlobalAgents(ctx context.Context, managerStore globalAgentStore)
 }
 
 func syncRuntimeSystemNodeOwners(ctx context.Context, managerStore globalAgentStore) error {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(resolveContractLoaderRoot())
-	if err != nil || bundle == nil {
-		return nil
+	owners := map[string]struct{}{
+		"lifecycle-orchestrator": {},
+		"holding-devops":         {},
 	}
-	for _, timer := range bundle.Workflow.Workflow.Timers {
-		if !timer.Recurring {
-			continue
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(resolveContractLoaderRoot())
+	if err == nil && bundle != nil {
+		for _, timer := range bundle.Workflow.Workflow.Timers {
+			if !timer.Recurring {
+				continue
+			}
+			owner := strings.TrimSpace(timer.Owner)
+			if owner == "" {
+				continue
+			}
+			owners[owner] = struct{}{}
 		}
-		owner := strings.TrimSpace(timer.Owner)
-		if owner == "" {
-			continue
-		}
+	}
+	for owner := range owners {
 		rec := runtimemanager.PersistedAgent{
 			Config: models.AgentConfig{
 				ID:   owner,

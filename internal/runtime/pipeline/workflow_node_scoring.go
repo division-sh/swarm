@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 const ScoringNodeID = "scoring-node"
@@ -38,6 +39,9 @@ type scoringStateRuntime interface {
 	loadWorkflowScoringAccumulator(context.Context, string) (*scoringAccumulator, bool)
 	publish(context.Context, string, string, map[string]any)
 	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
+	ContractBundle() *runtimecontracts.WorkflowContractBundle
+	currentWorkflowState(context.Context, string) WorkflowState
+	matchWorkflowRulesWithVars(workflowTriggerContext, map[string]any, map[string]any) (workflowRuleMatch, bool)
 	updateScoredVerticalState(context.Context, string, string, map[string]any, string)
 	appendScoringDigestBuffer(context.Context, VerticalScoredPayload)
 	persistWorkflowScoringAccumulator(context.Context, *scoringAccumulator)

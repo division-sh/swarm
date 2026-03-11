@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -253,13 +252,6 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 		WHERE id = $1::uuid
 	`, verticalID, stage)
 	pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
-}
-
-func expectedAgents(mode string) int {
-	if expected := runtimeproductpolicy.ExpectedScannerCount(mode); expected > 0 {
-		return expected
-	}
-	return 1
 }
 
 func firstNonEmptyString(vals ...string) string {

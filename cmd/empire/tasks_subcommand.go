@@ -118,8 +118,8 @@ func rejectHumanTask(ctx context.Context, stores storeBundle, cfg *config.Config
 	}
 
 	resetDay := "monday"
-	if cfg != nil && strings.TrimSpace(cfg.Budget.HumanTasks.BudgetReset) != "" {
-		resetDay = strings.TrimSpace(cfg.Budget.HumanTasks.BudgetReset)
+	if cfg != nil && strings.TrimSpace(cfg.Budget().HumanTasks.BudgetReset) != "" {
+		resetDay = strings.TrimSpace(cfg.Budget().HumanTasks.BudgetReset)
 	}
 	requeueAt := runtime.NextWeekResetUTC(time.Now(), resetDay).UTC().Format(time.RFC3339)
 
@@ -480,10 +480,10 @@ func printHumanTaskStats(ctx context.Context, db *sql.DB, cfg *config.Config) er
 	resetDay := "monday"
 	maxPerWeek := 0
 	if cfg != nil {
-		if strings.TrimSpace(cfg.Budget.HumanTasks.BudgetReset) != "" {
-			resetDay = strings.TrimSpace(cfg.Budget.HumanTasks.BudgetReset)
+		if strings.TrimSpace(cfg.Budget().HumanTasks.BudgetReset) != "" {
+			resetDay = strings.TrimSpace(cfg.Budget().HumanTasks.BudgetReset)
 		}
-		maxPerWeek = cfg.Budget.HumanTasks.MaxTasksPerWeek
+		maxPerWeek = cfg.Budget().HumanTasks.MaxTasksPerWeek
 	}
 	weekStart := runtime.WeekStartUTC(time.Now(), resetDay)
 	var approvedThisWeek int

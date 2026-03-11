@@ -1,0 +1,10 @@
+name: mas-generic-test
+version: "0.1.0"
+platform_version: "2.6.0"
+author: codex
+description: Generic MAS runtime bundle used by package-level tests during platformization.
+entity_schema:
+  entity_id:
+    type: string
+  state:
+    type: string

@@ -41,8 +41,8 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Publish a minimal org template for template loader paths.
-	agents := []byte(`[{"role":"opco-ceo","type":"llm","system_prompt":"x","tools":[],"subscriptions":["board.directive"]}]`)
-	routes := []byte(`[{"event_pattern":"board.*","subscriber_role":"opco-ceo","reason":"tests"}]`)
+	agents := []byte(`[{"role":"operator","type":"llm","system_prompt":"x","tools":[],"subscriptions":["review.requested"]}]`)
+	routes := []byte(`[{"event_pattern":"review.*","subscriber_role":"operator","reason":"tests"}]`)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO org_templates (version, agents, bootstrap_routes, seeded_routes, created_by, description, created_at)
 		VALUES ('2.0.1', $1::jsonb, $2::jsonb, '[]'::jsonb, 'test', 'test', now())
@@ -53,12 +53,12 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Upsert agent + load agents.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
-			ID:         "empire-coordinator",
-			Role:       "empire-coordinator",
+			ID:         "coordinator",
+			Role:       "coordinator",
 			Mode:       "holding",
 			VerticalID: "",
 			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
-			Config: json.RawMessage(`{"system_prompt":"You are empire coordinator.","tools":[],"subscriptions":["system.started"]}`),
+			Config: json.RawMessage(`{"system_prompt":"You are the coordinator.","tools":[],"subscriptions":["system.started"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -72,15 +72,15 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("load agents err=%v len=%d", err, len(agentsOut))
 	}
 
-	// Seed an OpCo CEO agent id so routing_rules FK constraints are satisfied.
-	ceoID := "opco-ceo-" + verticalID
+	// Seed an operating agent id so routing_rules FK constraints are satisfied.
+	ceoID := "operator-" + verticalID
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: models.AgentConfig{
 			ID:         ceoID,
-			Role:       "opco-ceo",
+			Role:       "operator",
 			Mode:       "operating",
 			VerticalID: verticalID,
-			Config:     json.RawMessage(`{"system_prompt":"You are an OpCo CEO.","tools":[],"subscriptions":["board.*"]}`),
+			Config:     json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -93,9 +93,9 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Routing rules.
 	rule := runtimemanager.PersistedRoutingRule{
 		VerticalID:       verticalID,
-		EventPattern:     "board.*",
+		EventPattern:     "review.*",
 		SubscriberID:     ceoID,
-		InstalledBy:      "empire-coordinator",
+		InstalledBy:      "coordinator",
 		Reason:           "tests",
 		Status:           "active",
 		Source:           "bootstrap",
@@ -111,7 +111,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Events + deliveries + receipts.
 	evt := events.Event{
 		ID:          uuid.NewString(),
-		Type:        events.EventType("board.directive"),
+		Type:        events.EventType("review.requested"),
 		SourceAgent: "dashboard",
 		VerticalID:  verticalID,
 		Payload:     json.RawMessage(`{"message":"hi"}`),
@@ -120,10 +120,10 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"empire-coordinator"}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"coordinator"}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, "empire-coordinator", "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, "coordinator", "processed", ""); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EventID:    evt.ID,
 		VerticalID: verticalID,
-		FromAgent:  "empire-coordinator",
+		FromAgent:  "coordinator",
 		Type:       "review",
 		Priority:   "normal",
 		Status:     "pending",

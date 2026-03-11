@@ -22,7 +22,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 	defer ticker.Stop()
 
 	expire := func() {
-		hours := cfg.Budget.HumanTasks.AutoExpireHours
+		hours := cfg.Budget().HumanTasks.AutoExpireHours
 		if hours <= 0 {
 			hours = 168
 		}
@@ -235,7 +235,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				continue
 			}
 
-			requeueAt := runtime.NextWeekResetUTC(time.Now(), cfg.Budget.HumanTasks.BudgetReset).UTC().Format(time.RFC3339)
+			requeueAt := runtime.NextWeekResetUTC(time.Now(), cfg.Budget().HumanTasks.BudgetReset).UTC().Format(time.RFC3339)
 			decisionObj := map[string]any{
 				"decision":     "deferred",
 				"defer_reason": "auto_requeue_next_cycle",

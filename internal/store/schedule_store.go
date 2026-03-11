@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -22,14 +23,18 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	payload := persistedSchedulePayload(sc)
+
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE schedules
 		SET active = false,
 		    cancelled_at = now()
 		WHERE agent_id = $1
 		  AND event_type = $2
+		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
-	`, sc.AgentID, sc.EventType); err != nil {
+	`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID)); err != nil {
 		return fmt.Errorf("deactivate previous schedule: %w", err)
 	}
 
@@ -39,11 +44,6 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 		atTime = sc.At
 		nextFire = sc.At
 	}
-	payload := sc.Payload
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
-
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO schedules (
 			agent_id, vertical_id, event_type, mode, cron_expr,
@@ -81,6 +81,26 @@ func (s *PostgresStore) CancelSchedule(ctx context.Context, agentID, eventType s
 	return nil
 }
 
+func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipeline.Schedule) error {
+	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
+		return fmt.Errorf("agent_id and event_type are required")
+	}
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE schedules
+		SET active = false,
+		    cancelled_at = now()
+		WHERE agent_id = $1
+		  AND event_type = $2
+		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
+		  AND active = true
+	`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID))
+	if err != nil {
+		return fmt.Errorf("cancel exact schedule: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
@@ -114,6 +134,7 @@ func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipel
 		); err != nil {
 			return nil, fmt.Errorf("scan active schedule: %w", err)
 		}
+		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(sc.Payload)
 		if at.Valid {
 			sc.At = at.Time
 		}
@@ -155,4 +176,78 @@ func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtimepipelin
 		return fmt.Errorf("mark recurring schedule fired: %w", err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepipeline.Schedule) error {
+	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
+		return nil
+	}
+	if sc.Mode == "once" {
+		_, err := s.DB.ExecContext(ctx, `
+			UPDATE schedules
+			SET active = false,
+			    last_fired_at = now(),
+			    next_fire_at = NULL
+			WHERE agent_id = $1
+			  AND event_type = $2
+			  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+			  AND COALESCE(payload->>'__schedule_task_id', '') = $4
+			  AND active = true
+		`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID))
+		if err != nil {
+			return fmt.Errorf("mark exact once schedule fired: %w", err)
+		}
+		return nil
+	}
+	_, err := s.DB.ExecContext(ctx, `
+		UPDATE schedules
+		SET last_fired_at = now()
+		WHERE agent_id = $1
+		  AND event_type = $2
+		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
+		  AND active = true
+	`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID))
+	if err != nil {
+		return fmt.Errorf("mark exact schedule fired: %w", err)
+	}
+	return nil
+}
+
+func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
+	payload := sc.Payload
+	if len(payload) == 0 {
+		payload = []byte("{}")
+	}
+	taskID := strings.TrimSpace(sc.TaskID)
+	if taskID == "" {
+		return payload
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil || decoded == nil {
+		return payload
+	}
+	decoded["__schedule_task_id"] = taskID
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
+func extractPersistedScheduleTaskID(payload []byte) (string, []byte) {
+	if len(payload) == 0 {
+		return "", payload
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil || decoded == nil {
+		return "", payload
+	}
+	taskID, _ := decoded["__schedule_task_id"].(string)
+	delete(decoded, "__schedule_task_id")
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return strings.TrimSpace(taskID), payload
+	}
+	return strings.TrimSpace(taskID), encoded
 }

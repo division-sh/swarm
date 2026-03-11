@@ -1,6 +1,10 @@
 package empire
 
-import "testing"
+import (
+	"testing"
+
+	runtimepipeline "empireai/internal/runtime/pipeline"
+)
 
 func TestSemanticPolicy_PrefilterVectors(t *testing.T) {
 	t.Run("passthrough", func(t *testing.T) {
@@ -112,6 +116,24 @@ func TestSemanticPolicy_ScoringComposite(t *testing.T) {
 	})
 }
 
+func TestSemanticPolicy_ParseDirectiveAndResolveCorpusPath(t *testing.T) {
+	mod := module{}
+	parsed := mod.ParseDirective("US, corpus, corpus_path=/data/test-signals-25.jsonl")
+	if parsed.Mode != "corpus" || !parsed.ExplicitMode {
+		t.Fatalf("expected corpus explicit parse, got %+v", parsed)
+	}
+
+	path, err := mod.ResolveDirectiveCorpusPath("corpus-mode", runtimepipeline.ParsedDirective{}, map[string]any{
+		"corpus_path": "/data/test-signals-25.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("ResolveDirectiveCorpusPath returned error: %v", err)
+	}
+	if path != "/data/test-signals-25.jsonl" {
+		t.Fatalf("expected corpus path passthrough, got %q", path)
+	}
+}
+
 func buildPrefilterPayload(signal float64, redFlags []string, evidenceURLs int, retention []string) map[string]any {
 	flagList := make([]any, 0, len(redFlags))
 	for _, flag := range redFlags {
@@ -127,9 +149,9 @@ func buildPrefilterPayload(signal float64, redFlags []string, evidenceURLs int, 
 	}
 
 	return map[string]any{
-		"signal_strength": signal,
-		"opportunity_name": "Policy Candidate",
-		"preliminary_icp":  "Owner at clinic invoice desk",
+		"signal_strength":        signal,
+		"opportunity_name":       "Policy Candidate",
+		"preliminary_icp":        "Owner at clinic invoice desk",
 		"opportunity_hypothesis": "Automate invoice reporting",
 		"build_sketch": map[string]any{
 			"red_flags": flagList,

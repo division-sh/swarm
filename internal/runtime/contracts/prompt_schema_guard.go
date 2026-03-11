@@ -7,19 +7,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func ValidatePromptSchemaGuards(repoRoot string) error {
 	promptsDir := ResolveWorkflowContractPaths(repoRoot).PromptsDir
 	schemas := EventSchemaRegistry()
-
-	policy := runtimeproductpolicy.DefaultOrNil()
-	if policy == nil {
-		return nil
-	}
-	cases := policy.PromptSchemaGuards()
+	cases := PromptSchemaGuards()
 
 	for _, tc := range cases {
 		path := filepath.Join(promptsDir, tc.PromptFile)

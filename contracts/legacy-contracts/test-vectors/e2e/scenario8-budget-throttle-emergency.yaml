@@ -1,0 +1,136 @@
+id: scenario8-budget-throttle-emergency
+agents:
+  - id: market-research-agent
+    role: market-research-agent
+    mode: factory
+    subscriptions: [market_research.scan_assigned]
+    responses:
+      - when_event: market_research.scan_assigned
+        tool_calls:
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: budget_a
+              signal_strength: 70
+              opportunity_name: Budget Scenario Opportunity A
+              preliminary_icp: Ops manager at SMB clinics handling invoice workflow
+              build_sketch:
+                core_features: [queue]
+                key_integrations: []
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp Budget A
+                    pricing: "$120/mo"
+                    source_url: https://example.com/b8a
+                pain_signals:
+                  - signal: repetitive invoice edits
+                    source_url: https://example.com/b8a1
+                regulatory:
+                  - detail: invoice correction retention requirements
+                    source_url: https://example.com/b8a-reg
+                buyer_communities:
+                  - name: Ops managers
+                    source_url: https://example.com/b8a2
+              opportunity_hypothesis: Recurring workflow automation for invoice queues.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_category_assessed
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              category: operations
+              subcategory: budget_b
+              signal_strength: 70
+              opportunity_name: Budget Scenario Opportunity B
+              preliminary_icp: Ops manager at SMB clinics handling invoice workflow
+              build_sketch:
+                core_features: [queue]
+                key_integrations: []
+                red_flags: []
+              evidence:
+                competitors:
+                  - name: Comp Budget B
+                    pricing: "$120/mo"
+                    source_url: https://example.com/b8b
+                pain_signals:
+                  - signal: repetitive invoice edits
+                    source_url: https://example.com/b8b1
+                regulatory:
+                  - detail: invoice correction retention requirements
+                    source_url: https://example.com/b8b-reg
+                buyer_communities:
+                  - name: Ops managers
+                    source_url: https://example.com/b8b2
+              opportunity_hypothesis: Recurring workflow automation for invoice queues.
+              geographic_scope: local
+              opportunity_pattern: workflow_automation
+          - name: emit_market_research_scan_complete
+            arguments:
+              scan_id: "{{scan_id}}"
+              campaign_id: "{{campaign_id}}"
+              mode: "{{mode}}"
+              geography: "{{geography}}"
+              categories_assessed: 2
+              high_signal_count: 2
+
+  - id: analysis-agent
+    role: analysis-agent
+    mode: factory
+    subscriptions: [scoring.requested]
+    responses:
+      - when_event: scoring.requested
+        tool_calls:
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: build_complexity, score: 78, evidence: b8 build, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: automation_completeness, score: 78, evidence: b8 automation, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: icp_crispness, score: 78, evidence: b8 icp, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: distribution_leverage, score: 78, evidence: b8 distribution, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: time_to_value, score: 78, evidence: b8 ttv, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: operational_drag, score: 78, evidence: b8 drag, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: pain_severity, score: 78, evidence: b8 pain, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: competition_gap, score: 78, evidence: b8 gap, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: monetization_clarity, score: 78, evidence: b8 monetization, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: retention_architecture, score: 78, evidence: b8 retention, confidence: high}
+          - name: emit_score_dimension_complete
+            arguments: {vertical_id: "{{vertical_id}}", dimension: expansion_potential, score: 78, evidence: b8 expansion, confidence: high}
+
+  - id: empire-coordinator
+    role: empire-coordinator
+    mode: holding
+    subscriptions: [budget.alert_sent]
+    responses:
+      - when_event: budget.alert_sent
+        tool_calls:
+          - name: emit_budget_throttle
+            arguments:
+              state: throttle
+              message: reduce scoring throughput
+      - when_event: budget.alert_sent
+        tool_calls:
+          - name: emit_budget_emergency
+            arguments:
+              state: emergency
+              message: budget near cap
+              action: pause_non_critical_scoring
+expected:
+  event_counts:
+    budget.threshold_crossed: 2
+    budget.alert_sent: 2
+    budget.throttle: 1
+    budget.emergency: 1

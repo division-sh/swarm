@@ -66,10 +66,8 @@ func (n *LifecycleOrchestrator) Handle(ctx context.Context, evt events.Event) bo
 		n.handleBudgetThresholdCrossed(ctx, evt)
 	case "mailbox.item_decided":
 		n.handleMailboxItemDecided(ctx, evt)
-	case "qa.validation_passed":
-		n.handleQAValidationPassed(ctx, evt)
-	case "review.deploy_feedback":
-		n.handleReviewDeployFeedback(ctx, evt)
+	case "qa.validation_passed", "review.deploy_feedback":
+		return n.handleBuildOrchestratorEvent(ctx, evt)
 	case "system.directive":
 		n.handleSystemDirective(ctx, evt)
 	case "build_complete":

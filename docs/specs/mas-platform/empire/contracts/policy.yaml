@@ -1,0 +1,167 @@
+permission_bundles:
+  coordinator:
+    description: Full control — top-level workflow coordinator
+    permissions:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
+    - configure_routing
+    - approve_spend
+    - message_all
+    - mailbox_send
+    - human_task_request
+  lead:
+    description: Domain/team lead — can manage team and routing
+    permissions:
+    - agent_hire
+    - agent_fire
+    - agent_reconfigure
+    - configure_routing
+    - message_domain
+    - mailbox_send
+    - human_task_request
+  specialist:
+    description: Skilled agent — can message domain and send to mailbox
+    permissions:
+    - message_domain
+    - mailbox_send
+    - configure_routing
+  worker:
+    description: Execution agent — can message peers only
+    permissions:
+    - message_peers
+  system_node:
+    description: Deterministic node — no permissions (platform handles internally)
+    permissions: []
+mra_self_filter_threshold: 40
+evidence_url_minimum: 2
+composite_marginal_high: 74
+tier1_dimension_floor: 50
+tier1_subscore_floor: 60
+marginal_tier1_dimensions_above_70: 2
+marginal_kill_days: 60
+max_derivations_per_parent: 2
+derivation_trigger_threshold: 65
+corpus_batch_size: 25
+blocking_red_flags:
+- complex_integration
+- high_feature_count
+- phone_led_sales
+- enterprise_procurement
+- relationship_networking
+- physical_presence_required
+- support_mode_phone_video
+passthrough_red_flags:
+- one_time_setup
+- accuracy_liability
+opportunity_patterns:
+- platform_parasitic
+- freelancer_replacement
+- data_asymmetry
+- api_middleware
+- compliance_regulatory
+- ai_wrapper
+- workflow_automation
+- unknown
+retention_primitives:
+- recurring_data
+- workflow_embedding
+- integration_lock_in
+- compliance_cadence
+- team_collaboration
+workflow_anchor_tokens:
+- schedule
+- booking
+- invoice
+- payroll
+- lead
+- dispatch
+- inventory
+- compliance
+- reporting
+tier1_capabilities:
+- Web UI
+- Go backend
+- LLM integration (document parsing, classification, generation)
+- Postgres
+- Stripe payments
+- External API integration (QuickBooks, Xero, MLS, Procore)
+- Document generation (PDF/CSV)
+- OAuth authentication
+- Web scraping
+tier2_capabilities:
+- name: Email sending
+  provider: SendGrid/Postmark
+  cost: ~$0.001/email
+  status: planned
+- name: SMS
+  provider: Twilio
+  cost: ~$0.008/message
+  status: planned
+- name: WhatsApp Business API
+  cost: ~$0.005-0.08/conversation
+  status: planned
+tier3_capabilities:
+- name: Voice AI
+  provider: Bland.ai/Vapi/Retell
+  cost: $0.07-0.15/minute
+  status: future
+- name: Browser automation
+  provider: Playwright
+  status: future
+model_tiers:
+  description: LLM model assignment per agent role
+  roles:
+    discovery-coordinator: sonnet
+    market-research-agent: sonnet
+    trend-research-agent: sonnet
+    scanner-agent: haiku
+    analysis-agent: sonnet
+    validation-coordinator: sonnet
+    business-research-agent: sonnet
+    lightweight-spec-agent: sonnet
+    spec-reviewer: haiku
+    factory-cto: sonnet
+    pre-brand-agent: sonnet
+    spec-auditor: sonnet
+    opco-ceo: sonnet
+    opco-chief-of-staff: haiku_or_sonnet
+    opco-head-of-product: haiku_or_sonnet
+    opco-head-of-growth: haiku_or_sonnet
+    opco-pm: sonnet
+    opco-cto: sonnet
+    opco-tech-writer: sonnet
+    opco-backend: sonnet
+    opco-frontend: sonnet
+    opco-qa: haiku
+    opco-devops: haiku
+    opco-marketing: sonnet
+    opco-support: haiku
+    empire-coordinator: sonnet
+    operations-analyst: sonnet
+    holding-devops: haiku
+  _note: Derived from agents.yaml model_tier (authoritative). This is a convenience lookup.
+scan_timeout_minutes: 90
+campaign_timeout_hours: 24
+budget_warning_percent: 80
+budget_throttle_percent: 90
+budget_emergency_percent: 100
+opco_agent_count: 13
+bootstrap_route_count: 20
+seeded_route_count: 7
+mailbox_types:
+- vertical_approval
+- migration_approval
+- domain_approval
+- spend_request
+- escalation
+- review
+- digest
+- budget_increase
+mailbox_priorities:
+- low
+- normal
+- high
+- critical
+marginal_park_days: 14
+pipeline_capacity_max: 50

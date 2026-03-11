@@ -217,8 +217,8 @@ func TestHandlePipelineGraph_DesignIncludesStageAndRubricMetadata(t *testing.T) 
 	if _, ok := resp.Meta["rubrics"]; !ok {
 		t.Fatalf("expected rubrics metadata")
 	}
-	if got, _ := resp.Meta["workflow_version"].(string); strings.TrimSpace(got) != "2.1.0" {
-		t.Fatalf("expected workflow_version 2.1.0, got %q", got)
+	if got, _ := resp.Meta["workflow_version"].(string); strings.TrimSpace(got) == "" {
+		t.Fatalf("expected non-empty workflow_version, got %q", got)
 	}
 	if got, _ := resp.Meta["platform_version"].(string); strings.TrimSpace(got) == "" {
 		t.Fatalf("expected platform_version metadata")

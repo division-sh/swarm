@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +12,8 @@ import (
 	"strings"
 
 	"empireai/internal/models"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
 type Target struct {
@@ -232,7 +234,7 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 }
 
 func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error) {
-	switch workspaceClass(actor) {
+	switch workspaceRouteClass(WorkspaceClass(actor)) {
 	case "factory":
 		if err := m.EnsureContainerRunning(ctx, m.cfg.FactoryContainer, []string{
 			"-v", fmt.Sprintf("%s:%s", m.cfg.FactoryVolume, m.cfg.FactoryWorkdir),
@@ -280,11 +282,93 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	}, nil
 }
 
-func workspaceClass(actor models.AgentConfig) string {
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		return strings.TrimSpace(policy.WorkspaceClass(actor))
+func WorkspaceClass(actor models.AgentConfig) string {
+	if cfgClass := configString(actor.Config, "workspace_class"); cfgClass != "" {
+		return cfgClass
+	}
+	if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
+		if entry, ok := workflowAgentRegistryEntry(bundle, actor.ID, actor.Role); ok {
+			return strings.TrimSpace(entry.WorkspaceClass)
+		}
 	}
 	return ""
+}
+
+func RoleWorkspaceClass(role string) string {
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return ""
+	}
+	if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
+		if entry, ok := workflowAgentRegistryEntry(bundle, "", role); ok {
+			return strings.TrimSpace(entry.WorkspaceClass)
+		}
+	}
+	return ""
+}
+
+func workspaceRouteClass(class string) string {
+	switch strings.ToLower(strings.TrimSpace(class)) {
+	case "factory":
+		return "factory"
+	case "infra", "holding":
+		return "infra"
+	default:
+		return ""
+	}
+}
+
+func RoleWorkspaceRouteClass(role string) string {
+	return workspaceRouteClass(RoleWorkspaceClass(role))
+}
+
+func workflowAgentRegistryEntry(bundle *runtimecontracts.WorkflowContractBundle, agentID, role string) (runtimecontracts.AgentRegistryEntry, bool) {
+	if bundle == nil {
+		return runtimecontracts.AgentRegistryEntry{}, false
+	}
+	agentID = strings.TrimSpace(agentID)
+	role = strings.TrimSpace(role)
+	if agentID != "" {
+		if entry, ok := bundle.MergedAgents[agentID]; ok {
+			return entry, true
+		}
+		if entry, ok := bundle.Agents[agentID]; ok {
+			return entry, true
+		}
+	}
+	if role != "" {
+		for _, source := range []map[string]runtimecontracts.AgentRegistryEntry{bundle.MergedAgents, bundle.Agents} {
+			for _, entry := range source {
+				if strings.EqualFold(strings.TrimSpace(entry.Role), role) || strings.EqualFold(strings.TrimSpace(entry.ID), role) {
+					return entry, true
+				}
+			}
+		}
+	}
+	return runtimecontracts.AgentRegistryEntry{}, false
+}
+
+func configString(raw []byte, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" || len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(asString(parsed[key]))
+}
+
+func asString(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 func (m *DockerManager) EnsureContainerRunning(ctx context.Context, name string, createArgs []string) error {

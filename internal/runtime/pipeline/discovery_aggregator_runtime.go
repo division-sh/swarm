@@ -7,9 +7,22 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
+
+func discoveryRuntimeDefaultScanMode(runtime scanWorkflowRuntime) string {
+	if pc, ok := runtime.(*FactoryPipelineCoordinator); ok {
+		return defaultPipelineScanMode(pc.ContractBundle())
+	}
+	return defaultPipelineScanMode(nil)
+}
+
+func discoveryRuntimeResolveScanMode(runtime scanWorkflowRuntime, raw string) string {
+	if pc, ok := runtime.(*FactoryPipelineCoordinator); ok {
+		return resolvePipelineScanMode(pc.ContractBundle(), raw)
+	}
+	return resolvePipelineScanMode(nil, raw)
+}
 
 func (n *DiscoveryAggregator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
 	sc := n.scanCoordinator()
@@ -34,7 +47,7 @@ func (n *DiscoveryAggregator) handleDiscoveryReport(ctx context.Context, evt eve
 	if acc == nil {
 		acc = &scanAccumulator{
 			ScanID:      scanID,
-			Mode:        normalizeScanMode(asString(payload["mode"])),
+			Mode:        discoveryRuntimeResolveScanMode(sc.runtime, asString(payload["mode"])),
 			Geography:   strings.TrimSpace(asString(payload["geography"])),
 			Expected:    1,
 			CompletedBy: make(map[string]struct{}),
@@ -42,7 +55,7 @@ func (n *DiscoveryAggregator) handleDiscoveryReport(ctx context.Context, evt eve
 			CreatedAt:   time.Now(),
 		}
 		if acc.Mode == "" {
-			acc.Mode = runtimeproductpolicy.DiscoveryFallbackMode()
+			acc.Mode = discoveryRuntimeDefaultScanMode(sc.runtime)
 		}
 		sc.scans[scanID] = acc
 	}
@@ -228,9 +241,9 @@ func (n *DiscoveryAggregator) handleSynthesisResolved(ctx context.Context, evt e
 	if name == "" {
 		return
 	}
-	mode := normalizeScanMode(asString(payload["mode"]))
+	mode := discoveryRuntimeResolveScanMode(sc.runtime, asString(payload["mode"]))
 	if mode == "" {
-		mode = runtimeproductpolicy.DiscoveryFallbackMode()
+		mode = discoveryRuntimeDefaultScanMode(sc.runtime)
 	}
 	geography := strings.TrimSpace(asString(payload["geography"]))
 	if geography == "" {

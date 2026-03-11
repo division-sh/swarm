@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"github.com/google/uuid"
 )
 
@@ -119,7 +118,7 @@ func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context
 		WHERE id = $1::uuid
 	`, verticalID).Scan(&name, &geography, &rawMode, &rawSignals)
 	if strings.TrimSpace(rawMode) == "" {
-		rawMode = runtimeproductpolicy.DiscoveryFallbackMode()
+		rawMode = defaultPipelineScanMode(pc.ContractBundle())
 	}
 	if len(rawSignals) > 0 {
 		var rs map[string]any
@@ -131,7 +130,7 @@ func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context
 			}
 		}
 	}
-	return strings.TrimSpace(name), strings.TrimSpace(geography), normalizeScanMode(rawMode), geographicScope, discoveryContext
+	return strings.TrimSpace(name), strings.TrimSpace(geography), resolvePipelineScanMode(pc.ContractBundle(), rawMode), geographicScope, discoveryContext
 }
 
 func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context, evt events.Event) {
@@ -140,13 +139,13 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	if verticalID == "" {
 		return
 	}
-	mode := normalizeScanMode(asString(payload["mode"]))
+	mode := resolvePipelineScanMode(pc.ContractBundle(), asString(payload["mode"]))
 	if mode == "" {
 		_, _, dbMode := pc.loadScoringSeed(ctx, verticalID)
-		mode = normalizeScanMode(dbMode)
+		mode = resolvePipelineScanMode(pc.ContractBundle(), dbMode)
 	}
 	if mode == "" {
-		mode = runtimeproductpolicy.DiscoveryFallbackMode()
+		mode = defaultPipelineScanMode(pc.ContractBundle())
 	}
 	rubric := pc.scoringState.scoring.SelectScoringRubric(mode)
 	expected := pc.scoringState.scoring.ExpectedScoringDimensions(rubric)
@@ -257,26 +256,12 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 	if generationDepth < 0 {
 		generationDepth = 0
 	}
-	if generationDepth > 2 {
-		runtimeWarn("scoring-node", "dropping vertical.derived depth cap exceeded parent=%s depth=%d", parentID, generationDepth)
-		return
-	}
-	if children, err := pc.countDerivedChildren(ctx, parentID); err == nil && children >= 2 {
-		runtimeWarn("scoring-node", "dropping vertical.derived branch cap exceeded parent=%s children=%d", parentID, children)
-		return
-	}
-
 	signal := asFloat(payload["signal_strength"])
 	if signal == 0 {
 		// Keep compatibility with emit payloads using integer encoding.
 		signal = float64(intFromAny(payload["signal_strength"]))
 	}
-	allowed, adjustedSignal, reason := pc.discoveryPolicy.EvaluateDiscoveryPreFilter(payload, signal)
-	if !allowed {
-		runtimeWarn("scoring-node", "dropping vertical.derived prefilter reject parent=%s reason=%s", parentID, reason)
-		return
-	}
-	payload["signal_strength"] = adjustedSignal
+	payload["signal_strength"] = signal
 
 	name := deriveDiscoveryCandidateName(payload)
 	if name == "" {
@@ -300,6 +285,10 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 	payload["generation_depth"] = generationDepth
 	payload["opportunity_name"] = name
 	payload["mode"] = "derived"
+	if passed, reason := pc.evaluateScoringDerivedGuard(ctx, evt, payload); !passed {
+		runtimeWarn("scoring-node", "dropping vertical.derived contract guard reject parent=%s reason=%s", parentID, reason)
+		return
+	}
 
 	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
 	verticalID, err := pc.ensureVerticalDiscovered(ctx, name, geography, "derived", payload)
@@ -314,11 +303,87 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 		"derived",
 		"", // scan_id (not applicable for derivation)
 		campaignID,
-		adjustedSignal,
+		signal,
 		strings.TrimSpace(evt.SourceAgent),
 		payload,
 	))
 	pc.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+}
+
+func (pc *FactoryPipelineCoordinator) evaluateScoringDerivedGuard(ctx context.Context, evt events.Event, payload map[string]any) (bool, string) {
+	if pc == nil || pc.ContractBundle() == nil {
+		return true, ""
+	}
+	handler, ok := pc.ContractBundle().NodeEventHandler(ScoringNodeID, "vertical.derived")
+	if !ok || handler.Guard == nil {
+		return true, ""
+	}
+	entity := pc.scoringDerivedGuardEntity(ctx, payload)
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		return false, "payload_encode_failed"
+	}
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:          strings.TrimSpace(evt.ID),
+			Type:        events.EventType("vertical.derived"),
+			VerticalID:  strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["parent_id"]))),
+			SourceAgent: strings.TrimSpace(evt.SourceAgent),
+			Payload:     rawPayload,
+		},
+		State: WorkflowState{
+			Stage:    "scoring",
+			Metadata: entity,
+		},
+	}
+	passed, evaluated := pc.evaluateWorkflowGuardSpec(triggerCtx, handler.Guard)
+	if passed {
+		return true, ""
+	}
+	if len(evaluated) == 0 {
+		return false, "guard_failed"
+	}
+	return false, strings.TrimSpace(evaluated[len(evaluated)-1])
+}
+
+func (pc *FactoryPipelineCoordinator) scoringDerivedGuardEntity(ctx context.Context, payload map[string]any) map[string]any {
+	entity := map[string]any{
+		"generation_depth": intFromAny(payload["generation_depth"]),
+	}
+	parentID := strings.TrimSpace(asString(payload["parent_id"]))
+	if children, err := pc.countDerivedChildren(ctx, parentID); err == nil {
+		entity["child_count"] = children
+	}
+	prefilter := pc.scoringDerivedPrefilterDetail(payload)
+	entity["red_flag_count"] = len(stringSliceFromAny(prefilter["red_flags"]))
+	entity["evidence_count"] = len(stringSliceFromAny(prefilter["evidence_urls"]))
+	entity["scores"] = map[string]any{
+		"icp_crispness":          scoringDerivedBooleanScore(prefilter["passes_icp_gate"]),
+		"retention_architecture": scoringDerivedBooleanScore(prefilter["passes_retention_gate"]),
+	}
+	return entity
+}
+
+func (pc *FactoryPipelineCoordinator) scoringDerivedPrefilterDetail(payload map[string]any) map[string]any {
+	if pc == nil || pc.discoveryPolicy == nil {
+		return map[string]any{}
+	}
+	signal := asFloat(payload["signal_strength"])
+	if signal == 0 {
+		signal = float64(intFromAny(payload["signal_strength"]))
+	}
+	detail := pc.discoveryPolicy.BuildPrefilterSkipDetail(payload, signal, signal, "", "derived")
+	if detail == nil {
+		return map[string]any{}
+	}
+	return detail
+}
+
+func scoringDerivedBooleanScore(raw any) int {
+	if truthyMetadataFlag(raw) {
+		return 100
+	}
+	return 0
 }
 
 func (pc *FactoryPipelineCoordinator) countDerivedChildren(ctx context.Context, parentID string) (int, error) {
@@ -416,7 +481,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 		acc.Geography = geo
 		acc.Mode = mode
 		if acc.Mode == "" {
-			acc.Mode = runtimeproductpolicy.DiscoveryFallbackMode()
+			acc.Mode = defaultPipelineScanMode(ss.runtime.ContractBundle())
 		}
 		acc.Rubric = ss.scoring.SelectScoringRubric(acc.Mode)
 		acc.Expected = ss.scoring.ExpectedScoringDimensions(acc.Rubric)
@@ -575,6 +640,19 @@ func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, vertical
 		return
 	}
 
+	if match, ok := ss.resolveScoringOnComplete(ctx, verticalID, scoredPayloadMap, result); ok {
+		stage := strings.TrimSpace(match.AdvancesTo)
+		if stage == "" {
+			stage = scoringOutcomeStage(match.Emits)
+		}
+		if scoringOutcomePublishesRejection(match.Emits) {
+			ss.runtime.appendScoringDigestBuffer(ctx, scoredPayload)
+		}
+		ss.publishScoringOutcomeEvents(ctx, verticalID, result, scoredPayloadMap, match.Emits)
+		ss.runtime.updateScoredVerticalState(ctx, verticalID, stage, scoredPayloadMap, strings.TrimSpace(result.Reason))
+		return
+	}
+
 	stage := "marginal_review"
 	switch result.Result {
 	case "shortlisted":
@@ -588,6 +666,115 @@ func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, vertical
 		ss.runtime.publish(ctx, "vertical.rejected", verticalID, payloadMap(ss.payloadFactory.BuildVerticalRejectedPayload(verticalID, result)))
 	}
 	ss.runtime.updateScoredVerticalState(ctx, verticalID, stage, scoredPayloadMap, strings.TrimSpace(result.Reason))
+}
+
+func (ss *ScoringState) resolveScoringOnComplete(ctx context.Context, verticalID string, scoredPayload map[string]any, result scoringComposite) (workflowRuleMatch, bool) {
+	if ss == nil || ss.runtime == nil || ss.runtime.ContractBundle() == nil {
+		return workflowRuleMatch{}, false
+	}
+	handler, ok := ss.runtime.ContractBundle().NodeEventHandler("scoring-node", "score.dimension_complete")
+	if !ok || handler.OnComplete == nil {
+		return workflowRuleMatch{}, false
+	}
+	triggerCtx := workflowTriggerContext{
+		Event: events.Event{
+			ID:         uuid.NewString(),
+			Type:       events.EventType("score.dimension_complete"),
+			VerticalID: verticalID,
+			Payload:    mustJSON(scoredPayload),
+		},
+		State: ss.runtime.currentWorkflowState(ctx, verticalID),
+	}
+	onCompleteMap := handlerRuleEntryToMap(handler.OnComplete)
+	return ss.runtime.matchWorkflowRulesWithVars(triggerCtx, onCompleteMap, scoringExpressionVars(computeSpecToMap(handler.Compute), result, scoredPayload))
+}
+
+func scoringExpressionVars(compute map[string]any, result scoringComposite, scoredPayload map[string]any) map[string]any {
+	vars := cloneStringAnyMap(scoredPayload)
+	if vars == nil {
+		vars = map[string]any{}
+	}
+	for dim, entry := range result.Dimensions {
+		dim = strings.TrimSpace(dim)
+		if dim == "" {
+			continue
+		}
+		vars[dim] = entry.Score
+	}
+	if tier1Dims := scoringComputeTierDimensions(compute, 0, result); len(tier1Dims) > 0 {
+		vars["tier1_dims"] = tier1Dims
+	}
+	return vars
+}
+
+func scoringComputeTierDimensions(compute map[string]any, tierIndex int, result scoringComposite) []any {
+	if len(compute) == 0 || tierIndex < 0 {
+		return nil
+	}
+	rawTiers, ok := asArray(compute["tiers"])
+	if !ok || tierIndex >= len(rawTiers) {
+		return nil
+	}
+	tier, ok := asObject(rawTiers[tierIndex])
+	if !ok {
+		return nil
+	}
+	rawDims, ok := asArray(tier["dimensions"])
+	if !ok {
+		return nil
+	}
+	out := make([]any, 0, len(rawDims))
+	for _, rawDim := range rawDims {
+		dim := strings.TrimSpace(asString(rawDim))
+		if dim == "" {
+			continue
+		}
+		if entry, ok := result.Dimensions[dim]; ok {
+			out = append(out, entry.Score)
+		}
+	}
+	return out
+}
+
+func (ss *ScoringState) publishScoringOutcomeEvents(ctx context.Context, verticalID string, result scoringComposite, scoredPayload map[string]any, emits []string) {
+	if ss == nil || ss.runtime == nil {
+		return
+	}
+	for _, emitEvent := range emits {
+		switch strings.TrimSpace(emitEvent) {
+		case "vertical.shortlisted":
+			ss.runtime.publish(ctx, emitEvent, verticalID, payloadMap(ss.payloadFactory.BuildVerticalShortlistedPayload(verticalID, result.CompositeScore, result.ViabilityScore, scoredPayload)))
+		case "vertical.marginal":
+			ss.runtime.publish(ctx, emitEvent, verticalID, payloadMap(ss.payloadFactory.BuildVerticalMarginalPayload(verticalID, result)))
+		case "vertical.rejected":
+			ss.runtime.publish(ctx, emitEvent, verticalID, payloadMap(ss.payloadFactory.BuildVerticalRejectedPayload(verticalID, result)))
+		default:
+			ss.runtime.publish(ctx, emitEvent, verticalID, cloneStringAnyMap(scoredPayload))
+		}
+	}
+}
+
+func scoringOutcomePublishesRejection(emits []string) bool {
+	for _, emitEvent := range emits {
+		if strings.TrimSpace(emitEvent) == "vertical.rejected" {
+			return true
+		}
+	}
+	return false
+}
+
+func scoringOutcomeStage(emits []string) string {
+	for _, emitEvent := range emits {
+		switch strings.TrimSpace(emitEvent) {
+		case "vertical.shortlisted":
+			return "shortlisted"
+		case "vertical.marginal":
+			return "marginal_review"
+		case "vertical.rejected":
+			return "killed"
+		}
+	}
+	return ""
 }
 
 func (pc *FactoryPipelineCoordinator) handlePortfolioDigestTimer(ctx context.Context, evt events.Event) {
