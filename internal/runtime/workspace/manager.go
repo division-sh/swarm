@@ -14,6 +14,7 @@ import (
 	"empireai/internal/models"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
 
 type Target struct {
@@ -286,8 +287,8 @@ func WorkspaceClass(actor models.AgentConfig) string {
 	if cfgClass := configString(actor.Config, "workspace_class"); cfgClass != "" {
 		return cfgClass
 	}
-	if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
-		if entry, ok := workflowAgentRegistryEntry(bundle, actor.ID, actor.Role); ok {
+	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
+		if entry, ok := workflowAgentRegistryEntry(source, actor.ID, actor.Role); ok {
 			return strings.TrimSpace(entry.WorkspaceClass)
 		}
 	}
@@ -299,8 +300,8 @@ func RoleWorkspaceClass(role string) string {
 	if role == "" {
 		return ""
 	}
-	if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
-		if entry, ok := workflowAgentRegistryEntry(bundle, "", role); ok {
+	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
+		if entry, ok := workflowAgentRegistryEntry(source, "", role); ok {
 			return strings.TrimSpace(entry.WorkspaceClass)
 		}
 	}
@@ -322,30 +323,9 @@ func RoleWorkspaceRouteClass(role string) string {
 	return workspaceRouteClass(RoleWorkspaceClass(role))
 }
 
-func workflowAgentRegistryEntry(bundle *runtimecontracts.WorkflowContractBundle, agentID, role string) (runtimecontracts.AgentRegistryEntry, bool) {
-	if bundle == nil {
-		return runtimecontracts.AgentRegistryEntry{}, false
-	}
-	agentID = strings.TrimSpace(agentID)
-	role = strings.TrimSpace(role)
-	if agentID != "" {
-		if entry, ok := bundle.MergedAgents[agentID]; ok {
-			return entry, true
-		}
-		if entry, ok := bundle.Agents[agentID]; ok {
-			return entry, true
-		}
-	}
-	if role != "" {
-		for _, source := range []map[string]runtimecontracts.AgentRegistryEntry{bundle.MergedAgents, bundle.Agents} {
-			for _, entry := range source {
-				if strings.EqualFold(strings.TrimSpace(entry.Role), role) || strings.EqualFold(strings.TrimSpace(entry.ID), role) {
-					return entry, true
-				}
-			}
-		}
-	}
-	return runtimecontracts.AgentRegistryEntry{}, false
+func workflowAgentRegistryEntry(source semanticview.Source, agentID, role string) (runtimecontracts.AgentRegistryEntry, bool) {
+	entry, ok := semanticview.FindAgentEntry(source, agentID, role)
+	return entry, ok
 }
 
 func configString(raw []byte, key string) string {

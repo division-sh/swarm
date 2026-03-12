@@ -1,0 +1,8 @@
+initial_state: collecting
+terminal_states: [done]
+states: [collecting, done]
+pins:
+  inputs:
+    events: [evidence.submitted]
+  outputs:
+    events: [evidence.recorded]

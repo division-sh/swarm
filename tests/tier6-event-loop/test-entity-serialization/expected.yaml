@@ -1,0 +1,14 @@
+trigger:
+  sequence:
+    - event: step.first
+      payload: { entity_id: ent-001 }
+    - event: step.second
+      payload: { entity_id: ent-001 }
+  assert_serial_processing: true
+
+expected:
+  handler_outcome: success
+  entity_state: complete
+  emitted_events:
+    - step.first_done
+    - step.second_done

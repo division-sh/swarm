@@ -79,8 +79,8 @@ func TestDashboard_HoldingList_IncludesWorkflowBadges(t *testing.T) {
 	if got := found["workflow_version"]; got != "2.1.0" {
 		t.Fatalf("expected workflow_version 2.1.0, got %#v", got)
 	}
-	if got := found["workflow_current_stage"]; got != "researching" {
-		t.Fatalf("expected workflow_current_stage researching, got %#v", got)
+	if got := found["workflow_current_state"]; got != "researching" {
+		t.Fatalf("expected workflow_current_state researching, got %#v", got)
 	}
 	if got, ok := found["active_timer_count"].(float64); !ok || got != 1 {
 		t.Fatalf("expected active_timer_count 1, got %#v", found["active_timer_count"])

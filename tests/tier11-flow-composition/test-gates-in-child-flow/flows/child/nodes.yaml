@@ -1,0 +1,11 @@
+validator:
+  id: validator
+  execution_type: system_node
+  subscribes_to: [validate.start]
+  produces: [validation.done]
+  event_handlers:
+    validate.start:
+      sets_gates:
+        g_validated: true
+      advances_to: done
+      emits: validation.done

@@ -1,0 +1,42 @@
+agent_fixtures:
+  business-research-agent:
+    - on: validation.started
+      emits:
+        - event: research.completed
+          payload:
+            entity_id: "{{entity_id}}"
+            vertical_id: "{{vertical_id}}"
+            business_brief: { market_size: 5000000, competitors: 2, moat: "WhatsApp integration" }
+            research_context: { geography: "US", mode: "saas_gap" }
+  lightweight-spec-agent:
+    - on: spec.requested
+      emits:
+        - event: spec.draft_ready
+          payload:
+            entity_id: "{{entity_id}}"
+            vertical_id: "{{vertical_id}}"
+            mvp_spec: "MVP specification: REST API + WhatsApp bot + simple dashboard."
+  spec-reviewer:
+    - on: spec_review.requested
+      emits:
+        - event: spec_review.passed
+          payload:
+            entity_id: "{{entity_id}}"
+            final_spec: "MVP specification: REST API + WhatsApp bot + simple dashboard."
+            review_notes: "Spec is complete and feasible."
+  factory-cto:
+    - on: cto.spec_review_requested
+      emits:
+        - event: cto.spec_approved
+          payload:
+            entity_id: "{{entity_id}}"
+            vertical_id: "{{vertical_id}}"
+            cto_notes: "Technically feasible. Recommend Node.js + PostgreSQL stack."
+  pre-brand-agent:
+    - on: brand.requested
+      emits:
+        - event: brand.candidates_ready
+          payload:
+            entity_id: "{{entity_id}}"
+            vertical_id: "{{vertical_id}}"
+            candidates: [{ name: "QuickInvoice", domain: "quickinvoice.com", available: true }]

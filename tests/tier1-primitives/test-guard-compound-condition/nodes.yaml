@@ -1,0 +1,12 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [check.requested]
+  produces: [check.passed]
+  event_handlers:
+    check.requested:
+      guard:
+        id: compound
+        check: "payload.score >= policy.min_score && (entity.priority == 'high' || payload.override == true)"
+      advances_to: done
+      emits: check.passed

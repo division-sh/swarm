@@ -1,0 +1,8 @@
+initial_state: discovered
+terminal_states: [killed]
+states: [discovered, shortlisted, marginal_review, killed]
+pins:
+  inputs:
+    events: [vertical.derived]
+  outputs:
+    events: [scoring.derived_requested]

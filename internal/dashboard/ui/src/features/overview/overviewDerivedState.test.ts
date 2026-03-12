@@ -21,7 +21,7 @@ test("deriveOverviewState prioritizes urgent items", () => {
     },
     holdingData: {
       campaigns: [],
-      verticals: [{ id: "v-1", slug: "alpha", stage: "scoring", workflow_current_stage: "validation", active_timer_count: 1 }],
+      verticals: [{ id: "v-1", slug: "alpha", stage: "scoring", workflow_current_state: "validation", active_timer_count: 1 }],
       agent_counts: {},
       summary: {},
       workflow_summary: {},

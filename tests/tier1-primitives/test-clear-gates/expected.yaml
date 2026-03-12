@@ -1,0 +1,14 @@
+trigger:
+  event: gates.clear_requested
+  payload:
+    entity_id: ent-001
+  gates_before:
+    g1_check: true
+
+expected:
+  handler_outcome: success
+  gates:
+    g1_check: false
+  entity_state: pending
+  emitted_events:
+    - gates.cleared

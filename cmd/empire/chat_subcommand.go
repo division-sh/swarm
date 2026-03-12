@@ -236,7 +236,7 @@ func syncRuntimeSystemNodeOwners(ctx context.Context, managerStore globalAgentSt
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundle(resolveContractLoaderRoot())
 	if err == nil && bundle != nil {
-		for _, timer := range bundle.Workflow.Workflow.Timers {
+		for _, timer := range bundle.WorkflowTimers() {
 			if !timer.Recurring {
 				continue
 			}

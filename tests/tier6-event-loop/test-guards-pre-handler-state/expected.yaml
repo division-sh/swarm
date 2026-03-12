@@ -1,0 +1,13 @@
+trigger:
+  event: process.requested
+  payload:
+    entity_id: ent-001
+  entity_state_before: active
+  entity_fields_before:
+    counter: 5
+expected:
+  handler_outcome: reject
+  entity_state: active
+  emitted_events: []
+  entity_fields:
+    counter: 5

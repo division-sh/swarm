@@ -1,0 +1,8 @@
+item.received:
+  payload:
+    entity_id: string
+    raw_score: integer
+item.scored:
+  payload:
+    entity_id: string
+    score: integer

@@ -1,0 +1,11 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [monitor.started]
+  produces: [timer.tick]
+  event_handlers:
+    monitor.started:
+      timer:
+        delay_ms: 1000
+        emit: timer.tick
+        recurring: true

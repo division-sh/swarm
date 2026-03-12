@@ -1,0 +1,18 @@
+trigger:
+  event: values.submitted
+  payload:
+    entity_id: ent-001
+    values:
+      - 10
+      - 5
+      - 20
+      - 3
+      - 15
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - values.reduced
+  entity_fields:
+    minimum: 3

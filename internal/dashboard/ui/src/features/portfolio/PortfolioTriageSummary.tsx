@@ -20,7 +20,7 @@ function verticalButton(label, vertical, onFocus, actionLabel, onAction) {
         </div>
       </div>
       <div className="stack tiny">
-        <span>stage {vertical.workflow_current_stage || vertical.stage || "-"}</span>
+        <span>state {vertical.workflow_current_state || vertical.stage || "-"}</span>
         {vertical.geography ? <span>{vertical.geography}</span> : null}
         {vertical.stage_entered_at ? <span>entered {relTime(vertical.stage_entered_at)}</span> : null}
         {(vertical.active_timer_count || 0) > 0 ? <span>timers {vertical.active_timer_count}</span> : null}

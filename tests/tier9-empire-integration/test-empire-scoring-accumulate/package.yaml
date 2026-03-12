@@ -1,0 +1,8 @@
+name: test-empire-scoring-accumulate
+version: 1.0.0
+description: >
+  11 score.dimension_complete events arrive at scoring-node. Accumulation completes,
+  weighted_average computed. Scores give composite >= 75, build_complexity >= 50,
+  automation_completeness >= 50, so on_complete classifies as shortlisted.
+platform_version: ">=1.1.0"
+flows: [scoring]

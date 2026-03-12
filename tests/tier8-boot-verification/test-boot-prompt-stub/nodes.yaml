@@ -1,0 +1,10 @@
+stub-agent-node:
+  id: stub-agent-node
+  execution_type: agent_node
+  subscribes_to: [task.requested]
+  produces: [task.completed]
+  agent: stub-agent
+  event_handlers:
+    task.requested:
+      advances_to: done
+      emits: task.completed

@@ -1,0 +1,6 @@
+trigger:
+  boot: true
+
+expected:
+  boot_result: success
+  template_instances: 0

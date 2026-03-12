@@ -48,6 +48,7 @@ entity_schema:
     generator_agent_id: text (agent that scored this entity)
   validation_phase:
     business_brief: jsonb (from research.completed)
+    research_context: jsonb (from research.completed)
     mvp_spec: jsonb (from spec.approved)
     cto_feasibility: jsonb (from cto.spec_approved)
     brand: jsonb (from brand.candidates_ready)

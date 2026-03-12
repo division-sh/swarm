@@ -6,7 +6,6 @@ var empireDefaultsOnce sync.Once
 
 func ensureEmpireDefaults() {
 	empireDefaultsOnce.Do(func() {
-		ensureEmpireProductPolicy()
 		ensureEmpireCommgraphPolicy()
 	})
 }

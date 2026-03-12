@@ -5,10 +5,11 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type WorkflowRuntime interface {
-	ContractBundle() *runtimecontracts.WorkflowContractBundle
+	SemanticSource() semanticview.Source
 	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
 	WorkflowStateStore() WorkflowStateStore
@@ -65,11 +66,11 @@ type ActionRegistry interface {
 	Action(id string) (runtimecontracts.GuardActionEntry, bool)
 }
 
-func (pc *FactoryPipelineCoordinator) ContractBundle() *runtimecontracts.WorkflowContractBundle {
+func (pc *FactoryPipelineCoordinator) SemanticSource() semanticview.Source {
 	if pc == nil || pc.module == nil {
 		return nil
 	}
-	return pc.module.ContractBundle()
+	return pc.module.SemanticSource()
 }
 
 func (pc *FactoryPipelineCoordinator) WorkflowDefinition() *WorkflowDefinition {

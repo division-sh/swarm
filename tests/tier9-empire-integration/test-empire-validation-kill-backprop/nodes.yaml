@@ -1,0 +1,11 @@
+validation-orchestrator:
+  id: validation-orchestrator
+  execution_type: system_node
+  subscribes_to: [cto.spec_vetoed]
+  produces: [vertical.killed, vertical.killed_backprop]
+  event_handlers:
+    cto.spec_vetoed:
+      advances_to: killed
+      emits:
+        - vertical.killed
+        - vertical.killed_backprop

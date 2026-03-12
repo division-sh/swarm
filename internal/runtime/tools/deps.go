@@ -4,10 +4,9 @@ import (
 	"context"
 	"database/sql"
 
+	"empireai/internal/config"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	"empireai/internal/config"
-	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 
@@ -27,7 +26,6 @@ type Scheduler interface {
 
 type Manager interface {
 	GetAgentConfig(agentID string) (models.AgentConfig, bool)
-	ConfigureRouting(rule runtimemanager.PersistedRoutingRule) error
 	SpawnAgentFor(verticalID string, cfg models.AgentConfig) error
 	TeardownAgent(agentID string) error
 	ReconfigureAgent(agentID string, cfg models.AgentConfig) error

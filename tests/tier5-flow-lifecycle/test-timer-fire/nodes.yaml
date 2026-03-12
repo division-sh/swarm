@@ -1,0 +1,11 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [timer.scheduled]
+  produces: [timer.check]
+  event_handlers:
+    timer.scheduled:
+      timer:
+        delay_ms: 1000
+        emit: timer.check
+      advances_to: checked

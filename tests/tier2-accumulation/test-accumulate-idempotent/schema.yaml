@@ -1,0 +1,8 @@
+initial_state: collecting
+terminal_states: [complete]
+states: [collecting, complete]
+pins:
+  inputs:
+    events: [item.arrived]
+  outputs:
+    events: [collection.done]

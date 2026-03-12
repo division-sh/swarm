@@ -1,0 +1,34 @@
+trigger:
+  sequence:
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: build_complexity, score: 82, evidence: "Simple REST API", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: automation_completeness, score: 78, evidence: "Full automation possible", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: icp_crispness, score: 85, evidence: "Clear ICP", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: distribution_leverage, score: 70, evidence: "SEO + content", confidence: "medium" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: time_to_value, score: 88, evidence: "Instant value", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: operational_drag, score: 75, evidence: "Low ops burden", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: pain_severity, score: 80, evidence: "Strong pain", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: competition_gap, score: 65, evidence: "Some competitors", confidence: "medium" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: monetization_clarity, score: 72, evidence: "Clear pricing model", confidence: "high" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: retention_architecture, score: 70, evidence: "Recurring data lock-in", confidence: "medium" }
+    - event: score.dimension_complete
+      payload: { entity_id: ent-001, dimension: expansion_potential, score: 68, evidence: "Adjacent verticals", confidence: "medium" }
+  entity_fields_before:
+    dimensions_requested: [build_complexity, automation_completeness, icp_crispness, distribution_leverage, time_to_value, operational_drag, pain_severity, competition_gap, monetization_clarity, retention_architecture, expansion_potential]
+
+expected:
+  handler_outcome: success
+  entity_state: shortlisted
+  emitted_events:
+    - vertical.shortlisted
+  entity_fields:
+    composite_score: computed_value

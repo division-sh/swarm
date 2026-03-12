@@ -1,0 +1,19 @@
+trigger:
+  event: job.start
+  payload:
+    entity_id: ent-001
+    mode: fast
+    threshold: "0.8"
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - process.done
+    - job.complete
+  entity_fields:
+    task_config:
+      mode: fast
+      threshold: "0.8"
+    result:
+      status: processed

@@ -1,0 +1,13 @@
+initial_state: idle
+terminal_states: [analyzed]
+states: [idle, analyzed]
+required_agents:
+  - role: analyzer
+    subscribes_to: [analysis.requested]
+    emits: [analysis.done]
+    description: Analyzes data
+pins:
+  inputs:
+    events: [analysis.requested]
+  outputs:
+    events: [analysis.done]

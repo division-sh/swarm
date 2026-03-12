@@ -8,6 +8,9 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeengine "empireai/internal/runtime/engine"
+	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/semanticview"
 )
 
 type HandlerPreview struct {
@@ -33,8 +36,8 @@ type previewWorkflowModule struct {
 	actionRegistry ActionRegistry
 }
 
-func (m *previewWorkflowModule) ContractBundle() *runtimecontracts.WorkflowContractBundle {
-	return m.bundle
+func (m *previewWorkflowModule) SemanticSource() semanticview.Source {
+	return semanticview.Wrap(m.bundle)
 }
 
 func (m *previewWorkflowModule) WorkflowDefinition() *WorkflowDefinition {
@@ -92,12 +95,12 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		return HandlerPreview{}, fmt.Errorf("missing handler %s/%s", nodeID, evt.Type)
 	}
 
-	previewBundle := cloneBundleForPreview(bundle, policyOverrides)
-	workflow, err := LoadWorkflowDefinition(previewBundle)
+	previewBundle := semanticview.CloneBundleForPreview(bundle, policyOverrides)
+	workflow, err := LoadWorkflowDefinition(semanticview.Wrap(previewBundle))
 	if err != nil {
 		return HandlerPreview{}, err
 	}
-	nodes, err := LoadWorkflowNodes(previewBundle)
+	nodes, err := LoadWorkflowNodes(semanticview.Wrap(previewBundle))
 	if err != nil {
 		return HandlerPreview{}, err
 	}
@@ -105,74 +108,58 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		bundle:         previewBundle,
 		workflow:       workflow,
 		workflowNodes:  nodes,
-		guardRegistry:  NewContractGuardRegistry(previewBundle),
-		actionRegistry: NewContractActionRegistry(previewBundle),
+		guardRegistry:  NewContractGuardRegistry(semanticview.Wrap(previewBundle)),
+		actionRegistry: NewContractActionRegistry(semanticview.Wrap(previewBundle)),
 	}
 	pc := NewFactoryPipelineCoordinatorWithOptions(previewBus{}, nil, FactoryPipelineCoordinatorOptions{Module: module})
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}
-	if evt.CreatedAt.IsZero() {
-		evt.CreatedAt = time.Now().UTC()
-	}
-	var emitted []events.Event
-	ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
-	outcome, err := executeHandlerStepsDetailed(withHandlerEngineContext(ctx, pc, nodeID, false), handler, evt, &state)
+	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
 	if err != nil {
 		return HandlerPreview{}, err
 	}
-	emits := append([]string{}, outcome.Emits...)
-	if len(emitted) > 0 {
-		emits = emits[:0]
-		for _, item := range emitted {
-			emits = append(emits, strings.TrimSpace(string(item.Type)))
+	node := runtimeengine.NewDeclarativeNode(nodeID, exec)
+	if node == nil {
+		return HandlerPreview{}, fmt.Errorf("preview executor is nil")
+	}
+	if evt.CreatedAt.IsZero() {
+		evt.CreatedAt = time.Now().UTC()
+	}
+	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID(workflowEventEntityID(evt)),
+		NodeID:   identity.NormalizeNodeID(nodeID),
+		Event:    evt,
+		Handler:  handler,
+		Preview:  true,
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID(state.VerticalID),
+			CurrentState: strings.TrimSpace(string(state.Stage)),
+			Metadata:     cloneStringAnyMap(state.Metadata),
+			StateBuckets: map[string]any{},
+		},
+	})
+	if err != nil {
+		return HandlerPreview{}, err
+	}
+	emits := make([]string, 0, len(result.EmitIntents))
+	for _, item := range result.EmitIntents {
+		if eventType := strings.TrimSpace(string(item.Event.Type)); eventType != "" {
+			emits = append(emits, eventType)
 		}
 	}
 	return HandlerPreview{
-		Status:          outcome.Status,
-		Stage:           state.Stage,
+		Status:          handlerOutcomeStatusFromEngine(result.Status),
+		Stage:           NormalizePipelineStage(firstNonEmptyString(result.NextState, result.CurrentState, string(state.Stage))),
 		StatusText:      state.Status,
-		Metadata:        cloneStringAnyMap(state.Metadata),
+		Metadata:        cloneStringAnyMap(result.StateMutation.Metadata),
 		Emits:           emits,
-		ActionsExecuted: append([]string{}, outcome.ActionsExecuted...),
-		GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
-		RuleID:          strings.TrimSpace(outcome.RuleID),
-		SetsGate:        strings.TrimSpace(outcome.SetsGate),
-		ClearGates:      append([]string{}, outcome.ClearGates...),
-		FanOutCount:     outcome.FanOutCount,
-		Computed:        cloneStringAnyMap(outcome.Computed),
+		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
+		GuardsEvaluated: append([]string{}, result.GuardsEvaluated...),
+		RuleID:          strings.TrimSpace(result.RuleID),
+		SetsGate:        strings.TrimSpace(result.SetsGate),
+		ClearGates:      append([]string{}, result.ClearGates...),
+		FanOutCount:     result.FanOutCount,
+		Computed:        cloneStringAnyMap(result.Computed),
 	}, nil
-}
-
-func cloneBundleForPreview(bundle *runtimecontracts.WorkflowContractBundle, policyOverrides map[string]any) *runtimecontracts.WorkflowContractBundle {
-	if bundle == nil {
-		return nil
-	}
-	clone := *bundle
-	clone.Policy = clonePolicyDocument(bundle.Policy)
-	clone.MergedPolicy = clonePolicyDocument(bundle.MergedPolicy)
-	if len(policyOverrides) == 0 {
-		return &clone
-	}
-	if clone.MergedPolicy.Values == nil {
-		clone.MergedPolicy.Values = map[string]runtimecontracts.PolicyValue{}
-	}
-	for key, value := range policyOverrides {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		current := clone.MergedPolicy.Values[key]
-		current.Value = value
-		clone.MergedPolicy.Values[key] = current
-	}
-	return &clone
-}
-
-func clonePolicyDocument(in runtimecontracts.PolicyDocument) runtimecontracts.PolicyDocument {
-	out := runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{}}
-	for key, value := range in.Values {
-		out.Values[key] = value
-	}
-	return out
 }

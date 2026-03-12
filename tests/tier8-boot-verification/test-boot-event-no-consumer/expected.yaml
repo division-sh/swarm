@@ -1,0 +1,7 @@
+trigger:
+  boot: true
+
+expected:
+  boot_result: warning
+  error_category: EVENT-NO-CONSUMER
+  error_contains: "orphan.unconsumed"

@@ -1,0 +1,11 @@
+trigger:
+  event: entity.create_requested
+  payload:
+    entity_id: ent-001
+    child_id: child-001
+
+expected:
+  handler_outcome: success
+  entity_state: creating
+  emitted_events:
+    - entity.created

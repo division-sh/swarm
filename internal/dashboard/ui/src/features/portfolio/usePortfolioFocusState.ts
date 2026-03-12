@@ -46,7 +46,7 @@ export function usePortfolioFocusState({ holdingData, traceRows, traceVertical }
     vertical: focusedVertical,
     latestTraceRow: focusedTraceRows.length > 0 ? focusedTraceRows[focusedTraceRows.length - 1] : (traceRows || []).length > 0 ? traceRows[traceRows.length - 1] : null,
     traceCount: focusedTraceRows.length,
-    drift: !!(focusedVertical?.workflow_current_stage && focusedVertical.workflow_current_stage !== focusedVertical.stage),
+    drift: !!(focusedVertical?.workflow_current_state && focusedVertical.workflow_current_state !== focusedVertical.stage),
     activeTimers: Number(focusedVertical?.active_timer_count || 0),
     revisions: Number(focusedVertical?.revision_count || 0),
   }), [focusedTraceRows, focusedVertical, resolvedFocusKey, traceRows]);

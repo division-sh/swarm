@@ -22,7 +22,7 @@ export default function HoldingWorkflowPanel({ workflowState, workflowStateError
               <div className="tiny">Runtime State</div>
               <div className="health-kv"><span>Workflow</span><span>{workflowState.workflow_name || "-"}</span></div>
               <div className="health-kv"><span>Version</span><span className="mono">{workflowState.workflow_version || "-"}</span></div>
-              <div className="health-kv"><span>Current Stage</span><span>{workflowState.current_stage || "-"}</span></div>
+              <div className="health-kv"><span>Current State</span><span>{workflowState.current_state || "-"}</span></div>
               <div className="health-kv"><span>Entered Stage</span><span title={fmtTime(workflowState.entered_stage_at)}>{relTime(workflowState.entered_stage_at)}</span></div>
               <div className="health-kv"><span>Transitions</span><span className="mono">{workflowState.transition_count || 0}</span></div>
               <div className="health-kv"><span>Active Timers</span><span className="mono">{workflowState.active_timer_count || 0}</span></div>
@@ -34,7 +34,7 @@ export default function HoldingWorkflowPanel({ workflowState, workflowStateError
               <div className="health-kv"><span>Updated</span><span>{fmtTime(workflowState.updated_at)}</span></div>
               <div className="health-kv"><span>Revision Count</span><span className="mono">{readPath(workflowState, ["metadata", "revision_count"]) || "0"}</span></div>
               <div className="health-kv"><span>Metadata Keys</span><span className="mono">{workflowState.metadata && typeof workflowState.metadata === "object" ? Object.keys(workflowState.metadata).length : 0}</span></div>
-              <div className="health-kv"><span>Accumulator Buckets</span><span className="mono">{workflowState.accumulator_state && typeof workflowState.accumulator_state === "object" ? Object.keys(workflowState.accumulator_state).length : 0}</span></div>
+              <div className="health-kv"><span>State Buckets</span><span className="mono">{workflowState.state_buckets && typeof workflowState.state_buckets === "object" ? Object.keys(workflowState.state_buckets).length : 0}</span></div>
             </div>
           </div>
 
@@ -83,8 +83,8 @@ export default function HoldingWorkflowPanel({ workflowState, workflowStateError
 
           <div className="row">
             <div className="holding-detail-section">
-              <div className="tiny" style={{ marginBottom: 6 }}>Accumulator State</div>
-              <JsonBlock data={workflowState.accumulator_state || {}} defaultOpen={2} />
+              <div className="tiny" style={{ marginBottom: 6 }}>State Buckets</div>
+              <JsonBlock data={workflowState.state_buckets || {}} defaultOpen={2} />
             </div>
             <div className="holding-detail-section">
               <div className="tiny" style={{ marginBottom: 6 }}>Workflow Metadata JSON</div>

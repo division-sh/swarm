@@ -1,0 +1,19 @@
+trigger:
+  sequence:
+    - event: score.received
+      payload: { entity_id: ent-001, score: 85.0 }
+      sender: "scoring/analysis-agent"
+    - event: score.received
+      payload: { entity_id: ent-001, score: 90.0 }
+      sender: "scoring/analysis-agent"
+    - event: score.received
+      payload: { entity_id: ent-001, score: 78.0 }
+      sender: "scoring/analysis-agent"
+  entity_fields_before:
+    expected_count: 3
+
+expected:
+  entity_state: complete
+  emitted_events:
+    - scores.collected
+  handler_outcome: success

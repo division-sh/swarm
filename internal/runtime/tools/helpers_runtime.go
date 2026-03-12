@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	runtimescanmode "empireai/internal/runtime/scanmode"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -30,11 +30,11 @@ func mustJSON(v any) []byte {
 }
 
 func normalizeScanMode(raw string) string {
-	return runtimeproductpolicy.NormalizeScanMode(raw)
+	return runtimescanmode.NormalizeMode(raw)
 }
 
 func normalizeScanPriority(raw string) string {
-	return runtimeproductpolicy.NormalizeScanPriority(raw)
+	return runtimescanmode.NormalizePriority(raw)
 }
 
 func asInt(v any) int {

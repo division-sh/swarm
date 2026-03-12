@@ -1,0 +1,19 @@
+node-a:
+  id: node-a
+  execution_type: system_node
+  subscribes_to: [task.started]
+  produces: [task.progressed]
+  event_handlers:
+    task.started:
+      advances_to: processing
+      emits: task.progressed
+
+node-b:
+  id: node-b
+  execution_type: system_node
+  subscribes_to: [task.progressed]
+  produces: [task.finished]
+  event_handlers:
+    task.progressed:
+      advances_to: complete
+      emits: task.finished

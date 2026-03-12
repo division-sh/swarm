@@ -33,8 +33,6 @@ import (
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	empirepipeline "empireai/internal/runtime/pipeline/empire"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
-	empireproductpolicy "empireai/internal/runtime/productpolicy/empire"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -123,9 +121,6 @@ func runRuntime(ctx context.Context, cfg *config.Config, stores storeBundle, sel
 		EnableToolGateway:  toolGatewayAddr != "",
 		ToolGatewayToken:   strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")),
 		WorkflowModule:     empirepipeline.NewModule(),
-		ProductPolicy: func() runtimeproductpolicy.Policy {
-			return empireproductpolicy.New()
-		},
 	})
 	if err != nil {
 		return err
@@ -548,7 +543,6 @@ func (s storeBundle) toRuntimeStores() runtime.Stores {
 		InboundStore:      s.InboundStore,
 		DigestStore:       s.DigestStore,
 		TurnStore:         s.TurnStore,
-		ScanCampaignStore: s.ScanCampaignStore,
 	}
 }
 

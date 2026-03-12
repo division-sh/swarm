@@ -1,0 +1,9 @@
+timer.scheduled:
+  payload:
+    entity_id: string
+timer.cancel_requested:
+  payload:
+    entity_id: string
+timer.check:
+  payload:
+    entity_id: string

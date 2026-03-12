@@ -1,0 +1,15 @@
+trigger:
+  event: spec.validation_failed
+  payload:
+    entity_id: ent-001
+    vertical_id: vert-001
+    issues: [{ type: "missing_section", detail: "No error handling defined" }]
+    severity: "medium"
+  entity_fields_before:
+    revision_count: 1
+
+expected:
+  handler_outcome: success
+  entity_state: mvp_speccing
+  emitted_events:
+    - spec.revision_requested

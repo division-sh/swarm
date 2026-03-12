@@ -1,0 +1,6 @@
+pipeline.start:
+  payload:
+    entity_id: string
+pipeline.complete:
+  payload:
+    entity_id: string

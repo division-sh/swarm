@@ -1,0 +1,11 @@
+trigger:
+  event: timer.operating_timeout
+  payload:
+    entity_id: ent-007
+    elapsed_hours: 168
+
+expected:
+  handler_outcome: success
+  entity_state: escalated
+  emitted_events:
+    - operating.timeout_escalation

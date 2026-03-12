@@ -1,0 +1,13 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [entity.create_requested]
+  produces: [entity.created]
+  event_handlers:
+    entity.create_requested:
+      action: create_flow_instance
+      action_params:
+        template: child-flow
+        instance_id: "payload.child_id"
+      emits: entity.created
+      advances_to: creating

@@ -1,0 +1,14 @@
+processor-node:
+  id: processor-node
+  execution_type: system_node
+  subscribes_to: [process.run]
+  produces: [process.done]
+  event_handlers:
+    process.run:
+      guard:
+        entity.task_config: { exists: true }
+      data_accumulation:
+        result:
+          status: processed
+      advances_to: finished
+      emits: process.done

@@ -1,0 +1,8 @@
+initial_state: ready
+terminal_states: [finished]
+states: [ready, finished]
+pins:
+  inputs:
+    events: [task.start]
+  outputs:
+    events: [task.done]

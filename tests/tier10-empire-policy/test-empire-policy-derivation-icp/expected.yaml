@@ -1,0 +1,15 @@
+trigger:
+  event: vertical.derived
+  payload:
+    entity_id: ent-005
+    signal_strength: 55
+    source_vertical_id: vert-parent-002
+  entity_fields_before:
+    generation_depth: 1
+    scores:
+      icp_crispness: 45
+
+expected:
+  handler_outcome: discard
+  entity_state: pending
+  emitted_events: []

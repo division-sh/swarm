@@ -1,0 +1,13 @@
+orchestrator:
+  id: orchestrator
+  execution_type: system_node
+  subscribes_to: [spawn.requested]
+  produces: [spawn.confirmed]
+  event_handlers:
+    spawn.requested:
+      action:
+        type: create_flow_instance
+        flow_template: worker
+        instance_id: "{{payload.worker_id}}"
+      emits: spawn.confirmed
+      advances_to: done

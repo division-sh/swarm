@@ -1,0 +1,5 @@
+delivery_enabled: true
+budget_state: normal
+suppression_states:
+  - throttled
+  - emergency

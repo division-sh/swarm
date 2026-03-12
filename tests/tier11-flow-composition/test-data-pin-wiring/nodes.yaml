@@ -1,0 +1,23 @@
+config-writer:
+  id: config-writer
+  execution_type: system_node
+  subscribes_to: [job.start]
+  produces: [processor/process.run]
+  event_handlers:
+    job.start:
+      data_accumulation:
+        task_config:
+          mode: "{{payload.mode}}"
+          threshold: "{{payload.threshold}}"
+      advances_to: configured
+      emits: processor/process.run
+
+result-listener:
+  id: result-listener
+  execution_type: system_node
+  subscribes_to: [processor/process.done]
+  produces: [job.complete]
+  event_handlers:
+    processor/process.done:
+      advances_to: done
+      emits: job.complete

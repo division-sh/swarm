@@ -268,10 +268,11 @@ func (pc *FactoryPipelineCoordinator) handlePortfolioSystemDirective(ctx context
 		pc.forwardSystemDirective(ctx, evt)
 		return
 	}
-	if pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if source == nil {
 		return
 	}
-	handler, ok := pc.ContractBundle().NodeEventHandler("portfolio-node", string(evt.Type))
+	handler, ok := source.NodeEventHandler("portfolio-node", string(evt.Type))
 	if !ok || len(handler.Rules) == 0 {
 		return
 	}
@@ -487,10 +488,11 @@ func (pc *FactoryPipelineCoordinator) handleLifecycleBudgetThreshold(ctx context
 }
 
 func (pc *FactoryPipelineCoordinator) handleLifecycleMailboxDecision(ctx context.Context, evt events.Event) {
-	if pc == nil || pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
 		return
 	}
-	handler, ok := pc.ContractBundle().NodeEventHandler("lifecycle-orchestrator", string(evt.Type))
+	handler, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type))
 	if !ok || len(handler.Rules) == 0 {
 		return
 	}

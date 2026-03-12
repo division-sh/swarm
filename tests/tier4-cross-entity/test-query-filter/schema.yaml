@@ -1,0 +1,8 @@
+initial_state: idle
+terminal_states: [done]
+states: [idle, filtered, done]
+pins:
+  inputs:
+    events: [filter.requested]
+  outputs:
+    events: [filter.completed]

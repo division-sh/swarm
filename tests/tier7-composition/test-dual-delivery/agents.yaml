@@ -1,0 +1,4 @@
+audit-agent:
+  id: audit-agent
+  subscribes_to: [task.completed]
+  produces: []

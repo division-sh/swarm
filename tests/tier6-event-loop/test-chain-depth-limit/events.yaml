@@ -1,0 +1,6 @@
+chain.start:
+  payload:
+    entity_id: string
+chain.continue:
+  payload:
+    entity_id: string

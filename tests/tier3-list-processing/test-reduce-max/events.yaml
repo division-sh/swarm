@@ -1,0 +1,7 @@
+values.submitted:
+  payload:
+    entity_id: string
+    values: array
+values.reduced:
+  payload:
+    entity_id: string

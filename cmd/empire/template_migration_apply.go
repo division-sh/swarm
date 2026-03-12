@@ -229,47 +229,12 @@ func executeMigrationOp(
 		_, _ = db.ExecContext(ctx, `UPDATE agents SET template_version = $2 WHERE id = $1`, id, toVersion)
 		return nil
 	case "ADD_ROUTE":
-		src := strings.TrimSpace(op.Source)
-		if src == "" {
-			src = "seeded"
-		}
-		bv := 0
-		if src == "bootstrap" || src == "seeded" {
-			bv = resolveBootstrapVersionForTemplate(ctx, db, toVersion)
-		}
-		rule := runtimemanager.PersistedRoutingRule{
-			VerticalID:       verticalID,
-			EventPattern:     strings.TrimSpace(op.EventPattern),
-			SubscriberID:     strings.TrimSpace(op.SubscriberID),
-			InstalledBy:      coalesce(strings.TrimSpace(op.InstalledBy), executedBy),
-			Reason:           strings.TrimSpace(op.Reason),
-			Status:           "active",
-			Source:           src,
-			BootstrapVersion: bv,
-		}
-		if err := manager.ConfigureRoutingTemplateMigration(rule); err != nil {
-			return fmt.Errorf("ADD_ROUTE %s -> %s failed: %w", rule.EventPattern, rule.SubscriberID, err)
-		}
+		// Routing derives from contracts and flow-instance expansion in the MAS runtime.
+		// Legacy template route mutations are intentionally obsolete.
 		return nil
 	case "REMOVE_ROUTE":
-		src := strings.TrimSpace(op.Source)
-		bv := 0
-		if src == "bootstrap" || src == "seeded" {
-			bv = resolveBootstrapVersionForTemplate(ctx, db, toVersion)
-		}
-		rule := runtimemanager.PersistedRoutingRule{
-			VerticalID:       verticalID,
-			EventPattern:     strings.TrimSpace(op.EventPattern),
-			SubscriberID:     strings.TrimSpace(op.SubscriberID),
-			InstalledBy:      executedBy,
-			Reason:           strings.TrimSpace(op.Reason),
-			Status:           "deactivated",
-			Source:           src,
-			BootstrapVersion: bv,
-		}
-		if err := manager.ConfigureRoutingTemplateMigration(rule); err != nil {
-			return fmt.Errorf("REMOVE_ROUTE %s -> %s failed: %w", rule.EventPattern, rule.SubscriberID, err)
-		}
+		// Routing derives from contracts and flow-instance expansion in the MAS runtime.
+		// Legacy template route mutations are intentionally obsolete.
 		return nil
 	default:
 		return fmt.Errorf("unsupported migration operation: %s", op.Type)

@@ -1,0 +1,13 @@
+trigger:
+  event: state.clear_requested
+  payload:
+    entity_id: ent-001
+  entity_fields_before:
+    accumulated_count: 5
+    accumulated_total: 250
+
+expected:
+  handler_outcome: success
+  entity_state: cleared
+  emitted_events:
+    - state.cleared

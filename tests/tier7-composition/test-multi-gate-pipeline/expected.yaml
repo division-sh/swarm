@@ -1,0 +1,20 @@
+trigger:
+  sequence:
+    - event: gate.g1_set
+      payload: { entity_id: ent-001 }
+    - event: gate.g2_set
+      payload: { entity_id: ent-001 }
+    - event: gate.g3_set
+      payload: { entity_id: ent-001 }
+    - event: approval.requested
+      payload: { entity_id: ent-001 }
+
+expected:
+  handler_outcome: success
+  entity_state: approved
+  gates:
+    g1: true
+    g2: true
+    g3: true
+  emitted_events:
+    - approval.granted

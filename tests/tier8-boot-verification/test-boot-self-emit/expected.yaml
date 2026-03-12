@@ -1,0 +1,7 @@
+trigger:
+  boot: true
+
+expected:
+  boot_result: error
+  error_category: DIALECT-SELF-EMIT
+  error_contains: "loop.event"

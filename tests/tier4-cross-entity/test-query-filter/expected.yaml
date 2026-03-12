@@ -1,0 +1,10 @@
+trigger:
+  event: filter.requested
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: filtered
+  emitted_events:
+    - filter.completed

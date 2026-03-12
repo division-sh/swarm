@@ -1,0 +1,8 @@
+initial_state: idle
+terminal_states: [done]
+states: [idle, creating, done]
+pins:
+  inputs:
+    events: [entity.create_requested]
+  outputs:
+    events: [entity.created]

@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [approved]
+states: [pending, approved]
+pins:
+  inputs:
+    events: [gate.g1_set, gate.g2_set, gate.g3_set, approval.requested]
+  outputs:
+    events: [approval.granted]

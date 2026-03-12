@@ -205,15 +205,16 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	discoveryMode := resolvePipelineScanMode(pc.ContractBundle(), mode)
+	source := pc.SemanticSource()
+	discoveryMode := resolvePipelineScanMode(source, mode)
 	if discoveryMode == "" {
 		discoveryMode = strings.ToLower(strings.TrimSpace(mode))
 	}
 	if discoveryMode == "" {
-		discoveryMode = resolvePipelineScanMode(pc.ContractBundle(), asString(payload["mode"]))
+		discoveryMode = resolvePipelineScanMode(source, asString(payload["mode"]))
 	}
 	if discoveryMode == "" {
-		discoveryMode = defaultPipelineScanMode(pc.ContractBundle())
+		discoveryMode = defaultPipelineScanMode(source)
 	}
 	opportunityPattern := pc.discoveryPolicy.NormalizeOpportunityPattern(asString(payload["opportunity_pattern"]))
 	if opportunityPattern == "" {

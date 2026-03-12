@@ -1,0 +1,3 @@
+loop.event:
+  payload:
+    entity_id: string

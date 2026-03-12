@@ -1,0 +1,13 @@
+reduce-node:
+  id: reduce-node
+  execution_type: system_node
+  subscribes_to: [values.submitted]
+  produces: [values.reduced]
+  event_handlers:
+    values.submitted:
+      reduce:
+        items_from: payload.values
+        operation: max
+        store_as: entity.maximum
+      emits: values.reduced
+      advances_to: done

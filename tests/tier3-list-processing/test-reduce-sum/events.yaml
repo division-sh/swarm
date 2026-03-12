@@ -1,0 +1,6 @@
+values.submitted:
+  payload:
+    entity_id: string
+values.totaled:
+  payload:
+    entity_id: string

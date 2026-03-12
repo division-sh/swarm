@@ -1,0 +1,5 @@
+name: test-rules-advances-to
+version: 1.0.0
+description: Rules branch advances entity state and emits event on match.
+platform_version: ">=1.1.0"
+flows: []

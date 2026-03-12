@@ -1,0 +1,9 @@
+task-handler:
+  id: task-handler
+  execution_type: system_node
+  subscribes_to: [work.assign]
+  produces: [work.done]
+  event_handlers:
+    work.assign:
+      advances_to: working
+      emits: work.done

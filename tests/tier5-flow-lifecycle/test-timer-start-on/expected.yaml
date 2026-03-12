@@ -1,0 +1,13 @@
+trigger:
+  sequence:
+    - event: task.started
+      payload:
+        entity_id: ent-001
+    - event: timer.task_timeout
+      payload:
+        entity_id: ent-001
+expected:
+  handler_outcome: success
+  entity_state: timed_out
+  emitted_events:
+    - task.timed_out

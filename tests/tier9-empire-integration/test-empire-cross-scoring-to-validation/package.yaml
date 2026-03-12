@@ -1,0 +1,8 @@
+name: test-empire-cross-scoring-to-validation
+version: 1.0.0
+description: >
+  Cross-flow test: vertical.shortlisted emitted by scoring flow is consumed
+  by validation-orchestrator. Starts validation pipeline at researching state,
+  emits validation.started.
+platform_version: ">=1.1.0"
+flows: [scoring, validation]

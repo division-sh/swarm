@@ -1,0 +1,5 @@
+name: child
+version: 1.0.0
+description: Child flow that validates and sets a scoped gate.
+platform_version: ">=1.1.0"
+flows: []

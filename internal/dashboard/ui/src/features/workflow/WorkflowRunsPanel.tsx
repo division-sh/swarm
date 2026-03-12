@@ -17,7 +17,7 @@ function deriveRuns(verticals, events) {
     const latest = rows[0] || null;
     const intercepted = rows.filter((row) => row.intercepted).length;
     const passthrough = rows.filter((row) => row.passthrough).length;
-    const drift = vertical.workflow_current_stage && vertical.workflow_current_stage !== vertical.stage;
+    const drift = vertical.workflow_current_state && vertical.workflow_current_state !== vertical.stage;
     const revisions = Number(vertical.revision_count || 0);
     const timers = Number(vertical.active_timer_count || 0);
     const issueScore = (drift ? 5 : 0) + Math.min(revisions, 4) + Math.min(timers, 4) + Math.min(intercepted, 5) + Math.min(passthrough, 3);
@@ -87,11 +87,11 @@ export default function WorkflowRunsPanel(props) {
       ),
     },
     {
-      accessorKey: "workflow_current_stage",
+      accessorKey: "workflow_current_state",
       header: "Stage",
       cell: ({ row }) => (
         <div>
-          <div>{row.original.workflow_current_stage || row.original.stage || "-"}</div>
+          <div>{row.original.workflow_current_state || row.original.stage || "-"}</div>
           {row.original.drift ? <div className="tiny health-warn">db {row.original.stage}</div> : null}
         </div>
       ),

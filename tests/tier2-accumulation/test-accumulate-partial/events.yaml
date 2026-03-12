@@ -1,0 +1,7 @@
+item.arrived:
+  payload:
+    entity_id: string
+    item_id: string
+collection.done:
+  payload:
+    entity_id: string

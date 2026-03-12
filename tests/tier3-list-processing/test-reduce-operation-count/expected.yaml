@@ -1,0 +1,16 @@
+trigger:
+  event: batch.submitted
+  payload:
+    entity_id: ent-001
+    items:
+      - id: a
+      - id: b
+      - id: c
+      - id: d
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - batch.counted
+  entity_fields:
+    item_count: 4

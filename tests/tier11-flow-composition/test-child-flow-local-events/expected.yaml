@@ -1,0 +1,12 @@
+trigger:
+  event: child/child.start
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: processed
+  emitted_events:
+    - child.internal
+    - child.done
+  parent_state: idle

@@ -10,7 +10,12 @@ import (
 	"empireai/internal/models"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
+
+type flowInstanceRouteInstaller interface {
+	AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error
+}
 
 func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	if am == nil {
@@ -25,11 +30,11 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if templateID == "" || instanceID == "" || verticalID == "" {
 		return fmt.Errorf("template_id, instance_id, and vertical_id are required")
 	}
-	view, ok := req.ContractBundle.FlowContracts[templateID]
+	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
 		return fmt.Errorf("flow contract view not found: %s", templateID)
 	}
-	schema, ok := req.ContractBundle.FlowSchemas[templateID]
+	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
 	if !ok {
 		return fmt.Errorf("flow schema not found: %s", templateID)
 	}
@@ -45,9 +50,9 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}
 
 	vars := flowActivationVars(req)
-	localEvents := flowLocalEventSet(schema, view)
-	agentKeys := make([]string, 0, len(view.Agents))
-	for key := range view.Agents {
+	localEvents := flowLocalEventSet(schema, scope)
+	agentKeys := make([]string, 0, len(scope.Agents))
+	for key := range scope.Agents {
 		key = strings.TrimSpace(key)
 		if key != "" {
 			agentKeys = append(agentKeys, key)
@@ -56,7 +61,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	sort.Strings(agentKeys)
 
 	for _, key := range agentKeys {
-		entry := view.Agents[key]
+		entry := scope.Agents[key]
 		cfg, err := buildFlowAgentConfig(templateID, instanceID, verticalID, key, entry, vars, localEvents, req.Config)
 		if err != nil {
 			return err
@@ -70,25 +75,14 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
 			return err
 		}
-		for _, subscription := range cfg.Subscriptions {
-			subscription = strings.TrimSpace(subscription)
-			if subscription == "" || !strings.Contains(subscription, "/") {
-				continue
-			}
-			if err := am.configureRouting(PersistedRoutingRule{
-				VerticalID:   verticalID,
-				EventPattern: subscription,
-				SubscriberID: cfg.ID,
-				InstalledBy:  "flow-instance-activator",
-				Reason:       "flow_instance_activation",
-				Status:       "active",
-				Source:       "dynamic_instance",
-			}, false); err != nil {
-				return err
-			}
-		}
 	}
-	return nil
+	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
+		if err := installer.AddFlowInstance(runtimecontracts.SystemNodeContract{}, req.FlowPath); err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("event bus does not support derived flow-instance routing for %s", req.FlowPath)
 }
 
 func buildFlowAgentConfig(
@@ -166,7 +160,7 @@ func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[s
 	return vars
 }
 
-func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, view runtimecontracts.FlowContractView) map[string]struct{} {
+func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) map[string]struct{} {
 	out := map[string]struct{}{}
 	for _, eventType := range schema.Pins.Inputs.Events {
 		eventType = strings.TrimSpace(eventType)
@@ -180,7 +174,7 @@ func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, view runtimec
 			out[eventType] = struct{}{}
 		}
 	}
-	for eventType := range view.Events {
+	for eventType := range scope.Events {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}

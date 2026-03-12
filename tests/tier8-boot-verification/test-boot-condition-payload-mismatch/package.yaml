@@ -1,0 +1,8 @@
+name: test-boot-condition-payload-mismatch
+version: 1.0.0
+description: >
+  Boot verification: guard condition references payload.nonexistent_field
+  which is not declared in the event's payload schema. Platform must catch
+  CONDITION-PAYLOAD error.
+platform_version: ">=1.1.0"
+flows: []

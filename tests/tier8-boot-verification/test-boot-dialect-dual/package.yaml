@@ -1,0 +1,7 @@
+name: test-boot-dialect-dual
+version: 1.0.0
+description: >
+  Boot verification: handler has both on_complete and rules fields,
+  which are mutually exclusive. Should produce a DIALECT-DUAL error.
+platform_version: ">=1.1.0"
+flows: []

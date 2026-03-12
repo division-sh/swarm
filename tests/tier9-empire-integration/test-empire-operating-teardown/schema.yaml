@@ -1,0 +1,8 @@
+initial_state: approved
+terminal_states: [killed]
+states: [approved, building, pre_launch, launched, operating, growth, winding_down, killed]
+pins:
+  inputs:
+    events: [opco.teardown_requested, opco.teardown_complete]
+  outputs:
+    events: [opco.terminated]

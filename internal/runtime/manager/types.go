@@ -112,12 +112,6 @@ type TemplatePersistence interface {
 	SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error
 }
 
-type RoutingPersistence interface {
-	UpsertRoutingRule(ctx context.Context, rule PersistedRoutingRule) error
-	LoadRoutingRules(ctx context.Context) ([]PersistedRoutingRule, error)
-	DeactivateRoutingRulesByVertical(ctx context.Context, verticalID string) error
-}
-
 type ReceiptPersistence interface {
 	UpsertEventReceipt(ctx context.Context, eventID, agentID, status, errText string) error
 }
@@ -130,7 +124,6 @@ type PendingEventPersistence interface {
 type ManagerPersistence interface {
 	AgentPersistence
 	TemplatePersistence
-	RoutingPersistence
 	ReceiptPersistence
 	PendingEventPersistence
 }

@@ -1,0 +1,17 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [export.requested]
+  produces: [item.exported]
+  event_handlers:
+    export.requested:
+      payload_transform:
+        fields:
+          id: payload.entity_id
+          name: entity.name
+          status: entity.state
+      advances_to: done
+      emits: item.exported
+  state_schema:
+    fields:
+      name: string

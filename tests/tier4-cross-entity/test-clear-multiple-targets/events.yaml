@@ -1,0 +1,6 @@
+state.reset_requested:
+  payload:
+    entity_id: string
+state.reset_completed:
+  payload:
+    entity_id: string

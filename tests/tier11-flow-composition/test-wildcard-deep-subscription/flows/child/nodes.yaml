@@ -1,0 +1,18 @@
+relay:
+  id: relay
+  execution_type: system_node
+  subscribes_to: [work.begin]
+  produces: [grandchild/task.start]
+  event_handlers:
+    work.begin:
+      emits: grandchild/task.start
+
+listener:
+  id: listener
+  execution_type: system_node
+  subscribes_to: [grandchild/task.done]
+  produces: [work.finished]
+  event_handlers:
+    grandchild/task.done:
+      advances_to: completed
+      emits: work.finished

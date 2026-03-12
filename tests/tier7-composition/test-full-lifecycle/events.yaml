@@ -1,0 +1,10 @@
+order.submitted:
+  payload:
+    entity_id: string
+    amount: integer
+order.validated:
+  payload:
+    entity_id: string
+order.finalized:
+  payload:
+    entity_id: string

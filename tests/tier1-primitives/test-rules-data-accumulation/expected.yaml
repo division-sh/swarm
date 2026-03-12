@@ -1,0 +1,13 @@
+trigger:
+  event: item.received
+  payload:
+    entity_id: ent-001
+    type: a
+    value: 42
+
+expected:
+  handler_outcome: success
+  entity_state: pending
+  emitted_events: []
+  entity_fields:
+    value: 42

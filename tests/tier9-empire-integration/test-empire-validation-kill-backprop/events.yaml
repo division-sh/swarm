@@ -1,0 +1,14 @@
+cto.spec_vetoed:
+  payload:
+    vertical_id: string
+    reason: string
+vertical.killed:
+  payload:
+    vertical_id: string
+    reason: string
+    source: string
+vertical.killed_backprop:
+  payload:
+    vertical_id: string
+    kill_reason: string
+    killed_by_flow: string

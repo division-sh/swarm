@@ -1,0 +1,10 @@
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: [a.start]
+  outputs:
+    events: [a.done]
+    data:
+      writes: [shared_field]

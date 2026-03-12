@@ -1,0 +1,30 @@
+trigger:
+  sequence:
+    - event: product_spec_ready
+      payload:
+        entity_id: ent-001
+        spec_id: spec-001
+        feature: "invoicing-module"
+    - event: technical_spec_ready
+      payload:
+        entity_id: ent-001
+        spec_id: spec-002
+        feature: "invoicing-module"
+    - event: qa.validation_passed
+      payload:
+        entity_id: ent-001
+        test_summary: "All 47 tests pass"
+        coverage_notes: "85% coverage"
+        staging_url: "https://staging.quickinvoice.com"
+    - event: deploy.requested
+      payload:
+        entity_id: ent-001
+        deployment_id: deploy-001
+        environment: production
+
+expected:
+  handler_outcome: success
+  entity_state: approved
+  gates_set: [g_product_spec, g_tech_spec, g_qa_passed]
+  emitted_events:
+    - deploy.authorized

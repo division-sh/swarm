@@ -1,0 +1,9 @@
+child-worker:
+  id: child-worker
+  execution_type: system_node
+  subscribes_to: [task.requested]
+  produces: [task.done]
+  event_handlers:
+    task.requested:
+      advances_to: finished
+      emits: task.done

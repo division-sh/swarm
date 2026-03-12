@@ -1,0 +1,10 @@
+trigger:
+  event: timer.scheduled
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: checked
+  emitted_events:
+    - timer.check

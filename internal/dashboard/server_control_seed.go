@@ -225,10 +225,10 @@ func (s *Server) handleControlCreateVertical(w http.ResponseWriter, r *http.Requ
 	}
 
 	if s.manager != nil {
-		if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
-			if _, ok := bundle.FlowContracts["operating"]; ok {
+		if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
+			if _, ok := source.FlowSchemaByID("operating"); ok {
 				if err := s.manager.ActivateFlowInstance(r.Context(), runtimepipeline.FlowInstanceActivationRequest{
-					ContractBundle: bundle,
+					ContractBundle: source,
 					TemplateID:     "operating",
 					InstanceID:     verticalID,
 					VerticalID:     verticalID,

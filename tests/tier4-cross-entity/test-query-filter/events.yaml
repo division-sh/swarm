@@ -1,0 +1,7 @@
+filter.requested:
+  payload:
+    entity_id: string
+filter.completed:
+  payload:
+    entity_id: string
+    results: object

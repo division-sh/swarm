@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type workflowStateBucketOwnership string
@@ -44,10 +45,10 @@ func classifyWorkflowStateBucket(bucket string) workflowStateBucketOwnership {
 
 func workflowStateBucketValue(instance WorkflowInstance, bucket string) (any, bool) {
 	bucket = strings.TrimSpace(bucket)
-	if bucket == "" || len(instance.AccumulatorState) == 0 {
+	if bucket == "" || len(instance.StateBuckets) == 0 {
 		return nil, false
 	}
-	value, ok := instance.AccumulatorState[bucket]
+	value, ok := instance.StateBuckets[bucket]
 	return value, ok
 }
 
@@ -67,8 +68,8 @@ func workflowMutableStateBucket(instance *WorkflowInstance, bucket string) map[s
 	if bucket == "" {
 		return map[string]any{}
 	}
-	if instance.AccumulatorState == nil {
-		instance.AccumulatorState = map[string]any{}
+	if instance.StateBuckets == nil {
+		instance.StateBuckets = map[string]any{}
 	}
 	current, _ := workflowStateBucketObject(*instance, bucket)
 	out := cloneStringAnyMap(current)
@@ -86,21 +87,21 @@ func workflowSetStateBucket(instance *WorkflowInstance, bucket string, value any
 	if bucket == "" {
 		return
 	}
-	if instance.AccumulatorState == nil {
-		instance.AccumulatorState = map[string]any{}
+	if instance.StateBuckets == nil {
+		instance.StateBuckets = map[string]any{}
 	}
-	instance.AccumulatorState[bucket] = value
+	instance.StateBuckets[bucket] = value
 }
 
 func workflowDeleteStateBucket(instance *WorkflowInstance, bucket string) {
-	if instance == nil || len(instance.AccumulatorState) == 0 {
+	if instance == nil || len(instance.StateBuckets) == 0 {
 		return
 	}
 	bucket = strings.TrimSpace(bucket)
 	if bucket == "" {
 		return
 	}
-	delete(instance.AccumulatorState, bucket)
+	delete(instance.StateBuckets, bucket)
 }
 
 func workflowStateBucketEntries(instance WorkflowInstance, bucket string) []map[string]any {
@@ -158,7 +159,7 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx cont
 	if pc != nil && pc.scoringState != nil && pc.scoringState.scoring != nil {
 		encoded = pc.scoringState.scoring.EncodeScoringRestoreDelta((*ScoringAccumulator)(acc))
 	}
-	encodedNode := encodeScoringAccumulatorForWorkflow(pc.ContractBundle(), acc)
+	encodedNode := encodeScoringAccumulatorForWorkflow(pc.SemanticSource(), acc)
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		workflowSetStateBucket(instance, restoreBucket, encoded)
 		workflowSetStateBucket(instance, workflowStateBucketScoringNode, encodedNode)
@@ -229,7 +230,7 @@ func (pc *FactoryPipelineCoordinator) hydrateWorkflowScoringAccumulator(ctx cont
 	acc.GeographicScope = firstNonEmptyString(acc.GeographicScope, geographicScope)
 	acc.Mode = firstNonEmptyString(normalizeScanMode(acc.Mode), normalizeScanMode(mode))
 	if acc.Mode == "" {
-		acc.Mode = bundleDefaultScanMode(pc.ContractBundle())
+		acc.Mode = bundleDefaultScanMode(pc.SemanticSource())
 	}
 	if len(acc.DiscoveryContext) == 0 {
 		acc.DiscoveryContext = cloneMap(discoveryContext)
@@ -268,19 +269,19 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScanProjection(ctx context.
 		if scanID == "" || acc == nil {
 			continue
 		}
-		encodedScan := encodeScanAccumulatorForWorkflow(pc.ContractBundle(), acc)
-		encodedPending := encodePendingCandidatesForWorkflow(pc.ContractBundle(), pendingByScan[scanID])
-		encodedDiscovery := encodeDiscoveryStateForWorkflow(pc.ContractBundle(), pendingByScan[scanID])
-		bundle := pc.ContractBundle()
+		encodedScan := encodeScanAccumulatorForWorkflow(pc.SemanticSource(), acc)
+		encodedPending := encodePendingCandidatesForWorkflow(pc.SemanticSource(), pendingByScan[scanID])
+		encodedDiscovery := encodeDiscoveryStateForWorkflow(pc.SemanticSource(), pendingByScan[scanID])
+		source := pc.SemanticSource()
 		_ = pc.workflowStore.Mutate(ctx, scanID, func(instance *WorkflowInstance) {
 			if strings.TrimSpace(instance.WorkflowName) == "" {
-				instance.WorkflowName = bundle.WorkflowName()
+				instance.WorkflowName = source.WorkflowName()
 			}
 			if strings.TrimSpace(instance.WorkflowVersion) == "" {
-				instance.WorkflowVersion = bundle.WorkflowVersion()
+				instance.WorkflowVersion = source.WorkflowVersion()
 			}
-			if strings.TrimSpace(instance.CurrentStage) == "" {
-				instance.CurrentStage = "scanning"
+			if strings.TrimSpace(instance.CurrentState) == "" {
+				instance.CurrentState = "scanning"
 			}
 			workflowSetStateBucket(instance, workflowStateBucketScanState, encodedScan)
 			workflowSetStateBucket(instance, workflowStateBucketPendingDedup, encodedPending)
@@ -575,8 +576,8 @@ func ApplyScoringRestoreDelta(acc *ScoringAccumulator, compatBucket map[string]a
 	}
 }
 
-func encodeScoringAccumulatorForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, acc *scoringAccumulator) map[string]any {
-	fields := workflowSystemNodeStateSchemaFields(bundle, ScoringNodeID)
+func encodeScoringAccumulatorForWorkflow(source semanticview.Source, acc *scoringAccumulator) map[string]any {
+	fields := workflowSystemNodeStateSchemaFields(source, ScoringNodeID)
 	if len(fields) == 0 || acc == nil {
 		return map[string]any{}
 	}
@@ -633,16 +634,16 @@ func encodeScanAccumulator(acc *scanAccumulator) map[string]any {
 	return out
 }
 
-func encodeScanAccumulatorForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, acc *scanAccumulator) map[string]any {
+func encodeScanAccumulatorForWorkflow(source semanticview.Source, acc *scanAccumulator) map[string]any {
 	out := encodeScanAccumulator(acc)
 	if acc == nil {
 		return out
 	}
-	stateFields := workflowSystemNodeStateSchemaFields(bundle, "scan-orchestrator")
+	stateFields := workflowSystemNodeStateSchemaFields(source, "scan-orchestrator")
 	if len(stateFields) == 0 {
 		return out
 	}
-	expectedScanners := scanExpectedDispatchKeys(bundle, acc)
+	expectedScanners := scanExpectedDispatchKeys(source, acc)
 	completedScanners := make([]string, 0, len(acc.CompletedBy))
 	for key := range acc.CompletedBy {
 		key = strings.TrimSpace(key)
@@ -679,11 +680,11 @@ func encodeScanAccumulatorForWorkflow(bundle *runtimecontracts.WorkflowContractB
 	return projected
 }
 
-func scanExpectedDispatchKeys(bundle *runtimecontracts.WorkflowContractBundle, acc *scanAccumulator) []string {
+func scanExpectedDispatchKeys(source semanticview.Source, acc *scanAccumulator) []string {
 	if acc == nil {
 		return nil
 	}
-	expected := scanDispatchKeysForMode(bundle, acc.Mode)
+	expected := scanDispatchKeysForMode(source, acc.Mode)
 	if len(expected) >= maxInt(acc.Expected, 0) {
 		return expected
 	}
@@ -693,11 +694,11 @@ func scanExpectedDispatchKeys(bundle *runtimecontracts.WorkflowContractBundle, a
 	return expected
 }
 
-func scanDispatchKeysForMode(bundle *runtimecontracts.WorkflowContractBundle, mode string) []string {
-	if bundle == nil {
+func scanDispatchKeysForMode(source semanticview.Source, mode string) []string {
+	if source == nil {
 		return nil
 	}
-	node, ok := bundle.Nodes["scan-orchestrator"]
+	node, ok := source.NodeEntries()["scan-orchestrator"]
 	if !ok {
 		return nil
 	}
@@ -850,9 +851,9 @@ func encodePendingCandidates(candidates []pendingCandidate) []map[string]any {
 	return out
 }
 
-func encodePendingCandidatesForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, candidates []pendingCandidate) []map[string]any {
+func encodePendingCandidatesForWorkflow(source semanticview.Source, candidates []pendingCandidate) []map[string]any {
 	out := encodePendingCandidates(candidates)
-	fields := workflowSystemNodeStateSchemaFields(bundle, workflowStateBucketDiscoveryAggregator)
+	fields := workflowSystemNodeStateSchemaFields(source, workflowStateBucketDiscoveryAggregator)
 	if len(fields) == 0 {
 		return out
 	}
@@ -887,12 +888,12 @@ func encodePendingCandidatesForWorkflow(bundle *runtimecontracts.WorkflowContrac
 	return out
 }
 
-func encodeDiscoveryStateForWorkflow(bundle *runtimecontracts.WorkflowContractBundle, candidates []pendingCandidate) []map[string]any {
-	fields := workflowSystemNodeStateSchemaFields(bundle, workflowStateBucketDiscoveryAggregator)
+func encodeDiscoveryStateForWorkflow(source semanticview.Source, candidates []pendingCandidate) []map[string]any {
+	fields := workflowSystemNodeStateSchemaFields(source, workflowStateBucketDiscoveryAggregator)
 	if len(fields) == 0 || len(candidates) == 0 {
 		return []map[string]any{}
 	}
-	withCompat := encodePendingCandidatesForWorkflow(bundle, candidates)
+	withCompat := encodePendingCandidatesForWorkflow(source, candidates)
 	out := make([]map[string]any, 0, len(withCompat))
 	for _, item := range withCompat {
 		filtered := map[string]any{}

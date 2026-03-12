@@ -1,0 +1,19 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.arrived, accumulate.timeout]
+  produces: [collection.done, collection.partial]
+  event_handlers:
+    item.arrived:
+      accumulate:
+        expected_from: entity.expected_count
+        completion: all
+        on_timeout:
+          advances_to: partial
+          emits: collection.partial
+      advances_to: complete
+      emits: collection.done
+  state_schema:
+    fields:
+      expected_count: integer
+      received_items: jsonb

@@ -14,11 +14,11 @@ func (pc *FactoryPipelineCoordinator) matchTypedRulesWithVars(triggerCtx workflo
 	return pc.matchWorkflowRulesWithVars(triggerCtx, rules, extraVars)
 }
 
-func (pc *FactoryPipelineCoordinator) matchTypedOnComplete(triggerCtx workflowTriggerContext, onComplete *runtimecontracts.HandlerRuleEntry, extraVars map[string]any) (workflowRuleMatch, bool) {
-	if onComplete == nil {
+func (pc *FactoryPipelineCoordinator) matchTypedOnComplete(triggerCtx workflowTriggerContext, onComplete []runtimecontracts.HandlerRuleEntry, extraVars map[string]any) (workflowRuleMatch, bool) {
+	if len(onComplete) == 0 {
 		return workflowRuleMatch{}, false
 	}
-	return pc.matchWorkflowRulesWithVars(triggerCtx, []runtimecontracts.HandlerRuleEntry{*onComplete}, extraVars)
+	return pc.matchWorkflowRulesWithVars(triggerCtx, onComplete, extraVars)
 }
 
 func gateSpecString(spec *runtimecontracts.GateSpec) string {
@@ -55,7 +55,7 @@ func computeSpecToMap(spec *runtimecontracts.ComputeSpec) map[string]any {
 		return nil
 	}
 	m := map[string]any{
-		"operation": spec.Operation,
+		"operation": spec.Operation.String(),
 		"store_as":  spec.StoreAs,
 	}
 	if len(spec.Tiers) > 0 {

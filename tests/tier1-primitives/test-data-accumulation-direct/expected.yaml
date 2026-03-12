@@ -1,0 +1,15 @@
+trigger:
+  event: item.received
+  payload:
+    entity_id: ent-001
+    name: "test"
+    score: 85
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  entity_fields:
+    name: "test"
+    score: 85
+  emitted_events:
+    - item.stored

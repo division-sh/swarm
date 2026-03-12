@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [evidence.submitted]
+  produces: [evidence.recorded]
+  event_handlers:
+    evidence.submitted:
+      action: record_evidence
+      emits: evidence.recorded

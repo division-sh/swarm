@@ -1,0 +1,13 @@
+trigger:
+  event: task.submitted
+  payload:
+    entity_id: ent-001
+  assert_atomic_commit: true
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  gates:
+    approval_gate: true
+  emitted_events:
+    - task.accepted

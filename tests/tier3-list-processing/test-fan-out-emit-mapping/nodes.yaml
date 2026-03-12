@@ -1,0 +1,15 @@
+routing-node:
+  id: routing-node
+  execution_type: system_node
+  subscribes_to: [batch.submitted]
+  produces: [routed.a, routed.b]
+  event_handlers:
+    batch.submitted:
+      fan_out:
+        items_from: payload.items
+        emit_mapping:
+          key_field: "item.type"
+          mapping:
+            a: "routed.a"
+            b: "routed.b"
+      advances_to: routing

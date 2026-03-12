@@ -1,0 +1,14 @@
+processor:
+  id: processor
+  execution_type: system_node
+  subscribes_to: [process.requested]
+  produces: [process.done]
+  event_handlers:
+    process.requested:
+      guard:
+        id: counter_check
+        check: "entity.counter < 3"
+      data_accumulation:
+        counter: "entity.counter + 1"
+      advances_to: processing
+      emits: process.done

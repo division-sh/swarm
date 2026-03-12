@@ -1,0 +1,7 @@
+name: test-boot-required-agent-missing
+version: 1.0.0
+description: >
+  Boot verification: schema requires agent role 'missing-agent' but
+  agents.yaml has no such agent. Platform must catch REQUIRED-AGENT.
+platform_version: ">=1.1.0"
+flows: []

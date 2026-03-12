@@ -1,0 +1,6 @@
+micro.start:
+  payload:
+    entity_id: string
+micro.done:
+  payload:
+    entity_id: string

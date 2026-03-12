@@ -1,0 +1,31 @@
+build-orchestrator:
+  id: build-orchestrator
+  execution_type: system_node
+  subscribes_to: [product_spec_ready, technical_spec_ready, qa.validation_passed, deploy.requested]
+  produces: [build_complete, deploy.authorized, build.escalation]
+  gate_state:
+    g_product_spec: PM completed product spec
+    g_tech_spec: CTO completed tech spec
+    g_qa_passed: QA validated the build
+  event_handlers:
+    product_spec_ready:
+      sets_gate: g_product_spec
+    technical_spec_ready:
+      guard:
+        id: need_product_spec_first
+        check: "entity.gates.g_product_spec == true"
+        on_fail: reject
+      sets_gate: g_tech_spec
+    qa.validation_passed:
+      guard:
+        id: need_build_first
+        check: "entity.gates.g_tech_spec == true"
+        on_fail: reject
+      sets_gate: g_qa_passed
+      emits: build_complete
+    deploy.requested:
+      guard:
+        id: qa_gate
+        check: "entity.gates.g_qa_passed == true"
+        on_fail: reject
+      emits: deploy.authorized

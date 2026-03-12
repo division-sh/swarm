@@ -1,0 +1,14 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [state.reset_requested]
+  produces: [state.reset_completed]
+  event_handlers:
+    state.reset_requested:
+      clear:
+        targets:
+          - accumulator_state
+          - cycle_counters
+          - pending_dedup
+      emits: state.reset_completed
+      advances_to: cleared

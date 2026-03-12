@@ -1,0 +1,13 @@
+count-node:
+  id: count-node
+  execution_type: system_node
+  subscribes_to: [items.submitted]
+  produces: [items.counted]
+  event_handlers:
+    items.submitted:
+      count:
+        items_from: payload.items
+        condition: "item.active == true"
+        store_as: entity.active_count
+      emits: items.counted
+      advances_to: done

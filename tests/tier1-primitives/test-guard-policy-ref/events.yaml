@@ -1,0 +1,7 @@
+check.requested:
+  payload:
+    entity_id: string
+    region: string
+check.passed:
+  payload:
+    entity_id: string

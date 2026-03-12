@@ -1,0 +1,7 @@
+entity.create_requested:
+  payload:
+    entity_id: string
+    child_id: string
+entity.created:
+  payload:
+    entity_id: string

@@ -1,0 +1,15 @@
+gate.g1_set:
+  payload:
+    entity_id: string
+gate.g2_set:
+  payload:
+    entity_id: string
+gate.g3_set:
+  payload:
+    entity_id: string
+approval.requested:
+  payload:
+    entity_id: string
+approval.granted:
+  payload:
+    entity_id: string

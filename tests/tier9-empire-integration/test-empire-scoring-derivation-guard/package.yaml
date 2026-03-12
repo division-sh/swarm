@@ -1,0 +1,7 @@
+name: test-empire-scoring-derivation-guard
+version: 1.0.0
+description: >
+  vertical.derived with generation_depth=3 exceeds policy max_derivation_depth=2.
+  Guard depth_cap fails, on_fail=discard. Event is silently dropped.
+platform_version: ">=1.1.0"
+flows: [scoring]

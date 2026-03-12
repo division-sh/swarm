@@ -12,6 +12,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/paths"
+	"empireai/internal/runtime/semanticview"
 )
 
 type workflowTransitionOutcome struct {
@@ -45,16 +47,21 @@ type handlerExecutionPlan struct {
 	Action           string
 	Template         string
 	InstanceIDFrom   string
+	InstanceIDPath   paths.Path
 	ConfigFrom       *runtimecontracts.ConfigFromSpec
 	CompletionRule   string
+	Accumulate       *runtimecontracts.AccumulateSpec
+	Compute          *runtimecontracts.ComputeSpec
+	FanOut           *runtimecontracts.FanOutSpec
 	AdvancesTo       string
 	SetsGate         string
 	ClearGates       bool
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
+	PayloadTransform *runtimecontracts.PayloadTransformSpec
 	Emits            string
 	EmitEvents       []string
 	Rules            []runtimecontracts.HandlerRuleEntry
-	OnComplete       *runtimecontracts.HandlerRuleEntry
+	OnComplete       []runtimecontracts.HandlerRuleEntry
 	ExecutionOrder   []string
 }
 
@@ -77,6 +84,13 @@ type workflowRuleMatch struct {
 	AdvancesTo       string
 	Emits            []string
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
+}
+
+var workflowPreStageUpdateActions = map[string]struct{}{
+	"increment_revision_count":  {},
+	"emit_vertical_shortlisted": {},
+	"emit_vertical_marginal":    {},
+	"emit_vertical_rejected":    {},
 }
 
 func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
@@ -117,7 +131,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.C
 		State:           previousState,
 		ValidationState: pc.validationStateSnapshot(verticalID),
 	}
-	if result, err := pc.executeDerivedContractHandler(ctx, triggerCtx, false); err != nil {
+	if result, err := pc.executeAuthoritativeNodeHandler(ctx, evt, triggerCtx); err != nil {
 		runtimeWarn(runtimeWorkflowID, "handler engine failed event=%s entity=%s: %v", strings.TrimSpace(string(evt.Type)), verticalID, err)
 		return workflowTransitionOutcome{}, false
 	} else if result.Handled {
@@ -178,7 +192,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowDataAccumulation(
 	if len(writes) == 0 {
 		return
 	}
-	allowedFields := workflowEntitySchemaFields(pc.ContractBundle())
+	allowedFields := workflowEntitySchemaFields(pc.SemanticSource())
 	if len(allowedFields) == 0 {
 		return
 	}
@@ -252,15 +266,20 @@ func handlerExecutionPlanFromDerivedSemantic(
 		EventType:        strings.TrimSpace(derived.EventType),
 		Guard:            handlerGuardID(derived.Guard),
 		GuardSpec:        derived.Guard,
-		Action:           strings.TrimSpace(derived.Action),
-		Template:         strings.TrimSpace(derived.Template),
-		InstanceIDFrom:   strings.TrimSpace(derived.InstanceIDFrom),
-		ConfigFrom:       derived.ConfigFrom,
+		Action:           strings.TrimSpace(derived.Action.ID),
+		Template:         strings.TrimSpace(derived.Action.Template),
+		InstanceIDFrom:   strings.TrimSpace(derived.Action.InstanceIDFrom),
+		InstanceIDPath:   derived.Action.InstanceIDPath,
+		ConfigFrom:       derived.Action.ConfigFrom,
 		CompletionRule:   strings.TrimSpace(derived.CompletionRule),
+		Accumulate:       derived.Accumulate,
+		Compute:          derived.Compute,
+		FanOut:           derived.FanOut,
 		AdvancesTo:       strings.TrimSpace(derived.AdvancesTo),
 		SetsGate:         gateSpecString(derived.SetsGate),
 		ClearGates:       len(derived.ClearGates) > 0,
 		DataAccumulation: derived.DataAccumulation,
+		PayloadTransform: derived.PayloadTransform,
 		Emits:            strings.TrimSpace(derived.Emits.First()),
 		EmitEvents:       derived.Emits.Values(),
 		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), derived.Rules...),
@@ -276,15 +295,20 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		EventType:        strings.TrimSpace(eventType),
 		Guard:            handlerGuardID(handler.Guard),
 		GuardSpec:        handler.Guard,
-		Action:           strings.TrimSpace(handler.Action),
-		Template:         strings.TrimSpace(handler.Template),
-		InstanceIDFrom:   strings.TrimSpace(handler.InstanceIDFrom),
-		ConfigFrom:       handler.ConfigFrom,
+		Action:           strings.TrimSpace(handler.Action.ID),
+		Template:         strings.TrimSpace(handler.Action.Template),
+		InstanceIDFrom:   strings.TrimSpace(handler.Action.InstanceIDFrom),
+		InstanceIDPath:   handler.Action.InstanceIDPath,
+		ConfigFrom:       handler.Action.ConfigFrom,
 		CompletionRule:   strings.TrimSpace(handler.CompletionRule),
+		Accumulate:       handler.Accumulate,
+		Compute:          handler.Compute,
+		FanOut:           handler.FanOut,
 		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 		SetsGate:         gateSpecString(handler.SetsGate),
 		ClearGates:       len(handler.ClearGates) > 0,
 		DataAccumulation: handler.DataAccumulation,
+		PayloadTransform: handler.PayloadTransform,
 		Emits:            strings.TrimSpace(handler.Emits.First()),
 		EmitEvents:       handler.Emits.Values(),
 		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), handler.Rules...),
@@ -295,18 +319,30 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 }
 
 func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
-	steps := make([]string, 0, 10)
+	steps := make([]string, 0, 12)
+	if plan.ClearGates {
+		steps = append(steps, "clear_gates")
+	}
 	if handlerPlanHasGuard(plan) {
 		steps = append(steps, "guard")
 	}
-	if plan.DataAccumulation.HasWrites() || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
+	if plan.Accumulate != nil {
 		steps = append(steps, "accumulate")
 	}
-	if plan.Action != "" {
+	if plan.Compute != nil {
 		steps = append(steps, "compute")
 	}
-	if plan.OnComplete != nil || plan.CompletionRule != "" {
+	if plan.FanOut != nil {
+		steps = append(steps, "fan_out")
+	}
+	if workflowHandlerHasOnComplete(runtimecontracts.SystemNodeEventHandler{
+		OnComplete: plan.OnComplete,
+		Accumulate: plan.Accumulate,
+	}) || len(plan.Rules) > 0 {
 		steps = append(steps, "on_complete")
+	}
+	if len(plan.Rules) > 0 {
+		steps = append(steps, "rules")
 	}
 	if plan.AdvancesTo != "" {
 		steps = append(steps, "advances_to")
@@ -317,14 +353,14 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	if plan.DataAccumulation.HasWrites() || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
 		steps = append(steps, "data_accumulation")
 	}
-	if plan.Emits != "" {
+	if plan.PayloadTransform != nil {
+		steps = append(steps, "payload_transform")
+	}
+	if len(plan.EmitEvents) > 0 || plan.Emits != "" {
 		steps = append(steps, "emits")
 	}
-	if len(plan.Rules) > 0 {
-		steps = append(steps, "rules")
-	}
 	if plan.Action != "" {
-		steps = append(steps, "action_hook")
+		steps = append(steps, "action")
 	}
 	return steps
 }
@@ -348,37 +384,9 @@ func workflowTransitionFromHandlerPlan(state WorkflowState, plan handlerExecutio
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) executeContractHandlerFirstPlan(
-	ctx context.Context,
-	triggerCtx workflowTriggerContext,
-	transition WorkflowTransition,
-	plan handlerExecutionPlan,
-) []string {
-	if pc == nil {
-		return nil
-	}
-	verticalID := workflowEventEntityID(triggerCtx.Event)
-	if verticalID == "" {
-		return nil
-	}
-	actionsExecuted := pc.executeHandlerPlanActions(ctx, triggerCtx, plan)
-	pc.applyWorkflowGateMutation(ctx, verticalID, strings.TrimSpace(plan.NodeID), strings.TrimSpace(plan.SetsGate), plan.ClearGates)
-	pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, triggerCtx.Event)
-	if strings.TrimSpace(plan.AdvancesTo) != "" {
-		pc.updateVerticalStage(ctx, verticalID, plan.AdvancesTo, string(triggerCtx.Event.Type))
-	}
-	for _, emitEvent := range plan.EmitEvents {
-		emitEvent = strings.TrimSpace(emitEvent)
-		if emitEvent == "" {
-			continue
-		}
-		pc.publish(ctx, emitEvent, verticalID, pc.handlerEmitPayload(ctx, triggerCtx, emitEvent))
-	}
-	return actionsExecuted
-}
-
 func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
-	if pc == nil || pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
 		return false
 	}
 	nodeID = strings.TrimSpace(nodeID)
@@ -386,17 +394,15 @@ func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context
 	if nodeID == "" || eventType == "" {
 		return false
 	}
-	handler, ok := pc.ContractBundle().NodeEventHandler(nodeID, eventType)
+	handler, ok := source.NodeEventHandler(nodeID, eventType)
 	if !ok {
 		return false
 	}
-	verticalID := workflowEventEntityID(evt)
-	triggerCtx := workflowTriggerContext{
-		Event:           evt,
-		State:           pc.currentWorkflowState(ctx, verticalID),
-		ValidationState: pc.validationStateSnapshot(verticalID),
+	engine := newCoordinatorHandlerExecutionEngine(pc, nodeID)
+	if engine == nil {
+		return false
 	}
-	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
+	result, err := engine.ExecuteHandlerSteps(ctx, handler, evt)
 	if err != nil {
 		runtimeWarn(runtimeWorkflowID, "node handler execution failed node=%s event=%s: %v", nodeID, eventType, err)
 		return false
@@ -404,33 +410,7 @@ func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context
 	if !result.Handled {
 		return false
 	}
-	pc.reconcileWorkflowEventTimers(ctx, verticalID, eventType)
 	return true
-}
-
-func (pc *FactoryPipelineCoordinator) executeHandlerPlanActions(
-	ctx context.Context,
-	triggerCtx workflowTriggerContext,
-	plan handlerExecutionPlan,
-) []string {
-	action := strings.TrimSpace(plan.Action)
-	if action == "" {
-		return nil
-	}
-	switch action {
-	case "record_evidence":
-		if pc.recordWorkflowEvidence(ctx, workflowEventEntityID(triggerCtx.Event), strings.TrimSpace(plan.NodeID), parsePayloadMap(triggerCtx.Event.Payload)) {
-			return []string{action}
-		}
-		return nil
-	case "create_flow_instance":
-		if pc.createFlowInstance(ctx, triggerCtx, plan) {
-			return []string{action}
-		}
-		return nil
-	default:
-		return nil
-	}
 }
 
 func (pc *FactoryPipelineCoordinator) createFlowInstance(
@@ -442,22 +422,22 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(
 		return false
 	}
 	templateID := strings.TrimSpace(plan.Template)
-	instanceID := strings.TrimSpace(pc.resolveFlowInstanceID(triggerCtx, plan.InstanceIDFrom))
+	instanceID := strings.TrimSpace(pc.resolveFlowInstanceID(triggerCtx, plan.InstanceIDFrom, plan.InstanceIDPath))
 	if templateID == "" || instanceID == "" {
 		return false
 	}
-	bundle := pc.ContractBundle()
-	if bundle == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	source := pc.SemanticSource()
+	if source == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return false
 	}
-	schema, ok := bundle.FlowSchemas[templateID]
+	schema, ok := source.FlowSchemaByID(templateID)
 	if !ok {
 		return false
 	}
 	if mode := strings.TrimSpace(schema.Mode); mode != "" && !strings.EqualFold(mode, "template") {
 		return false
 	}
-	initialState := strings.TrimSpace(bundle.FlowInitialStage(templateID))
+	initialState := strings.TrimSpace(source.FlowInitialStage(templateID))
 	if initialState == "" {
 		initialState = strings.TrimSpace(schema.InitialState)
 	}
@@ -484,8 +464,8 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(
 	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
 		InstanceID:      instanceID,
 		WorkflowName:    templateID,
-		WorkflowVersion: strings.TrimSpace(bundle.WorkflowVersion()),
-		CurrentStage:    initialState,
+		WorkflowVersion: strings.TrimSpace(source.WorkflowVersion()),
+		CurrentState:    initialState,
 		EnteredStageAt:  time.Now().UTC(),
 		Metadata: map[string]any{
 			"template_id":               templateID,
@@ -504,7 +484,7 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(
 
 	if pc.instanceActivator != nil {
 		if err := pc.instanceActivator(ctx, FlowInstanceActivationRequest{
-			ContractBundle: bundle,
+			ContractBundle: source,
 			TemplateID:     templateID,
 			InstanceID:     instanceID,
 			VerticalID:     verticalID,
@@ -540,12 +520,17 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(
 	return true
 }
 
-func (pc *FactoryPipelineCoordinator) resolveFlowInstanceID(triggerCtx workflowTriggerContext, ref string) string {
+func (pc *FactoryPipelineCoordinator) resolveFlowInstanceID(triggerCtx workflowTriggerContext, ref string, parsed paths.Path) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ""
 	}
 	hookCtx := workflowHookContextFromTrigger(triggerCtx)
+	if parsed.HasExplicitRoot() {
+		if value, ok := workflowExpressionResolveValueRef(parsed.String(), hookCtx, nil); ok {
+			return strings.TrimSpace(asString(value))
+		}
+	}
 	if value, ok := workflowExpressionResolveValueRef(ref, hookCtx, nil); ok {
 		return strings.TrimSpace(asString(value))
 	}
@@ -570,16 +555,26 @@ func (pc *FactoryPipelineCoordinator) resolveFlowInstanceConfig(
 			out[key] = resolved
 		}
 	}
-	for key, value := range spec.Bindings {
-		key = strings.TrimSpace(key)
+	entries := spec.Entries
+	if len(entries) == 0 {
+		entries = spec.ConfigEntries()
+	}
+	for _, entry := range entries {
+		key := strings.TrimSpace(entry.Key)
 		if key == "" {
 			continue
 		}
-		if resolved, found := workflowExpressionResolveValueRef(value, hookCtx, nil); found {
+		if entry.RefPath.HasExplicitRoot() {
+			if resolved, found := workflowExpressionResolveValueRef(entry.RefPath.String(), hookCtx, nil); found {
+				out[key] = resolved
+				continue
+			}
+		}
+		if resolved, found := workflowExpressionResolveValueRef(entry.Ref, hookCtx, nil); found {
 			out[key] = resolved
 			continue
 		}
-		out[key] = value
+		out[key] = entry.Ref
 	}
 	return out
 }
@@ -614,7 +609,7 @@ func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context
 	if verticalID == "" || nodeID == "" {
 		return false
 	}
-	field := workflowEvidenceAccumulatorField(pc.ContractBundle(), nodeID)
+	field := workflowEvidenceAccumulatorField(pc.SemanticSource(), nodeID)
 	if field == "" {
 		return false
 	}
@@ -623,7 +618,7 @@ func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context
 	}
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		bucket := workflowMutableStateBucket(instance, nodeID)
-		if _, ok := workflowSystemNodeStateSchemaFields(pc.ContractBundle(), nodeID)["vertical_id"]; ok && strings.TrimSpace(asString(bucket["vertical_id"])) == "" {
+		if _, ok := workflowSystemNodeStateSchemaFields(pc.SemanticSource(), nodeID)["vertical_id"]; ok && strings.TrimSpace(asString(bucket["vertical_id"])) == "" {
 			bucket["vertical_id"] = verticalID
 		}
 		existing, _ := asArray(bucket[field])
@@ -636,8 +631,8 @@ func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context
 	return true
 }
 
-func workflowEvidenceAccumulatorField(bundle *runtimecontracts.WorkflowContractBundle, nodeID string) string {
-	fields := workflowSystemNodeStateSchemaFields(bundle, nodeID)
+func workflowEvidenceAccumulatorField(source semanticview.Source, nodeID string) string {
+	fields := workflowSystemNodeStateSchemaFields(source, nodeID)
 	if len(fields) == 0 {
 		return ""
 	}
@@ -681,24 +676,29 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowGateMutation(
 		return
 	}
 	if clearGates || setGate != "" {
-		pc.mutateValidationState(ctx, verticalID, func(st *validationPipelineState) {
-			if clearGates {
-				st.G1Research = false
-				st.G2Spec = false
-				st.G3CTO = false
-				st.G4Brand = false
-			}
-			switch setGate {
-			case "g1_research":
-				st.G1Research = true
-			case "g2_spec":
-				st.G2Spec = true
-			case "g3_cto":
-				st.G3CTO = true
-			case "g4_brand":
-				st.G4Brand = true
-			}
-		})
+		applyValidationMutation := func() {
+			pc.mutateValidationState(context.Background(), verticalID, func(st *validationPipelineState) {
+				if clearGates {
+					st.G1Research = false
+					st.G2Spec = false
+					st.G3CTO = false
+					st.G4Brand = false
+				}
+				switch setGate {
+				case "g1_research":
+					st.G1Research = true
+				case "g2_spec":
+					st.G2Spec = true
+				case "g3_cto":
+					st.G3CTO = true
+				case "g4_brand":
+					st.G4Brand = true
+				}
+			})
+		}
+		if !queuePipelinePostCommitAction(ctx, applyValidationMutation) {
+			applyValidationMutation()
+		}
 	}
 	if pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
@@ -909,11 +909,7 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardCheck(
 	if entry, ok := pc.resolveWorkflowGuard(guardID); ok {
 		return pc.evaluateWorkflowGuardEntry(triggerCtx, entry), []string{guardID}
 	}
-	passed, err := pc.evaluateWorkflowExpressionBool(triggerCtx, guardID)
-	if err != nil {
-		return false, []string{guardID}
-	}
-	return passed, []string{guardID}
+	return false, []string{guardID}
 }
 
 func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardEntry(triggerCtx workflowTriggerContext, entry runtimecontracts.GuardActionEntry) bool {
@@ -946,12 +942,12 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowPlatformBuiltinGuard(
 		event:       triggerCtx.Event,
 		payload:     cloneStringAnyMap(hookCtx.Payload),
 		entityID:    strings.TrimSpace(hookCtx.VerticalID),
-		policy:      policyDocumentToMap(pc.ContractBundle().MergedPolicy),
+		policy:      map[string]any{},
 		accumulated: map[string]any{},
 		fanOut:      map[string]any{},
 	}
-	if len(exec.policy) == 0 && pc.ContractBundle() != nil {
-		exec.policy = policyDocumentToMap(pc.ContractBundle().Policy)
+	if source := pc.SemanticSource(); source != nil {
+		exec.policy = policyDocumentToMap(source.ResolvedPolicyForFlow(""))
 	}
 	passed, handled, err := handler(exec, strings.TrimSpace(entry.PolicyRef))
 	if err != nil {
@@ -970,50 +966,17 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowExpressionBoolWithVars(tri
 	}
 	hookCtx := workflowHookContextFromTrigger(triggerCtx)
 	expression = pc.rewriteWorkflowExpressionRuntimeCounts(expression, hookCtx, extraVars)
-	entity := cloneStringAnyMap(hookCtx.State.Metadata)
-	if entity == nil {
-		entity = map[string]any{}
-	}
-	if _, ok := entity["revision_count"]; !ok {
-		entity["revision_count"] = asInt(hookCtx.State.Metadata["revision_count"])
-	}
-	gates := map[string]any{}
-	if triggerCtx.ValidationState != nil {
-		gates["g1_research"] = triggerCtx.ValidationState.G1Research
-		gates["g2_spec"] = triggerCtx.ValidationState.G2Spec
-		gates["g3_cto"] = triggerCtx.ValidationState.G3CTO
-		gates["g4_brand"] = triggerCtx.ValidationState.G4Brand
-		if _, ok := entity["revision_count"]; !ok {
-			entity["revision_count"] = triggerCtx.ValidationState.RevisionCount
-		}
-	}
-	for _, gate := range []string{"g1_research", "g2_spec", "g3_cto", "g4_brand", "g_product_spec", "g_tech_spec", "g_qa_passed"} {
-		if value, ok := entity[gate]; ok {
-			gates[gate] = value
-		}
-	}
-	if len(gates) > 0 {
-		entity["gates"] = gates
-	}
-	if stage := strings.TrimSpace(string(hookCtx.State.Stage)); stage != "" {
-		entity["stage"] = stage
-	}
-	if status := strings.TrimSpace(hookCtx.State.Status); status != "" {
-		entity["status"] = status
-	}
 	policy := map[string]any{}
-	if bundle := pc.ContractBundle(); bundle != nil {
-		policy = policyDocumentToMap(bundle.MergedPolicy)
-		if len(policy) == 0 {
-			policy = policyDocumentToMap(bundle.Policy)
-		}
+	if source := pc.SemanticSource(); source != nil {
+		policy = policyDocumentToMap(source.ResolvedPolicyForFlow(""))
 	}
-	return pc.expressionEval.EvalBool(expression, workflowExpressionContext{
-		Entity:  entity,
-		Payload: hookCtx.Payload,
-		Policy:  policy,
-		Vars:    cloneStringAnyMap(extraVars),
-	})
+	return pc.expressionEval.EvalBool(expression, buildWorkflowExpressionContext(workflowExpressionContextInput{
+		State:           hookCtx.State,
+		ValidationState: triggerCtx.ValidationState,
+		Payload:         hookCtx.Payload,
+		Policy:          policy,
+		ExtraVars:       extraVars,
+	}))
 }
 
 func (pc *FactoryPipelineCoordinator) rewriteWorkflowExpressionRuntimeCounts(
@@ -1221,15 +1184,8 @@ func (pc *FactoryPipelineCoordinator) executeWorkflowTransitionActions(
 }
 
 func workflowActionRunsPreStageUpdate(actionID string) bool {
-	switch strings.TrimSpace(actionID) {
-	case "increment_revision_count",
-		"emit_vertical_shortlisted",
-		"emit_vertical_marginal",
-		"emit_vertical_rejected":
-		return true
-	default:
-		return false
-	}
+	_, ok := workflowPreStageUpdateActions[strings.TrimSpace(actionID)]
+	return ok
 }
 
 func (pc *FactoryPipelineCoordinator) executeWorkflowAction(
@@ -1368,7 +1324,7 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowAction(actionID string) (ru
 
 func workflowStateFromInstance(instance WorkflowInstance, fallback WorkflowState) WorkflowState {
 	out := fallback
-	out.Stage = NormalizePipelineStage(instance.CurrentStage)
+	out.Stage = NormalizePipelineStage(instance.CurrentState)
 	if metadata := workflowMetadataSnapshot(instance); len(metadata) > 0 {
 		out.Metadata = metadata
 	}
@@ -1417,9 +1373,12 @@ func (pc *FactoryPipelineCoordinator) validationStateSnapshot(verticalID string)
 	if verticalID == "" {
 		return nil
 	}
-	pc.mu.Lock()
-	st := pc.validationGate.states[verticalID]
-	pc.mu.Unlock()
+	var st *validationPipelineState
+	if pc.validationGate != nil {
+		pc.mu.Lock()
+		st = pc.validationGate.states[verticalID]
+		pc.mu.Unlock()
+	}
 	if st != nil {
 		return cloneValidationPipelineState(st)
 	}
@@ -1644,16 +1603,12 @@ func workflowGateMetadataFlag(triggerCtx workflowTriggerContext, key string) boo
 }
 
 func (pc *FactoryPipelineCoordinator) ContractPolicyFloat(key string, fallback float64) float64 {
-	if pc == nil || pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
 		return fallback
 	}
 	key = strings.TrimSpace(key)
-	if pv, ok := pc.ContractBundle().MergedPolicy.Values[key]; ok {
-		if value, ok := asFloat64(pv.Value); ok {
-			return value
-		}
-	}
-	if pv, ok := pc.ContractBundle().Policy.Values[key]; ok {
+	if pv, ok := semanticview.PolicyValueForFlow(source, "", key); ok {
 		if value, ok := asFloat64(pv.Value); ok {
 			return value
 		}
@@ -1662,16 +1617,12 @@ func (pc *FactoryPipelineCoordinator) ContractPolicyFloat(key string, fallback f
 }
 
 func (pc *FactoryPipelineCoordinator) ContractPolicyInt(key string, fallback int) int {
-	if pc == nil || pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
 		return fallback
 	}
 	key = strings.TrimSpace(key)
-	if pv, ok := pc.ContractBundle().MergedPolicy.Values[key]; ok {
-		if got := asInt(pv.Value); got != 0 {
-			return got
-		}
-	}
-	if pv, ok := pc.ContractBundle().Policy.Values[key]; ok {
+	if pv, ok := semanticview.PolicyValueForFlow(source, "", key); ok {
 		if got := asInt(pv.Value); got != 0 {
 			return got
 		}
@@ -1746,7 +1697,7 @@ func (pc *FactoryPipelineCoordinator) countVerticalsInStageRange(ctx context.Con
 }
 
 func (pc *FactoryPipelineCoordinator) workflowStageRange(startStage, endStage string) []string {
-	if pc == nil || pc.ContractBundle() == nil {
+	if pc == nil || pc.SemanticSource() == nil {
 		return nil
 	}
 	startStage = strings.TrimSpace(string(NormalizePipelineStage(startStage)))
@@ -1754,7 +1705,7 @@ func (pc *FactoryPipelineCoordinator) workflowStageRange(startStage, endStage st
 	if startStage == "" || endStage == "" {
 		return nil
 	}
-	stages := pc.ContractBundle().WorkflowStages()
+	stages := pc.SemanticSource().WorkflowStages()
 	startIdx := -1
 	endIdx := -1
 	for idx, stage := range stages {

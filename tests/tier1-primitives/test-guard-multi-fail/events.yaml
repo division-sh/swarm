@@ -1,0 +1,8 @@
+check.requested:
+  payload:
+    entity_id: string
+    score: integer
+    level: integer
+check.passed:
+  payload:
+    entity_id: string

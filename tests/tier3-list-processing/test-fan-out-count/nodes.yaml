@@ -1,0 +1,12 @@
+fan-out-node:
+  id: fan-out-node
+  execution_type: system_node
+  subscribes_to: [batch.received]
+  produces: [task.dispatched]
+  event_handlers:
+    batch.received:
+      fan_out:
+        items_from: payload.items
+        target: fan-out-node
+        emit_per_item: task.dispatched
+      advances_to: processing

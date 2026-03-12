@@ -1,0 +1,5 @@
+name: test-create-flow-instance-duplicate
+version: 1.0.0
+description: Creating a flow instance with a duplicate ID returns error.
+platform_version: ">=1.1.0"
+flows: []

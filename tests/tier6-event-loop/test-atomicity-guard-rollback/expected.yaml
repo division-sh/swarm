@@ -1,0 +1,20 @@
+trigger:
+  event: process.requested
+  payload:
+    entity_id: ent-001
+  entity_state_before: pending
+  entity_fields_before:
+    status: not_ready
+    counter: 0
+  gates_before:
+    g_processed: false
+
+expected:
+  handler_outcome: reject
+  entity_state: pending
+  entity_fields:
+    status: not_ready
+    counter: 0
+  gates:
+    g_processed: false
+  emitted_events: []

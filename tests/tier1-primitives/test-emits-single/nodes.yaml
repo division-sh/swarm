@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.processed]
+  event_handlers:
+    item.received:
+      advances_to: done
+      emits: item.processed

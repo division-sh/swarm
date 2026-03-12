@@ -6,7 +6,6 @@ import (
 
 	"empireai/internal/commgraph"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 )
 
 func TestMain(m *testing.M) {
@@ -15,9 +14,6 @@ func TestMain(m *testing.M) {
 	})
 	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
 		return runtimepipeline.NewGenericTestWorkflowModule()
-	})
-	runtimeproductpolicy.SetDefaultFactory(func() runtimeproductpolicy.Policy {
-		return runtimeproductpolicy.NewGenericTestPolicy()
 	})
 	os.Exit(m.Run())
 }

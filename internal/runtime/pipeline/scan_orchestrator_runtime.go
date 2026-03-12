@@ -7,6 +7,7 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.Event) {
@@ -164,14 +165,9 @@ func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
 }
 
 func scanOrchestratorFallbackMode() string {
-	if bundle := scanOrchestratorContractBundle(); bundle != nil {
-		if pv, ok := bundle.MergedPolicy.Values["default_scan_mode"]; ok {
-			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
-				return normalizeScanMode(mode)
-			}
-		}
-		if pv, ok := bundle.Policy.Values["default_scan_mode"]; ok {
-			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
+	if source := scanOrchestratorContractSource(); source != nil {
+		if value, ok := scanModePolicyValue(source, "default_scan_mode"); ok {
+			if mode := strings.TrimSpace(asString(value)); mode != "" {
 				return normalizeScanMode(mode)
 			}
 		}
@@ -184,8 +180,8 @@ func scanOrchestratorAssignmentEvents(mode string) []string {
 	if mode == "" {
 		mode = scanOrchestratorFallbackMode()
 	}
-	if bundle := scanOrchestratorContractBundle(); bundle != nil {
-		if events := scanOrchestratorAssignmentEventsFromBundle(bundle, mode); len(events) > 0 {
+	if source := scanOrchestratorContractSource(); source != nil {
+		if events := scanOrchestratorAssignmentEventsFromSource(source, mode); len(events) > 0 {
 			return events
 		}
 	}
@@ -202,16 +198,16 @@ func scanOrchestratorUsesShardedDispatch(assignmentEvents []string) bool {
 	return false
 }
 
-func scanOrchestratorContractBundle() *runtimecontracts.WorkflowContractBundle {
+func scanOrchestratorContractSource() semanticview.Source {
 	module := defaultWorkflowModuleOrNil()
 	if module == nil {
 		return nil
 	}
-	return module.ContractBundle()
+	return module.SemanticSource()
 }
 
-func scanOrchestratorAssignmentEventsFromBundle(bundle *runtimecontracts.WorkflowContractBundle, mode string) []string {
-	handler, ok := bundle.NodeEventHandler("scan-orchestrator", "scan.requested")
+func scanOrchestratorAssignmentEventsFromSource(source semanticview.Source, mode string) []string {
+	handler, ok := source.NodeEventHandler("scan-orchestrator", "scan.requested")
 	if !ok {
 		return nil
 	}
@@ -225,7 +221,7 @@ func scanOrchestratorAssignmentEventsFromBundle(bundle *runtimecontracts.Workflo
 		if dispatchEvent == "" {
 			continue
 		}
-		dispatchHandler, ok := bundle.NodeEventHandler("scan-orchestrator", dispatchEvent)
+		dispatchHandler, ok := source.NodeEventHandler("scan-orchestrator", dispatchEvent)
 		if !ok {
 			continue
 		}

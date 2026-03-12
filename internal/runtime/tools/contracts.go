@@ -11,6 +11,7 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/semanticview"
 )
 
 type ContractSchemaEntry struct {
@@ -32,8 +33,9 @@ func LoadContractSchemas() (map[string]ContractSchemaEntry, error) {
 			contractSchemasErr = fmt.Errorf("load workflow contract bundle: %w", err)
 			return
 		}
+		source := semanticview.Wrap(bundle)
 		parsed := map[string]ContractSchemaEntry{}
-		for name, entry := range bundle.MergedTools {
+		for name, entry := range source.ToolEntries() {
 			schema := map[string]any{}
 			raw, marshalErr := json.Marshal(entry.InputSchema)
 			if marshalErr != nil {

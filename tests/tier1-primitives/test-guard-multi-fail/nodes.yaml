@@ -1,0 +1,15 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [check.requested]
+  produces: []
+  event_handlers:
+    check.requested:
+      guard:
+        checks:
+          - id: score_check
+            check: "payload.score >= policy.min_score"
+          - id: level_check
+            check: "payload.level >= policy.min_level"
+      advances_to: done
+      emits: check.passed

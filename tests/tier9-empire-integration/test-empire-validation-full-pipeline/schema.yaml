@@ -1,0 +1,8 @@
+initial_state: researching
+terminal_states: [killed]
+states: [researching, mvp_speccing, cto_review, branding, ready_for_review, killed]
+pins:
+  inputs:
+    events: [vertical.shortlisted, research.completed, spec.draft_ready, spec_review.passed, cto.spec_approved, brand.candidates_ready]
+  outputs:
+    events: [validation.started, spec.requested, spec_review.requested, cto.spec_review_requested, brand.requested, validation.package_ready, mailbox.review_requested]

@@ -40,7 +40,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	}
 
 	processed := mustHandler(t, bundle, "intake-router", "item.processed")
-	if processed.Accumulate == nil || processed.Accumulate.OnComplete == nil {
+	if processed.Accumulate == nil || len(processed.Accumulate.OnComplete) == 0 {
 		t.Fatal("expected accumulate.on_complete on item.processed")
 	}
 	completed := previewHandler(t, bundle, "intake-router", "item.processed", map[string]any{

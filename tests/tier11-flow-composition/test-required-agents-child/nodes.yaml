@@ -1,0 +1,18 @@
+parent-node:
+  id: parent-node
+  execution_type: system_node
+  subscribes_to: [request.start]
+  produces: [analyzer-flow/analysis.requested]
+  event_handlers:
+    request.start:
+      emits: analyzer-flow/analysis.requested
+
+parent-listener:
+  id: parent-listener
+  execution_type: system_node
+  subscribes_to: [analyzer-flow/analysis.done]
+  produces: [request.complete]
+  event_handlers:
+    analyzer-flow/analysis.done:
+      advances_to: done
+      emits: request.complete

@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [loop.event]
+  produces: [loop.event]
+  event_handlers:
+    loop.event:
+      advances_to: done
+      emits: loop.event

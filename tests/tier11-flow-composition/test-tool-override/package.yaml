@@ -1,0 +1,10 @@
+name: test-tool-override
+version: 1.0.0
+description: >
+  Child flow defines a tool with the same ID as a root-level tool.
+  Within child, the child version takes precedence; root agent uses root version.
+platform_version: ">=1.1.0"
+flows:
+- id: child
+  flow: child
+  mode: static

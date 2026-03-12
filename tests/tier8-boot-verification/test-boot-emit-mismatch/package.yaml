@@ -1,0 +1,8 @@
+name: test-boot-emit-mismatch
+version: 1.0.0
+description: >
+  Boot verification: agent declares emit_events that do not match
+  the schema's required_agents emits. Should produce an
+  EMIT-MISMATCH error.
+platform_version: ">=1.1.0"
+flows: []

@@ -1,0 +1,6 @@
+check.requested:
+  payload:
+    entity_id: string
+check.passed:
+  payload:
+    entity_id: string

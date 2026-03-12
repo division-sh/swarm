@@ -1,0 +1,12 @@
+batch.submitted:
+  payload:
+    entity_id: string
+    items: array
+routed.a:
+  payload:
+    entity_id: string
+    item: object
+routed.b:
+  payload:
+    entity_id: string
+    item: object

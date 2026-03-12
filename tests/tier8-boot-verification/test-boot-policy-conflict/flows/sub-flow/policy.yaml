@@ -1,0 +1,2 @@
+max_retries: 10
+timeout_seconds: 60

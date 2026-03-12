@@ -1,0 +1,8 @@
+vertical.derived:
+  payload:
+    entity_id: string
+    signal_strength: number
+    source_vertical_id: string
+scoring.derived_requested:
+  payload:
+    entity_id: string

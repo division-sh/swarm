@@ -1,0 +1,10 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [task.requested]
+  produces: [task.completed]
+  event_handlers:
+    task.requested:
+      logic: custom
+      advances_to: done
+      emits: task.completed

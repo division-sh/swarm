@@ -109,12 +109,12 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		var id, slug, name, geo, stage, mode, composite, killReason, killedAtStage string
 		var createdAt, updatedAt time.Time
 		var approvedAt, parkedAt, launchedAt, enteredStageAt sql.NullTime
-		var workflowName, workflowVersion, workflowCurrentStage string
+		var workflowName, workflowVersion, workflowCurrentState string
 		var workflowMetaRaw, workflowTimerRaw, workflowTransitionsRaw []byte
 		if err := vertRows.Scan(&id, &slug, &name, &geo, &stage, &mode,
 			&composite, &killReason, &killedAtStage,
 			&createdAt, &updatedAt, &approvedAt, &parkedAt, &launchedAt,
-			&workflowName, &workflowVersion, &workflowCurrentStage, &enteredStageAt,
+			&workflowName, &workflowVersion, &workflowCurrentState, &enteredStageAt,
 			&workflowMetaRaw, &workflowTimerRaw, &workflowTransitionsRaw); err != nil {
 			vertRows.Close()
 			writeErr(w, http.StatusInternalServerError, err)
@@ -139,8 +139,8 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSpace(workflowVersion) != "" {
 			v["workflow_version"] = workflowVersion
 		}
-		if strings.TrimSpace(workflowCurrentStage) != "" {
-			v["workflow_current_stage"] = workflowCurrentStage
+		if strings.TrimSpace(workflowCurrentState) != "" {
+			v["workflow_current_state"] = workflowCurrentState
 		}
 		if enteredStageAt.Valid {
 			v["stage_entered_at"] = enteredStageAt.Time
@@ -218,7 +218,7 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		"stage_entered_set": 0,
 	}
 	for _, raw := range verts {
-		if workflowStage := strings.TrimSpace(asString(raw["workflow_current_stage"])); workflowStage != "" && workflowStage != strings.TrimSpace(asString(raw["stage"])) {
+		if workflowStage := strings.TrimSpace(asString(raw["workflow_current_state"])); workflowStage != "" && workflowStage != strings.TrimSpace(asString(raw["stage"])) {
 			workflowSummary["drift"]++
 		}
 		if n := intFromAny(raw["active_timer_count"]); n > 0 {
@@ -569,11 +569,11 @@ func (s *Server) handleHoldingVerticalDetail(w http.ResponseWriter, r *http.Requ
 			"instance_id":        instance.InstanceID,
 			"workflow_name":      instance.WorkflowName,
 			"workflow_version":   instance.WorkflowVersion,
-			"current_stage":      instance.CurrentStage,
+			"current_state":      instance.CurrentState,
 			"entered_stage_at":   instance.EnteredStageAt,
 			"transition_history": instance.TransitionHistory,
 			"transition_count":   len(instance.TransitionHistory),
-			"accumulator_state":  instance.AccumulatorState,
+			"state_buckets":      instance.StateBuckets,
 			"timer_state":        instance.TimerState,
 			"active_timer_count": activeTimers,
 			"metadata":           instance.Metadata,

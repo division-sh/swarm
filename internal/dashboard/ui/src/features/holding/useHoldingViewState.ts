@@ -9,12 +9,12 @@ export function useHoldingViewState({ holdingData, validationGateData, contractW
     const query = String(holdingSearch || "").trim().toLowerCase();
     let rows = [...(holdingData.verticals || [])];
     if (query) {
-      rows = rows.filter((v) => `${v.slug || ""} ${v.name || ""} ${v.geography || ""} ${v.stage || ""} ${v.workflow_current_stage || ""}`.toLowerCase().includes(query));
+      rows = rows.filter((v) => `${v.slug || ""} ${v.name || ""} ${v.geography || ""} ${v.stage || ""} ${v.workflow_current_state || ""}`.toLowerCase().includes(query));
     }
     rows = rows.filter((v) => {
       switch (holdingWorkflowFilter) {
       case "drift":
-        return !!(v.workflow_current_stage && v.workflow_current_stage !== v.stage);
+        return !!(v.workflow_current_state && v.workflow_current_state !== v.stage);
       case "timers":
         return Number(v.active_timer_count || 0) > 0;
       case "revisions":
@@ -43,7 +43,7 @@ export function useHoldingViewState({ holdingData, validationGateData, contractW
   }, [holdingData.verticals, holdingSearch, holdingSort, holdingWorkflowFilter]);
 
   const holdingWorkflowSummary = useMemo(() => ({
-    drift: holdingVisibleVerticals.filter((v) => v.workflow_current_stage && v.workflow_current_stage !== v.stage).length,
+    drift: holdingVisibleVerticals.filter((v) => v.workflow_current_state && v.workflow_current_state !== v.stage).length,
     timers: holdingVisibleVerticals.filter((v) => Number(v.active_timer_count || 0) > 0).length,
     revisions: holdingVisibleVerticals.filter((v) => Number(v.revision_count || 0) > 0).length,
   }), [holdingVisibleVerticals]);

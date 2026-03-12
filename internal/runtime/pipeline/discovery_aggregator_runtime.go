@@ -12,14 +12,14 @@ import (
 
 func discoveryRuntimeDefaultScanMode(runtime scanWorkflowRuntime) string {
 	if pc, ok := runtime.(*FactoryPipelineCoordinator); ok {
-		return defaultPipelineScanMode(pc.ContractBundle())
+		return defaultPipelineScanMode(pc.SemanticSource())
 	}
 	return defaultPipelineScanMode(nil)
 }
 
 func discoveryRuntimeResolveScanMode(runtime scanWorkflowRuntime, raw string) string {
 	if pc, ok := runtime.(*FactoryPipelineCoordinator); ok {
-		return resolvePipelineScanMode(pc.ContractBundle(), raw)
+		return resolvePipelineScanMode(pc.SemanticSource(), raw)
 	}
 	return resolvePipelineScanMode(nil, raw)
 }

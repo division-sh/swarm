@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
 	"github.com/google/uuid"
 )
 
@@ -119,7 +118,7 @@ func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context
 		WHERE id = $1::uuid
 	`, verticalID).Scan(&name, &geography, &rawMode, &rawSignals)
 	if strings.TrimSpace(rawMode) == "" {
-		rawMode = defaultPipelineScanMode(pc.ContractBundle())
+		rawMode = defaultPipelineScanMode(pc.SemanticSource())
 	}
 	if len(rawSignals) > 0 {
 		var rs map[string]any
@@ -131,7 +130,8 @@ func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context
 			}
 		}
 	}
-	return strings.TrimSpace(name), strings.TrimSpace(geography), resolvePipelineScanMode(pc.ContractBundle(), rawMode), geographicScope, discoveryContext
+	source := pc.SemanticSource()
+	return strings.TrimSpace(name), strings.TrimSpace(geography), resolvePipelineScanMode(source, rawMode), geographicScope, discoveryContext
 }
 
 func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context, evt events.Event) {
@@ -140,13 +140,14 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	if verticalID == "" {
 		return
 	}
-	mode := resolvePipelineScanMode(pc.ContractBundle(), asString(payload["mode"]))
+	source := pc.SemanticSource()
+	mode := resolvePipelineScanMode(source, asString(payload["mode"]))
 	if mode == "" {
 		_, _, dbMode := pc.loadScoringSeed(ctx, verticalID)
-		mode = resolvePipelineScanMode(pc.ContractBundle(), dbMode)
+		mode = resolvePipelineScanMode(source, dbMode)
 	}
 	if mode == "" {
-		mode = defaultPipelineScanMode(pc.ContractBundle())
+		mode = defaultPipelineScanMode(source)
 	}
 	rubric := pc.scoringState.scoring.SelectScoringRubric(mode)
 	expected := pc.scoringState.scoring.ExpectedScoringDimensions(rubric)
@@ -312,10 +313,11 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 }
 
 func (pc *FactoryPipelineCoordinator) evaluateScoringDerivedGuard(ctx context.Context, evt events.Event, payload map[string]any) (bool, string) {
-	if pc == nil || pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
 		return true, ""
 	}
-	handler, ok := pc.ContractBundle().NodeEventHandler(ScoringNodeID, "vertical.derived")
+	handler, ok := source.NodeEventHandler(ScoringNodeID, "vertical.derived")
 	if !ok || handler.Guard == nil {
 		return true, ""
 	}
@@ -481,7 +483,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 		acc.Geography = geo
 		acc.Mode = mode
 		if acc.Mode == "" {
-			acc.Mode = defaultPipelineScanMode(ss.runtime.ContractBundle())
+			acc.Mode = defaultPipelineScanMode(ss.runtime.SemanticSource())
 		}
 		acc.Rubric = ss.scoring.SelectScoringRubric(acc.Mode)
 		acc.Expected = ss.scoring.ExpectedScoringDimensions(acc.Rubric)
@@ -668,11 +670,12 @@ func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, vertical
 }
 
 func (ss *ScoringState) resolveScoringOnComplete(ctx context.Context, verticalID string, scoredPayload map[string]any, result scoringComposite) (workflowRuleMatch, bool) {
-	if ss == nil || ss.runtime == nil || ss.runtime.ContractBundle() == nil {
+	source := ss.runtime.SemanticSource()
+	if ss == nil || ss.runtime == nil || source == nil {
 		return workflowRuleMatch{}, false
 	}
-	handler, ok := ss.runtime.ContractBundle().NodeEventHandler("scoring-node", "score.dimension_complete")
-	if !ok || handler.OnComplete == nil {
+	handler, ok := source.NodeEventHandler("scoring-node", "score.dimension_complete")
+	if !ok || len(handler.OnComplete) == 0 {
 		return workflowRuleMatch{}, false
 	}
 	triggerCtx := workflowTriggerContext{
@@ -683,7 +686,7 @@ func (ss *ScoringState) resolveScoringOnComplete(ctx context.Context, verticalID
 		}).WithEntityID(verticalID),
 		State: ss.runtime.currentWorkflowState(ctx, verticalID),
 	}
-	return ss.runtime.matchWorkflowRulesWithVars(triggerCtx, []runtimecontracts.HandlerRuleEntry{*handler.OnComplete}, scoringExpressionVars(computeSpecToMap(handler.Compute), result, scoredPayload))
+	return ss.runtime.matchWorkflowRulesWithVars(triggerCtx, handler.OnComplete, scoringExpressionVars(computeSpecToMap(handler.Compute), result, scoredPayload))
 }
 
 func scoringExpressionVars(compute map[string]any, result scoringComposite, scoredPayload map[string]any) map[string]any {

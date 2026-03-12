@@ -1,0 +1,29 @@
+alpha-node:
+  id: alpha-node
+  flow: flow-alpha
+  execution_type: system_node
+  subscribes_to: [trigger.alpha]
+  produces: [job.alpha_done]
+  event_handlers:
+    trigger.alpha:
+      emits: job.alpha_done
+
+beta-node:
+  id: beta-node
+  flow: flow-beta
+  execution_type: system_node
+  subscribes_to: [trigger.beta]
+  produces: [job.beta_done]
+  event_handlers:
+    trigger.beta:
+      emits: job.beta_done
+
+audit-node:
+  id: audit-node
+  execution_type: system_node
+  subscribes_to: ["job.*"]
+  produces: [audit.logged]
+  event_handlers:
+    "job.*":
+      advances_to: done
+      emits: audit.logged

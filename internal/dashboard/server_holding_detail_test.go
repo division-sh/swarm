@@ -148,6 +148,9 @@ func TestDashboard_HoldingVerticalDetail_ReturnsArtifactsAndRelatedRecords(t *te
 	if got := workflowState["workflow_version"]; got != "2.1.0" {
 		t.Fatalf("expected workflow_version 2.1.0, got %#v", got)
 	}
+	if got := workflowState["current_state"]; got != "ready_for_review" {
+		t.Fatalf("expected current_state ready_for_review, got %#v", got)
+	}
 	if got, ok := workflowState["transition_count"].(float64); !ok || got != 1 {
 		t.Fatalf("expected transition_count 1, got %#v", workflowState["transition_count"])
 	}

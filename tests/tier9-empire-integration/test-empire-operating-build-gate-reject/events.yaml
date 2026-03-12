@@ -1,0 +1,9 @@
+deploy.requested:
+  payload:
+    deployment_id: string
+    environment: string
+deploy.authorized:
+  payload:
+    deployment_id: string
+    environment: string
+    authorized_by: string

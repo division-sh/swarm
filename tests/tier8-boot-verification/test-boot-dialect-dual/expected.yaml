@@ -1,0 +1,6 @@
+trigger:
+  boot: true
+expected:
+  boot_result: error
+  error_category: DIALECT-DUAL
+  error_contains: "on_complete AND rules"

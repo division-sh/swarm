@@ -1,0 +1,16 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.arrived]
+  produces: [collection.done]
+  event_handlers:
+    item.arrived:
+      accumulate:
+        expected_from: entity.item_count
+        completion: all
+      advances_to: complete
+      emits: collection.done
+  state_schema:
+    fields:
+      item_count: integer
+      received_items: jsonb

@@ -1,0 +1,9 @@
+"*.completed":
+  payload:
+    entity_id: string
+task.completed:
+  payload:
+    entity_id: string
+match.found:
+  payload:
+    entity_id: string

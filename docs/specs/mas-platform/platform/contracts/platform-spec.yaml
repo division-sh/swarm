@@ -1069,8 +1069,9 @@ engine:
     tracking:
       setup: 'When an entity first encounters a handler with accumulate.track, the platform creates an accumulator record:
         expected items list, received items list (empty).'
-      arrival: 'Each event arrival adds to the received list. The platform checks: is this item already received? If yes,
-        skip (idempotent). If no, add to received list and persist.'
+      arrival: 'Each event arrival is identified by its dedup_by key. Default: sender session ID. Can be overridden to a payload
+        field (e.g., payload.dimension). If the key was already received, the arrival is ignored (idempotent). If not, it
+        is added to the received set and persisted.'
       completion_check: 'After each arrival, check the completion condition: all (every expected item received), threshold
         (received count >= N), or timeout (timer fires regardless of count).'
     completion_modes:
@@ -1307,6 +1308,9 @@ system_node_specification:
         on_complete: handler fields to execute when done
         on_timeout: handler fields to execute on timeout
         description: string — human-readable note
+        dedup_by: 'string — field path for deduplication. Default: "sender" (sender session ID). Set to a payload field path
+          (e.g., "payload.dimension") when accumulating items identified by content rather than sender. Duplicate arrivals
+          with the same dedup key are ignored.'
     compute:
       field: compute
       type: object

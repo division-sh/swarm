@@ -1,0 +1,12 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.reviewed]
+  produces: [item.approved]
+  event_handlers:
+    item.reviewed:
+      rules:
+        approve:
+          condition: "payload.decision == approve"
+          advances_to: approved
+          emits: item.approved

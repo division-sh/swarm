@@ -1,0 +1,16 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.stored]
+  event_handlers:
+    item.received:
+      data_accumulation:
+        writes: [name, score]
+        source_event: item.received
+      advances_to: done
+      emits: item.stored
+  state_schema:
+    fields:
+      name: string
+      score: integer

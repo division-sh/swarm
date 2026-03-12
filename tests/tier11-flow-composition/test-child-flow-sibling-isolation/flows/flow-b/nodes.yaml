@@ -1,0 +1,9 @@
+beta-worker:
+  id: beta-worker
+  execution_type: system_node
+  subscribes_to: [beta.start]
+  produces: [beta.complete]
+  event_handlers:
+    beta.start:
+      advances_to: finished
+      emits: beta.complete

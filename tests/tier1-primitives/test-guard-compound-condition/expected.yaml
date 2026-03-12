@@ -1,0 +1,14 @@
+trigger:
+  event: check.requested
+  payload:
+    entity_id: ent-001
+    score: 60
+    override: false
+  entity_fields_before:
+    priority: high
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - check.passed

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type scoreDimensionResult = ScoreDimensionResult
@@ -386,7 +386,7 @@ type WorkflowHookRuntime interface {
 }
 
 type WorkflowModule interface {
-	ContractBundle() *runtimecontracts.WorkflowContractBundle
+	SemanticSource() semanticview.Source
 	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
 	GuardRegistry() GuardRegistry
@@ -422,10 +422,10 @@ func DefaultWorkflowModuleOrNil() WorkflowModule {
 	return defaultWorkflowModuleOrNil()
 }
 
-func DefaultWorkflowContractBundleOrNil() *runtimecontracts.WorkflowContractBundle {
+func DefaultWorkflowSemanticSourceOrNil() semanticview.Source {
 	module := defaultWorkflowModuleOrNil()
 	if module == nil {
 		return nil
 	}
-	return module.ContractBundle()
+	return module.SemanticSource()
 }

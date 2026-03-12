@@ -1,0 +1,16 @@
+vertical.derived:
+  payload:
+    opportunity_id: string
+    parent_id: string
+    generation_depth: integer
+    generator_agent_id: string
+    opportunity_name: string
+    signal_strength: number
+    build_sketch: object
+    evidence: object
+scoring.derived_requested:
+  payload:
+    vertical_id: string
+    dimensions_requested: array
+    rubric: string
+    mode: string

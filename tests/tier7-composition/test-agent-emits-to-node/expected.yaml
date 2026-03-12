@@ -1,0 +1,10 @@
+trigger:
+  event: task.assigned
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - task.finalized

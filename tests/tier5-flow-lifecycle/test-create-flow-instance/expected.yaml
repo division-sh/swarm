@@ -1,0 +1,11 @@
+trigger:
+  event: flow.spawn_requested
+  payload:
+    entity_id: ent-001
+    instance_id: worker-001
+
+expected:
+  handler_outcome: success
+  entity_state: spawned
+  emitted_events:
+    - flow.spawned

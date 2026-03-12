@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [task.requested]
+  produces: [orphan.event]
+  event_handlers:
+    task.requested:
+      advances_to: done
+      emits: orphan.event

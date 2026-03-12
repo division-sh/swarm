@@ -1,0 +1,5 @@
+name: test-empire-policy-timeout-validation
+version: 1.0.0
+description: Validation-orchestrator fires timer.validation_timeout after 72h and emits validation.timeout_escalation.
+platform_version: ">=1.1.0"
+flows: []

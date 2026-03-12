@@ -1,0 +1,7 @@
+timer.validation_timeout:
+  payload:
+    entity_id: string
+    elapsed_hours: number
+validation.timeout_escalation:
+  payload:
+    entity_id: string

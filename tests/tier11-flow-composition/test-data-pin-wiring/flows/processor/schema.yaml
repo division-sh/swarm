@@ -1,0 +1,12 @@
+initial_state: waiting
+terminal_states: [finished]
+states: [waiting, finished]
+pins:
+  inputs:
+    events: [process.run]
+    data:
+      reads: [task_config]
+  outputs:
+    events: [process.done]
+    data:
+      writes: [result]

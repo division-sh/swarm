@@ -1,0 +1,12 @@
+trigger:
+  event: item.received
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  entity_fields:
+    category: "premium"
+  emitted_events:
+    - item.categorized

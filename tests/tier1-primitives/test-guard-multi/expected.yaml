@@ -1,0 +1,12 @@
+trigger:
+  event: check.requested
+  payload:
+    entity_id: ent-001
+    score: 85
+    level: 5
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - check.passed

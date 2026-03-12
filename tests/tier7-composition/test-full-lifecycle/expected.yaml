@@ -1,0 +1,14 @@
+trigger:
+  event: order.submitted
+  payload:
+    entity_id: ent-001
+    amount: 100
+
+expected:
+  handler_outcome: success
+  entity_state: complete
+  gates:
+    validation_passed: true
+  emitted_events:
+    - order.validated
+    - order.finalized

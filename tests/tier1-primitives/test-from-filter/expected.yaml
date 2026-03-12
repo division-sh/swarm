@@ -1,0 +1,11 @@
+trigger:
+  event: task.completed
+  payload:
+    entity_id: ent-001
+  sender: "flow-a/agent-1"
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - task.acknowledged

@@ -1,0 +1,8 @@
+composite_shortlist: 75
+hard_gate_floor: 50
+max_derivation_depth: 2
+min_derivation_signal: 40
+min_icp_score: 50
+inner_revision_max: 3
+validation_gate_timeout_hours: 72
+operating_state_timeout_hours: 168

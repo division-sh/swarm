@@ -1,0 +1,6 @@
+child.task:
+  payload:
+    entity_id: string
+child.result:
+  payload:
+    entity_id: string

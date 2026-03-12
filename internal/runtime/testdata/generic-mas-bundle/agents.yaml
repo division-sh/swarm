@@ -1,0 +1,27 @@
+coordinator:
+  id: coordinator
+  role: coordinator
+  manager_fallback: coordinator
+  subscriptions:
+    - item.review_requested
+    - item.completed
+  emit_events:
+    - item.created
+worker-a:
+  id: worker-a
+  role: worker
+  manager_fallback: coordinator
+  subscriptions:
+    - item.review_requested
+  emit_events:
+    - item.processed
+    - item.completed
+worker-b:
+  id: worker-b
+  role: worker
+  manager_fallback: coordinator
+  subscriptions:
+    - item.review_requested
+  emit_events:
+    - item.processed
+    - item.completed

@@ -1,0 +1,5 @@
+name: test-guard-reject
+version: 1.0.0
+description: Guard fails with default on_fail (reject) — event rejected, state unchanged.
+platform_version: ">=1.1.0"
+flows: []

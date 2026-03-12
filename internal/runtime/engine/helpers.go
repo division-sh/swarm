@@ -1,0 +1,816 @@
+package engine
+
+import (
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/paths"
+	"empireai/internal/runtime/values"
+)
+
+const handlerAccumulatorBucketKey = "handler_accumulators"
+
+type Accumulator struct {
+	Expected       []string         `json:"expected,omitempty"`
+	ExpectedCount  int              `json:"expected_count,omitempty"`
+	Received       map[string]bool  `json:"received,omitempty"`
+	Items          []map[string]any `json:"items,omitempty"`
+	LastEventID    string           `json:"last_event_id,omitempty"`
+	LastEventType  string           `json:"last_event_type,omitempty"`
+	LastSource     string           `json:"last_source,omitempty"`
+	LastReceivedAt string           `json:"last_received_at,omitempty"`
+}
+
+func arrivalIdentifier(evt events.Event, payload map[string]any) string {
+	candidates := []string{
+		strings.TrimSpace(evt.SourceAgent),
+		strings.TrimSpace(asString(payload["source"])),
+		strings.TrimSpace(asString(payload["from"])),
+		strings.TrimSpace(asString(payload["agent_id"])),
+		strings.TrimSpace(asString(payload["node_id"])),
+		strings.TrimSpace(evt.ID),
+	}
+	for _, candidate := range candidates {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func dedupIdentifier(base BaseContext, state ExecutionState, evt events.Event, spec *runtimecontracts.AccumulateSpec) string {
+	if spec != nil {
+		if value, ok := resolveContractPath(base, state, spec.DedupPath, spec.DedupBy); ok {
+			if key := stringifyDedupValue(value); key != "" {
+				return key
+			}
+		} else if ref := strings.TrimSpace(spec.DedupBy); ref != "" {
+			if value := resolveRef(base, state, ref); value != nil {
+				if key := stringifyDedupValue(value); key != "" {
+					return key
+				}
+			}
+		}
+	}
+	return arrivalIdentifier(evt, base.Payload)
+}
+
+func rewriteExpression(expression string) string {
+	replacer := strings.NewReplacer(
+		"metadata.", "vars.metadata.",
+		"accumulated.", "vars.accumulated.",
+		"fan_out.", "vars.fan_out.",
+	)
+	return replacer.Replace(strings.TrimSpace(expression))
+}
+
+func lookupPath(source map[string]any, path string) (any, bool) {
+	source = cloneStringAnyMap(source)
+	return lookupParsedPath(source, paths.Parse(path))
+}
+
+func lookupParsedPath(source map[string]any, path paths.Path) (any, bool) {
+	source = cloneStringAnyMap(source)
+	if source == nil || path.IsZero() {
+		return nil, false
+	}
+	current := any(source)
+	for _, segment := range path.Segments {
+		object, ok := asObject(current)
+		if !ok {
+			return nil, false
+		}
+		current = object[segment]
+	}
+	return current, current != nil
+}
+
+func resolveParsedRef(base BaseContext, state ExecutionState, ref paths.Path) (any, bool) {
+	if ref.IsZero() {
+		return nil, false
+	}
+	switch ref.Root {
+	case paths.RootEntity:
+		return lookupParsedPath(base.Entity, ref)
+	case paths.RootPayload:
+		return lookupParsedPath(base.Payload, ref)
+	case paths.RootPolicy:
+		return lookupParsedPath(base.Policy, ref)
+	case paths.RootMetadata:
+		return lookupParsedPath(base.Metadata, ref)
+	case paths.RootAccumulated:
+		return lookupParsedPath(state.Accumulated, ref)
+	case paths.RootFanOut:
+		return lookupParsedPath(state.FanOut, ref)
+	case paths.RootComputed:
+		return lookupParsedPath(state.Computed, ref)
+	default:
+		return nil, false
+	}
+}
+
+func resolveContractPath(base BaseContext, state ExecutionState, parsed paths.Path, raw string) (any, bool) {
+	if parsed.HasExplicitRoot() {
+		return resolveParsedRef(base, state, parsed)
+	}
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, false
+	}
+	value := resolveRef(base, state, raw)
+	return value, value != nil
+}
+
+func resolveRef(base BaseContext, state ExecutionState, ref string) any {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+	switch {
+	case strings.HasPrefix(ref, "entity."):
+		value, _ := lookupPath(base.Entity, strings.TrimPrefix(ref, "entity."))
+		return value
+	case strings.HasPrefix(ref, "payload."):
+		value, _ := lookupPath(base.Payload, strings.TrimPrefix(ref, "payload."))
+		return value
+	case strings.HasPrefix(ref, "policy."):
+		value, _ := lookupPath(base.Policy, strings.TrimPrefix(ref, "policy."))
+		return value
+	case strings.HasPrefix(ref, "metadata."):
+		value, _ := lookupPath(base.Metadata, strings.TrimPrefix(ref, "metadata."))
+		return value
+	case strings.HasPrefix(ref, "accumulated."):
+		value, _ := lookupPath(state.Accumulated, strings.TrimPrefix(ref, "accumulated."))
+		return value
+	case strings.HasPrefix(ref, "fan_out."):
+		value, _ := lookupPath(state.FanOut, strings.TrimPrefix(ref, "fan_out."))
+		return value
+	case strings.HasPrefix(ref, "computed."):
+		value, _ := lookupPath(state.Computed, strings.TrimPrefix(ref, "computed."))
+		return value
+	default:
+		if value, ok := lookupPath(base.Payload, ref); ok {
+			return value
+		}
+		if value, ok := lookupPath(base.Metadata, ref); ok {
+			return value
+		}
+		if value, ok := lookupPath(state.Accumulated, ref); ok {
+			return value
+		}
+		if value, ok := lookupPath(state.FanOut, ref); ok {
+			return value
+		}
+		if value, ok := lookupPath(state.Computed, ref); ok {
+			return value
+		}
+		return nil
+	}
+}
+
+func resolveRefOrLiteral(base BaseContext, state ExecutionState, ref string) any {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+	if unquoted, err := strconv.Unquote(ref); err == nil {
+		return unquoted
+	}
+	switch strings.ToLower(ref) {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null":
+		return nil
+	}
+	if value := resolveRef(base, state, ref); value != nil {
+		return value
+	}
+	if parsed, err := strconv.ParseFloat(ref, 64); err == nil {
+		return parsed
+	}
+	return ref
+}
+
+func setValuePath(target map[string]any, path string, value any) {
+	setParsedValuePath(target, paths.Parse(path), value)
+}
+
+func setParsedValuePath(target map[string]any, path paths.Path, value any) {
+	if path.IsZero() {
+		return
+	}
+	parts := path.Segments
+	current := target
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			current[part] = value
+			return
+		}
+		next, _ := asObject(current[part])
+		if next == nil {
+			next = map[string]any{}
+			current[part] = next
+		}
+		current = next
+	}
+}
+
+func normalizeStateField(field string) string {
+	field = strings.TrimSpace(field)
+	switch {
+	case strings.HasPrefix(field, "entity."):
+		return strings.TrimSpace(strings.TrimPrefix(field, "entity."))
+	case strings.HasPrefix(field, "metadata."):
+		return strings.TrimSpace(strings.TrimPrefix(field, "metadata."))
+	default:
+		return field
+	}
+}
+
+func applyDataAccumulationToState(state *StateSnapshot, payload map[string]any, spec runtimecontracts.WorkflowDataAccumulation) {
+	if state == nil || len(spec.Writes) == 0 {
+		return
+	}
+	if state.Metadata == nil {
+		state.Metadata = map[string]any{}
+	}
+	for _, write := range spec.Writes {
+		target := normalizeStateField(write.Target())
+		if target == "" {
+			continue
+		}
+		if write.HasLiteralValue() {
+			state.Metadata[target] = write.Value.Literal
+			continue
+		}
+		source := strings.TrimSpace(write.Source())
+		if source == "" {
+			continue
+		}
+		if write.SourcePath.HasExplicitRoot() && write.SourcePath.Root == paths.RootPayload {
+			if value, ok := lookupParsedPath(payload, write.SourcePath); ok {
+				state.Metadata[target] = value
+				continue
+			}
+		}
+		if value, ok := lookupPath(payload, source); ok {
+			state.Metadata[target] = value
+		} else if value, ok := payload[source]; ok {
+			state.Metadata[target] = value
+		}
+	}
+	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
+		state.Metadata["last_data_accumulation_source"] = sourceEvent
+	}
+}
+
+func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) map[string]any {
+	if spec == nil {
+		return nil
+	}
+	bindings := spec.Bindings
+	if len(bindings) == 0 {
+		bindings = spec.TransformBindings()
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	payload := map[string]any{}
+	for _, binding := range bindings {
+		value := resolveRefOrLiteral(base, state, binding.Source)
+		if binding.SourcePath.HasExplicitRoot() {
+			if resolved, ok := resolveParsedRef(base, state, binding.SourcePath); ok {
+				value = resolved
+			}
+		}
+		setParsedValuePath(payload, binding.TargetPath, value)
+	}
+	return payload
+}
+
+func nextChainDepth(current, max int) (int, error) {
+	if max <= 0 {
+		max = DefaultMaxChainDepth
+	}
+	next := current + 1
+	if next > max {
+		return next, ErrChainDepthExceeded
+	}
+	return next, nil
+}
+
+func accumulatorBucketID(nodeID identity.NodeID, eventType events.EventType) string {
+	nodeName := nodeID.String()
+	eventName := strings.TrimSpace(string(eventType))
+	if nodeName == "" {
+		return eventName
+	}
+	return nodeName + ":" + eventName
+}
+
+func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType events.EventType) (*Accumulator, bool) {
+	if nodeID.IsZero() {
+		return nil, false
+	}
+	root := values.Wrap(state.StateBuckets)
+	bucket, ok := root.Map(nodeID.String())
+	if !ok {
+		return nil, false
+	}
+	rawAccumulators, ok := bucket.Map(handlerAccumulatorBucketKey)
+	if !ok {
+		return nil, false
+	}
+	raw, ok := rawAccumulators.Map(accumulatorBucketID(nodeID, eventType))
+	if !ok {
+		return nil, false
+	}
+	acc := &Accumulator{
+		Expected:       normalizeStrings(stringSliceFromAny(raw.Raw()["expected"])),
+		ExpectedCount:  raw.Int("expected_count"),
+		Received:       map[string]bool{},
+		Items:          sliceOfMapsFromAny(raw.Raw()["items"]),
+		LastEventID:    raw.String("last_event_id"),
+		LastEventType:  raw.String("last_event_type"),
+		LastSource:     raw.String("last_source"),
+		LastReceivedAt: raw.String("last_received_at"),
+	}
+	if received, ok := raw.Map("received"); ok {
+		for _, key := range received.Keys() {
+			acc.Received[strings.TrimSpace(key)] = received.Bool(key)
+		}
+	}
+	return acc, true
+}
+
+func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType events.EventType, acc *Accumulator) {
+	if state == nil || acc == nil || nodeID.IsZero() {
+		return
+	}
+	if state.StateBuckets == nil {
+		state.StateBuckets = map[string]any{}
+	}
+	root := values.Wrap(state.StateBuckets)
+	bucket := root.EnsureMap(nodeID.String())
+	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
+	received := map[string]any{}
+	keys := make([]string, 0, len(acc.Received))
+	for key := range acc.Received {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		received[key] = acc.Received[key]
+	}
+	items := make([]map[string]any, 0, len(acc.Items))
+	for _, item := range acc.Items {
+		items = append(items, cloneStringAnyMap(item))
+	}
+	accumulators.Set(accumulatorBucketID(nodeID, eventType), map[string]any{
+		"expected":         append([]string{}, acc.Expected...),
+		"expected_count":   acc.ExpectedCount,
+		"received":         received,
+		"items":            items,
+		"last_event_id":    acc.LastEventID,
+		"last_event_type":  acc.LastEventType,
+		"last_source":      acc.LastSource,
+		"last_received_at": acc.LastReceivedAt,
+	})
+}
+
+func expectedAccumulatorTargets(base BaseContext, state ExecutionState, parsed paths.Path, raw string) ([]string, int) {
+	value, ok := resolveContractPath(base, state, parsed, raw)
+	if !ok {
+		value = nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		return normalizeStrings(typed), len(typed)
+	case []any:
+		targets := stringSliceFromAny(typed)
+		if len(targets) > 0 {
+			return normalizeStrings(targets), len(targets)
+		}
+		return nil, len(typed)
+	case int:
+		return nil, typed
+	case int64:
+		return nil, int(typed)
+	case float64:
+		return nil, int(typed)
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return nil, 0
+		}
+		if n, err := strconv.Atoi(text); err == nil {
+			return nil, n
+		}
+		return []string{text}, 1
+	default:
+		return nil, asInt(value)
+	}
+}
+
+func accumulatorComplete(
+	acc *Accumulator,
+	spec *runtimecontracts.AccumulateSpec,
+	evalBool func(expression string, extraVars map[string]any) (bool, error),
+) (bool, error) {
+	if acc == nil {
+		return true, nil
+	}
+	completion := ""
+	var completionSpec runtimecontracts.AccumulateCompletion
+	if spec != nil {
+		completionSpec = spec.Completion
+		completion = completionSpec.String()
+	}
+	receivedCount := len(acc.Received)
+	if completionSpec.Mode == runtimecontracts.AccumulateModeDefault ||
+		completionSpec.Mode == runtimecontracts.AccumulateModeAll ||
+		completionSpec.Mode == runtimecontracts.AccumulateModeThreshold {
+		switch {
+		case len(acc.Expected) > 0:
+			for _, expected := range acc.Expected {
+				if !acc.Received[strings.TrimSpace(expected)] {
+					return false, nil
+				}
+			}
+			return true, nil
+		case acc.ExpectedCount > 0:
+			return receivedCount >= acc.ExpectedCount, nil
+		default:
+			return receivedCount > 0, nil
+		}
+	}
+	if completionSpec.Mode == runtimecontracts.AccumulateModeTimeout {
+		return false, nil
+	}
+	if evalBool == nil {
+		return false, nil
+	}
+	return evalBool(completion, map[string]any{
+		"accumulation": map[string]any{
+			"expected_count": acc.ExpectedCount,
+			"received_count": receivedCount,
+		},
+	})
+}
+
+func accumulatorExpressionValue(acc *Accumulator) map[string]any {
+	if acc == nil {
+		return map[string]any{}
+	}
+	items := make([]any, 0, len(acc.Items))
+	for _, item := range acc.Items {
+		items = append(items, cloneStringAnyMap(item))
+	}
+	expected := make([]any, 0, len(acc.Expected))
+	for _, item := range acc.Expected {
+		expected = append(expected, item)
+	}
+	return map[string]any{
+		"items":          items,
+		"expected":       expected,
+		"expected_count": acc.ExpectedCount,
+		"received_count": len(acc.Received),
+	}
+}
+
+func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontracts.ComputeSpec) (any, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	switch spec.Operation {
+	case runtimecontracts.ComputeOpWeightedAverage:
+		return computeWeightedAverage(acc, spec.Tiers, spec.Keys), nil
+	case runtimecontracts.ComputeOpWeightedSum:
+		return computeWeightedPayload(payload, spec.Tiers), nil
+	case runtimecontracts.ComputeOpSum:
+		return aggregateAccumulatorNumbers(acc, spec.Keys, func(current, next float64, idx int) float64 {
+			return current + next
+		}), nil
+	case runtimecontracts.ComputeOpMin:
+		return aggregateAccumulatorNumbers(acc, spec.Keys, func(current, next float64, idx int) float64 {
+			if idx == 0 || next < current {
+				return next
+			}
+			return current
+		}), nil
+	case runtimecontracts.ComputeOpMax:
+		return aggregateAccumulatorNumbers(acc, spec.Keys, func(current, next float64, idx int) float64 {
+			if idx == 0 || next > current {
+				return next
+			}
+			return current
+		}), nil
+	case runtimecontracts.ComputeOpCount:
+		return len(acc.Items), nil
+	default:
+		return nil, ErrNotImplemented
+	}
+}
+
+func computeWeightedAverage(acc *Accumulator, tiers []runtimecontracts.ComputeTier, keys runtimecontracts.ComputeKeyConfig) float64 {
+	if acc == nil || len(acc.Items) == 0 || len(tiers) == 0 {
+		return 0
+	}
+	dimensionKey := strings.TrimSpace(keys.DimensionKey)
+	if dimensionKey == "" {
+		return 0
+	}
+	scoreKeys := normalizeStrings(keys.ScoreKeys)
+	if len(scoreKeys) == 0 {
+		return 0
+	}
+	dimensionScores := map[string]float64{}
+	for _, item := range acc.Items {
+		payload, _ := asObject(item["payload"])
+		dimension := strings.TrimSpace(asString(payload[dimensionKey]))
+		scoreValues := make([]any, 0, len(scoreKeys))
+		for _, key := range scoreKeys {
+			scoreValues = append(scoreValues, payload[strings.TrimSpace(key)])
+		}
+		score := firstNumeric(scoreValues...)
+		if dimension == "" || math.IsNaN(score) {
+			continue
+		}
+		dimensionScores[dimension] = score
+	}
+	totalWeight := 0.0
+	total := 0.0
+	for _, tier := range tiers {
+		sum := 0.0
+		count := 0
+		for _, dimension := range tier.Dimensions {
+			score, ok := dimensionScores[strings.TrimSpace(dimension)]
+			if !ok {
+				continue
+			}
+			sum += score
+			count++
+		}
+		if count == 0 {
+			continue
+		}
+		weight := tier.Weight
+		if weight <= 0 {
+			weight = 1
+		}
+		total += (sum / float64(count)) * weight
+		totalWeight += weight
+	}
+	if totalWeight == 0 {
+		return 0
+	}
+	return total / totalWeight
+}
+
+func computeWeightedPayload(payload map[string]any, tiers []runtimecontracts.ComputeTier) float64 {
+	if len(payload) == 0 || len(tiers) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, tier := range tiers {
+		sum := 0.0
+		count := 0
+		for _, dimension := range tier.Dimensions {
+			var value any
+			if resolved, ok := lookupPath(payload, strings.TrimPrefix(strings.TrimSpace(dimension), "payload.")); ok {
+				value = resolved
+			}
+			score := firstNumeric(value)
+			if math.IsNaN(score) {
+				continue
+			}
+			sum += score
+			count++
+		}
+		if count == 0 {
+			continue
+		}
+		weight := tier.Weight
+		if weight <= 0 {
+			weight = 1
+		}
+		total += (sum / float64(count)) * weight
+	}
+	return total
+}
+
+func aggregateAccumulatorNumbers(acc *Accumulator, keys runtimecontracts.ComputeKeyConfig, combine func(current, next float64, idx int) float64) float64 {
+	if acc == nil {
+		return 0
+	}
+	numericKeys := normalizeStrings(keys.NumericKeys)
+	if len(numericKeys) == 0 {
+		return 0
+	}
+	current := 0.0
+	idx := 0
+	for _, item := range acc.Items {
+		payload, _ := asObject(item["payload"])
+		values := make([]any, 0, len(numericKeys))
+		for _, key := range numericKeys {
+			values = append(values, payload[strings.TrimSpace(key)])
+		}
+		value := firstNumeric(values...)
+		if math.IsNaN(value) {
+			continue
+		}
+		current = combine(current, value, idx)
+		idx++
+	}
+	if idx == 0 {
+		return 0
+	}
+	return current
+}
+
+func firstNumeric(values ...any) float64 {
+	for _, value := range values {
+		switch typed := value.(type) {
+		case int:
+			return float64(typed)
+		case int64:
+			return float64(typed)
+		case float64:
+			return typed
+		case float32:
+			return float64(typed)
+		case string:
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+				return parsed
+			}
+		}
+	}
+	return math.NaN()
+}
+
+func sliceFromAny(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return typed
+	case []string:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	case []map[string]any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func sliceOfMapsFromAny(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, cloneStringAnyMap(item))
+		}
+		return out
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			m, ok := asObject(item)
+			if ok {
+				out = append(out, cloneStringAnyMap(m))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func stringSliceFromAny(raw any) []string {
+	switch typed := raw.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if v := strings.TrimSpace(asString(item)); v != "" {
+				out = append(out, v)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func truthy(raw any) bool {
+	switch typed := raw.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func stringifyDedupValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case []byte:
+		return strings.TrimSpace(string(typed))
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
+}
+
+func asInt(v any) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case string:
+		t = strings.TrimSpace(t)
+		if t == "" {
+			return 0
+		}
+		var n int
+		_, _ = fmtSscanfInt(t, &n)
+		return n
+	default:
+		return 0
+	}
+}
+
+func asObject(v any) (map[string]any, bool) {
+	m, ok := v.(map[string]any)
+	return m, ok
+}
+
+func asString(v any) string {
+	switch typed := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case time.Time:
+		return typed.UTC().Format(time.RFC3339Nano)
+	default:
+		return ""
+	}
+}
+
+func fmtSscanfInt(text string, target *int) (int, error) {
+	return fmt.Sscanf(text, "%d", target)
+}

@@ -1,0 +1,10 @@
+trigger:
+  event: task.submitted
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: reject
+  dead_letter: true
+  entity_state: pending
+  emitted_events: []

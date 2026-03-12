@@ -7,7 +7,7 @@ const vertical = {
   stage: "ready_for_review",
   geography: "US",
   mode: "saas_gap",
-  workflow_current_stage: "validation",
+  workflow_current_state: "validation",
   stage_entered_at: "2026-03-05T08:00:00Z",
   active_timer_count: 1,
   revision_count: 2,
@@ -529,7 +529,7 @@ export async function installDashboardMocks(page) {
         stuck: [
           {
             vertical_slug: vertical.slug,
-            stage: vertical.workflow_current_stage,
+            stage: vertical.workflow_current_state,
             age_sec: 5400,
           },
         ],

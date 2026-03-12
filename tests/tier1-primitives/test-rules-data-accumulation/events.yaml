@@ -1,0 +1,5 @@
+item.received:
+  payload:
+    entity_id: string
+    type: string
+    value: integer

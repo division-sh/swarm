@@ -1,0 +1,21 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [score.received]
+  produces: [scores.aggregated]
+  event_handlers:
+    score.received:
+      accumulate:
+        expected_from: entity.expected_count
+        completion: all
+      on_complete:
+        - compute:
+            output_field: composite
+            expression: "weighted_average(accumulated.scores, accumulated.weights)"
+      advances_to: complete
+      emits: scores.aggregated
+  state_schema:
+    fields:
+      expected_count: integer
+      composite: float
+      received_items: jsonb

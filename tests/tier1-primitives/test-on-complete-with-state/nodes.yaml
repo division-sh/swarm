@@ -1,0 +1,14 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.evaluated]
+  produces: [item.expedited]
+  event_handlers:
+    item.evaluated:
+      on_complete:
+        - condition: "entity.priority == high"
+          emits: item.expedited
+          advances_to: done
+  state_schema:
+    fields:
+      priority: string

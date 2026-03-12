@@ -1,0 +1,5 @@
+name: test-rules-match
+version: 1.0.0
+description: Rules handler routes to matching rule based on payload.type.
+platform_version: ">=1.1.0"
+flows: []

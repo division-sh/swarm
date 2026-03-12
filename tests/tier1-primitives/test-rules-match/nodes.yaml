@@ -1,0 +1,14 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [routed.a, routed.b]
+  event_handlers:
+    item.received:
+      rules:
+        type_a:
+          condition: "payload.type == a"
+          emits: routed.a
+        type_b:
+          condition: "payload.type == b"
+          emits: routed.b

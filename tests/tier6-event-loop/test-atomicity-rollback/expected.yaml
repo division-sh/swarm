@@ -1,0 +1,12 @@
+trigger:
+  event: task.submitted
+  payload:
+    entity_id: ent-001
+  inject_failure: mid_execution
+
+expected:
+  handler_outcome: failure
+  entity_state: pending
+  gates:
+    approval_gate: false
+  emitted_events: []

@@ -1,0 +1,14 @@
+trigger:
+  event: state.reset_requested
+  payload:
+    entity_id: ent-001
+  entity_fields_before:
+    accumulated_count: 10
+    cycle_index: 3
+    dedup_key: abc123
+
+expected:
+  handler_outcome: success
+  entity_state: cleared
+  emitted_events:
+    - state.reset_completed

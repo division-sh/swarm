@@ -1,0 +1,17 @@
+trigger:
+  sequence:
+    - event: opco.teardown_requested
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+        reason: "Insufficient traction after 60 days"
+    - event: opco.teardown_complete
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+
+expected:
+  handler_outcome: success
+  entity_state: killed
+  emitted_events:
+    - opco.terminated

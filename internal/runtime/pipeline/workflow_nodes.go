@@ -7,6 +7,7 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type WorkflowEventPolicy struct {
@@ -88,16 +89,17 @@ func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, boo
 	return WorkflowEventPolicy{}, false
 }
 
-func LoadWorkflowNodes(bundle *runtimecontracts.WorkflowContractBundle) ([]WorkflowNode, error) {
-	if bundle == nil {
+func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
+	if source == nil {
 		return nil, fmt.Errorf("workflow contract bundle is nil")
 	}
-	path := bundle.Paths.SystemNodesFile
+	path := "workflow contract bundle"
 
-	wantIDs := workflowRuntimeNodeIDs(bundle)
+	wantIDs := workflowRuntimeNodeIDs(source)
+	nodes := source.NodeEntries()
 	out := make([]WorkflowNode, 0, len(wantIDs))
 	for _, nodeID := range wantIDs {
-		entry, ok := bundle.Nodes[nodeID]
+		entry, ok := nodes[nodeID]
 		if !ok {
 			return nil, fmt.Errorf("system node %q missing from %s", nodeID, path)
 		}
@@ -127,24 +129,26 @@ func LoadWorkflowNodes(bundle *runtimecontracts.WorkflowContractBundle) ([]Workf
 			Implementation:   strings.TrimSpace(entry.Implementation),
 			StateTable:       strings.TrimSpace(entry.StateTable),
 			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
-			Policies:         buildWorkflowNodePolicies(bundle, nodeID, subscriptions),
+			Policies:         buildWorkflowNodePolicies(source, nodeID, subscriptions),
 		})
 	}
 	return out, nil
 }
 
-func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []string {
-	if bundle == nil {
+func workflowRuntimeNodeIDs(source semanticview.Source) []string {
+	if source == nil {
 		return nil
 	}
+	nodes := source.NodeEntries()
+	events := source.EventEntries()
 	seen := make(map[string]struct{})
-	out := make([]string, 0, len(bundle.Nodes))
-	for _, transition := range bundle.WorkflowTransitions() {
+	out := make([]string, 0, len(nodes))
+	for _, transition := range source.WorkflowTransitions() {
 		nodeID := strings.TrimSpace(transition.Node)
 		if nodeID == "" {
 			continue
 		}
-		if _, ok := bundle.Nodes[nodeID]; !ok {
+		if _, ok := nodes[nodeID]; !ok {
 			continue
 		}
 		if _, ok := seen[nodeID]; ok {
@@ -153,12 +157,12 @@ func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []s
 		seen[nodeID] = struct{}{}
 		out = append(out, nodeID)
 	}
-	for _, entry := range bundle.Events {
+	for _, entry := range events {
 		nodeID := strings.TrimSpace(entry.OwningNode)
 		if nodeID == "" {
 			continue
 		}
-		if _, ok := bundle.Nodes[nodeID]; !ok {
+		if _, ok := nodes[nodeID]; !ok {
 			continue
 		}
 		if _, ok := seen[nodeID]; ok {
@@ -167,12 +171,12 @@ func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []s
 		seen[nodeID] = struct{}{}
 		out = append(out, nodeID)
 	}
-	for _, transition := range bundle.DerivedHandlerTransitions() {
+	for _, transition := range source.DerivedHandlerTransitions() {
 		nodeID := strings.TrimSpace(transition.NodeID)
 		if nodeID == "" {
 			continue
 		}
-		if _, ok := bundle.Nodes[nodeID]; !ok {
+		if _, ok := nodes[nodeID]; !ok {
 			continue
 		}
 		if _, ok := seen[nodeID]; ok {
@@ -184,7 +188,7 @@ func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []s
 		seen[nodeID] = struct{}{}
 		out = append(out, nodeID)
 	}
-	for nodeID, node := range bundle.Nodes {
+	for nodeID, node := range nodes {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" {
 			continue
@@ -202,8 +206,8 @@ func workflowRuntimeNodeIDs(bundle *runtimecontracts.WorkflowContractBundle) []s
 	return out
 }
 
-func buildWorkflowNodePolicies(bundle *runtimecontracts.WorkflowContractBundle, nodeID string, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
-	allowed := workflowNodeRuntimePolicyEvents(bundle, strings.TrimSpace(nodeID), subscriptions)
+func buildWorkflowNodePolicies(source semanticview.Source, nodeID string, subscriptions []events.EventType) map[string]WorkflowEventPolicy {
+	allowed := workflowNodeRuntimePolicyEvents(source, strings.TrimSpace(nodeID), subscriptions)
 	if len(allowed) == 0 {
 		return nil
 	}
@@ -214,13 +218,13 @@ func buildWorkflowNodePolicies(bundle *runtimecontracts.WorkflowContractBundle, 
 			subscribed[name] = struct{}{}
 		}
 	}
-	transitionTriggers := workflowNodeTransitionTriggers(bundle, nodeID)
+	transitionTriggers := workflowNodeTransitionTriggers(source, nodeID)
 	policies := make(map[string]WorkflowEventPolicy, len(allowed))
 	for eventType := range allowed {
 		if _, ok := subscribed[eventType]; !ok {
 			continue
 		}
-		policy := deriveWorkflowEventPolicy(bundle, eventType, transitionTriggers[eventType])
+		policy := deriveWorkflowEventPolicy(source, eventType, transitionTriggers[eventType])
 		if override, ok := workflowNodeRuntimePolicyOverride(nodeID, eventType); ok {
 			policy = override
 		}
@@ -245,9 +249,9 @@ func workflowNodeTimerIDs(timers []runtimecontracts.WorkflowTimerContract) []str
 	return out
 }
 
-func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBundle, nodeID string, subscriptions []events.EventType) map[string]struct{} {
+func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, subscriptions []events.EventType) map[string]struct{} {
 	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" || bundle == nil {
+	if nodeID == "" || source == nil {
 		return nil
 	}
 	out := make(map[string]struct{}, len(subscriptions)+8)
@@ -257,25 +261,25 @@ func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBu
 			out[name] = struct{}{}
 		}
 	}
-	for eventType := range bundle.Events {
+	for eventType := range source.EventEntries() {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
 			continue
 		}
-		for _, owner := range bundle.RuntimeEventOwners(eventType) {
+		for _, owner := range source.RuntimeEventOwners(eventType) {
 			if strings.TrimSpace(owner) == nodeID {
 				out[eventType] = struct{}{}
 				break
 			}
 		}
 	}
-	for eventType := range bundle.NodeEventHandlers(nodeID) {
+	for eventType := range source.NodeEventHandlers(nodeID) {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
-	for _, transition := range bundle.WorkflowTransitions() {
+	for _, transition := range source.WorkflowTransitions() {
 		if strings.TrimSpace(transition.Node) != nodeID {
 			continue
 		}
@@ -284,16 +288,16 @@ func workflowNodeRuntimePolicyEvents(bundle *runtimecontracts.WorkflowContractBu
 			out[trigger] = struct{}{}
 		}
 	}
-	if source, ok := bundle.NodeContractSource(nodeID); ok {
-		flowID := strings.TrimSpace(source.FlowID)
+	if contractSource, ok := source.NodeContractSource(nodeID); ok {
+		flowID := strings.TrimSpace(contractSource.FlowID)
 		if flowID != "" {
-			for _, eventType := range bundle.FlowInputEvents(flowID) {
+			for _, eventType := range source.FlowInputEvents(flowID) {
 				eventType = strings.TrimSpace(eventType)
 				if eventType != "" {
 					out[eventType] = struct{}{}
 				}
 			}
-			for _, eventType := range bundle.FlowOutputEvents(flowID) {
+			for _, eventType := range source.FlowOutputEvents(flowID) {
 				eventType = strings.TrimSpace(eventType)
 				if eventType != "" {
 					out[eventType] = struct{}{}
@@ -337,13 +341,13 @@ func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventP
 	return WorkflowEventPolicy{}, false
 }
 
-func workflowNodeTransitionTriggers(bundle *runtimecontracts.WorkflowContractBundle, nodeID string) map[string]bool {
+func workflowNodeTransitionTriggers(source semanticview.Source, nodeID string) map[string]bool {
 	out := make(map[string]bool)
-	if bundle == nil {
+	if source == nil {
 		return out
 	}
 	nodeID = strings.TrimSpace(nodeID)
-	for _, transition := range bundle.WorkflowTransitions() {
+	for _, transition := range source.WorkflowTransitions() {
 		if strings.TrimSpace(transition.Node) != nodeID {
 			continue
 		}
@@ -352,7 +356,7 @@ func workflowNodeTransitionTriggers(bundle *runtimecontracts.WorkflowContractBun
 			out[trigger] = true
 		}
 	}
-	for _, transition := range bundle.DerivedHandlerTransitions() {
+	for _, transition := range source.DerivedHandlerTransitions() {
 		if strings.TrimSpace(transition.NodeID) != nodeID {
 			continue
 		}
@@ -367,9 +371,9 @@ func workflowNodeTransitionTriggers(bundle *runtimecontracts.WorkflowContractBun
 	return out
 }
 
-func deriveWorkflowEventPolicy(bundle *runtimecontracts.WorkflowContractBundle, eventType string, drivesTransition bool) WorkflowEventPolicy {
+func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, drivesTransition bool) WorkflowEventPolicy {
 	eventType = strings.TrimSpace(eventType)
-	entry, ok := bundle.Events[eventType]
+	entry, ok := source.EventEntry(eventType)
 	if !ok {
 		return WorkflowEventPolicy{RequireVertical: drivesTransition}
 	}

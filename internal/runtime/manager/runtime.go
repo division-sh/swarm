@@ -13,9 +13,9 @@ import (
 	"empireai/internal/events"
 	"empireai/internal/models"
 	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
 	workspace "empireai/internal/runtime/workspace"
 	"github.com/google/uuid"
@@ -146,8 +146,8 @@ func (am *AgentManager) defaultManagerAgentID(cfg models.AgentConfig) string {
 		}
 		return managerID
 	}
-	if bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil(); bundle != nil {
-		if _, entry, ok := runtimecontracts.ResolveAgentRegistryEntry(bundle, cfg); ok {
+	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
+		if _, entry, ok := semanticview.ResolveAgentRegistryEntry(source, cfg); ok {
 			if managerID := normalizedManagerFallback(cfg, strings.TrimSpace(entry.ManagerFallback)); managerID != "" {
 				if managerID == "coordinator" {
 					return "empire-coordinator"
@@ -282,14 +282,6 @@ func (am *AgentManager) Run(ctx context.Context) {
 func (am *AgentManager) Recover(ctx context.Context) error {
 	if am.store == nil {
 		return nil
-	}
-
-	rules, err := am.store.LoadRoutingRules(ctx)
-	if err != nil {
-		return fmt.Errorf("load routing rules: %w", err)
-	}
-	if err := am.hydrateRoutingTables(rules); err != nil {
-		return err
 	}
 
 	agents, err := am.store.LoadAgents(ctx)
@@ -471,7 +463,6 @@ func (am *AgentManager) ResetRuntimeState() error {
 	am.agents = make(map[string]Agent)
 	am.agentCfg = make(map[string]models.AgentConfig)
 	am.agentUpAt = make(map[string]time.Time)
-	am.routeMeta = make(map[string]PersistedRoutingRule)
 	am.inFlight = make(map[string]struct{})
 	am.mu.Unlock()
 	am.poisonMu.Lock()

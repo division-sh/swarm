@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [timed_out]
+states: [pending, active, timed_out]
+pins:
+  inputs:
+    events: [task.started, timer.task_timeout]
+  outputs:
+    events: [task.timed_out]

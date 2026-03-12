@@ -1,0 +1,5 @@
+name: test-multi-gate-pipeline
+version: 1.0.0
+description: Three gates must all be set before guard allows final state advance.
+platform_version: ">=1.1.0"
+flows: []

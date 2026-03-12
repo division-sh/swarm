@@ -1,0 +1,13 @@
+opco.spinup_requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    mandate: object
+    brand: object
+    geography: string
+    tech_stack: string
+    founder_directives: string
+opco.ceo_ready:
+  payload:
+    vertical_id: string
+    agent_count: number

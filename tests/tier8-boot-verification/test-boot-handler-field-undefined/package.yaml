@@ -1,0 +1,7 @@
+name: test-boot-handler-field-undefined
+version: 1.0.0
+description: >
+  Boot verification: handler uses 'custom_logic' which is not a valid
+  handler field per platform spec. Platform must catch UNDEFINED-FIELD.
+platform_version: ">=1.1.0"
+flows: []

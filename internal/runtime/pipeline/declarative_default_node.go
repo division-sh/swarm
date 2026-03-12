@@ -8,6 +8,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeengine "empireai/internal/runtime/engine"
+	"empireai/internal/runtime/identity"
 )
 
 type Event = events.Event
@@ -110,11 +112,6 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	if err != nil {
 		return nil, err
 	}
-	if actionID := strings.TrimSpace(handler.Action); actionID != "" && n.hooks != nil {
-		if hook, ok := n.hooks.Get(actionID); ok {
-			return hook(ctx, evt, outcome)
-		}
-	}
 	return outcome, nil
 }
 
@@ -151,40 +148,64 @@ func (r *ProductHookRegistry) Get(actionID string) (ActionHandler, bool) {
 type coordinatorHandlerExecutionEngine struct {
 	nodeID      string
 	coordinator *FactoryPipelineCoordinator
+	executor    *runtimeengine.Executor
+	node        *runtimeengine.DeclarativeNode
+	err         error
 }
 
 func newCoordinatorHandlerExecutionEngine(pc *FactoryPipelineCoordinator, nodeID string) HandlerExecutionEngine {
 	if pc == nil {
 		return nil
 	}
-	return &coordinatorHandlerExecutionEngine{
+	engine := &coordinatorHandlerExecutionEngine{
 		nodeID:      strings.TrimSpace(nodeID),
 		coordinator: pc,
 	}
+	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
+	if err != nil {
+		engine.err = err
+		return engine
+	}
+	engine.executor = exec
+	engine.node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(nodeID), exec)
+	return engine
 }
 
 func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event) (*HandlerOutcome, error) {
 	if e == nil || e.coordinator == nil {
 		return nil, fmt.Errorf("handler execution engine is not configured")
 	}
-	eventType := strings.TrimSpace(string(evt.Type))
-	if e.nodeID == "" || eventType == "" {
+	if e.err != nil {
+		return nil, e.err
+	}
+	if e.executor == nil || e.node == nil {
+		return nil, fmt.Errorf("handler execution engine is not configured")
+	}
+	if e.nodeID == "" || strings.TrimSpace(string(evt.Type)) == "" {
 		return &HandlerOutcome{Handled: false}, nil
 	}
-	triggerCtx := workflowTriggerContext{Event: evt}
-	verticalID := workflowEventEntityID(evt)
-	triggerCtx.State = e.coordinator.currentWorkflowState(ctx, verticalID)
-	triggerCtx.ValidationState = e.coordinator.validationStateSnapshot(verticalID)
-	result, err := e.coordinator.executeNodeContractHandler(ctx, e.nodeID, handler, triggerCtx, false)
+	entityID := workflowEventEntityID(evt)
+	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
+	result, err := e.node.Handle(ctx, runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID(entityID),
+		NodeID:   identity.NormalizeNodeID(e.nodeID),
+		Event:    evt,
+		Handler:  handler,
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID(entityID),
+			CurrentState: strings.TrimSpace(string(currentState.Stage)),
+			Metadata:     cloneStringAnyMap(currentState.Metadata),
+			StateBuckets: map[string]any{},
+		},
+	})
 	if err != nil {
 		return nil, err
 	}
-	if !result.Handled {
+	if result.Status == runtimeengine.OutcomeUnknown {
 		return &HandlerOutcome{Handled: false}, nil
 	}
-	e.coordinator.reconcileWorkflowEventTimers(ctx, verticalID, eventType)
 	return &HandlerOutcome{
-		Handled:         true,
-		ActionsExecuted: append([]string{}, result.Outcome.ActionsExecuted...),
+		Handled:         result.Status != runtimeengine.OutcomeRejected && result.Status != runtimeengine.OutcomeDiscarded,
+		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
 	}, nil
 }

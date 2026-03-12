@@ -1,0 +1,5 @@
+name: test-on-complete-second-match
+version: 1.0.0
+description: on_complete ordered list where second condition matches after first fails.
+platform_version: ">=1.1.0"
+flows: []

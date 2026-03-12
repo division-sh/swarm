@@ -1,0 +1,15 @@
+trigger:
+  event: spawn.requested
+  payload:
+    entity_id: ent-001
+    worker_id: w-001
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - spawn.confirmed
+  flow_instance_created:
+    template: worker
+    instance_id: w-001
+    auto_emitted: worker.ready

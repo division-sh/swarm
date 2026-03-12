@@ -10,6 +10,7 @@ import (
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
@@ -29,7 +30,7 @@ type EventBus struct {
 	cycleTracker        *OpCoCycleTracker
 	store               EventStore
 	logger              LoggerHook
-	contractBundle      *runtimecontracts.WorkflowContractBundle
+	semanticSource      semanticview.Source
 }
 
 type EventBusOptions struct {
@@ -37,7 +38,7 @@ type EventBusOptions struct {
 	CycleTracker        *OpCoCycleTracker
 	Interceptors        []EventInterceptor
 	InterceptorProvider func() []EventInterceptor
-	ContractBundle      *runtimecontracts.WorkflowContractBundle
+	ContractBundle      semanticview.Source
 	RouteTable          *RouteTable
 }
 
@@ -63,9 +64,9 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 	if store == nil {
 		store = InMemoryEventStore{}
 	}
-	contractBundle := opts.ContractBundle
-	if contractBundle == nil {
-		contractBundle = runtimepipeline.DefaultWorkflowContractBundleOrNil()
+	semanticSource := opts.ContractBundle
+	if semanticSource == nil {
+		semanticSource = runtimepipeline.DefaultWorkflowSemanticSourceOrNil()
 	}
 	filtered := make([]EventInterceptor, 0, len(opts.Interceptors))
 	for _, it := range opts.Interceptors {
@@ -75,7 +76,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 	}
 	routeTable := opts.RouteTable
 	if routeTable == nil {
-		derived, err := DeriveRouteTable(contractBundle)
+		derived, err := DeriveRouteTable(semanticSource)
 		if err != nil {
 			panic(err)
 		}
@@ -91,7 +92,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 		cycleTracker:        opts.CycleTracker,
 		interceptors:        filtered,
 		interceptorProvider: opts.InterceptorProvider,
-		contractBundle:      contractBundle,
+		semanticSource:      semanticSource,
 	}
 }
 
@@ -219,7 +220,7 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 }
 
 func (eb *EventBus) deriveBootRouteTableLocked() *RouteTable {
-	derived, err := DeriveRouteTable(eb.contractBundle)
+	derived, err := DeriveRouteTable(eb.semanticSource)
 	if err != nil {
 		panic(err)
 	}

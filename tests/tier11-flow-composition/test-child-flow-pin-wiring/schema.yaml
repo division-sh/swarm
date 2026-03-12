@@ -1,0 +1,8 @@
+initial_state: ready
+terminal_states: [done]
+states: [ready, done]
+pins:
+  inputs:
+    events: [job.submit]
+  outputs:
+    events: [job.done]

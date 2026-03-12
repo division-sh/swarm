@@ -1,0 +1,14 @@
+trigger:
+  event: flow.spawn_with_config
+  payload:
+    entity_id: ent-001
+    instance_id: worker-cfg-001
+    config:
+      max_retries: 3
+      timeout_ms: 5000
+
+expected:
+  handler_outcome: success
+  entity_state: spawned
+  emitted_events:
+    - flow.spawned

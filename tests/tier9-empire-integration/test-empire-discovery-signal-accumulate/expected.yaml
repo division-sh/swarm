@@ -1,0 +1,49 @@
+trigger:
+  sequence:
+    - event: category.assessed
+      payload:
+        scan_id: scan-001
+        category: "SaaS"
+        subcategory: "invoice-management"
+        geography: "US"
+        signal_strength: 75
+        opportunity_name: "QuickInvoice"
+        preliminary_icp: "Solo accountants"
+        build_sketch: { core_features: ["invoicing", "payment tracking"] }
+        evidence: { pain_signals: [{ signal: "manual invoicing complaints", source_url: "https://example.com" }] }
+        opportunity_hypothesis: "Gap in affordable invoicing"
+        geographic_scope: "national"
+        opportunity_pattern: "api_middleware"
+    - event: category.assessed
+      payload:
+        scan_id: scan-001
+        category: "SaaS"
+        subcategory: "appointment-scheduling"
+        geography: "US"
+        signal_strength: 68
+        opportunity_name: "BookEasy"
+        preliminary_icp: "Small clinics"
+        build_sketch: { core_features: ["scheduling", "reminders"] }
+        evidence: { pain_signals: [{ signal: "no-show complaints", source_url: "https://example.com" }] }
+        opportunity_hypothesis: "Underserved scheduling market"
+        geographic_scope: "national"
+        opportunity_pattern: "workflow_automation"
+    - event: category.assessed
+      payload:
+        scan_id: scan-001
+        category: "SaaS"
+        subcategory: "fleet-tracking"
+        geography: "US"
+        signal_strength: 60
+        opportunity_name: "FleetPulse"
+        preliminary_icp: "Small delivery companies"
+        build_sketch: { core_features: ["GPS tracking", "route optimization"] }
+        evidence: { pain_signals: [{ signal: "manual dispatch inefficiency", source_url: "https://example.com" }] }
+        opportunity_hypothesis: "Fleet management for SMBs"
+        geographic_scope: "national"
+        opportunity_pattern: "data_asymmetry"
+
+expected:
+  handler_outcome: success
+  entity_state: null
+  emitted_events: []

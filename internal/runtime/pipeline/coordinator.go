@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 const (
@@ -30,6 +30,7 @@ const (
 )
 
 type pipelineEmitCollectorKey struct{}
+type pipelineEmitIntentCollectorKey struct{}
 type pipelineSourceAgentKey struct{}
 
 func withPipelineSourceAgent(ctx context.Context, sourceAgent string) context.Context {
@@ -53,8 +54,8 @@ func pipelineSourceAgent(ctx context.Context) string {
 func (pc *FactoryPipelineCoordinator) runtimeHandlerID(eventType string) string {
 	eventType = strings.TrimSpace(eventType)
 	if eventType != "" {
-		if bundle := pc.ContractBundle(); bundle != nil {
-			if entry, ok := bundle.Events[eventType]; ok {
+		if source := pc.SemanticSource(); source != nil {
+			if entry, ok := source.EventEntry(eventType); ok {
 				if owner := strings.TrimSpace(entry.OwningNode); owner != "" {
 					return owner
 				}
@@ -79,6 +80,9 @@ type FactoryPipelineCoordinator struct {
 	db  *sql.DB
 
 	mu sync.Mutex
+
+	entityLockMu sync.Mutex
+	entityLocks  map[string]*sync.Mutex
 
 	scanCoordinator *ScanCoordinator
 	scoringState    *ScoringState
@@ -119,7 +123,7 @@ type FactoryPipelineCoordinatorOptions struct {
 }
 
 type FlowInstanceActivationRequest struct {
-	ContractBundle *runtimecontracts.WorkflowContractBundle
+	ContractBundle semanticview.Source
 	TemplateID     string
 	InstanceID     string
 	VerticalID     string
@@ -153,6 +157,7 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 		scoringPolicy:     scoringPolicy,
 		payloads:          payloads,
 		processed:         make(map[string]struct{}),
+		entityLocks:       make(map[string]*sync.Mutex),
 		shardPlanner:      opts.ShardPlanner,
 		expressionEval:    newWorkflowExpressionEvaluator(),
 		instanceActivator: opts.InstanceActivator,

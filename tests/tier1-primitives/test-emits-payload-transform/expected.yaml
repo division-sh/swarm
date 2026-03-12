@@ -1,0 +1,11 @@
+trigger:
+  event: item.received
+  payload:
+    entity_id: ent-001
+    raw_score: 25
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - item.scored

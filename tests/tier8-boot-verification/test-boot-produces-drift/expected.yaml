@@ -1,0 +1,7 @@
+trigger:
+  boot: true
+
+expected:
+  boot_result: warning
+  error_category: PRODUCES-DRIFT
+  error_contains: "item.surprise"

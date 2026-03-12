@@ -1,0 +1,10 @@
+task.assigned:
+  payload:
+    entity_id: string
+task.feedback:
+  payload:
+    entity_id: string
+    comment: string
+task.result:
+  payload:
+    entity_id: string

@@ -1,0 +1,11 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.scored]
+  event_handlers:
+    item.received:
+      payload_transform:
+        score: "payload.raw_score * 2"
+      advances_to: done
+      emits: item.scored

@@ -1,0 +1,4 @@
+test-agent:
+  id: test-agent
+  subscribes_to: [task.assigned]
+  produces: [task.completed]

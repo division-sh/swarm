@@ -1,0 +1,12 @@
+step.first:
+  payload:
+    entity_id: string
+step.second:
+  payload:
+    entity_id: string
+step.first_done:
+  payload:
+    entity_id: string
+step.second_done:
+  payload:
+    entity_id: string

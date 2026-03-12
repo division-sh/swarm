@@ -9,6 +9,9 @@ import (
 	"sort"
 	"strings"
 
+	flowmodel "empireai/internal/runtime/flowmodel"
+	"empireai/internal/runtime/paths"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,20 +26,11 @@ type ContractPaths struct {
 	ProjectToolsFile      string
 	ProjectPolicyFile     string
 	ProjectPromptsDir     string
-	WorkflowSchemaFile    string
-	GuardRegistryFile     string
-	SystemNodesFile       string
-	EventCatalogFile      string
-	AgentRegistryFile     string
-	ToolSchemasFile       string
-	PolicyFile            string
-	PromptsDir            string
 	PlatformSpecFile      string
 	VerificationGatesFile string
 	ToolingLockFile       string
 	DDLFile               string
 	AgentConfigMapFile    string
-	RuntimeBridge         RuntimeBridgePaths
 	Flows                 []FlowContractPaths
 }
 
@@ -44,33 +38,24 @@ type WorkflowContractBundle struct {
 	Paths                 ContractPaths
 	Package               ProjectPackageDocument
 	PackageTree           []LoadedProjectPackage
-	ProjectContracts      map[string]ProjectContractView
-	FlowContracts         map[string]FlowContractView
-	ScopedNodes           map[string]SystemNodeContract
-	ScopedEvents          map[string]EventCatalogEntry
-	ScopedAgents          map[string]AgentRegistryEntry
-	ScopedTools           map[string]ToolSchemaEntry
-	MergedNodes           map[string]SystemNodeContract
-	MergedEvents          map[string]EventCatalogEntry
-	MergedAgents          map[string]AgentRegistryEntry
-	MergedTools           map[string]ToolSchemaEntry
-	MergedPolicy          PolicyDocument
-	ScopedNodeSources     map[string]ContractItemSource
-	ScopedEventSources    map[string]ContractItemSource
-	ScopedAgentSources    map[string]ContractItemSource
-	ScopedToolSources     map[string]ContractItemSource
-	NodeSources           map[string]ContractItemSource
-	EventSources          map[string]ContractItemSource
-	AgentSources          map[string]ContractItemSource
-	ToolSources           map[string]ContractItemSource
-	PolicySources         map[string]ContractItemSource
+	projectContracts      map[string]ProjectContractView
+	scopedNodes           map[string]SystemNodeContract
+	scopedEvents          map[string]EventCatalogEntry
+	scopedAgents          map[string]AgentRegistryEntry
+	scopedTools           map[string]ToolSchemaEntry
+	scopedNodeSources     map[string]ContractItemSource
+	scopedEventSources    map[string]ContractItemSource
+	scopedAgentSources    map[string]ContractItemSource
+	scopedToolSources     map[string]ContractItemSource
+	nodeSources           map[string]ContractItemSource
+	eventSources          map[string]ContractItemSource
+	agentSources          map[string]ContractItemSource
+	toolSources           map[string]ContractItemSource
 	ambiguousNodeAliases  map[string]struct{}
 	ambiguousEventAliases map[string]struct{}
 	ambiguousAgentAliases map[string]struct{}
 	ambiguousToolAliases  map[string]struct{}
 	Semantics             WorkflowSemanticView
-	Workflow              WorkflowSchemaDocument
-	Hooks                 GuardActionRegistryDocument
 	Nodes                 map[string]SystemNodeContract
 	Events                map[string]EventCatalogEntry
 	Agents                map[string]AgentRegistryEntry
@@ -79,6 +64,7 @@ type WorkflowContractBundle struct {
 	Platform              PlatformSpecDocument
 	FlowSchemas           map[string]FlowSchemaDocument
 	FlowTree              FlowTree
+	URIRegistry           ContractURIRegistry
 }
 
 type WorkflowSemanticView struct {
@@ -117,7 +103,7 @@ type HandlerTransitionSemantic struct {
 	NodeID           string
 	FlowID           string
 	EventType        string
-	Action           string
+	Action           ActionSpec
 	Guard            *GuardSpec
 	AdvancesTo       string
 	SetsGate         *GateSpec
@@ -126,7 +112,7 @@ type HandlerTransitionSemantic struct {
 	Emits            EventEmission
 	Condition        string
 	CompletionRule   string
-	OnComplete       *HandlerRuleEntry
+	OnComplete       []HandlerRuleEntry
 	Rules            []HandlerRuleEntry
 	Accumulate       *AccumulateSpec
 	Compute          *ComputeSpec
@@ -137,9 +123,6 @@ type HandlerTransitionSemantic struct {
 	Count            *CountSpec
 	Clear            *ClearSpec
 	PayloadTransform *PayloadTransformSpec
-	Template         string
-	InstanceIDFrom   string
-	ConfigFrom       *ConfigFromSpec
 	Branch           []BranchSpec
 }
 
@@ -205,16 +188,51 @@ func (g *GuardSpec) UnmarshalYAML(node *yaml.Node) error {
 }
 
 type AccumulateSpec struct {
-	ExpectedFrom string            `yaml:"expected_from"`
-	Completion   string            `yaml:"completion"`
-	OnComplete   *HandlerRuleEntry `yaml:"on_complete"`
-	OnTimeout    *HandlerRuleEntry `yaml:"on_timeout"`
+	ExpectedFrom string               `yaml:"expected_from"`
+	ExpectedPath paths.Path           `yaml:"-"`
+	DedupBy      string               `yaml:"dedup_by"`
+	DedupPath    paths.Path           `yaml:"-"`
+	Completion   AccumulateCompletion `yaml:"completion"`
+	OnComplete   []HandlerRuleEntry   `yaml:"on_complete"`
+	OnTimeout    *HandlerRuleEntry    `yaml:"on_timeout"`
+}
+
+func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	var aux struct {
+		ExpectedFrom string    `yaml:"expected_from"`
+		DedupBy      string    `yaml:"dedup_by"`
+		Completion   string    `yaml:"completion"`
+		OnComplete   yaml.Node `yaml:"on_complete"`
+		OnTimeout    yaml.Node `yaml:"on_timeout"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*a = AccumulateSpec{
+		ExpectedFrom: strings.TrimSpace(aux.ExpectedFrom),
+		ExpectedPath: paths.Parse(aux.ExpectedFrom),
+		DedupBy:      strings.TrimSpace(aux.DedupBy),
+		DedupPath:    paths.Parse(aux.DedupBy),
+		Completion:   ParseAccumulateCompletion(aux.Completion),
+	}
+	var err error
+	if a.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete); err != nil {
+		return err
+	}
+	if a.OnTimeout, err = decodeHandlerRuleEntryNode(&aux.OnTimeout); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ComputeSpec struct {
-	Operation string        `yaml:"operation"`
-	Tiers     []ComputeTier `yaml:"tiers"`
-	StoreAs   string        `yaml:"store_as"`
+	Operation ComputeOperation `yaml:"operation"`
+	Tiers     []ComputeTier    `yaml:"tiers"`
+	Keys      ComputeKeyConfig `yaml:"keys"`
+	StoreAs   string           `yaml:"store_as"`
 }
 
 type ComputeTier struct {
@@ -222,34 +240,67 @@ type ComputeTier struct {
 	Weight     float64  `yaml:"weight"`
 }
 
+type ComputeKeyConfig struct {
+	DimensionKey string   `yaml:"dimension_key"`
+	ScoreKeys    []string `yaml:"score_keys"`
+	NumericKeys  []string `yaml:"numeric_keys"`
+}
+
 type FanOutSpec struct {
 	ItemsFrom   string            `yaml:"items_from"`
+	ItemsPath   paths.Path        `yaml:"-"`
 	Target      string            `yaml:"target"`
 	EmitPerItem string            `yaml:"emit_per_item"`
 	EmitMapping map[string]string `yaml:"emit_mapping"`
 }
 
+func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
+	if f == nil {
+		return nil
+	}
+	type alias FanOutSpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*f = FanOutSpec(aux)
+	f.ItemsFrom = strings.TrimSpace(f.ItemsFrom)
+	f.ItemsPath = paths.Parse(f.ItemsFrom)
+	f.Target = strings.TrimSpace(f.Target)
+	f.EmitPerItem = strings.TrimSpace(f.EmitPerItem)
+	return nil
+}
+
 type FilterSpec struct {
-	Predicate string `yaml:"predicate"`
-	Source    string `yaml:"source"`
-	ItemsFrom string `yaml:"items_from"`
-	Condition string `yaml:"condition"`
-	StoreAs   string `yaml:"store_as"`
+	Predicate  string     `yaml:"predicate"`
+	Source     string     `yaml:"source"`
+	SourcePath paths.Path `yaml:"-"`
+	ItemsFrom  string     `yaml:"items_from"`
+	ItemsPath  paths.Path `yaml:"-"`
+	Condition  string     `yaml:"condition"`
+	StoreAs    string     `yaml:"store_as"`
+	StorePath  paths.Path `yaml:"-"`
 }
 
 type ReduceSpec struct {
-	Operation string         `yaml:"operation"`
-	Source    string         `yaml:"source"`
-	StoreAs   string         `yaml:"store_as"`
-	ItemsFrom string         `yaml:"items_from"`
-	Params    map[string]any `yaml:"params"`
+	Operation  string                     `yaml:"operation"`
+	Source     string                     `yaml:"source"`
+	SourcePath paths.Path                 `yaml:"-"`
+	StoreAs    string                     `yaml:"store_as"`
+	StorePath  paths.Path                 `yaml:"-"`
+	ItemsFrom  string                     `yaml:"items_from"`
+	ItemsPath  paths.Path                 `yaml:"-"`
+	Params     map[string]ExpressionValue `yaml:"params"`
 }
 
 type CountSpec struct {
-	Source    string `yaml:"source"`
-	StoreAs   string `yaml:"store_as"`
-	ItemsFrom string `yaml:"items_from"`
-	Condition string `yaml:"condition"`
+	Source     string     `yaml:"source"`
+	SourcePath paths.Path `yaml:"-"`
+	StoreAs    string     `yaml:"store_as"`
+	StorePath  paths.Path `yaml:"-"`
+	ItemsFrom  string     `yaml:"items_from"`
+	ItemsPath  paths.Path `yaml:"-"`
+	Condition  string     `yaml:"condition"`
 }
 
 type ClearSpec struct {
@@ -258,13 +309,75 @@ type ClearSpec struct {
 }
 
 type PayloadTransformSpec struct {
-	Mappings map[string]string `yaml:"mappings"`
-	Fields   map[string]string `yaml:"fields"`
+	Mappings map[string]string  `yaml:"mappings"`
+	Fields   map[string]string  `yaml:"fields"`
+	Bindings []TransformBinding `yaml:"-"`
+}
+
+type TransformBinding struct {
+	Target     string
+	TargetPath paths.Path
+	Source     string
+	SourcePath paths.Path
+}
+
+func (p *PayloadTransformSpec) UnmarshalYAML(node *yaml.Node) error {
+	if p == nil {
+		return nil
+	}
+	type alias PayloadTransformSpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*p = PayloadTransformSpec(aux)
+	p.Bindings = p.TransformBindings()
+	return nil
+}
+
+func (p PayloadTransformSpec) TransformBindings() []TransformBinding {
+	mappings := p.Mappings
+	if len(mappings) == 0 && len(p.Fields) > 0 {
+		mappings = p.Fields
+	}
+	out := make([]TransformBinding, 0, len(mappings))
+	for target, source := range mappings {
+		cleanTarget := strings.TrimSpace(target)
+		cleanSource := strings.TrimSpace(source)
+		if cleanTarget == "" || cleanSource == "" {
+			continue
+		}
+		out = append(out, TransformBinding{
+			Target:     cleanTarget,
+			TargetPath: paths.Parse(cleanTarget),
+			Source:     cleanSource,
+			SourcePath: paths.Parse(cleanSource),
+		})
+	}
+	return out
 }
 
 type ConfigFromSpec struct {
 	PolicyKeys []string          `yaml:"policy_keys"`
 	Bindings   map[string]string `yaml:",inline"`
+	Entries    []ConfigBinding   `yaml:"-"`
+}
+
+type ConfigBinding struct {
+	Key     string
+	Ref     string
+	RefPath paths.Path
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 type BranchSpec struct {
@@ -304,15 +417,121 @@ func (g *GateSpec) UnmarshalYAML(node *yaml.Node) error {
 }
 
 type QuerySpec struct {
-	Operation string      `yaml:"operation"`
-	Source    string      `yaml:"source"`
-	StoreAs   string      `yaml:"store_as"`
-	Entities  string      `yaml:"entities"`
-	Filter    string      `yaml:"filter"`
-	GroupBy   string      `yaml:"group_by"`
-	Count     bool        `yaml:"count"`
-	Select    []string    `yaml:"select"`
-	Queries   []QuerySpec `yaml:"-"`
+	Operation    string      `yaml:"operation"`
+	Source       string      `yaml:"source"`
+	SourcePath   paths.Path  `yaml:"-"`
+	StoreAs      string      `yaml:"store_as"`
+	StorePath    paths.Path  `yaml:"-"`
+	Entities     string      `yaml:"entities"`
+	EntitiesPath paths.Path  `yaml:"-"`
+	Filter       string      `yaml:"filter"`
+	GroupBy      string      `yaml:"group_by"`
+	GroupByPath  paths.Path  `yaml:"-"`
+	Count        bool        `yaml:"count"`
+	Select       []string    `yaml:"select"`
+	Queries      []QuerySpec `yaml:"-"`
+}
+
+func (s *FilterSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	type alias FilterSpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = FilterSpec(aux)
+	s.Source = strings.TrimSpace(s.Source)
+	s.SourcePath = paths.Parse(s.Source)
+	s.ItemsFrom = strings.TrimSpace(s.ItemsFrom)
+	s.ItemsPath = paths.Parse(s.ItemsFrom)
+	s.StoreAs = strings.TrimSpace(s.StoreAs)
+	s.StorePath = paths.Parse(s.StoreAs)
+	s.Predicate = strings.TrimSpace(s.Predicate)
+	s.Condition = strings.TrimSpace(s.Condition)
+	return nil
+}
+
+func (s *ReduceSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	type alias ReduceSpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = ReduceSpec(aux)
+	s.Operation = strings.TrimSpace(s.Operation)
+	s.Source = strings.TrimSpace(s.Source)
+	s.SourcePath = paths.Parse(s.Source)
+	s.StoreAs = strings.TrimSpace(s.StoreAs)
+	s.StorePath = paths.Parse(s.StoreAs)
+	s.ItemsFrom = strings.TrimSpace(s.ItemsFrom)
+	s.ItemsPath = paths.Parse(s.ItemsFrom)
+	return nil
+}
+
+func (s *CountSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	type alias CountSpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = CountSpec(aux)
+	s.Source = strings.TrimSpace(s.Source)
+	s.SourcePath = paths.Parse(s.Source)
+	s.StoreAs = strings.TrimSpace(s.StoreAs)
+	s.StorePath = paths.Parse(s.StoreAs)
+	s.ItemsFrom = strings.TrimSpace(s.ItemsFrom)
+	s.ItemsPath = paths.Parse(s.ItemsFrom)
+	s.Condition = strings.TrimSpace(s.Condition)
+	return nil
+}
+
+func (s *QuerySpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	type alias QuerySpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = QuerySpec(aux)
+	s.hydratePaths()
+	return nil
+}
+
+func (s *QuerySpec) hydratePaths() {
+	if s == nil {
+		return
+	}
+	s.Operation = strings.TrimSpace(s.Operation)
+	s.Source = strings.TrimSpace(s.Source)
+	s.SourcePath = paths.Parse(s.Source)
+	s.StoreAs = strings.TrimSpace(s.StoreAs)
+	s.StorePath = paths.Parse(s.StoreAs)
+	s.Entities = strings.TrimSpace(s.Entities)
+	s.EntitiesPath = paths.Parse(s.Entities)
+	s.Filter = strings.TrimSpace(s.Filter)
+	s.GroupBy = strings.TrimSpace(s.GroupBy)
+	s.GroupByPath = paths.Parse(s.GroupBy)
+	for i := range s.Queries {
+		s.Queries[i].hydratePaths()
+	}
+}
+
+type ActionSpec struct {
+	ID             string          `yaml:"id"`
+	Template       string          `yaml:"template"`
+	InstanceIDFrom string          `yaml:"instance_id_from"`
+	InstanceIDPath paths.Path      `yaml:"-"`
+	ConfigFrom     *ConfigFromSpec `yaml:"config_from"`
 }
 
 type EntitySchema struct {
@@ -347,21 +566,10 @@ type NodeStateField struct {
 	Default any    `yaml:"default"`
 }
 
-type PolicyDocument struct {
-	Values map[string]PolicyValue `yaml:",inline"`
-}
-
-type PolicyValue struct {
-	Value       any    `yaml:"value"`
-	Description string `yaml:"description"`
-	Override    bool   `yaml:"override"`
-}
-
-type FlowTree struct {
-	Root   *FlowContractView
-	ByPath map[string]*FlowContractView
-	ByID   map[string]*FlowContractView
-}
+type PolicyDocument = flowmodel.PolicyDocument
+type PolicyValue = flowmodel.PolicyValue
+type ContractURIRegistry = flowmodel.URIRegistry
+type ContractURIRef = flowmodel.URIRef
 
 type ExpressionValue struct {
 	Literal any    `yaml:"literal,omitempty"`
@@ -408,17 +616,25 @@ type EventFieldSpec struct {
 	Description string `yaml:"description"`
 }
 
+type SchemaLiteral struct {
+	Node yaml.Node
+}
+
+type ToolAdditionalProperties struct {
+	Allowed *bool
+	Schema  *ToolInputSchema
+}
+
 type ToolInputSchema struct {
 	Type                 string                     `yaml:"type"`
 	Description          string                     `yaml:"description"`
 	Properties           map[string]ToolInputSchema `yaml:"properties"`
 	Required             []string                   `yaml:"required"`
 	Items                *ToolInputSchema           `yaml:"items"`
-	Enum                 []any                      `yaml:"enum"`
-	AdditionalProperties any                        `yaml:"additionalProperties"`
+	Enum                 []SchemaLiteral            `yaml:"enum"`
+	AdditionalProperties ToolAdditionalProperties   `yaml:"additionalProperties"`
 	Minimum              *float64                   `yaml:"minimum"`
 	Maximum              *float64                   `yaml:"maximum"`
-	Raw                  map[string]any             `yaml:"-"`
 }
 
 func (b *WorkflowContractBundle) WorkflowName() string {
@@ -488,6 +704,239 @@ func (b *WorkflowContractBundle) WorkflowTimerByID(id string) (WorkflowTimerCont
 		}
 	}
 	return WorkflowTimerContract{}, false
+}
+
+func (b *WorkflowContractBundle) FlowViewByID(id string) (*FlowContractView, bool) {
+	id = strings.TrimSpace(id)
+	if b == nil || id == "" {
+		return nil, false
+	}
+	if view, ok := b.FlowTree.ByID[id]; ok && view != nil {
+		return view, true
+	}
+	return nil, false
+}
+
+func (b *WorkflowContractBundle) FlowSchemaByID(id string) (FlowSchemaDocument, bool) {
+	id = strings.TrimSpace(id)
+	if b == nil || id == "" {
+		return FlowSchemaDocument{}, false
+	}
+	schema, ok := b.FlowSchemas[id]
+	return schema, ok
+}
+
+func (b *WorkflowContractBundle) HasFlow(id string) bool {
+	_, ok := b.FlowViewByID(id)
+	return ok
+}
+
+func (b *WorkflowContractBundle) ProjectViews() []ProjectContractView {
+	if b == nil || len(b.projectContracts) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(b.projectContracts))
+	for key := range b.projectContracts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	views := make([]ProjectContractView, 0, len(keys))
+	for _, key := range keys {
+		views = append(views, b.projectContracts[key])
+	}
+	return views
+}
+
+func (b *WorkflowContractBundle) ProjectViewByKey(key string) (ProjectContractView, bool) {
+	key = strings.TrimSpace(key)
+	if b == nil || key == "" {
+		return ProjectContractView{}, false
+	}
+	view, ok := b.projectContracts[key]
+	return view, ok
+}
+
+func (b *WorkflowContractBundle) RootProjectViews() []ProjectContractView {
+	if b == nil || len(b.PackageTree) == 0 {
+		return nil
+	}
+	views := make([]ProjectContractView, 0, len(b.PackageTree))
+	for _, pkg := range b.PackageTree {
+		if strings.TrimSpace(pkg.ParentKey) != "" {
+			continue
+		}
+		if view, ok := b.ProjectViewByKey(pkg.Key); ok {
+			views = append(views, view)
+		}
+	}
+	return views
+}
+
+func (b *WorkflowContractBundle) FlowViews() []FlowContractView {
+	if b == nil {
+		return nil
+	}
+	return flowmodel.ViewsByPath(
+		b.FlowTree,
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Path) },
+		flowViewChildren,
+	)
+}
+
+func (b *WorkflowContractBundle) NodeEntries() map[string]SystemNodeContract {
+	if b == nil {
+		return nil
+	}
+	return cloneSystemNodeContractMap(b.Nodes)
+}
+
+func (b *WorkflowContractBundle) NodeEntry(id string) (SystemNodeContract, bool) {
+	id = strings.TrimSpace(id)
+	if b == nil || id == "" {
+		return SystemNodeContract{}, false
+	}
+	entry, ok := b.Nodes[id]
+	return entry, ok
+}
+
+func (b *WorkflowContractBundle) HasNode(id string) bool {
+	_, ok := b.NodeEntry(id)
+	return ok
+}
+
+func (b *WorkflowContractBundle) AgentEntries() map[string]AgentRegistryEntry {
+	if b == nil {
+		return nil
+	}
+	return cloneAgentRegistryEntryMap(b.Agents)
+}
+
+func (b *WorkflowContractBundle) AgentEntry(id string) (AgentRegistryEntry, bool) {
+	id = strings.TrimSpace(id)
+	if b == nil || id == "" {
+		return AgentRegistryEntry{}, false
+	}
+	entry, ok := b.Agents[id]
+	return entry, ok
+}
+
+func (b *WorkflowContractBundle) HasAgent(id string) bool {
+	_, ok := b.AgentEntry(id)
+	return ok
+}
+
+func (b *WorkflowContractBundle) ToolEntries() map[string]ToolSchemaEntry {
+	if b == nil {
+		return nil
+	}
+	return cloneToolSchemaEntryMap(b.Tools)
+}
+
+func (b *WorkflowContractBundle) EventEntries() map[string]EventCatalogEntry {
+	if b == nil {
+		return nil
+	}
+	return cloneEventCatalogEntryMap(b.Events)
+}
+
+func (b *WorkflowContractBundle) EventEntry(eventType string) (EventCatalogEntry, bool) {
+	eventType = strings.TrimSpace(eventType)
+	if b == nil || eventType == "" {
+		return EventCatalogEntry{}, false
+	}
+	entry, ok := b.Events[eventType]
+	return entry, ok
+}
+
+func (b *WorkflowContractBundle) HasEvent(eventType string) bool {
+	_, ok := b.EventEntry(eventType)
+	return ok
+}
+
+func (b *WorkflowContractBundle) ResolvedPolicyForFlow(flowID string) PolicyDocument {
+	if b == nil {
+		return PolicyDocument{Values: map[string]PolicyValue{}}
+	}
+	return flowmodel.ResolvePolicyByID(
+		b.Policy,
+		b.FlowTree,
+		flowID,
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+		func(view *FlowContractView) PolicyDocument { return view.Policy },
+		flowViewChildren,
+	)
+}
+
+func (b *WorkflowContractBundle) PolicyValueForFlow(flowID, key string) (PolicyValue, bool) {
+	doc := b.ResolvedPolicyForFlow(flowID)
+	value, ok := doc.Values[strings.TrimSpace(key)]
+	return value, ok
+}
+
+func (b *WorkflowContractBundle) ResolvedPolicyForNode(nodeID string) PolicyDocument {
+	if b == nil {
+		return PolicyDocument{Values: map[string]PolicyValue{}}
+	}
+	if source, ok := b.NodeContractSource(nodeID); ok {
+		return b.ResolvedPolicyForFlow(source.FlowID)
+	}
+	return b.ResolvedPolicyForFlow("")
+}
+
+func (b *WorkflowContractBundle) PolicyValueForNode(nodeID, key string) (PolicyValue, bool) {
+	doc := b.ResolvedPolicyForNode(nodeID)
+	value, ok := doc.Values[strings.TrimSpace(key)]
+	return value, ok
+}
+
+func (b *WorkflowContractBundle) FlowPath(flowID string) string {
+	if b == nil {
+		return ""
+	}
+	return flowmodel.PathForID(b.FlowTree, flowID, func(view *FlowContractView) string { return view.Path })
+}
+
+func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogEntry {
+	if b == nil {
+		return nil
+	}
+	if b.FlowTree.Root == nil {
+		return cloneEventCatalogEntryMap(b.Events)
+	}
+	return flowmodel.ResolveEntries(
+		b.FlowTree,
+		flowViewChildren,
+		func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
+	)
+}
+
+func clonePolicyDocument(in PolicyDocument) PolicyDocument {
+	return flowmodel.ClonePolicyDocument(in)
+}
+
+func flowViewChildren(view *FlowContractView) []*FlowContractView {
+	if view == nil || len(view.Children) == 0 {
+		return nil
+	}
+	children := make([]*FlowContractView, 0, len(view.Children))
+	for i := range view.Children {
+		children = append(children, &view.Children[i])
+	}
+	return children
+}
+
+func rootWorkflowPolicy(bundle *WorkflowContractBundle) PolicyDocument {
+	if bundle == nil {
+		return PolicyDocument{Values: map[string]PolicyValue{}}
+	}
+	for _, view := range bundle.RootProjectViews() {
+		return clonePolicyDocument(view.Policy)
+	}
+	if bundle.FlowTree.Root != nil {
+		return clonePolicyDocument(bundle.FlowTree.Root.Policy)
+	}
+	return PolicyDocument{Values: map[string]PolicyValue{}}
 }
 
 func (b *WorkflowContractBundle) GuardEntries() []GuardActionEntry {
@@ -613,8 +1062,38 @@ func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItem
 	if b == nil {
 		return ContractItemSource{}, false
 	}
-	source, ok := b.NodeSources[strings.TrimSpace(nodeID)]
+	source, ok := b.nodeSources[strings.TrimSpace(nodeID)]
 	return source, ok
+}
+
+func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {
+	if b == nil {
+		return ContractItemSource{}, false
+	}
+	source, ok := b.eventSources[strings.TrimSpace(eventType)]
+	return source, ok
+}
+
+func (b *WorkflowContractBundle) AgentContractSource(agentID string) (ContractItemSource, bool) {
+	if b == nil {
+		return ContractItemSource{}, false
+	}
+	source, ok := b.agentSources[strings.TrimSpace(agentID)]
+	return source, ok
+}
+
+func (b *WorkflowContractBundle) ScopedAgentEntries() map[string]AgentRegistryEntry {
+	if b == nil {
+		return nil
+	}
+	return cloneAgentRegistryEntryMap(b.scopedAgents)
+}
+
+func (b *WorkflowContractBundle) ScopedEventEntries() map[string]EventCatalogEntry {
+	if b == nil {
+		return nil
+	}
+	return cloneEventCatalogEntryMap(b.scopedEvents)
 }
 
 func (b *WorkflowContractBundle) NodeEventHandlers(nodeID string) map[string]SystemNodeEventHandler {
@@ -704,15 +1183,6 @@ func (b *WorkflowContractBundle) DerivedHandlerTransition(nodeID, eventType stri
 	return HandlerTransitionSemantic{}, false
 }
 
-type RuntimeBridgePaths struct {
-	Dir        string
-	NodesFile  string
-	EventsFile string
-	AgentsFile string
-	ToolsFile  string
-	PolicyFile string
-}
-
 type ProjectPackagePaths struct {
 	Key               string
 	ParentKey         string
@@ -725,7 +1195,6 @@ type ProjectPackagePaths struct {
 	ProjectToolsFile  string
 	ProjectPolicyFile string
 	ProjectPromptsDir string
-	RuntimeBridge     RuntimeBridgePaths
 	Flows             []FlowContractPaths
 }
 
@@ -747,32 +1216,17 @@ type FlowContractPaths struct {
 }
 
 type ProjectPackageDocument struct {
-	Name             string              `yaml:"name"`
-	Version          string              `yaml:"version"`
-	PlatformVersion  string              `yaml:"platform_version"`
-	Author           string              `yaml:"author"`
-	Description      string              `yaml:"description"`
-	Flows            []ProjectFlowRef    `yaml:"flows"`
-	Packages         []ProjectPackageRef `yaml:"packages"`
-	Children         []ProjectPackageRef `yaml:"children"`
-	Subpackages      []ProjectPackageRef `yaml:"subpackages"`
-	Handoffs         []ProjectHandoff    `yaml:"handoffs"`
-	RuntimeContracts struct {
-		Nodes  string `yaml:"nodes"`
-		Events string `yaml:"events"`
-		Agents string `yaml:"agents"`
-		Tools  string `yaml:"tools"`
-		Policy string `yaml:"policy"`
-	} `yaml:"runtime_contracts"`
-	TargetContracts struct {
-		Nodes  string `yaml:"nodes"`
-		Events string `yaml:"events"`
-		Agents string `yaml:"agents"`
-		Tools  string `yaml:"tools"`
-		Policy string `yaml:"policy"`
-		Note   string `yaml:"note"`
-	} `yaml:"target_contracts"`
-	EntitySchema EntitySchema `yaml:"entity_schema"`
+	Name            string              `yaml:"name"`
+	Version         string              `yaml:"version"`
+	PlatformVersion string              `yaml:"platform_version"`
+	Author          string              `yaml:"author"`
+	Description     string              `yaml:"description"`
+	Flows           []ProjectFlowRef    `yaml:"flows"`
+	Packages        []ProjectPackageRef `yaml:"packages"`
+	Children        []ProjectPackageRef `yaml:"children"`
+	Subpackages     []ProjectPackageRef `yaml:"subpackages"`
+	Handoffs        []ProjectHandoff    `yaml:"handoffs"`
+	EntitySchema    EntitySchema        `yaml:"entity_schema"`
 }
 
 const maxDiscoveredPackageDepth = 99
@@ -805,27 +1259,25 @@ type LoadedProjectPackage struct {
 	Manifest  ProjectPackageDocument
 }
 
-type ProjectContractView struct {
-	Paths    ProjectPackagePaths
-	Manifest ProjectPackageDocument
-	Nodes    map[string]SystemNodeContract
-	Events   map[string]EventCatalogEntry
-	Agents   map[string]AgentRegistryEntry
-	Tools    map[string]ToolSchemaEntry
-	Policy   PolicyDocument
-}
+type ProjectContractView = flowmodel.PackageView[
+	ProjectPackagePaths,
+	ProjectPackageDocument,
+	SystemNodeContract,
+	EventCatalogEntry,
+	AgentRegistryEntry,
+	ToolSchemaEntry,
+]
 
-type FlowContractView struct {
-	Paths    FlowContractPaths
-	Schema   FlowSchemaDocument
-	Nodes    map[string]SystemNodeContract
-	Events   map[string]EventCatalogEntry
-	Agents   map[string]AgentRegistryEntry
-	Tools    map[string]ToolSchemaEntry
-	Policy   PolicyDocument
-	Children []FlowContractView
-	Parent   *FlowContractView
-}
+type FlowContractView = flowmodel.View[
+	FlowContractPaths,
+	FlowSchemaDocument,
+	SystemNodeContract,
+	EventCatalogEntry,
+	AgentRegistryEntry,
+	ToolSchemaEntry,
+]
+
+type FlowTree = flowmodel.Tree[FlowContractView]
 
 type ContractItemSource struct {
 	PackageKey string
@@ -901,22 +1353,6 @@ type FlowRequiredAgent struct {
 	Description  string   `yaml:"description"`
 }
 
-type WorkflowSchemaDocument struct {
-	Workflow struct {
-		Name           string                       `yaml:"name"`
-		Version        string                       `yaml:"version"`
-		Entity         string                       `yaml:"entity"`
-		EntityTable    string                       `yaml:"entity_table"`
-		StateField     string                       `yaml:"state_field"`
-		InitialStage   string                       `yaml:"initial_stage"`
-		Stages         []WorkflowStageContract      `yaml:"stages"`
-		TerminalStages []string                     `yaml:"terminal_stages"`
-		Transitions    []WorkflowTransitionContract `yaml:"transitions"`
-		Timers         []WorkflowTimerContract      `yaml:"timers"`
-		EntitySchema   EntitySchema                 `yaml:"entity_schema"`
-	} `yaml:"workflow"`
-}
-
 type WorkflowStageContract struct {
 	ID          string `yaml:"id"`
 	Phase       string `yaml:"phase"`
@@ -980,7 +1416,9 @@ type WorkflowDataAccumulation struct {
 type WorkflowDataWrite struct {
 	Field       string          `yaml:"-" json:"field,omitempty"`
 	SourceField string          `yaml:"source_field,omitempty" json:"source_field,omitempty"`
+	SourcePath  paths.Path      `yaml:"-" json:"-"`
 	TargetField string          `yaml:"target_field,omitempty" json:"target_field,omitempty"`
+	TargetPath  paths.Path      `yaml:"-" json:"-"`
 	Value       ExpressionValue `yaml:"value,omitempty" json:"value,omitempty"`
 }
 
@@ -995,6 +1433,8 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 			return nil
 		}
 		w.Field = strings.TrimSpace(node.Value)
+		w.SourcePath = paths.Parse(w.Field)
+		w.TargetPath = paths.Parse(w.Field)
 		return nil
 	case yaml.MappingNode:
 		type alias WorkflowDataWrite
@@ -1003,6 +1443,11 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 			return err
 		}
 		*w = WorkflowDataWrite(aux)
+		w.Field = strings.TrimSpace(w.Field)
+		w.SourceField = strings.TrimSpace(w.SourceField)
+		w.TargetField = strings.TrimSpace(w.TargetField)
+		w.SourcePath = paths.Parse(w.Source())
+		w.TargetPath = paths.Parse(w.Target())
 		return nil
 	default:
 		return fmt.Errorf("unsupported workflow data write yaml node kind %d", node.Kind)
@@ -1163,54 +1608,6 @@ func (s *NodeStateSchema) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
-	if d == nil {
-		return nil
-	}
-	values := map[string]PolicyValue{}
-	if node == nil || node.Kind == 0 {
-		d.Values = values
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("unsupported policy yaml node kind %d", node.Kind)
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" {
-			continue
-		}
-		var value PolicyValue
-		if err := node.Content[i+1].Decode(&value); err != nil {
-			return err
-		}
-		values[key] = value
-	}
-	d.Values = values
-	return nil
-}
-
-func (v *PolicyValue) UnmarshalYAML(node *yaml.Node) error {
-	if v == nil {
-		return nil
-	}
-	if node.Kind == yaml.MappingNode && (hasYAMLMappingKey(node, "value") || hasYAMLMappingKey(node, "description") || hasYAMLMappingKey(node, "override")) {
-		type alias PolicyValue
-		var aux alias
-		if err := node.Decode(&aux); err != nil {
-			return err
-		}
-		*v = PolicyValue(aux)
-		return nil
-	}
-	var raw any
-	if err := node.Decode(&raw); err != nil {
-		return err
-	}
-	*v = PolicyValue{Value: raw}
-	return nil
-}
-
 func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -1280,6 +1677,44 @@ func (p *EventPayloadSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (v *SchemaLiteral) UnmarshalYAML(node *yaml.Node) error {
+	if v == nil || node == nil {
+		return nil
+	}
+	v.Node = *node
+	return nil
+}
+
+func (a *ToolAdditionalProperties) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil || node == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			*a = ToolAdditionalProperties{}
+			return nil
+		}
+		var allowed bool
+		if err := node.Decode(&allowed); err != nil {
+			return err
+		}
+		a.Allowed = &allowed
+		a.Schema = nil
+		return nil
+	case yaml.MappingNode:
+		var schema ToolInputSchema
+		if err := node.Decode(&schema); err != nil {
+			return err
+		}
+		a.Allowed = nil
+		a.Schema = &schema
+		return nil
+	default:
+		return fmt.Errorf("unsupported additionalProperties yaml node kind %d", node.Kind)
+	}
+}
+
 func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -1288,10 +1723,6 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 	var aux alias
 	if err := node.Decode(&aux); err != nil {
 		return err
-	}
-	var raw map[string]any
-	if err := node.Decode(&raw); err == nil {
-		aux.Raw = raw
 	}
 	*s = ToolInputSchema(aux)
 	return nil
@@ -1394,11 +1825,6 @@ func (e EventEmission) Empty() bool {
 	return len(e.Values()) == 0
 }
 
-type GuardActionRegistryDocument struct {
-	Guards  []GuardActionEntry `yaml:"guards"`
-	Actions []GuardActionEntry `yaml:"actions"`
-}
-
 type GuardActionEntry struct {
 	ID              string `yaml:"id"`
 	Category        string `yaml:"category"`
@@ -1427,7 +1853,7 @@ type SystemNodeContract struct {
 }
 
 type SystemNodeEventHandler struct {
-	Action           string                   `yaml:"action"`
+	Action           ActionSpec               `yaml:"action"`
 	Description      string                   `yaml:"description"`
 	Emits            EventEmission            `yaml:"emits"`
 	Guard            *GuardSpec               `yaml:"guard"`
@@ -1439,7 +1865,7 @@ type SystemNodeEventHandler struct {
 	CompletionRule   string                   `yaml:"completion_rule"`
 	Logic            string                   `yaml:"logic"`
 	PolicyRef        string                   `yaml:"policy_ref"`
-	OnComplete       *HandlerRuleEntry        `yaml:"on_complete"`
+	OnComplete       []HandlerRuleEntry       `yaml:"on_complete"`
 	Rules            []HandlerRuleEntry       `yaml:"rules"`
 	Accumulate       *AccumulateSpec          `yaml:"accumulate"`
 	Compute          *ComputeSpec             `yaml:"compute"`
@@ -1450,9 +1876,6 @@ type SystemNodeEventHandler struct {
 	Count            *CountSpec               `yaml:"count"`
 	Clear            *ClearSpec               `yaml:"clear"`
 	PayloadTransform *PayloadTransformSpec    `yaml:"payload_transform"`
-	Template         string                   `yaml:"template"`
-	InstanceIDFrom   string                   `yaml:"instance_id_from"`
-	ConfigFrom       *ConfigFromSpec          `yaml:"config_from"`
 	Branch           []BranchSpec             `yaml:"branch"`
 }
 
@@ -1500,7 +1923,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 	var aux struct {
-		Action           string                   `yaml:"action"`
+		Action           yaml.Node                `yaml:"action"`
 		Description      string                   `yaml:"description"`
 		Emits            EventEmission            `yaml:"emits"`
 		Guard            yaml.Node                `yaml:"guard"`
@@ -1523,16 +1946,12 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Count            *CountSpec               `yaml:"count"`
 		Clear            yaml.Node                `yaml:"clear"`
 		PayloadTransform *PayloadTransformSpec    `yaml:"payload_transform"`
-		Template         string                   `yaml:"template"`
-		InstanceIDFrom   string                   `yaml:"instance_id_from"`
-		ConfigFrom       yaml.Node                `yaml:"config_from"`
 		Branch           yaml.Node                `yaml:"branch"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
 	*h = SystemNodeEventHandler{
-		Action:           strings.TrimSpace(aux.Action),
 		Description:      strings.TrimSpace(aux.Description),
 		Emits:            aux.Emits,
 		AdvancesTo:       strings.TrimSpace(aux.AdvancesTo),
@@ -1548,10 +1967,11 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Reduce:           aux.Reduce,
 		Count:            aux.Count,
 		PayloadTransform: aux.PayloadTransform,
-		Template:         strings.TrimSpace(aux.Template),
-		InstanceIDFrom:   strings.TrimSpace(aux.InstanceIDFrom),
 	}
 	var err error
+	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
+		return err
+	}
 	if h.Guard, err = decodeGuardSpecNode(&aux.Guard); err != nil {
 		return err
 	}
@@ -1561,7 +1981,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	if h.ClearGates, err = decodeClearGatesNode(&aux.ClearGates); err != nil {
 		return err
 	}
-	if h.OnComplete, err = decodeHandlerRuleEntryNode(&aux.OnComplete); err != nil {
+	if h.OnComplete, err = decodeHandlerRuleEntriesNode(&aux.OnComplete); err != nil {
 		return err
 	}
 	if h.Rules, err = decodeHandlerRuleEntriesNode(&aux.Rules); err != nil {
@@ -1571,9 +1991,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	if h.Clear, err = decodeClearSpecNode(&aux.Clear); err != nil {
-		return err
-	}
-	if h.ConfigFrom, err = decodeConfigFromSpecNode(&aux.ConfigFrom); err != nil {
 		return err
 	}
 	if h.Branch, err = decodeBranchSpecsNode(&aux.Branch); err != nil {
@@ -1691,63 +2108,19 @@ func DefaultPlatformSpecFile(repoRoot string) string {
 }
 
 func DefaultWorkflowContractsDir(repoRoot string) string {
-	masWorkflowDir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts")
-	if existingFile(filepath.Join(masWorkflowDir, "package.yaml")) != "" {
-		return masWorkflowDir
-	}
-	return defaultWorkflowContractsDir(filepath.Join(repoRoot, "contracts"))
+	return filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts")
 }
 
 func RepoRootHasMASContracts(repoRoot string) bool {
-	return existingFile(filepath.Join(DefaultWorkflowContractsDir(repoRoot), "package.yaml")) != ""
+	return existingFile(filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts", "package.yaml")) != ""
 }
 
 func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) ContractPaths {
-	legacyContractsRoot := filepath.Join(repoRoot, "contracts")
 	workflowDir := DefaultWorkflowContractsDir(repoRoot)
 	overrideActive := strings.TrimSpace(workflowDirOverride) != ""
 	if overrideActive {
 		workflowDir = workflowDirOverride
 	}
-	workflowSchemaCandidates := []string{
-		filepath.Join(workflowDir, "workflow.yaml"),
-		filepath.Join(workflowDir, "workflow-schema.yaml"),
-		filepath.Join(workflowDir, "workflow-empire.yaml"),
-	}
-	guardRegistryCandidates := []string{
-		filepath.Join(workflowDir, "hooks.yaml"),
-		filepath.Join(workflowDir, "hooks-empire.yaml"),
-	}
-	systemNodesCandidates := []string{
-		filepath.Join(workflowDir, "runtime", "nodes.yaml"),
-		filepath.Join(workflowDir, "nodes.yaml"),
-		filepath.Join(workflowDir, "nodes-empire.yaml"),
-	}
-	eventCatalogCandidates := []string{
-		filepath.Join(workflowDir, "runtime", "events.yaml"),
-		filepath.Join(workflowDir, "events.yaml"),
-		filepath.Join(workflowDir, "events-empire.yaml"),
-	}
-	agentRegistryCandidates := []string{
-		filepath.Join(workflowDir, "runtime", "agents.yaml"),
-		filepath.Join(workflowDir, "agents.yaml"),
-		filepath.Join(workflowDir, "agents-empire.yaml"),
-	}
-	toolSchemaCandidates := []string{
-		filepath.Join(workflowDir, "runtime", "tools.yaml"),
-		filepath.Join(workflowDir, "tools.yaml"),
-		filepath.Join(workflowDir, "tools-empire.yaml"),
-	}
-	policyCandidates := []string{
-		filepath.Join(workflowDir, "runtime", "policy.yaml"),
-		filepath.Join(workflowDir, "policy.yaml"),
-		filepath.Join(workflowDir, "policy-empire.yaml"),
-	}
-	promptsCandidates := []string{
-		filepath.Join(workflowDir, "prompts"),
-	}
-	workflowSchemaFile := firstExistingFile(workflowSchemaCandidates...)
-	guardRegistryFile := firstExistingFile(guardRegistryCandidates...)
 	platformSpecFile := DefaultPlatformSpecFile(repoRoot)
 	if strings.TrimSpace(platformSpecFileOverride) != "" {
 		platformSpecFile = platformSpecFileOverride
@@ -1762,41 +2135,14 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		ProjectToolsFile:      existingFile(filepath.Join(workflowDir, "tools.yaml")),
 		ProjectPolicyFile:     existingFile(filepath.Join(workflowDir, "policy.yaml")),
 		ProjectPromptsDir:     existingDir(filepath.Join(workflowDir, "prompts")),
-		WorkflowSchemaFile:    workflowSchemaFile,
-		GuardRegistryFile:     guardRegistryFile,
-		SystemNodesFile:       firstExistingFile(systemNodesCandidates...),
-		EventCatalogFile:      firstExistingFile(eventCatalogCandidates...),
-		AgentRegistryFile:     firstExistingFile(agentRegistryCandidates...),
-		ToolSchemasFile:       firstExistingFile(toolSchemaCandidates...),
-		PolicyFile:            firstExistingFile(policyCandidates...),
-		PromptsDir:            firstExistingDir(promptsCandidates...),
 		PlatformSpecFile:      platformSpecFile,
 		VerificationGatesFile: filepath.Join(repoRoot, "docs", "specs", "mas-platform", "verification-gates.yaml"),
 		ToolingLockFile:       filepath.Join(repoRoot, "docs", "specs", "mas-platform", "tooling.lock"),
-		DDLFile:               filepath.Join(legacyContractsRoot, "ddl-canonical.sql"),
+		DDLFile:               "",
 		AgentConfigMapFile:    filepath.Join(repoRoot, "docs", "specs", "mas-platform", "agent-config-map.yaml"),
 	}
 	if paths.ProjectPackageFile != "" {
 		paths.ProjectPackages = discoverProjectPackagePaths(paths.ProjectPackageFile, workflowDir)
-		if len(paths.ProjectPackages) > 0 {
-			rootPackage := paths.ProjectPackages[0]
-			paths.RuntimeBridge = rootPackage.RuntimeBridge
-			if paths.RuntimeBridge.NodesFile != "" {
-				paths.SystemNodesFile = paths.RuntimeBridge.NodesFile
-			}
-			if paths.RuntimeBridge.EventsFile != "" {
-				paths.EventCatalogFile = paths.RuntimeBridge.EventsFile
-			}
-			if paths.RuntimeBridge.AgentsFile != "" {
-				paths.AgentRegistryFile = paths.RuntimeBridge.AgentsFile
-			}
-			if paths.RuntimeBridge.ToolsFile != "" {
-				paths.ToolSchemasFile = paths.RuntimeBridge.ToolsFile
-			}
-			if paths.RuntimeBridge.PolicyFile != "" {
-				paths.PolicyFile = paths.RuntimeBridge.PolicyFile
-			}
-		}
 		for _, pkg := range paths.ProjectPackages {
 			paths.Flows = append(paths.Flows, pkg.Flows...)
 		}
@@ -1810,49 +2156,7 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 			return strings.Compare(paths.Flows[i].ID, paths.Flows[j].ID) < 0
 		})
 	}
-	paths.WorkflowSchemaFile = existingFile(paths.WorkflowSchemaFile)
-	paths.GuardRegistryFile = existingFile(paths.GuardRegistryFile)
 	return paths
-}
-
-func preferredWorkflowContractsDir(preferred, fallback string) string {
-	if dir := existingDir(preferred); dir != "" {
-		return dir
-	}
-	return fallback
-}
-
-func defaultWorkflowContractsDir(contractsRoot string) string {
-	if file := existingFile(filepath.Join(contractsRoot, "package.yaml")); file != "" {
-		return contractsRoot
-	}
-	entries, err := os.ReadDir(contractsRoot)
-	if err != nil {
-		return contractsRoot
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		candidate := filepath.Join(contractsRoot, entry.Name())
-		if file := existingFile(filepath.Join(candidate, "package.yaml")); file != "" {
-			return candidate
-		}
-		if file := firstExistingFile(
-			filepath.Join(candidate, "workflow.yaml"),
-			filepath.Join(candidate, "workflow-empire.yaml"),
-			filepath.Join(candidate, "hooks.yaml"),
-			filepath.Join(candidate, "hooks-empire.yaml"),
-			filepath.Join(candidate, "nodes-empire.yaml"),
-			filepath.Join(candidate, "events-empire.yaml"),
-			filepath.Join(candidate, "agents-empire.yaml"),
-			filepath.Join(candidate, "tools-empire.yaml"),
-			filepath.Join(candidate, "policy-empire.yaml"),
-		); file != "" {
-			return candidate
-		}
-	}
-	return contractsRoot
 }
 
 func LoadWorkflowContractBundle(repoRoot string) (*WorkflowContractBundle, error) {
@@ -1866,32 +2170,30 @@ func LoadWorkflowContractBundleWithOverrides(repoRoot, workflowDirOverride, plat
 func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractBundle, error) {
 	bundle := &WorkflowContractBundle{
 		Paths:                 paths,
-		ProjectContracts:      map[string]ProjectContractView{},
-		FlowContracts:         map[string]FlowContractView{},
-		ScopedNodes:           map[string]SystemNodeContract{},
-		ScopedEvents:          map[string]EventCatalogEntry{},
-		ScopedAgents:          map[string]AgentRegistryEntry{},
-		ScopedTools:           map[string]ToolSchemaEntry{},
-		MergedNodes:           map[string]SystemNodeContract{},
-		MergedEvents:          map[string]EventCatalogEntry{},
-		MergedAgents:          map[string]AgentRegistryEntry{},
-		MergedTools:           map[string]ToolSchemaEntry{},
-		MergedPolicy:          PolicyDocument{Values: map[string]PolicyValue{}},
-		ScopedNodeSources:     map[string]ContractItemSource{},
-		ScopedEventSources:    map[string]ContractItemSource{},
-		ScopedAgentSources:    map[string]ContractItemSource{},
-		ScopedToolSources:     map[string]ContractItemSource{},
-		NodeSources:           map[string]ContractItemSource{},
-		EventSources:          map[string]ContractItemSource{},
-		AgentSources:          map[string]ContractItemSource{},
-		ToolSources:           map[string]ContractItemSource{},
-		PolicySources:         map[string]ContractItemSource{},
+		projectContracts:      map[string]ProjectContractView{},
+		scopedNodes:           map[string]SystemNodeContract{},
+		scopedEvents:          map[string]EventCatalogEntry{},
+		scopedAgents:          map[string]AgentRegistryEntry{},
+		scopedTools:           map[string]ToolSchemaEntry{},
+		scopedNodeSources:     map[string]ContractItemSource{},
+		scopedEventSources:    map[string]ContractItemSource{},
+		scopedAgentSources:    map[string]ContractItemSource{},
+		scopedToolSources:     map[string]ContractItemSource{},
+		nodeSources:           map[string]ContractItemSource{},
+		eventSources:          map[string]ContractItemSource{},
+		agentSources:          map[string]ContractItemSource{},
+		toolSources:           map[string]ContractItemSource{},
 		ambiguousNodeAliases:  map[string]struct{}{},
 		ambiguousEventAliases: map[string]struct{}{},
 		ambiguousAgentAliases: map[string]struct{}{},
 		ambiguousToolAliases:  map[string]struct{}{},
+		Nodes:                 map[string]SystemNodeContract{},
+		Events:                map[string]EventCatalogEntry{},
+		Agents:                map[string]AgentRegistryEntry{},
+		Tools:                 map[string]ToolSchemaEntry{},
 		FlowSchemas:           map[string]FlowSchemaDocument{},
 	}
+	flowViewsByID := map[string]FlowContractView{}
 	if paths.ProjectPackageFile != "" {
 		for i, pkgPaths := range paths.ProjectPackages {
 			var manifest ProjectPackageDocument
@@ -1912,7 +2214,7 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 			if err != nil {
 				return nil, err
 			}
-			bundle.ProjectContracts[pkgPaths.Key] = projectView
+			bundle.projectContracts[pkgPaths.Key] = projectView
 		}
 		if err := validateDiscoveredPackageTree(bundle.PackageTree); err != nil {
 			return nil, err
@@ -1936,71 +2238,99 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 			if err != nil {
 				return nil, err
 			}
-			bundle.FlowContracts[flow.ID] = flowView
+			flowViewsByID[flow.ID] = flowView
 		}
-		if err := populateMergedPackageViews(bundle); err != nil {
+		if err := buildFlowTree(bundle, flowViewsByID); err != nil {
+			return nil, err
+		}
+		if err := populateMergedPackageViews(bundle, flowViewsByID); err != nil {
 			return nil, err
 		}
 	}
-	if paths.WorkflowSchemaFile != "" {
-		if err := loadYAMLFile(paths.WorkflowSchemaFile, &bundle.Workflow); err != nil {
-			return nil, err
-		}
-	}
-	if paths.GuardRegistryFile != "" {
-		if err := loadYAMLFile(paths.GuardRegistryFile, &bundle.Hooks); err != nil {
-			return nil, err
-		}
-	}
-	if err := loadYAMLFile(paths.SystemNodesFile, &bundle.Nodes); err != nil {
-		return nil, err
-	}
-	if err := loadYAMLFile(paths.EventCatalogFile, &bundle.Events); err != nil {
-		return nil, err
-	}
-	if err := loadYAMLFile(paths.AgentRegistryFile, &bundle.Agents); err != nil {
-		return nil, err
-	}
-	if err := loadYAMLFile(paths.ToolSchemasFile, &bundle.Tools); err != nil {
-		return nil, err
-	}
-	if err := loadYAMLFile(paths.PolicyFile, &bundle.Policy); err != nil {
-		return nil, err
-	}
+	bundle.Policy = rootWorkflowPolicy(bundle)
 	if err := loadYAMLFile(paths.PlatformSpecFile, &bundle.Platform); err != nil {
 		return nil, err
 	}
 	populateWorkflowSemantics(bundle)
+	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
+		return nil, err
+	}
 	return bundle, nil
+}
+
+func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundle) error {
+	if bundle == nil {
+		return nil
+	}
+	errs := make([]string, 0, 8)
+	for nodeID, node := range bundle.Nodes {
+		nodeID = strings.TrimSpace(nodeID)
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			if workflowHandlerDeclaresConflictingCompletion(handler) {
+				errs = append(errs, fmt.Sprintf("node %s handler %s declares both on_complete and rules", nodeID, eventType))
+			}
+			if usesDeprecatedGuardFallback(handler.Guard) {
+				errs = append(errs, fmt.Sprintf("node %s handler %s uses deprecated id-only guard; migrate to check:", nodeID, eventType))
+			}
+		}
+	}
+	for eventType, owners := range bundle.Semantics.EventOwners {
+		if len(normalizeStrings(owners)) > 1 {
+			errs = append(errs, fmt.Sprintf("event %s has multiple authoritative system node owners: %s", strings.TrimSpace(eventType), strings.Join(normalizeStrings(owners), ", ")))
+		}
+	}
+	if len(errs) > 0 {
+		sort.Strings(errs)
+		return fmt.Errorf("workflow contract load validation failed:\n- %s", strings.Join(errs, "\n- "))
+	}
+	return nil
+}
+
+func workflowHandlerDeclaresConflictingCompletion(handler SystemNodeEventHandler) bool {
+	return len(handler.Rules) > 0 && workflowHandlerHasOnComplete(handler)
+}
+
+func workflowHandlerHasOnComplete(handler SystemNodeEventHandler) bool {
+	if len(handler.OnComplete) > 0 {
+		return true
+	}
+	return handler.Accumulate != nil && len(handler.Accumulate.OnComplete) > 0
+}
+
+func usesDeprecatedGuardFallback(spec *GuardSpec) bool {
+	if spec == nil {
+		return false
+	}
+	if strings.TrimSpace(spec.Check) != "" {
+		return false
+	}
+	for _, check := range spec.Checks {
+		if strings.TrimSpace(check.Check) != "" {
+			return false
+		}
+	}
+	return strings.TrimSpace(spec.ID) != ""
 }
 
 func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	if bundle == nil {
 		return
 	}
-	name := strings.TrimSpace(bundle.Workflow.Workflow.Name)
-	if name == "" {
-		name = strings.TrimSpace(bundle.Package.Name)
-	}
+	name := strings.TrimSpace(bundle.Package.Name)
 	version := strings.TrimSpace(bundle.Package.Version)
-	if version == "" {
-		version = strings.TrimSpace(bundle.Workflow.Workflow.Version)
-	}
 	entitySchema := bundle.Package.EntitySchema
-	if entitySchema.Empty() {
-		entitySchema = bundle.Workflow.Workflow.EntitySchema
-	}
 	semantics := WorkflowSemanticView{
 		Name:                   name,
 		Version:                version,
-		InitialStage:           strings.TrimSpace(bundle.Workflow.Workflow.InitialStage),
+		InitialStage:           "",
 		EntitySchema:           entitySchema,
-		Stages:                 append([]WorkflowStageContract{}, bundle.Workflow.Workflow.Stages...),
-		TerminalStages:         append([]string{}, bundle.Workflow.Workflow.TerminalStages...),
-		Transitions:            append([]WorkflowTransitionContract{}, bundle.Workflow.Workflow.Transitions...),
+		Stages:                 deriveWorkflowStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas),
+		TerminalStages:         deriveWorkflowTerminalStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas),
+		Transitions:            nil,
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
-		Guards:                 append([]GuardActionEntry{}, bundle.Hooks.Guards...),
-		Actions:                append([]GuardActionEntry{}, bundle.Hooks.Actions...),
+		Guards:                 deriveWorkflowGuardEntries(bundle),
+		Actions:                deriveWorkflowActionEntries(bundle),
 		GuardByID:              map[string]GuardActionEntry{},
 		ActionByID:             map[string]GuardActionEntry{},
 		FlowInitial:            map[string]string{},
@@ -2078,7 +2408,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				NodeID:           nodeID,
 				FlowID:           strings.TrimSpace(source.FlowID),
 				EventType:        eventType,
-				Action:           strings.TrimSpace(handler.Action),
+				Action:           handler.Action,
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 				SetsGate:         handler.SetsGate,
@@ -2098,12 +2428,12 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Count:            handler.Count,
 				Clear:            handler.Clear,
 				PayloadTransform: handler.PayloadTransform,
-				Template:         strings.TrimSpace(handler.Template),
-				InstanceIDFrom:   strings.TrimSpace(handler.InstanceIDFrom),
-				ConfigFrom:       handler.ConfigFrom,
 				Branch:           append([]BranchSpec{}, handler.Branch...),
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
+			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
+				semantics.Transitions = append(semantics.Transitions, derivedTransition)
+			}
 			if semantics.HandlerTransitionIndex[nodeID] == nil {
 				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
 			}
@@ -2111,20 +2441,104 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		}
 		semantics.NodeHandlers[nodeID] = handlers
 	}
-	if len(semantics.Stages) == 0 {
-		semantics.Stages = deriveWorkflowStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas)
-	}
-	if len(semantics.TerminalStages) == 0 {
-		semantics.TerminalStages = deriveWorkflowTerminalStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas)
-	}
 	bundle.Semantics = semantics
+}
+
+func deriveWorkflowGuardEntries(bundle *WorkflowContractBundle) []GuardActionEntry {
+	if bundle == nil {
+		return nil
+	}
+	seen := map[string]GuardActionEntry{}
+	for _, nodeID := range sortedContractKeys(bundle.Nodes) {
+		node := bundle.Nodes[nodeID]
+		for _, eventType := range sortedContractKeys(node.EventHandlers) {
+			handler := node.EventHandlers[eventType]
+			if handler.Guard == nil {
+				continue
+			}
+			id := strings.TrimSpace(handler.Guard.ID)
+			if id == "" {
+				continue
+			}
+			seen[id] = GuardActionEntry{
+				ID:        id,
+				Check:     strings.TrimSpace(handler.Guard.Check),
+				PolicyRef: strings.TrimSpace(handler.Guard.PolicyRef),
+			}
+		}
+	}
+	return sortedGuardActionEntries(seen)
+}
+
+func deriveWorkflowActionEntries(bundle *WorkflowContractBundle) []GuardActionEntry {
+	if bundle == nil {
+		return nil
+	}
+	seen := map[string]GuardActionEntry{}
+	for _, nodeID := range sortedContractKeys(bundle.Nodes) {
+		node := bundle.Nodes[nodeID]
+		for _, eventType := range sortedContractKeys(node.EventHandlers) {
+			handler := node.EventHandlers[eventType]
+			id := strings.TrimSpace(handler.Action.ID)
+			if id == "" {
+				continue
+			}
+			seen[id] = GuardActionEntry{ID: id}
+		}
+	}
+	return sortedGuardActionEntries(seen)
+}
+
+func sortedGuardActionEntries(entries map[string]GuardActionEntry) []GuardActionEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]GuardActionEntry, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, entries[id])
+	}
+	return out
+}
+
+func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
+	to := strings.TrimSpace(transition.AdvancesTo)
+	if to == "" {
+		return WorkflowTransitionContract{}, false
+	}
+	out := WorkflowTransitionContract{
+		ID:               strings.TrimSpace(transition.ID),
+		From:             []string{"*"},
+		To:               to,
+		Trigger:          strings.TrimSpace(transition.EventType),
+		Node:             strings.TrimSpace(transition.NodeID),
+		DataAccumulation: transition.DataAccumulation,
+	}
+	if guardID := strings.TrimSpace(firstTransitionGuardID(transition.Guard)); guardID != "" {
+		out.Guards = []string{guardID}
+	}
+	if actionID := strings.TrimSpace(transition.Action.ID); actionID != "" {
+		out.Actions = []string{actionID}
+	}
+	return out, strings.TrimSpace(out.ID) != "" && strings.TrimSpace(out.Trigger) != ""
+}
+
+func firstTransitionGuardID(guard *GuardSpec) string {
+	if guard == nil {
+		return ""
+	}
+	return strings.TrimSpace(guard.ID)
 }
 
 func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
 	if bundle == nil {
 		return nil
 	}
-	out := make([]WorkflowTimerContract, 0, len(bundle.Workflow.Workflow.Timers)+8)
+	out := make([]WorkflowTimerContract, 0, 8)
 	indexByID := map[string]int{}
 	addTimer := func(timer WorkflowTimerContract) {
 		timer = normalizeWorkflowSemanticTimer(bundle, timer)
@@ -2138,9 +2552,6 @@ func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTime
 		}
 		indexByID[id] = len(out)
 		out = append(out, timer)
-	}
-	for _, timer := range bundle.Workflow.Workflow.Timers {
-		addTimer(timer)
 	}
 	for _, timer := range deriveNodeWorkflowTimers(bundle) {
 		addTimer(timer)
@@ -2158,9 +2569,9 @@ func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCon
 		Node   SystemNodeContract
 		Source ContractItemSource
 	}
-	scopedNodes := make([]scopedNodeEntry, 0, len(bundle.ScopedNodes))
-	for scopedKey, node := range bundle.ScopedNodes {
-		source := bundle.ScopedNodeSources[scopedKey]
+	scopedNodes := make([]scopedNodeEntry, 0, len(bundle.scopedNodes))
+	for scopedKey, node := range bundle.scopedNodes {
+		source := bundle.scopedNodeSources[scopedKey]
 		nodeID := strings.TrimSpace(node.ID)
 		if nodeID == "" {
 			parts := strings.Split(scopedKey, "::")
@@ -2176,12 +2587,12 @@ func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCon
 		})
 	}
 	if len(scopedNodes) == 0 {
-		for nodeID, node := range bundle.MergedNodes {
+		for nodeID, node := range bundle.Nodes {
 			scopedNodes = append(scopedNodes, scopedNodeEntry{
 				Key:    nodeID,
 				NodeID: strings.TrimSpace(nodeID),
 				Node:   node,
-				Source: bundle.NodeSources[nodeID],
+				Source: bundle.nodeSources[nodeID],
 			})
 		}
 	}
@@ -2237,11 +2648,6 @@ func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer Workfl
 	timer.CancelOn = strings.TrimSpace(timer.CancelOn)
 	if timer.Event == "" && timer.NodeID != "" {
 		node := bundle.Nodes[timer.NodeID]
-		if len(bundle.MergedNodes) > 0 {
-			if merged, ok := bundle.MergedNodes[timer.NodeID]; ok {
-				node = merged
-			}
-		}
 		timer.Event = inferWorkflowTimerEvent(bundle, node, timer)
 	}
 	return timer
@@ -2333,33 +2739,12 @@ func inferWorkflowTimerEvent(bundle *WorkflowContractBundle, node SystemNodeCont
 	return ""
 }
 
-func firstExistingFile(paths ...string) string {
-	for _, path := range paths {
-		if file := existingFile(path); file != "" {
-			return file
-		}
-	}
-	return ""
-}
-
-func firstExistingDir(paths ...string) string {
-	for _, path := range paths {
-		if dir := existingDir(path); dir != "" {
-			return dir
-		}
-	}
-	return ""
-}
-
 func workflowTimerEventDefined(bundle *WorkflowContractBundle, eventType string) bool {
 	eventType = strings.TrimSpace(eventType)
 	if bundle == nil || eventType == "" {
 		return false
 	}
-	if _, ok := bundle.MergedEvents[eventType]; ok {
-		return true
-	}
-	for scopedKey := range bundle.ScopedEvents {
+	for scopedKey := range bundle.scopedEvents {
 		if strings.HasSuffix(scopedKey, "::"+eventType) {
 			return true
 		}
@@ -2555,15 +2940,18 @@ func loadProjectContractView(paths ProjectPackagePaths, manifest ProjectPackageD
 
 func loadFlowContractView(paths FlowContractPaths, schema FlowSchemaDocument) (FlowContractView, error) {
 	view := FlowContractView{
-		Paths:    paths,
-		Schema:   schema,
-		Nodes:    map[string]SystemNodeContract{},
-		Events:   map[string]EventCatalogEntry{},
-		Agents:   map[string]AgentRegistryEntry{},
-		Tools:    map[string]ToolSchemaEntry{},
-		Policy:   PolicyDocument{Values: map[string]PolicyValue{}},
-		Children: nil,
-		Parent:   nil,
+		Paths:     paths,
+		Schema:    schema,
+		Nodes:     map[string]SystemNodeContract{},
+		Events:    map[string]EventCatalogEntry{},
+		Agents:    map[string]AgentRegistryEntry{},
+		Tools:     map[string]ToolSchemaEntry{},
+		Policy:    PolicyDocument{Values: map[string]PolicyValue{}},
+		NodeURIs:  map[string]string{},
+		AgentURIs: map[string]string{},
+		EventURIs: map[string]string{},
+		Children:  nil,
+		Parent:    nil,
 	}
 	if err := loadOptionalYAMLMap(paths.NodesFile, &view.Nodes); err != nil {
 		return view, err
@@ -2583,28 +2971,211 @@ func loadFlowContractView(paths FlowContractPaths, schema FlowSchemaDocument) (F
 	return view, nil
 }
 
-func populateMergedPackageViews(bundle *WorkflowContractBundle) error {
+func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]FlowContractView) error {
+	if bundle == nil {
+		return nil
+	}
+	tree := FlowTree{
+		ByPath: map[string]*FlowContractView{},
+		ByID:   map[string]*FlowContractView{},
+	}
+	registry := ContractURIRegistry{
+		Scheme: flowTreeURIScheme(bundle),
+		Nodes:  map[string]ContractURIRef{},
+		Agents: map[string]ContractURIRef{},
+		Events: map[string]ContractURIRef{},
+		ByURI:  map[string]ContractURIRef{},
+	}
+	if len(flowViewsByID) == 0 {
+		bundle.FlowTree = tree
+		bundle.URIRegistry = registry
+		return nil
+	}
+
+	hasPackageNodes := false
 	for _, pkg := range bundle.PackageTree {
-		view, ok := bundle.ProjectContracts[pkg.Key]
-		if !ok {
+		if _, ok := bundle.ProjectViewByKey(pkg.Key); ok {
+			hasPackageNodes = true
+			break
+		}
+	}
+	if !hasPackageNodes {
+		root := &FlowContractView{Children: make([]FlowContractView, 0, len(bundle.Paths.Flows))}
+		for _, flow := range bundle.Paths.Flows {
+			view, ok := flowViewsByID[flow.ID]
+			if !ok {
+				continue
+			}
+			root.Children = append(root.Children, view)
+		}
+		tree.Root = root
+		flowmodel.IndexAndPopulateScopedURIs(
+			tree.Root,
+			&tree,
+			&registry,
+			func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+			flowViewChildren,
+			nearestFlowTreeAncestor,
+			func(view *FlowContractView, parent *FlowContractView) { view.Parent = parent },
+			func(view *FlowContractView, path string) { view.Path = path },
+			func(view *FlowContractView, uri string) { view.URI = uri },
+			func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+			func(view *FlowContractView) string { return strings.Trim(strings.TrimSpace(view.Path), "/") },
+			func(view *FlowContractView) map[string]SystemNodeContract { return view.Nodes },
+			func(view *FlowContractView) map[string]AgentRegistryEntry { return view.Agents },
+			func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
+			func(view *FlowContractView) *map[string]string { return &view.NodeURIs },
+			func(view *FlowContractView) *map[string]string { return &view.AgentURIs },
+			func(view *FlowContractView) *map[string]string { return &view.EventURIs },
+		)
+		if len(tree.ByPath) == 0 {
+			return fmt.Errorf("flow tree build produced no indexed paths")
+		}
+		bundle.FlowTree = tree
+		bundle.URIRegistry = registry
+		return nil
+	}
+
+	rootNode, err := flowmodel.AssemblePackageTree(
+		bundle.PackageTree,
+		func(pkg LoadedProjectPackage) string { return strings.TrimSpace(pkg.Key) },
+		func(pkg LoadedProjectPackage) string { return strings.TrimSpace(pkg.ParentKey) },
+		func(pkg LoadedProjectPackage) string { return strings.TrimSpace(pkg.Paths.Dir) },
+		func(pkg LoadedProjectPackage) []FlowContractPaths { return pkg.Paths.Flows },
+		func(flow FlowContractPaths) string { return strings.TrimSpace(flow.ID) },
+		func(flow FlowContractPaths) string { return strings.TrimSpace(flow.Flow) },
+		func(flow FlowContractPaths) string { return strings.TrimSpace(flow.Dir) },
+		func(pkg LoadedProjectPackage) *flowmodel.BuildNode[FlowContractView] {
+			view, ok := bundle.ProjectViewByKey(pkg.Key)
+			if !ok {
+				return nil
+			}
+			return &flowmodel.BuildNode[FlowContractView]{View: flowmodel.ProjectAsFlowView[
+				ProjectPackagePaths,
+				ProjectPackageDocument,
+				FlowContractPaths,
+				FlowSchemaDocument,
+				SystemNodeContract,
+				EventCatalogEntry,
+				AgentRegistryEntry,
+				ToolSchemaEntry,
+			](
+				FlowContractPaths{
+					PackageKey: pkg.Key,
+					PackageDir: pkg.Paths.Dir,
+					Dir:        pkg.Paths.Dir,
+				},
+				view,
+			)}
+		},
+		func(flow FlowContractPaths) *flowmodel.BuildNode[FlowContractView] {
+			view, ok := flowViewsByID[flow.ID]
+			if !ok {
+				return nil
+			}
+			return &flowmodel.BuildNode[FlowContractView]{View: view}
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	root := materializeFlowTree(rootNode)
+	tree.Root = &root
+	flowmodel.IndexAndPopulateScopedURIs(
+		tree.Root,
+		&tree,
+		&registry,
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+		flowViewChildren,
+		nearestFlowTreeAncestor,
+		func(view *FlowContractView, parent *FlowContractView) { view.Parent = parent },
+		func(view *FlowContractView, path string) { view.Path = path },
+		func(view *FlowContractView, uri string) { view.URI = uri },
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.ID) },
+		func(view *FlowContractView) string { return strings.Trim(strings.TrimSpace(view.Path), "/") },
+		func(view *FlowContractView) map[string]SystemNodeContract { return view.Nodes },
+		func(view *FlowContractView) map[string]AgentRegistryEntry { return view.Agents },
+		func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
+		func(view *FlowContractView) *map[string]string { return &view.NodeURIs },
+		func(view *FlowContractView) *map[string]string { return &view.AgentURIs },
+		func(view *FlowContractView) *map[string]string { return &view.EventURIs },
+	)
+	if len(tree.ByPath) == 0 {
+		return fmt.Errorf("flow tree build produced no indexed paths")
+	}
+	bundle.FlowTree = tree
+	bundle.URIRegistry = registry
+	return nil
+}
+
+func materializeFlowTree(node *flowmodel.BuildNode[FlowContractView]) FlowContractView {
+	return flowmodel.Materialize(
+		node,
+		func(view *FlowContractView, children int) {
+			view.Children = make([]FlowContractView, 0, children)
+			view.Parent = nil
+		},
+		func(view *FlowContractView, child FlowContractView) {
+			view.Children = append(view.Children, child)
+		},
+	)
+}
+
+func flowTreeURIScheme(bundle *WorkflowContractBundle) string {
+	if bundle == nil {
+		return "mas"
+	}
+	for _, candidate := range []string{bundle.Package.Name, bundle.Semantics.Name} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return "mas"
+}
+
+func sortedContractKeys[T any](m map[string]T) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func nearestFlowTreeAncestor(node *FlowContractView) *FlowContractView {
+	return flowmodel.NearestAncestor(
+		node,
+		func(view *FlowContractView) *FlowContractView { return view.Parent },
+		func(view *FlowContractView) bool { return strings.TrimSpace(view.Paths.ID) != "" },
+	)
+}
+
+func populateMergedPackageViews(bundle *WorkflowContractBundle, flowViewsByID map[string]FlowContractView) error {
+	for _, view := range bundle.RootProjectViews() {
+		pkgKey := strings.TrimSpace(view.Paths.Key)
+		if pkgKey == "" {
 			continue
 		}
-		if err := mergeNodeContracts(bundle, view.Nodes, ContractItemSource{PackageKey: pkg.Key, Layer: "project", File: view.Paths.ProjectNodesFile}); err != nil {
+		if err := mergeNodeContracts(bundle, view.Nodes, ContractItemSource{PackageKey: pkgKey, Layer: "project", File: view.Paths.ProjectNodesFile}); err != nil {
 			return err
 		}
-		if err := mergeEventContracts(bundle, view.Events, ContractItemSource{PackageKey: pkg.Key, Layer: "project", File: view.Paths.ProjectEventsFile}); err != nil {
+		if err := mergeEventContracts(bundle, view.Events, ContractItemSource{PackageKey: pkgKey, Layer: "project", File: view.Paths.ProjectEventsFile}); err != nil {
 			return err
 		}
-		if err := mergeAgentContracts(bundle, view.Agents, ContractItemSource{PackageKey: pkg.Key, Layer: "project", File: view.Paths.ProjectAgentsFile}); err != nil {
+		if err := mergeAgentContracts(bundle, view.Agents, ContractItemSource{PackageKey: pkgKey, Layer: "project", File: view.Paths.ProjectAgentsFile}); err != nil {
 			return err
 		}
-		if err := mergeToolContracts(bundle, view.Tools, ContractItemSource{PackageKey: pkg.Key, Layer: "project", File: view.Paths.ProjectToolsFile}); err != nil {
+		if err := mergeToolContracts(bundle, view.Tools, ContractItemSource{PackageKey: pkgKey, Layer: "project", File: view.Paths.ProjectToolsFile}); err != nil {
 			return err
 		}
-		mergePolicyContracts(bundle, view.Policy, ContractItemSource{PackageKey: pkg.Key, Layer: "project", File: view.Paths.ProjectPolicyFile})
 	}
 	for _, flow := range bundle.Paths.Flows {
-		view, ok := bundle.FlowContracts[flow.ID]
+		view, ok := flowViewsByID[flow.ID]
 		if !ok {
 			continue
 		}
@@ -2621,7 +3192,6 @@ func populateMergedPackageViews(bundle *WorkflowContractBundle) error {
 		if err := mergeToolContracts(bundle, view.Tools, contractSourceWithFile(sourcePrefix, view.Paths.ToolsFile)); err != nil {
 			return err
 		}
-		mergePolicyContracts(bundle, view.Policy, contractSourceWithFile(sourcePrefix, view.Paths.PolicyFile))
 	}
 	return nil
 }
@@ -2633,31 +3203,31 @@ func mergeNodeContracts(bundle *WorkflowContractBundle, entries map[string]Syste
 			continue
 		}
 		scopedKey := contractScopeKey(source, key)
-		if existing, ok := bundle.ScopedNodeSources[scopedKey]; ok {
-			if reflect.DeepEqual(bundle.ScopedNodes[scopedKey], entry) {
+		if existing, ok := bundle.scopedNodeSources[scopedKey]; ok {
+			if reflect.DeepEqual(bundle.scopedNodes[scopedKey], entry) {
 				continue
 			}
 			return fmt.Errorf("duplicate scoped node id %q from %s and %s", scopedKey, existing.File, source.File)
 		}
-		bundle.ScopedNodes[scopedKey] = entry
-		bundle.ScopedNodeSources[scopedKey] = source
+		bundle.scopedNodes[scopedKey] = entry
+		bundle.scopedNodeSources[scopedKey] = source
 		if _, ambiguous := bundle.ambiguousNodeAliases[key]; ambiguous {
 			continue
 		}
-		if existing, ok := bundle.NodeSources[key]; ok {
+		if existing, ok := bundle.nodeSources[key]; ok {
 			if contractSameScope(existing, source) {
-				if reflect.DeepEqual(bundle.MergedNodes[key], entry) {
+				if reflect.DeepEqual(bundle.Nodes[key], entry) {
 					continue
 				}
 				return fmt.Errorf("duplicate merged node id %q from %s and %s", key, existing.File, source.File)
 			}
-			delete(bundle.MergedNodes, key)
-			delete(bundle.NodeSources, key)
+			delete(bundle.Nodes, key)
+			delete(bundle.nodeSources, key)
 			bundle.ambiguousNodeAliases[key] = struct{}{}
 			continue
 		}
-		bundle.MergedNodes[key] = entry
-		bundle.NodeSources[key] = source
+		bundle.Nodes[key] = entry
+		bundle.nodeSources[key] = source
 	}
 	return nil
 }
@@ -2669,37 +3239,37 @@ func mergeEventContracts(bundle *WorkflowContractBundle, entries map[string]Even
 			continue
 		}
 		scopedKey := contractScopeKey(source, key)
-		if existing, ok := bundle.ScopedEventSources[scopedKey]; ok {
-			if reflect.DeepEqual(bundle.ScopedEvents[scopedKey], entry) {
+		if existing, ok := bundle.scopedEventSources[scopedKey]; ok {
+			if reflect.DeepEqual(bundle.scopedEvents[scopedKey], entry) {
 				continue
 			}
 			return fmt.Errorf("duplicate scoped event id %q from %s and %s", scopedKey, existing.File, source.File)
 		}
-		bundle.ScopedEvents[scopedKey] = entry
-		bundle.ScopedEventSources[scopedKey] = source
+		bundle.scopedEvents[scopedKey] = entry
+		bundle.scopedEventSources[scopedKey] = source
 		if _, ambiguous := bundle.ambiguousEventAliases[key]; ambiguous {
 			continue
 		}
-		if existing, ok := bundle.EventSources[key]; ok {
+		if existing, ok := bundle.eventSources[key]; ok {
 			if contractSameScope(existing, source) {
-				if reflect.DeepEqual(bundle.MergedEvents[key], entry) {
+				if reflect.DeepEqual(bundle.Events[key], entry) {
 					continue
 				}
-				merged, ok := mergeEventCatalogEntry(bundle.MergedEvents[key], entry)
+				merged, ok := mergeEventCatalogEntry(bundle.Events[key], entry)
 				if !ok {
 					return fmt.Errorf("duplicate merged event id %q from %s and %s", key, existing.File, source.File)
 				}
-				bundle.MergedEvents[key] = merged
-				bundle.EventSources[key] = source
+				bundle.Events[key] = merged
+				bundle.eventSources[key] = source
 				continue
 			}
-			delete(bundle.MergedEvents, key)
-			delete(bundle.EventSources, key)
+			delete(bundle.Events, key)
+			delete(bundle.eventSources, key)
 			bundle.ambiguousEventAliases[key] = struct{}{}
 			continue
 		}
-		bundle.MergedEvents[key] = entry
-		bundle.EventSources[key] = source
+		bundle.Events[key] = entry
+		bundle.eventSources[key] = source
 	}
 	return nil
 }
@@ -3002,15 +3572,55 @@ func decodeQuerySpecNode(node *yaml.Node) (*QuerySpec, error) {
 		if err := node.Decode(&spec); err != nil {
 			return nil, err
 		}
+		spec.hydratePaths()
 		return &spec, nil
 	case yaml.SequenceNode:
 		var queries []QuerySpec
 		if err := node.Decode(&queries); err != nil {
 			return nil, err
 		}
+		for i := range queries {
+			queries[i].hydratePaths()
+		}
 		return &QuerySpec{Queries: queries}, nil
 	default:
 		return nil, fmt.Errorf("unsupported query yaml node kind %d", node.Kind)
+	}
+}
+
+func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
+	if node == nil || node.Kind == 0 {
+		return ActionSpec{}, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			return ActionSpec{}, nil
+		}
+		return ActionSpec{ID: strings.TrimSpace(node.Value)}, nil
+	case yaml.MappingNode:
+		var aux struct {
+			ID             string    `yaml:"id"`
+			Template       string    `yaml:"template"`
+			InstanceIDFrom string    `yaml:"instance_id_from"`
+			ConfigFrom     yaml.Node `yaml:"config_from"`
+		}
+		if err := node.Decode(&aux); err != nil {
+			return ActionSpec{}, err
+		}
+		configFrom, err := decodeConfigFromSpecNode(&aux.ConfigFrom)
+		if err != nil {
+			return ActionSpec{}, err
+		}
+		return ActionSpec{
+			ID:             strings.TrimSpace(aux.ID),
+			Template:       strings.TrimSpace(aux.Template),
+			InstanceIDFrom: strings.TrimSpace(aux.InstanceIDFrom),
+			InstanceIDPath: paths.Parse(aux.InstanceIDFrom),
+			ConfigFrom:     configFrom,
+		}, nil
+	default:
+		return ActionSpec{}, fmt.Errorf("unsupported action yaml node kind %d", node.Kind)
 	}
 }
 
@@ -3057,7 +3667,25 @@ func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
 	if len(spec.PolicyKeys) == 0 && len(spec.Bindings) == 0 {
 		return nil, nil
 	}
+	spec.Entries = spec.ConfigEntries()
 	return spec, nil
+}
+
+func (s ConfigFromSpec) ConfigEntries() []ConfigBinding {
+	out := make([]ConfigBinding, 0, len(s.Bindings))
+	for key, value := range s.Bindings {
+		cleanKey := strings.TrimSpace(key)
+		cleanValue := strings.TrimSpace(value)
+		if cleanKey == "" || cleanValue == "" {
+			continue
+		}
+		out = append(out, ConfigBinding{
+			Key:     cleanKey,
+			Ref:     cleanValue,
+			RefPath: paths.Parse(cleanValue),
+		})
+	}
+	return out
 }
 
 func decodeBranchSpecsNode(node *yaml.Node) ([]BranchSpec, error) {
@@ -3291,31 +3919,31 @@ func mergeAgentContracts(bundle *WorkflowContractBundle, entries map[string]Agen
 			continue
 		}
 		scopedKey := contractScopeKey(source, key)
-		if existing, ok := bundle.ScopedAgentSources[scopedKey]; ok {
-			if reflect.DeepEqual(bundle.ScopedAgents[scopedKey], entry) {
+		if existing, ok := bundle.scopedAgentSources[scopedKey]; ok {
+			if reflect.DeepEqual(bundle.scopedAgents[scopedKey], entry) {
 				continue
 			}
 			return fmt.Errorf("duplicate scoped agent id %q from %s and %s", scopedKey, existing.File, source.File)
 		}
-		bundle.ScopedAgents[scopedKey] = entry
-		bundle.ScopedAgentSources[scopedKey] = source
+		bundle.scopedAgents[scopedKey] = entry
+		bundle.scopedAgentSources[scopedKey] = source
 		if _, ambiguous := bundle.ambiguousAgentAliases[key]; ambiguous {
 			continue
 		}
-		if existing, ok := bundle.AgentSources[key]; ok {
+		if existing, ok := bundle.agentSources[key]; ok {
 			if contractSameScope(existing, source) {
-				if reflect.DeepEqual(bundle.MergedAgents[key], entry) {
+				if reflect.DeepEqual(bundle.Agents[key], entry) {
 					continue
 				}
 				return fmt.Errorf("duplicate merged agent id %q from %s and %s", key, existing.File, source.File)
 			}
-			delete(bundle.MergedAgents, key)
-			delete(bundle.AgentSources, key)
+			delete(bundle.Agents, key)
+			delete(bundle.agentSources, key)
 			bundle.ambiguousAgentAliases[key] = struct{}{}
 			continue
 		}
-		bundle.MergedAgents[key] = entry
-		bundle.AgentSources[key] = source
+		bundle.Agents[key] = entry
+		bundle.agentSources[key] = source
 	}
 	return nil
 }
@@ -3327,47 +3955,33 @@ func mergeToolContracts(bundle *WorkflowContractBundle, entries map[string]ToolS
 			continue
 		}
 		scopedKey := contractScopeKey(source, key)
-		if existing, ok := bundle.ScopedToolSources[scopedKey]; ok {
-			if reflect.DeepEqual(bundle.ScopedTools[scopedKey], entry) {
+		if existing, ok := bundle.scopedToolSources[scopedKey]; ok {
+			if reflect.DeepEqual(bundle.scopedTools[scopedKey], entry) {
 				continue
 			}
 			return fmt.Errorf("duplicate scoped tool id %q from %s and %s", scopedKey, existing.File, source.File)
 		}
-		bundle.ScopedTools[scopedKey] = entry
-		bundle.ScopedToolSources[scopedKey] = source
+		bundle.scopedTools[scopedKey] = entry
+		bundle.scopedToolSources[scopedKey] = source
 		if _, ambiguous := bundle.ambiguousToolAliases[key]; ambiguous {
 			continue
 		}
-		if existing, ok := bundle.ToolSources[key]; ok {
+		if existing, ok := bundle.toolSources[key]; ok {
 			if contractSameScope(existing, source) {
-				if reflect.DeepEqual(bundle.MergedTools[key], entry) {
+				if reflect.DeepEqual(bundle.Tools[key], entry) {
 					continue
 				}
 				return fmt.Errorf("duplicate merged tool id %q from %s and %s", key, existing.File, source.File)
 			}
-			delete(bundle.MergedTools, key)
-			delete(bundle.ToolSources, key)
+			delete(bundle.Tools, key)
+			delete(bundle.toolSources, key)
 			bundle.ambiguousToolAliases[key] = struct{}{}
 			continue
 		}
-		bundle.MergedTools[key] = entry
-		bundle.ToolSources[key] = source
+		bundle.Tools[key] = entry
+		bundle.toolSources[key] = source
 	}
 	return nil
-}
-
-func mergePolicyContracts(bundle *WorkflowContractBundle, entries PolicyDocument, source ContractItemSource) {
-	for id, entry := range entries.Values {
-		key := strings.TrimSpace(id)
-		if key == "" {
-			continue
-		}
-		if bundle.MergedPolicy.Values == nil {
-			bundle.MergedPolicy.Values = map[string]PolicyValue{}
-		}
-		bundle.MergedPolicy.Values[key] = entry
-		bundle.PolicySources[key] = source
-	}
 }
 
 func contractSourceWithFile(source ContractItemSource, file string) ContractItemSource {
@@ -3396,14 +4010,6 @@ func (b *WorkflowContractBundle) TransitionIDsByOwner() map[string][]string {
 func ContractFilesExist(repoRoot string) []string {
 	paths := ResolveWorkflowContractPaths(repoRoot)
 	files := []string{
-		paths.WorkflowSchemaFile,
-		paths.GuardRegistryFile,
-		paths.SystemNodesFile,
-		paths.EventCatalogFile,
-		paths.AgentRegistryFile,
-		paths.ToolSchemasFile,
-		paths.PolicyFile,
-		paths.PromptsDir,
 		paths.PlatformSpecFile,
 		paths.VerificationGatesFile,
 		paths.ToolingLockFile,
@@ -3441,24 +4047,6 @@ func ContractFilesExist(repoRoot string) []string {
 	}
 	sort.Strings(missing)
 	return missing
-}
-
-func preferredContractPath(preferred, legacy string) string {
-	if preferred != "" {
-		if _, err := os.Stat(preferred); err == nil {
-			return preferred
-		}
-	}
-	return legacy
-}
-
-func preferredContractDir(preferred, legacy string) string {
-	if preferred != "" {
-		if stat, err := os.Stat(preferred); err == nil && stat.IsDir() {
-			return preferred
-		}
-	}
-	return legacy
 }
 
 func existingFile(path string) string {
@@ -3537,18 +4125,6 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			ProjectPolicyFile: existingFile(filepath.Join(packageDir, "policy.yaml")),
 			ProjectPromptsDir: existingDir(filepath.Join(packageDir, "prompts")),
 		}
-		if runtime := resolveRuntimeBridgePaths(packageDir, manifest); runtime.Dir != "" {
-			pkg.RuntimeBridge = runtime
-		} else if runtimeDir := existingDir(filepath.Join(packageDir, "runtime")); runtimeDir != "" {
-			pkg.RuntimeBridge = RuntimeBridgePaths{
-				Dir:        runtimeDir,
-				NodesFile:  existingFile(filepath.Join(runtimeDir, "nodes.yaml")),
-				EventsFile: existingFile(filepath.Join(runtimeDir, "events.yaml")),
-				AgentsFile: existingFile(filepath.Join(runtimeDir, "agents.yaml")),
-				ToolsFile:  existingFile(filepath.Join(runtimeDir, "tools.yaml")),
-				PolicyFile: existingFile(filepath.Join(runtimeDir, "policy.yaml")),
-			}
-		}
 		for _, flow := range manifest.Flows {
 			flowDirName := strings.TrimSpace(flow.Flow)
 			if flowDirName == "" {
@@ -3577,6 +4153,17 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		})
 		out = append(out, pkg)
 
+		var flowPackageFiles []string
+		for _, flow := range pkg.Flows {
+			if flowPackage := existingFile(filepath.Join(flow.Dir, "package.yaml")); flowPackage != "" {
+				flowPackageFiles = append(flowPackageFiles, flowPackage)
+			}
+		}
+		sort.Strings(flowPackageFiles)
+		for _, flowPackage := range flowPackageFiles {
+			walk(flowPackage, pkg.Key, depth+1)
+		}
+
 		for _, child := range manifest.ChildPackages() {
 			location := child.ResolveLocation()
 			if strings.TrimSpace(location) == "" {
@@ -3598,36 +4185,6 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 		return out[i].Depth < out[j].Depth
 	})
 	return out
-}
-
-func resolveRuntimeBridgePaths(packageDir string, manifest ProjectPackageDocument) RuntimeBridgePaths {
-	resolve := func(rel string) string {
-		rel = strings.TrimSpace(rel)
-		if rel == "" {
-			return ""
-		}
-		return existingFile(filepath.Join(packageDir, filepath.Clean(rel)))
-	}
-	runtime := RuntimeBridgePaths{
-		NodesFile:  resolve(manifest.RuntimeContracts.Nodes),
-		EventsFile: resolve(manifest.RuntimeContracts.Events),
-		AgentsFile: resolve(manifest.RuntimeContracts.Agents),
-		ToolsFile:  resolve(manifest.RuntimeContracts.Tools),
-		PolicyFile: resolve(manifest.RuntimeContracts.Policy),
-	}
-	for _, candidate := range []string{
-		runtime.NodesFile,
-		runtime.EventsFile,
-		runtime.AgentsFile,
-		runtime.ToolsFile,
-		runtime.PolicyFile,
-	} {
-		if candidate != "" {
-			runtime.Dir = filepath.Dir(candidate)
-			break
-		}
-	}
-	return runtime
 }
 
 func validateDiscoveredPackageTree(pkgs []LoadedProjectPackage) error {
@@ -3655,13 +4212,46 @@ func validateDiscoveredPackageTree(pkgs []LoadedProjectPackage) error {
 	return nil
 }
 
-func cloneStringAnyMap(in map[string]any) map[string]any {
+func cloneSystemNodeContractMap(in map[string]SystemNodeContract) map[string]SystemNodeContract {
 	if len(in) == 0 {
-		return map[string]any{}
+		return map[string]SystemNodeContract{}
 	}
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
+	out := make(map[string]SystemNodeContract, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneEventCatalogEntryMap(in map[string]EventCatalogEntry) map[string]EventCatalogEntry {
+	if len(in) == 0 {
+		return map[string]EventCatalogEntry{}
+	}
+	out := make(map[string]EventCatalogEntry, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneAgentRegistryEntryMap(in map[string]AgentRegistryEntry) map[string]AgentRegistryEntry {
+	if len(in) == 0 {
+		return map[string]AgentRegistryEntry{}
+	}
+	out := make(map[string]AgentRegistryEntry, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneToolSchemaEntryMap(in map[string]ToolSchemaEntry) map[string]ToolSchemaEntry {
+	if len(in) == 0 {
+		return map[string]ToolSchemaEntry{}
+	}
+	out := make(map[string]ToolSchemaEntry, len(in))
+	for key, value := range in {
+		out[key] = value
 	}
 	return out
 }

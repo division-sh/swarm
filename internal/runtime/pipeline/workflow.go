@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type WorkflowStage struct {
@@ -183,16 +184,15 @@ func DefaultPipelineWorkflow() *WorkflowDefinition {
 	return defaultWorkflowModule().WorkflowDefinition()
 }
 
-func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*WorkflowDefinition, error) {
-	if bundle == nil {
+func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, error) {
+	if source == nil {
 		return nil, fmt.Errorf("workflow contract bundle is nil")
 	}
-	path := bundle.Paths.WorkflowSchemaFile
-	name := bundle.WorkflowName()
+	name := source.WorkflowName()
 	if name == "" {
-		return nil, fmt.Errorf("workflow.name missing in %s", path)
+		return nil, fmt.Errorf("workflow.name missing from contract bundle semantics")
 	}
-	terminalStages := bundle.WorkflowTerminalStages()
+	terminalStages := source.WorkflowTerminalStages()
 	terminal := make(map[string]struct{}, len(terminalStages))
 	for _, stageID := range terminalStages {
 		stageID = strings.TrimSpace(stageID)
@@ -200,7 +200,7 @@ func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*W
 			terminal[stageID] = struct{}{}
 		}
 	}
-	stageContracts := bundle.WorkflowStages()
+	stageContracts := source.WorkflowStages()
 	stages := make([]WorkflowStage, 0, len(stageContracts))
 	for _, stage := range stageContracts {
 		stageID := strings.TrimSpace(stage.ID)
@@ -215,7 +215,7 @@ func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*W
 			Terminal:    isTerminal,
 		})
 	}
-	actionEntries := bundle.ActionEntries()
+	actionEntries := source.ActionEntries()
 	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(actionEntries))
 	for _, action := range actionEntries {
 		id := strings.TrimSpace(action.ID)
@@ -224,7 +224,7 @@ func LoadWorkflowDefinition(bundle *runtimecontracts.WorkflowContractBundle) (*W
 		}
 		actionDefs[id] = action
 	}
-	transitionContracts := bundle.WorkflowTransitions()
+	transitionContracts := source.WorkflowTransitions()
 	transitions := make([]WorkflowTransition, 0, len(transitionContracts))
 	for _, transition := range transitionContracts {
 		id := strings.TrimSpace(transition.ID)

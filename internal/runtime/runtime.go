@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"empireai/internal/config"
@@ -18,7 +19,7 @@ import (
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	workspace "empireai/internal/runtime/workspace"
@@ -36,7 +37,6 @@ type Stores struct {
 	InboundStore      InboundPersistence
 	DigestStore       DigestPersistence
 	TurnStore         llm.TurnPersistence
-	ScanCampaignStore runtimepipeline.ScanCampaignPersistence
 }
 
 type RuntimeOptions struct {
@@ -45,7 +45,6 @@ type RuntimeOptions struct {
 	EnableToolGateway  bool
 	ToolGatewayToken   string
 	WorkflowModule     runtimepipeline.WorkflowModule
-	ProductPolicy      func() runtimeproductpolicy.Policy
 }
 
 type Runtime struct {
@@ -56,7 +55,6 @@ type Runtime struct {
 	Logger          *RuntimeLogger
 	Pipeline        *runtimepipeline.FactoryPipelineCoordinator
 	SystemNodes     []runtimepipeline.BackgroundNode
-	ScanCampaign    *runtimepipeline.ScanCampaignManager
 	Scheduler       *runtimepipeline.Scheduler
 	Workspace       workspace.Lifecycle
 	Budget          *BudgetTracker
@@ -75,28 +73,52 @@ func cycleTrackerForDB(db *sql.DB) *runtimebus.OpCoCycleTracker {
 	return runtimebus.NewOpCoCycleTracker(db)
 }
 
+var (
+	defaultControlPlaneRecipientOnce  sync.Once
+	defaultControlPlaneRecipientValue string
+)
+
 func runtimeControlPlaneRecipient() string {
-	bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil()
-	if bundle != nil {
-		for _, logicalID := range []string{"coordinator", "empire-coordinator"} {
-			if entry, ok := bundle.MergedAgents[logicalID]; ok {
-				if agentID := strings.TrimSpace(entry.ID); agentID != "" {
-					return agentID
-				}
+	if recipient := controlPlaneRecipientFromSource(runtimepipeline.DefaultWorkflowSemanticSourceOrNil()); recipient != "" {
+		return recipient
+	}
+	defaultControlPlaneRecipientOnce.Do(func() {
+		repoRoot := runtimepipeline.WorkflowRepoRoot()
+		bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot)
+		if err == nil {
+			defaultControlPlaneRecipientValue = controlPlaneRecipientFromSource(semanticview.Wrap(bundle))
+		}
+	})
+	if strings.TrimSpace(defaultControlPlaneRecipientValue) != "" {
+		return strings.TrimSpace(defaultControlPlaneRecipientValue)
+	}
+	return "coordinator"
+}
+
+func controlPlaneRecipientFromSource(source semanticview.Source) string {
+	if source == nil {
+		return ""
+	}
+	for _, logicalID := range []string{"coordinator", "empire-coordinator"} {
+		if entry, ok := semanticview.FindAgentEntry(source, logicalID, ""); ok {
+			if agentID := strings.TrimSpace(entry.ID); agentID != "" {
+				return agentID
 			}
 		}
-		for _, key := range []string{"control_plane_agent_id", "manager_fallback_agent_id"} {
-			if value, ok := bundle.MergedPolicy.Values[key]; ok {
-				if agentID := strings.TrimSpace(asString(value.Value)); agentID != "" {
-					return agentID
-				}
-			}
-			if value, ok := bundle.Policy.Values[key]; ok {
-				if agentID := strings.TrimSpace(asString(value.Value)); agentID != "" {
-					return agentID
-				}
+	}
+	for _, key := range []string{"control_plane_agent_id", "manager_fallback_agent_id"} {
+		if value, ok := semanticview.PolicyValueForFlow(source, "", key); ok {
+			if agentID := strings.TrimSpace(asString(value.Value)); agentID != "" {
+				return agentID
 			}
 		}
+	}
+	return ""
+}
+
+func DefaultControlPlaneRecipient() string {
+	if recipient := strings.TrimSpace(runtimeControlPlaneRecipient()); recipient != "" {
+		return recipient
 	}
 	return "coordinator"
 }
@@ -108,18 +130,7 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
 		return opts.WorkflowModule
 	})
-	return runtimepipeline.ValidateWorkflowContracts(opts.WorkflowModule.ContractBundle())
-}
-
-func ensureProductPolicyBootWiring(opts RuntimeOptions) error {
-	if opts.ProductPolicy == nil {
-		return nil
-	}
-	runtimeproductpolicy.SetDefaultFactory(opts.ProductPolicy)
-	if runtimeproductpolicy.DefaultOrNil() == nil {
-		return fmt.Errorf("product policy factory returned nil")
-	}
-	return nil
+	return runtimepipeline.ValidateWorkflowContracts(opts.WorkflowModule.SemanticSource())
 }
 
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
@@ -138,9 +149,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
-	}
-	if err := ensureProductPolicyBootWiring(opts); err != nil {
-		return nil, err
 	}
 
 	rt := &Runtime{
@@ -167,35 +175,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
 		}
-	}
-
-	if stores.ScanCampaignStore != nil {
-		hooks := runtimepipeline.ScanCampaignHooks{
-			Warnf: func(component, format string, args ...any) {
-				log.Printf("runtime.warn component=%s message=%s", strings.TrimSpace(component), fmt.Sprintf(format, args...))
-			},
-			RecordTransition: func(ctx context.Context, db *sql.DB, in runtimepipeline.ScanCampaignTransitionInput) error {
-				return RecordPipelineTransition(ctx, db, PipelineTransitionInput{
-					EventID:       in.EventID,
-					EventType:     in.EventType,
-					Handler:       in.Handler,
-					PipelineType:  in.PipelineType,
-					PipelineID:    in.PipelineID,
-					Action:        in.Action,
-					StateBefore:   in.StateBefore,
-					StateAfter:    in.StateAfter,
-					EventsEmitted: in.EventsEmitted,
-					DropReason:    in.DropReason,
-					Error:         in.Error,
-					Duration:      in.Duration,
-				})
-			},
-			EnsureDirectiveGeography: runtimepipeline.EnsureDirectiveGeography,
-			ControlPlaneRecipient: func() string {
-				return strings.TrimSpace(runtimeControlPlaneRecipient())
-			},
-		}
-		rt.ScanCampaign = runtimepipeline.NewScanCampaignManager(rt.Bus, stores.ScanCampaignStore, hooks, stores.SQLDB)
 	}
 
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
@@ -298,9 +277,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if node != nil {
 			go node.Run(ctx)
 		}
-	}
-	if rt.ScanCampaign != nil {
-		go rt.ScanCampaign.Run(ctx)
 	}
 	if rt.Scheduler != nil && rt.Stores.ScheduleStore != nil {
 		schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
@@ -422,10 +398,14 @@ func (rt *Runtime) selfCheck() error {
 }
 
 func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, workflow runtimepipeline.WorkflowRuntime) error {
-	if store == nil || workflow == nil || workflow.ContractBundle() == nil {
+	if store == nil || workflow == nil {
 		return nil
 	}
-	for _, timer := range workflow.ContractBundle().WorkflowTimers() {
+	source := workflow.SemanticSource()
+	if source == nil {
+		return nil
+	}
+	for _, timer := range source.WorkflowTimers() {
 		if !timer.Recurring {
 			continue
 		}
@@ -452,7 +432,11 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 }
 
 func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
-	if store == nil || workflow == nil || workflow.ContractBundle() == nil {
+	if store == nil || workflow == nil {
+		return nil
+	}
+	source := workflow.SemanticSource()
+	if source == nil {
 		return nil
 	}
 	instanceStore := workflow.WorkflowInstanceStore()
@@ -473,7 +457,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 			if timerID == "" {
 				continue
 			}
-			timer, ok := workflow.ContractBundle().WorkflowTimerByID(timerID)
+			timer, ok := source.WorkflowTimerByID(timerID)
 			if !ok || timer.Recurring {
 				continue
 			}

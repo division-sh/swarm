@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [gates.clear_requested]
+  produces: [gates.cleared]
+  event_handlers:
+    gates.clear_requested:
+      clear_gates: true
+      emits: gates.cleared

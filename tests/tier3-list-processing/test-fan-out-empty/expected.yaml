@@ -1,0 +1,12 @@
+trigger:
+  event: batch.submitted
+  payload:
+    entity_id: ent-001
+    items: []
+
+expected:
+  handler_outcome: success
+  entity_state: scanning
+  emitted_events: []
+  entity_fields:
+    fan_out_count: 0

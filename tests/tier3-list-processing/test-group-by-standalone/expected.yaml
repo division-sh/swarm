@@ -1,0 +1,27 @@
+trigger:
+  event: items.submitted
+  payload:
+    entity_id: ent-001
+    items:
+      - name: a
+        category: x
+      - name: b
+        category: y
+      - name: c
+        category: x
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - items.grouped
+  entity_fields:
+    grouped:
+      x:
+        - name: a
+          category: x
+        - name: c
+          category: x
+      y:
+        - name: b
+          category: y

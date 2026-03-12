@@ -31,7 +31,7 @@ export default function PortfolioFocusCard({
         <div className="health-card">
           <div className="health-kv"><span>Vertical</span><span className="mono">{focusSummary.key || "-"}</span></div>
           <div className="health-kv"><span>DB Stage</span><span>{vertical?.stage || "-"}</span></div>
-          <div className="health-kv"><span>Workflow Stage</span><span>{vertical?.workflow_current_stage || "-"}</span></div>
+          <div className="health-kv"><span>Workflow State</span><span>{vertical?.workflow_current_state || "-"}</span></div>
         </div>
         <div className="health-card">
           <div className="health-kv"><span>Drift</span><span className={focusSummary.drift ? "health-warn mono" : "mono"}>{focusSummary.drift ? "yes" : "no"}</span></div>

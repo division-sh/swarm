@@ -1,0 +1,7 @@
+task.requested:
+  payload:
+    entity_id: string
+    score: integer
+task.completed:
+  payload:
+    entity_id: string

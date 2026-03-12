@@ -1,0 +1,9 @@
+task.submitted:
+  payload:
+    entity_id: string
+task.accepted:
+  payload:
+    entity_id: string
+task.unknown:
+  payload:
+    entity_id: string

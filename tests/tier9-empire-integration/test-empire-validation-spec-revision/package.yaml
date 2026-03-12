@@ -1,0 +1,7 @@
+name: test-empire-validation-spec-revision
+version: 1.0.0
+description: >
+  spec.validation_failed with revision_count=1 (< inner_revision_max=3).
+  Guard passes, spec.revision_requested emitted, state returns to mvp_speccing.
+platform_version: ">=1.1.0"
+flows: [validation]

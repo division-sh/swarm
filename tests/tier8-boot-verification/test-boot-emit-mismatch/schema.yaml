@@ -1,0 +1,13 @@
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [task.requested]
+  outputs:
+    events: [task.completed]
+required_agents:
+  - role: worker
+    subscribes_to: [task.requested]
+    emits: [task.completed]
+    description: Worker agent

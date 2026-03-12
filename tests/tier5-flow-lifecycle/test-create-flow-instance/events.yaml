@@ -1,0 +1,7 @@
+flow.spawn_requested:
+  payload:
+    entity_id: string
+    instance_id: string
+flow.spawned:
+  payload:
+    entity_id: string

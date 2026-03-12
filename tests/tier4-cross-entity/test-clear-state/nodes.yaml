@@ -1,0 +1,12 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [state.clear_requested]
+  produces: [state.cleared]
+  event_handlers:
+    state.clear_requested:
+      clear:
+        targets:
+          - accumulator_state
+      emits: state.cleared
+      advances_to: cleared

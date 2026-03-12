@@ -39,7 +39,7 @@ export default function OverviewView({ state, actions }) {
   const workflowWarnings = Array.isArray(health.workflow_audit?.warnings) ? health.workflow_audit.warnings : [];
   const topStuckAgents = (agentsResp.agents || []).filter((agent) => agent.state === "stuck").slice(0, 8);
   const triageVerticals = (holdingData.verticals || [])
-    .filter((vertical) => vertical.workflow_current_stage !== vertical.stage || (vertical.active_timer_count || 0) > 0 || Number(vertical.revision_count || 0) > 0)
+    .filter((vertical) => vertical.workflow_current_state !== vertical.stage || (vertical.active_timer_count || 0) > 0 || Number(vertical.revision_count || 0) > 0)
     .slice(0, 8);
   const recentIncidents = (incidentsData || []).slice(0, 8);
   const digestText = digestResp?.current?.text || "";
@@ -208,7 +208,7 @@ export default function OverviewView({ state, actions }) {
                       <td><button className="btn-secondary" onClick={() => openView("portfolio", "holding")}>{vertical.slug || vertical.name || vertical.id}</button></td>
                       <td>{vertical.stage_entered_at ? relTime(vertical.stage_entered_at) : "-"}</td>
                       <td className="mono">{vertical.active_timer_count || 0}</td>
-                      <td>{vertical.workflow_current_stage && vertical.workflow_current_stage !== vertical.stage ? "yes" : "no"}</td>
+                      <td>{vertical.workflow_current_state && vertical.workflow_current_state !== vertical.stage ? "yes" : "no"}</td>
                     </tr>
                   ))}
                 </tbody>

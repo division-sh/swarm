@@ -1,0 +1,8 @@
+initial_state: idle
+terminal_states: [finished]
+states: [idle, finished]
+pins:
+  inputs:
+    events: [task.requested]
+  outputs:
+    events: [task.done]

@@ -79,7 +79,7 @@ func builtinGuardHasHumanDecision(exec *handlerEngineExecution, _ string) (bool,
 
 func builtinGuardNotInTerminalState(exec *handlerEngineExecution, _ string) (bool, bool, error) {
 	pc := exec.coordinator()
-	if pc == nil || pc.ContractBundle() == nil {
+	if pc == nil || pc.SemanticSource() == nil {
 		return true, true, nil
 	}
 	currentState := strings.TrimSpace(string(exec.state.Stage))
@@ -92,7 +92,7 @@ func builtinGuardNotInTerminalState(exec *handlerEngineExecution, _ string) (boo
 			return !stage.Terminal, true, nil
 		}
 	}
-	for _, terminal := range pc.ContractBundle().WorkflowTerminalStages() {
+	for _, terminal := range pc.SemanticSource().WorkflowTerminalStages() {
 		if strings.EqualFold(strings.TrimSpace(terminal), currentState) {
 			return false, true, nil
 		}
@@ -148,9 +148,14 @@ func builtinActionIncrementRevisionCount(ctx context.Context, pc *FactoryPipelin
 	if pc == nil {
 		return false, fmt.Errorf("increment_revision_count requires runtime coordinator")
 	}
-	pc.mutateValidationState(ctx, hookCtx.VerticalID, func(st *validationPipelineState) {
-		st.RevisionCount++
-	})
+	applyRevisionMutation := func() {
+		pc.mutateValidationState(context.Background(), hookCtx.VerticalID, func(st *validationPipelineState) {
+			st.RevisionCount++
+		})
+	}
+	if !queuePipelinePostCommitAction(ctx, applyRevisionMutation) {
+		applyRevisionMutation()
+	}
 	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
 		_ = pc.workflowStore.Mutate(ctx, hookCtx.VerticalID, func(instance *WorkflowInstance) {
 			metadata := workflowMutableMetadata(instance)

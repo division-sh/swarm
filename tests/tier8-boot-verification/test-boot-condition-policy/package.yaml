@@ -1,0 +1,8 @@
+name: test-boot-condition-policy
+version: 1.0.0
+description: >
+  Boot verification: guard references policy.nonexistent_key but
+  policy.yaml does not define nonexistent_key. Should produce a
+  CONDITION-POLICY warning.
+platform_version: ">=1.1.0"
+flows: []

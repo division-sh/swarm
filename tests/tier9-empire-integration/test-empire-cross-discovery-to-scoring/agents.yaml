@@ -1,0 +1,6 @@
+analysis-agent:
+  id: analysis-agent
+  type: factory
+  role: analysis
+  subscriptions: [scoring.requested]
+  emit_events: [score.dimension_complete, vertical.derived]

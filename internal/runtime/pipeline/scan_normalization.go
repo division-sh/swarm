@@ -1,11 +1,11 @@
 package pipeline
 
-import runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+import runtimescanmode "empireai/internal/runtime/scanmode"
 
 func NormalizeScanMode(raw string) string {
-	return runtimeproductpolicy.NormalizeScanMode(raw)
+	return runtimescanmode.NormalizeMode(raw)
 }
 
 func NormalizeScanPriority(raw string) string {
-	return runtimeproductpolicy.NormalizeScanPriority(raw)
+	return runtimescanmode.NormalizePriority(raw)
 }

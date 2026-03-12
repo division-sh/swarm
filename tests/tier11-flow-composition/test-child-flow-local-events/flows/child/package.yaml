@@ -1,0 +1,5 @@
+name: child
+version: 1.0.0
+description: Child flow with internal events not visible to parent.
+platform_version: ">=1.1.0"
+flows: []

@@ -1,0 +1,8 @@
+initial_state: waiting
+terminal_states: [processed]
+states: [waiting, processing, processed]
+pins:
+  inputs:
+    events: [child.start]
+  outputs:
+    events: [child.done]

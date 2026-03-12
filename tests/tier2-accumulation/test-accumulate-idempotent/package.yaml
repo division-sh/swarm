@@ -1,0 +1,5 @@
+name: test-accumulate-idempotent
+version: 1.0.0
+description: Duplicate item_id is deduplicated; only unique items count.
+platform_version: ">=1.1.0"
+flows: []

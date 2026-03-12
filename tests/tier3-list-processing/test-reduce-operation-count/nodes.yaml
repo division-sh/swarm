@@ -1,0 +1,13 @@
+counter-node:
+  id: counter-node
+  execution_type: system_node
+  subscribes_to: [batch.submitted]
+  produces: [batch.counted]
+  event_handlers:
+    batch.submitted:
+      reduce:
+        items_from: payload.items
+        operation: count
+        store_as: entity.item_count
+      advances_to: done
+      emits: batch.counted

@@ -1,0 +1,7 @@
+worker:
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - task.requested
+  emit_events:
+    - task.finished

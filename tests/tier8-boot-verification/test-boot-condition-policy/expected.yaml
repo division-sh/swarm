@@ -1,0 +1,6 @@
+trigger:
+  boot: true
+expected:
+  boot_result: warning
+  error_category: CONDITION-POLICY
+  error_contains: "nonexistent_key"

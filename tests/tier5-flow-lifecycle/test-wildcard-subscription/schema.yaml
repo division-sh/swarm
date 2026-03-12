@@ -1,0 +1,8 @@
+initial_state: listening
+terminal_states: [done]
+states: [listening, matched, done]
+pins:
+  inputs:
+    events: ["*.completed"]
+  outputs:
+    events: [match.found]

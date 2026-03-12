@@ -1,0 +1,15 @@
+trigger:
+  event: spec.validation_failed
+  payload:
+    entity_id: ent-001
+    vertical_id: vert-001
+    issues: [{ type: "incomplete_api", detail: "Missing auth endpoints" }]
+    severity: "high"
+  entity_fields_before:
+    revision_count: 3
+
+expected:
+  handler_outcome: escalate
+  entity_state: mvp_speccing
+  emitted_events:
+    - validation.revision_limit_reached

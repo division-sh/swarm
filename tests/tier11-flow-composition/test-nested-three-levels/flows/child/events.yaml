@@ -1,0 +1,6 @@
+step.begin:
+  payload:
+    entity_id: string
+step.result:
+  payload:
+    entity_id: string

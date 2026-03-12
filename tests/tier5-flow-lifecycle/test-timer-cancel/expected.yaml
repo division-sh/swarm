@@ -1,0 +1,13 @@
+trigger:
+  sequence:
+    - event: timer.scheduled
+      payload:
+        entity_id: ent-001
+    - event: timer.cancel_requested
+      payload:
+        entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: cancelled
+  emitted_events: []

@@ -1,0 +1,5 @@
+name: processor
+version: 1.0.0
+description: Child flow that reads task_config and writes result.
+platform_version: ">=1.1.0"
+flows: []

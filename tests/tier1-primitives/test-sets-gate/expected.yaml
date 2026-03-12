@@ -1,0 +1,12 @@
+trigger:
+  event: gate.requested
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  gates:
+    g1_check: true
+  entity_state: pending
+  emitted_events:
+    - gate.set

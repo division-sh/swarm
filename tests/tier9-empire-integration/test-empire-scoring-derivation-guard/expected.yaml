@@ -1,0 +1,23 @@
+trigger:
+  event: vertical.derived
+  payload:
+    entity_id: ent-001
+    opportunity_id: opp-derived-001
+    parent_id: opp-parent-001
+    generation_depth: 3
+    generator_agent_id: analysis-agent-001
+    opportunity_name: "DerivedInvoiceTool"
+    signal_strength: 65
+    build_sketch: { core_features: ["invoicing"] }
+    evidence: { pain_signals: [{ signal: "test", source_url: "https://example.com" }] }
+  entity_fields_before:
+    generation_depth: 3
+    child_count: 0
+    red_flag_count: 0
+    evidence_count: 5
+    scores: { icp_crispness: 70, retention_architecture: 60 }
+
+expected:
+  handler_outcome: discard
+  entity_state: discovered
+  emitted_events: []

@@ -1,0 +1,11 @@
+chain-node:
+  id: chain-node
+  execution_type: system_node
+  subscribes_to: [chain.start, chain.continue]
+  produces: [chain.continue]
+  event_handlers:
+    chain.start:
+      advances_to: processing
+      emits: chain.continue
+    chain.continue:
+      emits: chain.continue

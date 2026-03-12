@@ -1,0 +1,8 @@
+initial_state: null
+terminal_states: []
+states: []
+pins:
+  inputs:
+    events: [dedup.resolved]
+  outputs:
+    events: []

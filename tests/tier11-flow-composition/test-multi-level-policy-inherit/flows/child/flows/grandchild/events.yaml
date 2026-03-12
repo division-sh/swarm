@@ -1,0 +1,7 @@
+grandchild.check:
+  payload:
+    entity_id: string
+    score: integer
+grandchild.passed:
+  payload:
+    entity_id: string

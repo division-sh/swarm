@@ -7,39 +7,42 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
-func ValidateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) error {
-	return validateWorkflowContracts(bundle)
+func ValidateWorkflowContracts(source semanticview.Source) error {
+	return validateWorkflowContracts(source)
 }
 
 func ValidateDefaultWorkflowContracts() error {
-	return validateWorkflowContracts(defaultWorkflowModule().ContractBundle())
+	return validateWorkflowContracts(defaultWorkflowModule().SemanticSource())
 }
 
 func (pc *FactoryPipelineCoordinator) ValidateWorkflowContracts() error {
-	return validateWorkflowContracts(pc.ContractBundle())
+	return validateWorkflowContracts(pc.SemanticSource())
 }
 
-func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) error {
-	if bundle == nil {
+func validateWorkflowContracts(source semanticview.Source) error {
+	if source == nil {
 		return fmt.Errorf("workflow contract bundle is nil")
 	}
 	errs := make([]string, 0, 16)
-	usesOwningNodeModel := contractBundleUsesOwningNodeModel(bundle)
-	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(bundle)
-	entityFields := workflowEntitySchemaFields(bundle)
-	if bundle.WorkflowName() == "" {
+	nodes := source.NodeEntries()
+	events := source.EventEntries()
+	usesOwningNodeModel := contractBundleUsesOwningNodeModel(source)
+	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(source)
+	entityFields := workflowEntitySchemaFields(source)
+	if source.WorkflowName() == "" {
 		errs = append(errs, "workflow.name missing")
 	}
-	if strings.TrimSpace(bundle.Platform.Platform.Name) == "" {
+	if strings.TrimSpace(source.PlatformSpec().Platform.Name) == "" {
 		errs = append(errs, "platform.name missing")
 	}
-	if strings.TrimSpace(bundle.Platform.Platform.Version) == "" {
+	if strings.TrimSpace(source.PlatformSpec().Platform.Version) == "" {
 		errs = append(errs, "platform.version missing")
 	}
 
-	transitions := bundle.WorkflowTransitions()
+	transitions := source.WorkflowTransitions()
 	transitionByID := make(map[string]runtimecontracts.WorkflowTransitionContract, len(transitions))
 	for _, transition := range transitions {
 		id := strings.TrimSpace(transition.ID)
@@ -49,7 +52,7 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 		transitionByID[id] = transition
 		if strings.TrimSpace(transition.Trigger) == "" {
 			errs = append(errs, fmt.Sprintf("transition %s missing trigger", id))
-		} else if !workflowEventExists(bundle, strings.TrimSpace(transition.Trigger)) {
+		} else if !workflowEventExists(source, strings.TrimSpace(transition.Trigger)) {
 			errs = append(errs, fmt.Sprintf("transition %s trigger %s missing from event catalog", id, transition.Trigger))
 		}
 		for _, field := range transition.DataAccumulation.TargetFields() {
@@ -66,13 +69,13 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 			if actionID == "" {
 				continue
 			}
-			action, ok := bundle.ActionEntryByID(actionID)
+			action, ok := source.ActionEntryByID(actionID)
 			if !ok {
 				errs = append(errs, fmt.Sprintf("transition %s references unknown action %s", id, actionID))
 				continue
 			}
 			if emits := strings.TrimSpace(action.Emits); emits != "" {
-				if !workflowEventExists(bundle, emits) {
+				if !workflowEventExists(source, emits) {
 					errs = append(errs, fmt.Sprintf("transition %s action %s emits missing event %s", id, actionID, emits))
 				}
 			}
@@ -85,7 +88,7 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 			if guardID == "" {
 				continue
 			}
-			guard, ok := bundle.GuardEntryByID(guardID)
+			guard, ok := source.GuardEntryByID(guardID)
 			if !ok {
 				errs = append(errs, fmt.Sprintf("transition %s references unknown guard %s", id, guardID))
 				continue
@@ -96,10 +99,25 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 		}
 	}
 
-	for nodeID, node := range bundle.Nodes {
+	for nodeID, node := range nodes {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" {
 			continue
+		}
+		for eventType, handler := range node.EventHandlers {
+			if workflowHandlerDeclaresConflictingCompletion(handler) {
+				errs = append(errs, fmt.Sprintf("node %s handler %s declares both on_complete and rules", nodeID, strings.TrimSpace(eventType)))
+			}
+			if onFail := handlerGuardOnFail(handler.Guard); onFail != "" {
+				if err := validateWorkflowGuardOnFail(onFail); err != nil {
+					errs = append(errs, fmt.Sprintf("node %s handler %s guard %v", nodeID, strings.TrimSpace(eventType), err))
+				}
+			}
+			if actionID := strings.TrimSpace(handler.Action.ID); actionID != "" {
+				if !workflowHandlerActionExecutable(source, actionID) {
+					errs = append(errs, fmt.Sprintf("node %s handler %s action %s is not executable", nodeID, strings.TrimSpace(eventType), actionID))
+				}
+			}
 		}
 		subs := normalizeStringSet(node.SubscribesTo)
 		produces := normalizeStringSet(node.Produces)
@@ -127,35 +145,35 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 		}
 	}
 
-	for flowID := range bundle.FlowSchemas {
-		states := normalizeStringSet(bundle.FlowStates(flowID))
-		initial := strings.TrimSpace(bundle.FlowInitialStage(flowID))
+	for flowID := range source.FlowSchemaEntries() {
+		states := normalizeStringSet(source.FlowStates(flowID))
+		initial := strings.TrimSpace(source.FlowInitialStage(flowID))
 		if initial != "" {
 			if _, ok := states[initial]; !ok {
 				errs = append(errs, fmt.Sprintf("flow %s initial_state %s missing from states", flowID, initial))
 			}
 		}
-		for _, eventType := range bundle.FlowInputEvents(flowID) {
+		for _, eventType := range source.FlowInputEvents(flowID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue
 			}
-			if !workflowEventExists(bundle, eventType) {
+			if !workflowEventExists(source, eventType) {
 				errs = append(errs, fmt.Sprintf("flow %s input event %s missing from event catalog", flowID, eventType))
 			}
 		}
-		for _, eventType := range bundle.FlowOutputEvents(flowID) {
+		for _, eventType := range source.FlowOutputEvents(flowID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue
 			}
-			if !workflowEventExists(bundle, eventType) {
+			if !workflowEventExists(source, eventType) {
 				errs = append(errs, fmt.Sprintf("flow %s output event %s missing from event catalog", flowID, eventType))
 			}
 		}
 	}
 
-	for eventType, entry := range bundle.Events {
+	for eventType, entry := range events {
 		eventType = strings.TrimSpace(eventType)
 		handling := strings.TrimSpace(entry.RuntimeHandling)
 		owner := strings.TrimSpace(entry.OwningNode)
@@ -166,57 +184,57 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 			errs = append(errs, fmt.Sprintf("event %s with runtime_handling=%s missing owning_node", eventType, handling))
 			continue
 		}
-		if _, ok := bundle.Nodes[owner]; !ok {
+		if _, ok := nodes[owner]; !ok {
 			errs = append(errs, fmt.Sprintf("event %s owning_node %s missing from system nodes", eventType, owner))
 			continue
 		}
 		if _, ok := runtimeExecutors[owner]; !ok {
 			errs = append(errs, fmt.Sprintf("event %s owning_node %s has no runtime executor", eventType, owner))
 		}
-		if handlers := bundle.NodeEventHandlers(owner); len(handlers) > 0 && nodeSubscribesToEvent(bundle, owner, eventType) {
-			if _, ok := bundle.NodeEventHandler(owner, eventType); !ok {
+		if handlers := source.NodeEventHandlers(owner); len(handlers) > 0 && nodeSubscribesToEvent(source, owner, eventType) {
+			if _, ok := source.NodeEventHandler(owner, eventType); !ok {
 				errs = append(errs, fmt.Sprintf("event %s owning_node %s missing semantic event_handler", eventType, owner))
 			}
 		}
 	}
 
-	for _, timer := range bundle.WorkflowTimers() {
+	for _, timer := range source.WorkflowTimers() {
 		owner := strings.TrimSpace(timer.Owner)
 		if owner == "" {
 			errs = append(errs, fmt.Sprintf("timer %s missing owner", timer.ID))
 			continue
 		}
 		if owner != "runtime" {
-			if _, systemNode := bundle.Nodes[owner]; !systemNode {
-				if !workflowParticipantExists(bundle, owner) {
+			if _, systemNode := nodes[owner]; !systemNode {
+				if !workflowParticipantExists(source, owner) {
 					errs = append(errs, fmt.Sprintf("timer %s owner %s missing from participants", timer.ID, owner))
 				}
 			}
 		}
-		if !workflowEventExists(bundle, strings.TrimSpace(timer.Event)) {
+		if !workflowEventExists(source, strings.TrimSpace(timer.Event)) {
 			errs = append(errs, fmt.Sprintf("timer %s event %s missing from event catalog", timer.ID, timer.Event))
 		}
 	}
 
-	for pin, owners := range workflowWritePinOwners(bundle) {
+	for pin, owners := range workflowWritePinOwners(source) {
 		if len(owners) > 1 {
 			errs = append(errs, fmt.Sprintf("write pin %s is owned by multiple flows: %s", pin, strings.Join(owners, ", ")))
 		}
 	}
 
-	for flowID, requiredAgents := range workflowRequiredAgents(bundle) {
+	for flowID, requiredAgents := range workflowRequiredAgents(source) {
 		for _, required := range requiredAgents {
 			role := strings.TrimSpace(required.Role)
 			if role == "" {
 				errs = append(errs, fmt.Sprintf("flow %s required_agents entry missing role", flowID))
 				continue
 			}
-			agentID, agent, ok := workflowRequiredAgentProvider(bundle, role)
+			agentID, agent, ok := workflowRequiredAgentProvider(source, role)
 			if !ok {
 				errs = append(errs, fmt.Sprintf("flow %s required agent role %s missing from merged agents", flowID, role))
 				continue
 			}
-			if flowRequiresStaticSubscriptionValidation(bundle, flowID) {
+			if flowRequiresStaticSubscriptionValidation(source, flowID) {
 				if diff := diffMissingStrings(required.SubscribesTo, workflowAgentSubscriptions(agent)); diff != "" {
 					errs = append(errs, fmt.Sprintf("flow %s required agent %s subscriptions mismatch (%s)", flowID, agentID, diff))
 				}
@@ -227,11 +245,11 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 		}
 	}
 
-	for _, transition := range bundle.DerivedHandlerTransitions() {
+	for _, transition := range source.DerivedHandlerTransitions() {
 		if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
 			if target := strings.TrimSpace(transition.AdvancesTo); target != "" {
-				validTargets := normalizeStringSet(bundle.FlowStates(flowID))
-				for _, terminal := range bundle.FlowTerminalStages(flowID) {
+				validTargets := normalizeStringSet(source.FlowStates(flowID))
+				for _, terminal := range source.FlowTerminalStages(flowID) {
 					validTargets[strings.TrimSpace(terminal)] = struct{}{}
 				}
 				if _, ok := validTargets[target]; !ok {
@@ -245,7 +263,7 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 			}
 		}
 		if gate := strings.TrimSpace(stringValue(transition.SetsGate)); gate != "" {
-			node, ok := bundle.Nodes[strings.TrimSpace(transition.NodeID)]
+			node, ok := nodes[strings.TrimSpace(transition.NodeID)]
 			if !ok {
 				continue
 			}
@@ -265,12 +283,32 @@ func validateWorkflowContracts(bundle *runtimecontracts.WorkflowContractBundle) 
 	return nil
 }
 
-func workflowWritePinOwners(bundle *runtimecontracts.WorkflowContractBundle) map[string][]string {
+func workflowHandlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
+	return len(handler.Rules) > 0 && workflowHandlerHasOnComplete(handler)
+}
+
+func workflowHandlerHasOnComplete(handler runtimecontracts.SystemNodeEventHandler) bool {
+	if len(handler.OnComplete) > 0 {
+		return true
+	}
+	return handler.Accumulate != nil && len(handler.Accumulate.OnComplete) > 0
+}
+
+func workflowWritePinOwners(source semanticview.Source) map[string][]string {
 	out := map[string][]string{}
-	if bundle == nil {
+	if source == nil {
 		return out
 	}
-	for pin, owners := range bundle.Semantics.WritePinOwners {
+	for _, flowID := range sortedWorkflowValidationKeys(source.FlowSchemaEntries()) {
+		for _, pin := range source.FlowWritePins(flowID) {
+			pin = strings.TrimSpace(pin)
+			if pin == "" {
+				continue
+			}
+			out[pin] = append(out[pin], flowID)
+		}
+	}
+	for pin, owners := range out {
 		normalizedPin := strings.TrimSpace(pin)
 		if normalizedPin == "" {
 			continue
@@ -282,19 +320,19 @@ func workflowWritePinOwners(bundle *runtimecontracts.WorkflowContractBundle) map
 	return out
 }
 
-func workflowRequiredAgents(bundle *runtimecontracts.WorkflowContractBundle) map[string][]runtimecontracts.FlowRequiredAgent {
+func workflowRequiredAgents(source semanticview.Source) map[string][]runtimecontracts.FlowRequiredAgent {
 	out := map[string][]runtimecontracts.FlowRequiredAgent{}
-	if bundle == nil {
+	if source == nil {
 		return out
 	}
-	for flowID := range bundle.Semantics.FlowAgents {
-		out[strings.TrimSpace(flowID)] = bundle.FlowRequiredAgents(flowID)
+	for flowID := range source.FlowSchemaEntries() {
+		out[strings.TrimSpace(flowID)] = source.FlowRequiredAgents(flowID)
 	}
 	return out
 }
 
-func workflowRequiredAgentProvider(bundle *runtimecontracts.WorkflowContractBundle, role string) (string, runtimecontracts.AgentRegistryEntry, bool) {
-	if bundle == nil {
+func workflowRequiredAgentProvider(source semanticview.Source, role string) (string, runtimecontracts.AgentRegistryEntry, bool) {
+	if source == nil {
 		return "", runtimecontracts.AgentRegistryEntry{}, false
 	}
 	role = strings.TrimSpace(role)
@@ -302,34 +340,13 @@ func workflowRequiredAgentProvider(bundle *runtimecontracts.WorkflowContractBund
 		return "", runtimecontracts.AgentRegistryEntry{}, false
 	}
 	requiredKey := normalizeContractRoleKey(role)
-	for scopedID, agent := range bundle.ScopedAgents {
-		localID := scopedContractLocalID(scopedID)
-		if normalizeContractRoleKey(localID) == requiredKey {
-			return strings.TrimSpace(localID), agent, true
-		}
-	}
-	for scopedID, agent := range bundle.ScopedAgents {
-		localID := scopedContractLocalID(scopedID)
-		if contractRoleMatches(localID, agent.Role, role) {
-			return strings.TrimSpace(localID), agent, true
-		}
-	}
-	for agentID, agent := range bundle.MergedAgents {
+	agents := source.AgentEntries()
+	for agentID, agent := range agents {
 		if normalizeContractRoleKey(agentID) == requiredKey {
 			return strings.TrimSpace(agentID), agent, true
 		}
 	}
-	for agentID, agent := range bundle.MergedAgents {
-		if contractRoleMatches(agentID, agent.Role, role) {
-			return strings.TrimSpace(agentID), agent, true
-		}
-	}
-	for agentID, agent := range bundle.Agents {
-		if normalizeContractRoleKey(agentID) == requiredKey {
-			return strings.TrimSpace(agentID), agent, true
-		}
-	}
-	for agentID, agent := range bundle.Agents {
+	for agentID, agent := range agents {
 		if contractRoleMatches(agentID, agent.Role, role) {
 			return strings.TrimSpace(agentID), agent, true
 		}
@@ -337,24 +354,46 @@ func workflowRequiredAgentProvider(bundle *runtimecontracts.WorkflowContractBund
 	return "", runtimecontracts.AgentRegistryEntry{}, false
 }
 
-func workflowEventExists(bundle *runtimecontracts.WorkflowContractBundle, eventType string) bool {
-	if bundle == nil {
+func workflowEventExists(source semanticview.Source, eventType string) bool {
+	if source == nil {
 		return false
 	}
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		return false
 	}
-	if _, ok := bundle.MergedEvents[eventType]; ok {
+	if _, ok := source.ResolvedEventCatalog()[eventType]; ok {
 		return true
 	}
-	for scopedID := range bundle.ScopedEvents {
-		if scopedContractLocalID(scopedID) == eventType {
-			return true
-		}
-	}
-	_, ok := bundle.Events[eventType]
+	_, ok := source.EventEntry(eventType)
 	return ok
+}
+
+func workflowHandlerActionExecutable(source semanticview.Source, actionID string) bool {
+	actionID = strings.TrimSpace(actionID)
+	if actionID == "" {
+		return true
+	}
+	if isSupportedWorkflowHandlerActionID(actionID) {
+		return true
+	}
+	entry, ok := source.ActionEntryByID(actionID)
+	return ok && isExecutableWorkflowActionEntry(entry)
+}
+
+func validateWorkflowGuardOnFail(onFail string) error {
+	onFail = normalizeWorkflowGuardFailureAction(onFail)
+	switch {
+	case onFail == "", onFail == "blocked", onFail == "discard", onFail == "reject", onFail == "kill":
+		return nil
+	case strings.HasPrefix(onFail, "escalate:"):
+		if strings.TrimSpace(strings.TrimPrefix(onFail, "escalate:")) == "" {
+			return fmt.Errorf("on_fail escalate requires event type")
+		}
+		return nil
+	default:
+		return fmt.Errorf("on_fail %q is not supported", onFail)
+	}
 }
 
 func scopedContractLocalID(scopedID string) string {
@@ -381,15 +420,19 @@ func normalizeContractRoleKey(raw string) string {
 	return raw
 }
 
-func flowRequiresStaticSubscriptionValidation(bundle *runtimecontracts.WorkflowContractBundle, flowID string) bool {
-	if bundle == nil {
+func flowRequiresStaticSubscriptionValidation(source semanticview.Source, flowID string) bool {
+	if source == nil {
 		return true
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return true
 	}
-	return !strings.EqualFold(strings.TrimSpace(bundle.FlowSchemas[flowID].Mode), "template")
+	schema, ok := source.FlowSchemaByID(flowID)
+	if !ok {
+		return true
+	}
+	return !strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
 }
 
 func workflowDerivedAccumulationSource(sourceEvent string) bool {
@@ -489,21 +532,33 @@ func parseGateNamesFromSchemaString(schema string) map[string]struct{} {
 	return out
 }
 
-func workflowEntitySchemaFields(bundle *runtimecontracts.WorkflowContractBundle) map[string]struct{} {
+func workflowEntitySchemaFields(source semanticview.Source) map[string]struct{} {
 	out := map[string]struct{}{}
-	if bundle == nil {
+	if source == nil {
 		return out
 	}
-	collectEntitySchemaFields(bundle.WorkflowEntitySchema(), out)
+	collectEntitySchemaFields(source.WorkflowEntitySchema(), out)
 	return out
 }
 
-func workflowSystemNodeStateSchemaFields(bundle *runtimecontracts.WorkflowContractBundle, nodeID string) map[string]struct{} {
+func sortedWorkflowValidationKeys[T any](m map[string]T) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func workflowSystemNodeStateSchemaFields(source semanticview.Source, nodeID string) map[string]struct{} {
 	out := map[string]struct{}{}
-	if bundle == nil {
+	if source == nil {
 		return out
 	}
-	node, ok := bundle.Nodes[strings.TrimSpace(nodeID)]
+	node, ok := source.NodeEntries()[strings.TrimSpace(nodeID)]
 	if !ok {
 		return out
 	}
@@ -525,6 +580,23 @@ func workflowSystemNodeStateSchemaFields(bundle *runtimecontracts.WorkflowContra
 }
 
 func collectEntitySchemaFields(raw any, out map[string]struct{}) {
+	switch typed := raw.(type) {
+	case runtimecontracts.EntitySchema:
+		for _, group := range typed.Groups {
+			for _, field := range group.Fields {
+				name := strings.TrimSpace(field.Name)
+				if name != "" {
+					out[name] = struct{}{}
+				}
+			}
+		}
+		return
+	case *runtimecontracts.EntitySchema:
+		if typed != nil {
+			collectEntitySchemaFields(*typed, out)
+		}
+		return
+	}
 	obj, ok := asObject(raw)
 	if !ok {
 		return
@@ -542,7 +614,7 @@ func collectEntitySchemaFields(raw any, out map[string]struct{}) {
 	}
 }
 
-func supportedWorkflowRuntimeExecutorIDs(bundle *runtimecontracts.WorkflowContractBundle) map[string]struct{} {
+func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]struct{} {
 	out := map[string]struct{}{
 		ScoringNodeID:             {},
 		"scan-orchestrator":       {},
@@ -551,12 +623,12 @@ func supportedWorkflowRuntimeExecutorIDs(bundle *runtimecontracts.WorkflowContra
 		"lifecycle-orchestrator":  {},
 		"portfolio-node":          {},
 	}
-	if bundle == nil {
+	if source == nil {
 		return out
 	}
 	filtered := make(map[string]struct{}, len(out))
 	for nodeID := range out {
-		if _, ok := bundle.Nodes[nodeID]; ok {
+		if _, ok := source.NodeEntries()[nodeID]; ok {
 			filtered[nodeID] = struct{}{}
 		}
 	}
@@ -572,35 +644,35 @@ func requiresOwningNode(runtimeHandling string) bool {
 	}
 }
 
-func contractBundleUsesOwningNodeModel(bundle *runtimecontracts.WorkflowContractBundle) bool {
-	if bundle == nil {
+func contractBundleUsesOwningNodeModel(source semanticview.Source) bool {
+	if source == nil {
 		return false
 	}
-	for _, entry := range bundle.Events {
+	for _, entry := range source.EventEntries() {
 		if strings.TrimSpace(entry.OwningNode) != "" {
 			return true
 		}
 	}
-	for _, node := range bundle.Nodes {
-		if len(bundle.NodeEventHandlers(node.ID)) > 0 {
+	for _, node := range source.NodeEntries() {
+		if len(source.NodeEventHandlers(node.ID)) > 0 {
 			return true
 		}
 	}
 	return false
 }
 
-func workflowParticipantExists(bundle *runtimecontracts.WorkflowContractBundle, participant string) bool {
+func workflowParticipantExists(source semanticview.Source, participant string) bool {
 	participant = strings.TrimSpace(participant)
-	if participant == "" || bundle == nil {
+	if participant == "" || source == nil {
 		return false
 	}
 	if participant == "runtime" || participant == "human" {
 		return true
 	}
-	if _, ok := bundle.Nodes[participant]; ok {
+	if _, ok := source.NodeEntries()[participant]; ok {
 		return true
 	}
-	for _, agent := range bundle.Agents {
+	for _, agent := range source.AgentEntries() {
 		if strings.TrimSpace(agent.ID) == participant || strings.TrimSpace(agent.Role) == participant {
 			return true
 		}
@@ -619,11 +691,11 @@ func normalizeStringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func nodeSubscribesToEvent(bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string) bool {
-	if bundle == nil {
+func nodeSubscribesToEvent(source semanticview.Source, nodeID, eventType string) bool {
+	if source == nil {
 		return false
 	}
-	node, ok := bundle.Nodes[strings.TrimSpace(nodeID)]
+	node, ok := source.NodeEntries()[strings.TrimSpace(nodeID)]
 	if !ok {
 		return false
 	}

@@ -1,0 +1,5 @@
+name: test-fan-out-count
+version: 1.0.0
+description: fan_out writes the item count to entity.fan_out_count.
+platform_version: ">=1.1.0"
+flows: []

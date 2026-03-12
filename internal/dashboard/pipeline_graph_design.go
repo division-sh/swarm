@@ -13,6 +13,8 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	models "empireai/internal/models"
+	contracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/templateops"
 )
@@ -23,18 +25,19 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 	seenNodes := map[string]struct{}{}
 	seenEdges := map[string]struct{}{}
 	contractBundle, _, _ := dashboardContractBundle()
-	workflowTransitions, workflowTransitionsByTrigger := workflowTransitionSummaries(contractBundle)
+	source := semanticview.Wrap(contractBundle)
+	workflowTransitions, workflowTransitionsByTrigger := workflowTransitionSummaries(source)
 	timerDetailsByEvent := map[string][]map[string]any{}
 	stagePhaseMap := map[string]string{}
-	if contractBundle != nil {
-		for _, stage := range contractBundle.WorkflowStages() {
+	if source != nil {
+		for _, stage := range source.WorkflowStages() {
 			stageID := strings.TrimSpace(stage.ID)
 			if stageID == "" {
 				continue
 			}
 			stagePhaseMap[stageID] = strings.TrimSpace(stage.Phase)
 		}
-		for _, timer := range contractBundle.WorkflowTimers() {
+		for _, timer := range source.WorkflowTimers() {
 			eventType := strings.TrimSpace(timer.Event)
 			if eventType == "" {
 				continue
@@ -210,6 +213,9 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 		addEventType(evt)
 	}
 	eventSchemas := runtimetools.EventSchemaSnapshot()
+	if contractBundle != nil {
+		eventSchemas = contractEventSchemasForDesign(semanticview.Wrap(contractBundle))
+	}
 	for evt := range eventSchemas {
 		addEventType(evt)
 	}
@@ -392,6 +398,55 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 		"sources":              sources,
 	}
 	return nodes, edges, meta, nil
+}
+
+func contractEventSchemasForDesign(source semanticview.Source) map[string]runtimetools.EmitSchema {
+	if source == nil {
+		return nil
+	}
+	resolved := source.ResolvedEventCatalog()
+	out := make(map[string]runtimetools.EmitSchema, len(resolved))
+	for eventType, entry := range resolved {
+		schema := map[string]any{
+			"type":                 "object",
+			"properties":           contractEventFieldSchemaMap(entry.Payload.Properties),
+			"additionalProperties": false,
+		}
+		if required := contractEventRequiredFields(entry); len(required) > 0 {
+			schema["required"] = required
+		}
+		out[eventType] = runtimetools.EmitSchema{
+			Description: "Derived from resolved contract bundle for " + strings.TrimSpace(eventType),
+			Schema:      schema,
+		}
+	}
+	return out
+}
+
+func contractEventRequiredFields(entry contracts.EventCatalogEntry) []string {
+	required := append([]string{}, entry.Payload.Required...)
+	if len(required) == 0 {
+		required = append(required, entry.Required...)
+	}
+	return required
+}
+
+func contractEventFieldSchemaMap(fields map[string]contracts.EventFieldSpec) map[string]any {
+	if len(fields) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(fields))
+	for name, field := range fields {
+		schema := map[string]any{}
+		if typ := strings.TrimSpace(field.Type); typ != "" {
+			schema["type"] = typ
+		}
+		if desc := strings.TrimSpace(field.Description); desc != "" {
+			schema["description"] = desc
+		}
+		out[name] = schema
+	}
+	return out
 }
 
 func (s *Server) loadPipelineDesignAgents() []graphNode {

@@ -1,0 +1,11 @@
+lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.teardown_requested, opco.teardown_complete]
+  produces: [opco.terminated]
+  event_handlers:
+    opco.teardown_requested:
+      advances_to: winding_down
+    opco.teardown_complete:
+      advances_to: killed
+      emits: opco.terminated

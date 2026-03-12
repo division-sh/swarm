@@ -1,0 +1,8 @@
+name: child
+version: 1.0.0
+description: Mid-level child that delegates to grandchild.
+platform_version: ">=1.1.0"
+flows:
+- id: grandchild
+  flow: grandchild
+  mode: static

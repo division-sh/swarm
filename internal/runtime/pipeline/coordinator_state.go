@@ -43,7 +43,7 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 					}
 				}
 				if verticalID := strings.TrimSpace(instance.InstanceID); verticalID != "" {
-					workflowStages[verticalID] = strings.TrimSpace(instance.CurrentStage)
+					workflowStages[verticalID] = strings.TrimSpace(instance.CurrentState)
 				}
 			}
 		}

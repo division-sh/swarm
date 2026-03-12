@@ -11,7 +11,6 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimemanager "empireai/internal/runtime/manager"
 	"github.com/google/uuid"
 )
 
@@ -306,82 +305,8 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 }
 
 func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	manager := e.getManager()
-	if manager == nil {
-		return nil, errors.New("agent manager is not configured")
-	}
-	var in struct {
-		VerticalID       string `json:"vertical_id"`
-		EventPattern     string `json:"event_pattern"`
-		SubscriberID     string `json:"subscriber_id"`
-		InstalledBy      string `json:"installed_by"`
-		Reason           string `json:"reason"`
-		Status           string `json:"status"`
-		Source           string `json:"source"`
-		BootstrapVersion int    `json:"bootstrap_version"`
-	}
-	if err := decodeToolInput(input, &in); err != nil {
-		return nil, err
-	}
-	if in.Status == "" {
-		in.Status = "active"
-	}
-	in.InstalledBy = actor.ID
-	in.Source = "discovered"
-	in.BootstrapVersion = 0
-	if strings.TrimSpace(in.VerticalID) == "" {
-		in.VerticalID = actor.VerticalID
-	}
-	if strings.TrimSpace(in.VerticalID) != "" && strings.TrimSpace(actor.VerticalID) != "" && in.VerticalID != actor.VerticalID {
-		return nil, errors.New("cross-vertical routing change is not allowed")
-	}
-	targetCfg, _ := manager.GetAgentConfig(in.SubscriberID)
-	if err := authorizeRouting(actor, targetCfg, in.Status); err != nil {
-		return nil, err
-	}
-
-	rule := runtimemanager.PersistedRoutingRule{
-		VerticalID:       in.VerticalID,
-		EventPattern:     in.EventPattern,
-		SubscriberID:     in.SubscriberID,
-		InstalledBy:      in.InstalledBy,
-		Reason:           in.Reason,
-		Status:           in.Status,
-		Source:           in.Source,
-		BootstrapVersion: in.BootstrapVersion,
-	}
-	if err := manager.ConfigureRouting(rule); err != nil {
-		return nil, err
-	}
-	if e.bus != nil {
-		if err := e.bus.Publish(ctx, (events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("opco.routing_updated"),
-			SourceAgent: actor.ID,
-			Payload: mustJSON(map[string]any{
-				"vertical_id":        in.VerticalID,
-				"event_pattern":      in.EventPattern,
-				"subscriber_id":      in.SubscriberID,
-				"installed_by":       actor.ID,
-				"reason":             in.Reason,
-				"status":             in.Status,
-				"source":             "discovered",
-				"bootstrap_version":  0,
-				"runtime_tool_event": true,
-			}),
-			CreatedAt: time.Now(),
-		}).WithEntityID(strings.TrimSpace(in.VerticalID))); err != nil {
-			runtimeWarn(
-				"tool-executor",
-				"failed to publish opco.routing_updated actor=%s vertical_id=%s pattern=%s: %v",
-				strings.TrimSpace(actor.ID),
-				strings.TrimSpace(in.VerticalID),
-				strings.TrimSpace(in.EventPattern),
-				err,
-			)
-		}
-	}
-	return map[string]any{"status": "updated"}, nil
+	_, _, _ = ctx, actor, input
+	return nil, errors.New("configure_routing is not part of the MAS runtime; routes derive from contracts")
 }
 
 func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, error) {

@@ -1,0 +1,6 @@
+item.received:
+  payload:
+    entity_id: string
+item.processed:
+  payload:
+    entity_id: string

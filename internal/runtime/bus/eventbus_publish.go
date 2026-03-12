@@ -102,6 +102,9 @@ func (eb *EventBus) publishTransactional(
 	if err != nil {
 		return fmt.Errorf("begin publish tx: %w", err)
 	}
+	postCommitActions := make([]func(), 0, 8)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 	committed := false
 	defer func() {
 		if !committed {
@@ -109,29 +112,29 @@ func (eb *EventBus) publishTransactional(
 		}
 	}()
 
-	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
 	if err != nil {
 		return err
 	}
 	var inboundPlan eventDeliveryPlan
 	if passthrough {
-		inboundPlan, err = eb.buildDeliveryPlan(ctx, evt)
+		inboundPlan, err = eb.buildDeliveryPlan(txctx, evt)
 		if err != nil {
 			return err
 		}
 	}
 
-	if err := txStore.AppendEventTx(ctx, tx, evt); err != nil {
+	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	receiptTableExists := txTableExists(ctx, tx, "pipeline_receipts")
+	receiptTableExists := txTableExists(txctx, tx, "pipeline_receipts")
 	if passthrough && len(inboundPlan.PersistedRecipients) > 0 {
-		if err := txStore.InsertEventDeliveriesTx(ctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
+		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
 	if receiptTableExists {
-		if err := txStore.UpsertPipelineReceiptTx(ctx, tx, evt.ID, "processed", ""); err != nil {
+		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "processed", ""); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
 	}
@@ -140,6 +143,7 @@ func (eb *EventBus) publishTransactional(
 		return fmt.Errorf("commit publish tx: %w", err)
 	}
 	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if deferredTransitions != nil {
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
 	}

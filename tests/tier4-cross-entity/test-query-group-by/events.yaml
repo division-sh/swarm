@@ -1,0 +1,7 @@
+digest.requested:
+  payload:
+    entity_id: string
+digest.compiled:
+  payload:
+    entity_id: string
+    groups: object

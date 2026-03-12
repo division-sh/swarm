@@ -1,0 +1,5 @@
+name: test-event-persisted-before-delivery
+version: 1.0.0
+description: Event is persisted to durable store before handler processes it (platform guarantee).
+platform_version: ">=1.1.0"
+flows: []

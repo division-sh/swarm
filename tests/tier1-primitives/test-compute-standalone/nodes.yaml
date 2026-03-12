@@ -1,0 +1,20 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [scores.ready]
+  produces: [scores.computed]
+  event_handlers:
+    scores.ready:
+      compute:
+        operation: weighted_average
+        tiers:
+          - dimensions: [a, b]
+            weight: 0.6
+          - dimensions: [c]
+            weight: 0.4
+        store_as: entity.composite
+      advances_to: done
+      emits: scores.computed
+  state_schema:
+    fields:
+      composite: float

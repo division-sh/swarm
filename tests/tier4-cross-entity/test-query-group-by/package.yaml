@@ -1,0 +1,5 @@
+name: test-query-group-by
+version: 1.0.0
+description: Query handler groups entities by state and emits digest event.
+platform_version: ">=1.1.0"
+flows: []

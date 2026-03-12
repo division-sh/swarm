@@ -1,0 +1,18 @@
+assign-node:
+  id: assign-node
+  execution_type: system_node
+  subscribes_to: [task.assigned]
+  produces: []
+  event_handlers:
+    task.assigned:
+      advances_to: assigned
+
+complete-node:
+  id: complete-node
+  execution_type: system_node
+  subscribes_to: [task.completed]
+  produces: [task.finalized]
+  event_handlers:
+    task.completed:
+      advances_to: done
+      emits: task.finalized

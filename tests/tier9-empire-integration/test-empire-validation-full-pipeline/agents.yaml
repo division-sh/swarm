@@ -1,0 +1,30 @@
+business-research-agent:
+  id: business-research-agent
+  type: factory
+  role: business_research
+  subscriptions: [validation.started]
+  emit_events: [research.completed]
+lightweight-spec-agent:
+  id: lightweight-spec-agent
+  type: factory
+  role: spec_writer
+  subscriptions: [spec.requested]
+  emit_events: [spec.draft_ready]
+spec-reviewer:
+  id: spec-reviewer
+  type: factory
+  role: spec_review
+  subscriptions: [spec_review.requested]
+  emit_events: [spec_review.passed]
+factory-cto:
+  id: factory-cto
+  type: factory
+  role: factory_cto
+  subscriptions: [cto.spec_review_requested]
+  emit_events: [cto.spec_approved, cto.spec_vetoed]
+pre-brand-agent:
+  id: pre-brand-agent
+  type: factory
+  role: pre_brand
+  subscriptions: [brand.requested]
+  emit_events: [brand.candidates_ready]

@@ -1,0 +1,3 @@
+operating_state_timeout_hours: 168
+marginal_park_days: 14
+marginal_kill_days: 60

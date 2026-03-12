@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [approved]
+states: [pending, approved]
+pins:
+  inputs:
+    events: [grandchild.check]
+  outputs:
+    events: [grandchild.passed]

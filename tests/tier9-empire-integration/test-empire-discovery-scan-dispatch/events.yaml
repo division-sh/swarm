@@ -1,0 +1,26 @@
+scan.requested:
+  payload:
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+scan.category_dispatch:
+  payload:
+    scan_id: string
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+scan.source_dispatch:
+  payload:
+    scan_id: string
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+market_research.scan_assigned:
+  payload:
+    geography: string
+    scan_id: string
+    shard: object
+    mode: string

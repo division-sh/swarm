@@ -1,0 +1,18 @@
+trigger:
+  event: items.submitted
+  payload:
+    entity_id: ent-001
+    items:
+      - score: 80
+      - score: 30
+      - score: 70
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - items.filtered
+  entity_fields:
+    filtered:
+      - score: 80
+      - score: 70

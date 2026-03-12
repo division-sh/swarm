@@ -1,0 +1,206 @@
+package pipeline
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeengine "empireai/internal/runtime/engine"
+	"empireai/internal/runtime/identity"
+)
+
+type HandlerOutcomeStatus string
+
+const (
+	HandlerOutcomeCompleted HandlerOutcomeStatus = "completed"
+	HandlerOutcomeBlocked   HandlerOutcomeStatus = "blocked"
+	HandlerOutcomeDiscarded HandlerOutcomeStatus = "discard"
+	HandlerOutcomeRejected  HandlerOutcomeStatus = "reject"
+	HandlerOutcomeKilled    HandlerOutcomeStatus = "kill"
+	HandlerOutcomeEscalated HandlerOutcomeStatus = "escalate"
+	HandlerOutcomeWaiting   HandlerOutcomeStatus = "waiting"
+	HandlerOutcomeFannedOut HandlerOutcomeStatus = "fanned_out"
+)
+
+type handlerExecutionOutcome struct {
+	Status           HandlerOutcomeStatus
+	GuardsEvaluated  []string
+	ActionsExecuted  []string
+	AdvancesTo       string
+	SetsGate         string
+	ClearGates       []string
+	DataAccumulation runtimecontracts.WorkflowDataAccumulation
+	Emits            []string
+	RuleID           string
+	FanOutCount      int
+	Computed         map[string]any
+}
+
+type contractHandlerExecutionResult struct {
+	Transition      WorkflowTransition
+	Plan            handlerExecutionPlan
+	Outcome         *handlerExecutionOutcome
+	GuardsEvaluated []string
+	Handled         bool
+}
+
+func (pc *FactoryPipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
+		return contractHandlerExecutionResult{}, nil
+	}
+	trigger := strings.TrimSpace(string(evt.Type))
+	if trigger == "" {
+		return contractHandlerExecutionResult{}, nil
+	}
+	owners := source.RuntimeEventOwners(trigger)
+	if len(owners) == 0 {
+		return contractHandlerExecutionResult{}, nil
+	}
+	var (
+		nodeID  string
+		handler runtimecontracts.SystemNodeEventHandler
+		matched bool
+	)
+	for _, owner := range owners {
+		candidate, ok := source.NodeEventHandler(owner, trigger)
+		if !ok {
+			continue
+		}
+		if matched {
+			return contractHandlerExecutionResult{}, nil
+		}
+		nodeID = strings.TrimSpace(owner)
+		handler = candidate
+		matched = true
+	}
+	if !matched {
+		return contractHandlerExecutionResult{}, nil
+	}
+	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
+}
+
+func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
+	ctx context.Context,
+	nodeID string,
+	handler runtimecontracts.SystemNodeEventHandler,
+	triggerCtx workflowTriggerContext,
+	preview bool,
+) (contractHandlerExecutionResult, error) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return contractHandlerExecutionResult{}, nil
+	}
+	entityID := strings.TrimSpace(firstNonEmptyString(
+		workflowEventEntityID(triggerCtx.Event),
+		triggerCtx.State.VerticalID,
+	))
+	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
+	if err != nil {
+		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
+	}
+	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
+		EntityID: identity.NormalizeEntityID(entityID),
+		NodeID:   identity.NormalizeNodeID(nodeID),
+		Event:    triggerCtx.Event,
+		Handler:  handler,
+		Preview:  preview,
+		State: runtimeengine.StateSnapshot{
+			EntityID:     identity.NormalizeEntityID(entityID),
+			CurrentState: strings.TrimSpace(string(triggerCtx.State.Stage)),
+			Metadata:     cloneStringAnyMap(triggerCtx.State.Metadata),
+			StateBuckets: map[string]any{},
+		},
+	})
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
+	if result.Status == runtimeengine.OutcomeUnknown {
+		return contractHandlerExecutionResult{Handled: false}, nil
+	}
+	outcome := handlerOutcomeFromExecutionResult(result)
+	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), handler)
+	plan.AdvancesTo = firstNonEmptyString(outcome.AdvancesTo, plan.AdvancesTo)
+	if len(outcome.Emits) > 0 {
+		plan.EmitEvents = append([]string{}, outcome.Emits...)
+		plan.Emits = strings.TrimSpace(outcome.Emits[0])
+	}
+	if outcome.SetsGate != "" {
+		plan.SetsGate = outcome.SetsGate
+	}
+	plan.DataAccumulation = outcome.DataAccumulation
+	return contractHandlerExecutionResult{
+		Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), outcome),
+		Plan:            plan,
+		Outcome:         outcome,
+		GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
+		Handled:         true,
+	}, nil
+}
+
+func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *handlerExecutionOutcome {
+	out := &handlerExecutionOutcome{
+		Status:           handlerOutcomeStatusFromEngine(result.Status),
+		GuardsEvaluated:  append([]string{}, result.GuardsEvaluated...),
+		ActionsExecuted:  append([]string{}, result.ActionsExecuted...),
+		AdvancesTo:       strings.TrimSpace(result.NextState),
+		SetsGate:         strings.TrimSpace(result.SetsGate),
+		ClearGates:       append([]string{}, result.ClearGates...),
+		DataAccumulation: result.StateMutation.DataAccumulation,
+		RuleID:           strings.TrimSpace(result.RuleID),
+		FanOutCount:      result.FanOutCount,
+		Computed:         cloneStringAnyMap(result.Computed),
+	}
+	if len(result.EmitIntents) > 0 {
+		out.Emits = make([]string, 0, len(result.EmitIntents))
+		for _, intent := range result.EmitIntents {
+			if eventType := strings.TrimSpace(string(intent.Event.Type)); eventType != "" {
+				out.Emits = append(out.Emits, eventType)
+			}
+		}
+	}
+	return out
+}
+
+func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerOutcomeStatus {
+	switch status {
+	case runtimeengine.OutcomeCompleted:
+		return HandlerOutcomeCompleted
+	case runtimeengine.OutcomeBlocked:
+		return HandlerOutcomeBlocked
+	case runtimeengine.OutcomeDiscarded:
+		return HandlerOutcomeDiscarded
+	case runtimeengine.OutcomeRejected:
+		return HandlerOutcomeRejected
+	case runtimeengine.OutcomeKilled:
+		return HandlerOutcomeKilled
+	case runtimeengine.OutcomeEscalated:
+		return HandlerOutcomeEscalated
+	case runtimeengine.OutcomeWaiting:
+		return HandlerOutcomeWaiting
+	case runtimeengine.OutcomeFannedOut:
+		return HandlerOutcomeFannedOut
+	default:
+		return HandlerOutcomeCompleted
+	}
+}
+
+func workflowTransitionFromHandlerOutcome(state WorkflowState, nodeID, eventType string, outcome *handlerExecutionOutcome) WorkflowTransition {
+	target := strings.TrimSpace(string(state.Stage))
+	if outcome != nil && strings.TrimSpace(outcome.AdvancesTo) != "" {
+		target = strings.TrimSpace(outcome.AdvancesTo)
+	}
+	transition := WorkflowTransition{
+		Name:    strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(eventType),
+		From:    []PipelineStage{NormalizePipelineStage(string(state.Stage))},
+		To:      NormalizePipelineStage(target),
+		Trigger: strings.TrimSpace(eventType),
+		Node:    strings.TrimSpace(nodeID),
+	}
+	if outcome != nil {
+		transition.DataAccumulation = outcome.DataAccumulation
+	}
+	return transition
+}

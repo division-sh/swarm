@@ -1,0 +1,10 @@
+name: test-gates-in-child-flow
+version: 1.0.0
+description: >
+  Gates set in a child flow are scoped to that flow instance.
+  Parent checks child-scoped gate via child/g_validated reference.
+platform_version: ">=1.1.0"
+flows:
+- id: child
+  flow: child
+  mode: static

@@ -107,7 +107,7 @@ export default function HoldingView({
                     <td>{v.stage_entered_at ? relTime(v.stage_entered_at) : "-"}</td>
                     <td className="mono">{readPath(v, ["revision_count"]) || "0"}</td>
                     <td className="mono">{v.active_timer_count || 0}</td>
-                    <td>{v.workflow_current_stage && v.workflow_current_stage !== v.stage ? "yes" : "no"}</td>
+                    <td>{v.workflow_current_state && v.workflow_current_state !== v.stage ? "yes" : "no"}</td>
                     <td>
                       <div className="stack">
                         <button className="btn-secondary" onClick={(e) => { e.stopPropagation(); onFocusVertical?.(v.slug || v.id); onOpenFunnelTrace?.(v.slug || v.id); }}>Trace</button>
@@ -138,7 +138,7 @@ export default function HoldingView({
                 const score = parseFloat(v.composite_score);
                 const scoreClass = !isNaN(score) ? (score >= 75 ? "tag-good" : score >= 50 ? "tag-warn" : "tag-bad") : "";
                 const ac = (holdingData.agent_counts || {})[v.id];
-                const workflowDrift = v.workflow_current_stage && v.workflow_current_stage !== v.stage;
+                const workflowDrift = v.workflow_current_state && v.workflow_current_state !== v.stage;
                 const downstream = portfolioDownstreamByKey[v.slug || v.id] || null;
                 return (
                   <div
@@ -172,12 +172,12 @@ export default function HoldingView({
                     ) : null}
                     {workflowDrift ? (
                       <div className="tiny health-warn" style={{ marginTop: 4 }}>
-                        db stage {v.stage} vs workflow {v.workflow_current_stage}
+                        db stage {v.stage} vs workflow {v.workflow_current_state}
                       </div>
                     ) : null}
-                    {(v.workflow_current_stage || v.stage) ? (
+                    {(v.workflow_current_state || v.stage) ? (
                       <div className="tiny" style={{ marginTop: 4 }}>
-                        execution {v.workflow_current_stage || v.stage}
+                        execution {v.workflow_current_state || v.stage}
                       </div>
                     ) : null}
                     {v.stage === "killed" && v.kill_reason ? (

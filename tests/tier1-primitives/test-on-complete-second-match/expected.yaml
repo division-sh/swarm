@@ -1,0 +1,11 @@
+trigger:
+  event: item.evaluated
+  payload:
+    entity_id: ent-001
+    score: 50
+
+expected:
+  handler_outcome: success
+  entity_state: failed
+  emitted_events:
+    - item.failed

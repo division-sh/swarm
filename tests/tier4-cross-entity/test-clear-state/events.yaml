@@ -1,0 +1,6 @@
+state.clear_requested:
+  payload:
+    entity_id: string
+state.cleared:
+  payload:
+    entity_id: string

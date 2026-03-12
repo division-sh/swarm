@@ -1,0 +1,15 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [step.first, step.second]
+  produces: [step.first_done, step.second_done]
+  event_handlers:
+    step.first:
+      advances_to: processing
+      emits: step.first_done
+    step.second:
+      guard:
+        id: state_check
+        check: "entity.state == 'processing'"
+      advances_to: complete
+      emits: step.second_done

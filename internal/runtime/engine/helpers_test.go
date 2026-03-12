@@ -1,0 +1,272 @@
+package engine
+
+import (
+	"testing"
+
+	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/paths"
+)
+
+func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
+	evt := events.Event{ID: "evt-1", SourceAgent: "agent-source"}
+	payload := map[string]any{
+		"source":   "payload-source",
+		"from":     "payload-from",
+		"agent_id": "payload-agent",
+		"node_id":  "payload-node",
+	}
+	if got := arrivalIdentifier(evt, payload); got != "agent-source" {
+		t.Fatalf("arrivalIdentifier = %q", got)
+	}
+
+	evt.SourceAgent = ""
+	if got := arrivalIdentifier(evt, payload); got != "payload-source" {
+		t.Fatalf("arrivalIdentifier fallback = %q", got)
+	}
+
+	if got := arrivalIdentifier(events.Event{ID: "evt-2"}, map[string]any{"dimension": "not-identity"}); got != "evt-2" {
+		t.Fatalf("arrivalIdentifier should ignore dimension payloads, got %q", got)
+	}
+}
+
+func TestDedupIdentifier_UsesContractConfiguredKey(t *testing.T) {
+	base := BaseContext{Payload: map[string]any{
+		"dimension": "retention_architecture",
+		"from":      "legacy-sender",
+	}}
+	got := dedupIdentifier(base, ExecutionState{}, events.Event{ID: "evt-1"}, &runtimecontracts.AccumulateSpec{
+		DedupBy:   "payload.dimension",
+		DedupPath: paths.Parse("payload.dimension"),
+	})
+	if got != "retention_architecture" {
+		t.Fatalf("dedupIdentifier = %q", got)
+	}
+}
+
+func TestRewriteExpression_PrefixesWorkflowVars(t *testing.T) {
+	got := rewriteExpression(`metadata.flag && accumulated.count > 1 && fan_out.item == "x"`)
+	want := `vars.metadata.flag && vars.accumulated.count > 1 && vars.fan_out.item == "x"`
+	if got != want {
+		t.Fatalf("rewriteExpression = %q, want %q", got, want)
+	}
+}
+
+func TestResolveRefAndLiteral(t *testing.T) {
+	base := BaseContext{
+		Entity:   map[string]any{"status": "ready"},
+		Metadata: map[string]any{"status": "ready"},
+		Payload:  map[string]any{"score": 7, "nested": map[string]any{"value": "x"}},
+		Policy:   map[string]any{"mode": "strict"},
+	}
+	state := ExecutionState{
+		Accumulated: map[string]any{"count": 2},
+		FanOut:      map[string]any{"item": "fan"},
+		Computed:    map[string]any{"grade": "A"},
+	}
+
+	cases := map[string]any{
+		"payload.score":        7,
+		"payload.nested.value": "x",
+		"metadata.status":      "ready",
+		"entity.status":        "ready",
+		"policy.mode":          "strict",
+		"accumulated.count":    2,
+		"fan_out.item":         "fan",
+		"computed.grade":       "A",
+		"score":                7,
+	}
+	for ref, want := range cases {
+		if got := resolveRef(base, state, ref); got != want {
+			t.Fatalf("resolveRef(%q) = %#v, want %#v", ref, got, want)
+		}
+	}
+
+	if got := resolveRefOrLiteral(base, state, `"quoted"`); got != "quoted" {
+		t.Fatalf("resolveRefOrLiteral quoted = %#v", got)
+	}
+	if got := resolveRefOrLiteral(base, state, "true"); got != true {
+		t.Fatalf("resolveRefOrLiteral true = %#v", got)
+	}
+	if got := resolveRefOrLiteral(base, state, "4.5"); got != 4.5 {
+		t.Fatalf("resolveRefOrLiteral float = %#v", got)
+	}
+}
+
+func TestSetValuePathAndPayloadTransform(t *testing.T) {
+	base := BaseContext{
+		Payload:  map[string]any{"score": 9},
+		Metadata: map[string]any{"state": "researching"},
+	}
+	state := ExecutionState{
+		Accumulated: map[string]any{"count": 3},
+	}
+	transformed := payloadTransform(base, state, &runtimecontracts.PayloadTransformSpec{
+		Mappings: map[string]string{
+			"nested.score":   "payload.score",
+			"nested.count":   "accumulated.count",
+			"literal.string": `"hello"`,
+		},
+	})
+	nested, ok := transformed["nested"].(map[string]any)
+	if !ok {
+		t.Fatalf("nested transform missing: %#v", transformed)
+	}
+	if got := nested["score"]; got != 9 {
+		t.Fatalf("nested.score = %#v", got)
+	}
+	if got := nested["count"]; got != 3 {
+		t.Fatalf("nested.count = %#v", got)
+	}
+	literal, ok := transformed["literal"].(map[string]any)
+	if !ok || literal["string"] != "hello" {
+		t.Fatalf("literal transform wrong: %#v", transformed)
+	}
+}
+
+func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
+	state := &StateSnapshot{Metadata: map[string]any{}}
+	payload := map[string]any{
+		"score":  4,
+		"nested": map[string]any{"value": "ok"},
+	}
+	spec := runtimecontracts.WorkflowDataAccumulation{
+		SourceEvent: "scan.completed",
+		Writes: []runtimecontracts.WorkflowDataWrite{
+			{TargetField: "entity.score", SourceField: "score"},
+			{TargetField: "metadata.status", SourceField: "nested.value"},
+			{TargetField: "literal", Value: runtimecontracts.ExpressionValue{Literal: "fixed"}},
+		},
+	}
+
+	applyDataAccumulationToState(state, payload, spec)
+
+	if got := state.Metadata["score"]; got != 4 {
+		t.Fatalf("score = %#v", got)
+	}
+	if got := state.Metadata["status"]; got != "ok" {
+		t.Fatalf("status = %#v", got)
+	}
+	if got := state.Metadata["literal"]; got != "fixed" {
+		t.Fatalf("literal = %#v", got)
+	}
+	if got := state.Metadata["last_data_accumulation_source"]; got != "scan.completed" {
+		t.Fatalf("source event = %#v", got)
+	}
+}
+
+func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T) {
+	state := &StateSnapshot{}
+	acc := &Accumulator{
+		Expected:      []string{"a", "b"},
+		ExpectedCount: 2,
+		Received:      map[string]bool{"a": true},
+		Items:         []map[string]any{{"payload": map[string]any{"score": 8}}},
+		LastEventID:   "evt-1",
+	}
+
+	storeAccumulator(state, "node-1", events.EventType("scan.completed"), acc)
+
+	nodeBucket, ok := state.StateBuckets["node-1"].(map[string]any)
+	if !ok {
+		t.Fatalf("node bucket missing: %#v", state.StateBuckets)
+	}
+	accBuckets, ok := nodeBucket[handlerAccumulatorBucketKey].(map[string]any)
+	if !ok {
+		t.Fatalf("handler accumulator bucket missing: %#v", nodeBucket)
+	}
+	if _, ok := accBuckets["node-1:scan.completed"]; !ok {
+		t.Fatalf("handler key missing: %#v", accBuckets)
+	}
+
+	loaded, ok := loadAccumulator(*state, "node-1", events.EventType("scan.completed"))
+	if !ok {
+		t.Fatal("expected accumulator to load")
+	}
+	if loaded.ExpectedCount != 2 || len(loaded.Items) != 1 || !loaded.Received["a"] {
+		t.Fatalf("loaded accumulator mismatch: %#v", loaded)
+	}
+}
+
+func TestNextChainDepth_EnforcesLimit(t *testing.T) {
+	if next, err := nextChainDepth(1, 3); err != nil || next != 2 {
+		t.Fatalf("nextChainDepth ok = %d, %v", next, err)
+	}
+	if next, err := nextChainDepth(3, 3); err != ErrChainDepthExceeded || next != 4 {
+		t.Fatalf("nextChainDepth overflow = %d, %v", next, err)
+	}
+}
+
+func TestExpectedAccumulatorTargets(t *testing.T) {
+	base := BaseContext{Payload: map[string]any{
+		"sources": []any{"b", "a", "a"},
+		"count":   "3",
+	}}
+	if ids, count := expectedAccumulatorTargets(base, ExecutionState{}, paths.Parse("payload.sources"), "payload.sources"); len(ids) != 2 || count != 3 {
+		t.Fatalf("expectedAccumulatorTargets sources = %v, %d", ids, count)
+	}
+	if ids, count := expectedAccumulatorTargets(base, ExecutionState{}, paths.Parse("payload.count"), "payload.count"); ids != nil || count != 3 {
+		t.Fatalf("expectedAccumulatorTargets count = %v, %d", ids, count)
+	}
+}
+
+func TestAccumulatorComplete(t *testing.T) {
+	acc := &Accumulator{
+		Expected:      []string{"a", "b"},
+		ExpectedCount: 2,
+		Received:      map[string]bool{"a": true},
+	}
+	complete, err := accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("all")}, nil)
+	if err != nil || complete {
+		t.Fatalf("accumulatorComplete all = %v, %v", complete, err)
+	}
+	acc.Received["b"] = true
+	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("threshold")}, nil)
+	if err != nil || !complete {
+		t.Fatalf("accumulatorComplete threshold = %v, %v", complete, err)
+	}
+	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("received_count >= 2")}, func(expression string, extra map[string]any) (bool, error) {
+		if expression != "received_count >= 2" {
+			t.Fatalf("unexpected expression: %q", expression)
+		}
+		accumulation, _ := extra["accumulation"].(map[string]any)
+		return accumulation["received_count"] == 2, nil
+	})
+	if err != nil || !complete {
+		t.Fatalf("accumulatorComplete expression = %v, %v", complete, err)
+	}
+}
+
+func TestComputeValue(t *testing.T) {
+	acc := &Accumulator{
+		Items: []map[string]any{
+			{"payload": map[string]any{"axis": "quality", "score_value": 10}},
+			{"payload": map[string]any{"axis": "speed", "score_value": 4}},
+		},
+	}
+	value, err := computeValue(acc, nil, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpWeightedAverage,
+		Keys: runtimecontracts.ComputeKeyConfig{
+			DimensionKey: "axis",
+			ScoreKeys:    []string{"score_value", "fallback_score"},
+		},
+		Tiers: []runtimecontracts.ComputeTier{{
+			Dimensions: []string{"quality", "speed"},
+			Weight:     2,
+		}},
+	})
+	if err != nil || value.(float64) != 7 {
+		t.Fatalf("computeValue weighted_average = %#v, %v", value, err)
+	}
+
+	acc.Items = append(acc.Items, map[string]any{"payload": map[string]any{"count_value": 9}})
+	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpCount,
+		Keys: runtimecontracts.ComputeKeyConfig{
+			NumericKeys: []string{"count_value"},
+		},
+	})
+	if err != nil || value.(int) != 3 {
+		t.Fatalf("computeValue count = %#v, %v", value, err)
+	}
+}

@@ -1,0 +1,7 @@
+review.requested:
+  payload:
+    entity_id: string
+    score: integer
+review.done:
+  payload:
+    entity_id: string

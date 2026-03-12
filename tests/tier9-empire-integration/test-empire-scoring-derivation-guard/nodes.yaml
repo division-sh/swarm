@@ -1,0 +1,34 @@
+scoring-node:
+  id: scoring-node
+  execution_type: system_node
+  subscribes_to: [vertical.discovered, score.dimension_complete, vertical.derived, vertical.killed_backprop]
+  produces: [scoring.requested, scoring.derived_requested, vertical.shortlisted, vertical.marginal, vertical.rejected]
+  event_handlers:
+    vertical.derived:
+      guard:
+        checks:
+          - id: depth_cap
+            check: "entity.generation_depth <= policy.max_derivation_depth"
+          - id: child_count
+            check: "entity.child_count < 2"
+          - id: signal_strength
+            check: "payload.signal_strength >= policy.min_derivation_signal"
+          - id: no_red_flags
+            check: "entity.red_flag_count == 0"
+          - id: icp_positive
+            check: "entity.scores.icp_crispness >= policy.min_icp_score"
+          - id: evidence_completeness
+            check: "entity.evidence_count >= policy.min_evidence_for_derivation"
+          - id: retention_primitive
+            check: "entity.scores.retention_architecture >= policy.min_retention_score"
+          - id: name_dedup
+            check: "query_entities(name == payload.opportunity_name).count == 0"
+        on_fail: discard
+      emits: scoring.derived_requested
+  state_schema:
+    fields:
+      generation_depth: integer
+      child_count: integer
+      red_flag_count: integer
+      evidence_count: integer
+      scores: object

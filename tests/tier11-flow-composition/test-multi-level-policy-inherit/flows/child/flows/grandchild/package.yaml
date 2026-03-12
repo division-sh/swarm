@@ -1,0 +1,5 @@
+name: grandchild
+version: 1.0.0
+description: Grandchild flow overrides mode to relaxed. Inherits threshold from child.
+platform_version: ">=1.1.0"
+flows: []

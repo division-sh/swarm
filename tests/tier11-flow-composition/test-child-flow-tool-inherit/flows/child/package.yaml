@@ -1,0 +1,5 @@
+name: child
+version: 1.0.0
+description: Child flow whose agent uses root-level tool via inheritance.
+platform_version: ">=1.1.0"
+flows: []

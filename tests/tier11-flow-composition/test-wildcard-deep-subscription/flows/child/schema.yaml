@@ -1,0 +1,8 @@
+initial_state: waiting
+terminal_states: [completed]
+states: [waiting, completed]
+pins:
+  inputs:
+    events: [work.begin]
+  outputs:
+    events: [work.finished]

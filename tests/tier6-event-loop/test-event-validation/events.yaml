@@ -1,0 +1,8 @@
+task.submitted:
+  payload:
+    entity_id: string
+    priority: integer
+  required: [entity_id, priority]
+task.accepted:
+  payload:
+    entity_id: string

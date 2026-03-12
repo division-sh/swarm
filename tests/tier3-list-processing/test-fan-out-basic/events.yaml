@@ -1,0 +1,8 @@
+batch.submitted:
+  payload:
+    entity_id: string
+    items: array
+scan.assigned:
+  payload:
+    entity_id: string
+    item: object

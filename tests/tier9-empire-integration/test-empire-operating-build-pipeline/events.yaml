@@ -1,0 +1,26 @@
+product_spec_ready:
+  payload:
+    spec_id: string
+    feature: string
+technical_spec_ready:
+  payload:
+    spec_id: string
+    feature: string
+qa.validation_passed:
+  payload:
+    test_summary: string
+    coverage_notes: string
+    staging_url: string
+deploy.requested:
+  payload:
+    deployment_id: string
+    environment: string
+build_complete:
+  payload:
+    feature: string
+    environment: string
+deploy.authorized:
+  payload:
+    deployment_id: string
+    environment: string
+    authorized_by: string

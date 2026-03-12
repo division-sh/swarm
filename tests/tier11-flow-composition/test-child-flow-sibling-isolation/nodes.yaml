@@ -1,0 +1,9 @@
+parent-node:
+  id: parent-node
+  execution_type: system_node
+  subscribes_to: [run.start]
+  produces: [run.complete]
+  event_handlers:
+    run.start:
+      advances_to: done
+      emits: run.complete

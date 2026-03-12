@@ -1,0 +1,5 @@
+name: test-from-filter
+version: 1.0.0
+description: Handler with from filter only accepts events from matching sender path.
+platform_version: ">=1.1.0"
+flows: []

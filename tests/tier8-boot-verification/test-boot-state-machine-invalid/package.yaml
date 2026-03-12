@@ -1,0 +1,7 @@
+name: test-boot-state-machine-invalid
+version: 1.0.0
+description: >
+  Boot verification: handler advances_to references a state not declared
+  in schema.yaml states list. Platform must catch STATE-MACHINE error.
+platform_version: ">=1.1.0"
+flows: []

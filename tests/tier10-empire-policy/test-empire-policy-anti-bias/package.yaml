@@ -1,0 +1,5 @@
+name: test-empire-policy-anti-bias
+version: 1.0.0
+description: Anti-bias pool separation — scoring.requested routes to analysis-agent (primary pool), scoring.derived_requested routes to analysis-agent-secondary (secondary pool).
+platform_version: ">=1.1.0"
+flows: []

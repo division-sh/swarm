@@ -1,0 +1,12 @@
+trigger:
+  event: evidence.submitted
+  payload:
+    entity_id: ent-001
+    finding: "missing-field"
+    severity: "high"
+
+expected:
+  handler_outcome: success
+  entity_state: collecting
+  emitted_events:
+    - evidence.recorded

@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [done]
+states: [pending, processing, done]
+pins:
+  inputs:
+    events: [cycle.ping]
+  outputs:
+    events: [cycle.ping, cycle.pong]

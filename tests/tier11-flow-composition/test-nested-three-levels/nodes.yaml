@@ -1,0 +1,18 @@
+root-dispatcher:
+  id: root-dispatcher
+  execution_type: system_node
+  subscribes_to: [pipeline.start]
+  produces: [child/step.begin]
+  event_handlers:
+    pipeline.start:
+      emits: child/step.begin
+
+root-collector:
+  id: root-collector
+  execution_type: system_node
+  subscribes_to: [child/step.result]
+  produces: [pipeline.complete]
+  event_handlers:
+    child/step.result:
+      advances_to: done
+      emits: pipeline.complete

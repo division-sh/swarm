@@ -1,0 +1,19 @@
+trigger:
+  event: scores.ready
+  payload:
+    entity_id: ent-001
+    scores:
+      - dimension: a
+        value: 80
+      - dimension: b
+        value: 90
+      - dimension: c
+        value: 70
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - scores.computed
+  entity_fields:
+    composite: computed_value

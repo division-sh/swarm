@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [complete]
+states: [pending, processing, complete]
+pins:
+  inputs:
+    events: [step.first, step.second]
+  outputs:
+    events: [step.first_done, step.second_done]

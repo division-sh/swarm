@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type contractIDRegistry struct {
@@ -54,7 +55,16 @@ func isExecutableWorkflowActionEntry(entry runtimecontracts.GuardActionEntry) bo
 	if strings.TrimSpace(entry.Emits) != "" {
 		return true
 	}
-	return isSupportedWorkflowActionBuiltin(firstNonEmptyString(entry.PlatformBuiltin, entry.ID))
+	return isSupportedWorkflowHandlerActionID(firstNonEmptyString(entry.PlatformBuiltin, entry.ID))
+}
+
+func isSupportedWorkflowHandlerActionID(id string) bool {
+	switch normalizeWorkflowBuiltinActionID(id) {
+	case "create_flow_instance", "record_evidence":
+		return true
+	default:
+		return isSupportedWorkflowActionBuiltin(id)
+	}
 }
 
 type contractGuardRegistry struct {
@@ -99,11 +109,11 @@ func defaultActionRegistry() ActionRegistry {
 	return defaultWorkflowModule().ActionRegistry()
 }
 
-func NewContractGuardRegistry(bundle *runtimecontracts.WorkflowContractBundle) GuardRegistry {
-	if bundle == nil {
+func NewContractGuardRegistry(source semanticview.Source) GuardRegistry {
+	if source == nil {
 		return contractGuardRegistry{}
 	}
-	entries := bundle.GuardEntries()
+	entries := source.GuardEntries()
 	guards := make(map[string]struct{}, len(entries))
 	guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(entries))
 	for _, guard := range entries {
@@ -119,11 +129,11 @@ func NewContractGuardRegistry(bundle *runtimecontracts.WorkflowContractBundle) G
 	}
 }
 
-func NewContractActionRegistry(bundle *runtimecontracts.WorkflowContractBundle) ActionRegistry {
-	if bundle == nil {
+func NewContractActionRegistry(source semanticview.Source) ActionRegistry {
+	if source == nil {
 		return contractActionRegistry{}
 	}
-	entries := bundle.ActionEntries()
+	entries := source.ActionEntries()
 	actions := make(map[string]struct{}, len(entries))
 	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(entries))
 	for _, action := range entries {

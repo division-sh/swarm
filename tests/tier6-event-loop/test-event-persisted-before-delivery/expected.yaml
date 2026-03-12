@@ -1,0 +1,11 @@
+trigger:
+  event: task.submitted
+  payload:
+    entity_id: ent-001
+  assert_persisted_before_delivery: true
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - task.accepted

@@ -1,0 +1,13 @@
+reduce-node:
+  id: reduce-node
+  execution_type: system_node
+  subscribes_to: [values.submitted]
+  produces: [values.totaled]
+  event_handlers:
+    values.submitted:
+      reduce:
+        items_from: entity.values
+        operation: sum
+        store_as: entity.total
+      emits: values.totaled
+      advances_to: done

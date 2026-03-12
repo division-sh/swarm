@@ -20,12 +20,6 @@ entity_schema:
         - name: gates
           type: object
           nullable: true
-runtime_contracts:
-  nodes: runtime/nodes.yaml
-  events: runtime/events.yaml
-  agents: runtime/agents.yaml
-  tools: runtime/tools.yaml
-  policy: runtime/policy.yaml
 flows:
   - id: intake
     flow: intake

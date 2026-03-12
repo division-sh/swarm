@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [task.completed]
+  produces: [task.finalized]
+  event_handlers:
+    task.completed:
+      advances_to: done
+      emits: task.finalized

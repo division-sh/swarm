@@ -1,0 +1,8 @@
+name: test-multi-level-policy-inherit
+version: 1.0.0
+description: Three-level policy inheritance with overrides at each level. Grandchild sees merged policy.
+platform_version: ">=1.1.0"
+flows:
+- id: child
+  flow: child
+  mode: static

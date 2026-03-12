@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	empireruntime "empireai/internal/runtime"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -23,7 +23,7 @@ func NewService(db *sql.DB, mailbox runtimetools.MailboxPersistence) *Service {
 }
 
 func controlPlaneMailboxSender() string {
-	return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
+	return strings.TrimSpace(empireruntime.DefaultControlPlaneRecipient())
 }
 
 type MetricInput struct {

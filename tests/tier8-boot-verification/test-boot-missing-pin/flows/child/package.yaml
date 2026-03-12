@@ -1,0 +1,7 @@
+name: child
+version: 1.0.0
+description: >
+  Child flow with two input pins: task.assigned (wired) and
+  task.feedback (unwired — no producer exists).
+platform_version: ">=1.1.0"
+flows: []

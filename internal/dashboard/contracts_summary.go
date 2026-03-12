@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,10 +74,11 @@ func dashboardContractSummary() map[string]any {
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}
+	source := semanticview.Wrap(bundle)
 
-	workflowStages := bundle.WorkflowStages()
-	workflowTimers := bundle.WorkflowTimers()
-	workflowTransitionsRaw := bundle.WorkflowTransitions()
+	workflowStages := source.WorkflowStages()
+	workflowTimers := source.WorkflowTimers()
+	workflowTransitionsRaw := source.WorkflowTransitions()
 
 	stages := make([]map[string]any, 0, len(workflowStages))
 	stageIDs := make([]string, 0, len(workflowStages))
@@ -105,7 +107,7 @@ func dashboardContractSummary() map[string]any {
 		})
 	}
 
-	transitions, transitionsByTrigger := workflowTransitionSummaries(bundle)
+	transitions, transitionsByTrigger := workflowTransitionSummaries(source)
 	transitionOwnerCounts := map[string]int{}
 	for _, transition := range transitions {
 		owner := strings.TrimSpace(asString(transition["node"]))
@@ -243,7 +245,7 @@ func dashboardContractSummary() map[string]any {
 			"stage_phase_map":           stagePhaseMap,
 			"phase_counts":              phaseCounts,
 			"validation_stages":         validationStages,
-			"terminal_stages":           bundle.WorkflowTerminalStages(),
+			"terminal_stages":           source.WorkflowTerminalStages(),
 			"transition_count":          maxInt(len(workflowTransitionsRaw), len(bundle.Semantics.HandlerTransitions)),
 			"transitions":               transitions,
 			"transition_owner_counts":   transitionOwnerCounts,
@@ -266,15 +268,13 @@ func dashboardContractSummary() map[string]any {
 		},
 		"verification_gates": verificationSummary,
 		"paths": map[string]any{
-			"workflow_schema":    dashboardRelPath(repoRoot, bundle.Paths.WorkflowSchemaFile),
 			"platform_spec":      dashboardRelPath(repoRoot, bundle.Paths.PlatformSpecFile),
 			"verification_gates": dashboardRelPath(repoRoot, bundle.Paths.VerificationGatesFile),
-			"event_catalog":      dashboardRelPath(repoRoot, bundle.Paths.EventCatalogFile),
-			"agent_registry":     dashboardRelPath(repoRoot, bundle.Paths.AgentRegistryFile),
-			"system_nodes":       dashboardRelPath(repoRoot, bundle.Paths.SystemNodesFile),
-			"guard_registry":     dashboardRelPath(repoRoot, bundle.Paths.GuardRegistryFile),
-			"tool_schemas":       dashboardRelPath(repoRoot, bundle.Paths.ToolSchemasFile),
-			"policy_definition":  dashboardRelPath(repoRoot, bundle.Paths.PolicyFile),
+			"event_catalog":      dashboardRelPath(repoRoot, bundle.Paths.ProjectEventsFile),
+			"agent_registry":     dashboardRelPath(repoRoot, bundle.Paths.ProjectAgentsFile),
+			"system_nodes":       dashboardRelPath(repoRoot, bundle.Paths.ProjectNodesFile),
+			"tool_schemas":       dashboardRelPath(repoRoot, bundle.Paths.ProjectToolsFile),
+			"policy_definition":  dashboardRelPath(repoRoot, bundle.Paths.ProjectPolicyFile),
 			"tooling_lock":       dashboardRelPath(repoRoot, bundle.Paths.ToolingLockFile),
 			"canonical_ddl":      dashboardRelPath(repoRoot, bundle.Paths.DDLFile),
 			"agent_config_map":   dashboardRelPath(repoRoot, bundle.Paths.AgentConfigMapFile),
@@ -295,13 +295,13 @@ func dashboardRelPath(repoRoot, target string) string {
 	return filepath.ToSlash(rel)
 }
 
-func workflowTransitionSummaries(bundle *runtimecontracts.WorkflowContractBundle) ([]map[string]any, map[string][]map[string]any) {
+func workflowTransitionSummaries(source semanticview.Source) ([]map[string]any, map[string][]map[string]any) {
 	out := make([]map[string]any, 0)
 	byTrigger := map[string][]map[string]any{}
-	if bundle == nil {
+	if source == nil {
 		return out, byTrigger
 	}
-	if transitions := bundle.WorkflowTransitions(); len(transitions) > 0 {
+	if transitions := source.WorkflowTransitions(); len(transitions) > 0 {
 		for _, transition := range transitions {
 			trigger := strings.TrimSpace(transition.Trigger)
 			entry := map[string]any{
@@ -321,7 +321,7 @@ func workflowTransitionSummaries(bundle *runtimecontracts.WorkflowContractBundle
 		}
 		return out, byTrigger
 	}
-	for _, transition := range bundle.Semantics.HandlerTransitions {
+	for _, transition := range source.DerivedHandlerTransitions() {
 		trigger := strings.TrimSpace(transition.EventType)
 		from := []string{}
 		if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
@@ -339,7 +339,7 @@ func workflowTransitionSummaries(bundle *runtimecontracts.WorkflowContractBundle
 			"trigger":             trigger,
 			"node":                strings.TrimSpace(transition.NodeID),
 			"guards":              nil,
-			"actions":             compactStrings([]string{strings.TrimSpace(transition.Action)}),
+			"actions":             compactStrings([]string{strings.TrimSpace(transition.Action.ID)}),
 			"allow_terminal_exit": false,
 		}
 		out = append(out, entry)

@@ -1,0 +1,16 @@
+trigger:
+  event: deploy.requested
+  payload:
+    entity_id: ent-001
+    deployment_id: deploy-001
+    environment: production
+  entity_fields_before:
+    gates:
+      g_product_spec: true
+      g_tech_spec: true
+      g_qa_passed: false
+
+expected:
+  handler_outcome: reject
+  entity_state: building
+  emitted_events: []

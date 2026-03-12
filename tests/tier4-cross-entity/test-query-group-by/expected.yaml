@@ -1,0 +1,10 @@
+trigger:
+  event: digest.requested
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: compiled
+  emitted_events:
+    - digest.compiled

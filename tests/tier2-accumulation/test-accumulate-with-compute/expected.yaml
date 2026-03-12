@@ -1,0 +1,18 @@
+trigger:
+  sequence:
+    - event: score.received
+      payload: { entity_id: ent-001, score: 80, weight: 0.5 }
+    - event: score.received
+      payload: { entity_id: ent-001, score: 90, weight: 0.3 }
+    - event: score.received
+      payload: { entity_id: ent-001, score: 70, weight: 0.2 }
+  entity_fields_before:
+    expected_count: 3
+
+expected:
+  entity_state: complete
+  emitted_events:
+    - scores.aggregated
+  entity_fields:
+    composite: computed_value
+  handler_outcome: success

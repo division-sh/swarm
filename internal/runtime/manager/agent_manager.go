@@ -31,7 +31,6 @@ type AgentManager struct {
 	agents      map[string]Agent
 	agentCfg    map[string]models.AgentConfig
 	agentUpAt   map[string]time.Time
-	routeMeta   map[string]PersistedRoutingRule
 	workspaces  workspace.Lifecycle
 	bus         Bus
 	factory     AgentFactory
@@ -83,7 +82,6 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		agents:               make(map[string]Agent),
 		agentCfg:             make(map[string]models.AgentConfig),
 		agentUpAt:            make(map[string]time.Time),
-		routeMeta:            make(map[string]PersistedRoutingRule),
 		bus:                  bus,
 		factory:              factory,
 		store:                store,

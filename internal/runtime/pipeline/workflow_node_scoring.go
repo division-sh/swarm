@@ -7,6 +7,7 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 const ScoringNodeID = "scoring-node"
@@ -39,7 +40,7 @@ type scoringStateRuntime interface {
 	loadWorkflowScoringAccumulator(context.Context, string) (*scoringAccumulator, bool)
 	publish(context.Context, string, string, map[string]any)
 	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
-	ContractBundle() *runtimecontracts.WorkflowContractBundle
+	SemanticSource() semanticview.Source
 	currentWorkflowState(context.Context, string) WorkflowState
 	matchWorkflowRulesWithVars(workflowTriggerContext, []runtimecontracts.HandlerRuleEntry, map[string]any) (workflowRuleMatch, bool)
 	updateScoredVerticalState(context.Context, string, string, map[string]any, string)

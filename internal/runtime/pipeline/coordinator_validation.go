@@ -6,10 +6,11 @@ import (
 )
 
 func validationDeclarativeHandlerSupported(pc *FactoryPipelineCoordinator, eventType string) bool {
-	if pc == nil || pc.ContractBundle() == nil {
+	source := pc.SemanticSource()
+	if pc == nil || source == nil {
 		return false
 	}
-	_, ok := pc.ContractBundle().NodeEventHandler("validation-orchestrator", strings.TrimSpace(eventType))
+	_, ok := source.NodeEventHandler("validation-orchestrator", strings.TrimSpace(eventType))
 	return ok
 }
 

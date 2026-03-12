@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type Subscriber struct {
@@ -40,36 +41,32 @@ type routeSubscriberTemplate struct {
 	Patterns   []string
 }
 
-func DeriveRouteTable(bundle *runtimecontracts.WorkflowContractBundle) (*RouteTable, error) {
+func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 	rt := newRouteTable()
-	if bundle == nil {
+	if source == nil {
 		return rt, nil
 	}
 
-	projectKeys := sortedStringKeys(bundle.ProjectContracts)
-	for _, key := range projectKeys {
-		view := bundle.ProjectContracts[key]
-		localEvents := routeProjectLocalEventSet(view)
+	for _, scope := range semanticview.ProjectScopes(source) {
+		localEvents := routeProjectLocalEventSet(scope)
 		rt.addEventPathsLocked("", localEvents)
-		rt.addAgentPatternsLocked("", localEvents, view.Agents)
-		rt.addNodePatternsLocked("", localEvents, view.Nodes)
+		rt.addAgentPatternsLocked("", localEvents, scope.Agents)
+		rt.addNodePatternsLocked("", localEvents, scope.Nodes)
 	}
 
-	flowIDs := sortedStringKeys(bundle.FlowContracts)
-	for _, flowID := range flowIDs {
-		view := bundle.FlowContracts[flowID]
-		flowPath := routeFlowPath(bundle, flowID)
-		localEvents := routeFlowLocalEventSet(view)
-		if strings.EqualFold(routeFlowMode(view), "template") {
-			rt.templates[flowID] = routeFlowTemplate{
+	for _, scope := range semanticview.FlowScopes(source) {
+		flowPath := routeFlowPath(source, scope.ID)
+		localEvents := routeFlowLocalEventSet(scope)
+		if strings.EqualFold(scope.Mode, "template") {
+			rt.templates[scope.ID] = routeFlowTemplate{
 				LocalEvents: cloneStringSet(localEvents),
-				Subscribers: routeSubscriberTemplates(view),
+				Subscribers: routeSubscriberTemplates(scope),
 			}
 			continue
 		}
 		rt.addEventPathsLocked(flowPath, localEvents)
-		rt.addAgentPatternsLocked(flowPath, localEvents, view.Agents)
-		rt.addNodePatternsLocked(flowPath, localEvents, view.Nodes)
+		rt.addAgentPatternsLocked(flowPath, localEvents, scope.Agents)
+		rt.addNodePatternsLocked(flowPath, localEvents, scope.Nodes)
 	}
 
 	rt.rebuildLocked()
@@ -245,25 +242,25 @@ func (rt *RouteTable) rebuildLocked() {
 	}
 }
 
-func routeProjectLocalEventSet(view runtimecontracts.ProjectContractView) map[string]struct{} {
-	return routeEventKeys(view.Events)
+func routeProjectLocalEventSet(scope semanticview.ProjectScope) map[string]struct{} {
+	return routeEventKeys(scope.Events)
 }
 
-func routeFlowLocalEventSet(view runtimecontracts.FlowContractView) map[string]struct{} {
-	out := routeEventKeys(view.Events)
-	for _, eventType := range view.Schema.Pins.Inputs.Events {
+func routeFlowLocalEventSet(scope semanticview.FlowScope) map[string]struct{} {
+	out := routeEventKeys(scope.Events)
+	for _, eventType := range scope.InputEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
-	for _, eventType := range view.Schema.Pins.Outputs.Events {
+	for _, eventType := range scope.OutputEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
-	if autoEmit := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); autoEmit != "" {
+	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
 		out[autoEmit] = struct{}{}
 	}
 	return out
@@ -292,10 +289,10 @@ func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[st
 	return out
 }
 
-func routeSubscriberTemplates(view runtimecontracts.FlowContractView) []routeSubscriberTemplate {
-	out := make([]routeSubscriberTemplate, 0, len(view.Agents)+len(view.Nodes))
-	for _, key := range sortedStringKeys(view.Agents) {
-		entry := view.Agents[key]
+func routeSubscriberTemplates(scope semanticview.FlowScope) []routeSubscriberTemplate {
+	out := make([]routeSubscriberTemplate, 0, len(scope.Agents)+len(scope.Nodes))
+	for _, key := range sortedStringKeys(scope.Agents) {
+		entry := scope.Agents[key]
 		patterns := normalizeStringList(entry.Subscriptions)
 		if len(patterns) == 0 {
 			continue
@@ -306,8 +303,8 @@ func routeSubscriberTemplates(view runtimecontracts.FlowContractView) []routeSub
 			Patterns:   patterns,
 		})
 	}
-	for _, key := range sortedStringKeys(view.Nodes) {
-		entry := view.Nodes[key]
+	for _, key := range sortedStringKeys(scope.Nodes) {
+		entry := scope.Nodes[key]
 		patterns := normalizeStringList(entry.SubscribesTo)
 		if len(patterns) == 0 {
 			continue
@@ -325,29 +322,17 @@ func routeSubscriberTemplates(view runtimecontracts.FlowContractView) []routeSub
 	return out
 }
 
-func routeFlowPath(bundle *runtimecontracts.WorkflowContractBundle, flowID string) string {
+func routeFlowPath(source semanticview.Source, flowID string) string {
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return ""
 	}
-	if bundle != nil {
-		for path, view := range bundle.FlowTree.ByPath {
-			if view != nil && strings.TrimSpace(view.Paths.ID) == flowID {
-				path = strings.Trim(strings.TrimSpace(path), "/")
-				if path != "" {
-					return path
-				}
-			}
+	if source != nil {
+		if path := source.FlowPath(flowID); path != "" {
+			return path
 		}
 	}
 	return flowID
-}
-
-func routeFlowMode(view runtimecontracts.FlowContractView) string {
-	if mode := strings.TrimSpace(view.Schema.Mode); mode != "" {
-		return mode
-	}
-	return strings.TrimSpace(view.Paths.Mode)
 }
 
 func routeResolvePattern(basePath string, localEvents map[string]struct{}, raw string) string {

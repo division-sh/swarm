@@ -1,0 +1,19 @@
+trigger:
+  event: items.submitted
+  payload:
+    entity_id: ent-001
+    items:
+      - id: item-1
+        active: true
+      - id: item-2
+        active: false
+      - id: item-3
+        active: true
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - items.counted
+  entity_fields:
+    active_count: 2

@@ -1,0 +1,11 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [task.submitted]
+  produces: [task.accepted]
+  event_handlers:
+    task.submitted:
+      advances_to: done
+      sets_gates:
+        approval_gate: true
+      emits: task.accepted

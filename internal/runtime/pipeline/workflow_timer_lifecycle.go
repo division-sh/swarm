@@ -7,22 +7,23 @@ import (
 	"time"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
-func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, verticalID, currentStage, nextStage, sourceEvent string) {
+func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, verticalID, currentStage, nextStage, sourceEvent string) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return
+		return nil
 	}
-	bundle := pc.ContractBundle()
-	if bundle == nil {
-		return
+	source := pc.SemanticSource()
+	if source == nil {
+		return nil
 	}
 	verticalID = strings.TrimSpace(verticalID)
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
 	sourceEvent = strings.TrimSpace(sourceEvent)
 	if verticalID == "" || nextStage == "" || currentStage == nextStage {
-		return
+		return nil
 	}
 	now := time.Now().UTC()
 	toSchedule := make([]Schedule, 0, 2)
@@ -36,21 +37,21 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.C
 			if timerState.Cancelled {
 				continue
 			}
-			timer, ok := bundle.WorkflowTimerByID(timerState.TimerID)
+			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
 			if !ok || !workflowTimerLifecycleMatches(timer.CancelOn, nextStage, sourceEvent) {
 				continue
 			}
 			timerState.Cancelled = true
 			toCancel = append(toCancel, workflowTimerSchedule(timer, verticalID, timerState.FiresAt))
 		}
-		for _, timer := range bundle.WorkflowTimers() {
+		for _, timer := range source.WorkflowTimers() {
 			if timer.Recurring || !workflowTimerLifecycleMatches(timer.StartOn, nextStage, sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
 				continue
 			}
-			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(bundle))
+			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source))
 			if !ok {
 				continue
 			}
@@ -65,14 +66,20 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.C
 			toSchedule = append(toSchedule, workflowTimerSchedule(timer, verticalID, fireAt))
 		}
 	}); err != nil {
-		runtimeWarn(runtimeWorkflowID, "workflow timer projection failed vertical_id=%s stage=%s: %v", verticalID, nextStage, err)
-		return
+		return err
 	}
 	for _, sc := range toCancel {
-		pc.cancelWorkflowTimerSchedule(ctx, sc)
+		pc.persistWorkflowTimerCancellation(ctx, sc)
 	}
 	for _, sc := range toSchedule {
-		pc.registerWorkflowTimerSchedule(ctx, sc)
+		pc.persistWorkflowTimerSchedule(ctx, sc)
+	}
+	return nil
+}
+
+func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, verticalID, currentStage, nextStage, sourceEvent string) {
+	if err := pc.applyWorkflowTimerIntents(ctx, verticalID, currentStage, nextStage, sourceEvent); err != nil {
+		runtimeWarn(runtimeWorkflowID, "workflow timer projection failed vertical_id=%s stage=%s: %v", verticalID, nextStage, err)
 	}
 }
 
@@ -80,8 +87,8 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
 	}
-	bundle := pc.ContractBundle()
-	if bundle == nil {
+	source := pc.SemanticSource()
+	if source == nil {
 		return
 	}
 	verticalID = strings.TrimSpace(verticalID)
@@ -107,21 +114,21 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 			if timerState.Cancelled {
 				continue
 			}
-			timer, ok := bundle.WorkflowTimerByID(timerState.TimerID)
+			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
 			if !ok || !workflowTimerLifecycleMatches(timer.CancelOn, "", sourceEvent) {
 				continue
 			}
 			timerState.Cancelled = true
 			toCancel = append(toCancel, workflowTimerSchedule(timer, verticalID, timerState.FiresAt))
 		}
-		for _, timer := range bundle.WorkflowTimers() {
+		for _, timer := range source.WorkflowTimers() {
 			if timer.Recurring || !workflowTimerLifecycleMatches(timer.StartOn, "", sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
 				continue
 			}
-			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(bundle))
+			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source))
 			if !ok {
 				continue
 			}
@@ -218,14 +225,11 @@ func workflowTimerRenderedDelay(delay string, policy map[string]any) string {
 	})
 }
 
-func workflowTimerPolicy(bundle *runtimecontracts.WorkflowContractBundle) map[string]any {
-	if bundle == nil {
+func workflowTimerPolicy(source semanticview.Source) map[string]any {
+	if source == nil {
 		return nil
 	}
-	if len(bundle.MergedPolicy.Values) > 0 {
-		return policyDocumentToMap(bundle.MergedPolicy)
-	}
-	return policyDocumentToMap(bundle.Policy)
+	return policyDocumentToMap(source.ResolvedPolicyForFlow(""))
 }
 
 func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, verticalID string, fireAt time.Time) Schedule {
@@ -276,5 +280,51 @@ func (pc *FactoryPipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Co
 	}
 	if err := pc.timerScheduleStore.CancelSchedule(ctx, sc.AgentID, sc.EventType); err != nil {
 		runtimeWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s vertical_id=%s: %v", sc.AgentID, sc.EventType, sc.VerticalID, err)
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
+	if pc == nil {
+		return
+	}
+	if pc.timerScheduleStore != nil {
+		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
+			runtimeWarn(runtimeWorkflowID, "workflow timer persist failed agent=%s event=%s vertical_id=%s: %v", sc.AgentID, sc.EventType, sc.VerticalID, err)
+		}
+	}
+	if pc.timerScheduler != nil {
+		register := func() {
+			if err := pc.timerScheduler.Register(sc); err != nil {
+				runtimeWarn(runtimeWorkflowID, "workflow timer register failed agent=%s event=%s vertical_id=%s: %v", sc.AgentID, sc.EventType, sc.VerticalID, err)
+			}
+		}
+		if !queuePipelinePostCommitAction(ctx, register) {
+			register()
+		}
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Context, sc Schedule) {
+	if pc == nil {
+		return
+	}
+	if pc.timerScheduleStore != nil {
+		if exactStore, ok := pc.timerScheduleStore.(ExactSchedulePersistence); ok {
+			if err := exactStore.CancelScheduleExact(ctx, sc); err != nil {
+				runtimeWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s vertical_id=%s: %v", sc.AgentID, sc.EventType, sc.VerticalID, err)
+			}
+		} else if err := pc.timerScheduleStore.CancelSchedule(ctx, sc.AgentID, sc.EventType); err != nil {
+			runtimeWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s vertical_id=%s: %v", sc.AgentID, sc.EventType, sc.VerticalID, err)
+		}
+	}
+	if pc.timerScheduler != nil {
+		cancel := func() {
+			if err := pc.timerScheduler.CancelExact(sc); err != nil {
+				runtimeWarn(runtimeWorkflowID, "workflow timer cancel failed agent=%s event=%s vertical_id=%s: %v", sc.AgentID, sc.EventType, sc.VerticalID, err)
+			}
+		}
+		if !queuePipelinePostCommitAction(ctx, cancel) {
+			cancel()
+		}
 	}
 }

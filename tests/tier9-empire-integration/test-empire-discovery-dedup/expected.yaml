@@ -1,0 +1,18 @@
+trigger:
+  event: dedup.resolved
+  payload:
+    dedup_id: dedup-001
+    vertical_id: vert-001
+    strategy: keep_best
+    signal_a: { type: gap, strength: 60, name: "InvoiceHelper" }
+    signal_b: { type: gap, strength: 80, name: "QuickInvoice" }
+    best_signal: { type: gap, strength: 80, name: "QuickInvoice" }
+    merged: {}
+    reasoning: "Signal B has higher strength and better evidence"
+
+expected:
+  handler_outcome: success
+  entity_state: null
+  emitted_events: []
+  entity_fields:
+    merged_signal: { type: gap, strength: 80, name: "QuickInvoice" }

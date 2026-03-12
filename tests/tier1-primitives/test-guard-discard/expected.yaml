@@ -1,0 +1,10 @@
+trigger:
+  event: check.requested
+  payload:
+    entity_id: ent-001
+    score: 50
+
+expected:
+  handler_outcome: discard
+  entity_state: pending
+  emitted_events: []

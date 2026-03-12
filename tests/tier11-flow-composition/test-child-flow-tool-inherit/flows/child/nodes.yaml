@@ -1,0 +1,9 @@
+child-node:
+  id: child-node
+  execution_type: system_node
+  subscribes_to: [child.task]
+  produces: [child.result]
+  event_handlers:
+    child.task:
+      advances_to: done
+      emits: child.result

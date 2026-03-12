@@ -1,0 +1,9 @@
+tool-agent:
+  model_tier: tier2
+  conversation_mode: stateless
+  tools_tier2:
+    - nonexistent_tool
+  subscriptions:
+    - task.requested
+  emit_events:
+    - task.completed

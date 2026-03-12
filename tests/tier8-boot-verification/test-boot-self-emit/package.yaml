@@ -1,0 +1,7 @@
+name: test-boot-self-emit
+version: 1.0.0
+description: >
+  Boot verification: handler emits the same event it subscribes to,
+  creating an infinite loop risk. Platform must catch DIALECT-SELF-EMIT.
+platform_version: ">=1.1.0"
+flows: []

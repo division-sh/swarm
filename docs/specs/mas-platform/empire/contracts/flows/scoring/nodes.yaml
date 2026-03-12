@@ -82,20 +82,20 @@ scoring-node:
     score.dimension_complete:
       description: Add dimension score to accumulator.
       on_complete:
-        composite_above_shortlist:
-          condition: composite_score >= {{composite_shortlist}} AND build_complexity >= {{hard_gate_floor}} AND automation_completeness
-            >= {{hard_gate_floor}}
-          emits: vertical.shortlisted
-          advances_to: shortlisted
-        composite_marginal_eligible:
-          condition: composite_score >= {{hard_gate_floor}} AND composite_score < {{composite_shortlist}} AND count(tier1_dims
-            >= 70) >= 2
-          emits: vertical.marginal
-          advances_to: marginal_review
-        composite_below_marginal:
-          condition: else
-          emits: vertical.rejected
-          advances_to: killed
+      - condition: composite_score >= {{composite_shortlist}} AND build_complexity >= {{hard_gate_floor}} AND automation_completeness
+          >= {{hard_gate_floor}}
+        emits: vertical.shortlisted
+        advances_to: shortlisted
+        _name: composite_above_shortlist
+      - condition: composite_score >= {{hard_gate_floor}} AND composite_score < {{composite_shortlist}} AND count(tier1_dims
+          >= 70) >= 2
+        emits: vertical.marginal
+        advances_to: marginal_review
+        _name: composite_marginal_eligible
+      - condition: else
+        emits: vertical.rejected
+        advances_to: killed
+        _name: composite_below_marginal
       compute:
         operation: weighted_average
         description: Weighted average across 3 tiers
@@ -122,6 +122,7 @@ scoring-node:
         expected_from: entity.dimensions_requested
         completion: all
         description: all dimensions in scoring.requested.dimensions_requested have been received
+        dedup_by: payload.dimension
     vertical.killed_backprop:
       description: Validation killed this vertical. Update scoring entity state.
       advances_to: killed

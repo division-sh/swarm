@@ -1,0 +1,11 @@
+tool-agent:
+  model_tier: tier2
+  conversation_mode: stateless
+  tools_tier2:
+    - create_flow_instance
+  permissions:
+    - message_peers
+  subscriptions:
+    - task.requested
+  emit_events:
+    - task.completed

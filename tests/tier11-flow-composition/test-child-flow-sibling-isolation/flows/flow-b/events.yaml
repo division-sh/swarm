@@ -1,0 +1,6 @@
+beta.start:
+  payload:
+    entity_id: string
+beta.complete:
+  payload:
+    entity_id: string

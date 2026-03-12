@@ -1,0 +1,16 @@
+vertical.discovered:
+  payload:
+    vertical_name: string
+    raw_signals: object
+    geography: string
+    mode: string
+    signal_strength: integer
+    opportunity_pattern: string
+scoring.requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    mode: string
+    rubric: string
+    dimensions_requested: array

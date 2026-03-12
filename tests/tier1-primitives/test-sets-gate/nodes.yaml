@@ -1,0 +1,10 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [gate.requested]
+  produces: [gate.set]
+  event_handlers:
+    gate.requested:
+      sets_gates:
+        g1_check: true
+      emits: gate.set

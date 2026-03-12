@@ -3,12 +3,12 @@ package main
 import (
 	"strings"
 
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	empireruntime "empireai/internal/runtime"
 )
 
 func defaultControlPlaneAgentID() string {
 	ensureEmpireDefaults()
-	return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
+	return strings.TrimSpace(empireruntime.DefaultControlPlaneRecipient())
 }
 
 func withControlPlaneRecipient(recipients ...string) []string {

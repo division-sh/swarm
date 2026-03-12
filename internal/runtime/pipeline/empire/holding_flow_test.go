@@ -4,14 +4,14 @@ import "testing"
 
 func TestHoldingFlow_C1_ShortlistedCreatesValidationPipelineAndEnrichedPayloads(t *testing.T) {
 	module := NewModule()
-	bundle := module.ContractBundle()
-	if bundle == nil {
-		t.Fatal("expected Empire workflow bundle")
+	source := module.SemanticSource()
+	if source == nil {
+		t.Fatal("expected Empire workflow semantic source")
 	}
-	if got := bundle.FlowInitialStage("validation"); got != "researching" {
+	if got := source.FlowInitialStage("validation"); got != "researching" {
 		t.Fatalf("validation initial stage = %q, want researching", got)
 	}
-	if handler, ok := bundle.NodeEventHandler("validation-orchestrator", "vertical.shortlisted"); !ok {
+	if handler, ok := source.NodeEventHandler("validation-orchestrator", "vertical.shortlisted"); !ok {
 		t.Fatal("expected validation-orchestrator handler for vertical.shortlisted")
 	} else if handler.AdvancesTo != "researching" {
 		t.Fatalf("vertical.shortlisted advances_to = %q, want researching", handler.AdvancesTo)
@@ -20,8 +20,8 @@ func TestHoldingFlow_C1_ShortlistedCreatesValidationPipelineAndEnrichedPayloads(
 
 func TestHoldingFlow_C2_BusinessResearchReceivesValidationContextAndCanContinue(t *testing.T) {
 	module := NewModule()
-	bundle := module.ContractBundle()
-	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "research.completed")
+	source := module.SemanticSource()
+	handler, ok := source.NodeEventHandler("validation-orchestrator", "research.completed")
 	if !ok {
 		t.Fatal("expected validation-orchestrator handler for research.completed")
 	}
@@ -35,8 +35,8 @@ func TestHoldingFlow_C2_BusinessResearchReceivesValidationContextAndCanContinue(
 
 func TestHoldingFlow_C3_ResearchCompletedSetsG1AndSpecRequestedPassthrough(t *testing.T) {
 	module := NewModule()
-	bundle := module.ContractBundle()
-	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "research.completed")
+	source := module.SemanticSource()
+	handler, ok := source.NodeEventHandler("validation-orchestrator", "research.completed")
 	if !ok {
 		t.Fatal("expected validation-orchestrator handler for research.completed")
 	}
@@ -50,8 +50,8 @@ func TestHoldingFlow_C3_ResearchCompletedSetsG1AndSpecRequestedPassthrough(t *te
 
 func TestHoldingFlow_C4_SpecDraftToReviewRouting(t *testing.T) {
 	module := NewModule()
-	bundle := module.ContractBundle()
-	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "spec.draft_ready")
+	source := module.SemanticSource()
+	handler, ok := source.NodeEventHandler("validation-orchestrator", "spec.draft_ready")
 	if !ok {
 		t.Fatal("expected validation-orchestrator handler for spec.draft_ready")
 	}
@@ -62,8 +62,8 @@ func TestHoldingFlow_C4_SpecDraftToReviewRouting(t *testing.T) {
 
 func TestHoldingFlow_C5_SpecReviewPassedTriggersCTORequest(t *testing.T) {
 	module := NewModule()
-	bundle := module.ContractBundle()
-	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "spec_review.passed")
+	source := module.SemanticSource()
+	handler, ok := source.NodeEventHandler("validation-orchestrator", "spec_review.passed")
 	if !ok {
 		t.Fatal("expected validation-orchestrator handler for spec_review.passed")
 	}
@@ -77,11 +77,11 @@ func TestHoldingFlow_C5_SpecReviewPassedTriggersCTORequest(t *testing.T) {
 
 func TestHoldingFlow_CatalogSmoke_EventPayloadJSONRoundTrip(t *testing.T) {
 	module := NewModule()
-	bundle := module.ContractBundle()
-	if len(bundle.Events) == 0 {
+	source := module.SemanticSource()
+	if len(source.EventEntries()) == 0 {
 		t.Fatal("expected Empire event catalog entries")
 	}
-	if outputs := bundle.FlowOutputEvents("validation"); !containsString(outputs, "validation.package_ready") {
+	if outputs := source.FlowOutputEvents("validation"); !containsString(outputs, "validation.package_ready") {
 		t.Fatalf("validation flow outputs = %v, want validation.package_ready", outputs)
 	}
 }

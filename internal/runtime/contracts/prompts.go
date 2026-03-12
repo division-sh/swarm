@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"empireai/internal/models"
-	"empireai/internal/promptcontracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,10 +64,9 @@ func promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {
 	candidates := promptIDCandidates(cfg)
 	bundle, err := promptWorkflowBundle()
 	if err != nil || bundle == nil {
-		fallback := promptLegacyDirs()
 		dirs := make(map[string][]string, len(candidates))
 		for _, candidate := range candidates {
-			dirs[candidate] = fallback
+			dirs[candidate] = nil
 		}
 		return candidates, dirs
 	}
@@ -81,18 +79,13 @@ func promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {
 	resolved = uniqueStrings(resolved...)
 
 	globalDirs := promptBundlePromptDirs(bundle)
-	legacyDirs := promptLegacyDirs()
 	dirs := make(map[string][]string, len(resolved))
 	for _, agentID := range resolved {
 		if agentID == "" {
 			continue
 		}
 		bundleDirs := uniqueStrings(append(promptDirsForBundleAgent(bundle, agentID), globalDirs...)...)
-		if promptBundleHasAgent(bundle, agentID) {
-			dirs[agentID] = bundleDirs
-			continue
-		}
-		dirs[agentID] = uniqueStrings(append(bundleDirs, legacyDirs...)...)
+		dirs[agentID] = bundleDirs
 	}
 	return resolved, dirs
 }
@@ -117,15 +110,17 @@ func canonicalRuntimeRole(role string) string {
 
 func resolveBundlePromptAgentID(bundle *WorkflowContractBundle, cfg models.AgentConfig, candidates []string) (string, bool) {
 	for _, candidate := range candidates {
-		if _, ok := bundle.MergedAgents[candidate]; ok {
-			return candidate, true
+		for _, record := range bundleAgentRecords(bundle) {
+			if strings.TrimSpace(record.LogicalID) == candidate {
+				return candidate, true
+			}
 		}
 	}
 
 	for _, candidate := range candidates {
-		for logicalID, entry := range bundle.MergedAgents {
-			if promptRegistryIDMatches(entry.ID, candidate) {
-				return strings.TrimSpace(logicalID), true
+		for _, record := range bundleAgentRecords(bundle) {
+			if promptRegistryIDMatches(record.Entry.ID, candidate) {
+				return strings.TrimSpace(record.LogicalID), true
 			}
 		}
 	}
@@ -135,18 +130,16 @@ func resolveBundlePromptAgentID(bundle *WorkflowContractBundle, cfg models.Agent
 		return "", false
 	}
 	mode := canonicalPromptLookupValue(cfg.Mode)
-	for logicalID, entry := range bundle.MergedAgents {
-		if canonicalPromptLookupValue(entry.Role) != role {
+	for _, record := range bundleAgentRecords(bundle) {
+		if canonicalPromptLookupValue(record.Entry.Role) != role {
 			continue
 		}
 		if mode != "" {
-			if source, ok := bundle.AgentSources[strings.TrimSpace(logicalID)]; ok {
-				if flowMode := promptFlowMode(bundle, source.FlowID); flowMode != "" && flowMode != mode {
-					continue
-				}
+			if flowMode := promptFlowMode(bundle, record.Source.FlowID); flowMode != "" && flowMode != mode {
+				continue
 			}
 		}
-		return strings.TrimSpace(logicalID), true
+		return strings.TrimSpace(record.LogicalID), true
 	}
 	return "", false
 }
@@ -187,26 +180,26 @@ func promptDirsForBundleAgent(bundle *WorkflowContractBundle, agentID string) []
 	if bundle == nil {
 		return nil
 	}
-	source, ok := bundle.AgentSources[strings.TrimSpace(agentID)]
+	source, ok := bundle.AgentContractSource(agentID)
 	if !ok {
 		return nil
 	}
 	dirs := make([]string, 0, 4)
 	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
-		if flow, ok := bundle.FlowContracts[flowID]; ok && strings.TrimSpace(flow.Paths.PromptsDir) != "" {
+		if flow, ok := bundle.FlowViewByID(flowID); ok && strings.TrimSpace(flow.Paths.PromptsDir) != "" {
 			dirs = append(dirs, flow.Paths.PromptsDir)
 		}
 	}
 	if pkgKey := strings.TrimSpace(source.PackageKey); pkgKey != "" {
-		if pkg, ok := bundle.ProjectContracts[pkgKey]; ok && strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
-			dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
+		for _, pkg := range bundle.ProjectViews() {
+			if strings.TrimSpace(pkg.Paths.Key) == pkgKey && strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
+				dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
+				break
+			}
 		}
 	}
 	if strings.TrimSpace(bundle.Paths.ProjectPromptsDir) != "" {
 		dirs = append(dirs, bundle.Paths.ProjectPromptsDir)
-	}
-	if strings.TrimSpace(bundle.Paths.PromptsDir) != "" {
-		dirs = append(dirs, bundle.Paths.PromptsDir)
 	}
 	return uniqueStrings(dirs...)
 }
@@ -215,27 +208,29 @@ func promptBundleHasAgent(bundle *WorkflowContractBundle, agentID string) bool {
 	if bundle == nil {
 		return false
 	}
-	_, ok := bundle.MergedAgents[strings.TrimSpace(agentID)]
-	return ok
+	agentID = strings.TrimSpace(agentID)
+	for _, record := range bundleAgentRecords(bundle) {
+		if strings.TrimSpace(record.LogicalID) == agentID {
+			return true
+		}
+	}
+	return false
 }
 
 func promptBundlePromptDirs(bundle *WorkflowContractBundle) []string {
 	if bundle == nil {
 		return nil
 	}
-	dirs := make([]string, 0, 2+len(bundle.ProjectContracts)+len(bundle.FlowContracts))
+	dirs := make([]string, 0, 2+len(bundle.ProjectViews())+len(bundle.FlowTree.ByID))
 	if strings.TrimSpace(bundle.Paths.ProjectPromptsDir) != "" {
 		dirs = append(dirs, bundle.Paths.ProjectPromptsDir)
 	}
-	if strings.TrimSpace(bundle.Paths.PromptsDir) != "" {
-		dirs = append(dirs, bundle.Paths.PromptsDir)
-	}
-	for _, pkg := range bundle.ProjectContracts {
+	for _, pkg := range bundle.ProjectViews() {
 		if strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
 			dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
 		}
 	}
-	for _, flow := range bundle.FlowContracts {
+	for _, flow := range bundle.FlowViews() {
 		if strings.TrimSpace(flow.Paths.PromptsDir) != "" {
 			dirs = append(dirs, flow.Paths.PromptsDir)
 		}
@@ -243,19 +238,11 @@ func promptBundlePromptDirs(bundle *WorkflowContractBundle) []string {
 	return uniqueStrings(dirs...)
 }
 
-func promptLegacyDirs() []string {
-	dir, ok := promptcontracts.ResolveDir()
-	if !ok {
-		return nil
-	}
-	return []string{dir}
-}
-
 func promptFlowMode(bundle *WorkflowContractBundle, flowID string) string {
 	if bundle == nil {
 		return ""
 	}
-	flow, ok := bundle.FlowContracts[strings.TrimSpace(flowID)]
+	flow, ok := bundle.FlowViewByID(flowID)
 	if !ok {
 		return ""
 	}
@@ -349,21 +336,12 @@ func promptRuntimeVariables(repoRoot string) (map[string]any, error) {
 			return
 		}
 		vars := map[string]any{}
-		for key, value := range bundle.MergedPolicy.Values {
+		for key, value := range bundle.ResolvedPolicyForFlow("").Values {
 			key = strings.TrimSpace(key)
 			if key == "" {
 				continue
 			}
 			vars[key] = value.Value
-		}
-		if len(vars) == 0 {
-			for key, value := range bundle.Policy.Values {
-				key = strings.TrimSpace(key)
-				if key == "" {
-					continue
-				}
-				vars[key] = value.Value
-			}
 		}
 		promptVariables = vars
 	})

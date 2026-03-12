@@ -1,0 +1,10 @@
+trigger:
+  event: child/grandchild/grandchild.check
+  payload:
+    entity_id: ent-001
+    score: 65
+expected:
+  handler_outcome: success
+  entity_state: approved
+  emitted_events:
+    - grandchild.passed

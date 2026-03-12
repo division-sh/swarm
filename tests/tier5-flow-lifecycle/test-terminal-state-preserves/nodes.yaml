@@ -1,0 +1,18 @@
+complete-node:
+  id: complete-node
+  execution_type: system_node
+  subscribes_to: [task.completed]
+  produces: [task.finished]
+  event_handlers:
+    task.completed:
+      advances_to: done
+      emits: task.finished
+
+update-node:
+  id: update-node
+  execution_type: system_node
+  subscribes_to: [task.updated]
+  produces: []
+  event_handlers:
+    task.updated:
+      advances_to: pending

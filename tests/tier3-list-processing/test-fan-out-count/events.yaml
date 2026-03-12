@@ -1,0 +1,8 @@
+batch.received:
+  payload:
+    entity_id: string
+    items: array
+task.dispatched:
+  payload:
+    entity_id: string
+    item: object

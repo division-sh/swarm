@@ -1,0 +1,4 @@
+agent_fixtures:
+  audit-agent:
+    - on: task.completed
+      emits: []

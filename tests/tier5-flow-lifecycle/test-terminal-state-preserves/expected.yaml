@@ -1,0 +1,14 @@
+trigger:
+  sequence:
+    - event: task.completed
+      payload:
+        entity_id: ent-001
+    - event: task.updated
+      payload:
+        entity_id: ent-001
+        data: late-update
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events: []

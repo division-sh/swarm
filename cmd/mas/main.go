@@ -23,7 +23,7 @@ import (
 	runtimellm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/store"
 	"gopkg.in/yaml.v3"
@@ -93,6 +93,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load MAS contracts: %v", err)
 	}
+	source := semanticview.Wrap(bundle)
 	stores, err := buildStores(ctx, *storeMode, cfg)
 	if err != nil {
 		log.Fatalf("init stores: %v", err)
@@ -102,7 +103,6 @@ func main() {
 	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
 		SelfCheck:      *selfCheck,
 		WorkflowModule: module,
-		ProductPolicy:  runtimeproductpolicy.NewGenericTestPolicy,
 	})
 	if err != nil {
 		log.Fatalf("init runtime: %v", err)
@@ -118,12 +118,12 @@ func main() {
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
-	logBootSkeleton(bundle, contractsRoot, resolvedPlatformSpecPath)
+	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath)
 	if err := rt.Start(ctx); err != nil {
 		log.Fatalf("start runtime: %v", err)
 	}
 	ready.Store(true)
-	logReadySummary(bundle, contractsRoot, *healthAddr)
+	logReadySummary(source, contractsRoot, *healthAddr)
 
 	<-ctx.Done()
 	ready.Store(false)
@@ -205,6 +205,7 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 
 type masWorkflowModule struct {
 	bundle         *runtimecontracts.WorkflowContractBundle
+	source         semanticview.Source
 	workflow       *runtimepipeline.WorkflowDefinition
 	nodes          []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
@@ -217,27 +218,27 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 	if err != nil {
 		return nil, nil, err
 	}
-	workflow, err := runtimepipeline.LoadWorkflowDefinition(bundle)
+	source := semanticview.Wrap(bundle)
+	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodes, err := runtimepipeline.LoadWorkflowNodes(bundle)
+	nodes, err := runtimepipeline.LoadWorkflowNodes(source)
 	if err != nil {
 		return nil, nil, err
 	}
 	return &masWorkflowModule{
 		bundle:         bundle,
+		source:         source,
 		workflow:       workflow,
 		nodes:          nodes,
-		guardRegistry:  runtimepipeline.NewContractGuardRegistry(bundle),
-		actionRegistry: runtimepipeline.NewContractActionRegistry(bundle),
+		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
+		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
 		policies:       runtimepipeline.NewGenericTestWorkflowModule(),
 	}, bundle, nil
 }
 
-func (m *masWorkflowModule) ContractBundle() *runtimecontracts.WorkflowContractBundle {
-	return m.bundle
-}
+func (m *masWorkflowModule) SemanticSource() semanticview.Source { return m.source }
 func (m *masWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
 	return m.workflow
 }
@@ -257,17 +258,17 @@ func (m *masWorkflowModule) PayloadFactory() runtimepipeline.PayloadFactory {
 	return m.policies.PayloadFactory()
 }
 
-func logBootSkeleton(bundle *runtimecontracts.WorkflowContractBundle, contractsRoot, platformSpecPath string) {
+func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string) {
 	steps := []struct {
 		index int
 		name  string
 		note  string
 	}{
 		{1, "load_platform_spec", fmt.Sprintf("loaded %s", filepath.Clean(platformSpecPath))},
-		{2, "walk_flow_tree", fmt.Sprintf("discovered %d flow(s)", len(bundle.FlowSchemas))},
+		{2, "walk_flow_tree", fmt.Sprintf("discovered %d flow(s)", len(source.FlowSchemaEntries()))},
 		{3, "construct_paths", "constructed hierarchical contract paths from package tree"},
-		{4, "register_templates", fmt.Sprintf("registered %d template flow(s)", templateFlowCount(bundle))},
-		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(bundle.MergedNodes), len(bundle.MergedAgents), len(bundle.MergedEvents), len(bundle.MergedTools))},
+		{4, "register_templates", fmt.Sprintf("registered %d template flow(s)", templateFlowCount(source))},
+		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(source.ToolEntries()))},
 		{6, "resolve_subscriptions", "subscription resolution skeleton in place; full validation lands in CP4"},
 		{7, "validate_pins", "placeholder only; boot validation deferred to CP4"},
 		{8, "validate_required_agents", "placeholder only; boot validation deferred to CP4"},
@@ -284,9 +285,9 @@ func logBootSkeleton(bundle *runtimecontracts.WorkflowContractBundle, contractsR
 	}
 }
 
-func templateFlowCount(bundle *runtimecontracts.WorkflowContractBundle) int {
+func templateFlowCount(source semanticview.Source) int {
 	count := 0
-	for _, flow := range bundle.FlowSchemas {
+	for _, flow := range source.FlowSchemaEntries() {
 		if strings.EqualFold(strings.TrimSpace(flow.Mode), "template") {
 			count++
 		}
@@ -329,14 +330,14 @@ func shutdownHealthServer(server *http.Server) {
 	}
 }
 
-func logReadySummary(bundle *runtimecontracts.WorkflowContractBundle, contractsRoot, healthAddr string) {
+func logReadySummary(source semanticview.Source, contractsRoot, healthAddr string) {
 	log.Printf(
 		"mas runtime ready contracts=%s flows=%d nodes=%d agents=%d events=%d health=%s",
 		contractsRoot,
-		len(bundle.FlowSchemas),
-		len(bundle.MergedNodes),
-		len(bundle.MergedAgents),
-		len(bundle.MergedEvents),
+		len(source.FlowSchemaEntries()),
+		len(source.NodeEntries()),
+		len(source.AgentEntries()),
+		len(source.ResolvedEventCatalog()),
 		healthAddr,
 	)
 }

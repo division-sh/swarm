@@ -1,0 +1,9 @@
+task.started:
+  payload:
+    entity_id: string
+task.progressed:
+  payload:
+    entity_id: string
+task.finished:
+  payload:
+    entity_id: string

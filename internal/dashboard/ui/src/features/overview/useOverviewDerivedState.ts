@@ -74,16 +74,16 @@ export function deriveOverviewState({
         route: { view: "operations", subview: "queue" },
       })),
     ...verticals
-      .filter((vertical) => vertical.workflow_current_stage !== vertical.stage || Number(vertical.active_timer_count || 0) > 0)
+      .filter((vertical) => vertical.workflow_current_state !== vertical.stage || Number(vertical.active_timer_count || 0) > 0)
       .map((vertical) => ({
         kind: "vertical",
         id: vertical.id,
         title: vertical.slug || vertical.name || vertical.id,
         subtitle: [
-          vertical.workflow_current_stage !== vertical.stage ? "stage drift" : "",
+          vertical.workflow_current_state !== vertical.stage ? "stage drift" : "",
           Number(vertical.active_timer_count || 0) > 0 ? `${vertical.active_timer_count} timers` : "",
         ].filter(Boolean).join(" · "),
-        priority: 50 + (vertical.workflow_current_stage !== vertical.stage ? 20 : 0) + clampPriority(Number(vertical.active_timer_count)),
+        priority: 50 + (vertical.workflow_current_state !== vertical.stage ? 20 : 0) + clampPriority(Number(vertical.active_timer_count)),
         route: { view: "portfolio", subview: "holding" },
       })),
   ].sort((a, b) => b.priority - a.priority).slice(0, 8);

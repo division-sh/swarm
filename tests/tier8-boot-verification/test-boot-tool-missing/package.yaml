@@ -1,0 +1,7 @@
+name: test-boot-tool-missing
+version: 1.0.0
+description: >
+  Boot verification: agent references tool 'nonexistent_tool' in
+  tools_tier2 but it is not defined in tools.yaml. Platform must catch TOOL-MISSING.
+platform_version: ">=1.1.0"
+flows: []

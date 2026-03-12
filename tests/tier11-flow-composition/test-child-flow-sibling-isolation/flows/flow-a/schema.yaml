@@ -1,0 +1,8 @@
+initial_state: waiting
+terminal_states: [processed]
+states: [waiting, working, processed]
+pins:
+  inputs:
+    events: [alpha.start]
+  outputs:
+    events: [alpha.complete]

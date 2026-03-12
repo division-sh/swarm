@@ -11,8 +11,8 @@ export type FunnelStuckRecord = {
   slug?: string;
   name?: string;
   stage?: string;
-  current_stage?: string;
-  workflow_current_stage?: string;
+  current_state?: string;
+  workflow_current_state?: string;
   [key: string]: unknown;
 };
 
@@ -35,7 +35,7 @@ export type VerticalRecord = {
   name?: string;
   geography?: string;
   stage?: string;
-  workflow_current_stage?: string;
+  workflow_current_state?: string;
   stage_entered_at?: string;
   active_timer_count?: number;
   revision_count?: number;

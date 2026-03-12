@@ -1,0 +1,13 @@
+trigger:
+  sequence:
+    - event: task.completed
+      payload:
+        entity_id: ent-001
+    - event: task.reopen_requested
+      payload:
+        entity_id: ent-001
+
+expected:
+  handler_outcome: reject
+  entity_state: done
+  emitted_events: []

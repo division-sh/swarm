@@ -1,0 +1,9 @@
+item.requested:
+  payload:
+    entity_id: string
+item.done:
+  payload:
+    entity_id: string
+item.surprise:
+  payload:
+    entity_id: string

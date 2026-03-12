@@ -1,0 +1,5 @@
+name: child
+version: 1.0.0
+description: Child flow that emits task.done for parent to consume via absolute path.
+platform_version: ">=1.1.0"
+flows: []

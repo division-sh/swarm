@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context.Context, verticalID, currentStage, nextStage, sourceEvent string, state WorkflowState) {
@@ -19,17 +19,17 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 	if verticalID == "" || nextStage == "" {
 		return
 	}
-	bundle := pc.ContractBundle()
+	source := pc.SemanticSource()
 	if err := pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		enteredStageAt := time.Now().UTC()
-		if strings.TrimSpace(instance.CurrentStage) == nextStage && !instance.EnteredStageAt.IsZero() {
+		if strings.TrimSpace(instance.CurrentState) == nextStage && !instance.EnteredStageAt.IsZero() {
 			enteredStageAt = instance.EnteredStageAt
 		}
 		if strings.TrimSpace(instance.WorkflowName) == "" {
-			instance.WorkflowName = bundle.WorkflowName()
+			instance.WorkflowName = source.WorkflowName()
 		}
 		if strings.TrimSpace(instance.WorkflowVersion) == "" {
-			instance.WorkflowVersion = bundle.WorkflowVersion()
+			instance.WorkflowVersion = source.WorkflowVersion()
 		}
 		metadata := cloneStringAnyMap(state.Metadata)
 		if strings.TrimSpace(state.Status) != "" {
@@ -38,12 +38,12 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 		if sourceEvent != "" {
 			metadata["last_source_event"] = sourceEvent
 		}
-		instance.CurrentStage = nextStage
+		instance.CurrentState = nextStage
 		instance.EnteredStageAt = enteredStageAt
 		instance.Metadata = metadata
 		validationStartedAt, validationCompletedAt := existingValidationProjectionTimes(instance)
 		workflowSetStateBucket(instance, workflowStateBucketValidationOrchestrator, encodeValidationProjection(
-			bundle,
+			source,
 			verticalID,
 			metadata,
 			enteredStageAt,
@@ -73,8 +73,8 @@ func existingValidationProjectionTimes(instance *WorkflowInstance) (time.Time, t
 	return parseWorkflowTime(bucket["started_at"]), parseWorkflowTime(bucket["completed_at"])
 }
 
-func encodeValidationProjection(bundle *runtimecontracts.WorkflowContractBundle, verticalID string, metadata map[string]any, enteredStageAt time.Time, nextStage string, existingStartedAt, existingCompletedAt time.Time) map[string]any {
-	fields := workflowSystemNodeStateSchemaFields(bundle, workflowStateBucketValidationOrchestrator)
+func encodeValidationProjection(source semanticview.Source, verticalID string, metadata map[string]any, enteredStageAt time.Time, nextStage string, existingStartedAt, existingCompletedAt time.Time) map[string]any {
+	fields := workflowSystemNodeStateSchemaFields(source, workflowStateBucketValidationOrchestrator)
 	if len(fields) == 0 {
 		return map[string]any{}
 	}

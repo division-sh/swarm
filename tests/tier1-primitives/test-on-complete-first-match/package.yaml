@@ -1,0 +1,5 @@
+name: test-on-complete-first-match
+version: 1.0.0
+description: on_complete ordered list where the first condition matches.
+platform_version: ">=1.1.0"
+flows: []

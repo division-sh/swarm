@@ -1,0 +1,6 @@
+validate.requested:
+  payload:
+    entity_id: string
+validate.passed:
+  payload:
+    entity_id: string

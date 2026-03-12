@@ -19,10 +19,10 @@ type WorkflowInstance struct {
 	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
-	CurrentStage      string
+	CurrentState      string
 	EnteredStageAt    time.Time
 	TransitionHistory []WorkflowTransitionRecord
-	AccumulatorState  map[string]any
+	StateBuckets      map[string]any
 	TimerState        []WorkflowTimerState
 	Metadata          map[string]any
 	CreatedAt         time.Time
@@ -67,7 +67,6 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if instanceID == "" || s == nil || s.db == nil {
 		return WorkflowInstance{}, false, nil
 	}
-	ctx = withoutSQLTxContext(ctx)
 	var (
 		out               WorkflowInstance
 		transitionHistory []byte
@@ -79,7 +78,7 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if len(keys) == 0 {
 		return WorkflowInstance{}, false, nil
 	}
-	err := s.db.QueryRowContext(ctx, `
+	err := dbQueryRowContext(ctx, s.db, `
 		SELECT
 			instance_id::text,
 			workflow_name,
@@ -100,7 +99,7 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 		&out.InstanceID,
 		&out.WorkflowName,
 		&out.WorkflowVersion,
-		&out.CurrentStage,
+		&out.CurrentState,
 		&out.EnteredStageAt,
 		&transitionHistory,
 		&accumulatorState,
@@ -118,7 +117,7 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if err := json.Unmarshal(transitionHistory, &out.TransitionHistory); err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	if err := json.Unmarshal(accumulatorState, &out.AccumulatorState); err != nil {
+	if err := json.Unmarshal(accumulatorState, &out.StateBuckets); err != nil {
 		return WorkflowInstance{}, false, err
 	}
 	if err := json.Unmarshal(timerState, &out.TimerState); err != nil {
@@ -127,8 +126,8 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if err := json.Unmarshal(metadata, &out.Metadata); err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	if out.AccumulatorState == nil {
-		out.AccumulatorState = map[string]any{}
+	if out.StateBuckets == nil {
+		out.StateBuckets = map[string]any{}
 	}
 	if out.Metadata == nil {
 		out.Metadata = map[string]any{}
@@ -142,8 +141,7 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	ctx = withoutSQLTxContext(ctx)
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			instance_id::text,
 			workflow_name,
@@ -177,7 +175,7 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 			&item.InstanceID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
-			&item.CurrentStage,
+			&item.CurrentState,
 			&item.EnteredStageAt,
 			&transitionHistory,
 			&accumulatorState,
@@ -191,7 +189,7 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 		if err := json.Unmarshal(transitionHistory, &item.TransitionHistory); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(accumulatorState, &item.AccumulatorState); err != nil {
+		if err := json.Unmarshal(accumulatorState, &item.StateBuckets); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(timerState, &item.TimerState); err != nil {
@@ -200,8 +198,8 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 		if err := json.Unmarshal(metadata, &item.Metadata); err != nil {
 			return nil, err
 		}
-		if item.AccumulatorState == nil {
-			item.AccumulatorState = map[string]any{}
+		if item.StateBuckets == nil {
+			item.StateBuckets = map[string]any{}
 		}
 		if item.Metadata == nil {
 			item.Metadata = map[string]any{}
@@ -223,14 +221,14 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	instance.InstanceID = strings.TrimSpace(instance.InstanceID)
 	instance.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 	instance.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
-	instance.CurrentStage = strings.TrimSpace(instance.CurrentStage)
-	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentStage == "" {
+	instance.CurrentState = strings.TrimSpace(instance.CurrentState)
+	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentState == "" {
 		return fmt.Errorf(
-			"workflow instance requires instance_id, workflow_name, workflow_version, and current_stage (id=%q workflow=%q version=%q stage=%q)",
+			"workflow instance requires instance_id, workflow_name, workflow_version, and current_state (id=%q workflow=%q version=%q state=%q)",
 			instance.InstanceID,
 			instance.WorkflowName,
 			instance.WorkflowVersion,
-			instance.CurrentStage,
+			instance.CurrentState,
 		)
 	}
 	if instance.EnteredStageAt.IsZero() {
@@ -256,7 +254,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	if err != nil {
 		return err
 	}
-	accumulatorState, err := json.Marshal(instance.AccumulatorState)
+	accumulatorState, err := json.Marshal(instance.StateBuckets)
 	if err != nil {
 		return err
 	}
@@ -268,7 +266,6 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	if err != nil {
 		return err
 	}
-	ctx = withoutSQLTxContext(ctx)
 	_, err = dbExecContext(ctx, s.db, `
 		INSERT INTO workflow_instances (
 			instance_id,
@@ -310,7 +307,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 		rowID,
 		instance.WorkflowName,
 		instance.WorkflowVersion,
-		instance.CurrentStage,
+		instance.CurrentState,
 		instance.EnteredStageAt,
 		jsonOrDefault(transitionHistory, "[]"),
 		jsonOrDefault(accumulatorState, "{}"),
@@ -341,7 +338,6 @@ func (s *WorkflowInstanceStore) Delete(ctx context.Context, instanceID string) e
 	if instanceID == "" || s == nil || s.db == nil {
 		return nil
 	}
-	ctx = withoutSQLTxContext(ctx)
 	keys := workflowInstanceLookupKeys(instanceID)
 	if len(keys) == 0 {
 		return nil

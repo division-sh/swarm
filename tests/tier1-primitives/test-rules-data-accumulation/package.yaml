@@ -1,0 +1,5 @@
+name: test-rules-data-accumulation
+version: 1.0.0
+description: Rules branch with data_accumulation writes payload value to entity field.
+platform_version: ">=1.1.0"
+flows: []

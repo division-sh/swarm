@@ -1,0 +1,12 @@
+validation-orchestrator:
+  id: validation-orchestrator
+  execution_type: system_node
+  subscribes_to: [timer.validation_timeout]
+  produces: [validation.timeout_escalation]
+  event_handlers:
+    timer.validation_timeout:
+      guard:
+        id: timeout_window_check
+        check: "payload.elapsed_hours >= policy.validation_gate_timeout_hours"
+      advances_to: escalated
+      emits: validation.timeout_escalation

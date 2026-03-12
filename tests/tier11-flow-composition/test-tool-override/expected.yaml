@@ -1,0 +1,12 @@
+trigger:
+  event: task.requested
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events: [task.done]
+  tool_resolution:
+    root_agent: { tool: lookup_data, endpoint: /api/v1/lookup }
+    child_agent: { tool: lookup_data, endpoint: /api/v2/lookup }

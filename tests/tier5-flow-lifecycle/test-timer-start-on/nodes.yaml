@@ -1,0 +1,16 @@
+task-node:
+  id: task-node
+  execution_type: system_node
+  subscribes_to: [task.started, timer.task_timeout]
+  produces: [task.timed_out]
+  timers:
+    - id: task_timer
+      start_on: task.started
+      duration: 1h
+      emits: timer.task_timeout
+  event_handlers:
+    task.started:
+      advances_to: active
+    timer.task_timeout:
+      advances_to: timed_out
+      emits: task.timed_out

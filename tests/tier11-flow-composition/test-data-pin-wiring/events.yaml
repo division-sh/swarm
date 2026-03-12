@@ -1,0 +1,8 @@
+job.start:
+  payload:
+    entity_id: string
+    mode: string
+    threshold: string
+job.complete:
+  payload:
+    entity_id: string

@@ -1,0 +1,8 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [auto.started]
+  produces: []
+  event_handlers:
+    auto.started:
+      advances_to: started

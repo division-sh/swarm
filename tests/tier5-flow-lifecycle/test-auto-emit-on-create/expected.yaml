@@ -1,0 +1,10 @@
+trigger:
+  event: flow.created
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: started
+  emitted_events:
+    - auto.started

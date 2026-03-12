@@ -1,0 +1,7 @@
+items.submitted:
+  payload:
+    entity_id: string
+    items: array
+items.counted:
+  payload:
+    entity_id: string

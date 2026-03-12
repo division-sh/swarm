@@ -1,0 +1,13 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [digest.requested]
+  produces: [digest.compiled]
+  event_handlers:
+    digest.requested:
+      query:
+        entities: items
+        group_by: state
+        count: true
+      emits: digest.compiled
+      advances_to: compiled

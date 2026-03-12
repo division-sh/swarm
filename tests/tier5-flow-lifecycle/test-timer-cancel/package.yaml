@@ -1,0 +1,5 @@
+name: test-timer-cancel
+version: 1.0.0
+description: Timer cancelled when state changes before it fires.
+platform_version: ">=1.1.0"
+flows: []

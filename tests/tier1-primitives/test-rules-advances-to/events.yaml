@@ -1,0 +1,7 @@
+item.reviewed:
+  payload:
+    entity_id: string
+    decision: string
+item.approved:
+  payload:
+    entity_id: string

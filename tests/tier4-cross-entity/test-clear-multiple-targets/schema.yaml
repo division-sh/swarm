@@ -1,0 +1,8 @@
+initial_state: active
+terminal_states: [done]
+states: [active, cleared, done]
+pins:
+  inputs:
+    events: [state.reset_requested]
+  outputs:
+    events: [state.reset_completed]

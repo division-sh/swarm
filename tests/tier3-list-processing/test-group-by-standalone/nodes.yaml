@@ -1,0 +1,13 @@
+group-node:
+  id: group-node
+  execution_type: system_node
+  subscribes_to: [items.submitted]
+  produces: [items.grouped]
+  event_handlers:
+    items.submitted:
+      group_by:
+        items_from: payload.items
+        key: category
+        store_as: entity.grouped
+      emits: items.grouped
+      advances_to: done

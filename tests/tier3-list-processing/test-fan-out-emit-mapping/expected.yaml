@@ -1,0 +1,16 @@
+trigger:
+  event: batch.submitted
+  payload:
+    entity_id: ent-001
+    items:
+      - type: a
+        id: item-1
+      - type: b
+        id: item-2
+
+expected:
+  handler_outcome: success
+  entity_state: routing
+  emitted_events:
+    - routed.a
+    - routed.b

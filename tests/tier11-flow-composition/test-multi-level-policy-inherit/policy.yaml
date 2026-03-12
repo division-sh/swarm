@@ -1,0 +1,3 @@
+threshold: 80
+max_retries: 5
+mode: strict

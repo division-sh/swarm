@@ -1,0 +1,5 @@
+name: flow-a
+version: 1.0.0
+description: Sibling flow A that writes shared_field.
+platform_version: ">=1.1.0"
+flows: []

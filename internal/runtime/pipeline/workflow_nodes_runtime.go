@@ -50,8 +50,8 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 	if pc == nil {
 		return nil
 	}
-	bundle := pc.ContractBundle()
-	if bundle == nil {
+	source := pc.SemanticSource()
+	if source == nil {
 		return nil
 	}
 	nodes := pc.WorkflowNodes()
@@ -61,7 +61,7 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 		if nodeID == "" {
 			continue
 		}
-		contract, ok := bundle.Nodes[nodeID]
+		contract, ok := source.NodeEntries()[nodeID]
 		if !ok {
 			continue
 		}

@@ -1,0 +1,7 @@
+scan.requested:
+  payload:
+    entity_id: string
+    type: string
+scan.completed:
+  payload:
+    entity_id: string

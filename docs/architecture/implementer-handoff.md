@@ -27,93 +27,31 @@ The old implementer's phased plan is archived at `docs/architecture/archive/`. D
 
 ## Your Mission
 
-Three phases, **interleaved** (not purely sequential):
+Four phases, strictly sequential:
 
-1. **Test suite cleanup** — stop tests from protecting Empire code
-2. **Empire extraction + typed model** — remove Empire logic, type the semantic model, build the handler engine
-3. **Platform completion** — implement the 59% of spec requirements that don't exist yet
-
-**CRITICAL SEQUENCING:** Phases 1 and 2 are interleaved. The generic test bundle (Step 1.3) and test rewrites (Step 1.4) depend on the typed semantic model (Step 2.1). If you write tests against the current `map[string]any` model, they'll break when you type it — repeating the old implementer's mistake.
+1. **Foundation** — type the semantic model, unblock the codebase, fix source-of-truth
+2. **Declarative engine** — build the 12-step handler engine, DeclarativeNode, contract-derived routing
+3. **Empire extraction** — rewrite tests, delete VerticalID, extract Empire packages, remove vocabulary
+4. **Platform completion** — implement the 59% of spec requirements that don't exist yet
 
 The exit criterion: a second product with different flows, agents, events, and entities can run on this platform without modifying any generic package.
 
 ---
 
-## Parallelization Plan (4-5 agents)
+## Execution Order
 
-Work is organized into 4 checkpoints with sync gates. Each checkpoint has 4-5 lanes with **zero file overlap** — agents never touch the same file.
-
-### Checkpoint 1: Foundation (4 lanes, start immediately)
-
-| Lane | Agent scope | Files owned (exclusive) | Steps |
-|------|------------|------------------------|-------|
-| **A** | Delete 112 tests + replace init() wiring | All `*_test.go` files | 1.1, 1.2 |
-| **B** | Type 58 `map[string]any` fields | `internal/runtime/contracts/workflow_contracts.go` | 2.1 |
-| **C** | Extract Empire from non-runtime packages | `internal/config/`, `internal/factory/`, `internal/store/mailbox.go`, `internal/store/scan_campaigns.go` | 2.7a-d |
-| **D** | Schema registry + contracts relocation + cmd skeleton | `scripts/generate_*`, `contracts/`, `cmd/` | 2.2, 2.7e, 2.8 |
-
-**Sync gate 1:** `go build ./...` passes. All agents stop and merge.
-
-### Checkpoint 2: Engine + Tests (5 lanes)
-
-| Lane | Agent scope | Files owned (exclusive) | Steps |
-|------|------------|------------------------|-------|
-| **A** | Build generic test bundle + rewrite 224 tests | Test fixtures dir, all `*_test.go` | 1.3, 1.4, 1.5 |
-| **B** | 10-step handler execution engine + guard/action builtins | `workflow_transition_engine.go`, `workflow_hooks.go` | 2.5a, 2.3 |
-| **C** | DeclarativeNode + node executor replacement | `workflow_nodes*.go`, `declarative_workflow_node.go` (new) | 2.5b |
-| **D** | Routing derivation from contracts | `bus/eventbus*.go`, `bus/routing.go` | 2.5c |
-| **E** | Delete wrong concepts: Policy, accumulator_state, current_stage, mutable routing | `productpolicy/`, `manager/opco.go`, `manager/bootstrap.go`, `pipeline/state_machine.go` | 2.6 |
-
-**Sync gate 2:** `go build ./...` passes + `go test ./... -short` passes. Merge.
-
-### Checkpoint 3: The Big Cleanup (5 lanes)
-
-| Lane | Agent scope | Files owned (exclusive) | Steps |
-|------|------------|------------------------|-------|
-| **A** | Delete VerticalID + fix ALL callsites | `events/types.go` + callsites in `store/`, `workspace/`, `agents/`, `mcp/` | 2.4 (half) |
-| **B** | VerticalID callsites in pipeline/ + delete orchestrator structs | `pipeline/lifecycle_orchestrator*.go`, `pipeline/validation_orchestrator*.go`, `pipeline/discovery_aggregator*.go`, `pipeline/scan_campaign*.go`, `pipeline/workflow_node_scoring.go`, `pipeline/coordinator*.go` | 2.4 (half), 2.9 (pipeline/) |
-| **C** | Remove Empire vocabulary from manager/ + bus/ | `manager/*.go` (non-test), `bus/*.go` (non-test, non-routing — routing done in CP2) | 2.9 (manager/, bus/) |
-| **D** | Remove Empire vocabulary from tools/ + workspace/ + agents/ + mcp/ | `tools/*.go`, `workspace/*.go`, `agents/*.go`, `mcp/*.go` | 2.9 (tools/, workspace/, agents/, mcp/) |
-| **E** | Remove Empire vocabulary from contracts/ package + commgraph/ | `contracts/*.go` (non-workflow_contracts.go), `commgraph/*.go` | 2.9 (contracts/, commgraph/) |
-
-**Sync gate 3:** `go test ./... -count=1` GREEN + `grep -rn "vertical\|opco\|empire\|factory" internal/runtime/ --include="*.go"` returns zero hits in generic packages. Merge.
-
-### Checkpoint 4: Platform Completion (5 lanes)
-
-| Lane | Agent scope | Files owned (exclusive) | Steps |
-|------|------------|------------------------|-------|
-| **A** | Entity persistence tools (get_entity, save_entity_field, search_entities, query_metrics) | `tools/executor_entity.go` (new), `tools/executor.go` | 3.2 |
-| **B** | DDL generation from entity_schema + boot steps 7-12 | `pipeline/ddl_generator.go` (new), boot validation code | 3.3, 3.4 |
-| **C** | Permissions model + runtime enforcement rules | `tools/authorizer.go`, enforcement code | 3.5, 3.8, 3.14 |
-| **D** | Error model + dynamic instance lifecycle + timer completeness | `pipeline/error_handler.go` (new), `manager/flow_activation.go` | 3.6, 3.11, 3.13 |
-| **E** | URI addressing + namespace substitution + emit tool auto-gen + prompt templating | Resolution code, `contracts/prompts.go` | 3.7, 3.9, 3.12, 3.15 |
-
-**Sync gate 4:** Full test suite green + all 11 boot validation checks pass + all 11 runtime enforcement rules active.
-
-### Lane safety rules
-
-1. **Each agent owns files exclusively within a checkpoint.** No two agents touch the same `.go` file.
-2. **Agents may READ any file** for context — but only WRITE files in their lane.
-3. **At sync gates:** one agent runs `go build ./...` and `go test ./...`. If failures span lanes, agents coordinate fixes before proceeding.
-4. **If an agent finishes early:** they can start on the next checkpoint's work for their lane IF it has zero dependencies on other lanes. Otherwise, they wait.
-5. **VerticalID deletion (CP3, Lanes A+B):** split by package — Lane A owns non-pipeline packages, Lane B owns pipeline/. Both delete VerticalID usages but in different files. Coordinate on `events/types.go` (Lane A deletes the field, Lane B adapts pipeline code).
-
-### Why this ordering works
-
-- **CP1** has zero dependencies between lanes — test files, contract types, non-runtime packages, and scripts are completely disjoint
-- **CP2** depends on CP1's typed model (Lane B→Lane B continuity) and deleted tests (Lane A→Lane A continuity). The handler engine, DeclarativeNode, routing derivation, and concept deletion touch different files.
-- **CP3** is the big bang — VerticalID deletion + Empire vocabulary removal. Split by package ownership so agents don't conflict.
-- **CP4** is all new code (new files, new functions) — agents create, not modify.
+| Phase | Gate |
+|-------|------|
+| **1. Foundation** | `go build ./...` |
+| **2. Declarative Engine** | `go build ./...` + `go test ./... -short` |
+| **3. Empire Extraction** | `go test ./... -count=1` + zero Empire vocabulary in generic packages |
+| **4. Platform Completion** | Full test suite + all 18 boot checks + all 11 enforcement rules |
 
 ---
 
-## Phase 1: Test Suite Cleanup
+## Phase 1: Foundation
 
-### Why this is first
-
-112 tests actively prevent removing Empire code. They are the lock; removing them is the key.
-
-**IMPORTANT:** Steps 1.1 and 1.2 execute immediately. Steps 1.3-1.5 execute AFTER Phase 2 Step 2.1 (type the semantic model). See execution order above.
+Unblock the codebase: delete tests that protect Empire code, type the semantic model that everything else depends on, and fix the source-of-truth pipeline.
 
 ### Step 1.1: Triage the 112 tests (three-way classification)
 
@@ -135,7 +73,7 @@ An audit of every test revealed many "DELETE" tests contain valuable **platform 
 
 #### 1.1b: EXTRACT intent → REWRITE as generic (~55 tests) — valuable platform patterns
 
-These tests validate real platform mechanics but are welded to Empire constants. For each: document the **test intent**, delete the Empire implementation, and rewrite in the generic test bundle (Step 1.3).
+These tests validate real platform mechanics but are welded to Empire constants. For each: document the **test intent**, delete the Empire implementation, and rewrite in the generic test bundle (Step 3.1).
 
 | File | Tests | Platform pattern to preserve |
 |------|-------|------------------------------|
@@ -179,71 +117,9 @@ After all three sub-steps, run `go build ./...` to find orphaned test helpers. D
 
 **Action:** Create a minimal generic test module that loads a synthetic MAS contract bundle. The `masflowtest/` package (12/12 clean tests, zero Empire vocabulary) is the model.
 
-### Step 1.3: Build a generic test contract bundle + rewrite extracted intents
+### Step 1.3: Type the full semantic model (4 layers)
 
-**PREREQUISITE:** Complete Phase 2 Step 2.1 (type the semantic model) before this step. The test bundle must use typed handler structs, not `map[string]any`.
-
-Create a minimal MAS YAML package under a test fixtures directory:
-- 2-3 synthetic flows (`intake`, `processing`, `delivery`)
-- Generic agents (`coordinator`, `worker-a`, `worker-b`)
-- Generic events (`item.created`, `item.processed`, `item.completed`)
-- Generic entity fields (`status`, `priority`, `score`)
-- Handlers exercising guard, accumulate, on_complete, rules, compute, emits
-
-**Then rewrite the ~55 extracted intents from Step 1.1b as generic tests.** Organize by platform pattern:
-
-| Test file (new) | Patterns covered | Source intents |
-|-----------------|-----------------|----------------|
-| `testcases/accumulation_fanout_test.go` | Fan-out to N agents, count completions, threshold trigger, cleanup | A2, A3, A4, A5, scan_orchestrator |
-| `testcases/multigate_state_machine_test.go` | Gate coordination, reset-on-feedback, max-revision, stale-event guard, dedup | C8, D1-D4, E1-E4, pipeline_supplemental |
-| `testcases/scoring_outcome_test.go` | Dual-publish, per-dimension gates, buffer-to-digest | scoring_fanout tests |
-| `testcases/system_node_reliability_test.go` | Ledger idempotency, dead-letter, contract defaults, derived-entity | scoring_node tests |
-| `testcases/timer_lifecycle_test.go` | Timer forced completion, timer expiry enforcement | E5, scan_orchestrator timer |
-| `testcases/budget_suppression_test.go` | Budget state machine, event suppression by policy | Scenario 8, manager budget |
-| `testcases/agent_lifecycle_test.go` | Panic backoff, heartbeat, reconfigure, teardown | manager_supplemental, manager_lifecycle |
-| `testcases/e2e_framework_test.go` | Canned LLM fixtures, publish-and-wait, state validation | canned_llm structure |
-| `testcases/authorization_matrix_test.go` | Routing auth, message authority, mailbox permissions | commgraph/authority, commgraph/registry |
-
-### Step 1.4: Rewrite the 224 REWRITE tests in batches
-
-**PREREQUISITE:** Complete Step 1.3 (generic test bundle built against typed model).
-
-| Priority | Package | Count | Typical fix |
-|----------|---------|-------|-------------|
-| 1 | `store/` | 6 | Replace Empire agent IDs |
-| 2 | `workspace/` | 3 | Replace Empire role names |
-| 3 | `bus/` | 22 | Replace Empire event names |
-| 4 | `tools/` | 20 | Replace Empire agent/event IDs |
-| 5 | `agents/` | 15 | Replace Empire agent/scan modes |
-| 6 | `manager/` | 26 | Replace OpCo vocabulary |
-| 7 | `runtime/` root | 47 | Replace Empire module with generic |
-| 8 | `pipeline/` | 81 | Replace Empire nodes/events/stages |
-| 9 | `contracts/` | 20 | Replace Empire paths |
-| 10 | `commgraph/` | 4 | Replace Empire role names |
-
-### Step 1.5: Move product E2E coverage to product-owned packages
-
-- `holding_flow_strategy_*.go` → `pipeline/empire/`
-- `canned_llm_*.go` → `internal/runtime/empire_e2e_test.go`
-- `commgraph/authority_test.go` DELETE tests → `commgraph/empire/`
-
-### Exit criteria
-
-- `go test ./... -count=1` green
-- Zero `init()` wiring Empire module/policy as defaults
-- Zero test files in generic packages importing `empirepipeline` or `empireproductpolicy` directly
-- The 140 KEEP tests untouched
-- The ~224 REWRITE tests use generic vocabulary only
-
----
-
-## Phase 2: Empire Extraction
-
-After tests stop protecting Empire code, remove it.
-
-### Step 2.1: Type the full semantic model (3 layers)
-
-The current codebase has **30+ `map[string]any` fields** across three layers. All must become typed structs. This is the foundation — Steps 2.3 (guards), 2.5 (DeclarativeNode), and Phase 3 (DDL generation, pin validation) all depend on typed contracts.
+The current codebase has **30+ `map[string]any` fields** across four layers. All must become typed structs. This is the foundation — the handler engine (Phase 2), DDL generation, and pin validation (Phase 4) all depend on typed contracts.
 
 #### Layer 1: Handler fields on `SystemNodeEventHandler` and `HandlerTransitionSemantic`
 
@@ -265,8 +141,9 @@ The handler-first path (`directHandlerExecutionPlanSupported()`) bails out on `o
 | `config_from` | `map[string]any` | `ConfigFromSpec` | Read config values into handler context |
 | `branch` | `[]any` | `[]BranchSpec` | Conditional handler paths |
 | `sets_gate` | `any` | `GateSpec` | Gate name + optional value (string or struct) |
-| `clear_gates` | `any` | `[]string` | Gate names to clear |
+| `clear_gates` | `any` | `[]string` | Gate names to clear (runs BEFORE guard in engine) |
 | `query` | `any` | `QuerySpec` | Query expression (CEL or entity reference) |
+| `action` | `any` | `ActionSpec` | Platform action (create_flow_instance, record_evidence) or product hook ID |
 | `mode_to_scanners` | `map[string]any` | **DELETE** | Empire-specific, not in MAS model |
 
 **Add these typed structs to `workflow_contracts.go`:**
@@ -280,10 +157,11 @@ type HandlerRuleEntry struct {
 }
 
 type GuardSpec struct {
-    ID     string       `yaml:"id"`
-    Check  string       `yaml:"check"`      // CEL expression
-    OnFail string       `yaml:"on_fail"`
-    Checks []GuardCheck `yaml:"checks"`     // Compound guard
+    ID        string       `yaml:"id"`
+    Check     string       `yaml:"check"`      // CEL expression
+    PolicyRef string       `yaml:"policy_ref"` // Informational only — NOT executed. Documents which policy key the check references.
+    OnFail    string       `yaml:"on_fail"`
+    Checks    []GuardCheck `yaml:"checks"`     // Compound guard
 }
 
 type GuardCheck struct {
@@ -359,6 +237,13 @@ type QuerySpec struct {
     Source    string `yaml:"source"`
     StoreAs   string `yaml:"store_as"`
 }
+
+type ActionSpec struct {
+    ID             string `yaml:"id"`              // Platform action or product hook ID
+    Template       string `yaml:"template"`        // For create_flow_instance: template flow ID
+    InstanceIDFrom string `yaml:"instance_id_from"` // CEL expression for instance ID
+    ConfigFrom     string `yaml:"config_from"`     // CEL expression for config
+}
 ```
 
 Add `UnmarshalYAML` methods for backward compatibility where YAML uses string shorthand (especially `Guard`, `SetsGate` which can be a plain string).
@@ -367,7 +252,7 @@ After typing: remove `directHandlerExecutionPlanSupported()` bail-out. Delete th
 
 #### Layer 2: Entity schema and node state schema
 
-`EntitySchema` is `map[string]any` in **4 locations**. It must become typed for DDL generation (Phase 3, Step 3.3) and pin validation (boot check #10):
+`EntitySchema` is `map[string]any` in **4 locations**. It must become typed for DDL generation (Phase 4, Step 4.3) and pin validation (boot check #10):
 
 ```go
 type EntitySchema struct {
@@ -471,7 +356,7 @@ This is the structure that boot steps 2-6 build and steps 7-11 validate against.
    - Populate `ByID` with flow ID lookups
    - If `FlowTree.ByPath` is empty after loading, the loader is broken
 
-5. **Build the URI registry as part of tree construction.** URI addressing (local, absolute, full) is not a Phase 3 feature — it is inseparable from the tree. When the tree is built, every node, agent, and event gets a hierarchical URI assigned. This replaces Step 3.7 as a separate phase — URI resolution is a property of the tree, not an add-on.
+5. **Build the URI registry as part of tree construction.** URI addressing (local, absolute, full) is not a Phase 4 feature — it is inseparable from the tree. When the tree is built, every node, agent, and event gets a hierarchical URI assigned. This replaces Step 4.7 as a separate phase — URI resolution is a property of the tree, not an add-on.
 
    URI formats (resolve during tree construction):
    - Local (no `/`): `scoring.requested` → entity in current flow instance
@@ -558,7 +443,7 @@ type FlowVariable struct {
 
 All 58 `map[string]any` / `any` fields must become typed. This is not incremental — the typed model is the foundation for the handler engine, DDL generation, pin validation, policy resolution, and URI addressing.
 
-### Step 2.2: Fix source-of-truth pipeline
+### Step 1.4: Fix source-of-truth pipeline
 
 **Re-point schema registry generator** at MAS resolved bundle:
 ```go
@@ -572,7 +457,21 @@ Regenerate. This fixes: 22 missing events, 3 ghost events, transitive staleness.
 
 **Remove self-authority claim** from `contracts/ddl-canonical.sql` header.
 
-### Step 2.3: Delete hardcoded guard/action switch logic
+### Exit criteria for Phase 1
+
+- `go build ./...` passes
+- All 58 `map[string]any` / `any` fields replaced with typed structs
+- `FlowTree.Root`, `ByPath`, `ByID` populated by the loader
+- Schema registry generated from MAS contracts (not legacy catalog)
+- Zero `init()` wiring Empire module/policy as defaults
+
+---
+
+## Phase 2: Declarative Engine
+
+Build the spec's execution engine: typed guards, the 12-step handler, DeclarativeNode, and contract-derived routing. Delete the concepts these replace.
+
+### Step 2.1: Delete hardcoded guard/action switch logic
 
 **Delete `workflow_hooks.go`** — the 19 guard IDs and 11 action IDs must come from contracts, not Go switch statements.
 
@@ -598,68 +497,85 @@ Regenerate. This fixes: 22 missing events, 3 ghost events, transitive staleness.
 | `start_stage_timers` | Start timers scoped to entered state | Implicit (always runs) |
 | `increment_revision_count` | `metadata.revision_count += 1` | Explicit (register in hook) |
 
-### Step 2.4: Delete VerticalID from event envelope
-
-**Delete `VerticalID string` from Event struct** (`internal/events/types.go:15`). Do NOT rename — there is no concept of entity scope field on the event envelope in MAS.
-
-Routing comes from subscriptions + `subscribes_to`, not an entity ID on the envelope. Entity identity is a payload field.
-
-| Current usage | MAS replacement |
-|---------------|----------------|
-| Bus routing (factory vs OpCo) | Derive from event type + flow instance subscriptions |
-| Workspace addressing | `workspace_class` from agents.yaml + flow instance path |
-| Persistence scoping | `instance_id` (flow instance concept) |
-| Agent session scoping | Flow instance path for `session_per_entity` |
-| Store queries | Payload `entity_id` field |
-
-~300 callsites. Do it as one coordinated pass: break everything, fix everything, green. No bridge.
-
-### Step 2.5: Build the 10-step handler execution engine + DeclarativeNode
+### Step 2.2: Build the handler execution engine + DeclarativeNode
 
 **THIS IS THE ARCHITECTURAL BACKBONE. Everything depends on it.**
 
 Neither the handler execution engine nor `DeclarativeNode` exist in the current codebase. The current `resolveContractHandlerFirstTransition()` (line 700 of `workflow_transition_engine.go`) bails out on complex handlers. The entire transition engine is a mixture of typed paths and manual `map[string]any` walking with hardcoded Empire switch statements.
 
-#### 2.5a: Implement the 10-step handler execution engine
+#### 2.2a: Implement the handler execution engine
 
-The spec defines a strict dependency graph for handler execution. When a node receives an event, its handler executes these steps **in order**, short-circuiting where appropriate:
+The spec defines a strict dependency graph for handler execution (spec lines 725-761). When a node receives an event, its handler executes these steps **in order**, short-circuiting where appropriate:
 
 ```
-Step 1: guard        → evaluate CEL expression or compound checks. If false → STOP (transition blocked)
-Step 2: accumulate   → track incoming event against expected_from set (idempotent, set-based)
-Step 3: compute      → run operation (weighted_average, sum, etc.) over accumulated data
-Step 4: fan_out      → iterate items_from, emit emit_per_item for each. STOP after fan_out (async)
-Step 5: on_complete  → evaluate completion CEL. If met → execute nested rule (advances_to, emits, data_accumulation)
-Step 6: advances_to  → set entity state to target. Triggers implicit actions (record_state_change, update_stage, cancel/start timers)
-Step 7: sets_gate    → set gate flag on entity
-Step 8: data_accumulation → write entity fields from event payload
-Step 9: emits        → publish event(s) to event loop
-Step 10: rules       → evaluate CEL conditions in order. First match fires (advances_to, emits, data_accumulation)
+Step 1:  clear_gates       → reset gate flags listed in handler's clear_gates field. Runs BEFORE guard so re-validation cycles start clean.
+Step 2:  guard             → evaluate CEL expression or compound checks. If false → STOP (on_fail: reject|kill|discard|escalate)
+Step 3:  accumulate        → track incoming event against expected_from set. Received list is a SET (duplicates ignored). If incomplete → STOP.
+Step 4:  compute           → run operation (weighted_average, sum, etc.) over accumulated data
+Step 5:  fan_out           → iterate items_from, emit emit_per_item for each. Writes fan_out.count to entity state. STOP after fan_out (async).
+Step 6:  on_complete/rules → MUTUALLY EXCLUSIVE. Handler uses ONE, never both. Boot must reject handlers declaring both.
+                             on_complete: ordered list [{condition, advances_to, emits, data_accumulation}] — first match wins
+                             rules: map {condition → {emits, advances_to, data_accumulation}} — payload-based dispatch, first match wins
+Step 7:  advances_to       → set entity state to target. Triggers implicit actions (record_state_change, update_stage, cancel/start timers)
+Step 8:  sets_gate         → set gate flag on entity (default: true)
+Step 9:  data_accumulation → write entity fields from event payload. Supports direct, mapped, and literal writes.
+Step 10: payload_transform → construct output event payload from entity + payload + computed values via CEL field mappings
+Step 11: emits             → persist event(s) to event store (within transaction). Delivery happens AFTER commit.
+Step 12: action            → execute platform actions (create_flow_instance, record_evidence) or product hook actions
 ```
+
+**Steps 7-9 (`advances_to`, `sets_gate`, `data_accumulation`) are INDEPENDENT** — no causal dependency between them, any execution order is valid within this group.
 
 **Short-circuit rules:**
-- Guard false → stop at step 1
-- Accumulate incomplete → stop at step 2 (wait for more events)
-- Fan-out → stop at step 4 (async, each fan-out item re-enters at step 1)
-- Rules → first match wins, stop evaluating
+- `clear_gates` → always runs if present, no short-circuit
+- Guard false → stop at step 2. Execute `on_fail` action.
+- Accumulate incomplete → stop at step 3 (wait for more events)
+- Fan-out → stop at step 5 (async, each fan-out item re-enters at step 2)
+- on_complete/rules → first match wins, stop evaluating
 
-**CEL context variables** available in all expressions:
+#### Handler atomicity boundary (spec lines 746-753)
+
+**ALL side effects from one handler execution commit in a single database transaction.** This is a load-bearing runtime invariant:
+
+- State change, gate update, data writes, event persistence — all in one transaction
+- No external observer sees intermediate state
+- **Guards evaluate against entity state BEFORE any handler writes** — `data_accumulation` from the current handler does NOT affect the current handler's guard (it affects the NEXT handler's guard after commit)
+- **Emitted events are persisted within the transaction but DELIVERED after commit** — this prevents recursive handler chains and deadlocks
+- Agent inbox delivery is async (outside atomic boundary)
+
+#### Entity concurrency model (spec lines 1003-1013)
+
+- **Per-entity serial:** All events for the same entity processed one at a time. Entity-level lock acquired before handler execution, released after commit or rollback.
+- **Cross-entity concurrent:** Events for different entities fully concurrent. Handling entity X does not block entity Y.
+- **Agent concurrency:** Agent deliveries asynchronous. Events placed in agent inbox in order. Agent processes sequentially. Multiple agents run concurrently.
+
+**CEL context variables** available in all expressions (from spec `context_variables`):
 ```
 entity.{field}           — entity fields from entity_schema
 entity.current_state     — current workflow state
 entity.gates.{gate_id}   — gate flags
 payload.{field}          — trigger event payload
 policy.{key}             — policy values (hierarchical, child shadows parent)
-accumulated.{node_id}    — accumulated data from node's state
+accumulated.{node_id}    — accumulated data from node's state (list of received items)
 fan_out.item             — current item in fan_out iteration
+fan_out.count            — number of items fanned out (written to entity state by fan_out step)
 metadata.revision_count  — revision counter
 ```
 
-**Implementation:** Replace `resolveContractHandlerFirstTransition()` with a new `executeHandlerSteps()` function that:
-1. Takes typed `SystemNodeEventHandler` (after Step 2.1 typing)
-2. Walks steps 1-10 in order using typed structs (not map[string]any)
-3. Evaluates CEL expressions with the context variables above
-4. Returns the outcome: state change, emitted events, entity writes, or blocked
+**Implementation: Generic CEL Context Builder.** Build a single `BuildCELContext(entity, payload, policy, executionState) → CELEnv` function that auto-populates all context variables based on the current handler execution state. This replaces the current manual variable mapping in `workflow_transition_engine.go:1534-1690`. The builder must:
+- Populate `fan_out.*` only when executing inside a fan_out step
+- Populate `accumulated.*` only inside `on_complete` after accumulation completes
+- Resolve `policy.*` by walking up `FlowTree` (child shadows parent) — not from a flat merged map
+- Be called once per handler step evaluation, not once per handler
+
+Replace `resolveContractHandlerFirstTransition()` with a new `executeHandlerSteps()` function that:
+1. Takes typed `SystemNodeEventHandler` (after Step 1.3 typing)
+2. Acquires entity lock, loads pre-handler entity state
+3. Walks steps 1-12 in order using typed structs (not map[string]any)
+4. Calls `BuildCELContext()` at each evaluation point with current execution state
+5. Commits all side effects in a single transaction
+6. Delivers emitted events AFTER commit (not during)
+7. Returns the outcome: state change, emitted events, entity writes, or blocked
 
 **Files to modify:**
 - `workflow_transition_engine.go:700-750` — replace bail-out with full execution
@@ -669,14 +585,14 @@ metadata.revision_count  — revision counter
 - `workflow_transition_engine.go:1436-1520` — delete guard switch, use CEL evaluation
 - `workflow_transition_engine.go:1817-1964` — delete action switch, use platform builtins + product hooks
 
-#### 2.5b: Implement DeclarativeNode
+#### 2.2b: Implement DeclarativeNode
 
 `DeclarativeNode` is the **default** node executor. Every system node ID maps to `DeclarativeNode` unless a product hook overrides it.
 
 ```go
 type DeclarativeNode struct {
     contract    SystemNodeContract       // typed YAML definition
-    engine      *HandlerExecutionEngine  // the 10-step engine from 2.5a
+    engine      *HandlerExecutionEngine  // the 12-step engine from 2.2a
     hookRegistry *ProductHookRegistry    // optional product hooks
 }
 
@@ -701,7 +617,7 @@ type ActionHandler func(ctx context.Context, evt Event, entity *Entity) error
 // registry.RegisterAction("spinup_opco_org", empire.SpinupOpCo)
 ```
 
-The hook is invoked at step 10 of the handler execution engine when the handler's `action` field matches a registered hook. All other steps are generic.
+The hook is invoked at step 12 of the handler execution engine when the handler's `action` field matches a registered hook. All other steps are generic.
 
 **Replace `workflow_nodes_runtime.go` switch:**
 ```go
@@ -712,7 +628,7 @@ func NewNode(contract SystemNodeContract, engine *HandlerExecutionEngine, hooks 
 }
 ```
 
-#### 2.5c: Derive routing from contracts (replace mutable routing tables)
+#### 2.2c: Derive routing from contracts (replace mutable routing tables)
 
 Current code uses `SetRoutingTable(verticalID, routes)` to mutate routing at runtime. The MAS spec says routing is **derived**, not mutated.
 
@@ -737,7 +653,7 @@ Current code uses `SetRoutingTable(verticalID, routes)` to mutate routing at run
 - `bus/eventbus_routing.go:71-92` — delete `resolveOpCoRecipients()`, replace with instance-scoped lookup
 - `bus/routing.go:27-65` — delete `FactoryEventPrefixes`
 
-### Step 2.6: Delete concepts that don't exist in MAS
+### Step 2.3: Delete concepts that don't exist in MAS
 
 **a) Mutable routing tables.** `SetRoutingTable`/`GetRoutingTable` → delete. MAS derives routing at boot + flow activation. Routing is a projection of `FlowTree.ByPath` — walk the tree, collect `subscribes_to` declarations, build a read-only route table.
 
@@ -759,7 +675,7 @@ Current code uses `SetRoutingTable(verticalID, routes)` to mutate routing at run
 
 These are Empire product state. If Empire needs them, they belong behind a product-owned adapter, not in generic `state_store.go` recovery paths.
 
-**Target `WorkflowModule` interface after Step 2.6:**
+**Target `WorkflowModule` interface after Step 2.3:**
 
 ```go
 type WorkflowModule interface {
@@ -776,7 +692,83 @@ The following methods are REMOVED from the generic interface (move to Empire-int
 - `ScoringPolicy()` — Empire scoring logic
 - `PayloadFactory()` — Empire payload shaping
 
-### Step 2.7: Extract Empire from config, factory, store, tools
+### Exit criteria for Phase 2
+
+- `go build ./...` + `go test ./... -short` passes
+- Handler-first execution handles `on_complete` and `rules` without bailing out
+- All system nodes execute through `DeclarativeNode`
+- No `productpolicy.Policy` interface
+- No mutable routing tables
+- No `accumulator_state` JSON bucket
+- No `current_stage` on entity table
+
+---
+
+## Phase 3: Empire Extraction
+
+Remove all Empire logic from generic packages: rewrite tests, delete VerticalID, extract Empire-specific packages, scrub vocabulary.
+
+### Step 3.1: Build generic test bundle + rewrite extracted intents
+
+Create a minimal MAS YAML package under a test fixtures directory:
+- 2-3 synthetic flows (`intake`, `processing`, `delivery`)
+- Generic agents (`coordinator`, `worker-a`, `worker-b`)
+- Generic events (`item.created`, `item.processed`, `item.completed`)
+- Generic entity fields (`status`, `priority`, `score`)
+- Handlers exercising guard, accumulate, on_complete, rules, compute, emits
+
+**Then rewrite the ~55 extracted intents from Step 1.1b as generic tests.** Organize by platform pattern:
+
+| Test file (new) | Patterns covered | Source intents |
+|-----------------|-----------------|----------------|
+| `testcases/accumulation_fanout_test.go` | Fan-out to N agents, count completions, threshold trigger, cleanup | A2, A3, A4, A5, scan_orchestrator |
+| `testcases/multigate_state_machine_test.go` | Gate coordination, reset-on-feedback, max-revision, stale-event guard, dedup | C8, D1-D4, E1-E4, pipeline_supplemental |
+| `testcases/scoring_outcome_test.go` | Dual-publish, per-dimension gates, buffer-to-digest | scoring_fanout tests |
+| `testcases/system_node_reliability_test.go` | Ledger idempotency, dead-letter, contract defaults, derived-entity | scoring_node tests |
+| `testcases/timer_lifecycle_test.go` | Timer forced completion, timer expiry enforcement | E5, scan_orchestrator timer |
+| `testcases/budget_suppression_test.go` | Budget state machine, event suppression by policy | Scenario 8, manager budget |
+| `testcases/agent_lifecycle_test.go` | Panic backoff, heartbeat, reconfigure, teardown | manager_supplemental, manager_lifecycle |
+| `testcases/e2e_framework_test.go` | Canned LLM fixtures, publish-and-wait, state validation | canned_llm structure |
+| `testcases/authorization_matrix_test.go` | Routing auth, message authority, mailbox permissions | commgraph/authority, commgraph/registry |
+
+### Step 3.2: Rewrite the 224 REWRITE tests in batches
+
+| Priority | Package | Count | Typical fix |
+|----------|---------|-------|-------------|
+| 1 | `store/` | 6 | Replace Empire agent IDs |
+| 2 | `workspace/` | 3 | Replace Empire role names |
+| 3 | `bus/` | 22 | Replace Empire event names |
+| 4 | `tools/` | 20 | Replace Empire agent/event IDs |
+| 5 | `agents/` | 15 | Replace Empire agent/scan modes |
+| 6 | `manager/` | 26 | Replace OpCo vocabulary |
+| 7 | `runtime/` root | 47 | Replace Empire module with generic |
+| 8 | `pipeline/` | 81 | Replace Empire nodes/events/stages |
+| 9 | `contracts/` | 20 | Replace Empire paths |
+| 10 | `commgraph/` | 4 | Replace Empire role names |
+
+### Step 3.3: Move product E2E coverage to product-owned packages
+
+- `holding_flow_strategy_*.go` → `pipeline/empire/`
+- `canned_llm_*.go` → `internal/runtime/empire_e2e_test.go`
+- `commgraph/authority_test.go` DELETE tests → `commgraph/empire/`
+
+### Step 3.4: Delete VerticalID from event envelope
+
+**Delete `VerticalID string` from Event struct** (`internal/events/types.go:15`). Do NOT rename — there is no concept of entity scope field on the event envelope in MAS.
+
+Routing comes from subscriptions + `subscribes_to`, not an entity ID on the envelope. Entity identity is a payload field.
+
+| Current usage | MAS replacement |
+|---------------|----------------|
+| Bus routing (factory vs OpCo) | Derive from event type + flow instance subscriptions |
+| Workspace addressing | `workspace_class` from agents.yaml + flow instance path |
+| Persistence scoping | `instance_id` (flow instance concept) |
+| Agent session scoping | Flow instance path for `session_per_entity` |
+| Store queries | Payload `entity_id` field |
+
+~300 callsites. Do it as one coordinated pass: break everything, fix everything, green. No bridge.
+
+### Step 3.5: Extract Empire from config, factory, store, tools
 
 **a) `internal/config/config.go`** (235 lines, CRITICAL)
 
@@ -800,21 +792,21 @@ Action: Move to `internal/empire/store/`. Keep generic store interfaces for agen
 
 Agents have raw SQL access. Spec forbids this — agents use typed entity CRUD tools.
 
-Action: Delete. Replace with auto-generated entity persistence tools (Step 3.2).
+Action: Delete. Replace with auto-generated entity persistence tools (Step 4.2).
 
 **e) `contracts/` root directory** (30 files)
 
 100% Empire domain model. The MAS contracts live at `docs/specs/mas-platform/`.
 
-Action: Move to `internal/empire/contracts/` or `docs/specs/mas-platform/empire/contracts/`. The schema registry generator already needs to point at MAS bundle (Step 2.2).
+Action: Move to `internal/empire/contracts/` or `docs/specs/mas-platform/empire/contracts/`. The schema registry generator already needs to point at MAS bundle (Step 1.4).
 
-### Step 2.8: Genericize `cmd/empire/main.go`
+### Step 3.6: Genericize `cmd/empire/main.go`
 
 978 lines with Empire-specific wiring: Hetzner workspace lifecycle, factory scan runner, inbound gateway, mailbox notifier, human task expiry, marginal maintenance, portfolio digest, health monitor, Telegram bot, dashboard.
 
 Action: Extract a generic `cmd/mas/main.go` (~300 lines) that boots only core runtime: LLM runtime, event bus, agent lifecycle, scheduling. `cmd/empire/main.go` extends it with Empire subsystems via a product hook registration pattern.
 
-### Step 2.9: Remove remaining Empire vocabulary
+### Step 3.7: Remove remaining Empire vocabulary
 
 Work package by package:
 
@@ -849,29 +841,25 @@ Rename:
 - `verticals` table → product-owned entity table derived from `entity_schema`
 - Delete `isFactoryEvent` (routing is derivation-based)
 
-### Exit criteria for Phase 2
+### Exit criteria for Phase 3
 
 - `go test ./... -count=1` green
 - Zero imports of `pipeline/empire`, `productpolicy/empire`, `commgraph/empire` from generic packages
 - `grep -r "vertical\|opco\|empire\|factory\|holding" internal/runtime/pipeline/*.go` returns zero hits in non-empire/ files
-- Handler-first execution handles `on_complete` and `rules` without bailing out
-- All system nodes execute through `DeclarativeNode`
-- No `productpolicy.Policy` interface
-- No mutable routing tables
-- No `accumulator_state` JSON bucket
-- No `current_stage` on entity table
-- Schema registry generated from MAS contracts
+- The 140 KEEP tests untouched
+- The ~224 REWRITE tests use generic vocabulary only
+- Zero test files in generic packages importing `empirepipeline` or `empireproductpolicy` directly
 - No raw SQL tool in generic packages
 - Config has only Runtime/Database/LLM sections
 - `cmd/mas/main.go` exists and boots without Empire
 
 ---
 
-## Phase 3: Platform Completion
+## Phase 4: Platform Completion
 
-The spec defines 147 requirements. After Phases 1-2, roughly 40% are covered. Phase 3 implements the missing 59%.
+The spec defines 147 requirements. After Phases 1-3, roughly 40% are covered. Phase 4 implements the missing 59%.
 
-### Step 3.1: Boot sequence (15 steps)
+### Step 4.1: Boot sequence (15 steps)
 
 Implement the full boot sequence from `engine → boot_sequence`:
 
@@ -881,7 +869,7 @@ Implement the full boot sequence from `engine → boot_sequence`:
 | 2. `walk_flow_tree` | Recursive from root package.yaml, max depth 99 | Implemented |
 | 3. `construct_paths` | Hierarchical paths: `{flow_instance_path}/{local_name}` | Implemented |
 | 4. `register_templates` | `mode: template` → register, don't instantiate | Implemented |
-| 5. `build_registries` | Nodes, agents, events, tools, policy (hierarchical) | Partial |
+| 5. `build_registries` | Nodes, agents, events, tools (with inheritance), policy (hierarchical) | Partial |
 | 6. `resolve_subscriptions` | Local (no /) vs absolute (/) vs wildcards | Implemented |
 | 7. `validate_pins` | Required input pins wired, no write conflicts | **MISSING** |
 | 8. `validate_required_agents` | All flow `required_agents` fulfilled | **MISSING** |
@@ -895,7 +883,7 @@ Implement the full boot sequence from `engine → boot_sequence`:
 
 **Failure mode:** Any step fails → abort boot with clear error (step, flow/agent/event, fix). No partial startup.
 
-### Step 3.2: Entity persistence tools (auto-generated)
+### Step 4.2: Entity persistence tools (auto-generated)
 
 The spec requires 4 auto-generated persistence tools from `entity_schema` in `package.yaml`:
 
@@ -908,7 +896,7 @@ The spec requires 4 auto-generated persistence tools from `entity_schema` in `pa
 
 These replace `executor_sql.go`. Agents do NOT have raw database access. All access is permissioned, auditable, and storage-backend agnostic.
 
-### Step 3.3: DDL generation from entity_schema
+### Step 4.3: DDL generation from entity_schema
 
 The spec says entity tables are derived from `entity_schema` at boot (step 12).
 
@@ -938,7 +926,7 @@ CREATE TABLE workflow_instances (
 
 Note: `accumulator_state` on `workflow_instances` is per-node keyed state (the spec says "per-node state buckets, keyed by node_id") — this is different from the current untyped grab-bag. The platform should enforce that node state matches `state_schema` declarations.
 
-### Step 3.4: Boot validation checks (11 required)
+### Step 4.4: Boot validation checks (18 required)
 
 All must pass before step 13 (start_system_nodes):
 
@@ -953,8 +941,15 @@ All must pass before step 13 (start_system_nodes):
 9. All `emit_events` have schemas in events.yaml
 10. `entity_schema` covers all `data_accumulation` write targets
 11. All `required_agents` fulfilled after namespace substitution
+12. Cross-flow event schemas: an event schema is defined ONCE in the emitting flow's `events.yaml`. Consuming flows reference it by absolute path — they do NOT redefine the schema. Boot must reject conflicting schema definitions for the same event name across flows.
+13. `on_complete` and `rules` are mutually exclusive on a handler. Boot must reject handlers declaring both (spec line 755).
+14. Flow ID uniqueness across entire tree. Duplicate flow IDs across different parents is a boot error (spec line 793).
+15. All handler fields must be defined in `system_node_specification.handler_fields` — reject unknown handler fields (spec line 1238).
+16. All guard `check` expressions, rule `condition` expressions, filter conditions, and `on_complete` conditions must parse as valid CEL. Syntax errors abort boot (spec lines 1254-1257).
+17. Every agent must have a prompt file in flow `prompts/` directory (spec line 1244).
+18. No deprecated fields used: `subscriptions_bootstrap`, `logic`, `on_below_threshold`, `on_dedup`, `on_pass`, handler-level `condition` (spec lines 1250-1253).
 
-### Step 3.5: Runtime enforcement rules (11 required)
+### Step 4.5: Runtime enforcement rules (11 required)
 
 Enforce during execution:
 
@@ -970,7 +965,7 @@ Enforce during execution:
 10. Manager fallback read from `agent.manager_fallback`, not hardcoded
 11. Workspace class read from `agent.workspace_class`, not hardcoded
 
-### Step 3.6: Error model
+### Step 4.6: Error model
 
 Implement the full error model:
 
@@ -992,7 +987,14 @@ Implement the full error model:
 
 **Timer failure:** Same retry policy as handler failures.
 
-### Step 3.7: URI addressing model
+**Terminal state behavior (spec lines 1055-1062):**
+When an entity reaches a terminal state (declared in `schema.yaml terminal_states`):
+- Entity stops accepting new events — handlers reject events for terminal entities
+- All active timers for the entity are cancelled
+- All agent sessions working on the entity are terminated
+- **Entity data is NOT cleared.** Terminal entities retain all accumulated state, scores, research, and decision history. This is explicit in the spec — do not implement cleanup-on-terminal.
+
+### Step 4.7: URI addressing model
 
 Implement the three addressing formats:
 
@@ -1006,7 +1008,9 @@ Resolution rule: slash presence determines scope. No slash = local. Slash = abso
 
 Wildcards: `*/entity.shortlisted` (direct children), `**/entity.completed` (any depth).
 
-### Step 3.8: Permissions model (13 permissions)
+**Note:** URI construction is done during FlowTree build (Step 1.3, Layer 3). This step covers runtime resolution — looking up entities by URI at event delivery time.
+
+### Step 4.8: Permissions model (13 permissions)
 
 Implement and enforce:
 
@@ -1032,21 +1036,31 @@ Implement and enforce:
 
 **Workflow extensions:** Unrecognized permissions pass to workflow-registered handlers.
 
-### Step 3.9: Prompt templating
+**Tool inheritance model (spec lines 845-847):**
+- Root `tools.yaml` tools are shared with ALL child flows — agents in any child flow can use them
+- Child flow `tools.yaml` tools are available ONLY within that child flow
+- If a child declares a tool with the same ID as a root tool, the child's version takes precedence within that flow
+- Tools are NOT URI-scoped (unlike nodes, agents, events) — they are shared resources
+- The tool registry must track per-flow precedence, not just a flat global map
+
+**Agent `model_tier` authority (spec line 714):**
+`agents.yaml` `model_tier` is AUTHORITATIVE — it wins over `policy.yaml model_tiers` on conflict. `policy.yaml model_tiers` is a convenience lookup for tooling and dashboards only.
+
+### Step 4.9: Prompt templating
 
 - Agent prompts: markdown in `prompts/{agent-id}.md`
 - `{{variable}}` placeholders substituted from `policy.yaml` at session creation
 - Simple string replacement, no logic
 - Variables not in policy.yaml → left as-is (fail-open)
 
-### Step 3.10: Session model completeness
+### Step 4.10: Session model completeness
 
 Verify implementation covers:
 
 **Conversation modes:**
 - `task` — new session per event, stateless (default)
 - `session` — persists across events, context accumulates
-- `session_per_entity` — one session per entity, separate per entity
+- `session_per_entity` — one session per entity, separate per entity. **Implementation requirement:** the platform must maintain a persistent mapping from `(agent_id, entity_id) → session_id` so that multiple event deliveries for the same entity resume the same conversation. This is NOT a simple cache — it must survive agent restarts and be queryable at session creation time.
 
 **Emit tool auto-generation:**
 - From each agent's `emit_events`, generate `emit_{event_name}` tools (dots → underscores)
@@ -1057,7 +1071,7 @@ Verify implementation covers:
 
 **Turn budget:** `max_turns_per_task` from agents.yaml. Exceeded → terminate session, emit timeout event.
 
-### Step 3.11: Timer model completeness
+### Step 4.11: Timer model completeness
 
 Verify implementation covers all timer fields:
 
@@ -1072,15 +1086,19 @@ Verify implementation covers all timer fields:
 
 **Lifecycle:** start_on triggers → persist (entity_id, timer_id, fire_at) → fire_at reached → emit event → cancel_on triggers → cancel. Recurring timers restart after firing unless cancelled.
 
+**cancel_on supports both states AND events:** `cancel_on: state:ready_for_review` cancels when entity reaches that state. `cancel_on: event:spec.approved` cancels when that event fires. The scheduler must subscribe to both state transitions and events to handle cancellation — not just state checks.
+
 **Crash recovery:** Timers are persisted. On restart, check for expired timers and fire them.
 
-### Step 3.12: Namespace substitution
+### Step 4.12: Namespace substitution
 
 Flow schemas declare `namespace_prefix`. Root flows assign namespace per instance. Platform substitutes at boot.
 
+**Recursive nesting:** Substitution must be applied recursively during `walk_flow_tree`. A child flow's namespace prefix prepends its children's events, agents, and node IDs. For a flow at depth 3 (`root/flow-a/flow-b/flow-c`), the final event name is the concatenation of all namespace prefixes from root to leaf. The substitution happens during tree construction (Layer 3 FlowTree build), not as a separate post-processing pass — otherwise cross-flow references resolve against un-substituted names.
+
 Must validate: no event name collisions after substitution (boot check #6). All `required_agents` fulfilled after substitution (boot check #11).
 
-### Step 3.13: Dynamic flow instance lifecycle (11 steps)
+### Step 4.13: Dynamic flow instance lifecycle (11 steps)
 
 Current implementation (`manager/flow_activation.go`) covers ~6 of 11 spec steps. Missing steps are critical.
 
@@ -1098,7 +1116,7 @@ Current implementation (`manager/flow_activation.go`) covers ~6 of 11 spec steps
 | 10 | **Start nodes AND agents** | Partial — agents started, **nodes not activated** |
 | 11 | **Auto-emit on create** | **MISSING** — `auto_emit_on_create` field is read but never emitted |
 
-### Step 3.14: Required field validation at boot
+### Step 4.14: Required field validation at boot
 
 The spec mandates all required fields present on every contract object. Add boot checks for:
 
@@ -1115,7 +1133,7 @@ The spec mandates all required fields present on every contract object. Add boot
 
 These are structural integrity checks — fail fast at boot with clear error messages.
 
-### Step 3.15: Emit tool auto-generation
+### Step 4.15: Emit tool auto-generation
 
 From each agent's `emit_events` list, auto-generate tool schemas:
 
@@ -1125,7 +1143,7 @@ From each agent's `emit_events` list, auto-generate tool schemas:
 4. Agents do NOT list these in `tools_tier2` — they are auto-granted based on `emit_events`
 5. Universal tools (`agent_message`, `mailbox_send`) auto-granted to all agents without declaration
 
-### Step 3.16: Database migration strategy
+### Step 4.16: Database migration strategy
 
 Three-tier schema responsibility:
 
@@ -1139,12 +1157,12 @@ Three-tier schema responsibility:
 
 **Schema changes:** Detect at boot. The spec does not define automatic migration — implementer designs the upgrade path.
 
-### Exit criteria for Phase 3
+### Exit criteria for Phase 4
 
 - All 15 boot steps implemented
-- All 11 boot validation checks pass
+- All 18 boot validation checks pass
 - All 11 runtime enforcement rules active
-- All required fields validated at boot (Step 3.14)
+- All required fields validated at boot (Step 4.14)
 - 4 entity persistence tools auto-generated from entity_schema
 - DDL generated from entity_schema at boot
 - Error model with exponential backoff, dead letter, chain depth 50
@@ -1152,27 +1170,41 @@ Three-tier schema responsibility:
 - 13 permissions enforced on tool calls and message delivery
 - Prompt templating with `{{variable}}` from policy.yaml
 - 3 conversation modes implemented
-- Emit tools auto-generated from `emit_events` (Step 3.15)
+- Emit tools auto-generated from `emit_events` (Step 4.15)
 - Timer model with start_on/cancel_on/recurring/crash recovery
 - Namespace substitution at boot with collision detection
-- Dynamic instance lifecycle: all 11 steps (Step 3.13), including mode validation, uniqueness, node activation, auto-emit
+- Dynamic instance lifecycle: all 11 steps (Step 4.13), including mode validation, uniqueness, node activation, auto-emit
 - `create_flow_instance` rejects non-template flows
 - Wildcard subscriptions expanded on instance creation
 
 ---
 
-## Reference: What the old implementer got right
+## Reference: What's Already Right — DO NOT REFACTOR
 
-- **Handler-first execution path (partial)** — core transition engine exists, CEL evaluation works, timer lifecycle exists. But: bails out on `on_complete`/`rules`, no 10-step engine, no DeclarativeNode. The foundation is there; the engine needs to be finished.
+**WARNING:** An implementer who doesn't know what's correct will accidentally refactor working code. The items below are **structurally sound** and match the spec's abstractions. Do not redesign, rewrite, or "improve" them. Build on top of them.
+
+### Correct abstractions (keep as-is, extend only)
+
+- **`SystemNodeRunner`** (`system_node_runner.go`) — Generic node execution wrapper with retry, dead-letter, dedup. This is the spec's system node lifecycle. The problem is the nodes it wraps (Empire orchestrators), not the runner itself.
+- **`WorkflowInstanceStore`** (`workflow_instance_store.go`) — CRUD, mutation, template-flow coexistence. Matches the spec's `workflow_instances` DDL closely. Keep.
+- **Handler engine** (`handler_engine_exec.go`) — Already implements the spec's execution primitives: `advances_to`, `emits`, `sets_gate`, `guard`, `data_accumulation`, `on_complete`, `fan_out`, `rules`, `accumulate`, `record_evidence`, `from`. This is the most important piece of existing infrastructure. Finish it (12-step engine, DeclarativeNode) — don't replace it.
+- **`WorkflowModule` interface** — Clean product injection point. Needs slimming (remove `ScanPolicy`, `DiscoveryPolicy`, `ScoringPolicy`, `PayloadFactory`) but the pattern of products providing a module to the platform is exactly right.
+- **`CommGraph.Policy` interface** — Correct abstraction boundary for communication graph policy. The issue is fallback paths that bypass the interface (hardcoded `roleAliases`, `defaultManagerAgentID()`), not the interface itself.
+- **`ProductPolicy` / `PolicyReader` pattern** — Generic config access from `policy.yaml`. The abstraction is correct; the issue is Empire-specific keys/modes leaking into the generic reader.
+- **Contract loading** (`workflow_contracts.go`) — Hierarchical, scope-aware resolution with source tracking. The loader architecture is sound. The issue is: (a) it doesn't populate `FlowTree`, and (b) it defaults to Empire paths. Fix those two things — don't rewrite the loader.
+
+### Correct implementations (keep, no changes needed)
+
 - **MAS contract loader** — walks package tree, resolves flows, merges bundles, handles namespacing. Solid.
-- **Workflow instance store** — CRUD, mutation, template-flow coexistence. Works.
-- **Flow activation (partial)** — `create_flow_instance` exists, wildcard subscriptions expand at boot, instance-scoped routing works. Missing: mode validation, node activation, auto-emit (5 of 11 steps missing).
+- **Flow activation (partial)** — `create_flow_instance` exists, wildcard subscriptions expand at boot, instance-scoped routing works. Missing: mode validation, node activation, auto-emit (5 of 11 steps missing). Extend, don't replace.
 - **Wildcard handler resolution** — closed across all 3 lookup paths. Works.
 - **Budget system** — `budget_test.go` 6/6 KEEP, fully generic.
 - **CEL expression evaluator** — 7/13 tests KEEP, product-agnostic. But: context variable binding is manual and Empire-specific.
-- **masflowtest framework** — 12/12 clean, shows the right pattern.
+- **masflowtest framework** — 12/12 clean, shows the right pattern for generic tests.
 
-The runtime foundations exist but are incomplete. The problem is both Empire logic mixed into generic packages AND missing spec features (10-step engine, DeclarativeNode, routing derivation, pin validation, entity persistence tools).
+### The one-sentence summary
+
+The handler engine can already execute arbitrary declarative workflows; the remaining work is removing the hardcoded Empire logic that bypasses it and populating the FlowTree that everything else projects from.
 
 ## Reference: Key documents
 

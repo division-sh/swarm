@@ -8,6 +8,7 @@ import (
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
 
 func LoadMASWorkflowBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
@@ -44,7 +45,7 @@ func ActivateOperatingFlowInstance(t testing.TB, am *runtimemanager.AgentManager
 		payload[key] = value
 	}
 	if err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
-		ContractBundle: LoadMASWorkflowBundle(t),
+		ContractBundle: semanticview.Wrap(LoadMASWorkflowBundle(t)),
 		TemplateID:     "operating",
 		InstanceID:     verticalID,
 		VerticalID:     verticalID,

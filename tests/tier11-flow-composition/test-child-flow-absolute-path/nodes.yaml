@@ -1,0 +1,18 @@
+dispatcher:
+  id: dispatcher
+  execution_type: system_node
+  subscribes_to: [work.start]
+  produces: [child/task.requested]
+  event_handlers:
+    work.start:
+      emits: child/task.requested
+
+listener:
+  id: listener
+  execution_type: system_node
+  subscribes_to: [child/task.done]
+  produces: [work.finished]
+  event_handlers:
+    child/task.done:
+      advances_to: done
+      emits: work.finished

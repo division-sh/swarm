@@ -1,0 +1,5 @@
+name: test-wildcard-subscription
+version: 1.0.0
+description: Node subscribes to wildcard event pattern and handler fires on match.
+platform_version: ">=1.1.0"
+flows: []

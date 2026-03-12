@@ -1,0 +1,8 @@
+initial_state: scoring
+terminal_states: [shortlisted, killed]
+states: [scoring, shortlisted, marginal_review, killed]
+pins:
+  inputs:
+    events: [score.dimension_complete]
+  outputs:
+    events: [vertical.shortlisted, vertical.marginal, vertical.rejected]

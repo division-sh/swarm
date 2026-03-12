@@ -1,0 +1,7 @@
+child.check:
+  payload:
+    entity_id: string
+    score: integer
+child.done:
+  payload:
+    entity_id: string

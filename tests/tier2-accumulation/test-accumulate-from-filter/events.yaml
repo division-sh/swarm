@@ -1,0 +1,7 @@
+score.received:
+  payload:
+    entity_id: string
+    score: float
+scores.collected:
+  payload:
+    entity_id: string

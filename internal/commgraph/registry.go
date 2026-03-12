@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
 
@@ -266,16 +267,19 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 	if err != nil {
 		return contractProducerRegistry{}, err
 	}
+	source := semanticview.Wrap(bundle)
 	reg := contractProducerRegistry{
 		agentEvents: make(map[string][]string),
 	}
 	runtimeSet := map[string]struct{}{}
 	humanSet := map[string]struct{}{}
-	for eventType := range bundle.MergedEvents {
+	eventCatalog := source.ResolvedEventCatalog()
+	for eventType := range eventCatalog {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
 			continue
 		}
+		runtimeSet[eventType] = struct{}{}
 		switch {
 		case strings.HasPrefix(eventType, "board."):
 			humanSet[eventType] = struct{}{}
@@ -285,7 +289,8 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 			runtimeSet[eventType] = struct{}{}
 		}
 	}
-	for role, entry := range bundle.MergedAgents {
+	agents := source.AgentEntries()
+	for role, entry := range agents {
 		role = canonicalRole(firstNonEmpty(role, entry.Role))
 		if role == "" {
 			continue
@@ -294,7 +299,8 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
 		}
 	}
-	for nodeID, node := range bundle.MergedNodes {
+	nodes := source.NodeEntries()
+	for nodeID, node := range nodes {
 		role := canonicalRole(nodeID)
 		if role == "" {
 			continue
@@ -304,7 +310,7 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
 		}
 	}
-	for _, timer := range bundle.WorkflowTimers() {
+	for _, timer := range source.WorkflowTimers() {
 		if eventType := strings.TrimSpace(timer.Event); eventType != "" {
 			runtimeSet[eventType] = struct{}{}
 		}

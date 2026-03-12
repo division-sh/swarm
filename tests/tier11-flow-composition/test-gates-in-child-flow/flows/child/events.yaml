@@ -1,0 +1,6 @@
+validate.start:
+  payload:
+    entity_id: string
+validation.done:
+  payload:
+    entity_id: string

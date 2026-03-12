@@ -1,0 +1,8 @@
+initial_state: operating
+terminal_states: [completed, escalated]
+states: [operating, completed, escalated]
+pins:
+  inputs:
+    events: [timer.operating_timeout]
+  outputs:
+    events: [operating.timeout_escalation]

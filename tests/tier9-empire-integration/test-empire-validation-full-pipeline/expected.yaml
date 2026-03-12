@@ -1,0 +1,45 @@
+trigger:
+  sequence:
+    - event: vertical.shortlisted
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+        composite_score: 82
+    - event: research.completed
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+        business_brief: { market_size: 5000000, competitors: 2, moat: "WhatsApp integration" }
+        research_context: { geography: "US", mode: "saas_gap" }
+    - event: spec.draft_ready
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+        mvp_spec: "MVP specification: REST API + WhatsApp bot + simple dashboard."
+    - event: spec_review.passed
+      payload:
+        entity_id: ent-001
+        final_spec: "MVP specification: REST API + WhatsApp bot + simple dashboard."
+        review_notes: "Spec is complete and feasible."
+    - event: cto.spec_approved
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+        cto_notes: "Technically feasible. Recommend Node.js + PostgreSQL stack."
+    - event: brand.candidates_ready
+      payload:
+        entity_id: ent-001
+        vertical_id: vert-001
+        candidates: [{ name: "QuickInvoice", domain: "quickinvoice.com", available: true }]
+
+expected:
+  handler_outcome: success
+  entity_state: ready_for_review
+  gates_set: [g1_research, g2_spec, g3_cto, g4_brand]
+  emitted_events:
+    - validation.package_ready
+    - mailbox.review_requested
+  entity_fields:
+    business_brief: { market_size: 5000000, competitors: 2, moat: "WhatsApp integration" }
+    cto_feasibility: "Technically feasible. Recommend Node.js + PostgreSQL stack."
+    brand: [{ name: "QuickInvoice", domain: "quickinvoice.com", available: true }]

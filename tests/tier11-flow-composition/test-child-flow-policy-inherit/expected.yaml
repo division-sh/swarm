@@ -1,0 +1,11 @@
+trigger:
+  event: child/check.requested
+  payload:
+    entity_id: ent-001
+    score: 55
+
+expected:
+  handler_outcome: success
+  entity_state: approved
+  emitted_events:
+    - check.passed

@@ -1,0 +1,15 @@
+trigger:
+  sequence:
+    - event: flow.spawn_requested
+      payload:
+        entity_id: ent-001
+        instance_id: worker-dup
+    - event: flow.spawn_requested
+      payload:
+        entity_id: ent-002
+        instance_id: worker-dup
+
+expected:
+  handler_outcome: error
+  entity_state: spawned
+  emitted_events: []

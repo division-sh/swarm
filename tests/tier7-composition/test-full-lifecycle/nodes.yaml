@@ -1,0 +1,27 @@
+validation-node:
+  id: validation-node
+  execution_type: system_node
+  subscribes_to: [order.submitted]
+  produces: [order.validated]
+  event_handlers:
+    order.submitted:
+      guard:
+        id: amount_check
+        check: "payload.amount >= policy.min_amount"
+      advances_to: validated
+      sets_gates:
+        validation_passed: true
+      emits: order.validated
+
+completion-node:
+  id: completion-node
+  execution_type: system_node
+  subscribes_to: [order.validated]
+  produces: [order.finalized]
+  event_handlers:
+    order.validated:
+      guard:
+        id: gate_check
+        check: "entity.gates.validation_passed == true"
+      advances_to: complete
+      emits: order.finalized

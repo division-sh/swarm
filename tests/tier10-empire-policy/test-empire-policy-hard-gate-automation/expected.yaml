@@ -1,0 +1,23 @@
+trigger:
+  event: score.dimension_complete
+  payload:
+    entity_id: ent-003
+    composite_score: 76
+    build_complexity: 83
+    automation_completeness: 45
+    icp_crispness: 80
+    distribution_leverage: 78
+    time_to_value: 82
+    operational_drag: 74
+    pain_severity: 79
+    competition_gap: 76
+    monetization_clarity: 81
+    retention_architecture: 70
+    expansion_potential: 65
+    tier1_dims_above_70: 4
+
+expected:
+  handler_outcome: success
+  entity_state: killed
+  emitted_events:
+    - vertical.rejected

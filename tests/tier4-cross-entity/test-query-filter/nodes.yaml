@@ -1,0 +1,12 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [filter.requested]
+  produces: [filter.completed]
+  event_handlers:
+    filter.requested:
+      query:
+        entities: items
+        filter: "entity.status == active"
+      emits: filter.completed
+      advances_to: filtered

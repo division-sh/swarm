@@ -1,0 +1,7 @@
+name: test-empire-validation-kill-backprop
+version: 1.0.0
+description: >
+  cto.spec_vetoed arrives at validation-orchestrator. State advances to killed,
+  emits vertical.killed and vertical.killed_backprop to notify scoring flow.
+platform_version: ">=1.1.0"
+flows: [validation]

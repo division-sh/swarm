@@ -82,10 +82,10 @@ lifecycle-orchestrator:
       description: Human mailbox decision received.
       rules:
         approved:
-          condition: decision == approve
+          condition: payload.decision == approve
           emits: vertical.approved
         rejected:
-          condition: decision == reject
+          condition: payload.decision == reject
           emits: vertical.killed
     opco.teardown_complete:
       description: Teardown finished. Advance to terminal state.

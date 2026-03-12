@@ -1,0 +1,8 @@
+initial_state: null
+terminal_states: []
+states: []
+pins:
+  inputs:
+    events: [category.assessed]
+  outputs:
+    events: [vertical.discovered]

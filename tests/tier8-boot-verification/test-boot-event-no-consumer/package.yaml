@@ -1,0 +1,7 @@
+name: test-boot-event-no-consumer
+version: 1.0.0
+description: >
+  Boot verification: event schema defined and emitted by node, but
+  nobody subscribes to it. Platform must warn EVENT-NO-CONSUMER.
+platform_version: ">=1.1.0"
+flows: []

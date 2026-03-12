@@ -6,6 +6,12 @@ import (
 	"empireai/internal/models"
 )
 
+type bundleAgentRecord struct {
+	LogicalID string
+	Entry     AgentRegistryEntry
+	Source    ContractItemSource
+}
+
 // ResolveAgentRegistryEntry matches a runtime agent config back to the MAS
 // contract registry entry that defined it when possible.
 func ResolveAgentRegistryEntry(bundle *WorkflowContractBundle, cfg models.AgentConfig) (string, AgentRegistryEntry, bool) {
@@ -13,8 +19,12 @@ func ResolveAgentRegistryEntry(bundle *WorkflowContractBundle, cfg models.AgentC
 		return "", AgentRegistryEntry{}, false
 	}
 	if matched := resolveAgentRegistryByID(bundle, strings.TrimSpace(cfg.ID)); matched != "" {
-		entry, ok := bundle.MergedAgents[matched]
-		return matched, entry, ok
+		for _, record := range bundleAgentRecords(bundle) {
+			if strings.TrimSpace(record.LogicalID) == matched {
+				return matched, record.Entry, true
+			}
+		}
+		return "", AgentRegistryEntry{}, false
 	}
 
 	role := canonicalPromptLookupValue(cfg.Role)
@@ -22,18 +32,16 @@ func ResolveAgentRegistryEntry(bundle *WorkflowContractBundle, cfg models.AgentC
 		return "", AgentRegistryEntry{}, false
 	}
 	mode := canonicalPromptLookupValue(cfg.Mode)
-	for logicalID, entry := range bundle.MergedAgents {
-		if canonicalPromptLookupValue(entry.Role) != role {
+	for _, record := range bundleAgentRecords(bundle) {
+		if canonicalPromptLookupValue(record.Entry.Role) != role {
 			continue
 		}
 		if mode != "" {
-			if source, ok := bundle.AgentSources[strings.TrimSpace(logicalID)]; ok {
-				if flowMode := promptFlowMode(bundle, source.FlowID); flowMode != "" && flowMode != mode {
-					continue
-				}
+			if flowMode := promptFlowMode(bundle, record.Source.FlowID); flowMode != "" && flowMode != mode {
+				continue
 			}
 		}
-		return strings.TrimSpace(logicalID), entry, true
+		return strings.TrimSpace(record.LogicalID), record.Entry, true
 	}
 	return "", AgentRegistryEntry{}, false
 }
@@ -43,13 +51,44 @@ func resolveAgentRegistryByID(bundle *WorkflowContractBundle, agentID string) st
 	if bundle == nil || agentID == "" {
 		return ""
 	}
-	if _, ok := bundle.MergedAgents[agentID]; ok {
-		return agentID
-	}
-	for logicalID, entry := range bundle.MergedAgents {
-		if promptRegistryIDMatches(entry.ID, agentID) {
-			return strings.TrimSpace(logicalID)
+	for _, record := range bundleAgentRecords(bundle) {
+		if strings.TrimSpace(record.LogicalID) == agentID || promptRegistryIDMatches(record.Entry.ID, agentID) {
+			return strings.TrimSpace(record.LogicalID)
 		}
 	}
 	return ""
+}
+
+func bundleAgentRecords(bundle *WorkflowContractBundle) []bundleAgentRecord {
+	if bundle == nil {
+		return nil
+	}
+	records := make([]bundleAgentRecord, 0, len(bundle.ProjectViews())+len(bundle.FlowTree.ByID))
+	for _, view := range bundle.ProjectViews() {
+		key := strings.TrimSpace(view.Paths.Key)
+		agentIDs := sortedContractKeys(view.Agents)
+		for _, logicalID := range agentIDs {
+			records = append(records, bundleAgentRecord{
+				LogicalID: logicalID,
+				Entry:     view.Agents[logicalID],
+				Source:    ContractItemSource{PackageKey: key, Layer: "project"},
+			})
+		}
+	}
+	for _, view := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(view.Paths.ID)
+		agentIDs := sortedContractKeys(view.Agents)
+		for _, logicalID := range agentIDs {
+			records = append(records, bundleAgentRecord{
+				LogicalID: logicalID,
+				Entry:     view.Agents[logicalID],
+				Source: ContractItemSource{
+					PackageKey: view.Paths.PackageKey,
+					FlowID:     flowID,
+					Layer:      "flow",
+				},
+			})
+		}
+	}
+	return records
 }

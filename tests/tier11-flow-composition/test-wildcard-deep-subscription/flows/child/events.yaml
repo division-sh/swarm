@@ -1,0 +1,6 @@
+work.begin:
+  payload:
+    entity_id: string
+work.finished:
+  payload:
+    entity_id: string

@@ -1,0 +1,13 @@
+reduce-node:
+  id: reduce-node
+  execution_type: system_node
+  subscribes_to: [scores.submitted]
+  produces: [scores.resolved]
+  event_handlers:
+    scores.submitted:
+      reduce:
+        items_from: entity.scores
+        operation: pick_or_average
+        store_as: entity.result
+      emits: scores.resolved
+      advances_to: done

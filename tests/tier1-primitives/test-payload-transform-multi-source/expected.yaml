@@ -1,0 +1,12 @@
+trigger:
+  event: export.requested
+  payload:
+    entity_id: ent-001
+  entity_fields_before:
+    name: "test-entity"
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events:
+    - item.exported

@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [done]
+states: [pending, assigned, done]
+pins:
+  inputs:
+    events: [task.assigned]
+  outputs:
+    events: [task.finalized]

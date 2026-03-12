@@ -1,0 +1,7 @@
+name: test-empire-operating-spinup
+version: 1.0.0
+description: >
+  opco.spinup_requested arrives at portfolio-node. create_flow_instance action
+  creates an operating flow instance. auto_emit_on_create fires opco.ceo_ready.
+platform_version: ">=1.1.0"
+flows: [operating]

@@ -3,10 +3,12 @@ package pipeline
 import (
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
-func resolvePipelineScanMode(bundle *runtimecontracts.WorkflowContractBundle, raw string) string {
+const scanModePolicyFlowID = "discovery"
+
+func resolvePipelineScanMode(source semanticview.Source, raw string) string {
 	mode := strings.ToLower(strings.TrimSpace(raw))
 	if mode == "" {
 		return ""
@@ -25,14 +27,9 @@ func resolvePipelineScanMode(bundle *runtimecontracts.WorkflowContractBundle, ra
 	case pipelineModeName("corpus", "mode"), pipelineModeName("signal", "corpus"):
 		return "corpus"
 	}
-	if bundle != nil {
-		if pv, ok := bundle.MergedPolicy.Values["default_scan_mode"]; ok {
-			if configured := strings.TrimSpace(asString(pv.Value)); configured != "" && mode == strings.ToLower(strings.TrimSpace(configured)) {
-				return mode
-			}
-		}
-		if pv, ok := bundle.Policy.Values["default_scan_mode"]; ok {
-			if configured := strings.TrimSpace(asString(pv.Value)); configured != "" && mode == strings.ToLower(strings.TrimSpace(configured)) {
+	if source != nil {
+		if value, ok := scanModePolicyValue(source, "default_scan_mode"); ok {
+			if configured := strings.TrimSpace(asString(value)); configured != "" && mode == strings.ToLower(strings.TrimSpace(configured)) {
 				return mode
 			}
 		}
@@ -40,27 +37,33 @@ func resolvePipelineScanMode(bundle *runtimecontracts.WorkflowContractBundle, ra
 	return ""
 }
 
-func defaultPipelineScanMode(bundle *runtimecontracts.WorkflowContractBundle) string {
-	if bundle != nil {
-		if pv, ok := bundle.MergedPolicy.Values["default_scan_mode"]; ok {
-			if mode := resolvePipelineScanMode(bundle, asString(pv.Value)); mode != "" {
-				return mode
-			}
-		}
-		if pv, ok := bundle.Policy.Values["default_scan_mode"]; ok {
-			if mode := resolvePipelineScanMode(bundle, asString(pv.Value)); mode != "" {
+func defaultPipelineScanMode(source semanticview.Source) string {
+	if source != nil {
+		if value, ok := scanModePolicyValue(source, "default_scan_mode"); ok {
+			if mode := resolvePipelineScanMode(source, asString(value)); mode != "" {
 				return mode
 			}
 		}
 	}
 	if module := defaultWorkflowModuleOrNil(); module != nil {
-		if pv, ok := module.ContractBundle().MergedPolicy.Values["default_scan_mode"]; ok {
-			if mode := resolvePipelineScanMode(module.ContractBundle(), asString(pv.Value)); mode != "" {
+		source := module.SemanticSource()
+		if value, ok := scanModePolicyValue(source, "default_scan_mode"); ok {
+			if mode := resolvePipelineScanMode(source, asString(value)); mode != "" {
 				return mode
 			}
 		}
 	}
 	return pipelineModeName("saas", "gap")
+}
+
+func scanModePolicyValue(source semanticview.Source, key string) (any, bool) {
+	if pv, ok := semanticview.PolicyValueForFlow(source, scanModePolicyFlowID, key); ok {
+		return pv.Value, true
+	}
+	if pv, ok := semanticview.PolicyValueForFlow(source, "", key); ok {
+		return pv.Value, true
+	}
+	return nil, false
 }
 
 func pipelineModeName(parts ...string) string {

@@ -1,0 +1,11 @@
+trigger:
+  event: item.received
+  payload:
+    entity_id: ent-001
+    type: a
+
+expected:
+  handler_outcome: success
+  entity_state: pending
+  emitted_events:
+    - routed.a

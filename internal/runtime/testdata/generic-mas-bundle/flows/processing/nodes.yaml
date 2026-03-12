@@ -1,9 +1,51 @@
 processing-node:
   id: processing-node
   execution_type: workflow_node
+  idempotency_table: processing_node_idempotency
+  state_table: processing_node_state
   subscribes_to:
     - item.review_requested
     - item.rejected
   produces:
     - item.completed
     - item.rejected
+  event_handlers:
+    item.review_requested:
+      guard:
+        id: delivery_enabled
+        check: policy.delivery_enabled
+        on_fail: block
+      branch:
+        - condition: payload.priority == 'urgent'
+          then:
+            emits: item.completed
+          else:
+            emits: item.rejected
+      compute:
+        operation: weighted_sum
+        store_as: score
+        keys:
+          numeric_keys:
+            - score
+        tiers:
+          - dimensions:
+              - score
+            weight: 1.0
+      rules:
+        approve:
+          condition: payload.score >= 80
+          advances_to: approved
+          emits: item.completed
+        reject:
+          condition: else
+          advances_to: rejected
+          emits: item.rejected
+      sets_gate: score_ready
+      clear_gates:
+        - intake_open
+    item.rejected:
+      advances_to: rejected
+      clear_gates:
+        - intake_ready
+        - score_ready
+        - delivery_ready

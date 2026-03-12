@@ -1,0 +1,5 @@
+name: test-guard-multi-fail
+version: 1.0.0
+description: Two guards, second fails with default reject — state unchanged.
+platform_version: ">=1.1.0"
+flows: []

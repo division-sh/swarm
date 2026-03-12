@@ -1,0 +1,9 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: ["*.completed"]
+  produces: [match.found]
+  event_handlers:
+    "*.completed":
+      emits: match.found
+      advances_to: matched

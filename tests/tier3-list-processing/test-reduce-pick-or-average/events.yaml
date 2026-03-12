@@ -1,0 +1,6 @@
+scores.submitted:
+  payload:
+    entity_id: string
+scores.resolved:
+  payload:
+    entity_id: string

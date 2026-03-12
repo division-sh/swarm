@@ -1,0 +1,6 @@
+a.start:
+  payload:
+    entity_id: string
+a.done:
+  payload:
+    entity_id: string

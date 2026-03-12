@@ -34,7 +34,7 @@ export function usePortfolioDerivedState({ holdingData, funnel, shardScans }: Po
     const scans = Array.isArray(shardScans) ? shardScans : [];
 
     const driftedVerticals = sortVerticals(
-      verticals.filter((vertical) => vertical.workflow_current_stage && vertical.workflow_current_stage !== vertical.stage),
+      verticals.filter((vertical) => vertical.workflow_current_state && vertical.workflow_current_state !== vertical.stage),
     );
     const timerHeavyVerticals = sortVerticals(
       verticals.filter((vertical) => Number(vertical.active_timer_count || 0) > 0),

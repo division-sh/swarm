@@ -1,0 +1,8 @@
+initial_state: active
+terminal_states: [processing]
+states: [active, processing]
+pins:
+  inputs:
+    events: [process.requested]
+  outputs:
+    events: [process.done]

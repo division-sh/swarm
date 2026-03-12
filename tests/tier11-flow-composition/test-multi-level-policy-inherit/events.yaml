@@ -1,0 +1,7 @@
+root.check:
+  payload:
+    entity_id: string
+    score: integer
+root.done:
+  payload:
+    entity_id: string

@@ -1,0 +1,4 @@
+operating_state_timeout_hours: 168
+build_timeout_hours: 336
+deploy_timeout_hours: 24
+qa_timeout_hours: 48

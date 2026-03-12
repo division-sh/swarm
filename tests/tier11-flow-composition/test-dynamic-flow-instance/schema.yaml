@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [spawn.requested]
+  outputs:
+    events: [spawn.confirmed]

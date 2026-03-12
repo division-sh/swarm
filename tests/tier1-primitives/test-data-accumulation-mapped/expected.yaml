@@ -1,0 +1,13 @@
+trigger:
+  event: item.received
+  payload:
+    entity_id: ent-001
+    src_name: "mapped-value"
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  entity_fields:
+    name: "mapped-value"
+  emitted_events:
+    - item.stored

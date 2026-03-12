@@ -1,0 +1,12 @@
+b-node:
+  id: b-node
+  execution_type: system_node
+  subscribes_to: [b.start]
+  produces: [b.done]
+  event_handlers:
+    b.start:
+      data_accumulation:
+        shared_field:
+          source: flow-b
+      advances_to: done
+      emits: b.done

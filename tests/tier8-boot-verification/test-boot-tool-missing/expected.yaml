@@ -1,0 +1,7 @@
+trigger:
+  boot: true
+
+expected:
+  boot_result: error
+  error_category: TOOL-MISSING
+  error_contains: "nonexistent_tool"

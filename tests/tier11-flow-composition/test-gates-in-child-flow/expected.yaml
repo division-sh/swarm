@@ -1,0 +1,11 @@
+trigger:
+  event: validate.requested
+  payload:
+    entity_id: ent-001
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  emitted_events: [validate.passed]
+  gates:
+    child/g_validated: true

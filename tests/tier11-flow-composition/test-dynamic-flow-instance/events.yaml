@@ -1,0 +1,7 @@
+spawn.requested:
+  payload:
+    entity_id: string
+    worker_id: string
+spawn.confirmed:
+  payload:
+    entity_id: string

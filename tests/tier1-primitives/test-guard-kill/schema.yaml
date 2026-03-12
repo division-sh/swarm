@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [done, killed]
+states: [pending, done, killed]
+pins:
+  inputs:
+    events: [check.requested]
+  outputs:
+    events: []

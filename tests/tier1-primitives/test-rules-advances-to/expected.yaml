@@ -1,0 +1,11 @@
+trigger:
+  event: item.reviewed
+  payload:
+    entity_id: ent-001
+    decision: approve
+
+expected:
+  handler_outcome: success
+  entity_state: approved
+  emitted_events:
+    - item.approved

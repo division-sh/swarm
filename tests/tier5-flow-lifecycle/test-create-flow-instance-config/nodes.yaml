@@ -1,0 +1,14 @@
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [flow.spawn_with_config]
+  produces: [flow.spawned]
+  event_handlers:
+    flow.spawn_with_config:
+      action: create_flow_instance
+      action_params:
+        template: worker-flow
+        instance_id: "payload.instance_id"
+        config_from: payload.config
+      emits: flow.spawned
+      advances_to: spawned

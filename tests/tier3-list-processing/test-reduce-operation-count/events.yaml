@@ -1,0 +1,7 @@
+batch.submitted:
+  payload:
+    entity_id: string
+    items: array
+batch.counted:
+  payload:
+    entity_id: string

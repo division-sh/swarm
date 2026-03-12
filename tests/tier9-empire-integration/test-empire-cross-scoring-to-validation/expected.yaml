@@ -1,0 +1,14 @@
+trigger:
+  event: vertical.shortlisted
+  payload:
+    entity_id: ent-001
+    vertical_id: vert-001
+    composite_score: 82.5
+    viability_score: 78.0
+    scoring_payload: { rubric: "saas_gap_rubric", dimensions: 11 }
+
+expected:
+  handler_outcome: success
+  entity_state: researching
+  emitted_events:
+    - validation.started

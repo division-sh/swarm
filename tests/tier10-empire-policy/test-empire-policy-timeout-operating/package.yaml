@@ -1,0 +1,5 @@
+name: test-empire-policy-timeout-operating
+version: 1.0.0
+description: Lifecycle-orchestrator fires timer.operating_timeout after 168h and emits operating.timeout_escalation.
+platform_version: ">=1.1.0"
+flows: []

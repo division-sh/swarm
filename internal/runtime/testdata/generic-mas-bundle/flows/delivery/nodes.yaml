@@ -1,8 +1,39 @@
 delivery-node:
   id: delivery-node
   execution_type: workflow_node
+  idempotency_table: delivery_node_idempotency
+  state_table: delivery_node_state
   subscribes_to:
     - item.completed
     - timer.item.timeout
   produces:
     - item.completed
+  timers:
+    - id: item_timeout
+      event: timer.item.timeout
+      delay: 30m
+      start_on: state:approved
+      cancel_on: state:completed
+      recurring: false
+  event_handlers:
+    item.completed:
+      sets_gate: delivery_ready
+      clear_gates:
+        - intake_ready
+        - score_ready
+      branch:
+        - condition: payload.priority == 'urgent'
+          then:
+            emits: item.completed
+    timer.item.timeout:
+      advances_to: completed
+      emits: item.completed
+      data_accumulation:
+        source_event: timer.item.timeout
+        writes:
+          - target_field: timed_out
+            value:
+              literal: true
+          - target_field: status
+            value:
+              literal: completed

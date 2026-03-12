@@ -1,0 +1,8 @@
+flow.spawn_with_config:
+  payload:
+    entity_id: string
+    instance_id: string
+    config: object
+flow.spawned:
+  payload:
+    entity_id: string

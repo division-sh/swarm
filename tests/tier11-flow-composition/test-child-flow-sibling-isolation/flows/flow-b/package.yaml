@@ -1,0 +1,5 @@
+name: flow-b
+version: 1.0.0
+description: Sibling flow B that should not receive flow-a internal events.
+platform_version: ">=1.1.0"
+flows: []

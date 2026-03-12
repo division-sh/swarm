@@ -1,0 +1,9 @@
+child-agent:
+  model_tier: tier2
+  conversation_mode: stateless
+  tools_tier2:
+    - lookup_data
+  subscriptions:
+    - child.task
+  emit_events:
+    - child.result

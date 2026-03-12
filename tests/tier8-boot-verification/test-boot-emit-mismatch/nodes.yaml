@@ -1,0 +1,10 @@
+worker-node:
+  id: worker-node
+  execution_type: agent_node
+  subscribes_to: [task.requested]
+  produces: [task.completed]
+  agent: worker
+  event_handlers:
+    task.requested:
+      advances_to: done
+      emits: task.completed

@@ -1,0 +1,6 @@
+flow.created:
+  payload:
+    entity_id: string
+auto.started:
+  payload:
+    entity_id: string

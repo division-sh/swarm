@@ -1,0 +1,19 @@
+timer-node:
+  id: timer-node
+  execution_type: system_node
+  subscribes_to: [timer.scheduled]
+  produces: [timer.check]
+  event_handlers:
+    timer.scheduled:
+      timer:
+        delay_ms: 5000
+        emit: timer.check
+
+cancel-node:
+  id: cancel-node
+  execution_type: system_node
+  subscribes_to: [timer.cancel_requested]
+  produces: []
+  event_handlers:
+    timer.cancel_requested:
+      advances_to: cancelled

@@ -1,0 +1,14 @@
+trigger:
+  event: vertical.discovered
+  payload:
+    entity_id: ent-008
+    vertical_name: saas-analytics
+
+expected:
+  handler_outcome: success
+  entity_state: scoring
+  emitted_events:
+    - scoring.requested
+  agent_routing:
+    scoring.requested: analysis-agent
+    scoring.derived_requested: analysis-agent-secondary

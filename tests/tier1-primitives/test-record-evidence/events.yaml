@@ -1,0 +1,8 @@
+evidence.submitted:
+  payload:
+    entity_id: string
+    finding: string
+    severity: string
+evidence.recorded:
+  payload:
+    entity_id: string

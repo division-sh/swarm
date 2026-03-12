@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
+	"empireai/internal/runtime/semanticview"
+	runtimescanmode "empireai/internal/runtime/scanmode"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -116,12 +116,17 @@ func asObject(v any) (map[string]any, bool) {
 }
 
 type sqlTxContextKey struct{}
+type pipelinePostCommitActionsKey struct{}
 
 func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 	if tx == nil {
 		return ctx
 	}
 	return context.WithValue(ctx, sqlTxContextKey{}, tx)
+}
+
+func WithPipelineSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
+	return withSQLTxContext(ctx, tx)
 }
 
 func sqlTxFromContext(ctx context.Context) (*sql.Tx, bool) {
@@ -137,6 +142,49 @@ func withoutSQLTxContext(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return context.WithValue(ctx, sqlTxContextKey{}, (*sql.Tx)(nil))
+}
+
+func withPipelinePostCommitActions(ctx context.Context, actions *[]func()) context.Context {
+	if actions == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, pipelinePostCommitActionsKey{}, actions)
+}
+
+func WithPipelinePostCommitActions(ctx context.Context, actions *[]func()) context.Context {
+	return withPipelinePostCommitActions(ctx, actions)
+}
+
+func queuePipelinePostCommitAction(ctx context.Context, fn func()) bool {
+	if ctx == nil || fn == nil {
+		return false
+	}
+	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
+	if !ok || actions == nil {
+		return false
+	}
+	*actions = append(*actions, fn)
+	return true
+}
+
+func flushPipelinePostCommitActions(actions []func()) {
+	for _, fn := range actions {
+		if fn != nil {
+			fn()
+		}
+	}
+}
+
+func FlushPipelinePostCommitActions(actions []func()) {
+	flushPipelinePostCommitActions(actions)
+}
+
+func pipelinePostCommitActionsFromContext(ctx context.Context) (*[]func(), bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]func())
+	return actions, ok && actions != nil
 }
 
 func dbExecContext(ctx context.Context, db *sql.DB, query string, args ...any) (sql.Result, error) {
@@ -187,23 +235,18 @@ func compactSQLSnippet(q string) string {
 	return q
 }
 
-func normalizeScanMode(raw string) string     { return runtimeproductpolicy.NormalizeScanMode(raw) }
-func normalizeScanPriority(raw string) string { return runtimeproductpolicy.NormalizeScanPriority(raw) }
+func normalizeScanMode(raw string) string     { return runtimescanmode.NormalizeMode(raw) }
+func normalizeScanPriority(raw string) string { return runtimescanmode.NormalizePriority(raw) }
 
-func bundleDefaultScanMode(bundle *runtimecontracts.WorkflowContractBundle) string {
-	if bundle != nil {
-		if pv, ok := bundle.MergedPolicy.Values["default_scan_mode"]; ok {
-			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
-				return normalizeScanMode(mode)
-			}
-		}
-		if pv, ok := bundle.Policy.Values["default_scan_mode"]; ok {
-			if mode := strings.TrimSpace(asString(pv.Value)); mode != "" {
+func bundleDefaultScanMode(source semanticview.Source) string {
+	if source != nil {
+		if value, ok := scanModePolicyValue(source, "default_scan_mode"); ok {
+			if mode := strings.TrimSpace(asString(value)); mode != "" {
 				return normalizeScanMode(mode)
 			}
 		}
 	}
-	return normalizeScanMode(runtimeproductpolicy.DiscoveryFallbackMode())
+	return normalizeScanMode(runtimescanmode.DefaultMode())
 }
 
 func compatibilityExpectedScannerCount(mode string, expectedScanners []string, storedExpected int) int {
@@ -211,7 +254,7 @@ func compatibilityExpectedScannerCount(mode string, expectedScanners []string, s
 		return storedExpected
 	}
 	if len(expectedScanners) == 1 && strings.TrimSpace(expectedScanners[0]) == "scanner" {
-		if expected := runtimeproductpolicy.ExpectedScannerCount(mode); expected > 0 {
+		if expected := runtimescanmode.ExpectedScannerCount(mode); expected > 0 {
 			return expected
 		}
 	}
@@ -220,7 +263,7 @@ func compatibilityExpectedScannerCount(mode string, expectedScanners []string, s
 
 func scanDispatchExpectedAgents(mode string, expectedScanners []string) int {
 	if strings.TrimSpace(mode) != "" && len(expectedScanners) > 0 {
-		if expected := runtimeproductpolicy.ExpectedScannerCount(mode); expected > 0 {
+		if expected := runtimescanmode.ExpectedScannerCount(mode); expected > 0 {
 			return expected
 		}
 	}

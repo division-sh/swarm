@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 type genericTestModule struct {
@@ -33,31 +34,32 @@ func (m *genericTestModule) init() {
 	}
 	m.once.Do(func() {
 		repoRoot := WorkflowRepoRoot()
-		contractsDir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "tests", "generic-runtime", "contracts")
+		contractsDir := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-mas-bundle")
 		platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
 		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsDir, platformSpec)
 		if m.loadErr != nil {
 			return
 		}
-		m.workflow, m.loadErr = LoadWorkflowDefinition(m.contractBundle)
+		m.workflow, m.loadErr = LoadWorkflowDefinition(semanticview.Wrap(m.contractBundle))
 		if m.loadErr != nil {
 			return
 		}
-		m.workflowNodes, m.loadErr = LoadWorkflowNodes(m.contractBundle)
+		m.workflowNodes, m.loadErr = LoadWorkflowNodes(semanticview.Wrap(m.contractBundle))
 		if m.loadErr != nil {
 			return
 		}
-		m.guardRegistry = NewContractGuardRegistry(m.contractBundle)
-		m.actionRegistry = NewContractActionRegistry(m.contractBundle)
+		source := semanticview.Wrap(m.contractBundle)
+		m.guardRegistry = NewContractGuardRegistry(source)
+		m.actionRegistry = NewContractActionRegistry(source)
 	})
 	if m.loadErr != nil {
 		panic(m.loadErr)
 	}
 }
 
-func (m *genericTestModule) ContractBundle() *runtimecontracts.WorkflowContractBundle {
+func (m *genericTestModule) SemanticSource() semanticview.Source {
 	m.init()
-	return m.contractBundle
+	return semanticview.Wrap(m.contractBundle)
 }
 
 func (m *genericTestModule) WorkflowDefinition() *WorkflowDefinition {

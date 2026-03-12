@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
 
 type module struct {
@@ -36,25 +37,26 @@ func (m *module) init() {
 		if m.loadErr != nil {
 			return
 		}
-		m.workflow, m.loadErr = runtimepipeline.LoadWorkflowDefinition(m.contractBundle)
+		m.workflow, m.loadErr = runtimepipeline.LoadWorkflowDefinition(semanticview.Wrap(m.contractBundle))
 		if m.loadErr != nil {
 			return
 		}
-		m.workflowNodes, m.loadErr = runtimepipeline.LoadWorkflowNodes(m.contractBundle)
+		m.workflowNodes, m.loadErr = runtimepipeline.LoadWorkflowNodes(semanticview.Wrap(m.contractBundle))
 		if m.loadErr != nil {
 			return
 		}
-		m.guardRegistry = runtimepipeline.NewContractGuardRegistry(m.contractBundle)
-		m.actionRegistry = runtimepipeline.NewContractActionRegistry(m.contractBundle)
+		source := semanticview.Wrap(m.contractBundle)
+		m.guardRegistry = runtimepipeline.NewContractGuardRegistry(source)
+		m.actionRegistry = runtimepipeline.NewContractActionRegistry(source)
 	})
 	if m.loadErr != nil {
 		panic(m.loadErr)
 	}
 }
 
-func (m *module) ContractBundle() *runtimecontracts.WorkflowContractBundle {
+func (m *module) SemanticSource() semanticview.Source {
 	m.init()
-	return m.contractBundle
+	return semanticview.Wrap(m.contractBundle)
 }
 
 func (m *module) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {

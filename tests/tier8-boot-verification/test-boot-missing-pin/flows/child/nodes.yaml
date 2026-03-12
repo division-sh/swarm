@@ -1,0 +1,11 @@
+worker:
+  id: worker
+  execution_type: system_node
+  subscribes_to: [task.assigned, task.feedback]
+  produces: [task.result]
+  event_handlers:
+    task.assigned:
+      advances_to: working
+    task.feedback:
+      advances_to: done
+      emits: task.result

@@ -1,0 +1,5 @@
+name: test-reduce-sum
+version: 1.0.0
+description: reduce with sum operation totals numeric values.
+platform_version: ">=1.1.0"
+flows: []

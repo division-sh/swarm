@@ -340,7 +340,7 @@ DEFINED_HANDLER_FIELDS = {
     'advances_to', 'sets_gate', 'data_accumulation', 'emits', 'rules',
     'fan_out', 'query', 'reduce', 'filter', 'count', 'clear', 'action',
     'template', 'instance_id_from', 'config_from', 'from', 'payload_transform',
-    'clear_gates',
+    'clear_gates', 'dedup_by',
 }
 for flow in ['root'] + FLOWS:
     nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
@@ -463,6 +463,108 @@ for flow in FLOWS:
         if key in root_policy and not isinstance(fval, dict) and not isinstance(root_policy[key], dict):
             if fval != root_policy[key]:
                 warn("POLICY-CONFLICT", "'%s': root=%s, %s=%s" % (key, root_policy[key], flow, fval))
+
+
+# ============================================================
+# CHECK 14: Event chain cycle detection
+# ============================================================
+node_emit_graph = {}
+for flow in ['root'] + FLOWS:
+    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
+        for ev, h in node.get('event_handlers', {}).items():
+            if not isinstance(h, dict): continue
+            emitted = set()
+            e = h.get('emits')
+            if isinstance(e, str): emitted.add(e)
+            elif isinstance(e, list): emitted.update(e)
+            ru = h.get('rules', {})
+            if isinstance(ru, dict):
+                for r in ru.values():
+                    if isinstance(r, dict):
+                        re_ = r.get('emits')
+                        if isinstance(re_, str): emitted.add(re_)
+                        elif isinstance(re_, list): emitted.update(re_)
+            oc = h.get('on_complete')
+            if isinstance(oc, (dict, list)):
+                items = oc.values() if isinstance(oc, dict) else oc
+                for b in items:
+                    if isinstance(b, dict):
+                        be = b.get('emits')
+                        if isinstance(be, str): emitted.add(be)
+                        elif isinstance(be, list): emitted.update(be)
+            fo = h.get('fan_out', {})
+            if isinstance(fo, dict) and fo.get('emit_per_item'):
+                emitted.add(fo['emit_per_item'])
+            if emitted:
+                node_emit_graph[ev] = node_emit_graph.get(ev, set()) | emitted
+
+def find_cycles(graph):
+    cycles = []
+    for start in graph:
+        visited = set()
+        stack = [(start, [start])]
+        while stack:
+            current, path = stack.pop()
+            if current in graph:
+                for nxt in graph[current]:
+                    if nxt == start and len(path) > 1:
+                        cycles.append(path + [nxt])
+                    elif nxt not in visited and nxt in graph:
+                        visited.add(nxt)
+                        stack.append((nxt, path + [nxt]))
+    return cycles
+
+for cycle in find_cycles(node_emit_graph):
+    error("EVENT-CYCLE", "Node handler emit cycle: %s" % " -> ".join(cycle))
+
+
+# ============================================================
+# CHECK 15: Dialect compliance (spec vs YAML shape)
+# ============================================================
+for flow in ['root'] + FLOWS:
+    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
+        for ev, h in node.get('event_handlers', {}).items():
+            if not isinstance(h, dict): continue
+            loc = "%s/%s/%s" % (flow, nid, ev)
+
+            # Guard must be dict not string
+            g = h.get('guard')
+            if isinstance(g, str):
+                error("DIALECT-GUARD", "%s: guard is string, must be {id, check}" % loc)
+            elif isinstance(g, dict) and 'check' not in g and 'checks' not in g:
+                error("DIALECT-GUARD", "%s: guard missing check/checks field" % loc)
+
+            # on_complete and rules mutually exclusive
+            if 'on_complete' in h and 'rules' in h:
+                error("DIALECT-DUAL", "%s: has both on_complete AND rules" % loc)
+
+            # on_complete must be list not dict
+            if isinstance(h.get('on_complete'), dict):
+                error("DIALECT-OC-ORDER", "%s: on_complete is dict (unordered), must be list" % loc)
+
+            # Conditions must have prefix
+            for block_name in ['rules']:
+                block = h.get(block_name, {})
+                if isinstance(block, dict):
+                    for rn, r in block.items():
+                        if isinstance(r, dict):
+                            c = r.get('condition', '')
+                            if c and c != 'else' and not any(c.startswith(p) for p in ['payload.','entity.','policy.','accumulated.','fan_out.']):
+                                error("DIALECT-BARE-COND", "%s/%s: condition '%s' missing prefix" % (loc, rn, c))
+
+            # advances_to must be string
+            if isinstance(h.get('advances_to'), list):
+                error("DIALECT-ADV-LIST", "%s: advances_to is list, must be string" % loc)
+
+            # Self-emit
+            emit_val = h.get('emits')
+            elist = [emit_val] if isinstance(emit_val, str) else (emit_val if isinstance(emit_val, list) else [])
+            if ev in elist:
+                error("DIALECT-SELF-EMIT", "%s: emits own trigger '%s'" % (loc, ev))
 
 # ============================================================
 # Report

@@ -1,0 +1,11 @@
+name: test-child-flow-sibling-isolation
+version: 1.0.0
+description: Two sibling child flows. Events in one do not leak to the other.
+platform_version: ">=1.1.0"
+flows:
+- id: flow-a
+  flow: flow-a
+  mode: static
+- id: flow-b
+  flow: flow-b
+  mode: static
