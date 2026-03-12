@@ -11,7 +11,6 @@ import (
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecorpus "empireai/internal/runtime/corpusobs"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	runtimerterr "empireai/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
@@ -161,17 +160,8 @@ func (am *AgentManager) logCorpusTurnLifecycle(
 }
 
 func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {
-	am.mu.RLock()
-	cfg, ok := am.agentCfg[agentID]
-	am.mu.RUnlock()
-	if !ok {
-		return false
-	}
-	policy := runtimeproductpolicy.DefaultOrNil()
-	if policy == nil {
-		return false
-	}
-	return policy.InterceptRuntimeHandledDirective(cfg, evt)
+	_, _ = agentID, evt
+	return false
 }
 
 func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event) (bool, string) {
@@ -187,7 +177,7 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 		return false, ""
 	}
 	role := strings.ToLower(strings.TrimSpace(cfg.Role))
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := strings.TrimSpace(evt.EntityID())
 	if verticalID == "" {
 		verticalID = strings.TrimSpace(cfg.VerticalID)
 	}
@@ -430,14 +420,13 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		"spec_version": runtimeSpecVersion,
 	})
 
-	if err := am.bus.PublishDirect(am.runtimeContext(), events.Event{
+	if err := am.bus.PublishDirect(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.dead_letter_escalation"),
 		SourceAgent: "runtime",
-		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}, []string{managerID}); err != nil {
+	}).WithEntityID(verticalID), []string{managerID}); err != nil {
 		RuntimeWarn("agent-manager", "ops.dead_letter_escalation publish failed agent=%s manager=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(managerID), strings.TrimSpace(eventID), err)
 	}
 }

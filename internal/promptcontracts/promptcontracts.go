@@ -22,7 +22,8 @@ var (
 	promptVariablesCache = map[string]map[string]any{}
 )
 
-// Load reads an agent prompt from contracts/prompts with optional mode variant.
+// Load reads an agent prompt from the configured prompt directory with optional
+// mode variant.
 // Lookup order:
 // 1) {agent-id}.{mode}.md (when mode is non-empty)
 // 2) {agent-id}.md
@@ -95,24 +96,57 @@ func loadPromptVariables(promptsDir string) (map[string]any, error) {
 	}
 	promptVariablesMu.RUnlock()
 
-	path := filepath.Join(filepath.Dir(promptsDir), "prompt-variables.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("missing prompt variables file %s", path)
-		}
-		return nil, fmt.Errorf("read prompt variables file %s: %w", path, err)
+	sources := promptVariableSources(promptsDir)
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("missing prompt variables source near %s", promptsDir)
 	}
-
-	var vars map[string]any
-	if err := yaml.Unmarshal(raw, &vars); err != nil {
-		return nil, fmt.Errorf("parse prompt variables file %s: %w", path, err)
+	vars := map[string]any{}
+	for _, source := range sources {
+		raw, err := os.ReadFile(source)
+		if err != nil {
+			return nil, fmt.Errorf("read prompt variable source %s: %w", source, err)
+		}
+		loaded := map[string]any{}
+		if err := yaml.Unmarshal(raw, &loaded); err != nil {
+			return nil, fmt.Errorf("parse prompt variables from %s: %w", source, err)
+		}
+		for key, value := range loaded {
+			vars[key] = value
+		}
 	}
 
 	promptVariablesMu.Lock()
 	promptVariablesCache[promptsDir] = vars
 	promptVariablesMu.Unlock()
 	return vars, nil
+}
+
+func promptVariableSources(promptsDir string) []string {
+	base := filepath.Dir(promptsDir)
+	dirs := make([]string, 0, 8)
+	for dir := base; ; dir = filepath.Dir(dir) {
+		dirs = append(dirs, dir)
+		if filepath.Base(dir) == "contracts" {
+			break
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+	}
+	sources := make([]string, 0, len(dirs))
+	for i := len(dirs) - 1; i >= 0; i-- {
+		for _, candidate := range []string{
+			filepath.Join(dirs[i], "prompt-variables.yaml"),
+			filepath.Join(dirs[i], "policy.yaml"),
+			filepath.Join(dirs[i], "runtime", "policy.yaml"),
+		} {
+			if _, err := os.Stat(candidate); err == nil {
+				sources = append(sources, candidate)
+			}
+		}
+	}
+	return sources
 }
 
 func renderPromptTemplate(promptText string, vars map[string]any) string {
@@ -204,10 +238,10 @@ func unresolvedPromptTokens(promptText string) []string {
 	return out
 }
 
-// ResolveDir discovers contracts/prompts. It checks:
+// ResolveDir discovers the default MAS prompt directory. It checks:
 // 1) EMPIREAI_PROMPTS_DIR
-// 2) contracts/prompts walking up from CWD
-// 3) contracts/prompts relative to the repo root derived from this source file.
+// 2) docs/specs/mas-platform/empire/contracts/prompts walking up from CWD
+// 3) docs/specs/mas-platform/empire/contracts/prompts relative to this repo.
 func ResolveDir() (string, bool) {
 	if env := strings.TrimSpace(os.Getenv("EMPIREAI_PROMPTS_DIR")); env != "" {
 		if isDir(env) {
@@ -216,14 +250,14 @@ func ResolveDir() (string, bool) {
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
-		if dir, ok := findDirUp(cwd, "contracts", "prompts"); ok {
+		if dir, ok := findDirUp(cwd, "docs", "specs", "mas-platform", "empire", "contracts", "prompts"); ok {
 			return dir, true
 		}
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-		if dir := filepath.Join(repoRoot, "contracts", "prompts"); isDir(dir) {
+		if dir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts", "prompts"); isDir(dir) {
 			return dir, true
 		}
 	}

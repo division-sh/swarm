@@ -271,26 +271,21 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 	}
 	runtimeSet := map[string]struct{}{}
 	humanSet := map[string]struct{}{}
-	for eventType, entry := range bundle.Events {
+	for eventType := range bundle.MergedEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
 			continue
 		}
-		switch strings.TrimSpace(strings.ToLower(entry.EmitterType)) {
-		case "runtime", "system_node":
-			runtimeSet[eventType] = struct{}{}
-		case "human":
+		switch {
+		case strings.HasPrefix(eventType, "board."):
 			humanSet[eventType] = struct{}{}
-		}
-		for _, role := range producerRolesForEvent(entry) {
-			role = canonicalRole(role)
-			if role == "" {
-				continue
-			}
-			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
+		case strings.HasPrefix(eventType, "timer."):
+			runtimeSet[eventType] = struct{}{}
+		case eventType == "cycle_limit_reached", eventType == "founder_input.response", eventType == "user_onboarded":
+			runtimeSet[eventType] = struct{}{}
 		}
 	}
-	for role, entry := range bundle.Agents {
+	for role, entry := range bundle.MergedAgents {
 		role = canonicalRole(firstNonEmpty(role, entry.Role))
 		if role == "" {
 			continue
@@ -299,13 +294,19 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
 		}
 	}
-	for nodeID, node := range bundle.Nodes {
+	for nodeID, node := range bundle.MergedNodes {
 		role := canonicalRole(nodeID)
 		if role == "" {
 			continue
 		}
 		for _, eventType := range node.Produces {
+			runtimeSet[strings.TrimSpace(eventType)] = struct{}{}
 			reg.agentEvents[role] = appendUniqueSortedEvent(reg.agentEvents[role], eventType)
+		}
+	}
+	for _, timer := range bundle.WorkflowTimers() {
+		if eventType := strings.TrimSpace(timer.Event); eventType != "" {
+			runtimeSet[eventType] = struct{}{}
 		}
 	}
 	for role, events := range extraProducerEvents {
@@ -546,7 +547,7 @@ func sortedSet(values map[string]struct{}) []string {
 func findRepoRoot() (string, error) {
 	if _, file, _, ok := runtime.Caller(0); ok {
 		dir := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-		if _, err := os.Stat(filepath.Join(dir, "contracts")); err == nil {
+		if runtimecontracts.RepoRootHasMASContracts(dir) {
 			return dir, nil
 		}
 	}
@@ -555,7 +556,7 @@ func findRepoRoot() (string, error) {
 		return "", err
 	}
 	for dir := wd; ; dir = filepath.Dir(dir) {
-		if _, err := os.Stat(filepath.Join(dir, "contracts")); err == nil {
+		if runtimecontracts.RepoRootHasMASContracts(dir) {
 			return dir, nil
 		}
 		next := filepath.Dir(dir)
@@ -576,6 +577,8 @@ func firstNonEmpty(values ...string) string {
 }
 
 func routeMatches(pattern, eventType string) bool {
+	pattern = normalizeEventPattern(pattern)
+	eventType = normalizeEventPattern(eventType)
 	switch {
 	case pattern == "", pattern == "*":
 		return true
@@ -590,4 +593,12 @@ func routeMatches(pattern, eventType string) bool {
 		}
 		return pattern == eventType
 	}
+}
+
+func normalizeEventPattern(value string) string {
+	value = strings.TrimSpace(value)
+	if idx := strings.LastIndex(value, "/"); idx >= 0 && idx+1 < len(value) {
+		value = value[idx+1:]
+	}
+	return value
 }

@@ -177,17 +177,16 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		"last_error":  msg,
 		"retry_count": maxInt(n.retryLimit, 1),
 	}
-	if strings.TrimSpace(evt.VerticalID) != "" {
-		payload["vertical_id"] = strings.TrimSpace(evt.VerticalID)
+	if verticalID := workflowEventEntityID(evt); verticalID != "" {
+		payload["vertical_id"] = verticalID
 	}
-	if err := n.bus.Publish(ctx, events.Event{
+	if err := n.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("pipeline.dead_letter"),
 		SourceAgent: n.nodeID,
-		VerticalID:  strings.TrimSpace(evt.VerticalID),
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),
-	}); err != nil {
+	}).WithEntityID(workflowEventEntityID(evt))); err != nil {
 		log.Printf("%s: emit dead letter failed event=%s err=%v", n.nodeID, strings.TrimSpace(evt.ID), err)
 	}
 }

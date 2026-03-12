@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -12,21 +11,6 @@ import (
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
-
-// Route is the deprecated mutable-routing entry preserved as a CP2 bridge for
-// stale manager/test call sites while routing derivation finishes rolling out.
-type Route struct {
-	EventPattern string
-	SubscriberID string
-	Status       string
-}
-
-// RoutingTable is the deprecated per-vertical mutable routing table preserved
-// as a compatibility shim. New code should use RouteTable derivation instead.
-type RoutingTable struct {
-	VerticalID string
-	Routes     []Route
-}
 
 func (eb *EventBus) persistableRecipients(ctx context.Context, recipients []string) []string {
 	recipients = uniqueStrings(recipients)
@@ -74,13 +58,11 @@ func (eb *EventBus) resolveRoutedSubscribers(eventType string) []Subscriber {
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
-	legacy := cloneLegacyRoutingTables(eb.legacyRoutingTables)
 	eb.mu.RUnlock()
 	out := make([]Subscriber, 0, 8)
 	if table != nil {
 		out = append(out, table.Resolve(eventType)...)
 	}
-	out = append(out, resolveLegacySubscribers(legacy, eventType)...)
 	return dedupeSubscribers(out)
 }
 
@@ -113,7 +95,7 @@ func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agent
 		case <-ctx.Done():
 			return
 		case <-time.After(deliverySendTimeout):
-			eb.logRuntime(ctx, "warn", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.VerticalID, "", "", "", map[string]any{
+			eb.logRuntime(ctx, "warn", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", "", "", map[string]any{
 				"timeout_ms": int(deliverySendTimeout / time.Millisecond),
 			}, "", 0)
 		}
@@ -173,47 +155,6 @@ func (eb *EventBus) ResolveSubscribedRecipients(eventType string) []string {
 	return eb.resolveSubscribedRecipients(eventType)
 }
 
-func (eb *EventBus) SetRoutingTable(verticalID string, table *RoutingTable) error {
-	if eb == nil {
-		return nil
-	}
-	verticalID = strings.TrimSpace(verticalID)
-	if table != nil && verticalID == "" {
-		verticalID = strings.TrimSpace(table.VerticalID)
-	}
-	if verticalID == "" {
-		return fmt.Errorf("vertical id is required")
-	}
-
-	eb.mu.Lock()
-	defer eb.mu.Unlock()
-	if table == nil {
-		delete(eb.legacyRoutingTables, verticalID)
-		return nil
-	}
-	clone := cloneRoutingTable(table)
-	clone.VerticalID = verticalID
-	eb.legacyRoutingTables[verticalID] = clone
-	return nil
-}
-
-func (eb *EventBus) GetRoutingTable(verticalID string) *RoutingTable {
-	if eb == nil {
-		return nil
-	}
-	verticalID = strings.TrimSpace(verticalID)
-	if verticalID == "" {
-		return nil
-	}
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
-	table, ok := eb.legacyRoutingTables[verticalID]
-	if !ok {
-		return nil
-	}
-	return cloneRoutingTable(table)
-}
-
 func routeMatches(pattern, eventType string) bool {
 	return RouteMatches(pattern, eventType)
 }
@@ -239,77 +180,6 @@ func (eb *EventBus) resolveHumanTaskRecipients(evt events.Event) []string {
 
 func uniqueStrings(in []string) []string {
 	return UniqueStrings(in)
-}
-
-func cloneRoutingTable(table *RoutingTable) *RoutingTable {
-	if table == nil {
-		return nil
-	}
-	out := &RoutingTable{
-		VerticalID: strings.TrimSpace(table.VerticalID),
-		Routes:     make([]Route, 0, len(table.Routes)),
-	}
-	for _, route := range table.Routes {
-		out.Routes = append(out.Routes, Route{
-			EventPattern: strings.TrimSpace(route.EventPattern),
-			SubscriberID: strings.TrimSpace(route.SubscriberID),
-			Status:       strings.TrimSpace(route.Status),
-		})
-	}
-	return out
-}
-
-func cloneLegacyRoutingTables(in map[string]*RoutingTable) map[string]*RoutingTable {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]*RoutingTable, len(in))
-	for key, table := range in {
-		key = strings.TrimSpace(key)
-		if key == "" || table == nil {
-			continue
-		}
-		out[key] = cloneRoutingTable(table)
-	}
-	return out
-}
-
-func resolveLegacySubscribers(legacy map[string]*RoutingTable, eventType string) []Subscriber {
-	if len(legacy) == 0 || eventType == "" {
-		return nil
-	}
-	keys := make([]string, 0, len(legacy))
-	for key := range legacy {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	out := make([]Subscriber, 0, len(keys))
-	for _, key := range keys {
-		table := legacy[key]
-		if table == nil {
-			continue
-		}
-		for _, route := range table.Routes {
-			if strings.EqualFold(strings.TrimSpace(route.Status), "inactive") {
-				continue
-			}
-			pattern := strings.Trim(strings.TrimSpace(route.EventPattern), "/")
-			subscriberID := strings.TrimSpace(route.SubscriberID)
-			if pattern == "" || subscriberID == "" {
-				continue
-			}
-			if !RouteMatches(pattern, eventType) {
-				continue
-			}
-			out = append(out, Subscriber{
-				ID:   subscriberID,
-				Type: "legacy",
-				Path: strings.TrimSpace(table.VerticalID),
-			})
-		}
-	}
-	return out
 }
 
 func dedupeSubscribers(in []Subscriber) []Subscriber {
@@ -370,19 +240,18 @@ func filterOutVerticalScopedAgentIDs(in []string, verticalID string) []string {
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
 	payload := []byte(fmt.Sprintf(`{"event_id":"%s","reason":"%s","source_type":"%s"}`,
 		source.ID, reason, source.Type))
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.contradiction_detected"),
 		SourceAgent: "runtime",
 		TaskID:      source.TaskID,
-		VerticalID:  source.VerticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}
+	}).WithEntityID(source.EntityID())
 	if err := eb.store.AppendEvent(ctx, evt); err != nil {
 		return fmt.Errorf("persist contradiction event: %w", err)
 	}
-	eb.logRuntime(ctx, "warn", "guardrails", "violation", source.ID, string(source.Type), "", source.VerticalID, "", "", "", map[string]any{
+	eb.logRuntime(ctx, "warn", "guardrails", "violation", source.ID, string(source.Type), "", source.EntityID(), "", "", "", map[string]any{
 		"reason": reason,
 	}, "", 0)
 	return nil

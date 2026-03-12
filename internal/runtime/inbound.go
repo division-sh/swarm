@@ -127,14 +127,13 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	envelopeBytes := mustJSON(pubPayload)
 	if g.bus != nil {
 		pubCtx := runtimebus.WithCurrentRuntimeEpoch(r.Context())
-		if err := g.bus.Publish(pubCtx, events.Event{
+		if err := g.bus.Publish(pubCtx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        pubType,
 			SourceAgent: "inbound-gateway",
-			VerticalID:  target.VerticalID,
 			Payload:     envelopeBytes,
 			CreatedAt:   now,
-		}); err != nil {
+		}).WithEntityID(target.VerticalID)); err != nil {
 			log.Printf("inbound publish failed provider=%s vertical=%s err=%v", provider, target.VerticalID, err)
 		}
 	}

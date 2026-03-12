@@ -14,7 +14,7 @@ import (
 )
 
 type genericTestModule struct {
-	once           sync.Once
+	once           *sync.Once
 	contractBundle *runtimecontracts.WorkflowContractBundle
 	workflow       *WorkflowDefinition
 	workflowNodes  []WorkflowNode
@@ -28,6 +28,9 @@ func NewGenericTestWorkflowModule() WorkflowModule {
 }
 
 func (m *genericTestModule) init() {
+	if m.once == nil {
+		m.once = &sync.Once{}
+	}
 	m.once.Do(func() {
 		repoRoot := WorkflowRepoRoot()
 		contractsDir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "tests", "generic-runtime", "contracts")

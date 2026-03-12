@@ -43,14 +43,13 @@ func claimHumanTask(ctx context.Context, stores storeBundle, taskID, assignedTo 
 		"vertical_id":      strings.TrimSpace(verticalID),
 		"assigned_to":      assignedTo,
 	}
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("human_task.assigned"),
 		SourceAgent: "cli",
-		VerticalID:  verticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}, []string{strings.TrimSpace(requestingAgent)}); err != nil {
+	}).WithEntityID(verticalID), []string{strings.TrimSpace(requestingAgent)}); err != nil {
 		return err
 	}
 
@@ -95,14 +94,13 @@ func completeHumanTask(ctx context.Context, stores storeBundle, taskID, result, 
 		"outcome":          outcome,
 		"follow_up_needed": followUp,
 	}
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("human_task.completed"),
 		SourceAgent: "cli",
-		VerticalID:  verticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}, []string{strings.TrimSpace(requestingAgent)}); err != nil {
+	}).WithEntityID(verticalID), []string{strings.TrimSpace(requestingAgent)}); err != nil {
 		return err
 	}
 
@@ -156,14 +154,13 @@ func rejectHumanTask(ctx context.Context, stores storeBundle, cfg *config.Config
 		"human_reason":     reason,
 		"requeue_date":     requeueAt,
 	}
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("human_task.deferred"),
 		SourceAgent: "cli",
-		VerticalID:  verticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}, withControlPlaneRecipient(strings.TrimSpace(requestingAgent))); err != nil {
+	}).WithEntityID(verticalID), withControlPlaneRecipient(strings.TrimSpace(requestingAgent))); err != nil {
 		return err
 	}
 

@@ -304,14 +304,13 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, verti
 	t.Helper()
 
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
 		SourceAgent: "store-test",
-		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now().Add(-1 * time.Hour),
-	}
+	}).WithEntityID(verticalID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}

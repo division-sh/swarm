@@ -49,7 +49,7 @@ func TurnMetaFromEvent(evt events.Event) (TurnMeta, bool) {
 		EventID:      strings.TrimSpace(evt.ID),
 		EventType:    strings.TrimSpace(string(evt.Type)),
 		AgentID:      strings.TrimSpace(evt.SourceAgent),
-		VerticalID:   strings.TrimSpace(evt.VerticalID),
+		VerticalID:   strings.TrimSpace(evt.EntityID()),
 		ScanID:       strings.TrimSpace(asString(payload["scan_id"])),
 		CampaignID:   strings.TrimSpace(asString(payload["campaign_id"])),
 		AssignedAt:   evt.CreatedAt.UTC(),

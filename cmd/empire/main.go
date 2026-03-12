@@ -45,6 +45,7 @@ import (
 const defaultMigrationFilePath = "contracts/ddl-canonical.sql"
 
 func main() {
+	ensureEmpireDefaults()
 	if handled, err := tryRunSubcommand(); handled {
 		if err != nil {
 			log.Fatalf("command failed: %v", err)
@@ -234,6 +235,7 @@ func goServeHTTP(name string, serve func() error) {
 }
 
 func tryRunSubcommand() (bool, error) {
+	ensureEmpireDefaults()
 	if len(os.Args) < 2 {
 		return false, nil
 	}

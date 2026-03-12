@@ -266,7 +266,7 @@ func DeterministicOutputEventID(inbound events.Event, agentID string, index int,
 		strings.TrimSpace(agentID),
 		fmt.Sprintf("%d", index),
 		strings.TrimSpace(string(out.Type)),
-		strings.TrimSpace(out.VerticalID),
+		strings.TrimSpace(out.EntityID()),
 	}, "|")
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String()
 }

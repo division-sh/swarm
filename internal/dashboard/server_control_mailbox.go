@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"empireai/internal/events"
 	empirestore "empireai/internal/empire/store"
+	"empireai/internal/events"
 	mailboxsvc "empireai/internal/mailbox"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
@@ -61,7 +61,6 @@ func (s *Server) handleControlMailboxDecide(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-
 func (s *Server) emitMailboxDecisionSideEffects(
 	ctx context.Context,
 	item runtimetools.MailboxItem,
@@ -79,35 +78,32 @@ func (s *Server) emitMailboxDecisionSideEffects(
 		"notes":      notes,
 		"context":    json.RawMessage(item.Context),
 	}
-	if err := s.appendTargetedEvent(ctx, events.Event{
+	if err := s.appendTargetedEvent(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("mailbox.decision"),
 		SourceAgent: "mailbox",
-		VerticalID:  item.VerticalID,
 		Payload:     mustJSON(basePayload),
 		CreatedAt:   s.now(),
-	}, nil); err != nil {
+	}).WithEntityID(item.VerticalID), nil); err != nil {
 		return err
 	}
-	if err := s.appendTargetedEvent(ctx, events.Event{
+	if err := s.appendTargetedEvent(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("mailbox.item_decided"),
 		SourceAgent: "mailbox",
-		VerticalID:  item.VerticalID,
 		Payload:     mustJSON(basePayload),
 		CreatedAt:   s.now(),
-	}, nil); err != nil {
+	}).WithEntityID(item.VerticalID), nil); err != nil {
 		return err
 	}
 	if outcome.Status == "more_data" && item.VerticalID != "" {
-		if err := s.appendTargetedEvent(ctx, events.Event{
+		if err := s.appendTargetedEvent(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.needs_more_data"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   s.now(),
-		}, []string{"empire-coordinator"}); err != nil {
+		}).WithEntityID(item.VerticalID), []string{"empire-coordinator"}); err != nil {
 			return err
 		}
 	}
@@ -120,14 +116,13 @@ func (s *Server) emitMailboxDecisionSideEffects(
 			evtType = events.EventType("vertical.killed")
 		}
 		if evtType != "" {
-			if err := s.appendTargetedEvent(ctx, events.Event{
+			if err := s.appendTargetedEvent(ctx, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        evtType,
 				SourceAgent: "mailbox",
-				VerticalID:  item.VerticalID,
 				Payload:     mustJSON(basePayload),
 				CreatedAt:   s.now(),
-			}, []string{"empire-coordinator"}); err != nil {
+			}).WithEntityID(item.VerticalID), []string{"empire-coordinator"}); err != nil {
 				return err
 			}
 		}
@@ -147,27 +142,25 @@ func (s *Server) emitMailboxDecisionSideEffects(
 			} else if strings.TrimSpace(item.FromAgent) != "" {
 				recipients = []string{strings.TrimSpace(item.FromAgent)}
 			}
-			if err := s.appendTargetedEvent(ctx, events.Event{
+			if err := s.appendTargetedEvent(ctx, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        evtType,
 				SourceAgent: "mailbox",
-				VerticalID:  item.VerticalID,
 				Payload:     mustJSON(basePayload),
 				CreatedAt:   s.now(),
-			}, recipients); err != nil {
+			}).WithEntityID(item.VerticalID), recipients); err != nil {
 				return err
 			}
 		}
 	}
 	if isFounderInputMailbox(item) && item.VerticalID != "" {
-		if err := s.appendTargetedEvent(ctx, events.Event{
+		if err := s.appendTargetedEvent(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("founder_input.response"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   s.now(),
-		}, []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
+		}).WithEntityID(item.VerticalID), []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
 			return err
 		}
 	}
@@ -176,11 +169,10 @@ func (s *Server) emitMailboxDecisionSideEffects(
 	if item.VerticalID != "" && strings.Contains(strings.ToLower(item.Type), "escalation") && outcome.Status == "approved" {
 		directive := strings.TrimSpace(notes)
 		if directive != "" {
-			if err := s.appendTargetedEvent(ctx, events.Event{
+			if err := s.appendTargetedEvent(ctx, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("opco.escalation_response"),
 				SourceAgent: "mailbox",
-				VerticalID:  item.VerticalID,
 				Payload: mustJSON(map[string]any{
 					"mailbox_id":     item.ID,
 					"directive_text": directive,
@@ -188,7 +180,7 @@ func (s *Server) emitMailboxDecisionSideEffects(
 					"context":        json.RawMessage(item.Context),
 				}),
 				CreatedAt: s.now(),
-			}, []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
+			}).WithEntityID(item.VerticalID), []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
 				return err
 			}
 		}
@@ -201,11 +193,10 @@ func (s *Server) emitMailboxDecisionSideEffects(
 		if err != nil {
 			return err
 		}
-		if err := s.appendTargetedEvent(ctx, events.Event{
+		if err := s.appendTargetedEvent(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("geography.expansion_queued"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload: mustJSON(map[string]any{
 				"mailbox_id":   item.ID,
 				"vertical_id":  item.VerticalID,
@@ -220,7 +211,7 @@ func (s *Server) emitMailboxDecisionSideEffects(
 				"context":      json.RawMessage(item.Context),
 			}),
 			CreatedAt: s.now(),
-		}, []string{"empire-coordinator"}); err != nil {
+		}).WithEntityID(item.VerticalID), []string{"empire-coordinator"}); err != nil {
 			return err
 		}
 	}

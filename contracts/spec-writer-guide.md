@@ -1,1 +1,0 @@
-legacy-contracts/spec-writer-guide.md

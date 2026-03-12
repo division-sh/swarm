@@ -84,7 +84,7 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	if !ok {
 		return false, false
 	}
-	if policy.RequireVertical && strings.TrimSpace(evt.VerticalID) == "" && strings.TrimSpace(asString(parsePayloadMap(evt.Payload)["vertical_id"])) == "" {
+	if policy.RequireVertical && workflowEventEntityID(evt) == "" {
 		return false, false
 	}
 	return policy.Consume, true
@@ -171,29 +171,20 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if e.nodeID == "" || eventType == "" {
 		return &HandlerOutcome{Handled: false}, nil
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
-	if verticalID == "" {
-		verticalID = strings.TrimSpace(asString(parsePayloadMap(evt.Payload)["vertical_id"]))
+	triggerCtx := workflowTriggerContext{Event: evt}
+	verticalID := workflowEventEntityID(evt)
+	triggerCtx.State = e.coordinator.currentWorkflowState(ctx, verticalID)
+	triggerCtx.ValidationState = e.coordinator.validationStateSnapshot(verticalID)
+	result, err := e.coordinator.executeNodeContractHandler(ctx, e.nodeID, handler, triggerCtx, false)
+	if err != nil {
+		return nil, err
 	}
-	triggerCtx := workflowTriggerContext{
-		Event:           evt,
-		State:           e.coordinator.currentWorkflowState(ctx, verticalID),
-		ValidationState: e.coordinator.validationStateSnapshot(verticalID),
-	}
-	plan := handlerExecutionPlanFromNodeHandler(e.nodeID, eventType, handler)
-	if !directHandlerExecutionPlanSupported(plan) {
+	if !result.Handled {
 		return &HandlerOutcome{Handled: false}, nil
 	}
-	if handlerPlanHasGuard(plan) {
-		passed, _ := e.coordinator.evaluateWorkflowGuardSpec(triggerCtx, plan.GuardSpec)
-		if !passed {
-			return &HandlerOutcome{Handled: false}, nil
-		}
-	}
-	actionsExecuted := e.coordinator.executeContractHandlerFirstPlan(ctx, triggerCtx, workflowTransitionFromHandlerPlan(triggerCtx.State, plan), plan)
 	e.coordinator.reconcileWorkflowEventTimers(ctx, verticalID, eventType)
 	return &HandlerOutcome{
 		Handled:         true,
-		ActionsExecuted: actionsExecuted,
+		ActionsExecuted: append([]string{}, result.Outcome.ActionsExecuted...),
 	}, nil
 }

@@ -306,9 +306,9 @@ func (e *handlerEngineExecution) resolveEntityID() string {
 		return ""
 	}
 	candidates := []string{
-		strings.TrimSpace(e.event.VerticalID),
 		strings.TrimSpace(asString(e.payload["entity_id"])),
 		strings.TrimSpace(asString(e.payload["vertical_id"])),
+		strings.TrimSpace(e.event.EntityID()),
 		strings.TrimSpace(e.state.VerticalID),
 	}
 	for _, candidate := range candidates {
@@ -907,6 +907,8 @@ func (e *handlerEngineExecution) computeValue(acc *handlerEngineAccumulator) (an
 	switch op {
 	case "weighted_average":
 		return computeWeightedAverage(acc, e.handler.Compute.Tiers), nil
+	case "weighted_sum":
+		return computeWeightedPayload(e.payload, e.handler.Compute.Tiers), nil
 	case "sum":
 		return aggregateAccumulatorNumbers(acc, func(current, next float64, idx int) float64 {
 			return current + next
@@ -1143,6 +1145,38 @@ func computeWeightedAverage(acc *handlerEngineAccumulator, tiers []runtimecontra
 		return 0
 	}
 	return total / totalWeight
+}
+
+func computeWeightedPayload(payload map[string]any, tiers []runtimecontracts.ComputeTier) float64 {
+	if len(payload) == 0 || len(tiers) == 0 {
+		return 0
+	}
+	total := 0.0
+	for _, tier := range tiers {
+		sum := 0.0
+		count := 0
+		for _, dimension := range tier.Dimensions {
+			var value any
+			if resolved, ok := workflowExpressionLookupPath(payload, strings.TrimPrefix(strings.TrimSpace(dimension), "payload.")); ok {
+				value = resolved
+			}
+			score := firstNumeric(value)
+			if math.IsNaN(score) {
+				continue
+			}
+			sum += score
+			count++
+		}
+		if count == 0 {
+			continue
+		}
+		weight := tier.Weight
+		if weight <= 0 {
+			weight = 1
+		}
+		total += (sum / float64(count)) * weight
+	}
+	return total
 }
 
 func aggregateAccumulatorNumbers(acc *handlerEngineAccumulator, combine func(current, next float64, idx int) float64) float64 {

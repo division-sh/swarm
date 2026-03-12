@@ -222,7 +222,7 @@ func verticalHealthMonitorLoop(ctx context.Context, bus *runtime.EventBus, db *s
 			if !ok {
 				return
 			}
-			verticalID := strings.TrimSpace(evt.VerticalID)
+			verticalID := strings.TrimSpace(evt.EntityID())
 			if verticalID == "" {
 				var p struct {
 					VerticalID string `json:"vertical_id"`
@@ -479,14 +479,13 @@ func maybeEmitSteadyState(ctx context.Context, bus *runtime.EventBus, db *sql.DB
 		"emitted_at": time.Now().UTC().Format(time.RFC3339),
 	})
 
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("opco.steady_state_reached"),
 		SourceAgent: fmt.Sprintf("opco-ceo-%s", verticalID),
-		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}
+	}).WithEntityID(verticalID)
 	return bus.Publish(context.Background(), evt)
 }
 

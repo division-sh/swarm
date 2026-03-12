@@ -1,4 +1,0 @@
-marginal_park_days: 14
-pipeline_capacity_max: 3
-operating_state_timeout_hours: 168
-marginal_kill_days: 60

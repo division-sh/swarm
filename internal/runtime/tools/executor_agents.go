@@ -96,15 +96,14 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if len(wirePayload) == 0 || string(wirePayload) == "null" {
 		wirePayload = []byte("{}")
 	}
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(in.EventType),
 		SourceAgent: in.SourceAgent,
 		TaskID:      in.TaskID,
-		VerticalID:  targetVertical,
 		Payload:     wirePayload,
 		CreatedAt:   time.Now(),
-	}
+	}).WithEntityID(targetVertical)
 	if err := e.bus.PublishDirect(ctx, evt, targets); err != nil {
 		return nil, err
 	}
@@ -355,11 +354,10 @@ func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentC
 		return nil, err
 	}
 	if e.bus != nil {
-		if err := e.bus.Publish(ctx, events.Event{
+		if err := e.bus.Publish(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("opco.routing_updated"),
 			SourceAgent: actor.ID,
-			VerticalID:  strings.TrimSpace(in.VerticalID),
 			Payload: mustJSON(map[string]any{
 				"vertical_id":        in.VerticalID,
 				"event_pattern":      in.EventPattern,
@@ -372,7 +370,7 @@ func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentC
 				"runtime_tool_event": true,
 			}),
 			CreatedAt: time.Now(),
-		}); err != nil {
+		}).WithEntityID(strings.TrimSpace(in.VerticalID))); err != nil {
 			runtimeWarn(
 				"tool-executor",
 				"failed to publish opco.routing_updated actor=%s vertical_id=%s pattern=%s: %v",

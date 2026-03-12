@@ -225,14 +225,13 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			"vertical_id": rec.Config.VerticalID,
 			"hired_by":    rec.HiredBy,
 		})
-		if err := am.bus.Publish(am.runtimeContext(), events.Event{
+		if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("agent.started"),
 			SourceAgent: rec.Config.ID,
-			VerticalID:  rec.Config.VerticalID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		}); err != nil {
+		}).WithEntityID(rec.Config.VerticalID)); err != nil {
 			RuntimeWarn("agent-manager", "agent.started publish failed agent=%s err=%v", rec.Config.ID, err)
 		}
 	}

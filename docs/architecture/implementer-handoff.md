@@ -408,7 +408,9 @@ type NodeStateField struct {
 }
 ```
 
-#### Layer 3: Flow composition — typed recursive tree
+#### Layer 3: Flow composition — typed recursive tree (ARCHITECTURAL FOUNDATION)
+
+**THIS IS THE MOST IMPORTANT DATA STRUCTURE IN THE PLATFORM.** Everything else — routing derivation, policy resolution, URI addressing, pin validation, namespace substitution, dynamic flow instances — is a projection of this tree. Build it first. If the tree is empty, everything downstream is built on flat workarounds that will need to be rewritten.
 
 The loader discovers the recursive flow tree (`LoadedProjectPackage` with `Depth`, `ParentKey`) but the contract views flatten it. `FlowContractView` and `ProjectContractView` have no parent→child structure. Policy is `map[string]any` with no typed hierarchy.
 
@@ -460,6 +462,24 @@ type FlowTree struct {
 ```
 
 This is the structure that boot steps 2-6 build and steps 7-11 validate against.
+
+4. **Wire the loader.** After loading flows into the flat `FlowContracts` map, the loader MUST build the tree:
+   - Set `FlowTree.Root` to the top-level package's view
+   - For each flow, assign it as a child of its parent flow (using `LoadedProjectPackage.ParentKey`)
+   - Set `Parent` back-pointers on each child
+   - Populate `ByPath` with hierarchical paths: `{parent_flow}/{child_flow}/...`
+   - Populate `ByID` with flow ID lookups
+   - If `FlowTree.ByPath` is empty after loading, the loader is broken
+
+5. **Build the URI registry as part of tree construction.** URI addressing (local, absolute, full) is not a Phase 3 feature — it is inseparable from the tree. When the tree is built, every node, agent, and event gets a hierarchical URI assigned. This replaces Step 3.7 as a separate phase — URI resolution is a property of the tree, not an add-on.
+
+   URI formats (resolve during tree construction):
+   - Local (no `/`): `scoring.requested` → entity in current flow instance
+   - Absolute (with `/`): `scoring/entity.shortlisted` → entity in specific flow instance
+   - Full URI: `empire://scoring/entity.shortlisted` → multi-root-flow scenario
+   - Wildcards: `*/entity.shortlisted` (direct children), `**/entity.completed` (any depth)
+
+**Why this is foundational:** Without the populated tree, the implementer will build flat workarounds for routing (lookup from flat map instead of tree walk), policy (flat merged map instead of hierarchical resolution), and addressing (bare flow ID instead of hierarchical path). These workarounds compile and pass tests but produce the wrong architecture — a second product with nested flows will fail silently.
 
 #### Layer 4: Event catalog and transition data
 
@@ -719,15 +739,42 @@ Current code uses `SetRoutingTable(verticalID, routes)` to mutate routing at run
 
 ### Step 2.6: Delete concepts that don't exist in MAS
 
-**a) Mutable routing tables.** `SetRoutingTable`/`GetRoutingTable` → delete. MAS derives routing at boot + flow activation.
+**a) Mutable routing tables.** `SetRoutingTable`/`GetRoutingTable` → delete. MAS derives routing at boot + flow activation. Routing is a projection of `FlowTree.ByPath` — walk the tree, collect `subscribes_to` declarations, build a read-only route table.
 
 **b) `accumulator_state` JSON bucket.** The untyped JSON grab-bag → replace with typed entity fields (from `entity_schema`) or node-scoped state (from `state_schema`).
 
 **c) `PipelineStage` / `current_stage`.** MAS has per-flow-instance states, not global stage. Delete `current_stage` from entity table. Per-instance state lives in `workflow_instances.current_state`.
 
-**d) `productpolicy.Policy` interface.** The 30-method interface is wrong. MAS reads policy from `policy.yaml` per flow, resolved via `{{policy.X}}` in CEL. Delete the interface. Read policy values from MAS bundle.
+**d) `productpolicy.Policy` interface.** The 30-method interface is wrong. MAS reads policy from `policy.yaml` per flow, resolved via `{{policy.X}}` in CEL. Delete the interface. Policy resolution walks up the `FlowTree` from the current flow's `FlowContractView.Parent` to root — child values shadow parent values. Do NOT replace the interface with flat helper functions or a merged map. The replacement is the tree walk.
 
 **e) Custom orchestrator Go structs.** `LifecycleOrchestrator`, `ValidationOrchestrator`, `DiscoveryAggregator`, `ScanOrchestrator`, `ScoringNode` — after Steps 2.1+2.5, most execute declaratively. Delete the structs; node IDs remain in `nodes.yaml`, execute through `DeclarativeNode`.
+
+**f) `ScanCampaignManager` background loop.** Sharding and parallelism in MAS are not a background loop — they are the `fan_out` + `accumulate` + `agent_hire` handler primitives working together. The handler engine already supports `fan_out` (iterate items, emit per item) and `accumulate` (track completions, fire on threshold). The scan campaign manager is Empire product logic expressed as infrastructure. Delete it from generic code; Empire can express the same behavior declaratively in its `nodes.yaml` handlers.
+
+**g) Empire-specific parallel state stores.** `workflow_instances` must be the sole runtime state authority. The generic runtime must NOT restore state from Empire-specific side tables. Delete generic dependencies on:
+- `scan_accumulators`
+- `pending_dedup_candidates`
+- `validation_pipelines`
+- `pipeline_processed_events`
+
+These are Empire product state. If Empire needs them, they belong behind a product-owned adapter, not in generic `state_store.go` recovery paths.
+
+**Target `WorkflowModule` interface after Step 2.6:**
+
+```go
+type WorkflowModule interface {
+    ContractBundle() *runtimecontracts.WorkflowContractBundle
+    WorkflowNodes() []WorkflowNode
+    GuardRegistry() GuardRegistry
+    ActionRegistry() ActionRegistry
+}
+```
+
+The following methods are REMOVED from the generic interface (move to Empire-internal if still needed):
+- `ScanPolicy()` — Empire scanning logic
+- `DiscoveryPolicy()` — Empire discovery logic
+- `ScoringPolicy()` — Empire scoring logic
+- `PayloadFactory()` — Empire payload shaping
 
 ### Step 2.7: Extract Empire from config, factory, store, tools
 

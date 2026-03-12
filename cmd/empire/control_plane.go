@@ -7,6 +7,7 @@ import (
 )
 
 func defaultControlPlaneAgentID() string {
+	ensureEmpireDefaults()
 	return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
 }
 

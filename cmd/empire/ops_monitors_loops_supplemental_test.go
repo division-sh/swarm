@@ -88,14 +88,13 @@ func TestVerticalHealthMonitorLoop_EmitsWarningAndSteadyState(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // let subscription attach
 
 	// Publish report with vertical id in payload (evt.VerticalID empty) to cover payload extraction.
-	_ = bus.Publish(context.Background(), events.Event{
+	_ = bus.Publish(context.Background(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("opco.ceo_report"),
 		SourceAgent: "opco-ceo-" + verticalID,
-		VerticalID:  "",
 		Payload:     []byte(`{"vertical_id":"` + verticalID + `"}`),
 		CreatedAt:   time.Now(),
-	})
+	}).WithEntityID(verticalID))
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

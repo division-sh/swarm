@@ -26,7 +26,7 @@ func (n *ValidationOrchestrator) InterceptPolicy(eventType string, evt events.Ev
 	if !ok {
 		return false, false
 	}
-	if policy.RequireVertical && strings.TrimSpace(evt.VerticalID) == "" {
+	if policy.RequireVertical && workflowEventEntityID(evt) == "" {
 		return false, false
 	}
 	return policy.Consume, true

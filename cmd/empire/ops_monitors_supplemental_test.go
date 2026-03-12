@@ -84,14 +84,13 @@ func TestOpsMonitors_Loops_PortfolioDigest_And_HealthMonitor(t *testing.T) {
 	healthCh := bus.Subscribe("t-health", events.EventType("vertical.health_warning"))
 	go verticalHealthMonitorLoop(ctx, bus, db, stores.MailboxStore)
 	time.Sleep(30 * time.Millisecond)
-	_ = bus.Publish(context.Background(), events.Event{
+	_ = bus.Publish(context.Background(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("opco.ceo_report"),
 		SourceAgent: "opco-ceo-" + verticalID,
-		VerticalID:  verticalID,
 		Payload:     []byte(`{"vertical_id":"` + verticalID + `"}`),
 		CreatedAt:   time.Now(),
-	})
+	}).WithEntityID(verticalID))
 	select {
 	case <-healthCh:
 	case <-time.After(2 * time.Second):

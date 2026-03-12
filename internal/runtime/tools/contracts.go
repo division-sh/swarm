@@ -3,15 +3,14 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
+	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
-	"gopkg.in/yaml.v3"
 )
 
 type ContractSchemaEntry struct {
@@ -28,16 +27,28 @@ var (
 
 func LoadContractSchemas() (map[string]ContractSchemaEntry, error) {
 	contractSchemasOnce.Do(func() {
-		path := filepath.Join(repoRoot(), "contracts", "tool-schemas.yaml")
-		raw, err := os.ReadFile(path)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot())
 		if err != nil {
-			contractSchemasErr = fmt.Errorf("read %s: %w", path, err)
+			contractSchemasErr = fmt.Errorf("load workflow contract bundle: %w", err)
 			return
 		}
 		parsed := map[string]ContractSchemaEntry{}
-		if err := yaml.Unmarshal(raw, &parsed); err != nil {
-			contractSchemasErr = fmt.Errorf("parse %s: %w", path, err)
-			return
+		for name, entry := range bundle.MergedTools {
+			schema := map[string]any{}
+			raw, marshalErr := json.Marshal(entry.InputSchema)
+			if marshalErr != nil {
+				contractSchemasErr = fmt.Errorf("marshal tool schema %s: %w", name, marshalErr)
+				return
+			}
+			if unmarshalErr := json.Unmarshal(raw, &schema); unmarshalErr != nil {
+				contractSchemasErr = fmt.Errorf("normalize tool schema %s: %w", name, unmarshalErr)
+				return
+			}
+			parsed[name] = ContractSchemaEntry{
+				Category:    entry.Category,
+				Description: entry.Description,
+				InputSchema: schema,
+			}
 		}
 		contractSchemas = parsed
 	})

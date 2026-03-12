@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	"empireai/internal/events"
 	"empireai/internal/empire/factory"
+	"empireai/internal/events"
 	"empireai/internal/specaudit"
 	"github.com/google/uuid"
 )
@@ -476,14 +476,13 @@ func runSpecAuditSubcommand(args []string) error {
 		"requested_by": *requestedBy,
 		"spec":         json.RawMessage(specRaw),
 	})
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.validation_requested"),
 		SourceAgent: *requestedBy,
-		VerticalID:  strings.TrimSpace(*verticalID),
 		Payload:     requestPayload,
 		CreatedAt:   time.Now(),
-	}, []string{"spec-auditor"}); err != nil {
+	}).WithEntityID(strings.TrimSpace(*verticalID)), []string{"spec-auditor"}); err != nil {
 		return err
 	}
 
@@ -498,14 +497,13 @@ func runSpecAuditSubcommand(args []string) error {
 	if result.Passed {
 		eventType = events.EventType("spec.validation_passed")
 	}
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        eventType,
 		SourceAgent: "spec-auditor",
-		VerticalID:  strings.TrimSpace(*verticalID),
 		Payload:     resultPayload,
 		CreatedAt:   time.Now(),
-	}, []string{strings.TrimSpace(*requestedBy)}); err != nil {
+	}).WithEntityID(strings.TrimSpace(*verticalID)), []string{strings.TrimSpace(*requestedBy)}); err != nil {
 		return err
 	}
 	if result.Passed {

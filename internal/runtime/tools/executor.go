@@ -464,14 +464,13 @@ func (e *Executor) emitToolExecutionEvent(
 		"result":       SafeTelemetryText(result),
 		"runtime_tool": true,
 	})
-	if err := e.bus.Publish(ctx, events.Event{
+	if err := e.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("agent.tool_execution"),
 		SourceAgent: actor.ID,
-		VerticalID:  actor.VerticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}); err != nil {
+	}).WithEntityID(actor.VerticalID)); err != nil {
 		runtimeWarn(
 			"tool-executor",
 			"failed to publish agent.tool_execution actor=%s tool=%s: %v",

@@ -1,23 +1,19 @@
 package testcases
 
 import (
-	"fmt"
+	"context"
+	"encoding/json"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"empireai/internal/events"
 	"empireai/internal/models"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 )
-
-type simulatedHandlerOutcome struct {
-	nextState  string
-	emitted    []string
-	setsGate   string
-	clearGates []string
-}
 
 func loadGenericMASBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
@@ -76,158 +72,6 @@ func hasAll(values []string, want ...string) bool {
 	return true
 }
 
-func simulateAccumulation(handler runtimecontracts.SystemNodeEventHandler, received, expected int) simulatedHandlerOutcome {
-	outcome := simulatedHandlerOutcome{
-		nextState:  strings.TrimSpace(handler.AdvancesTo),
-		emitted:    handler.Emits.Values(),
-		setsGate:   gateName(handler.SetsGate),
-		clearGates: append([]string(nil), handler.ClearGates...),
-	}
-	if handler.Accumulate == nil || handler.Accumulate.OnComplete == nil {
-		return outcome
-	}
-	if received >= expected && expected > 0 {
-		outcome.nextState = strings.TrimSpace(handler.Accumulate.OnComplete.AdvancesTo)
-		outcome.emitted = handler.Accumulate.OnComplete.Emits.Values()
-	}
-	return outcome
-}
-
-func chooseRuleForScore(handler runtimecontracts.SystemNodeEventHandler, score float64) (runtimecontracts.HandlerRuleEntry, bool) {
-	for _, rule := range handler.Rules {
-		condition := strings.TrimSpace(rule.Condition)
-		switch {
-		case strings.Contains(condition, ">="):
-			parts := strings.SplitN(condition, ">=", 2)
-			threshold, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-			if err == nil && score >= threshold {
-				return rule, true
-			}
-		case strings.Contains(condition, "<"):
-			parts := strings.SplitN(condition, "<", 2)
-			threshold, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-			if err == nil && score < threshold {
-				return rule, true
-			}
-		}
-	}
-	return runtimecontracts.HandlerRuleEntry{}, false
-}
-
-func evaluateGuard(guard *runtimecontracts.GuardSpec, payload, entity, policy map[string]any) bool {
-	if guard == nil {
-		return true
-	}
-	if check := strings.TrimSpace(guard.Check); check != "" && !evaluateComparison(check, payload, entity, policy) {
-		return false
-	}
-	for _, check := range guard.Checks {
-		if !evaluateComparison(strings.TrimSpace(check.Check), payload, entity, policy) {
-			return false
-		}
-	}
-	return true
-}
-
-func evaluateComparison(expr string, payload, entity, policy map[string]any) bool {
-	for _, op := range []string{">=", "==", "!=", "<"} {
-		if !strings.Contains(expr, op) {
-			continue
-		}
-		parts := strings.SplitN(expr, op, 2)
-		if len(parts) != 2 {
-			return false
-		}
-		left := resolveRef(strings.TrimSpace(parts[0]), payload, entity, policy)
-		right := resolveRef(strings.TrimSpace(parts[1]), payload, entity, policy)
-		switch op {
-		case ">=":
-			return asFloat(left) >= asFloat(right)
-		case "<":
-			return asFloat(left) < asFloat(right)
-		case "==":
-			return fmt.Sprint(left) == fmt.Sprint(right)
-		case "!=":
-			return fmt.Sprint(left) != fmt.Sprint(right)
-		}
-	}
-	return false
-}
-
-func resolveRef(expr string, payload, entity, policy map[string]any) any {
-	expr = strings.TrimSpace(expr)
-	switch expr {
-	case "true":
-		return true
-	case "false":
-		return false
-	}
-	if n, err := strconv.ParseFloat(expr, 64); err == nil {
-		return n
-	}
-	if strings.HasPrefix(expr, "'") && strings.HasSuffix(expr, "'") && len(expr) >= 2 {
-		return strings.Trim(expr, "'")
-	}
-	rootMaps := map[string]map[string]any{
-		"payload": payload,
-		"entity":  entity,
-		"policy":  policy,
-	}
-	parts := strings.Split(expr, ".")
-	if len(parts) == 0 {
-		return nil
-	}
-	current, ok := rootMaps[strings.TrimSpace(parts[0])]
-	if !ok {
-		return expr
-	}
-	var value any = current
-	for _, part := range parts[1:] {
-		obj, ok := value.(map[string]any)
-		if !ok {
-			return nil
-		}
-		value = obj[strings.TrimSpace(part)]
-	}
-	return value
-}
-
-func asFloat(value any) float64 {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed)
-	case int64:
-		return float64(typed)
-	case float64:
-		return typed
-	case float32:
-		return float64(typed)
-	case string:
-		n, _ := strconv.ParseFloat(strings.TrimSpace(typed), 64)
-		return n
-	default:
-		return 0
-	}
-}
-
-func weightedScore(handler runtimecontracts.SystemNodeEventHandler, payload map[string]any) float64 {
-	if handler.Compute == nil {
-		return 0
-	}
-	total := 0.0
-	for _, tier := range handler.Compute.Tiers {
-		sum := 0.0
-		for _, dimension := range tier.Dimensions {
-			sum += asFloat(resolveRef(dimension, payload, nil, nil))
-		}
-		if len(tier.Dimensions) > 0 {
-			sum /= float64(len(tier.Dimensions))
-		}
-		total += sum * tier.Weight
-	}
-	return total
-}
-
 func agentConfigFromEntry(id string, entry runtimecontracts.AgentRegistryEntry) models.AgentConfig {
 	return models.AgentConfig{
 		ID:            id,
@@ -235,4 +79,23 @@ func agentConfigFromEntry(id string, entry runtimecontracts.AgentRegistryEntry) 
 		Role:          entry.Role,
 		Subscriptions: append([]string(nil), entry.Subscriptions...),
 	}
+}
+
+func previewHandler(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string, payload map[string]any, state runtimepipeline.WorkflowState, policyOverrides map[string]any) runtimepipeline.HandlerPreview {
+	t.Helper()
+	rawPayload, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(context.Background(), bundle, nodeID, (events.Event{
+		ID:          "evt-" + strings.ReplaceAll(eventType, ".", "-"),
+		Type:        events.EventType(eventType),
+		SourceAgent: "test-driver",
+		Payload:     rawPayload,
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID("item-123"), state, policyOverrides)
+	if err != nil {
+		t.Fatalf("preview handler %s/%s: %v", nodeID, eventType, err)
+	}
+	return preview
 }

@@ -121,14 +121,13 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		"description":      in.Description,
 	}
 
-	if err := e.bus.Publish(ctx, events.Event{
+	if err := e.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("human_task.requested"),
 		SourceAgent: actor.ID,
-		VerticalID:  in.VerticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}); err != nil {
+	}).WithEntityID(in.VerticalID)); err != nil {
 		runtimeWarn(
 			"tool-executor",
 			"failed to publish human_task.requested task_id=%s actor=%s: %v",
@@ -269,14 +268,13 @@ skipBudget:
 		}
 	}
 
-	if err := e.bus.Publish(ctx, events.Event{
+	if err := e.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        evtType,
 		SourceAgent: actor.ID,
-		VerticalID:  verticalID,
 		Payload:     mustJSON(outPayload),
 		CreatedAt:   time.Now(),
-	}); err != nil {
+	}).WithEntityID(verticalID)); err != nil {
 		runtimeWarn(
 			"tool-executor",
 			"failed to publish human task decision event=%s task_id=%s actor=%s: %v",

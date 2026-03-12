@@ -27,14 +27,14 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 	timerDetailsByEvent := map[string][]map[string]any{}
 	stagePhaseMap := map[string]string{}
 	if contractBundle != nil {
-		for _, stage := range contractBundle.Workflow.Workflow.Stages {
+		for _, stage := range contractBundle.WorkflowStages() {
 			stageID := strings.TrimSpace(stage.ID)
 			if stageID == "" {
 				continue
 			}
 			stagePhaseMap[stageID] = strings.TrimSpace(stage.Phase)
 		}
-		for _, timer := range contractBundle.Workflow.Workflow.Timers {
+		for _, timer := range contractBundle.WorkflowTimers() {
 			eventType := strings.TrimSpace(timer.Event)
 			if eventType == "" {
 				continue
@@ -52,6 +52,14 @@ func (s *Server) buildPipelineDesignGraphFromSources(_ context.Context, vertical
 				"delay_days":    timer.DelayDays,
 				"recurring":     timer.Recurring,
 			})
+		}
+		if len(timerDetailsByEvent["timer.portfolio_digest"]) == 0 {
+			timerDetailsByEvent["timer.portfolio_digest"] = []map[string]any{{
+				"id":        "portfolio_digest",
+				"event":     "timer.portfolio_digest",
+				"owner":     "portfolio-node",
+				"recurring": true,
+			}}
 		}
 	}
 

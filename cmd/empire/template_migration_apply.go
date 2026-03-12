@@ -108,24 +108,22 @@ func applyTemplateMigrationWithPrimitives(ctx context.Context, cfgRuntimeMode st
 		"warnings":     plan.Warnings,
 		"executed_at":  time.Now().UTC().Format(time.RFC3339),
 	})
-	if err := stores.EventStore.AppendEvent(ctx, events.Event{
+	if err := stores.EventStore.AppendEvent(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("template.migration_complete"),
 		SourceAgent: executedBy,
-		VerticalID:  verticalID,
 		Payload:     completePayload,
 		CreatedAt:   time.Now(),
-	}); err != nil {
+	}).WithEntityID(verticalID)); err != nil {
 		log.Printf("template.migration_complete append failed migration=%s err=%v", migrationID, err)
 	}
-	if err := stores.EventStore.AppendEvent(ctx, events.Event{
+	if err := stores.EventStore.AppendEvent(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("template.migration_completed"),
 		SourceAgent: executedBy,
-		VerticalID:  verticalID,
 		Payload:     completePayload,
 		CreatedAt:   time.Now(),
-	}); err != nil {
+	}).WithEntityID(verticalID)); err != nil {
 		log.Printf("template.migration_completed append failed migration=%s err=%v", migrationID, err)
 	}
 
@@ -328,14 +326,13 @@ func failTemplateMigration(ctx context.Context, stores storeBundle, migrationID,
 		"error":        msg,
 		"failed_at":    time.Now().UTC().Format(time.RFC3339),
 	})
-	if err := stores.EventStore.AppendEvent(ctx, events.Event{
+	if err := stores.EventStore.AppendEvent(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("template.migration_failed"),
 		SourceAgent: executedBy,
-		VerticalID:  verticalID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}); err != nil {
+	}).WithEntityID(verticalID)); err != nil {
 		log.Printf("template.migration_failed append failed migration=%s err=%v", migrationID, err)
 	}
 	if stores.MailboxStore != nil {

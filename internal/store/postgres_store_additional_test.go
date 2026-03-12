@@ -24,15 +24,14 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 	ctx := context.Background()
 
 	eventID := uuid.NewString()
-	err := pg.AppendEvent(ctx, events.Event{
+	err := pg.AppendEvent(ctx, (events.Event{
 		ID:          eventID,
 		Type:        events.EventType("review.requested"),
 		SourceAgent: "coordinator",
 		TaskID:      "legacy-task-key",
-		VerticalID:  "pry_hc_telemedicine_001",
 		Payload:     []byte(`{"name":"Telemedicine Platform"}`),
 		CreatedAt:   time.Now(),
-	})
+	}).WithEntityID("pry_hc_telemedicine_001"))
 	if err != nil {
 		t.Fatalf("AppendEvent should not fail on non-UUID optional refs: %v", err)
 	}
@@ -1314,14 +1313,13 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("DeactivateRoutingRulesByVertical: %v", err)
 	}
 
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        "review.requested",
 		SourceAgent: "human",
-		VerticalID:  verticalID,
 		Payload:     json.RawMessage(`{"x":1}`),
 		CreatedAt:   time.Now().Add(-2 * time.Hour),
-	}
+	}).WithEntityID(verticalID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("AppendEvent: %v", err)
 	}

@@ -181,14 +181,13 @@ func (s *Server) queueBoardMessage(ctx context.Context, target controlTarget, ev
 		"sent_by":         "dashboard",
 		"sent_at":         s.now().UTC().Format(time.RFC3339),
 	}
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        eventType,
 		SourceAgent: "dashboard",
-		VerticalID:  target.VerticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   s.now(),
-	}
+	}).WithEntityID(target.VerticalID)
 	if err := s.eventStore.AppendEvent(ctx, evt); err != nil {
 		return "", err
 	}

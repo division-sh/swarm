@@ -421,7 +421,7 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 		return true, nil, nil
 	}
 
-	if eventType == "spec.revision_needed" && strings.TrimSpace(evt.VerticalID) != "" {
+	if eventType == "spec.revision_needed" && workflowEventEntityID(evt) != "" {
 		escalated := false
 		if pc.validationGate != nil {
 			validator := &ValidationOrchestrator{coordinator: pc}
@@ -464,7 +464,7 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 func (pc *FactoryPipelineCoordinator) interceptDropReason(eventType string, evt events.Event) string {
 	switch eventType {
 	case "spec.validation_passed", "spec.validation_failed", "vertical.ready_for_review", "spec.revision_needed":
-		if strings.TrimSpace(evt.VerticalID) == "" {
+		if workflowEventEntityID(evt) == "" {
 			return "missing vertical_id"
 		}
 	}
@@ -472,7 +472,7 @@ func (pc *FactoryPipelineCoordinator) interceptDropReason(eventType string, evt 
 }
 
 func (pc *FactoryPipelineCoordinator) interceptStateDropReason(eventType string, evt events.Event) string {
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return ""
 	}

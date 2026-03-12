@@ -53,7 +53,7 @@ func (r *ScanRequestedRunner) handle(ctx context.Context, evt events.Event) {
 		geography = strings.TrimSpace(asString(payload["geography_label"]))
 	}
 	if geography == "" {
-		geography = strings.TrimSpace(evt.VerticalID)
+		geography = strings.TrimSpace(evt.EntityID())
 	}
 
 	depth := strings.TrimSpace(asString(payload["depth"]))

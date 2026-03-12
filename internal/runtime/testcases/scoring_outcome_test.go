@@ -1,40 +1,52 @@
 package testcases
 
-import "testing"
+import (
+	"testing"
+
+	runtimepipeline "empireai/internal/runtime/pipeline"
+)
 
 func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 	bundle := loadGenericMASBundle(t)
-	handler := mustHandler(t, bundle, "processing-node", "item.review_requested")
-
-	approvedScore := weightedScore(handler, map[string]any{
+	approved := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{
+		"entity_id":    "item-123",
+		"score":        90.0,
 		"quality":      90.0,
 		"completeness": 90.0,
 		"risk":         80.0,
-	})
-	if approvedScore < 80 {
-		t.Fatalf("expected weighted score >= 80, got %.2f", approvedScore)
+		"priority":     "urgent",
+	}, runtimepipeline.WorkflowState{
+		VerticalID: "item-123",
+		Stage:      runtimepipeline.NormalizePipelineStage("ready"),
+		Status:     "ready",
+		Metadata:   map[string]any{},
+	}, nil)
+	if approved.RuleID != "approve" || approved.Stage != runtimepipeline.NormalizePipelineStage("approved") {
+		t.Fatalf("expected approve rule execution, got %+v", approved)
 	}
-	approvedRule, ok := chooseRuleForScore(handler, approvedScore)
-	if !ok || approvedRule.ID != "approve" || approvedRule.AdvancesTo != "approved" {
-		t.Fatalf("expected approve rule, got %+v", approvedRule)
+	if !hasAll(approved.Emits, "item.completed") {
+		t.Fatalf("expected approval emission, got %v", approved.Emits)
 	}
-	if !hasAll(approvedRule.Emits.Values(), "item.completed") {
-		t.Fatalf("expected approval emission, got %v", approvedRule.Emits.Values())
+	if got := approved.Metadata["score"]; got == nil {
+		t.Fatalf("expected computed score to be stored, got %+v", approved)
 	}
 
-	rejectedScore := weightedScore(handler, map[string]any{
+	rejected := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{
+		"entity_id":    "item-456",
+		"score":        45.0,
 		"quality":      45.0,
 		"completeness": 55.0,
 		"risk":         40.0,
-	})
-	if rejectedScore >= 80 {
-		t.Fatalf("expected weighted score < 80, got %.2f", rejectedScore)
+	}, runtimepipeline.WorkflowState{
+		VerticalID: "item-456",
+		Stage:      runtimepipeline.NormalizePipelineStage("ready"),
+		Status:     "ready",
+		Metadata:   map[string]any{},
+	}, nil)
+	if rejected.RuleID != "reject" || rejected.Stage != runtimepipeline.NormalizePipelineStage("rejected") {
+		t.Fatalf("expected reject rule execution, got %+v", rejected)
 	}
-	rejectedRule, ok := chooseRuleForScore(handler, rejectedScore)
-	if !ok || rejectedRule.ID != "reject" || rejectedRule.AdvancesTo != "rejected" {
-		t.Fatalf("expected reject rule, got %+v", rejectedRule)
-	}
-	if !hasAll(rejectedRule.Emits.Values(), "item.rejected") {
-		t.Fatalf("expected rejection emission, got %v", rejectedRule.Emits.Values())
+	if !hasAll(rejected.Emits, "item.rejected") {
+		t.Fatalf("expected rejection emission, got %v", rejected.Emits)
 	}
 }

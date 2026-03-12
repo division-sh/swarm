@@ -21,7 +21,7 @@ func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound ev
 	if emitSchemaAllowsProperty(eventType, "vertical_id") && strings.TrimSpace(asString(out["vertical_id"])) == "" {
 		verticalID := strings.TrimSpace(actor.VerticalID)
 		if verticalID == "" {
-			verticalID = strings.TrimSpace(inbound.VerticalID)
+			verticalID = strings.TrimSpace(inbound.EntityID())
 		}
 		out["vertical_id"] = verticalID
 	}

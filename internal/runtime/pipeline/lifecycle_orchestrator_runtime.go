@@ -14,7 +14,7 @@ func (n *LifecycleOrchestrator) handleVerticalApproved(ctx context.Context, evt 
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -34,7 +34,7 @@ func (n *LifecycleOrchestrator) handleVerticalKilled(ctx context.Context, evt ev
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -54,7 +54,7 @@ func (n *LifecycleOrchestrator) handleVerticalResumed(ctx context.Context, evt e
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -120,7 +120,7 @@ func (n *LifecycleOrchestrator) handleOpCoCEOReady(ctx context.Context, evt even
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		payload := parsePayloadMap(evt.Payload)
 		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
@@ -242,7 +242,7 @@ func (pc *FactoryPipelineCoordinator) persistLifecycleEvidence(ctx context.Conte
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	if verticalID == "" {
 		return
 	}
@@ -256,7 +256,7 @@ func (pc *FactoryPipelineCoordinator) forwardSystemDirective(ctx context.Context
 		return
 	}
 	recipients := []string{"scan-campaign-manager"}
-	pc.publishDirect(ctx, string(evt.Type), strings.TrimSpace(evt.VerticalID), parsePayloadMap(evt.Payload), recipients)
+	pc.publishDirect(ctx, string(evt.Type), workflowEventEntityID(evt), parsePayloadMap(evt.Payload), recipients)
 }
 
 func (pc *FactoryPipelineCoordinator) handlePortfolioSystemDirective(ctx context.Context, evt events.Event) {
@@ -298,7 +298,7 @@ func (pc *FactoryPipelineCoordinator) applyLifecycleStageEvent(ctx context.Conte
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	if verticalID == "" {
 		return
 	}
@@ -346,7 +346,7 @@ func portfolioDirectiveEmitPayload(evt events.Event, emitEvent string) (string, 
 		}
 		return "", out
 	case "vertical.resumed":
-		verticalID := strings.TrimSpace(firstNonEmptyString(asString(out["vertical_id"]), evt.VerticalID))
+		verticalID := strings.TrimSpace(firstNonEmptyString(asString(out["vertical_id"]), workflowEventEntityID(evt)))
 		if verticalID != "" && strings.TrimSpace(asString(out["vertical_id"])) == "" {
 			out["vertical_id"] = verticalID
 		}
@@ -380,7 +380,7 @@ func (pc *FactoryPipelineCoordinator) applyLifecycleTeardownEvent(ctx context.Co
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	if verticalID == "" {
 		return
 	}
@@ -418,7 +418,7 @@ func (pc *FactoryPipelineCoordinator) forwardMarginalReviewTimer(ctx context.Con
 		payload["parked_marginals_summary"] = fmt.Sprintf("%d marginal vertical(s) parked for review", count)
 	}
 	payload["review_request_injected"] = true
-	pc.publishDirect(ctx, "timer.marginal_review", strings.TrimSpace(evt.VerticalID), payload, recipients)
+	pc.publishDirect(ctx, "timer.marginal_review", workflowEventEntityID(evt), payload, recipients)
 }
 
 func (pc *FactoryPipelineCoordinator) forwardPortfolioDigestTimer(ctx context.Context, evt events.Event) {
@@ -461,7 +461,7 @@ func (pc *FactoryPipelineCoordinator) forwardPortfolioDigestTimer(ctx context.Co
 		ScoringRejectionsCount:    len(entries),
 		ScoringRejectionSummaries: entries,
 	}
-	pc.publishDirect(ctx, "timer.portfolio_digest", strings.TrimSpace(evt.VerticalID), payloadMap(payload), recipients)
+	pc.publishDirect(ctx, "timer.portfolio_digest", workflowEventEntityID(evt), payloadMap(payload), recipients)
 }
 
 func (pc *FactoryPipelineCoordinator) handleLifecycleBudgetThreshold(ctx context.Context, evt events.Event) {
@@ -470,7 +470,7 @@ func (pc *FactoryPipelineCoordinator) handleLifecycleBudgetThreshold(ctx context
 	}
 	payload := parsePayloadMap(evt.Payload)
 	entityID := firstNonEmptyString(
-		strings.TrimSpace(evt.VerticalID),
+		workflowEventEntityID(evt),
 		strings.TrimSpace(asString(payload["vertical_id"])),
 		strings.TrimSpace(asString(payload["entity_id"])),
 	)
@@ -479,7 +479,7 @@ func (pc *FactoryPipelineCoordinator) handleLifecycleBudgetThreshold(ctx context
 		strings.TrimSpace(asString(payload["level"])),
 		"warning",
 	)
-	pc.publish(ctx, "budget.alert_sent", strings.TrimSpace(evt.VerticalID), map[string]any{
+	pc.publish(ctx, "budget.alert_sent", workflowEventEntityID(evt), map[string]any{
 		"entity_id":  entityID,
 		"alert_type": alertType,
 		"details":    payload,
@@ -495,7 +495,7 @@ func (pc *FactoryPipelineCoordinator) handleLifecycleMailboxDecision(ctx context
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	triggerCtx := workflowTriggerContext{
 		Event:           evt,
 		State:           pc.currentWorkflowState(ctx, verticalID),
@@ -522,7 +522,7 @@ func (pc *FactoryPipelineCoordinator) applyMarginalKillTimer(ctx context.Context
 		return
 	}
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	if verticalID == "" {
 		return
 	}

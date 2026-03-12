@@ -93,17 +93,19 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 	out := make([]events.Event, 0)
 	for rows.Next() {
 		var evt events.Event
+		var legacyVerticalID string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&evt.TaskID,
-			&evt.VerticalID,
+			&legacyVerticalID,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending event: %w", err)
 		}
+		evt = evt.WithEntityID(legacyVerticalID)
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {
@@ -179,17 +181,19 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	out := make([]events.Event, 0)
 	for rows.Next() {
 		var evt events.Event
+		var legacyVerticalID string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&evt.TaskID,
-			&evt.VerticalID,
+			&legacyVerticalID,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending subscribed event: %w", err)
 		}
+		evt = evt.WithEntityID(legacyVerticalID)
 		if matchesAnySubscription(string(evt.Type), subscriptions) {
 			out = append(out, evt)
 		}

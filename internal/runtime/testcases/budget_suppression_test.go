@@ -1,26 +1,37 @@
 package testcases
 
-import "testing"
+import (
+	"testing"
+
+	runtimepipeline "empireai/internal/runtime/pipeline"
+)
 
 func TestGenericBundle_BudgetSuppressionPatterns(t *testing.T) {
 	bundle := loadGenericMASBundle(t)
-	handler := mustHandler(t, bundle, "processing-node", "item.review_requested")
-	policy := map[string]any{
-		"delivery_enabled": true,
-	}
-	entity := map[string]any{
-		"status": "ready",
-	}
-	payload := map[string]any{
-		"score": 70.0,
-	}
-	if !evaluateGuard(handler.Guard, payload, entity, policy) {
-		t.Fatal("expected review guard to pass when delivery is enabled")
+	allowed := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{
+		"entity_id": "item-123",
+		"score":     70.0,
+	}, runtimepipeline.WorkflowState{
+		VerticalID: "item-123",
+		Stage:      runtimepipeline.NormalizePipelineStage("ready"),
+		Status:     "ready",
+		Metadata:   map[string]any{},
+	}, map[string]any{"delivery_enabled": true})
+	if allowed.Status == runtimepipeline.HandlerOutcomeBlocked {
+		t.Fatalf("expected review guard to pass when delivery is enabled, got %+v", allowed)
 	}
 
-	policy["delivery_enabled"] = false
-	if evaluateGuard(handler.Guard, payload, entity, policy) {
-		t.Fatal("expected review guard to block when delivery is disabled")
+	blocked := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{
+		"entity_id": "item-456",
+		"score":     70.0,
+	}, runtimepipeline.WorkflowState{
+		VerticalID: "item-456",
+		Stage:      runtimepipeline.NormalizePipelineStage("ready"),
+		Status:     "ready",
+		Metadata:   map[string]any{},
+	}, map[string]any{"delivery_enabled": false})
+	if blocked.Status != runtimepipeline.HandlerOutcomeBlocked {
+		t.Fatalf("expected review guard to block when delivery is disabled, got %+v", blocked)
 	}
 
 	if state, ok := bundle.Policy.Values["budget_state"]; !ok || state.Value != "normal" {

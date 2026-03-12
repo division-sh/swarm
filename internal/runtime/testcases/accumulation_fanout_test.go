@@ -1,6 +1,10 @@
 package testcases
 
-import "testing"
+import (
+	"testing"
+
+	runtimepipeline "empireai/internal/runtime/pipeline"
+)
 
 func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	bundle := loadGenericMASBundle(t)
@@ -17,22 +21,52 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	if len(created.Branch) != 1 || created.Branch[0].Then == nil || created.Branch[0].Else == nil {
 		t.Fatalf("expected urgent/non-urgent branch on item.created, got %+v", created.Branch)
 	}
+	fannedOut := previewHandler(t, bundle, "intake-router", "item.created", map[string]any{
+		"item_id":   "item-123",
+		"priority":  "urgent",
+		"items":     []map[string]any{{"id": "a"}, {"id": "b"}, {"id": "c"}},
+		"entity_id": "item-123",
+	}, runtimepipeline.WorkflowState{
+		VerticalID: "item-123",
+		Stage:      runtimepipeline.NormalizePipelineStage("queued"),
+		Status:     "queued",
+		Metadata:   map[string]any{},
+	}, nil)
+	if fannedOut.Status != runtimepipeline.HandlerOutcomeFannedOut {
+		t.Fatalf("expected fan-out execution, got %+v", fannedOut)
+	}
+	if fannedOut.FanOutCount != 3 {
+		t.Fatalf("expected 3 fan-out items, got %+v", fannedOut)
+	}
 
 	processed := mustHandler(t, bundle, "intake-router", "item.processed")
 	if processed.Accumulate == nil || processed.Accumulate.OnComplete == nil {
 		t.Fatal("expected accumulate.on_complete on item.processed")
 	}
-	outcome := simulateAccumulation(processed, 3, 3)
-	if outcome.nextState != "ready" {
-		t.Fatalf("expected ready state after accumulation completion, got %q", outcome.nextState)
+	completed := previewHandler(t, bundle, "intake-router", "item.processed", map[string]any{
+		"entity_id":        "item-123",
+		"expected_workers": 1,
+		"result":           map[string]any{"worker": "done"},
+		"source":           "worker-a",
+		"received_count":   1,
+	}, runtimepipeline.WorkflowState{
+		VerticalID: "item-123",
+		Stage:      runtimepipeline.NormalizePipelineStage("collecting"),
+		Status:     "collecting",
+		Metadata: map[string]any{
+			"received_count": 1,
+		},
+	}, nil)
+	if completed.Stage != runtimepipeline.NormalizePipelineStage("ready") {
+		t.Fatalf("expected ready state after accumulation completion, got %+v", completed)
 	}
-	if !hasAll(outcome.emitted, "item.review_requested") {
-		t.Fatalf("expected intake completion to emit item.review_requested, got %v", outcome.emitted)
+	if !hasAll(completed.Emits, "item.review_requested") {
+		t.Fatalf("expected intake completion to emit item.review_requested, got %v", completed.Emits)
 	}
-	if outcome.setsGate != "intake_ready" {
-		t.Fatalf("expected intake_ready gate, got %q", outcome.setsGate)
+	if completed.SetsGate != "intake_ready" {
+		t.Fatalf("expected intake_ready gate, got %q", completed.SetsGate)
 	}
-	if !hasAll(outcome.clearGates, "needs_revision") {
-		t.Fatalf("expected needs_revision gate cleared, got %v", outcome.clearGates)
+	if !hasAll(completed.ClearGates, "needs_revision") {
+		t.Fatalf("expected needs_revision gate cleared, got %v", completed.ClearGates)
 	}
 }

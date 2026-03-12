@@ -319,7 +319,7 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 }
 
 func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
-	eb.logRuntime(ctx, "debug", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.VerticalID, "", "", "", map[string]any{
+	eb.logRuntime(ctx, "debug", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", "", "", map[string]any{
 		"type":   string(evt.Type),
 		"source": evt.SourceAgent,
 	}, "", durationUS)
@@ -441,7 +441,7 @@ func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipient
 	for k, v := range extra {
 		detail[k] = v
 	}
-	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.VerticalID, "", "", "", detail, "", 0)
+	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", "", "", detail, "", 0)
 }
 
 // PublishDirect persists an event and delivers it to the specified recipients
@@ -487,7 +487,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	}
 	persisted = true
 	eb.deliverToAgents(ctx, evt, recipients)
-	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.VerticalID, "", "", "", map[string]any{
+	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", "", "", map[string]any{
 		"direct":           true,
 		"recipients_count": len(recipients),
 	}, "", int(time.Since(start)/time.Microsecond))

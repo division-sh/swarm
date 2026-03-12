@@ -344,11 +344,10 @@ func (s *Server) handleTaskReject(w http.ResponseWriter, r *http.Request, taskID
 	}
 
 	if s.eventStore != nil {
-		_ = s.appendTargetedEvent(ctx, events.Event{
+		_ = s.appendTargetedEvent(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("human_task.deferred"),
 			SourceAgent: "dashboard",
-			VerticalID:  verticalID,
 			Payload: mustJSON(map[string]any{
 				"task_id":          taskID,
 				"requesting_agent": strings.TrimSpace(requestingAgent),
@@ -358,7 +357,7 @@ func (s *Server) handleTaskReject(w http.ResponseWriter, r *http.Request, taskID
 				"requeue_date":     requeueAt,
 			}),
 			CreatedAt: s.now(),
-		}, []string{strings.TrimSpace(requestingAgent), "empire-coordinator"})
+		}).WithEntityID(verticalID), []string{strings.TrimSpace(requestingAgent), "empire-coordinator"})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "task_id": taskID, "status": "deferred", "requeue_date": requeueAt})
@@ -546,11 +545,10 @@ func (s *Server) handleTaskClaim(w http.ResponseWriter, r *http.Request, taskID 
 	}
 
 	if s.eventStore != nil {
-		_ = s.appendTargetedEvent(ctx, events.Event{
+		_ = s.appendTargetedEvent(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("human_task.assigned"),
 			SourceAgent: "dashboard",
-			VerticalID:  verticalID,
 			Payload: mustJSON(map[string]any{
 				"task_id":          taskID,
 				"requesting_agent": strings.TrimSpace(requestingAgent),
@@ -558,7 +556,7 @@ func (s *Server) handleTaskClaim(w http.ResponseWriter, r *http.Request, taskID 
 				"assigned_to":      req.AssignedTo,
 			}),
 			CreatedAt: s.now(),
-		}, []string{strings.TrimSpace(requestingAgent)})
+		}).WithEntityID(verticalID), []string{strings.TrimSpace(requestingAgent)})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "task_id": taskID, "status": "assigned", "assigned_to": req.AssignedTo})
@@ -611,11 +609,10 @@ func (s *Server) handleTaskComplete(w http.ResponseWriter, r *http.Request, task
 	}
 
 	if s.eventStore != nil {
-		_ = s.appendTargetedEvent(ctx, events.Event{
+		_ = s.appendTargetedEvent(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("human_task.completed"),
 			SourceAgent: "dashboard",
-			VerticalID:  verticalID,
 			Payload: mustJSON(map[string]any{
 				"task_id":          taskID,
 				"requesting_agent": strings.TrimSpace(requestingAgent),
@@ -625,7 +622,7 @@ func (s *Server) handleTaskComplete(w http.ResponseWriter, r *http.Request, task
 				"follow_up_needed": follow,
 			}),
 			CreatedAt: s.now(),
-		}, []string{strings.TrimSpace(requestingAgent)})
+		}).WithEntityID(verticalID), []string{strings.TrimSpace(requestingAgent)})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "task_id": taskID, "status": "completed"})

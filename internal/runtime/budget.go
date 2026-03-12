@@ -426,11 +426,10 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		"evaluated_at": now.Format(time.RFC3339),
 	}
 	evtID := uuid.NewString()
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          evtID,
 		Type:        events.EventType("budget.threshold_crossed"),
 		SourceAgent: "runtime",
-		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"scope":           scope,
 			"vertical_id":     verticalID,
@@ -443,7 +442,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			"evaluated_at":    now.Format(time.RFC3339),
 		}),
 		CreatedAt: time.Now(),
-	}
+	}).WithEntityID(verticalID)
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err
 	}

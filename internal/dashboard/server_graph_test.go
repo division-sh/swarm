@@ -23,10 +23,10 @@ func TestHandleGraph_Holding(t *testing.T) {
 	s := NewServer(db, nil, nil, nil, nil)
 	s.now = func() time.Time { return now }
 
-	cfg := `{"system_prompt":"Holding prompt","tools":["sql_execute"],"subscriptions":["system.started","opco.*.steady_state_reached"],"constraints":{"x":1}}`
+	cfg := `{"system_prompt":"Holding prompt","tools":["sql_execute"],"subscriptions":["system.started","item.review_requested"],"constraints":{"x":1}}`
 	rows := sqlmock.NewRows([]string{"id", "role", "mode", "status", "parent_agent_id", "config"}).
-		AddRow("empire-coordinator", "empire-coordinator", "holding", "active", "", []byte(cfg)).
-		AddRow("operations-analyst", "operations-analyst", "holding", "active", "empire-coordinator", []byte(`{"system_prompt":"OA"}`))
+		AddRow("coordinator", "coordinator", "holding", "active", "", []byte(cfg)).
+		AddRow("reviewer", "reviewer", "holding", "active", "coordinator", []byte(`{"system_prompt":"Reviewer"}`))
 
 	mock.ExpectQuery(`(?s)SELECT.*FROM agents a.*vertical_id IS NULL.*ORDER BY a\.id ASC`).
 		WillReturnRows(rows)
@@ -57,7 +57,7 @@ func TestHandleGraph_Holding(t *testing.T) {
 	// Ensure system_prompt is present for agent nodes and subscription edges exist.
 	foundPrompt := false
 	for _, n := range resp.Nodes {
-		if n["kind"] == "agent" && n["id"] == "empire-coordinator" {
+		if n["kind"] == "agent" && n["id"] == "coordinator" {
 			if sp, _ := n["system_prompt"].(string); strings.TrimSpace(sp) == "Holding prompt" {
 				foundPrompt = true
 			}

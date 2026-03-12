@@ -9,7 +9,6 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
-	"gopkg.in/yaml.v3"
 )
 
 type factoryContractPolicy struct {
@@ -68,37 +67,30 @@ func buildFactoryContractPolicy() (factoryContractPolicy, error) {
 		}
 		policy.recipientsByEvent[strings.TrimSpace(eventType)] = recipients
 	}
-	if err := loadFactoryScanModes(repoRoot, &policy); err != nil {
+	if err := loadFactoryScanModes(bundle, &policy); err != nil {
 		return factoryContractPolicy{}, err
 	}
 	return policy, nil
 }
 
-func loadFactoryScanModes(repoRoot string, policy *factoryContractPolicy) error {
+func loadFactoryScanModes(bundle *runtimecontracts.WorkflowContractBundle, policy *factoryContractPolicy) error {
 	if policy == nil {
 		return nil
 	}
-	path := filepath.Join(repoRoot, "contracts", "test-vectors", "campaign-cycling.yaml")
-	var doc struct {
-		ModeCases []factoryScanModeCase `yaml:"mode_cases"`
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return err
-	}
-	for _, modeCase := range doc.ModeCases {
-		mode := strings.TrimSpace(modeCase.Mode)
-		if mode == "" {
+	reader := runtimeproductpolicy.NewBundlePolicy(bundle)
+	for _, mode := range []string{"local_services", "saas_gap", "saas_trend", "corpus"} {
+		if _, ok := reader.ReadPolicy("scan_modes." + mode + ".rubric"); !ok {
 			continue
 		}
-		policy.scanModeCases = append(policy.scanModeCases, modeCase)
+		policy.scanModeCases = append(policy.scanModeCases, factoryScanModeCase{Mode: mode})
 		policy.scanModeSet[mode] = struct{}{}
-		if policy.defaultScanMode == "" && mode == strings.TrimSpace(runtimeproductpolicy.DefaultScanMode()) {
-			policy.defaultScanMode = mode
-		}
+	}
+	if _, ok := policy.scanModeSet["saas_gap"]; ok {
+		policy.scanModeSet["automation_micro"] = struct{}{}
+		policy.scanModeSet["derived"] = struct{}{}
+	}
+	if value, ok := reader.ReadPolicy("default_scan_mode"); ok {
+		policy.defaultScanMode = strings.TrimSpace(runtimeproductpolicy.NormalizeScanMode(asContractString(value)))
 	}
 	if policy.defaultScanMode == "" && len(policy.scanModeCases) > 0 {
 		policy.defaultScanMode = strings.TrimSpace(policy.scanModeCases[0].Mode)

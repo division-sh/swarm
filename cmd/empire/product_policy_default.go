@@ -5,7 +5,7 @@ import (
 	empireproductpolicy "empireai/internal/runtime/productpolicy/empire"
 )
 
-func init() {
+func ensureEmpireProductPolicy() {
 	runtimeproductpolicy.SetDefaultFactory(func() runtimeproductpolicy.Policy {
 		return empireproductpolicy.New()
 	})

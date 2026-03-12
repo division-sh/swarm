@@ -9,11 +9,8 @@ func validationDeclarativeHandlerSupported(pc *FactoryPipelineCoordinator, event
 	if pc == nil || pc.ContractBundle() == nil {
 		return false
 	}
-	handler, ok := pc.ContractBundle().NodeEventHandler("validation-orchestrator", strings.TrimSpace(eventType))
-	if !ok {
-		return false
-	}
-	return directHandlerExecutionPlanSupported(handlerExecutionPlanFromNodeHandler("validation-orchestrator", strings.TrimSpace(eventType), handler))
+	_, ok := pc.ContractBundle().NodeEventHandler("validation-orchestrator", strings.TrimSpace(eventType))
+	return ok
 }
 
 func (pc *FactoryPipelineCoordinator) specVersionMatches(verticalID string, payload map[string]any) bool {

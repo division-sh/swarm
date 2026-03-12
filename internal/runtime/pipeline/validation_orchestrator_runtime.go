@@ -24,7 +24,7 @@ func (n *ValidationOrchestrator) syncDeclarativeValidationState(evt events.Event
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -122,7 +122,7 @@ func (n *ValidationOrchestrator) maybePublishDeclarativeValidationPackage(ctx co
 		return
 	}
 
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -158,7 +158,7 @@ func (n *ValidationOrchestrator) handleValidationStarted(ctx context.Context, ev
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -194,7 +194,7 @@ func (n *ValidationOrchestrator) handleValidationGate(ctx context.Context, evt e
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -274,7 +274,7 @@ func (n *ValidationOrchestrator) handleCTOApproved(ctx context.Context, evt even
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -289,7 +289,7 @@ func (n *ValidationOrchestrator) handleSpecValidationPassed(ctx context.Context,
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -304,7 +304,7 @@ func (n *ValidationOrchestrator) handleSpecValidationFailed(ctx context.Context,
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -356,7 +356,7 @@ func (n *ValidationOrchestrator) handleCTORevisionNeeded(ctx context.Context, ev
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -398,7 +398,7 @@ func (n *ValidationOrchestrator) handleValidationRejected(ctx context.Context, e
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -420,7 +420,7 @@ func (n *ValidationOrchestrator) handleValidationPackaged(ctx context.Context, e
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -440,7 +440,7 @@ func (n *ValidationOrchestrator) handleValidationMoreData(ctx context.Context, e
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -488,7 +488,7 @@ func (n *ValidationOrchestrator) handleBrandRevision(ctx context.Context, evt ev
 	if isRuntimeWorkflowSource(evt.SourceAgent) {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -511,7 +511,7 @@ func (n *ValidationOrchestrator) handleSpecRevisionRequested(evt events.Event) {
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return
 	}
@@ -525,7 +525,7 @@ func (n *ValidationOrchestrator) handleInnerSpecRevision(ctx context.Context, ev
 	if n == nil || n.coordinator == nil || n.coordinator.validationGate == nil {
 		return false
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return false
 	}

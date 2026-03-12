@@ -60,14 +60,13 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 			"runtime_tool": true,
 		})
 		if marshalErr == nil {
-			if pubErr := a.bus.Publish(ctx, events.Event{
+			if pubErr := a.bus.Publish(ctx, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("spec.contradiction_detected"),
 				SourceAgent: "runtime",
-				VerticalID:  actor.VerticalID,
 				Payload:     payload,
 				CreatedAt:   time.Now(),
-			}); pubErr != nil {
+			}).WithEntityID(actor.VerticalID)); pubErr != nil {
 				runtimeWarn(
 					"tool-executor",
 					"failed to publish spec.contradiction_detected actor=%s tool=%s: %v",

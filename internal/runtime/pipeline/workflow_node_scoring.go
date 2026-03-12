@@ -41,7 +41,7 @@ type scoringStateRuntime interface {
 	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
 	ContractBundle() *runtimecontracts.WorkflowContractBundle
 	currentWorkflowState(context.Context, string) WorkflowState
-	matchWorkflowRulesWithVars(workflowTriggerContext, map[string]any, map[string]any) (workflowRuleMatch, bool)
+	matchWorkflowRulesWithVars(workflowTriggerContext, []runtimecontracts.HandlerRuleEntry, map[string]any) (workflowRuleMatch, bool)
 	updateScoredVerticalState(context.Context, string, string, map[string]any, string)
 	appendScoringDigestBuffer(context.Context, VerticalScoredPayload)
 	persistWorkflowScoringAccumulator(context.Context, *scoringAccumulator)
@@ -106,7 +106,7 @@ func (e *scoringTransitionExecutor) InterceptPolicy(eventType string, evt events
 	if !ok {
 		return false, false
 	}
-	if policy.RequireVertical && strings.TrimSpace(evt.VerticalID) == "" {
+	if policy.RequireVertical && workflowEventEntityID(evt) == "" {
 		return false, false
 	}
 	return policy.Consume, true

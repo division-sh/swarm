@@ -123,35 +123,32 @@ func emitMailboxDecisionSideEffects(
 		"context":    json.RawMessage(item.Context),
 	}
 
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("mailbox.decision"),
 		SourceAgent: "mailbox",
-		VerticalID:  item.VerticalID,
 		Payload:     mustJSON(basePayload),
 		CreatedAt:   time.Now(),
-	}, nil); err != nil {
+	}).WithEntityID(item.VerticalID), nil); err != nil {
 		return err
 	}
-	if err := appendTargetedEvent(ctx, stores, events.Event{
+	if err := appendTargetedEvent(ctx, stores, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("mailbox.item_decided"),
 		SourceAgent: "mailbox",
-		VerticalID:  item.VerticalID,
 		Payload:     mustJSON(basePayload),
 		CreatedAt:   time.Now(),
-	}, nil); err != nil {
+	}).WithEntityID(item.VerticalID), nil); err != nil {
 		return err
 	}
 	if outcome.Status == "more_data" && item.VerticalID != "" {
-		if err := appendTargetedEvent(ctx, stores, events.Event{
+		if err := appendTargetedEvent(ctx, stores, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.needs_more_data"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   time.Now(),
-		}, withControlPlaneRecipient()); err != nil {
+		}).WithEntityID(item.VerticalID), withControlPlaneRecipient()); err != nil {
 			return err
 		}
 	}
@@ -164,27 +161,25 @@ func emitMailboxDecisionSideEffects(
 			evtType = events.EventType("vertical.killed")
 		}
 		if evtType != "" {
-			if err := appendTargetedEvent(ctx, stores, events.Event{
+			if err := appendTargetedEvent(ctx, stores, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        evtType,
 				SourceAgent: "mailbox",
-				VerticalID:  item.VerticalID,
 				Payload:     mustJSON(basePayload),
 				CreatedAt:   time.Now(),
-			}, withControlPlaneRecipient()); err != nil {
+			}).WithEntityID(item.VerticalID), withControlPlaneRecipient()); err != nil {
 				return err
 			}
 		}
 	}
 	if item.Type == "template_migration" && outcome.Status == "approved" {
-		if err := appendTargetedEvent(ctx, stores, events.Event{
+		if err := appendTargetedEvent(ctx, stores, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("template.migration_approved"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   time.Now(),
-			}, withControlPlaneRecipient()); err != nil {
+		}).WithEntityID(item.VerticalID), withControlPlaneRecipient()); err != nil {
 			return err
 		}
 	}
@@ -203,38 +198,35 @@ func emitMailboxDecisionSideEffects(
 			} else if strings.TrimSpace(item.FromAgent) != "" {
 				recipients = []string{strings.TrimSpace(item.FromAgent)}
 			}
-			if err := appendTargetedEvent(ctx, stores, events.Event{
+			if err := appendTargetedEvent(ctx, stores, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        evtType,
 				SourceAgent: "mailbox",
-				VerticalID:  item.VerticalID,
 				Payload:     mustJSON(basePayload),
 				CreatedAt:   time.Now(),
-			}, recipients); err != nil {
+			}).WithEntityID(item.VerticalID), recipients); err != nil {
 				return err
 			}
 		}
 	}
 	if isFounderInputMailbox(item) && item.VerticalID != "" {
-		if err := appendTargetedEvent(ctx, stores, events.Event{
+		if err := appendTargetedEvent(ctx, stores, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("founder_input.response"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload:     mustJSON(basePayload),
 			CreatedAt:   time.Now(),
-		}, []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
+		}).WithEntityID(item.VerticalID), []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
 			return err
 		}
 	}
 	if item.VerticalID != "" && strings.Contains(strings.ToLower(item.Type), "escalation") && outcome.Status == "approved" {
 		directive := strings.TrimSpace(notes)
 		if directive != "" {
-			if err := appendTargetedEvent(ctx, stores, events.Event{
+			if err := appendTargetedEvent(ctx, stores, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("opco.escalation_response"),
 				SourceAgent: "mailbox",
-				VerticalID:  item.VerticalID,
 				Payload: mustJSON(map[string]any{
 					"mailbox_id":     item.ID,
 					"directive_text": directive,
@@ -242,7 +234,7 @@ func emitMailboxDecisionSideEffects(
 					"context":        json.RawMessage(item.Context),
 				}),
 				CreatedAt: time.Now(),
-			}, []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
+			}).WithEntityID(item.VerticalID), []string{fmt.Sprintf("opco-ceo-%s", item.VerticalID)}); err != nil {
 				return err
 			}
 		}
@@ -252,11 +244,10 @@ func emitMailboxDecisionSideEffects(
 		if err != nil {
 			return err
 		}
-		if err := appendTargetedEvent(ctx, stores, events.Event{
+		if err := appendTargetedEvent(ctx, stores, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("geography.expansion_queued"),
 			SourceAgent: "mailbox",
-			VerticalID:  item.VerticalID,
 			Payload: mustJSON(map[string]any{
 				"mailbox_id":   item.ID,
 				"vertical_id":  item.VerticalID,
@@ -271,7 +262,7 @@ func emitMailboxDecisionSideEffects(
 				"context":      json.RawMessage(item.Context),
 			}),
 			CreatedAt: time.Now(),
-		}, withControlPlaneRecipient()); err != nil {
+		}).WithEntityID(item.VerticalID), withControlPlaneRecipient()); err != nil {
 			return err
 		}
 	}

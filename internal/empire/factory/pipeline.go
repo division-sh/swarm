@@ -174,11 +174,10 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 			return out, fmt.Errorf("dedup discovered vertical: %w", err)
 		} else if found {
 			out.VerticalIDs = appendUnique(out.VerticalIDs, existingID)
-			_ = p.emit(ctx, events.Event{
+			_ = p.emit(ctx, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("vertical.discovered"),
 				SourceAgent: "discovery-coordinator",
-				VerticalID:  existingID,
 				Payload: mustJSON(map[string]any{
 					"vertical_id":         existingID,
 					"name":                name,
@@ -191,7 +190,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 					"existing_stage":      existingStage,
 				}),
 				CreatedAt: time.Now(),
-			}, deliveryRecipientsForEvent("vertical.discovered"))
+			}).WithEntityID(existingID), deliveryRecipientsForEvent("vertical.discovered"))
 			continue
 		}
 
@@ -215,11 +214,10 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 		}
 		out.Discovered++
 		out.VerticalIDs = append(out.VerticalIDs, id)
-		_ = p.emit(ctx, events.Event{
+		_ = p.emit(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.discovered"),
 			SourceAgent: "discovery-coordinator",
-			VerticalID:  id,
 			Payload: mustJSON(map[string]any{
 				"vertical_id":         id,
 				"name":                name,
@@ -232,7 +230,7 @@ func (p *Pipeline) runScan(ctx context.Context, geography, depth, mode string, t
 				"dedup":               false,
 			}),
 			CreatedAt: time.Now(),
-		}, deliveryRecipientsForEvent("vertical.discovered"))
+		}).WithEntityID(id), deliveryRecipientsForEvent("vertical.discovered"))
 	}
 	if depth == "discovery" {
 		return out, nil
@@ -350,11 +348,10 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 	if computationMethod == "" {
 		computationMethod = "rules_v1"
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("scoring.requested"),
 		SourceAgent: factoryScoringNodeID,
-		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"vertical_id":  verticalID,
 			"mode":         mode,
@@ -362,13 +359,12 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 			"requested_at": time.Now().UTC().Format(time.RFC3339),
 		}),
 		CreatedAt: time.Now(),
-	}, []string{"analysis-agent"})
+	}).WithEntityID(verticalID), []string{"analysis-agent"})
 	for dimension, score := range dimensions {
-		_ = p.emit(ctx, events.Event{
+		_ = p.emit(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("score.dimension_complete"),
 			SourceAgent: "analysis-agent",
-			VerticalID:  verticalID,
 			Payload: mustJSON(map[string]any{
 				"vertical_id": verticalID,
 				"dimension":   dimension,
@@ -376,7 +372,7 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 				"rubric_used": rubricUsed,
 			}),
 			CreatedAt: time.Now(),
-		}, deliveryRecipientsForEvent("score.dimension_complete"))
+		}).WithEntityID(verticalID), deliveryRecipientsForEvent("score.dimension_complete"))
 	}
 
 	stage := "marginal_review"
@@ -425,42 +421,38 @@ func (p *Pipeline) scoreVertical(ctx context.Context, verticalID string) (string
 	`, verticalID, stage, string(scores), killReason); err != nil {
 		return "", fmt.Errorf("update scoring stage: %w", err)
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.scored"),
 		SourceAgent: factoryScoringNodeID,
-		VerticalID:  verticalID,
 		Payload:     scores,
 		CreatedAt:   time.Now(),
-	}, deliveryRecipientsForEvent("vertical.scored"))
+	}).WithEntityID(verticalID), deliveryRecipientsForEvent("vertical.scored"))
 	switch result {
 	case "shortlisted":
-		_ = p.emit(ctx, events.Event{
+		_ = p.emit(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.shortlisted"),
 			SourceAgent: factoryScoringNodeID,
-			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),
-		}, []string{factoryValidationNodeID})
+		}).WithEntityID(verticalID), []string{factoryValidationNodeID})
 	case "marginal":
-		_ = p.emit(ctx, events.Event{
+		_ = p.emit(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.marginal"),
 			SourceAgent: factoryScoringNodeID,
-			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),
-		}, deliveryRecipientsForEvent("vertical.marginal"))
+		}).WithEntityID(verticalID), deliveryRecipientsForEvent("vertical.marginal"))
 	case "rejected":
-		_ = p.emit(ctx, events.Event{
+		_ = p.emit(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("vertical.rejected"),
 			SourceAgent: factoryScoringNodeID,
-			VerticalID:  verticalID,
 			Payload:     scores,
 			CreatedAt:   time.Now(),
-		}, nil)
+		}).WithEntityID(verticalID), nil)
 	}
 	return stage, nil
 }
@@ -477,11 +469,10 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	if stage == "killed" || stage == "ready_for_review" {
 		return stage == "ready_for_review", nil
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("validation.started"),
 		SourceAgent: "validation-coordinator",
-		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"vertical_id": verticalID,
 			"name":        name,
@@ -489,7 +480,7 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 			"stage":       stage,
 		}),
 		CreatedAt: time.Now(),
-	}, []string{"business-research-agent"})
+	}).WithEntityID(verticalID), []string{"business-research-agent"})
 
 	brief := mustJSON(map[string]any{
 		"customer_profile":      "owner-operator SMB",
@@ -501,22 +492,20 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	if err := p.updateStageField(ctx, verticalID, "researching", "business_brief", brief); err != nil {
 		return false, err
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("research.completed"),
 		SourceAgent: "business-research-agent",
-		VerticalID:  verticalID,
 		Payload:     brief,
 		CreatedAt:   time.Now(),
-	}, []string{"validation-coordinator"})
-	_ = p.emit(ctx, events.Event{
+	}).WithEntityID(verticalID), []string{"validation-coordinator"})
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.requested"),
 		SourceAgent: "business-research-agent",
-		VerticalID:  verticalID,
 		Payload:     brief,
 		CreatedAt:   time.Now(),
-	}, []string{"lightweight-spec-agent"})
+	}).WithEntityID(verticalID), []string{"lightweight-spec-agent"})
 
 	mvpSpec := mustJSON(map[string]any{
 		"problem":          fmt.Sprintf("%s coordination and bookings", name),
@@ -531,43 +520,39 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	if err := p.updateStageField(ctx, verticalID, "mvp_speccing", "mvp_spec", mvpSpec); err != nil {
 		return false, err
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.draft_ready"),
 		SourceAgent: "lightweight-spec-agent",
-		VerticalID:  verticalID,
 		Payload:     mvpSpec,
 		CreatedAt:   time.Now(),
-	}, []string{"business-research-agent"})
-	_ = p.emit(ctx, events.Event{
+	}).WithEntityID(verticalID), []string{"business-research-agent"})
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec_review.requested"),
 		SourceAgent: "business-research-agent",
-		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"brief":    json.RawMessage(brief),
 			"mvp_spec": json.RawMessage(mvpSpec),
 		}),
 		CreatedAt: time.Now(),
-	}, []string{"spec-reviewer"})
-	_ = p.emit(ctx, events.Event{
+	}).WithEntityID(verticalID), []string{"spec-reviewer"})
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec_review.passed"),
 		SourceAgent: "spec-reviewer",
-		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"checklist": []string{"pain_addressed", "scope_enforced", "feasibility", "user_story"},
 		}),
 		CreatedAt: time.Now(),
-	}, []string{"business-research-agent"})
-	_ = p.emit(ctx, events.Event{
+	}).WithEntityID(verticalID), []string{"business-research-agent"})
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.approved"),
 		SourceAgent: "business-research-agent",
-		VerticalID:  verticalID,
 		Payload:     mvpSpec,
 		CreatedAt:   time.Now(),
-	}, []string{"validation-coordinator"})
+	}).WithEntityID(verticalID), []string{"validation-coordinator"})
 
 	feasibility := mustJSON(map[string]any{
 		"cto_assessment": "feasible with standard stack",
@@ -580,14 +565,13 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 		"spec":         json.RawMessage(mvpSpec),
 		"requested_by": "factory-cto",
 	})
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.validation_requested"),
 		SourceAgent: "factory-cto",
-		VerticalID:  verticalID,
 		Payload:     requestPayload,
 		CreatedAt:   time.Now(),
-	}, []string{"spec-auditor"})
+	}).WithEntityID(verticalID), []string{"spec-auditor"})
 
 	result := specaudit.Validate("vertical_spec", mvpSpec)
 	resPayload := mustJSON(map[string]any{
@@ -602,24 +586,22 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	}
 
 	if !result.Passed {
-		_ = p.emit(ctx, events.Event{
+		_ = p.emit(ctx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("spec.validation_failed"),
 			SourceAgent: "spec-auditor",
-			VerticalID:  verticalID,
 			Payload:     resPayload,
 			CreatedAt:   time.Now(),
-		}, []string{"factory-cto"})
+		}).WithEntityID(verticalID), []string{"factory-cto"})
 		return false, nil
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("cto.spec_approved"),
 		SourceAgent: "factory-cto",
-		VerticalID:  verticalID,
 		Payload:     feasibility,
 		CreatedAt:   time.Now(),
-	}, []string{"validation-coordinator"})
+	}).WithEntityID(verticalID), []string{"validation-coordinator"})
 
 	// CTO feasibility is evaluated after a passing spec audit so the stage transition
 	// follows the declared pipeline order (mvp_speccing -> spec_review -> cto_spec_review).
@@ -627,14 +609,13 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 		return false, err
 	}
 
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("spec.validation_passed"),
 		SourceAgent: "spec-auditor",
-		VerticalID:  verticalID,
 		Payload:     resPayload,
 		CreatedAt:   time.Now(),
-	}, []string{"factory-cto"})
+	}).WithEntityID(verticalID), []string{"factory-cto"})
 
 	brand := mustJSON(map[string]any{
 		"name":         makeBrandName(name),
@@ -642,25 +623,23 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 		"tagline":      "Run the day without chaos.",
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 	})
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("brand.requested"),
 		SourceAgent: "validation-coordinator",
-		VerticalID:  verticalID,
 		Payload:     brief,
 		CreatedAt:   time.Now(),
-	}, []string{"pre-brand-agent"})
+	}).WithEntityID(verticalID), []string{"pre-brand-agent"})
 	if err := p.updateStageField(ctx, verticalID, "branding", "brand", brand); err != nil {
 		return false, err
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("brand.candidates_ready"),
 		SourceAgent: "pre-brand-agent",
-		VerticalID:  verticalID,
 		Payload:     brand,
 		CreatedAt:   time.Now(),
-	}, []string{"validation-coordinator"})
+	}).WithEntityID(verticalID), []string{"validation-coordinator"})
 
 	kit := mustJSON(map[string]any{
 		"brief":           json.RawMessage(brief),
@@ -671,14 +650,13 @@ func (p *Pipeline) validateVertical(ctx context.Context, verticalID string) (boo
 	if err := p.updateStageField(ctx, verticalID, "ready_for_review", "validation_kit", kit); err != nil {
 		return false, err
 	}
-	_ = p.emit(ctx, events.Event{
+	_ = p.emit(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.ready_for_review"),
 		SourceAgent: "validation-coordinator",
-		VerticalID:  verticalID,
 		Payload:     kit,
 		CreatedAt:   time.Now(),
-	}, nil)
+	}).WithEntityID(verticalID), nil)
 
 	if p.Mailbox != nil {
 		_, err := p.Mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
@@ -788,7 +766,7 @@ func (p *Pipeline) emit(ctx context.Context, evt events.Event, recipients []stri
 		evt.Payload = []byte("{}")
 	}
 	if err := p.Events.AppendEvent(ctx, evt); err != nil {
-		log.Printf("factory emit append failed type=%s vertical=%s err=%v", evt.Type, evt.VerticalID, err)
+		log.Printf("factory emit append failed type=%s vertical=%s err=%v", evt.Type, evt.EntityID(), err)
 		return err
 	}
 	if len(recipients) > 0 {

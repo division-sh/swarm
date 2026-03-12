@@ -10,7 +10,6 @@ import (
 
 	"empireai/internal/events"
 	"empireai/internal/models"
-	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	workspace "empireai/internal/runtime/workspace"
@@ -104,29 +103,6 @@ func (am *AgentManager) configureRouting(rule PersistedRoutingRule, allowBootstr
 		}
 	}
 
-	table := am.bus.GetRoutingTable(rule.VerticalID)
-	if table == nil {
-		table = &runtimebus.RoutingTable{VerticalID: rule.VerticalID}
-	}
-	updated := false
-	for i := range table.Routes {
-		r := &table.Routes[i]
-		if r.EventPattern == rule.EventPattern && r.SubscriberID == rule.SubscriberID {
-			r.Status = rule.Status
-			updated = true
-			break
-		}
-	}
-	if !updated {
-		table.Routes = append(table.Routes, runtimebus.Route{
-			EventPattern: rule.EventPattern,
-			SubscriberID: rule.SubscriberID,
-			Status:       rule.Status,
-		})
-	}
-	if err := am.bus.SetRoutingTable(rule.VerticalID, table); err != nil {
-		return err
-	}
 	if am.store != nil {
 		if err := am.store.UpsertRoutingRule(am.runtimeContext(), rule); err != nil {
 			return err
@@ -137,27 +113,11 @@ func (am *AgentManager) configureRouting(rule PersistedRoutingRule, allowBootstr
 }
 
 func (am *AgentManager) hydrateRoutingTables(rules []PersistedRoutingRule) error {
-	perVertical := make(map[string]*runtimebus.RoutingTable)
 	for _, r := range rules {
 		if r.VerticalID == "" {
 			continue
 		}
-		rt := perVertical[r.VerticalID]
-		if rt == nil {
-			rt = &runtimebus.RoutingTable{VerticalID: r.VerticalID}
-			perVertical[r.VerticalID] = rt
-		}
-		rt.Routes = append(rt.Routes, runtimebus.Route{
-			EventPattern: r.EventPattern,
-			SubscriberID: r.SubscriberID,
-			Status:       r.Status,
-		})
 		am.setRouteMeta(routeRuleKey(r.VerticalID, r.EventPattern, r.SubscriberID), r)
-	}
-	for verticalID, rt := range perVertical {
-		if err := am.bus.SetRoutingTable(verticalID, rt); err != nil {
-			return fmt.Errorf("set routing table for %s: %w", verticalID, err)
-		}
 	}
 	return nil
 }

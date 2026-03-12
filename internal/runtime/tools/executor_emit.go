@@ -100,26 +100,25 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		return nil, err
 	}
 
-	emitted := events.Event{
+	emitted := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
 		SourceAgent: actor.ID,
 		TaskID:      strings.TrimSpace(asString(payloadMap["task_id"])),
-		VerticalID:  strings.TrimSpace(asString(payloadMap["vertical_id"])),
 		Payload:     mustJSON(payloadMap),
 		CreatedAt:   time.Now(),
-	}
-	if emitted.VerticalID == "" {
-		emitted.VerticalID = strings.TrimSpace(actor.VerticalID)
+	}).WithEntityID(strings.TrimSpace(asString(payloadMap["vertical_id"])))
+	if emitted.EntityID() == "" {
+		emitted = emitted.WithEntityID(strings.TrimSpace(actor.VerticalID))
 	}
 	if emitted.TaskID == "" {
 		emitted.TaskID = strings.TrimSpace(inbound.TaskID)
 	}
-	if emitted.VerticalID == "" {
-		emitted.VerticalID = strings.TrimSpace(inbound.VerticalID)
+	if emitted.EntityID() == "" {
+		emitted = emitted.WithEntityID(strings.TrimSpace(inbound.EntityID()))
 	}
-	if strings.TrimSpace(asString(payloadMap["vertical_id"])) == "" && emitted.VerticalID != "" {
-		payloadMap["vertical_id"] = emitted.VerticalID
+	if strings.TrimSpace(asString(payloadMap["vertical_id"])) == "" && emitted.EntityID() != "" {
+		payloadMap["vertical_id"] = emitted.EntityID()
 		emitted.Payload = mustJSON(payloadMap)
 	}
 

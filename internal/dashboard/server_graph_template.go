@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -20,6 +21,9 @@ func (s *Server) buildTemplateGraph(ctx context.Context, version string) ([]grap
 			ORDER BY created_at DESC
 			LIMIT 1
 		`).Scan(&ver, &agentsRaw, &bootstrapRaw, &seededRaw); err != nil {
+			if err == sql.ErrNoRows {
+				return s.buildTemplateGraphFromYAML()
+			}
 			return nil, nil, "", err
 		}
 	} else {
@@ -28,6 +32,9 @@ func (s *Server) buildTemplateGraph(ctx context.Context, version string) ([]grap
 			FROM org_templates
 			WHERE version = $1
 		`, strings.TrimSpace(version)).Scan(&ver, &agentsRaw, &bootstrapRaw, &seededRaw); err != nil {
+			if err == sql.ErrNoRows {
+				return s.buildTemplateGraphFromYAML()
+			}
 			return nil, nil, "", err
 		}
 	}

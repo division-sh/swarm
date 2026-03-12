@@ -75,6 +75,32 @@ func cycleTrackerForDB(db *sql.DB) *runtimebus.OpCoCycleTracker {
 	return runtimebus.NewOpCoCycleTracker(db)
 }
 
+func runtimeControlPlaneRecipient() string {
+	bundle := runtimepipeline.DefaultWorkflowContractBundleOrNil()
+	if bundle != nil {
+		for _, logicalID := range []string{"coordinator", "empire-coordinator"} {
+			if entry, ok := bundle.MergedAgents[logicalID]; ok {
+				if agentID := strings.TrimSpace(entry.ID); agentID != "" {
+					return agentID
+				}
+			}
+		}
+		for _, key := range []string{"control_plane_agent_id", "manager_fallback_agent_id"} {
+			if value, ok := bundle.MergedPolicy.Values[key]; ok {
+				if agentID := strings.TrimSpace(asString(value.Value)); agentID != "" {
+					return agentID
+				}
+			}
+			if value, ok := bundle.Policy.Values[key]; ok {
+				if agentID := strings.TrimSpace(asString(value.Value)); agentID != "" {
+					return agentID
+				}
+			}
+		}
+	}
+	return "coordinator"
+}
+
 func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	if opts.WorkflowModule == nil {
 		return fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
@@ -87,7 +113,7 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 
 func ensureProductPolicyBootWiring(opts RuntimeOptions) error {
 	if opts.ProductPolicy == nil {
-		return fmt.Errorf("product policy is required: configure RuntimeOptions.ProductPolicy")
+		return nil
 	}
 	runtimeproductpolicy.SetDefaultFactory(opts.ProductPolicy)
 	if runtimeproductpolicy.DefaultOrNil() == nil {
@@ -166,7 +192,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			},
 			EnsureDirectiveGeography: runtimepipeline.EnsureDirectiveGeography,
 			ControlPlaneRecipient: func() string {
-				return strings.TrimSpace(runtimeproductpolicy.ControlPlaneAgentID())
+				return strings.TrimSpace(runtimeControlPlaneRecipient())
 			},
 		}
 		rt.ScanCampaign = runtimepipeline.NewScanCampaignManager(rt.Bus, stores.ScanCampaignStore, hooks, stores.SQLDB)
@@ -179,15 +205,14 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		if len(payload) == 0 {
 			payload = []byte("{}")
 		}
-		if err := rt.Bus.Publish(callbackCtx, events.Event{
+		if err := rt.Bus.Publish(callbackCtx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType(sc.EventType),
 			SourceAgent: sc.AgentID,
 			TaskID:      sc.TaskID,
-			VerticalID:  sc.VerticalID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		}); err != nil {
+		}).WithEntityID(sc.VerticalID)); err != nil {
 			log.Printf("schedule publish failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 		}
 		if stores.ScheduleStore != nil {

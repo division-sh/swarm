@@ -33,8 +33,6 @@ type Bus interface {
 	Unsubscribe(agentID string)
 	Store() runtimebus.EventStore
 	ResetInMemoryState()
-	SetRoutingTable(verticalID string, table *runtimebus.RoutingTable) error
-	GetRoutingTable(verticalID string) *runtimebus.RoutingTable
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
 }
 

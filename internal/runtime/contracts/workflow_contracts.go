@@ -1682,9 +1682,29 @@ func ResolveWorkflowContractPaths(repoRoot string) ContractPaths {
 	return ResolveWorkflowContractPathsWithOverrides(repoRoot, "", "")
 }
 
+func DefaultPlatformContractsDir(repoRoot string) string {
+	return filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts")
+}
+
+func DefaultPlatformSpecFile(repoRoot string) string {
+	return filepath.Join(DefaultPlatformContractsDir(repoRoot), "platform-spec.yaml")
+}
+
+func DefaultWorkflowContractsDir(repoRoot string) string {
+	masWorkflowDir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts")
+	if existingFile(filepath.Join(masWorkflowDir, "package.yaml")) != "" {
+		return masWorkflowDir
+	}
+	return defaultWorkflowContractsDir(filepath.Join(repoRoot, "contracts"))
+}
+
+func RepoRootHasMASContracts(repoRoot string) bool {
+	return existingFile(filepath.Join(DefaultWorkflowContractsDir(repoRoot), "package.yaml")) != ""
+}
+
 func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) ContractPaths {
-	contractsRoot := filepath.Join(repoRoot, "contracts")
-	workflowDir := defaultWorkflowContractsDir(contractsRoot)
+	legacyContractsRoot := filepath.Join(repoRoot, "contracts")
+	workflowDir := DefaultWorkflowContractsDir(repoRoot)
 	overrideActive := strings.TrimSpace(workflowDirOverride) != ""
 	if overrideActive {
 		workflowDir = workflowDirOverride
@@ -1726,24 +1746,14 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 	promptsCandidates := []string{
 		filepath.Join(workflowDir, "prompts"),
 	}
-	if !overrideActive {
-		workflowSchemaCandidates = append(workflowSchemaCandidates, filepath.Join(contractsRoot, "workflow-schema.yaml"))
-		guardRegistryCandidates = append(guardRegistryCandidates, filepath.Join(contractsRoot, "guard-action-registry.yaml"))
-		systemNodesCandidates = append(systemNodesCandidates, filepath.Join(contractsRoot, "system-nodes.yaml"))
-		eventCatalogCandidates = append(eventCatalogCandidates, filepath.Join(contractsRoot, "event-catalog.yaml"))
-		agentRegistryCandidates = append(agentRegistryCandidates, filepath.Join(contractsRoot, "agent-tools.yaml"))
-		toolSchemaCandidates = append(toolSchemaCandidates, filepath.Join(contractsRoot, "tool-schemas.yaml"))
-		policyCandidates = append(policyCandidates, filepath.Join(contractsRoot, "prompt-variables.yaml"))
-		promptsCandidates = append(promptsCandidates, filepath.Join(contractsRoot, "prompts"))
-	}
 	workflowSchemaFile := firstExistingFile(workflowSchemaCandidates...)
 	guardRegistryFile := firstExistingFile(guardRegistryCandidates...)
-	platformSpecFile := filepath.Join(contractsRoot, "platform", "platform-spec.yaml")
+	platformSpecFile := DefaultPlatformSpecFile(repoRoot)
 	if strings.TrimSpace(platformSpecFileOverride) != "" {
 		platformSpecFile = platformSpecFileOverride
 	}
 	paths := ContractPaths{
-		ContractsRoot:         contractsRoot,
+		ContractsRoot:         workflowDir,
 		WorkflowDir:           workflowDir,
 		ProjectPackageFile:    existingFile(filepath.Join(workflowDir, "package.yaml")),
 		ProjectNodesFile:      existingFile(filepath.Join(workflowDir, "nodes.yaml")),
@@ -1761,10 +1771,10 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		PolicyFile:            firstExistingFile(policyCandidates...),
 		PromptsDir:            firstExistingDir(promptsCandidates...),
 		PlatformSpecFile:      platformSpecFile,
-		VerificationGatesFile: filepath.Join(contractsRoot, "verification-gates.yaml"),
-		ToolingLockFile:       filepath.Join(contractsRoot, "tooling.lock"),
-		DDLFile:               filepath.Join(contractsRoot, "ddl-canonical.sql"),
-		AgentConfigMapFile:    filepath.Join(contractsRoot, "agent-config-map.yaml"),
+		VerificationGatesFile: filepath.Join(repoRoot, "docs", "specs", "mas-platform", "verification-gates.yaml"),
+		ToolingLockFile:       filepath.Join(repoRoot, "docs", "specs", "mas-platform", "tooling.lock"),
+		DDLFile:               filepath.Join(legacyContractsRoot, "ddl-canonical.sql"),
+		AgentConfigMapFile:    filepath.Join(repoRoot, "docs", "specs", "mas-platform", "agent-config-map.yaml"),
 	}
 	if paths.ProjectPackageFile != "" {
 		paths.ProjectPackages = discoverProjectPackagePaths(paths.ProjectPackageFile, workflowDir)
@@ -2796,89 +2806,6 @@ func mergeEventPayloadSpec(existing, incoming EventPayloadSpec) (EventPayloadSpe
 	default:
 		return EventPayloadSpec{}, false
 	}
-}
-
-func mergeDynamicValue(existing, incoming any) (any, bool) {
-	switch {
-	case isEmptyDynamicValue(existing):
-		return cloneDynamicValue(incoming), true
-	case isEmptyDynamicValue(incoming):
-		return cloneDynamicValue(existing), true
-	case reflect.DeepEqual(existing, incoming):
-		return cloneDynamicValue(existing), true
-	}
-	existingMap, existingOK := dynamicStringMap(existing)
-	incomingMap, incomingOK := dynamicStringMap(incoming)
-	if existingOK && incomingOK {
-		merged := cloneStringAnyMap(existingMap)
-		for key, value := range incomingMap {
-			current, exists := merged[key]
-			if !exists {
-				merged[key] = cloneDynamicValue(value)
-				continue
-			}
-			next, ok := mergeDynamicValue(current, value)
-			if !ok {
-				return nil, false
-			}
-			merged[key] = next
-		}
-		return merged, true
-	}
-	if existingOK && !incomingOK {
-		if _, ok := incoming.(string); ok {
-			return cloneDynamicValue(existing), true
-		}
-	}
-	if !existingOK && incomingOK {
-		if _, ok := existing.(string); ok {
-			return cloneDynamicValue(incoming), true
-		}
-	}
-	return nil, false
-}
-
-func dynamicStringMap(value any) (map[string]any, bool) {
-	if value == nil {
-		return nil, false
-	}
-	typed, ok := value.(map[string]any)
-	return typed, ok
-}
-
-func cloneDynamicValue(value any) any {
-	if typed, ok := dynamicStringMap(value); ok {
-		cloned := make(map[string]any, len(typed))
-		for key, entry := range typed {
-			cloned[key] = cloneDynamicValue(entry)
-		}
-		return cloned
-	}
-	return value
-}
-
-func isEmptyDynamicValue(value any) bool {
-	if value == nil {
-		return true
-	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed) == ""
-	case []string:
-		return len(typed) == 0
-	case []any:
-		return len(typed) == 0
-	case map[string]any:
-		return len(typed) == 0
-	}
-	rv := reflect.ValueOf(value)
-	switch rv.Kind() {
-	case reflect.Slice, reflect.Array, reflect.Map:
-		return rv.Len() == 0
-	case reflect.Pointer, reflect.Interface:
-		return rv.IsNil()
-	}
-	return false
 }
 
 func isEmptyEventEmitterRef(ref EventEmitterRef) bool {

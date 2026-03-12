@@ -129,7 +129,7 @@ func pipelineHandlerRef(eventType string) string {
 func eventSchemaRequired(raw map[string]any) []string {
 	requiredRaw, ok := raw["required"]
 	if !ok || requiredRaw == nil {
-		return nil
+		return eventSchemaProperties(raw)
 	}
 	switch t := requiredRaw.(type) {
 	case []any:
@@ -153,7 +153,7 @@ func eventSchemaRequired(raw map[string]any) []string {
 		sort.Strings(out)
 		return out
 	default:
-		return nil
+		return eventSchemaProperties(raw)
 	}
 }
 

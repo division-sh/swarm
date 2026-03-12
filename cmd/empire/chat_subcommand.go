@@ -283,7 +283,7 @@ func resolveContractLoaderRoot() string {
 func searchContractRoot(start string) string {
 	dir := filepath.Clean(start)
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "contracts", "workflow-schema.yaml")); err == nil {
+		if runtimecontracts.RepoRootHasMASContracts(dir) {
 			return dir
 		}
 		parent := filepath.Dir(dir)
@@ -381,7 +381,13 @@ func dispatchBoardMessage(ctx context.Context, stores storeBundle, target target
 		"sent_at":         time.Now().UTC().Format(time.RFC3339),
 	})
 	eventID := uuid.NewString()
-	evt := events.Event{ID: eventID, Type: eventType, SourceAgent: "human-board", VerticalID: target.VerticalID, Payload: payload, CreatedAt: time.Now()}
+	evt := (events.Event{
+		ID:          eventID,
+		Type:        eventType,
+		SourceAgent: "human-board",
+		Payload:     payload,
+		CreatedAt:   time.Now(),
+	}).WithEntityID(target.VerticalID)
 	if err := stores.EventStore.AppendEvent(ctx, evt); err != nil {
 		return "", err
 	}
@@ -420,14 +426,13 @@ func dispatchSystemDirectiveDirect(ctx context.Context, stores storeBundle, targ
 		"timestamp":      time.Now().UTC().Format(time.RFC3339),
 	})
 	eventID := uuid.NewString()
-	evt := events.Event{
+	evt := (events.Event{
 		ID:          eventID,
 		Type:        events.EventType("system.directive"),
 		SourceAgent: "human-board",
-		VerticalID:  strings.TrimSpace(target.VerticalID),
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}
+	}).WithEntityID(strings.TrimSpace(target.VerticalID))
 	if err := stores.EventStore.AppendEvent(ctx, evt); err != nil {
 		return "", fmt.Errorf("append system.directive event: %w", err)
 	}

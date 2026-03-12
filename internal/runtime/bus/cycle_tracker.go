@@ -73,11 +73,11 @@ func (t *OpCoCycleTracker) Check(ctx context.Context, evt events.Event) (bool, *
 		return false, nil
 	}
 	if strings.TrimSpace(string(evt.Type)) == "devops.deploy_complete" {
-		t.ResetVertical(ctx, strings.TrimSpace(evt.VerticalID))
+		t.ResetVertical(ctx, strings.TrimSpace(evt.EntityID()))
 		return false, nil
 	}
 
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := strings.TrimSpace(evt.EntityID())
 	eventPattern := strings.TrimSpace(string(evt.Type))
 	limit, window := cycleLimitsForEvent(eventPattern)
 	key := cycleCounterKey(verticalID, eventPattern)
@@ -127,22 +127,21 @@ func (t *OpCoCycleTracker) Check(ctx context.Context, evt events.Event) (bool, *
 		"recommendation":    recommendation,
 		"escalation_target": escalationTarget,
 	}
-	escalation := &events.Event{
+	escalation := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("cycle_limit_reached"),
 		SourceAgent: "runtime",
-		VerticalID:  verticalID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   now,
-	}
-	return true, escalation
+	}).WithEntityID(verticalID)
+	return true, &escalation
 }
 
 func (t *OpCoCycleTracker) HandleResetEvent(ctx context.Context, evt events.Event) {
 	if t == nil || strings.TrimSpace(string(evt.Type)) != "cycle_reset" {
 		return
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := strings.TrimSpace(evt.EntityID())
 	eventPattern := ""
 	if len(evt.Payload) > 0 {
 		var payload map[string]any
@@ -259,7 +258,7 @@ func (t *OpCoCycleTracker) persistCounterLocked(ctx context.Context, c *opcoCycl
 }
 
 func shouldTrackOpCoCycle(evt events.Event) bool {
-	verticalID := strings.TrimSpace(evt.VerticalID)
+	verticalID := strings.TrimSpace(evt.EntityID())
 	source := strings.TrimSpace(evt.SourceAgent)
 	eventPattern := strings.TrimSpace(string(evt.Type))
 	if verticalID == "" || source == "" || eventPattern == "" {

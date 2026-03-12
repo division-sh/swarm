@@ -25,7 +25,7 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 		id = uuid.NewString()
 	}
 	taskID := sanitizeOptionalUUID(evt.TaskID)
-	verticalID := sanitizeOptionalUUID(evt.VerticalID)
+	verticalID := sanitizeOptionalUUID(evt.EntityID())
 	createdAt := evt.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now()
@@ -53,7 +53,7 @@ func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt even
 		id = uuid.NewString()
 	}
 	taskID := sanitizeOptionalUUID(evt.TaskID)
-	verticalID := sanitizeOptionalUUID(evt.VerticalID)
+	verticalID := sanitizeOptionalUUID(evt.EntityID())
 	createdAt := evt.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now()
@@ -213,17 +213,19 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 	out := make([]events.Event, 0, limit)
 	for rows.Next() {
 		var evt events.Event
+		var legacyVerticalID string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&evt.TaskID,
-			&evt.VerticalID,
+			&legacyVerticalID,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
+		evt = evt.WithEntityID(legacyVerticalID)
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {

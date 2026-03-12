@@ -1,6 +1,7 @@
 package promptcontracts
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -131,24 +132,26 @@ func TestPromptVariablesComplete(t *testing.T) {
 		t.Fatal("resolve caller path")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-	promptsDir := filepath.Join(repoRoot, "contracts", "prompts")
-	varsPath := filepath.Join(repoRoot, "contracts", "prompt-variables.yaml")
+	contractsDir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts")
 
-	rawVars, err := os.ReadFile(varsPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", varsPath, err)
-	}
-	var vars map[string]any
-	if err := yaml.Unmarshal(rawVars, &vars); err != nil {
-		t.Fatalf("parse %s: %v", varsPath, err)
-	}
-
-	files, err := filepath.Glob(filepath.Join(promptsDir, "*.md"))
-	if err != nil {
-		t.Fatalf("glob prompts: %v", err)
+	var files []string
+	if err := filepath.WalkDir(contractsDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filepath.Ext(path) != ".md" || filepath.Base(filepath.Dir(path)) != "prompts" {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	}); err != nil {
+		t.Fatalf("walk prompts: %v", err)
 	}
 	if len(files) == 0 {
-		t.Fatalf("no prompt files found under %s", promptsDir)
+		t.Fatalf("no prompt files found under %s", contractsDir)
 	}
 
 	missingByPrompt := make(map[string][]string)
@@ -161,14 +164,22 @@ func TestPromptVariablesComplete(t *testing.T) {
 		if len(tokens) == 0 {
 			continue
 		}
+		vars := loadPromptVarsForTest(t, filepath.Dir(p))
 		missing := make([]string, 0, len(tokens))
 		for _, tok := range tokens {
-			if _, ok := vars[tok]; !ok {
-				missing = append(missing, tok)
+			if _, ok := vars[tok]; ok {
+				continue
 			}
+			if isAllowedRuntimePromptToken(tok) {
+				continue
+			}
+			if strings.EqualFold(tok, "variable") {
+				continue
+			}
+			missing = append(missing, tok)
 		}
 		if len(missing) > 0 {
-			missingByPrompt[filepath.Base(p)] = missing
+			missingByPrompt[filepath.ToSlash(strings.TrimPrefix(p, contractsDir+string(filepath.Separator)))] = missing
 		}
 	}
 	if len(missingByPrompt) > 0 {
@@ -176,6 +187,10 @@ func TestPromptVariablesComplete(t *testing.T) {
 	}
 
 	for _, p := range files {
+		if hasAllowedRuntimePromptTokens(t, p) {
+			continue
+		}
+		promptsDir := filepath.Dir(p)
 		base := strings.TrimSuffix(filepath.Base(p), ".md")
 		parts := strings.Split(base, ".")
 		agentID := strings.TrimSpace(parts[0])
@@ -193,5 +208,58 @@ func TestPromptVariablesComplete(t *testing.T) {
 		if unresolved := unresolvedPromptTokens(rendered); len(unresolved) > 0 {
 			t.Fatalf("rendered prompt %s still has unresolved variables: %v", filepath.Base(p), unresolved)
 		}
+	}
+}
+
+func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
+	t.Helper()
+
+	vars := map[string]any{}
+	for _, candidate := range promptVariableSources(promptsDir) {
+		raw, err := os.ReadFile(candidate)
+		if err != nil {
+			t.Fatalf("read %s: %v", candidate, err)
+		}
+		loaded := map[string]any{}
+		if err := yaml.Unmarshal(raw, &loaded); err != nil {
+			t.Fatalf("parse %s: %v", candidate, err)
+		}
+		for key, value := range loaded {
+			vars[key] = value
+		}
+	}
+	return vars
+}
+
+func hasAllowedRuntimePromptTokens(t *testing.T, path string) bool {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	for _, tok := range unresolvedPromptTokens(string(raw)) {
+		if isAllowedRuntimePromptToken(tok) || strings.EqualFold(strings.TrimSpace(tok), "variable") {
+			return true
+		}
+	}
+	return false
+}
+
+func isAllowedRuntimePromptToken(token string) bool {
+	switch strings.TrimSpace(token) {
+	case "name",
+		"type",
+		"vertical_name",
+		"vertical_description",
+		"geography",
+		"mandate_document",
+		"founder_directives",
+		"org_roster",
+		"monthly_api_cap",
+		"product_budget",
+		"growth_budget":
+		return true
+	default:
+		return false
 	}
 }

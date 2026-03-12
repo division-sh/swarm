@@ -16,7 +16,6 @@ import (
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimeproductpolicy "empireai/internal/runtime/productpolicy"
 	"empireai/internal/runtime/sessions"
 	workspace "empireai/internal/runtime/workspace"
 	"github.com/google/uuid"
@@ -123,18 +122,17 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"agent_id":    agentID,
 		"event_id":    strings.TrimSpace(evt.ID),
 		"event_type":  strings.TrimSpace(string(evt.Type)),
-		"vertical_id": strings.TrimSpace(evt.VerticalID),
+		"vertical_id": strings.TrimSpace(evt.EntityID()),
 		"panic_count": count,
 		"error":       strings.TrimSpace(panicText),
 	}
-	_ = am.bus.PublishDirect(am.runtimeContext(), events.Event{
+	_ = am.bus.PublishDirect(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.poison_event_quarantined"),
 		SourceAgent: "runtime",
-		VerticalID:  strings.TrimSpace(evt.VerticalID),
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}, []string{managerID})
+	}).WithEntityID(strings.TrimSpace(evt.EntityID())), []string{managerID})
 }
 
 func deterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
@@ -156,14 +154,6 @@ func (am *AgentManager) defaultManagerAgentID(cfg models.AgentConfig) string {
 				}
 				return managerID
 			}
-		}
-	}
-	if policy := runtimeproductpolicy.DefaultOrNil(); policy != nil {
-		if managerID := normalizedManagerFallback(cfg, strings.TrimSpace(policy.ManagerFallbackAgentID(cfg))); managerID != "" {
-			if managerID == "coordinator" {
-				return "empire-coordinator"
-			}
-			return managerID
 		}
 	}
 	return "empire-coordinator"
@@ -478,11 +468,6 @@ func (am *AgentManager) ResetRuntimeState() error {
 			verticals[cfg.VerticalID] = struct{}{}
 		}
 	}
-	for _, rule := range am.routeMeta {
-		if strings.TrimSpace(rule.VerticalID) != "" {
-			verticals[rule.VerticalID] = struct{}{}
-		}
-	}
 	am.agents = make(map[string]Agent)
 	am.agentCfg = make(map[string]models.AgentConfig)
 	am.agentUpAt = make(map[string]time.Time)
@@ -494,7 +479,6 @@ func (am *AgentManager) ResetRuntimeState() error {
 	am.poisonMu.Unlock()
 
 	for verticalID := range verticals {
-		_ = am.bus.SetRoutingTable(verticalID, &runtimebus.RoutingTable{VerticalID: verticalID})
 		if am.workspaces != nil {
 			_ = am.workspaces.StopVerticalWorkspace(am.runtimeContext(), verticalID)
 		}
@@ -605,11 +589,10 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		verticalID = strings.TrimSpace(cfg.VerticalID)
 	}
 
-	if err := am.bus.Publish(am.runtimeContext(), events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
-		VerticalID:  verticalID,
 		Payload: mustJSON(map[string]any{
 			"agent_id":           agent.ID(),
 			"vertical_id":        verticalID,
@@ -618,7 +601,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
 		}),
 		CreatedAt: time.Now(),
-	}); err != nil {
+	}).WithEntityID(verticalID)); err != nil {
 		RuntimeWarn("agent-manager", "ops.agent_panic publish failed agent=%s err=%v", agent.ID(), err)
 	}
 
@@ -643,11 +626,10 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		managerID = am.defaultManagerAgentID(cfg)
 	}
 	if managerID != agent.ID() {
-		if err := am.bus.PublishDirect(am.runtimeContext(), events.Event{
+		if err := am.bus.PublishDirect(am.runtimeContext(), (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("ops.agent_failed"),
 			SourceAgent: "runtime",
-			VerticalID:  verticalID,
 			Payload: mustJSON(map[string]any{
 				"agent_id":           agent.ID(),
 				"manager_id":         managerID,
@@ -657,7 +639,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 				"instruction":        "Agent loop failed after repeated panics. Decide: reconfigure, restart, or replace agent.",
 			}),
 			CreatedAt: time.Now(),
-		}, []string{managerID}); err != nil {
+		}).WithEntityID(verticalID), []string{managerID}); err != nil {
 			RuntimeWarn("agent-manager", "ops.agent_failed publish failed agent=%s manager=%s err=%v", agent.ID(), managerID, err)
 		}
 	}
@@ -706,7 +688,7 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 		}
 		verticalID := strings.TrimSpace(payload.VerticalID)
 		if verticalID == "" {
-			verticalID = strings.TrimSpace(evt.VerticalID)
+			verticalID = strings.TrimSpace(evt.EntityID())
 		}
 		if verticalID == "" {
 			return
@@ -723,7 +705,7 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 		_ = json.Unmarshal(evt.Payload, &payload)
 		verticalID := strings.TrimSpace(payload.VerticalID)
 		if verticalID == "" {
-			verticalID = strings.TrimSpace(evt.VerticalID)
+			verticalID = strings.TrimSpace(evt.EntityID())
 		}
 		if verticalID == "" {
 			return
@@ -733,18 +715,17 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 			return
 		}
 		if am.bus != nil {
-			if err := am.bus.Publish(am.runtimeContext(), events.Event{
+			if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("vertical.killed"),
 				SourceAgent: "agent-manager",
-				VerticalID:  verticalID,
 				Payload: mustJSON(map[string]any{
 					"vertical_id": verticalID,
 					"reason":      FirstNonEmptyString(strings.TrimSpace(payload.Reason), "opco teardown requested"),
 					"source":      "opco.teardown_requested",
 				}),
 				CreatedAt: time.Now(),
-			}); err != nil {
+			}).WithEntityID(verticalID)); err != nil {
 				RuntimeWarn("agent-manager", "vertical.killed publish failed vertical=%s err=%v", verticalID, err)
 			}
 		}

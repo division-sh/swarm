@@ -41,11 +41,11 @@ type handlerExecutionPlan struct {
 	NodeID           string
 	EventType        string
 	Guard            string
-	GuardSpec        any
+	GuardSpec        *runtimecontracts.GuardSpec
 	Action           string
 	Template         string
 	InstanceIDFrom   string
-	ConfigFrom       map[string]any
+	ConfigFrom       *runtimecontracts.ConfigFromSpec
 	CompletionRule   string
 	AdvancesTo       string
 	SetsGate         string
@@ -53,8 +53,8 @@ type handlerExecutionPlan struct {
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 	Emits            string
 	EmitEvents       []string
-	Rules            map[string]any
-	OnComplete       map[string]any
+	Rules            []runtimecontracts.HandlerRuleEntry
+	OnComplete       *runtimecontracts.HandlerRuleEntry
 	ExecutionOrder   []string
 }
 
@@ -80,11 +80,8 @@ type workflowRuleMatch struct {
 }
 
 func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
-	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
-	if verticalID == "" {
-		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
-	}
+	verticalID := workflowEventEntityIDWithPayload(triggerCtx.Event, payload)
 	return WorkflowHookContext{
 		Event:      triggerCtx.Event,
 		VerticalID: verticalID,
@@ -93,15 +90,23 @@ func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowH
 	}
 }
 
+func workflowEventEntityID(evt events.Event) string {
+	return workflowEventEntityIDWithPayload(evt, parsePayloadMap(evt.Payload))
+}
+
+func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) string {
+	return strings.TrimSpace(firstNonEmptyString(
+		asString(payload["entity_id"]),
+		asString(payload["vertical_id"]),
+		evt.EntityID(),
+	))
+}
+
 func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.Context, evt events.Event) (workflowTransitionOutcome, bool) {
 	if pc == nil {
 		return workflowTransitionOutcome{}, false
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
-	if verticalID == "" {
-		payload := parsePayloadMap(evt.Payload)
-		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
-	}
+	verticalID := workflowEventEntityID(evt)
 	if verticalID == "" {
 		return workflowTransitionOutcome{}, false
 	}
@@ -134,20 +139,9 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.C
 	}
 
 	actionsExecuted := []string{}
-	if plan, planOK := pc.resolveDerivedHandlerExecutionPlanByEvent(triggerCtx); planOK && handlerExecutionOrderEnabled(triggerCtx.Event.Type) {
-		if safety := classifyHandlerExecutionPlanSafety(transition, plan); safety.Safe {
-			actionsExecuted = pc.executeHandlerExecutionPlanPreStage(ctx, triggerCtx, plan)
-			pc.updateVerticalStage(ctx, verticalID, plan.AdvancesTo, string(evt.Type))
-		} else {
-			pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
-			actionsExecuted = pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
-			pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
-		}
-	} else {
-		pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
-		actionsExecuted = pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
-		pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
-	}
+	pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
+	actionsExecuted = pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
+	pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
 	nextState := pc.currentWorkflowState(ctx, verticalID)
 	actionsExecuted = append(actionsExecuted, pc.executeWorkflowTransitionActions(ctx, workflowTriggerContext{
 		Event:           evt,
@@ -237,12 +231,6 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 	if workflow == nil {
 		return WorkflowTransition{}, nil, false
 	}
-	if promoted, _, evaluated, ok := pc.resolveContractHandlerFirstTransition(triggerCtx); ok {
-		return promoted, evaluated, true
-	}
-	if promoted, evaluated, ok := pc.resolvePromotedDerivedWorkflowTransition(triggerCtx, workflow, trigger); ok {
-		return promoted, evaluated, true
-	}
 	transition, ok := workflow.TransitionByTrigger(triggerCtx.State, trigger, func(candidate WorkflowTransition) bool {
 		passed, evaluated := pc.evaluateWorkflowTransitionGuards(triggerCtx, candidate)
 		if passed {
@@ -253,164 +241,7 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowTransitionByEvent(
 	if !ok {
 		return WorkflowTransition{}, nil, false
 	}
-	_ = pc.shadowCompareDerivedWorkflowTransition(triggerCtx, transition)
 	return transition, guardsEvaluated, true
-}
-
-func (pc *FactoryPipelineCoordinator) resolvePromotedDerivedWorkflowTransition(
-	triggerCtx workflowTriggerContext,
-	workflow *WorkflowDefinition,
-	trigger string,
-) (WorkflowTransition, []string, bool) {
-	if !handlerFirstCandidateEnabled(trigger) {
-		return WorkflowTransition{}, nil, false
-	}
-	derived, ok := pc.resolveDerivedWorkflowTransitionByEvent(triggerCtx)
-	if !ok {
-		return WorkflowTransition{}, nil, false
-	}
-	stateStage := workflow.NormalizeStage(string(triggerCtx.State.Stage))
-	var matched WorkflowTransition
-	var matchedGuards []string
-	var found bool
-	for _, candidate := range workflow.transitions {
-		if strings.TrimSpace(candidate.Trigger) != trigger {
-			continue
-		}
-		if !containsPipelineStage(candidate.From, stateStage) {
-			continue
-		}
-		if matched, _ := workflowTransitionSemanticParity(candidate, derived); !matched {
-			continue
-		}
-		passed, evaluated := pc.evaluateWorkflowTransitionGuards(triggerCtx, candidate)
-		if !passed {
-			continue
-		}
-		if found {
-			return WorkflowTransition{}, nil, false
-		}
-		matched = candidate
-		matchedGuards = evaluated
-		found = true
-	}
-	if !found {
-		return WorkflowTransition{}, nil, false
-	}
-	return matched, matchedGuards, true
-}
-
-func handlerFirstCandidateEnabled(trigger string) bool {
-	switch strings.TrimSpace(trigger) {
-	case "vertical.shortlisted", "research.completed", "cto.spec_approved",
-		"opco.steady_state_reached", "opco.growth_triggered", "opco.growth_stabilized",
-		"build_complete", "launch_ready", "opco.teardown_requested",
-		"vertical.ready_for_review", "research.vertical_rejected", "cto.spec_vetoed",
-		"spec.validation_failed", "cto.spec_revision_needed", "spec.revision_requested":
-		return true
-	default:
-		return false
-	}
-}
-
-func handlerExecutionOrderEnabled(eventType events.EventType) bool {
-	switch strings.TrimSpace(string(eventType)) {
-	case "opco.steady_state_reached", "opco.growth_triggered", "opco.growth_stabilized", "opco.teardown_requested",
-		"build_complete", "launch_ready",
-		"spec.validation_failed", "cto.spec_revision_needed",
-		"research.vertical_rejected", "cto.spec_vetoed":
-		return true
-	default:
-		return false
-	}
-}
-
-func (pc *FactoryPipelineCoordinator) shadowCompareDerivedWorkflowTransition(
-	triggerCtx workflowTriggerContext,
-	flat WorkflowTransition,
-) workflowTransitionShadowComparison {
-	derived, ok := pc.resolveDerivedWorkflowTransitionByEvent(triggerCtx)
-	if !ok {
-		return workflowTransitionShadowComparison{FlatTransition: flat, Reason: "no_derived_candidate"}
-	}
-	matched, reason := workflowTransitionSemanticParity(flat, derived)
-	return workflowTransitionShadowComparison{
-		FlatTransition:    flat,
-		DerivedTransition: derived,
-		Matched:           matched,
-		Reason:            reason,
-	}
-}
-
-func (pc *FactoryPipelineCoordinator) resolveDerivedWorkflowTransitionByEvent(
-	triggerCtx workflowTriggerContext,
-) (WorkflowTransition, bool) {
-	if pc == nil || pc.ContractBundle() == nil {
-		return WorkflowTransition{}, false
-	}
-	trigger := strings.TrimSpace(string(triggerCtx.Event.Type))
-	if trigger == "" {
-		return WorkflowTransition{}, false
-	}
-	bundle := pc.ContractBundle()
-	owners := bundle.RuntimeEventOwners(trigger)
-	if len(owners) == 0 {
-		return WorkflowTransition{}, false
-	}
-	var match runtimecontracts.HandlerTransitionSemantic
-	var matched bool
-	for _, owner := range owners {
-		derived, ok := bundle.DerivedHandlerTransition(owner, trigger)
-		if !ok {
-			continue
-		}
-		if strings.TrimSpace(derived.AdvancesTo) == "" {
-			continue
-		}
-		if matched {
-			return WorkflowTransition{}, false
-		}
-		match = derived
-		matched = true
-	}
-	if !matched {
-		return WorkflowTransition{}, false
-	}
-	return workflowTransitionFromDerivedSemantic(triggerCtx.State, match), true
-}
-
-func (pc *FactoryPipelineCoordinator) resolveDerivedHandlerExecutionPlanByEvent(
-	triggerCtx workflowTriggerContext,
-) (handlerExecutionPlan, bool) {
-	if pc == nil || pc.ContractBundle() == nil {
-		return handlerExecutionPlan{}, false
-	}
-	trigger := strings.TrimSpace(string(triggerCtx.Event.Type))
-	if trigger == "" {
-		return handlerExecutionPlan{}, false
-	}
-	bundle := pc.ContractBundle()
-	owners := bundle.RuntimeEventOwners(trigger)
-	if len(owners) == 0 {
-		return handlerExecutionPlan{}, false
-	}
-	var match runtimecontracts.HandlerTransitionSemantic
-	var matched bool
-	for _, owner := range owners {
-		derived, ok := bundle.DerivedHandlerTransition(owner, trigger)
-		if !ok {
-			continue
-		}
-		if matched {
-			return handlerExecutionPlan{}, false
-		}
-		match = derived
-		matched = true
-	}
-	if !matched {
-		return handlerExecutionPlan{}, false
-	}
-	return handlerExecutionPlanFromDerivedSemantic(match), true
 }
 
 func handlerExecutionPlanFromDerivedSemantic(
@@ -424,7 +255,7 @@ func handlerExecutionPlanFromDerivedSemantic(
 		Action:           strings.TrimSpace(derived.Action),
 		Template:         strings.TrimSpace(derived.Template),
 		InstanceIDFrom:   strings.TrimSpace(derived.InstanceIDFrom),
-		ConfigFrom:       configFromSpecToMap(derived.ConfigFrom),
+		ConfigFrom:       derived.ConfigFrom,
 		CompletionRule:   strings.TrimSpace(derived.CompletionRule),
 		AdvancesTo:       strings.TrimSpace(derived.AdvancesTo),
 		SetsGate:         gateSpecString(derived.SetsGate),
@@ -432,8 +263,8 @@ func handlerExecutionPlanFromDerivedSemantic(
 		DataAccumulation: derived.DataAccumulation,
 		Emits:            strings.TrimSpace(derived.Emits.First()),
 		EmitEvents:       derived.Emits.Values(),
-		Rules:            handlerRuleEntriesToMap(derived.Rules),
-		OnComplete:       handlerRuleEntryToMapOrNil(derived.OnComplete),
+		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), derived.Rules...),
+		OnComplete:       derived.OnComplete,
 	}
 	plan.ExecutionOrder = handlerExecutionOrderForPlan(plan)
 	return plan
@@ -448,7 +279,7 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		Action:           strings.TrimSpace(handler.Action),
 		Template:         strings.TrimSpace(handler.Template),
 		InstanceIDFrom:   strings.TrimSpace(handler.InstanceIDFrom),
-		ConfigFrom:       configFromSpecToMap(handler.ConfigFrom),
+		ConfigFrom:       handler.ConfigFrom,
 		CompletionRule:   strings.TrimSpace(handler.CompletionRule),
 		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 		SetsGate:         gateSpecString(handler.SetsGate),
@@ -456,8 +287,8 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		DataAccumulation: handler.DataAccumulation,
 		Emits:            strings.TrimSpace(handler.Emits.First()),
 		EmitEvents:       handler.Emits.Values(),
-		Rules:            handlerRuleEntriesToMap(handler.Rules),
-		OnComplete:       handlerRuleEntryToMapOrNil(handler.OnComplete),
+		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), handler.Rules...),
+		OnComplete:       handler.OnComplete,
 	}
 	plan.ExecutionOrder = handlerExecutionOrderForPlan(plan)
 	return plan
@@ -474,7 +305,7 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	if plan.Action != "" {
 		steps = append(steps, "compute")
 	}
-	if len(plan.OnComplete) > 0 || plan.CompletionRule != "" {
+	if plan.OnComplete != nil || plan.CompletionRule != "" {
 		steps = append(steps, "on_complete")
 	}
 	if plan.AdvancesTo != "" {
@@ -498,275 +329,8 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	return steps
 }
 
-func workflowTransitionFromDerivedSemantic(
-	state WorkflowState,
-	derived runtimecontracts.HandlerTransitionSemantic,
-) WorkflowTransition {
-	transition := WorkflowTransition{
-		Name:             strings.TrimSpace(derived.ID),
-		From:             []PipelineStage{NormalizePipelineStage(string(state.Stage))},
-		To:               NormalizePipelineStage(strings.TrimSpace(derived.AdvancesTo)),
-		Trigger:          strings.TrimSpace(derived.EventType),
-		Node:             strings.TrimSpace(derived.NodeID),
-		DataAccumulation: derived.DataAccumulation,
-	}
-	if guardID := strings.TrimSpace(asString(derived.Guard)); guardID != "" {
-		transition.GuardIDs = []string{guardID}
-	}
-	actionID := strings.TrimSpace(derived.Action)
-	emitID := strings.TrimSpace(derived.Emits.First())
-	if actionID != "" || emitID != "" {
-		action := WorkflowAction{Name: actionID}
-		if emitID != "" {
-			action.Emits = emitID
-			if action.Name == "" {
-				action.Name = "emit:" + emitID
-			}
-		}
-		transition.Actions = []WorkflowAction{action}
-	}
-	return transition
-}
-
-func workflowTransitionToExecutionPlan(transition WorkflowTransition) handlerExecutionPlan {
-	plan := handlerExecutionPlan{
-		NodeID:           strings.TrimSpace(transition.Node),
-		EventType:        strings.TrimSpace(transition.Trigger),
-		DataAccumulation: transition.DataAccumulation,
-		AdvancesTo:       strings.TrimSpace(string(transition.To)),
-	}
-	if len(transition.GuardIDs) > 0 {
-		plan.Guard = strings.TrimSpace(transition.GuardIDs[0])
-		plan.GuardSpec = strings.TrimSpace(transition.GuardIDs[0])
-	}
-	if len(transition.Actions) > 0 {
-		plan.Action = strings.TrimSpace(transition.Actions[0].Name)
-		plan.Emits = strings.TrimSpace(transition.Actions[0].Emits)
-	}
-	plan.ExecutionOrder = handlerExecutionOrderForPlan(plan)
-	return plan
-}
-
-func shadowCompareHandlerExecutionPlan(
-	flat WorkflowTransition,
-	derived handlerExecutionPlan,
-) handlerExecutionPlanShadowComparison {
-	flatPlan := workflowTransitionToExecutionPlan(flat)
-	matched, reason := handlerExecutionPlanParity(flatPlan, derived)
-	return handlerExecutionPlanShadowComparison{
-		FlatPlan:    flatPlan,
-		DerivedPlan: derived,
-		Matched:     matched,
-		Reason:      reason,
-	}
-}
-
-func handlerExecutionPlanParity(flat handlerExecutionPlan, derived handlerExecutionPlan) (bool, string) {
-	if flat.AdvancesTo != derived.AdvancesTo {
-		return false, "advances_to_mismatch"
-	}
-	if flat.EventType != derived.EventType {
-		return false, "event_mismatch"
-	}
-	if flat.NodeID != derived.NodeID {
-		return false, "node_mismatch"
-	}
-	if flat.Guard != "" && derived.Guard != "" && flat.Guard != derived.Guard {
-		return false, "guard_mismatch"
-	}
-	if flat.Action != "" && derived.Action != "" && !workflowTransitionActionAliasesMatch(flat.Action, derived.Action) {
-		return false, "action_mismatch"
-	}
-	if flat.Emits != "" && derived.Emits != "" && flat.Emits != derived.Emits {
-		return false, "emit_mismatch"
-	}
-	return true, "match"
-}
-
-func classifyHandlerExecutionPlanSafety(
-	flat WorkflowTransition,
-	derived handlerExecutionPlan,
-) handlerExecutionPlanSafetyComparison {
-	flatPlan := workflowTransitionToExecutionPlan(flat)
-	safe, reason := handlerExecutionPlanExecutionSafety(flatPlan, derived)
-	return handlerExecutionPlanSafetyComparison{
-		FlatPlan:    flatPlan,
-		DerivedPlan: derived,
-		Safe:        safe,
-		Reason:      reason,
-	}
-}
-
-func handlerExecutionPlanExecutionSafety(flat handlerExecutionPlan, derived handlerExecutionPlan) (bool, string) {
-	if flat.AdvancesTo != derived.AdvancesTo {
-		return false, "advances_to_mismatch"
-	}
-	if flat.EventType != derived.EventType {
-		return false, "event_mismatch"
-	}
-	if flat.NodeID != derived.NodeID {
-		return false, "node_mismatch"
-	}
-	if !workflowExecutionGuardAliasesMatch(flat, derived) {
-		return false, "guard_mismatch"
-	}
-	if !workflowExecutionActionAliasesMatch(flat.Action, derived.Action) {
-		return false, "action_mismatch"
-	}
-	if flat.SetsGate != derived.SetsGate {
-		return false, "sets_gate_mismatch"
-	}
-	if strings.TrimSpace(flat.DataAccumulation.SourceEvent) != strings.TrimSpace(derived.DataAccumulation.SourceEvent) {
-		return false, "data_accumulation_source_mismatch"
-	}
-	if !equalWorkflowDataWrites(flat.DataAccumulation.Writes, derived.DataAccumulation.Writes) {
-		return false, "data_accumulation_writes_mismatch"
-	}
-	if !workflowExecutionEmitAliasesMatch(flat, derived) {
-		return false, "emit_mismatch"
-	}
-	return true, "safe"
-}
-
-func workflowExecutionGuardAliasesMatch(flat handlerExecutionPlan, derived handlerExecutionPlan) bool {
-	if flat.Guard == derived.Guard {
-		return true
-	}
-	switch {
-	case strings.TrimSpace(derived.Guard) == "" &&
-		strings.TrimSpace(derived.Action) == "advance_operating" &&
-		(strings.TrimSpace(flat.Guard) == "qa_passed" || strings.TrimSpace(flat.Guard) == "deploy_approved"):
-		return true
-	default:
-		return false
-	}
-}
-
-func workflowExecutionActionAliasesMatch(flatAction string, derivedAction string) bool {
-	flatAction = strings.TrimSpace(flatAction)
-	derivedAction = strings.TrimSpace(derivedAction)
-	if workflowTransitionActionAliasesMatch(flatAction, derivedAction) {
-		return true
-	}
-	switch {
-	case flatAction == "" && derivedAction == "advance_operating":
-		return true
-	case flatAction == "" && derivedAction == "kill_vertical":
-		return true
-	default:
-		return false
-	}
-}
-
-func workflowExecutionEmitAliasesMatch(flat handlerExecutionPlan, derived handlerExecutionPlan) bool {
-	if flat.Emits == derived.Emits {
-		return true
-	}
-	switch {
-	case strings.TrimSpace(flat.Emits) == "" &&
-		strings.TrimSpace(derived.Emits) == "spec.revision_requested" &&
-		(strings.TrimSpace(flat.Action) == "increment_revision_count" || strings.TrimSpace(derived.Action) == "revision_loop"):
-		return true
-	case strings.TrimSpace(flat.Emits) == "" &&
-		strings.TrimSpace(derived.Emits) == "vertical.killed" &&
-		strings.TrimSpace(derived.Action) == "kill_vertical":
-		return true
-	default:
-		return false
-	}
-}
-
-func (pc *FactoryPipelineCoordinator) executeHandlerExecutionPlanPreStage(
-	ctx context.Context,
-	triggerCtx workflowTriggerContext,
-	plan handlerExecutionPlan,
-) []string {
-	switch strings.TrimSpace(plan.Action) {
-	case "advance_operating":
-		// Structural stage advance only. Keep this side-effect free.
-		return nil
-	case "revision_loop":
-		if pc.executeWorkflowAction(ctx, triggerCtx, "increment_revision_count") {
-			return []string{"increment_revision_count"}
-		}
-		return nil
-	case "kill_vertical":
-		// The surrounding validation/lifecycle handlers already emit vertical.killed after
-		// applyWorkflowEventTransition returns, so pre-stage behavior stays side-effect free.
-		return nil
-	default:
-		return nil
-	}
-}
-
-func (pc *FactoryPipelineCoordinator) resolveContractHandlerFirstTransition(
-	triggerCtx workflowTriggerContext,
-) (WorkflowTransition, handlerExecutionPlan, []string, bool) {
-	trigger := strings.TrimSpace(string(triggerCtx.Event.Type))
-	if !contractHandlerFirstEventEnabled(trigger) {
-		return WorkflowTransition{}, handlerExecutionPlan{}, nil, false
-	}
-	result, err := pc.executeDerivedContractHandler(context.Background(), triggerCtx, true)
-	if err != nil || !result.Handled || result.Outcome == nil {
-		return WorkflowTransition{}, handlerExecutionPlan{}, nil, false
-	}
-	switch result.Outcome.Status {
-	case HandlerOutcomeCompleted:
-		return result.Transition, result.Plan, result.GuardsEvaluated, true
-	default:
-		return WorkflowTransition{}, result.Plan, result.GuardsEvaluated, false
-	}
-}
-
-func contractHandlerFirstEventEnabled(trigger string) bool {
-	switch strings.TrimSpace(trigger) {
-	case "vertical.shortlisted",
-		"research.completed",
-		"cto.spec_approved",
-		"spec.revision_requested",
-		"vertical.ready_for_review",
-		"vertical.approved",
-		"vertical.needs_more_data":
-		return true
-	default:
-		return false
-	}
-}
-
-func directHandlerExecutionPlanSupported(plan handlerExecutionPlan) bool {
-	if strings.TrimSpace(plan.NodeID) == "" || strings.TrimSpace(plan.EventType) == "" {
-		return false
-	}
-	if strings.TrimSpace(plan.AdvancesTo) == "" &&
-		strings.TrimSpace(plan.Action) == "" &&
-		strings.TrimSpace(plan.SetsGate) == "" &&
-		!plan.ClearGates &&
-		!plan.DataAccumulation.HasWrites() &&
-		strings.TrimSpace(plan.DataAccumulation.SourceEvent) == "" &&
-		len(plan.EmitEvents) == 0 &&
-		strings.TrimSpace(plan.CompletionRule) == "" &&
-		len(plan.OnComplete) == 0 &&
-		len(plan.Rules) == 0 &&
-		strings.TrimSpace(plan.Emits) == "" {
-		return false
-	}
-	return true
-}
-
 func handlerPlanHasGuard(plan handlerExecutionPlan) bool {
-	if strings.TrimSpace(plan.Guard) != "" {
-		return true
-	}
-	switch typed := plan.GuardSpec.(type) {
-	case nil:
-		return false
-	case string:
-		return strings.TrimSpace(typed) != ""
-	case map[string]any:
-		return len(typed) > 0
-	default:
-		return strings.TrimSpace(asString(typed)) != ""
-	}
+	return strings.TrimSpace(plan.Guard) != "" || plan.GuardSpec != nil
 }
 
 func workflowTransitionFromHandlerPlan(state WorkflowState, plan handlerExecutionPlan) WorkflowTransition {
@@ -793,10 +357,7 @@ func (pc *FactoryPipelineCoordinator) executeContractHandlerFirstPlan(
 	if pc == nil {
 		return nil
 	}
-	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
-	if verticalID == "" {
-		verticalID = strings.TrimSpace(asString(parsePayloadMap(triggerCtx.Event.Payload)["vertical_id"]))
-	}
+	verticalID := workflowEventEntityID(triggerCtx.Event)
 	if verticalID == "" {
 		return nil
 	}
@@ -829,10 +390,7 @@ func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context
 	if !ok {
 		return false
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
-	if verticalID == "" {
-		verticalID = strings.TrimSpace(asString(parsePayloadMap(evt.Payload)["vertical_id"]))
-	}
+	verticalID := workflowEventEntityID(evt)
 	triggerCtx := workflowTriggerContext{
 		Event:           evt,
 		State:           pc.currentWorkflowState(ctx, verticalID),
@@ -861,7 +419,7 @@ func (pc *FactoryPipelineCoordinator) executeHandlerPlanActions(
 	}
 	switch action {
 	case "record_evidence":
-		if pc.recordWorkflowEvidence(ctx, strings.TrimSpace(triggerCtx.Event.VerticalID), strings.TrimSpace(plan.NodeID), parsePayloadMap(triggerCtx.Event.Payload)) {
+		if pc.recordWorkflowEvidence(ctx, workflowEventEntityID(triggerCtx.Event), strings.TrimSpace(plan.NodeID), parsePayloadMap(triggerCtx.Event.Payload)) {
 			return []string{action}
 		}
 		return nil
@@ -908,8 +466,7 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(
 	}
 	config := pc.resolveFlowInstanceConfig(triggerCtx, plan.ConfigFrom)
 	verticalID := strings.TrimSpace(firstNonEmptyString(
-		triggerCtx.Event.VerticalID,
-		asString(parsePayloadMap(triggerCtx.Event.Payload)["vertical_id"]),
+		workflowEventEntityID(triggerCtx.Event),
 		instanceID,
 	))
 	flowPath := workflowInstancePath(templateID, instanceID)
@@ -997,23 +554,30 @@ func (pc *FactoryPipelineCoordinator) resolveFlowInstanceID(triggerCtx workflowT
 
 func (pc *FactoryPipelineCoordinator) resolveFlowInstanceConfig(
 	triggerCtx workflowTriggerContext,
-	raw map[string]any,
+	spec *runtimecontracts.ConfigFromSpec,
 ) map[string]any {
-	if len(raw) == 0 {
+	if spec == nil {
 		return map[string]any{}
 	}
 	hookCtx := workflowHookContextFromTrigger(triggerCtx)
-	out := make(map[string]any, len(raw))
-	for key, value := range raw {
+	out := make(map[string]any, len(spec.PolicyKeys)+len(spec.Bindings))
+	for _, key := range spec.PolicyKeys {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
-		if ref, ok := value.(string); ok {
-			if resolved, found := workflowExpressionResolveValueRef(ref, hookCtx, nil); found {
-				out[key] = resolved
-				continue
-			}
+		if resolved, found := workflowExpressionResolveValueRef("policy."+key, hookCtx, nil); found {
+			out[key] = resolved
+		}
+	}
+	for key, value := range spec.Bindings {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if resolved, found := workflowExpressionResolveValueRef(value, hookCtx, nil); found {
+			out[key] = resolved
+			continue
 		}
 		out[key] = value
 	}
@@ -1174,10 +738,7 @@ func (pc *FactoryPipelineCoordinator) handlerEmitPayload(
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	verticalID := strings.TrimSpace(triggerCtx.Event.VerticalID)
-	if verticalID == "" {
-		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
-	}
+	verticalID := workflowEventEntityIDWithPayload(triggerCtx.Event, payload)
 	if verticalID != "" && strings.TrimSpace(asString(payload["vertical_id"])) == "" {
 		payload["vertical_id"] = verticalID
 	}
@@ -1206,15 +767,11 @@ func (pc *FactoryPipelineCoordinator) handlerEmitPayload(
 	}
 }
 
-func handlerGuardID(raw any) string {
-	switch typed := raw.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	case map[string]any:
-		return strings.TrimSpace(asString(typed["id"]))
-	default:
-		return strings.TrimSpace(asString(raw))
+func handlerGuardID(spec *runtimecontracts.GuardSpec) string {
+	if spec == nil {
+		return ""
 	}
+	return strings.TrimSpace(spec.ID)
 }
 
 func equalWorkflowDataWrites(left []runtimecontracts.WorkflowDataWrite, right []runtimecontracts.WorkflowDataWrite) bool {
@@ -1307,61 +864,56 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuard(triggerCtx workflowT
 	return pc.evaluateWorkflowGuardEntry(triggerCtx, entry)
 }
 
-func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardSpec(triggerCtx workflowTriggerContext, guardSpec any) (bool, []string) {
-	switch typed := guardSpec.(type) {
-	case nil:
+func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardSpec(triggerCtx workflowTriggerContext, guardSpec *runtimecontracts.GuardSpec) (bool, []string) {
+	if guardSpec == nil {
 		return true, nil
-	case string:
-		guardID := strings.TrimSpace(typed)
-		if guardID == "" {
-			return true, nil
-		}
-		if entry, ok := pc.resolveWorkflowGuard(guardID); ok {
-			return pc.evaluateWorkflowGuardEntry(triggerCtx, entry), []string{guardID}
-		}
-		passed, err := pc.evaluateWorkflowExpressionBool(triggerCtx, guardID)
-		if err != nil {
-			return false, []string{guardID}
-		}
-		return passed, []string{guardID}
-	case map[string]any:
-		if rawChecks, ok := typed["checks"].([]any); ok {
-			evaluated := make([]string, 0, len(rawChecks))
-			for _, rawCheck := range rawChecks {
-				passed, ids := pc.evaluateWorkflowGuardSpec(triggerCtx, rawCheck)
-				evaluated = append(evaluated, ids...)
-				if !passed {
-					return false, evaluated
-				}
-			}
-			return true, evaluated
-		}
-		guardID := strings.TrimSpace(asString(typed["id"]))
-		check := strings.TrimSpace(asString(typed["check"]))
-		if check != "" {
-			entry := runtimecontracts.GuardActionEntry{
-				ID:              guardID,
-				Check:           check,
-				PolicyRef:       strings.TrimSpace(asString(typed["policy_ref"])),
-				PlatformBuiltin: strings.TrimSpace(asString(typed["platform_builtin"])),
-			}
-			passed := pc.evaluateWorkflowGuardEntry(triggerCtx, entry)
-			if guardID != "" {
-				return passed, []string{guardID}
-			}
-			return passed, []string{check}
-		}
-		if guardID != "" {
-			return pc.evaluateWorkflowGuard(triggerCtx, guardID), []string{guardID}
-		}
-		return true, nil
-	default:
-		guardID := strings.TrimSpace(asString(typed))
-		if guardID == "" {
-			return true, nil
-		}
-		return pc.evaluateWorkflowGuard(triggerCtx, guardID), []string{guardID}
 	}
+	if len(guardSpec.Checks) > 0 {
+		evaluated := make([]string, 0, len(guardSpec.Checks))
+		for _, check := range guardSpec.Checks {
+			passed, ids := pc.evaluateWorkflowGuardCheck(triggerCtx, check.ID, check.Check, guardSpec.PolicyRef)
+			evaluated = append(evaluated, ids...)
+			if !passed {
+				return false, evaluated
+			}
+		}
+		return true, evaluated
+	}
+	return pc.evaluateWorkflowGuardCheck(triggerCtx, guardSpec.ID, guardSpec.Check, guardSpec.PolicyRef)
+}
+
+func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardCheck(
+	triggerCtx workflowTriggerContext,
+	guardID string,
+	check string,
+	policyRef string,
+) (bool, []string) {
+	guardID = strings.TrimSpace(guardID)
+	check = strings.TrimSpace(check)
+	policyRef = strings.TrimSpace(policyRef)
+	if check != "" {
+		entry := runtimecontracts.GuardActionEntry{
+			ID:        guardID,
+			Check:     check,
+			PolicyRef: policyRef,
+		}
+		passed := pc.evaluateWorkflowGuardEntry(triggerCtx, entry)
+		if guardID != "" {
+			return passed, []string{guardID}
+		}
+		return passed, []string{check}
+	}
+	if guardID == "" {
+		return true, nil
+	}
+	if entry, ok := pc.resolveWorkflowGuard(guardID); ok {
+		return pc.evaluateWorkflowGuardEntry(triggerCtx, entry), []string{guardID}
+	}
+	passed, err := pc.evaluateWorkflowExpressionBool(triggerCtx, guardID)
+	if err != nil {
+		return false, []string{guardID}
+	}
+	return passed, []string{guardID}
 }
 
 func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardEntry(triggerCtx workflowTriggerContext, entry runtimecontracts.GuardActionEntry) bool {
@@ -1596,37 +1148,30 @@ func workflowExpressionLookupPath(source map[string]any, path string) (any, bool
 	return current, current != nil
 }
 
-func (pc *FactoryPipelineCoordinator) matchWorkflowRules(triggerCtx workflowTriggerContext, rules map[string]any) (workflowRuleMatch, bool) {
+func (pc *FactoryPipelineCoordinator) matchWorkflowRules(triggerCtx workflowTriggerContext, rules []runtimecontracts.HandlerRuleEntry) (workflowRuleMatch, bool) {
 	return pc.matchWorkflowRulesWithVars(triggerCtx, rules, nil)
 }
 
-func (pc *FactoryPipelineCoordinator) matchWorkflowRulesWithVars(triggerCtx workflowTriggerContext, rules map[string]any, extraVars map[string]any) (workflowRuleMatch, bool) {
+func (pc *FactoryPipelineCoordinator) matchWorkflowRulesWithVars(triggerCtx workflowTriggerContext, rules []runtimecontracts.HandlerRuleEntry, extraVars map[string]any) (workflowRuleMatch, bool) {
 	if len(rules) == 0 {
 		return workflowRuleMatch{}, false
 	}
-	keys := make([]string, 0, len(rules))
-	for key := range rules {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
 	var fallback workflowRuleMatch
 	var hasFallback bool
-	for _, key := range keys {
-		rule, ok := asObject(rules[key])
-		if !ok {
-			continue
+	for i, rule := range rules {
+		key := strings.TrimSpace(rule.ID)
+		if key == "" {
+			key = strings.TrimSpace(rule.Description)
 		}
-		condition := strings.TrimSpace(asString(rule["condition"]))
+		if key == "" {
+			key = fmt.Sprintf("rule_%d", i)
+		}
+		condition := strings.TrimSpace(rule.Condition)
 		match := workflowRuleMatch{
-			RuleID:     key,
-			AdvancesTo: strings.TrimSpace(asString(rule["advances_to"])),
-			Emits:      eventEmissionList(rule["emits"]),
-		}
-		if accumulation, ok := asObject(rule["data_accumulation"]); ok {
-			match.DataAccumulation = decodeWorkflowDataAccumulation(accumulation)
+			RuleID:           key,
+			AdvancesTo:       strings.TrimSpace(rule.AdvancesTo),
+			Emits:            rule.Emits.Values(),
+			DataAccumulation: rule.DataAccumulation,
 		}
 		if strings.EqualFold(condition, "else") {
 			fallback = match
@@ -1648,37 +1193,6 @@ func (pc *FactoryPipelineCoordinator) matchWorkflowRulesWithVars(triggerCtx work
 		return fallback, true
 	}
 	return workflowRuleMatch{}, false
-}
-
-func decodeWorkflowDataAccumulation(raw map[string]any) runtimecontracts.WorkflowDataAccumulation {
-	accumulation := runtimecontracts.WorkflowDataAccumulation{
-		SourceEvent: strings.TrimSpace(asString(raw["source_event"])),
-		Value:       runtimecontracts.ExpressionValue{Literal: raw["value"]},
-	}
-	rawWrites, ok := raw["writes"].([]any)
-	if !ok {
-		return accumulation
-	}
-	writes := make([]runtimecontracts.WorkflowDataWrite, 0, len(rawWrites))
-	for _, item := range rawWrites {
-		switch typed := item.(type) {
-		case string:
-			field := strings.TrimSpace(typed)
-			if field == "" {
-				continue
-			}
-			writes = append(writes, runtimecontracts.WorkflowDataWrite{Field: field})
-		case map[string]any:
-			writes = append(writes, runtimecontracts.WorkflowDataWrite{
-				Field:       strings.TrimSpace(asString(typed["field"])),
-				SourceField: strings.TrimSpace(asString(typed["source_field"])),
-				TargetField: strings.TrimSpace(asString(typed["target_field"])),
-				Value:       runtimecontracts.ExpressionValue{Literal: typed["value"]},
-			})
-		}
-	}
-	accumulation.Writes = writes
-	return accumulation
 }
 
 func (pc *FactoryPipelineCoordinator) executeWorkflowTransitionActions(
@@ -1765,16 +1279,17 @@ func (pc *FactoryPipelineCoordinator) workflowActionEmitPayload(
 	eventType string,
 ) map[string]any {
 	eventType = strings.TrimSpace(eventType)
+	entityID := workflowEventEntityID(triggerCtx.Event)
 	switch eventType {
 	case "validation.started":
 		if pc.payloadFactory != nil {
-			return payloadMap(pc.payloadFactory.BuildValidationStartedPayload(ctx, triggerCtx.Event.VerticalID, parsePayloadMap(triggerCtx.Event.Payload), nil))
+			return payloadMap(pc.payloadFactory.BuildValidationStartedPayload(ctx, entityID, parsePayloadMap(triggerCtx.Event.Payload), nil))
 		}
 	case "vertical.shortlisted":
 		if pc.payloadFactory != nil {
 			payload := parsePayloadMap(triggerCtx.Event.Payload)
 			return payloadMap(pc.payloadFactory.BuildVerticalShortlistedPayload(
-				triggerCtx.Event.VerticalID,
+				entityID,
 				workflowPayloadFloat(payload, "composite_score"),
 				workflowPayloadFloat(payload, "viability_score"),
 				payload,
@@ -1783,19 +1298,19 @@ func (pc *FactoryPipelineCoordinator) workflowActionEmitPayload(
 	case "vertical.marginal":
 		if pc.payloadFactory != nil {
 			return payloadMap(pc.payloadFactory.BuildVerticalMarginalPayload(
-				triggerCtx.Event.VerticalID,
+				entityID,
 				scoringCompositeFromPayload(parsePayloadMap(triggerCtx.Event.Payload)),
 			))
 		}
 	case "vertical.rejected":
 		if pc.payloadFactory != nil {
 			return payloadMap(pc.payloadFactory.BuildVerticalRejectedPayload(
-				triggerCtx.Event.VerticalID,
+				entityID,
 				scoringCompositeFromPayload(parsePayloadMap(triggerCtx.Event.Payload)),
 			))
 		}
 	case "opco.spinup_requested":
-		pc.PersistWorkflowMetadata(ctx, strings.TrimSpace(triggerCtx.Event.VerticalID), func(metadata map[string]any) {
+		pc.PersistWorkflowMetadata(ctx, entityID, func(metadata map[string]any) {
 			metadata["opco_spinup_emitted"] = true
 		})
 		return pc.handlerEmitPayload(ctx, triggerCtx, eventType)

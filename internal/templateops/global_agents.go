@@ -9,6 +9,7 @@ import (
 
 	"empireai/internal/models"
 	"empireai/internal/promptcontracts"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 type GlobalAgentRosterYAML struct {
@@ -44,15 +45,22 @@ func LoadGlobalAgentsFromYAML(agentsDir string) ([]models.AgentConfig, error) {
 			return nil, fmt.Errorf("agent missing id (file=%s)", f)
 		}
 		if strings.TrimSpace(a.SystemPrompt) != "" {
-			return nil, fmt.Errorf("agent %s uses legacy system_prompt in YAML (file=%s); use contracts/prompts/%s.md", id, f, id)
+			return nil, fmt.Errorf("agent %s uses legacy system_prompt in YAML (file=%s); use MAS contract prompts for %s instead", id, f, id)
 		}
 		contractPrompt, foundContractPrompt, err := promptcontracts.Load(id, "")
+		if err != nil || !foundContractPrompt || strings.TrimSpace(contractPrompt) == "" {
+			contractPrompt, foundContractPrompt, err = runtimecontracts.LoadPromptForAgent(models.AgentConfig{
+				ID:   id,
+				Role: strings.TrimSpace(coalesce(a.Role, id)),
+				Mode: strings.TrimSpace(strings.ToLower(a.Mode)),
+			}, "")
+		}
 		if err != nil {
 			return nil, fmt.Errorf("load contract prompt for %s: %w", id, err)
 		}
 		systemPrompt := strings.TrimSpace(contractPrompt)
 		if !foundContractPrompt || systemPrompt == "" {
-			return nil, fmt.Errorf("agent %s missing required contract prompt (expected contracts/prompts/%s.md)", id, id)
+			return nil, fmt.Errorf("agent %s missing required contract prompt in MAS spec bundle", id)
 		}
 		if _, ok := seen[id]; ok {
 			return nil, fmt.Errorf("duplicate agent id %q (file=%s)", id, f)

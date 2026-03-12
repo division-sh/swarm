@@ -10,17 +10,19 @@ import (
 )
 
 func ValidatePromptSchemaGuards(repoRoot string) error {
-	promptsDir := ResolveWorkflowContractPaths(repoRoot).PromptsDir
+	bundle, err := LoadWorkflowContractBundle(repoRoot)
+	if err != nil {
+		return err
+	}
 	schemas := EventSchemaRegistry()
 	cases := PromptSchemaGuards()
 
 	for _, tc := range cases {
-		path := filepath.Join(promptsDir, tc.PromptFile)
-		raw, err := os.ReadFile(path)
+		_, raw, err := readPromptSchemaGuardFile(bundle, tc.PromptFile)
 		if err != nil {
-			return fmt.Errorf("read %s: %w", path, err)
+			return err
 		}
-		text := string(raw)
+		text := raw
 
 		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.EmitTool, "emit_"), "_", ".")
 		schema, ok := schemas[eventType]
@@ -59,6 +61,20 @@ func ValidatePromptSchemaGuards(repoRoot string) error {
 		}
 	}
 	return nil
+}
+
+func readPromptSchemaGuardFile(bundle *WorkflowContractBundle, promptFile string) (string, string, error) {
+	for _, dir := range promptBundlePromptDirs(bundle) {
+		path := filepath.Join(dir, promptFile)
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			return path, string(raw), nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return "", "", fmt.Errorf("read %s: %w", path, err)
+		}
+	}
+	return "", "", fmt.Errorf("prompt %s not found in workflow contract bundle", promptFile)
 }
 
 var promptEmitFieldBulletPattern = regexp.MustCompile(`^\s*-\s*([a-zA-Z0-9_]+)\s*:`)

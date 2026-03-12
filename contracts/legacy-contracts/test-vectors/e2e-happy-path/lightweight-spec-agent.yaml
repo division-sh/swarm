@@ -1,8 +1,0 @@
-role: lightweight-spec-agent
-responses:
-  - when_event: spec.requested
-    tool_calls:
-      - name: emit_spec_draft_ready
-        arguments:
-          vertical_id: "{{vertical_id}}"
-          mvp_spec: "core workflow: ingest remittances, identify mismatches, route exceptions"

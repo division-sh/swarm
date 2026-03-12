@@ -24,7 +24,6 @@ type EventBus struct {
 	agentChans          map[string]chan events.Event
 	subscriptions       map[string][]events.EventType
 	routeTable          *RouteTable
-	legacyRoutingTables map[string]*RoutingTable
 	interceptors        []EventInterceptor
 	interceptorProvider func() []EventInterceptor
 	cycleTracker        *OpCoCycleTracker
@@ -87,7 +86,6 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 		agentChans:          make(map[string]chan events.Event),
 		subscriptions:       make(map[string][]events.EventType),
 		routeTable:          routeTable,
-		legacyRoutingTables: make(map[string]*RoutingTable),
 		store:               store,
 		logger:              opts.Logger,
 		cycleTracker:        opts.CycleTracker,
@@ -173,7 +171,6 @@ func (eb *EventBus) ResetInMemoryState() {
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.routeTable = eb.deriveBootRouteTableLocked()
-	eb.legacyRoutingTables = make(map[string]*RoutingTable)
 	if eb.cycleTracker != nil {
 		eb.cycleTracker.ResetAll(context.Background())
 	}

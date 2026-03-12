@@ -343,19 +343,27 @@ func renderPromptWithRuntimeVariables(repoRoot, promptText string) (string, erro
 
 func promptRuntimeVariables(repoRoot string) (map[string]any, error) {
 	promptVariablesOnce.Do(func() {
-		path := filepath.Join(repoRoot, "contracts", "prompt-variables.yaml")
-		raw, err := os.ReadFile(path)
+		bundle, err := promptWorkflowBundle()
 		if err != nil {
-			if os.IsNotExist(err) {
-				return
-			}
-			promptVariablesErr = err
+			promptVariablesErr = fmt.Errorf("load workflow contract bundle: %w", err)
 			return
 		}
-		var vars map[string]any
-		if err := yaml.Unmarshal(raw, &vars); err != nil {
-			promptVariablesErr = err
-			return
+		vars := map[string]any{}
+		for key, value := range bundle.MergedPolicy.Values {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			vars[key] = value.Value
+		}
+		if len(vars) == 0 {
+			for key, value := range bundle.Policy.Values {
+				key = strings.TrimSpace(key)
+				if key == "" {
+					continue
+				}
+				vars[key] = value.Value
+			}
 		}
 		promptVariables = vars
 	})

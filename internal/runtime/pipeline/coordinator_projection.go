@@ -21,14 +21,13 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, ve
 	if sourceAgent == "" {
 		sourceAgent = runtimeWorkflowID
 	}
-	emitted := events.Event{
+	emitted := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
 		SourceAgent: sourceAgent,
-		VerticalID:  strings.TrimSpace(verticalID),
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}
+	}).WithEntityID(verticalID)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return
@@ -70,14 +69,13 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 	if sourceAgent == "" {
 		sourceAgent = runtimeWorkflowID
 	}
-	emitted := events.Event{
+	emitted := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
 		SourceAgent: sourceAgent,
-		VerticalID:  strings.TrimSpace(verticalID),
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}
+	}).WithEntityID(verticalID)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
 		return
@@ -321,8 +319,8 @@ func (pc *FactoryPipelineCoordinator) recordTransition(
 }
 
 func (pc *FactoryPipelineCoordinator) transitionIdentity(eventType string, evt events.Event, payload map[string]any) (pipelineType string, pipelineID string) {
-	if isUUID(strings.TrimSpace(evt.VerticalID)) {
-		return "validation", strings.TrimSpace(evt.VerticalID)
+	if verticalID := workflowEventEntityIDWithPayload(evt, payload); isUUID(verticalID) {
+		return "validation", verticalID
 	}
 	if v := strings.TrimSpace(asString(payload["vertical_id"])); isUUID(v) {
 		return "validation", v
@@ -363,10 +361,7 @@ func (pc *FactoryPipelineCoordinator) transitionStateSnapshot(eventType string, 
 		"validations":     0,
 		"processed_count": 0,
 	}
-	verticalID := strings.TrimSpace(evt.VerticalID)
-	if verticalID == "" {
-		verticalID = strings.TrimSpace(asString(payload["vertical_id"]))
-	}
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	scanID := strings.TrimSpace(asString(payload["scan_id"]))
 	if scanID == "" {
 		scanID = strings.TrimSpace(evt.ID)

@@ -52,7 +52,7 @@ func dashboardRepoRoot() string {
 			continue
 		}
 		seen[abs] = struct{}{}
-		if _, err := os.Stat(filepath.Join(abs, "contracts", "workflow-schema.yaml")); err == nil {
+		if _, err := os.Stat(filepath.Join(abs, "docs", "specs", "mas-platform", "empire", "contracts", "package.yaml")); err == nil {
 			return abs
 		}
 	}
@@ -74,12 +74,16 @@ func dashboardContractSummary() map[string]any {
 		return map[string]any{"error": err.Error()}
 	}
 
-	stages := make([]map[string]any, 0, len(bundle.Workflow.Workflow.Stages))
-	stageIDs := make([]string, 0, len(bundle.Workflow.Workflow.Stages))
+	workflowStages := bundle.WorkflowStages()
+	workflowTimers := bundle.WorkflowTimers()
+	workflowTransitionsRaw := bundle.WorkflowTransitions()
+
+	stages := make([]map[string]any, 0, len(workflowStages))
+	stageIDs := make([]string, 0, len(workflowStages))
 	stagePhaseMap := map[string]string{}
 	phaseCounts := map[string]int{}
 	validationStages := make([]string, 0, 8)
-	for _, stage := range bundle.Workflow.Workflow.Stages {
+	for _, stage := range workflowStages {
 		id := strings.TrimSpace(stage.ID)
 		phase := strings.TrimSpace(stage.Phase)
 		desc := strings.TrimSpace(stage.Description)
@@ -114,10 +118,10 @@ func dashboardContractSummary() map[string]any {
 		transitionTriggerCounts[trigger] = len(entries)
 	}
 
-	timers := make([]map[string]any, 0, len(bundle.Workflow.Workflow.Timers))
-	timerEvents := make([]string, 0, len(bundle.Workflow.Workflow.Timers))
+	timers := make([]map[string]any, 0, len(workflowTimers))
+	timerEvents := make([]string, 0, len(workflowTimers))
 	timerOwnerCounts := map[string]int{}
-	for _, timer := range bundle.Workflow.Workflow.Timers {
+	for _, timer := range workflowTimers {
 		id := strings.TrimSpace(timer.ID)
 		event := strings.TrimSpace(timer.Event)
 		stage := strings.TrimSpace(timer.Stage)
@@ -216,28 +220,35 @@ func dashboardContractSummary() map[string]any {
 				"latest_results":  "not_persisted",
 			}
 		}
+	} else if complianceTotal > 0 {
+		verificationSummary = map[string]any{
+			"status":         "derived_from_platform_spec",
+			"spec_version":   strings.TrimSpace(bundle.Platform.Platform.Version),
+			"count":          complianceTotal,
+			"latest_results": "not_persisted",
+		}
 	}
 
 	return map[string]any{
 		"repo_root": repoRoot,
 		"workflow": map[string]any{
-			"name":                      strings.TrimSpace(bundle.Workflow.Workflow.Name),
-			"version":                   strings.TrimSpace(bundle.Workflow.Workflow.Version),
-			"entity":                    strings.TrimSpace(bundle.Workflow.Workflow.Entity),
-			"entity_table":              strings.TrimSpace(bundle.Workflow.Workflow.EntityTable),
-			"state_field":               strings.TrimSpace(bundle.Workflow.Workflow.StateField),
-			"initial_stage":             strings.TrimSpace(bundle.Workflow.Workflow.InitialStage),
+			"name":                      strings.TrimSpace(bundle.WorkflowName()),
+			"version":                   strings.TrimSpace(bundle.WorkflowVersion()),
+			"entity":                    strings.TrimSpace(bundle.Package.Name),
+			"entity_table":              "",
+			"state_field":               "state",
+			"initial_stage":             strings.TrimSpace(bundle.WorkflowInitialStage()),
 			"stages":                    stages,
 			"stage_ids":                 stageIDs,
 			"stage_phase_map":           stagePhaseMap,
 			"phase_counts":              phaseCounts,
 			"validation_stages":         validationStages,
-			"terminal_stages":           bundle.Workflow.Workflow.TerminalStages,
-			"transition_count":          len(bundle.Workflow.Workflow.Transitions),
+			"terminal_stages":           bundle.WorkflowTerminalStages(),
+			"transition_count":          maxInt(len(workflowTransitionsRaw), len(bundle.Semantics.HandlerTransitions)),
 			"transitions":               transitions,
 			"transition_owner_counts":   transitionOwnerCounts,
 			"transition_trigger_counts": transitionTriggerCounts,
-			"timer_count":               len(bundle.Workflow.Workflow.Timers),
+			"timer_count":               len(workflowTimers),
 			"timer_events":              timerEvents,
 			"timers":                    timers,
 			"timer_owner_counts":        timerOwnerCounts,
@@ -290,17 +301,46 @@ func workflowTransitionSummaries(bundle *runtimecontracts.WorkflowContractBundle
 	if bundle == nil {
 		return out, byTrigger
 	}
-	for _, transition := range bundle.Workflow.Workflow.Transitions {
-		trigger := strings.TrimSpace(transition.Trigger)
+	if transitions := bundle.WorkflowTransitions(); len(transitions) > 0 {
+		for _, transition := range transitions {
+			trigger := strings.TrimSpace(transition.Trigger)
+			entry := map[string]any{
+				"id":                  strings.TrimSpace(transition.ID),
+				"from":                normalizeContractStageList(transition.From),
+				"to":                  strings.TrimSpace(transition.To),
+				"trigger":             trigger,
+				"node":                strings.TrimSpace(transition.Node),
+				"guards":              transition.Guards,
+				"actions":             transition.Actions,
+				"allow_terminal_exit": transition.AllowTerminalExit,
+			}
+			out = append(out, entry)
+			if trigger != "" {
+				byTrigger[trigger] = append(byTrigger[trigger], entry)
+			}
+		}
+		return out, byTrigger
+	}
+	for _, transition := range bundle.Semantics.HandlerTransitions {
+		trigger := strings.TrimSpace(transition.EventType)
+		from := []string{}
+		if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
+			from = append(from, flowID)
+		}
+		if advance := strings.TrimSpace(transition.AdvancesTo); advance != "" {
+			if !containsString(from, advance) {
+				from = append(from, advance)
+			}
+		}
 		entry := map[string]any{
 			"id":                  strings.TrimSpace(transition.ID),
-			"from":                normalizeContractStageList(transition.From),
-			"to":                  strings.TrimSpace(transition.To),
+			"from":                from,
+			"to":                  strings.TrimSpace(transition.AdvancesTo),
 			"trigger":             trigger,
-			"node":                strings.TrimSpace(transition.Node),
-			"guards":              transition.Guards,
-			"actions":             transition.Actions,
-			"allow_terminal_exit": transition.AllowTerminalExit,
+			"node":                strings.TrimSpace(transition.NodeID),
+			"guards":              nil,
+			"actions":             compactStrings([]string{strings.TrimSpace(transition.Action)}),
+			"allow_terminal_exit": false,
 		}
 		out = append(out, entry)
 		if trigger != "" {
@@ -343,7 +383,7 @@ func normalizeContractStageList(raw any) []string {
 
 func isValidationStageID(stage string) bool {
 	switch strings.TrimSpace(stage) {
-	case "researching", "mvp_speccing", "cto_spec_review", "branding":
+	case "researching", "mvp_speccing", "cto_spec_review", "cto_review", "branding":
 		return true
 	default:
 		return false
@@ -363,4 +403,21 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func containsString(items []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, item := range items {
+		if strings.TrimSpace(item) == target {
+			return true
+		}
+	}
+	return false
 }

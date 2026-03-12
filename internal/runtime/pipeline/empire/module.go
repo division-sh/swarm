@@ -9,7 +9,7 @@ import (
 )
 
 type module struct {
-	once           sync.Once
+	once           *sync.Once
 	contractBundle *runtimecontracts.WorkflowContractBundle
 	workflow       *runtimepipeline.WorkflowDefinition
 	workflowNodes  []runtimepipeline.WorkflowNode
@@ -23,6 +23,9 @@ func NewModule() runtimepipeline.WorkflowModule {
 }
 
 func (m *module) init() {
+	if m.once == nil {
+		m.once = &sync.Once{}
+	}
 	m.once.Do(func() {
 		repoRoot := runtimepipeline.WorkflowRepoRoot()
 		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundleWithOverrides(

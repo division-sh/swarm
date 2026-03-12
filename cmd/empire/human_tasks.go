@@ -92,14 +92,13 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 					"requeued":         true,
 					"requeue_reason":   "budget_cycle_reset",
 				})
-				if err := bus.Publish(ctx, events.Event{
+				if err := bus.Publish(ctx, (events.Event{
 					ID:          uuid.NewString(),
 					Type:        events.EventType("human_task.requested"),
 					SourceAgent: "runtime",
-					VerticalID:  strings.TrimSpace(r.Vertical),
 					Payload:     b,
 					CreatedAt:   time.Now(),
-				}); err != nil {
+				}).WithEntityID(strings.TrimSpace(r.Vertical))); err != nil {
 					log.Printf("human_task.requested publish failed task=%s err=%v", strings.TrimSpace(r.ID), err)
 				}
 			}
@@ -178,14 +177,13 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				"expiry_reason":    reason,
 			}
 			b := mustJSON(payload)
-			if err := bus.Publish(ctx, events.Event{
+			if err := bus.Publish(ctx, (events.Event{
 				ID:          uuid.NewString(),
 				Type:        events.EventType("human_task.expired"),
 				SourceAgent: "runtime",
-				VerticalID:  strings.TrimSpace(tr.Vertical),
 				Payload:     b,
 				CreatedAt:   time.Now(),
-			}); err != nil {
+			}).WithEntityID(strings.TrimSpace(tr.Vertical))); err != nil {
 				log.Printf("human_task.expired publish failed task=%s err=%v", strings.TrimSpace(tr.ID), err)
 			}
 
@@ -254,11 +252,10 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 				    completed_at = NULL
 				WHERE id = $1::uuid
 			`, tr.ID, string(decisionJSON)); err == nil {
-				if err := bus.Publish(ctx, events.Event{
+				if err := bus.Publish(ctx, (events.Event{
 					ID:          uuid.NewString(),
 					Type:        events.EventType("human_task.deferred"),
 					SourceAgent: "runtime",
-					VerticalID:  strings.TrimSpace(tr.Vertical),
 					Payload: mustJSON(map[string]any{
 						"task_id":          strings.TrimSpace(tr.ID),
 						"requesting_agent": strings.TrimSpace(tr.Requester),
@@ -267,7 +264,7 @@ func humanTaskExpiryLoop(ctx context.Context, db *sql.DB, cfg *config.Config, bu
 						"requeue_date":     requeueAt,
 					}),
 					CreatedAt: time.Now(),
-				}); err != nil {
+				}).WithEntityID(strings.TrimSpace(tr.Vertical))); err != nil {
 					log.Printf("human_task.deferred publish failed task=%s err=%v", strings.TrimSpace(tr.ID), err)
 				}
 			}

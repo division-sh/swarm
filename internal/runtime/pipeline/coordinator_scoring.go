@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	"github.com/google/uuid"
 )
 
@@ -135,7 +136,7 @@ func (pc *FactoryPipelineCoordinator) loadScoringSeedDetails(ctx context.Context
 
 func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	if verticalID == "" {
 		return
 	}
@@ -324,13 +325,12 @@ func (pc *FactoryPipelineCoordinator) evaluateScoringDerivedGuard(ctx context.Co
 		return false, "payload_encode_failed"
 	}
 	triggerCtx := workflowTriggerContext{
-		Event: events.Event{
+		Event: (events.Event{
 			ID:          strings.TrimSpace(evt.ID),
 			Type:        events.EventType("vertical.derived"),
-			VerticalID:  strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["parent_id"]))),
 			SourceAgent: strings.TrimSpace(evt.SourceAgent),
 			Payload:     rawPayload,
-		},
+		}).WithEntityID(strings.TrimSpace(firstNonEmptyString(asString(payload["parent_id"]), workflowEventEntityID(evt)))),
 		State: WorkflowState{
 			Stage:    "scoring",
 			Metadata: entity,
@@ -438,7 +438,7 @@ func (pc *FactoryPipelineCoordinator) checkScoringTimeouts(ctx context.Context, 
 
 func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	if verticalID == "" {
 		return
 	}
@@ -545,7 +545,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 
 func (ss *ScoringState) handleScoringContestResolved(ctx context.Context, evt events.Event) {
 	payload := parsePayloadMap(evt.Payload)
-	verticalID := strings.TrimSpace(firstNonEmptyString(evt.VerticalID, asString(payload["vertical_id"])))
+	verticalID := workflowEventEntityIDWithPayload(evt, payload)
 	dimension := strings.TrimSpace(asString(payload["dimension"]))
 	if verticalID == "" || dimension == "" {
 		return
@@ -626,14 +626,13 @@ func (ss *ScoringState) finalizeScoringAccumulator(ctx context.Context, vertical
 	scoredPayload := ss.payloadFactory.BuildVerticalScoredPayload(verticalID, result, acc)
 	scoredPayloadMap := payloadMap(scoredPayload)
 	ss.runtime.publish(ctx, "vertical.scored", verticalID, scoredPayloadMap)
-	if outcome, ok := ss.runtime.applyWorkflowEventTransition(ctx, events.Event{
+	if outcome, ok := ss.runtime.applyWorkflowEventTransition(ctx, (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("vertical.scored"),
 		SourceAgent: "scoring-node",
-		VerticalID:  verticalID,
 		Payload:     mustJSON(scoredPayloadMap),
 		CreatedAt:   time.Now().UTC(),
-	}); ok {
+	}).WithEntityID(verticalID)); ok {
 		if strings.TrimSpace(string(outcome.Transition.To)) == "killed" {
 			ss.runtime.appendScoringDigestBuffer(ctx, scoredPayload)
 		}
@@ -677,16 +676,14 @@ func (ss *ScoringState) resolveScoringOnComplete(ctx context.Context, verticalID
 		return workflowRuleMatch{}, false
 	}
 	triggerCtx := workflowTriggerContext{
-		Event: events.Event{
-			ID:         uuid.NewString(),
-			Type:       events.EventType("score.dimension_complete"),
-			VerticalID: verticalID,
-			Payload:    mustJSON(scoredPayload),
-		},
+		Event: (events.Event{
+			ID:      uuid.NewString(),
+			Type:    events.EventType("score.dimension_complete"),
+			Payload: mustJSON(scoredPayload),
+		}).WithEntityID(verticalID),
 		State: ss.runtime.currentWorkflowState(ctx, verticalID),
 	}
-	onCompleteMap := handlerRuleEntryToMap(handler.OnComplete)
-	return ss.runtime.matchWorkflowRulesWithVars(triggerCtx, onCompleteMap, scoringExpressionVars(computeSpecToMap(handler.Compute), result, scoredPayload))
+	return ss.runtime.matchWorkflowRulesWithVars(triggerCtx, []runtimecontracts.HandlerRuleEntry{*handler.OnComplete}, scoringExpressionVars(computeSpecToMap(handler.Compute), result, scoredPayload))
 }
 
 func scoringExpressionVars(compute map[string]any, result scoringComposite, scoredPayload map[string]any) map[string]any {
@@ -807,7 +804,7 @@ func (pc *FactoryPipelineCoordinator) handlePortfolioDigestTimer(ctx context.Con
 		ScoringRejectionsCount:    len(entries),
 		ScoringRejectionSummaries: entries,
 	}
-	pc.publish(ctx, "timer.portfolio_digest", strings.TrimSpace(evt.VerticalID), payloadMap(payload))
+	pc.publish(ctx, "timer.portfolio_digest", workflowEventEntityID(evt), payloadMap(payload))
 }
 
 type scoringDigestEntry struct {

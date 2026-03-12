@@ -531,7 +531,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 		evt.Type,
 		evt.SourceAgent,
 		evt.TaskID,
-		evt.VerticalID,
+		evt.EntityID(),
 		payload,
 		toolsLine,
 		strictRequirement,
@@ -561,7 +561,7 @@ func transitionContextKey(primary events.Event, fallback events.Event) string {
 }
 
 func extractContextIDs(evt events.Event) (verticalID, taskID string) {
-	verticalID = strings.TrimSpace(evt.VerticalID)
+	verticalID = strings.TrimSpace(evt.EntityID())
 	taskID = strings.TrimSpace(evt.TaskID)
 	if len(evt.Payload) == 0 {
 		return verticalID, taskID
