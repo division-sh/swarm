@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	empirepayloads "empireai/internal/empire/payloads"
 	"empireai/internal/events"
 	"empireai/internal/runtime/semanticview"
 )
@@ -288,12 +289,7 @@ type validationPipelineState struct {
 	PackagingRetries     int
 }
 
-type DedupCandidatePayload struct {
-	Name           string  `json:"name,omitempty"`
-	Geography      string  `json:"geography,omitempty"`
-	SignalStrength float64 `json:"signal_strength,omitempty"`
-	ID             string  `json:"id,omitempty"`
-}
+type DedupCandidatePayload = empirepayloads.DedupCandidatePayload
 
 type VerticalDerivedPayload struct {
 	OpportunityID         string         `json:"opportunity_id,omitempty"`

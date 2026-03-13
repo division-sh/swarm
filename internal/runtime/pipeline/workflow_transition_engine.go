@@ -149,32 +149,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowEventTransition(ctx context.C
 			TriggerEventType: strings.TrimSpace(string(evt.Type)),
 		}, true
 	}
-	transition, guardsEvaluated, ok := pc.resolveWorkflowTransitionByEvent(triggerCtx)
-	if !ok {
-		return workflowTransitionOutcome{}, false
-	}
-
-	actionsExecuted := []string{}
-	pc.applyWorkflowDataAccumulation(ctx, verticalID, transition, evt)
-	actionsExecuted = pc.executeWorkflowTransitionActions(ctx, triggerCtx, transition, true)
-	pc.updateVerticalStage(ctx, verticalID, string(transition.To), string(evt.Type))
-	nextState := pc.currentWorkflowState(ctx, verticalID)
-	actionsExecuted = append(actionsExecuted, pc.executeWorkflowTransitionActions(ctx, workflowTriggerContext{
-		Event:           evt,
-		State:           nextState,
-		ValidationState: pc.validationStateSnapshot(verticalID),
-	}, transition, false)...)
-	pc.reconcileWorkflowEventTimers(ctx, verticalID, string(evt.Type))
-
-	return workflowTransitionOutcome{
-		Transition:       transition,
-		PreviousState:    previousState,
-		CurrentState:     nextState,
-		GuardsEvaluated:  guardsEvaluated,
-		ActionsExecuted:  actionsExecuted,
-		TriggerEventID:   strings.TrimSpace(evt.ID),
-		TriggerEventType: strings.TrimSpace(string(evt.Type)),
-	}, true
+	return workflowTransitionOutcome{}, false
 }
 
 func (pc *FactoryPipelineCoordinator) applyWorkflowDataAccumulation(

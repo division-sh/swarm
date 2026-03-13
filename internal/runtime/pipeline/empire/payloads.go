@@ -1,33 +1,33 @@
 package empire
 
-import runtimepipeline "empireai/internal/runtime/pipeline"
+import empirepayloads "empireai/internal/empire/payloads"
 
-type ValidationContextSnapshot = runtimepipeline.ValidationContextSnapshot
-type ScoreDimensionResult = runtimepipeline.ScoreDimensionResult
-type ContestedDimension = runtimepipeline.ContestedDimension
-type ScoringComposite = runtimepipeline.ScoringComposite
-type ScoringAccumulatorInput = runtimepipeline.ScoringAccumulatorInput
+type ValidationContextSnapshot = empirepayloads.ValidationContextSnapshot
+type ScoreDimensionResult = empirepayloads.ScoreDimensionResult
+type ContestedDimension = empirepayloads.ContestedDimension
+type ScoringComposite = empirepayloads.ScoringComposite
+type ScoringAccumulatorInput = empirepayloads.ScoringAccumulatorInput
 
-type ValidationStartedPayload = runtimepipeline.ValidationStartedPayload
-type BrandRequestedPayload = runtimepipeline.BrandRequestedPayload
-type ValidationPackageReadyPayload = runtimepipeline.ValidationPackageReadyPayload
-type SpecValidationRequestedPayload = runtimepipeline.SpecValidationRequestedPayload
-type CTOSpecReviewRequestedPayload = runtimepipeline.CTOSpecReviewRequestedPayload
-type SpecRevisionRequestedPayload = runtimepipeline.SpecRevisionRequestedPayload
-type ValidationMoreDataNeededPayload = runtimepipeline.ValidationMoreDataNeededPayload
-type BrandRevisionNeededPayload = runtimepipeline.BrandRevisionNeededPayload
-type VerticalKilledPayload = runtimepipeline.VerticalKilledPayload
-type ScanAssignedPayload = runtimepipeline.ScanAssignedPayload
-type SynthesisNeededPayload = runtimepipeline.SynthesisNeededPayload
-type DedupCandidatePayload = runtimepipeline.DedupCandidatePayload
-type DedupAmbiguousPayload = runtimepipeline.DedupAmbiguousPayload
-type VerticalDiscoveredPayload = runtimepipeline.VerticalDiscoveredPayload
-type ScanCompletedBuildInput = runtimepipeline.ScanCompletedBuildInput
-type ScanCompletedPayload = runtimepipeline.ScanCompletedPayload
-type ScoringRequestedPayload = runtimepipeline.ScoringRequestedPayload
-type ScoringContestedPayload = runtimepipeline.ScoringContestedPayload
-type VerticalScoredPayload = runtimepipeline.VerticalScoredPayload
-type VerticalShortlistedPayload = runtimepipeline.VerticalShortlistedPayload
-type VerticalMarginalPayload = runtimepipeline.VerticalMarginalPayload
-type VerticalRejectedPayload = runtimepipeline.VerticalRejectedPayload
-type PortfolioDigestTimerPayload = runtimepipeline.PortfolioDigestTimerPayload
+type ValidationStartedPayload = empirepayloads.ValidationStartedPayload
+type BrandRequestedPayload = empirepayloads.BrandRequestedPayload
+type ValidationPackageReadyPayload = empirepayloads.ValidationPackageReadyPayload
+type SpecValidationRequestedPayload = empirepayloads.SpecValidationRequestedPayload
+type CTOSpecReviewRequestedPayload = empirepayloads.CTOSpecReviewRequestedPayload
+type SpecRevisionRequestedPayload = empirepayloads.SpecRevisionRequestedPayload
+type ValidationMoreDataNeededPayload = empirepayloads.ValidationMoreDataNeededPayload
+type BrandRevisionNeededPayload = empirepayloads.BrandRevisionNeededPayload
+type VerticalKilledPayload = empirepayloads.VerticalKilledPayload
+type ScanAssignedPayload = empirepayloads.ScanAssignedPayload
+type SynthesisNeededPayload = empirepayloads.SynthesisNeededPayload
+type DedupCandidatePayload = empirepayloads.DedupCandidatePayload
+type DedupAmbiguousPayload = empirepayloads.DedupAmbiguousPayload
+type VerticalDiscoveredPayload = empirepayloads.VerticalDiscoveredPayload
+type ScanCompletedBuildInput = empirepayloads.ScanCompletedBuildInput
+type ScanCompletedPayload = empirepayloads.ScanCompletedPayload
+type ScoringRequestedPayload = empirepayloads.ScoringRequestedPayload
+type ScoringContestedPayload = empirepayloads.ScoringContestedPayload
+type VerticalScoredPayload = empirepayloads.VerticalScoredPayload
+type VerticalShortlistedPayload = empirepayloads.VerticalShortlistedPayload
+type VerticalMarginalPayload = empirepayloads.VerticalMarginalPayload
+type VerticalRejectedPayload = empirepayloads.VerticalRejectedPayload
+type PortfolioDigestTimerPayload = empirepayloads.PortfolioDigestTimerPayload
