@@ -26,11 +26,11 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Seed entity.
-	verticalID := uuid.NewString()
+	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'TestCo', 'testco', 'us', 'operating', 'operating', now(), now())
-	`, verticalID); err != nil {
+	`, entityID); err != nil {
 		t.Fatalf("seed compatibility entity: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -41,12 +41,12 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			$1::uuid, 'test', 'v1', 'operating',
 			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco"}'::jsonb, now(), now()
 		)
-	`, verticalID); err != nil {
+	`, entityID); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
 	// Ensure entity schema.
-	if err := pg.EnsureEntitySchema(ctx, verticalID); err != nil {
+	if err := pg.EnsureEntitySchema(ctx, entityID); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
@@ -83,13 +83,13 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Seed an operating agent id so routing_rules FK constraints are satisfied.
-	ceoID := "operator-" + verticalID
+	ceoID := "operator-" + entityID
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:       ceoID,
 			Role:     "operator",
 			Mode:     "operating",
-			EntityID: verticalID,
+			EntityID: entityID,
 			Config:   json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
 		},
 		Status:          "active",
@@ -102,7 +102,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Routing rules.
 	rule := runtimemanager.PersistedRoutingRule{
-		EntityID:         verticalID,
+		EntityID:         entityID,
 		EventPattern:     "review.*",
 		SubscriberID:     ceoID,
 		InstalledBy:      "control-plane",
@@ -125,7 +125,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		SourceAgent: "dashboard",
 		Payload:     json.RawMessage(`{"message":"hi"}`),
 		CreatedAt:   time.Now(),
-	}).WithEntityID(verticalID)
+	}).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Mailbox.
 	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EventID:   evt.ID,
-		EntityID:  verticalID,
+		EntityID:  entityID,
 		FromAgent: "control-plane",
 		Type:      "review",
 		Priority:  "normal",
@@ -169,18 +169,18 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		UPDATE workflow_instances
 		SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"credentials":{"webhooks":{"chat":{"secret":"s3cr3t"}}}}'::jsonb
 		WHERE instance_id = $1::uuid
-	`, verticalID)
+	`, entityID)
 	if err != nil {
 		t.Fatalf("seed credentials: %v", err)
 	}
 	target, err := pg.ResolveInboundTarget(ctx, "testco", "chat")
-	if err != nil || target.EntityID != verticalID || target.WebhookSecret == "" {
+	if err != nil || target.EntityID != entityID || target.WebhookSecret == "" {
 		t.Fatalf("resolve inbound target err=%v target=%+v", err, target)
 	}
-	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "chat"); err != nil || !ok {
+	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", entityID, "chat"); err != nil || !ok {
 		t.Fatalf("record inbound err=%v ok=%v", err, ok)
 	}
-	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "chat"); err != nil || ok {
+	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", entityID, "chat"); err != nil || ok {
 		t.Fatalf("record inbound duplicate err=%v ok=%v", err, ok)
 	}
 

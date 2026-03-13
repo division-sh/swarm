@@ -217,12 +217,12 @@ func filterOutAgentIDs(in []string, disallow []string) []string {
 	return FilterOutAgentIDs(in, disallow)
 }
 
-func filterOutVerticalScopedAgentIDs(in []string, verticalID string) []string {
-	verticalID = strings.TrimSpace(verticalID)
-	if len(in) == 0 || verticalID == "" {
+func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
+	entityID = strings.TrimSpace(entityID)
+	if len(in) == 0 || entityID == "" {
 		return in
 	}
-	suffix := "-" + verticalID
+	suffix := "-" + entityID
 	out := make([]string, 0, len(in))
 	for _, v := range in {
 		v = strings.TrimSpace(v)
@@ -272,7 +272,7 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 	_ = recorder.UpsertPipelineReceipt(ctx, eventID, status, errText)
 }
 
-func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, eventID, eventType, agentID, verticalID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int) {
+func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int) {
 	if eb == nil {
 		return
 	}
@@ -282,7 +282,7 @@ func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, ev
 	if logger == nil {
 		return
 	}
-	logger.Log(ctx, level, component, action, eventID, eventType, agentID, verticalID, campaignID, scanID, sessionID, detail, errText, durationUS)
+	logger.Log(ctx, level, component, action, eventID, eventType, agentID, entityID, campaignID, scanID, sessionID, detail, errText, durationUS)
 }
 
 func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) {

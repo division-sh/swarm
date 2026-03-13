@@ -58,7 +58,7 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 		SELECT
 			e.id::text, e.type, e.source_agent,
 			COALESCE(e.task_id::text, ''),
-			COALESCE(e.vertical_id::text, ''),
+			COALESCE(e.entity_id::text, ''),
 			e.payload, e.created_at
 		FROM event_deliveries d
 		INNER JOIN events e ON e.id = d.event_id
@@ -93,19 +93,19 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 	out := make([]events.Event, 0)
 	for rows.Next() {
 		var evt events.Event
-		var legacyVerticalID string
+		var legacyEntityID string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&evt.TaskID,
-			&legacyVerticalID,
+			&legacyEntityID,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending event: %w", err)
 		}
-		evt = evt.WithEntityID(legacyVerticalID)
+		evt = evt.WithEntityID(legacyEntityID)
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {
@@ -135,7 +135,7 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 		SELECT
 			e.id::text, e.type, e.source_agent,
 			COALESCE(e.task_id::text, ''),
-			COALESCE(e.vertical_id::text, ''),
+			COALESCE(e.entity_id::text, ''),
 			e.payload, e.created_at
 		FROM events e
 		LEFT JOIN event_receipts r
@@ -181,19 +181,19 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	out := make([]events.Event, 0)
 	for rows.Next() {
 		var evt events.Event
-		var legacyVerticalID string
+		var legacyEntityID string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&evt.TaskID,
-			&legacyVerticalID,
+			&legacyEntityID,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending subscribed event: %w", err)
 		}
-		evt = evt.WithEntityID(legacyVerticalID)
+		evt = evt.WithEntityID(legacyEntityID)
 		if matchesAnySubscription(string(evt.Type), subscriptions) {
 			out = append(out, evt)
 		}

@@ -8,8 +8,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeengine "empireai/internal/runtime/engine"
 	"empireai/internal/runtime/core/identity"
+	runtimeengine "empireai/internal/runtime/engine"
 )
 
 type Event = events.Event
@@ -86,7 +86,7 @@ func (n *DeclarativeNode) InterceptPolicy(eventType string, evt events.Event) (b
 	if !ok {
 		return false, false
 	}
-	if policy.RequireVertical && workflowEventEntityID(evt) == "" {
+	if policy.RequireEntity && workflowEventEntityID(evt) == "" {
 		return false, false
 	}
 	return policy.Consume, true

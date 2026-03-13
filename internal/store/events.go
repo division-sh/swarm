@@ -25,14 +25,14 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 		id = uuid.NewString()
 	}
 	taskID := sanitizeOptionalUUID(evt.TaskID)
-	verticalID := sanitizeOptionalUUID(evt.EntityID())
+	entityID := sanitizeOptionalUUID(evt.EntityID())
 	createdAt := evt.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
 
 	const q = `
-		INSERT INTO events (id, type, source_agent, task_id, vertical_id, payload, created_at)
+		INSERT INTO events (id, type, source_agent, task_id, entity_id, payload, created_at)
 		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
 		ON CONFLICT (id) DO NOTHING
 	`
@@ -40,7 +40,7 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	_, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, verticalID, evt.Payload, createdAt)
+	_, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt)
 	if err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
@@ -53,7 +53,7 @@ func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt even
 		id = uuid.NewString()
 	}
 	taskID := sanitizeOptionalUUID(evt.TaskID)
-	verticalID := sanitizeOptionalUUID(evt.EntityID())
+	entityID := sanitizeOptionalUUID(evt.EntityID())
 	createdAt := evt.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now()
@@ -66,11 +66,11 @@ func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt even
 	defer func() { _ = tx.Rollback() }()
 
 	const insertEvent = `
-		INSERT INTO events (id, type, source_agent, task_id, vertical_id, payload, created_at)
+		INSERT INTO events (id, type, source_agent, task_id, entity_id, payload, created_at)
 		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
 		ON CONFLICT (id) DO NOTHING
 	`
-	if _, err := tx.ExecContext(ctx, insertEvent, id, string(evt.Type), evt.SourceAgent, taskID, verticalID, evt.Payload, createdAt); err != nil {
+	if _, err := tx.ExecContext(ctx, insertEvent, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt); err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
 
@@ -193,7 +193,7 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 		SELECT
 			e.id::text, e.type, e.source_agent,
 			COALESCE(e.task_id::text, ''),
-			COALESCE(e.vertical_id::text, ''),
+			COALESCE(e.entity_id::text, ''),
 			e.payload, e.created_at
 		FROM events e
 		LEFT JOIN pipeline_receipts pr ON pr.event_id = e.id
@@ -213,19 +213,19 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 	out := make([]events.Event, 0, limit)
 	for rows.Next() {
 		var evt events.Event
-		var legacyVerticalID string
+		var legacyEntityID string
 		if err := rows.Scan(
 			&evt.ID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&evt.TaskID,
-			&legacyVerticalID,
+			&legacyEntityID,
 			&evt.Payload,
 			&evt.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
 		}
-		evt = evt.WithEntityID(legacyVerticalID)
+		evt = evt.WithEntityID(legacyEntityID)
 		out = append(out, evt)
 	}
 	if err := rows.Err(); err != nil {

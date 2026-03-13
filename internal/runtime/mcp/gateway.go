@@ -424,7 +424,7 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 		strings.TrimSpace(r.Header.Get(actorIDHeader)),
 		strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
 	)
-	verticalID := FirstNonEmpty(
+	entityID := FirstNonEmpty(
 		strings.TrimSpace(r.Header.Get(entityIDHeader)),
 		strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
 	)
@@ -432,7 +432,7 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 	if err != nil {
 		errText = g.formatError(err)
 	}
-	g.hooks.Log(r.Context(), strings.ToLower(strings.TrimSpace(level)), strings.TrimSpace(action), agentID, verticalID, detail, errText)
+	g.hooks.Log(r.Context(), strings.ToLower(strings.TrimSpace(level)), strings.TrimSpace(action), agentID, entityID, detail, errText)
 }
 
 func (g *Gateway) runtimeIngressPaused() bool {

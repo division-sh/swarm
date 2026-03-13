@@ -88,12 +88,12 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 		t.Fatalf("ApplyMigrationFile: %v", err)
 	}
 
-	// Seed verticals for digest coverage.
-	verticalID := uuid.NewString()
+	// Seed entities for digest coverage.
+	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid,'TestCo','testco','us','approved','entity', now(), now())
-	`, verticalID); err != nil {
+	`, entityID); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
@@ -104,7 +104,7 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 			$1::uuid, 'test', 'v1', 'active',
 			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco","name":"TestCo"}'::jsonb, now(), now()
 		)
-	`, verticalID); err != nil {
+	`, entityID); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	// Active count includes active workflow instances.
@@ -115,15 +115,15 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 	// Digest rows: metrics + spend.
 	now := time.Now().UTC()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO vertical_metrics (id, vertical_id, period_start, period_end, users_total, mrr_cents, api_cost_cents, infra_cost_cents, created_at)
+		INSERT INTO entity_metrics (id, entity_id, period_start, period_end, users_total, mrr_cents, api_cost_cents, infra_cost_cents, created_at)
 		VALUES ($1::uuid,$2::uuid,$3,$4,10,1234,0,0, now())
-	`, uuid.NewString(), verticalID, now.Add(-24*time.Hour), now); err != nil {
+	`, uuid.NewString(), entityID, now.Add(-24*time.Hour), now); err != nil {
 		t.Fatalf("seed metrics: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO spend_ledger (id, vertical_id, category, amount_cents, description, approved_by, created_at)
+		INSERT INTO spend_ledger (id, entity_id, category, amount_cents, description, approved_by, created_at)
 		VALUES ($1::uuid,$2::uuid,'api',500,'test','estimated', now())
-	`, uuid.NewString(), verticalID); err != nil {
+	`, uuid.NewString(), entityID); err != nil {
 		t.Fatalf("seed spend: %v", err)
 	}
 	if rows, err := pg.ListInstanceDigestRows(ctx, 10); err != nil || len(rows) == 0 {

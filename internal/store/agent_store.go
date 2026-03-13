@@ -25,7 +25,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 
 	const q = `
 		INSERT INTO agents (
-			id, type, role, mode, vertical_id, parent_agent_id, status,
+			id, type, role, mode, entity_id, parent_agent_id, status,
 			coordinator_id, config, budget_envelope, hired_by, template_version,
 			started_at, last_active_at
 		)
@@ -38,7 +38,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 			type = EXCLUDED.type,
 			role = EXCLUDED.role,
 			mode = EXCLUDED.mode,
-			vertical_id = EXCLUDED.vertical_id,
+			entity_id = EXCLUDED.entity_id,
 			parent_agent_id = EXCLUDED.parent_agent_id,
 			status = EXCLUDED.status,
 			coordinator_id = EXCLUDED.coordinator_id,
@@ -73,7 +73,7 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 	const q = `
 		SELECT
 			id, type, role, mode,
-			COALESCE(vertical_id::text, ''),
+			COALESCE(entity_id::text, ''),
 			COALESCE(parent_agent_id, ''),
 			COALESCE(status, 'active'),
 			COALESCE(coordinator_id, ''),

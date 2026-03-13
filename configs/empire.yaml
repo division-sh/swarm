@@ -48,7 +48,7 @@ hetzner:
   host: ""
   ssh_key: ""
   base_domain: ""
-  verticals_dir: "/srv/verticals"
+  entities_dir: "/srv/verticals"
   port_range_start: 12000
   staging_port_range_start: 22000
   gateway_port: 8090

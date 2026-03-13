@@ -23,8 +23,8 @@ func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	verticalID, agentID := seedVerticalAndAgent(t, ctx, pg)
-	evt := seedEvent(t, ctx, pg, verticalID, "test.retry_upsert")
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.retry_upsert")
 
 	for i := 1; i <= 4; i++ {
 		if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, "error", "boom"); err != nil {
@@ -56,8 +56,8 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	verticalID, agentID := seedVerticalAndAgent(t, ctx, pg)
-	evt := seedEvent(t, ctx, pg, verticalID, "test.pending_direct")
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.pending_direct")
 	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
@@ -152,8 +152,8 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 	defer cleanup()
 
 	ctx := context.Background()
-	verticalID, agentID := seedVerticalAndAgent(t, ctx, pg)
-	evt := seedEvent(t, ctx, pg, verticalID, "test.pending_subscribed")
+	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
+	evt := seedEvent(t, ctx, pg, entityID, "test.pending_subscribed")
 
 	since := time.Now().Add(-2 * time.Hour)
 	subs := []events.EventType{evt.Type}
@@ -278,29 +278,29 @@ func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
 	return pg, cleanup
 }
 
-func seedVerticalAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore) (verticalID, agentID string) {
+func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore) (entityID, agentID string) {
 	t.Helper()
 
-	verticalID = uuid.NewString()
+	entityID = uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, geography, stage, mode)
+		INSERT INTO entities (id, name, geography, stage, mode)
 		VALUES ($1::uuid, 'Store Retry Policy Test', 'US', 'approved', 'factory')
-	`, verticalID); err != nil {
+	`, entityID); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
 
 	agentID = "agent-" + uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, vertical_id, config)
+		INSERT INTO agents (id, type, role, mode, entity_id, config)
 		VALUES ($1, 'test', 'test', 'factory', $2::uuid, '{}'::jsonb)
-	`, agentID, verticalID); err != nil {
+	`, agentID, entityID); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 
-	return verticalID, agentID
+	return entityID, agentID
 }
 
-func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, verticalID, eventType string) events.Event {
+func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entityID, eventType string) events.Event {
 	t.Helper()
 
 	payload, _ := json.Marshal(map[string]any{"k": "v"})
@@ -310,7 +310,7 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, verti
 		SourceAgent: "store-test",
 		Payload:     payload,
 		CreatedAt:   time.Now().Add(-1 * time.Hour),
-	}).WithEntityID(verticalID)
+	}).WithEntityID(entityID)
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}

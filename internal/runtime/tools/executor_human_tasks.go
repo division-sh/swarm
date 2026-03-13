@@ -94,7 +94,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	var taskID string
 	const q = `
 		INSERT INTO human_tasks (
-			requesting_agent, vertical_id, category, description,
+			requesting_agent, entity_id, category, description,
 			talking_points, expected_value, priority, deadline, status
 		) VALUES (
 			$1, NULLIF($2,'')::uuid, $3, $4,
@@ -245,7 +245,7 @@ skipBudget:
 		    reviewed_at = now(),
 		    review_decision = $3::jsonb
 		WHERE id = $1::uuid
-		RETURNING requesting_agent, COALESCE(vertical_id::text, '')
+		RETURNING requesting_agent, COALESCE(entity_id::text, '')
 	`
 	if err := db.QueryRowContext(ctx, q, in.TaskID, newStatus, decisionJSON).Scan(&requestingAgent, &entityID); err != nil {
 		return nil, fmt.Errorf("update human task decision: %w", err)

@@ -108,7 +108,7 @@ var (
 		"buildSynthesisNeededPayload":         {"scan_id", "campaign_id", "mode", "geography", "category", "subcategory", "conflict_notes", "raw_report"},
 		"buildDedupAmbiguousPayload":          {"scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_entity"},
 		"buildEntityDiscoveredPayload":        {"entity_id", "name", "geography", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals"},
-		"buildScanCompletedPayload":           {"scan_id", "campaign_id", "mode", "geography", "reports_received", "agents_expected", "agents_complete", "verticals_discovered", "verticals_skipped", "pending_dedup", "timed_out", "shards_total", "shards_completed", "shards_failed"},
+		"buildScanCompletedPayload":           {"scan_id", "campaign_id", "mode", "geography", "reports_received", "agents_expected", "agents_complete", "entities_discovered", "entities_skipped", "pending_dedup", "timed_out", "shards_total", "shards_completed", "shards_failed"},
 		"buildScoringRequestedPayload":        {"entity_id", "entity_name", "geography", "mode", "rubric", "dimensions_requested"},
 		"buildScoringContestedPayload":        {"entity_id", "dimension", "scores", "evidence", "spread", "rubric", "mode"},
 		"buildEntityScoredPayload":            {"entity_id", "result", "reason", "composite_score", "viability_score", "market_score", "dimensions", "rubric", "partial", "mode", "entity_name", "geography"},

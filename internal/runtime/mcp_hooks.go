@@ -114,8 +114,8 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger) runtimemcp.GatewayHooks {
 			return runtimetools.GenerateEmitToolsForRole(role, runtimeWarnOnce)
 		},
 		EmitSchemaForTool: runtimeGatewayEmitSchemaForTool,
-		Log: func(ctx context.Context, level, action, agentID, verticalID string, detail map[string]any, errText string) {
-			runtimeMCPLog(logger, ctx, level, action, agentID, verticalID, detail, errText)
+		Log: func(ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+			runtimeMCPLog(logger, ctx, level, action, agentID, entityID, detail, errText)
 		},
 		AfterToolSuccess: func(ctx context.Context, r *http.Request, toolName string) {
 			runtimeMCPAfterToolSuccess(logger, ctx, r, toolName)
@@ -154,18 +154,18 @@ func runtimeGatewayEmitSchemaForTool(name string) (string, any, bool) {
 	return desc, evtSchema.Schema, true
 }
 
-func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, agentID, verticalID string, detail map[string]any, errText string) {
+func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 	if logger == nil {
 		return
 	}
 	logger.Log(ctx, RuntimeLogEntry{
-		Level:      strings.ToLower(strings.TrimSpace(level)),
-		Component:  "mcp-gateway",
-		Action:     strings.TrimSpace(action),
-		AgentID:    strings.TrimSpace(agentID),
-		EntityID:   strings.TrimSpace(verticalID),
-		Detail:     detail,
-		Error:      strings.TrimSpace(errText),
+		Level:     strings.ToLower(strings.TrimSpace(level)),
+		Component: "mcp-gateway",
+		Action:    strings.TrimSpace(action),
+		AgentID:   strings.TrimSpace(agentID),
+		EntityID:  strings.TrimSpace(entityID),
+		Detail:    detail,
+		Error:     strings.TrimSpace(errText),
 	})
 }
 

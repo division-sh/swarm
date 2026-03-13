@@ -38,7 +38,7 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 
 	const q = `
 		INSERT INTO mailbox (
-			id, event_id, vertical_id, from_agent, type, priority, status,
+			id, event_id, entity_id, from_agent, type, priority, status,
 			context, summary, timeout_at, created_at
 		)
 		VALUES (
@@ -94,7 +94,7 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 		SELECT
 			id::text,
 			COALESCE(event_id::text, ''),
-			COALESCE(vertical_id::text, ''),
+			COALESCE(entity_id::text, ''),
 			COALESCE(from_agent, ''),
 			type,
 			COALESCE(priority, 'normal'),
@@ -180,7 +180,7 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 		SELECT
 			id::text,
 			COALESCE(event_id::text, ''),
-			COALESCE(vertical_id::text, ''),
+			COALESCE(entity_id::text, ''),
 			COALESCE(from_agent, ''),
 			type,
 			COALESCE(priority, 'normal'),
@@ -283,7 +283,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 		RETURNING
 			m.id::text,
 			COALESCE(m.event_id::text, ''),
-			COALESCE(m.vertical_id::text, ''),
+			COALESCE(m.entity_id::text, ''),
 			COALESCE(m.from_agent, ''),
 			m.type,
 			COALESCE(m.priority, 'normal'),
@@ -347,7 +347,7 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 		SELECT
 			id::text,
 			COALESCE(event_id::text, ''),
-			COALESCE(vertical_id::text, ''),
+			COALESCE(entity_id::text, ''),
 			COALESCE(from_agent, ''),
 			type,
 			COALESCE(priority, 'normal'),

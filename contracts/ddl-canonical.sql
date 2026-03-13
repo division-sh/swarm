@@ -2,7 +2,7 @@
 -- Generated from spec v2.0.28, v2.0.33, v2.0.44, v2.0.46 (indexes), v2.0.48
 --
 -- Execution order: tables ordered for FK dependency resolution.
--- routing_rules and bootstrap_versions execute after verticals + agents.
+-- routing_rules and bootstrap_versions execute after entities + agents.
 -- Deferred FKs added via ALTER TABLE after all tables created.
 --
 -- FIX (from spec v2.0.28 audit): deployments.deployed_by changed from
@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS schema_version (
 -- CORE TABLES (§8.1)
 -- ===================================================================
 
--- Verticals: the central business object
-CREATE TABLE verticals (
+-- Entities: the central business object
+CREATE TABLE entities (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name              TEXT NOT NULL,
     slug              TEXT NOT NULL,           -- URL-safe identifier, unique per geography
@@ -62,14 +62,14 @@ CREATE TABLE verticals (
     -- Terminal: killed (reachable from any stage except launched/operating/expanding)
     -- Backward: ready_for_review→researching (more-data), expanding→operating (contraction)
     mode              TEXT NOT NULL DEFAULT 'factory',  -- factory | operating
-    discovery_mode    TEXT,                              -- How this vertical was discovered: local_services | saas_gap | saas_trend | derived | corpus | manual (human directive). v2.0.44: added corpus.
+    discovery_mode    TEXT,                              -- How this entity was discovered: local_services | saas_gap | saas_trend | derived | corpus | manual (human directive). v2.0.44: added corpus.
     scoring_rubric    TEXT,                              -- Which scoring rubric was used: local_services | saas (derived from discovery_mode)
     opportunity_pattern TEXT,                            -- v2.0.44: Opportunity archetype: platform_parasitic | freelancer_replacement | data_asymmetry | api_middleware | compliance_regulatory | ai_wrapper | workflow_automation | unknown
     signal_sources    JSONB DEFAULT '[]',               -- v2.0.44: Array of {source, url, signal_type} tracking demand signal provenance
     required_capabilities JSONB DEFAULT '{}',           -- v2.0.44: {current: [], would_unlock: "", automation_with_unlock: N} platform capability requirements
     template_version  TEXT,                              -- Org template version used at spinup (NULL for factory-stage)
     -- v2.0.44: Derivation loop columns
-    parent_id         UUID REFERENCES verticals(id),     -- NULL for depth-0 (original) verticals
+    parent_id         UUID REFERENCES entities(id),      -- NULL for depth-0 (original) entities
     generation_depth  INTEGER DEFAULT 0,                 -- 0 = original, 1 = first derivation, 2 = max
     generator_agent_id TEXT,                             -- Session ID of analyst that generated this (for exclusion from scoring)
     derivation_rationale JSONB,                          -- {targeted_dimensions[], modification_type, rationale} — NULL for depth-0
@@ -86,7 +86,7 @@ CREATE TABLE verticals (
     deploy_config     JSONB,          -- Populated by OpCo CTO agent during build
     live_url          TEXT,            -- Populated by OpCo CTO agent after deploy
     launch_targets    JSONB,           -- 2-3 concrete goals from mandate for first 30 days
-    credentials       JSONB,           -- Per-vertical secrets: WhatsApp, MercadoPago, etc. (encrypted at rest via pgcrypto, see §13.1)
+    credentials       JSONB,           -- Per-entity secrets: WhatsApp, MercadoPago, etc. (encrypted at rest via pgcrypto, see §13.1)
     human_notes       TEXT,
     killed_at_stage   TEXT,
     kill_reason       TEXT,
@@ -97,14 +97,14 @@ CREATE TABLE verticals (
     updated_at        TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_verticals_stage ON verticals(stage);
-CREATE INDEX idx_verticals_mode ON verticals(mode);
-CREATE INDEX idx_verticals_geography ON verticals(geography);
-CREATE UNIQUE INDEX idx_verticals_slug_geo ON verticals(slug, geography);
+CREATE INDEX idx_entities_stage ON entities(stage);
+CREATE INDEX idx_entities_mode ON entities(mode);
+CREATE INDEX idx_entities_geography ON entities(geography);
+CREATE UNIQUE INDEX idx_entities_slug_geo ON entities(slug, geography);
 -- v2.0.44: Derivation loop indexes and constraints
-CREATE INDEX idx_verticals_parent ON verticals(parent_id) WHERE parent_id IS NOT NULL;
-CREATE INDEX idx_verticals_depth ON verticals(generation_depth);
-ALTER TABLE verticals ADD CONSTRAINT chk_generation_depth CHECK (generation_depth >= 0 AND generation_depth <= 2);
+CREATE INDEX idx_entities_parent ON entities(parent_id) WHERE parent_id IS NOT NULL;
+CREATE INDEX idx_entities_depth ON entities(generation_depth);
+ALTER TABLE entities ADD CONSTRAINT chk_generation_depth CHECK (generation_depth >= 0 AND generation_depth <= 2);
 
 -- Events: full audit trail + recovery source
 CREATE TABLE events (
@@ -112,13 +112,13 @@ CREATE TABLE events (
     type            TEXT NOT NULL,
     source_agent    TEXT NOT NULL,
     task_id         UUID,
-    vertical_id     UUID REFERENCES verticals(id),
+    entity_id       UUID REFERENCES entities(id),
     payload         JSONB NOT NULL,
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX idx_events_type ON events(type);
-CREATE INDEX idx_events_vertical ON events(vertical_id);
+CREATE INDEX idx_events_entity ON events(entity_id);
 CREATE INDEX idx_events_task ON events(task_id);
 CREATE INDEX idx_events_created ON events(created_at);
 
@@ -128,7 +128,7 @@ CREATE TABLE agents (
     type            TEXT NOT NULL,
     role            TEXT NOT NULL,          -- e.g., empire_coordinator, factory_cto, holding_devops, operations_analyst, opco_ceo, chief_of_staff, head_of_product, head_of_growth, cto, pm, tech_writer, backend, frontend, devops, marketing, support, custom
     mode            TEXT NOT NULL DEFAULT 'factory',  -- factory | operating
-    vertical_id     UUID REFERENCES verticals(id),    -- NULL for factory agents
+    entity_id       UUID REFERENCES entities(id),     -- NULL for system-scoped agents
     parent_agent_id TEXT REFERENCES agents(id),       -- Manager chain: worker→VP, VP→CEO. NULL for CEOs and factory agents
     status          TEXT NOT NULL DEFAULT 'idle',
     current_task_id UUID,
@@ -141,7 +141,7 @@ CREATE TABLE agents (
     last_active_at  TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_agents_vertical ON agents(vertical_id);
+CREATE INDEX idx_agents_entity ON agents(entity_id);
 CREATE INDEX idx_agents_mode ON agents(mode);
 CREATE INDEX idx_agents_parent ON agents(parent_agent_id);
 
@@ -176,12 +176,12 @@ CREATE INDEX idx_receipts_agent ON event_receipts(agent_id);
 CREATE INDEX idx_receipts_agent_time ON event_receipts(agent_id, processed_at DESC);
 
 -- Event routing is stored in routing_rules (see §5.5).
--- The EventBus loads routing_rules into an in-memory RoutingTable per vertical.
+-- The EventBus loads routing_rules into an in-memory RoutingTable per entity.
 -- routing_rules is the source of truth; the in-memory table is a derived read model.
 
 -- Org templates — versioned agent roster, prompts, and routing templates.
 -- Factory CTO manages these. SpawnOpCo reads the current version.
--- Running verticals track which version they were spawned from (verticals.template_version).
+-- Running entities track which version they were spawned from (entities.template_version).
 CREATE TABLE org_templates (
     version         TEXT PRIMARY KEY,        -- Semantic: "1.0", "1.1", "2.0"
     agents          JSONB NOT NULL,          -- Array of AgentTemplate (role, parent_role, type, prompt, tools, subscriptions, constraints)
@@ -192,10 +192,10 @@ CREATE TABLE org_templates (
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- Template migration tracking — one row per vertical per migration attempt
+-- Template migration tracking — one row per entity per migration attempt
 CREATE TABLE template_migrations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vertical_id     UUID NOT NULL REFERENCES verticals(id),
+    entity_id       UUID NOT NULL REFERENCES entities(id),
     from_version    TEXT NOT NULL,
     to_version      TEXT NOT NULL REFERENCES org_templates(version),
     plan            JSONB NOT NULL,          -- Migration plan: agents_to_add, agents_to_remove, agents_to_reconfigure, routes_to_add, routes_to_remove
@@ -211,8 +211,8 @@ CREATE TABLE conversations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id        TEXT REFERENCES agents(id),
     task_id         UUID,
-    scope_key       TEXT,                 -- NULL for task/session, vertical_id for session_per_vertical
-    mode            TEXT DEFAULT 'task',  -- task | session | session_per_vertical
+    scope_key       TEXT,                 -- NULL for task/session, entity_id for session_per_entity
+    mode            TEXT DEFAULT 'task',  -- task | session | session_per_entity
     messages        JSONB NOT NULL,
     summary         TEXT,                 -- Compressed context for session-scoped
     turn_count      INT DEFAULT 0,
@@ -231,7 +231,7 @@ CREATE UNIQUE INDEX idx_conversations_scope ON conversations(agent_id, COALESCE(
 CREATE TABLE agent_sessions (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id        TEXT NOT NULL REFERENCES agents(id),
-    scope_key       TEXT,                    -- NULL for global sessions, vertical_id for session_per_vertical
+    scope_key       TEXT,                    -- NULL for global sessions, entity_id for session_per_entity
     runtime_mode    TEXT NOT NULL,            -- 'api' | 'cli_test'
     provider        TEXT NOT NULL DEFAULT 'anthropic',
     session_id      TEXT NOT NULL,            -- Provider session ID (API conversation ID or CLI --session-id UUID)
@@ -278,9 +278,9 @@ CREATE UNIQUE INDEX idx_turns_session_turn ON agent_turns(session_row_id, turn_i
 CREATE TABLE mailbox (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     event_id        UUID REFERENCES events(id),
-    vertical_id     UUID REFERENCES verticals(id),
+    entity_id       UUID REFERENCES entities(id),
     from_agent      TEXT,                           -- Agent that originated the request
-    type            TEXT NOT NULL CHECK (type IN ('review', 'escalation', 'spend_request', 'budget_increase', 'digest', 'vertical_approval', 'migration_approval', 'domain_approval')),
+    type            TEXT NOT NULL CHECK (type IN ('review', 'escalation', 'spend_request', 'budget_increase', 'digest', 'entity_approval', 'migration_approval', 'domain_approval')),
     priority        TEXT DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'critical')),
     status          TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'more_data', 'timed_out')),
     context         JSONB NOT NULL,
@@ -300,14 +300,14 @@ CREATE INDEX idx_mailbox_critical ON mailbox(priority) WHERE priority = 'critica
 ALTER TABLE template_migrations ADD CONSTRAINT fk_migration_mailbox
     FOREIGN KEY (mailbox_id) REFERENCES mailbox(id);
 
--- Deferred FK: routing_rules (defined in §5.5) references verticals and agents.
--- routing_rules DDL must execute after verticals and agents in actual migration.
+-- Deferred FK: routing_rules (defined in §5.5) references entities and agents.
+-- routing_rules DDL must execute after entities and agents in actual migration.
 
 -- Schedules: timer-based agent wake-ups (recurring or one-shot)
 CREATE TABLE schedules (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_id        TEXT REFERENCES agents(id),
-    vertical_id     UUID REFERENCES verticals(id),
+    entity_id       UUID REFERENCES entities(id),
     event_type      TEXT NOT NULL,           -- Event to emit on trigger
     mode            TEXT NOT NULL DEFAULT 'cron',  -- 'cron' | 'once'
     cron_expr       TEXT,                    -- Cron expression (required if mode='cron')
@@ -369,10 +369,10 @@ CREATE INDEX idx_scan_campaigns_status ON scan_campaigns(status);
 -- Cleanup cron purges entries older than 7 days (matches §4.7 Inbound Gateway retention).
 CREATE TABLE inbound_events (
     provider_event_id TEXT NOT NULL,
-    vertical_id       UUID NOT NULL REFERENCES verticals(id),
+    entity_id         UUID NOT NULL REFERENCES entities(id),
     provider          TEXT NOT NULL,         -- 'whatsapp' | 'stripe' | 'email' | 'domain_registrar'
     received_at       TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (provider_event_id, vertical_id)
+    PRIMARY KEY (provider_event_id, entity_id)
 );
 
 CREATE INDEX idx_inbound_events_age ON inbound_events(received_at);
@@ -380,9 +380,9 @@ CREATE INDEX idx_inbound_events_age ON inbound_events(received_at);
 -- Deployments
 CREATE TABLE deployments (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vertical_id     UUID REFERENCES verticals(id),
+    entity_id       UUID REFERENCES entities(id),
     environment     TEXT NOT NULL DEFAULT 'production',  -- 'staging' | 'production'
-    version         INT NOT NULL DEFAULT 1,              -- Auto-increment per vertical+environment
+    version         INT NOT NULL DEFAULT 1,              -- Auto-increment per entity+environment
     status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'deploying', 'deployed', 'failed', 'rolled_back')),
     url             TEXT,
     domain          TEXT,            -- Real domain once purchased
@@ -397,7 +397,7 @@ CREATE TABLE deployments (
     deployed_at     TIMESTAMPTZ,
     last_health_at  TIMESTAMPTZ,
     created_at      TIMESTAMPTZ DEFAULT now(),
-    UNIQUE(vertical_id, environment, version)
+    UNIQUE(entity_id, environment, version)
 );
 
 -- Technical patterns (Factory CTO intelligence)
@@ -405,7 +405,7 @@ CREATE TABLE technical_patterns (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     pattern_type    TEXT NOT NULL,  -- code_reuse, integration, architecture, failure
     description     TEXT NOT NULL,
-    vertical_ids    UUID[] NOT NULL,
+    entity_ids      UUID[] NOT NULL,
     confidence      TEXT DEFAULT 'observed',  -- observed, confirmed, extraction_ready
     cto_notes       TEXT,
     action_taken    TEXT,
@@ -413,10 +413,10 @@ CREATE TABLE technical_patterns (
     updated_at      TIMESTAMPTZ DEFAULT now()
 );
 
--- Operating metrics (per-vertical, per-week)
-CREATE TABLE vertical_metrics (
+-- Operating metrics (per-entity, per-week)
+CREATE TABLE entity_metrics (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vertical_id     UUID REFERENCES verticals(id),
+    entity_id       UUID REFERENCES entities(id),
     period_start    DATE NOT NULL,
     period_end      DATE NOT NULL,
     users_total     INT DEFAULT 0,
@@ -433,13 +433,13 @@ CREATE TABLE vertical_metrics (
     api_cost_cents  INT DEFAULT 0,
     infra_cost_cents INT DEFAULT 0,
     created_at      TIMESTAMPTZ DEFAULT now(),
-    UNIQUE(vertical_id, period_start)
+    UNIQUE(entity_id, period_start)
 );
 
 -- Spend ledger (tracks all real-money spending)
 CREATE TABLE spend_ledger (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vertical_id     UUID REFERENCES verticals(id),  -- NULL for factory-level spend
+    entity_id       UUID REFERENCES entities(id),   -- NULL for system-level spend
     agent_id        TEXT REFERENCES agents(id),  -- Which agent incurred this cost (NULL for infra/manual)
     category        TEXT NOT NULL,   -- llm_api, domain, whatsapp_api, infrastructure, tool_cost
     amount_cents    INT NOT NULL,
@@ -451,14 +451,14 @@ CREATE TABLE spend_ledger (
     created_at      TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_spend_vertical ON spend_ledger(vertical_id);
+CREATE INDEX idx_spend_entity ON spend_ledger(entity_id);
 
 -- Human task queue (§14)
 -- Tasks requiring physical-world action by humans. Agents request, Empire Coordinator approves.
 CREATE TABLE human_tasks (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     requesting_agent    TEXT NOT NULL,         -- Agent ID that called human_task_request. Used to route human_task.completed/rejected/deferred events back.
-    vertical_id         UUID REFERENCES verticals(id),  -- NULL for holding-level tasks
+    entity_id           UUID REFERENCES entities(id),   -- NULL for system-level tasks
     category            TEXT NOT NULL,         -- sales_call, government_visit, verification, escalated_support, partnership, ground_truth
     description         TEXT NOT NULL,         -- What needs to be done
     talking_points      JSONB,                 -- For sales calls: key points, offer details, objection handling
@@ -483,7 +483,7 @@ CREATE TABLE human_tasks (
 );
 
 CREATE INDEX idx_human_tasks_status ON human_tasks(status);
-CREATE INDEX idx_human_tasks_vertical ON human_tasks(vertical_id);
+CREATE INDEX idx_human_tasks_entity ON human_tasks(entity_id);
 CREATE INDEX idx_human_tasks_category ON human_tasks(category);
 
 -- Pipeline diagnostics (§4.2.2.6) — every interceptor handler writes a transition record.
@@ -494,7 +494,7 @@ CREATE TABLE pipeline_transitions (
     event_type      TEXT NOT NULL,
     handler         TEXT NOT NULL,           -- e.g. "handleSpecApproved", "handleCTORevision"
     pipeline_type   TEXT NOT NULL,           -- "campaign" | "validation" | "scan" | "marginal"
-    pipeline_id     UUID NOT NULL,           -- campaign_id, vertical_id, or scan_id
+    pipeline_id     UUID NOT NULL,           -- campaign_id, entity_id, or scan_id
     action          TEXT NOT NULL,           -- "consumed" | "passthrough" | "dropped" | "error"
     state_before    JSONB,                   -- Snapshot of relevant state before mutation
     state_after     JSONB,                   -- Snapshot after mutation (null if dropped/error)
@@ -556,27 +556,27 @@ CREATE TABLE prompt_overrides (
 
 -- OpCo cycle detection counters (§4.2.2.9).
 -- In-memory primary, DB-synced for crash recovery.
--- One row per active event pattern per vertical.
+-- One row per active event pattern per entity.
 CREATE TABLE cycle_counters (
-    vertical_id     UUID NOT NULL REFERENCES verticals(id) ON DELETE CASCADE,
+    entity_id       UUID NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
     event_pattern   TEXT NOT NULL,           -- e.g., "qa.validation_failed"
     count           INT NOT NULL DEFAULT 0,
     window_start    TIMESTAMPTZ NOT NULL,
     last_emitter    TEXT,                    -- agent_id of last emission
     updated_at      TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (vertical_id, event_pattern)
+    PRIMARY KEY (entity_id, event_pattern)
 );
 
 -- Expired windows are cleaned up by a periodic job (hourly).
--- Active counters are few: typically 0-3 per vertical during normal operation.
+-- Active counters are few: typically 0-3 per entity during normal operation.
 
--- Scoring digest buffer: rejected verticals summarized for EC digest (§4.2.2.8).
+-- Scoring digest buffer: rejected entities summarized for EC digest (§4.2.2.8).
 -- Runtime writes rows on rejection. EC digest compilation reads and summarizes.
 -- Rows retained 30 days for audit, cleaned by periodic job.
 CREATE TABLE scoring_digest_buffer (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vertical_id     UUID NOT NULL REFERENCES verticals(id),
-    vertical_name   TEXT NOT NULL,
+    entity_id       UUID NOT NULL REFERENCES entities(id),
+    entity_name     TEXT NOT NULL,
     geography       TEXT NOT NULL,
     composite       NUMERIC(5,2) NOT NULL,
     viability       NUMERIC(5,2),
@@ -587,12 +587,12 @@ CREATE TABLE scoring_digest_buffer (
 CREATE INDEX idx_scoring_digest_buffer_time ON scoring_digest_buffer(scored_at);
 
 -- ===================================================================
--- ROUTING (§5.5) — must execute AFTER verticals + agents
+-- ROUTING (§5.5) — must execute AFTER entities + agents
 -- ===================================================================
 
 CREATE TABLE routing_rules (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    vertical_id     UUID NOT NULL REFERENCES verticals(id),
+    entity_id       UUID NOT NULL REFERENCES entities(id),
     event_pattern   TEXT NOT NULL,           -- e.g., "feature_deployed", "bug_*", "*"
     subscriber_id   TEXT NOT NULL REFERENCES agents(id),
     installed_by    TEXT NOT NULL REFERENCES agents(id),  -- who added this route
@@ -604,7 +604,7 @@ CREATE TABLE routing_rules (
     deactivated_at  TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX idx_routing_rules_unique ON routing_rules(vertical_id, event_pattern, subscriber_id)
+CREATE UNIQUE INDEX idx_routing_rules_unique ON routing_rules(entity_id, event_pattern, subscriber_id)
     WHERE status = 'active';
 
 -- bootstrap_versions table (maintained by Factory CTO based on Operations Analyst proposals)
@@ -613,7 +613,7 @@ CREATE TABLE bootstrap_versions (
     routes          JSONB NOT NULL,          -- array of {event_pattern, subscriber_role, reason}
     proposed_by     TEXT NOT NULL,            -- 'initial' or analyst agent ID
     approved_by     TEXT NOT NULL,            -- 'initial' or factory_cto agent ID
-    evidence        TEXT,                     -- "discovered in 5/5 verticals within 2 weeks"
+    evidence        TEXT,                     -- "discovered in 5/5 entities within 2 weeks"
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -635,7 +635,7 @@ CREATE TABLE runtime_log (
     event_id        UUID,                    -- FK events(id) when log relates to a business event
     event_type      TEXT,                    -- Denormalized for fast filtering without join
     agent_id        TEXT,                    -- Agent involved
-    vertical_id     UUID,                    -- Vertical involved
+    entity_id       UUID,                    -- Entity involved
     campaign_id     UUID,                    -- Campaign involved
     scan_id         UUID,                    -- Scan involved
     session_id      UUID,                    -- Agent session involved
@@ -651,7 +651,7 @@ CREATE INDEX idx_rlog_component ON runtime_log(component, ts DESC);
 CREATE INDEX idx_rlog_level ON runtime_log(level, ts DESC) WHERE level IN ('warn', 'error', 'fatal');
 CREATE INDEX idx_rlog_event ON runtime_log(event_id) WHERE event_id IS NOT NULL;
 CREATE INDEX idx_rlog_agent ON runtime_log(agent_id, ts DESC) WHERE agent_id IS NOT NULL;
-CREATE INDEX idx_rlog_vertical ON runtime_log(vertical_id, ts DESC) WHERE vertical_id IS NOT NULL;
+CREATE INDEX idx_rlog_entity ON runtime_log(entity_id, ts DESC) WHERE entity_id IS NOT NULL;
 
 -- ===================================================================
 -- RUNTIME INTERNAL TABLES (added v2.0.33 — from migrations 003, 009, 011, 012)
@@ -695,8 +695,8 @@ CREATE TABLE scan_accumulators (
     complete        INT NOT NULL DEFAULT 0,   -- agents that have reported completion
     completed_by    JSONB NOT NULL DEFAULT '{}',  -- object keyed by agent_id → completion metadata
     reports         INT NOT NULL DEFAULT 0,   -- count of reports received (not JSONB array)
-    discovered      INT NOT NULL DEFAULT 0,   -- verticals discovered in this scan
-    skipped         INT NOT NULL DEFAULT 0,   -- verticals skipped (below threshold)
+    discovered      INT NOT NULL DEFAULT 0,   -- entities discovered in this scan
+    skipped         INT NOT NULL DEFAULT 0,   -- entities skipped (below threshold)
     pending_dedup   INT NOT NULL DEFAULT 0,   -- candidates held in pending_dedup_candidates
     timeout_at      TIMESTAMPTZ NOT NULL,     -- scan deadline
     started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -708,7 +708,7 @@ CREATE TABLE scan_accumulators (
 CREATE INDEX idx_accum_campaign ON scan_accumulators(campaign_id);
 CREATE INDEX idx_accum_timeout ON scan_accumulators(timeout_at) WHERE completed_at IS NULL;
 
--- pending_dedup_candidates: Buffers verticals held during dedup resolution.
+-- pending_dedup_candidates: Buffers entities held during dedup resolution.
 -- Maps to Go PendingCandidate struct (§4.2.2.3). Held until dedup.resolved arrives.
 -- scan.completed emits even with pending entries; dedup resolution is async.
 CREATE TABLE pending_dedup_candidates (
@@ -716,12 +716,12 @@ CREATE TABLE pending_dedup_candidates (
     scan_id         TEXT NOT NULL,            -- references scan_accumulators.scan_id
     campaign_id     TEXT NOT NULL,            -- references scan_campaigns
     mode            TEXT NOT NULL,            -- 'saas_gap' | 'saas_trend' | 'local_services'
-    name            TEXT NOT NULL,            -- candidate vertical name
+    name            TEXT NOT NULL,            -- candidate entity name
     geography       TEXT NOT NULL,
     discovery_mode  TEXT NOT NULL,
     signal_strength DOUBLE PRECISION NOT NULL, -- fractional score, not integer
     payload         JSONB NOT NULL,           -- raw discovery payload (the candidate that triggered fuzzy match)
-    existing_id     TEXT,                     -- the existing vertical it matched against (vertical slug or ID)
+    existing_id     TEXT,                     -- the existing entity it matched against (entity slug or ID)
     status          TEXT NOT NULL DEFAULT 'pending',
     CONSTRAINT valid_dedup_status CHECK (status IN ('pending', 'resolved_keep', 'resolved_merge', 'resolved_skip')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -732,11 +732,11 @@ CREATE INDEX idx_dedup_pending ON pending_dedup_candidates(status)
     WHERE status = 'pending';
 CREATE INDEX idx_dedup_scan ON pending_dedup_candidates(scan_id);
 
--- validation_pipelines: Tracks validation stage progress per vertical.
--- Maps to Go ValidationPipeline struct (§4.2.2.2). One row per vertical in validation.
+-- validation_pipelines: Tracks validation stage progress per entity.
+-- Maps to Go ValidationPipeline struct (§4.2.2.2). One row per entity in validation.
 -- Boolean gate flags (G1-G4) + revision counters match the struct exactly.
 CREATE TABLE validation_pipelines (
-    vertical_id     UUID PRIMARY KEY REFERENCES verticals(id),
+    entity_id       UUID PRIMARY KEY REFERENCES entities(id),
     status          TEXT NOT NULL DEFAULT 'active',
     CONSTRAINT valid_vp_status CHECK (status IN ('active', 'rejected', 'packaged', 'parked', 'approved')),
     g1_research     BOOLEAN NOT NULL DEFAULT FALSE,   -- research.completed received
@@ -794,7 +794,7 @@ CREATE INDEX IF NOT EXISTS idx_events_source_agent ON events(source_agent);
 CREATE INDEX IF NOT EXISTS idx_spend_ledger_created_at ON spend_ledger(created_at DESC);
 
 -- v2.0.45: Additional indexes from audit
-CREATE INDEX IF NOT EXISTS idx_vertical_metrics_period_end ON vertical_metrics(period_end);
+CREATE INDEX IF NOT EXISTS idx_entity_metrics_period_end ON entity_metrics(period_end);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_active ON agent_sessions(agent_id, session_id) WHERE status = 'active';
 
 -- ============================================================================

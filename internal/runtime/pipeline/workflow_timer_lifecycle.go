@@ -10,7 +10,7 @@ import (
 	"empireai/internal/runtime/semanticview"
 )
 
-func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, verticalID, currentStage, nextStage, sourceEvent string) error {
+func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return nil
 	}
@@ -18,17 +18,17 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 	if source == nil {
 		return nil
 	}
-	verticalID = strings.TrimSpace(verticalID)
+	entityID = strings.TrimSpace(entityID)
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
 	sourceEvent = strings.TrimSpace(sourceEvent)
-	if verticalID == "" || nextStage == "" || currentStage == nextStage {
+	if entityID == "" || nextStage == "" || currentStage == nextStage {
 		return nil
 	}
 	now := time.Now().UTC()
 	toSchedule := make([]Schedule, 0, 2)
 	toCancel := make([]Schedule, 0, 2)
-	if err := pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
+	if err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		if instance.TimerState == nil {
 			instance.TimerState = []WorkflowTimerState{}
 		}
@@ -42,7 +42,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, verticalID, timerState.FiresAt))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt))
 		}
 		for _, timer := range source.WorkflowTimers() {
 			if timer.Recurring || !workflowTimerLifecycleMatches(timer.StartOn, nextStage, sourceEvent) {
@@ -63,7 +63,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 				StartedBy: "state:" + nextStage,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, verticalID, fireAt))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt))
 		}
 	}); err != nil {
 		return err
@@ -77,13 +77,13 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 	return nil
 }
 
-func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, verticalID, currentStage, nextStage, sourceEvent string) {
-	if err := pc.applyWorkflowTimerIntents(ctx, verticalID, currentStage, nextStage, sourceEvent); err != nil {
-		runtimeWarn(runtimeWorkflowID, "workflow timer projection failed entity_id=%s stage=%s: %v", verticalID, nextStage, err)
+func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) {
+	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
+		runtimeWarn(runtimeWorkflowID, "workflow timer projection failed entity_id=%s stage=%s: %v", entityID, nextStage, err)
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context, verticalID, sourceEvent string) {
+func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context, entityID, sourceEvent string) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
 	}
@@ -91,13 +91,13 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 	if source == nil {
 		return
 	}
-	verticalID = strings.TrimSpace(verticalID)
+	entityID = strings.TrimSpace(entityID)
 	sourceEvent = strings.TrimSpace(sourceEvent)
-	if verticalID == "" || sourceEvent == "" {
+	if entityID == "" || sourceEvent == "" {
 		return
 	}
-	if _, ok, err := pc.workflowStore.Load(ctx, verticalID); err != nil {
-		runtimeWarn(runtimeWorkflowID, "workflow event timer load failed entity_id=%s event=%s: %v", verticalID, sourceEvent, err)
+	if _, ok, err := pc.workflowStore.Load(ctx, entityID); err != nil {
+		runtimeWarn(runtimeWorkflowID, "workflow event timer load failed entity_id=%s event=%s: %v", entityID, sourceEvent, err)
 		return
 	} else if !ok {
 		return
@@ -105,7 +105,7 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 	now := time.Now().UTC()
 	toSchedule := make([]Schedule, 0, 1)
 	toCancel := make([]Schedule, 0, 1)
-	if err := pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
+	if err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		if instance.TimerState == nil {
 			instance.TimerState = []WorkflowTimerState{}
 		}
@@ -119,7 +119,7 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, verticalID, timerState.FiresAt))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt))
 		}
 		for _, timer := range source.WorkflowTimers() {
 			if timer.Recurring || !workflowTimerLifecycleMatches(timer.StartOn, "", sourceEvent) {
@@ -140,10 +140,10 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 				StartedBy: "event:" + sourceEvent,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, verticalID, fireAt))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt))
 		}
 	}); err != nil {
-		runtimeWarn(runtimeWorkflowID, "workflow event timer projection failed entity_id=%s event=%s: %v", verticalID, sourceEvent, err)
+		runtimeWarn(runtimeWorkflowID, "workflow event timer projection failed entity_id=%s event=%s: %v", entityID, sourceEvent, err)
 		return
 	}
 	for _, sc := range toCancel {
@@ -234,13 +234,13 @@ func workflowTimerPolicy(source semanticview.Source) map[string]any {
 
 func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID string, fireAt time.Time) Schedule {
 	return Schedule{
-		AgentID:    strings.TrimSpace(timer.Owner),
-		EventType:  strings.TrimSpace(timer.Event),
-		Mode:       "once",
-		At:         fireAt,
-		EntityID:   strings.TrimSpace(entityID),
-		TaskID:     strings.TrimSpace(timer.ID),
-		Payload:    mustJSON(map[string]any{"timer_id": strings.TrimSpace(timer.ID), "trigger_reason": strings.TrimSpace(timer.ID)}),
+		AgentID:   strings.TrimSpace(timer.Owner),
+		EventType: strings.TrimSpace(timer.Event),
+		Mode:      "once",
+		At:        fireAt,
+		EntityID:  strings.TrimSpace(entityID),
+		TaskID:    strings.TrimSpace(timer.ID),
+		Payload:   mustJSON(map[string]any{"timer_id": strings.TrimSpace(timer.ID), "trigger_reason": strings.TrimSpace(timer.ID)}),
 	}
 }
 

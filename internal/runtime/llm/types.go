@@ -48,10 +48,10 @@ type BudgetGuard interface {
 	LockExecutionScope(scope string) func()
 	IsEntityEmergency(entityID string) bool
 	IsEntityThrottle(entityID string) bool
-	IsEmergency(verticalID string) bool
-	IsThrottle(verticalID string) bool
+	IsEmergency(entityID string) bool
+	IsThrottle(entityID string) bool
 	RecordEntityLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error
-	RecordLLMUsage(ctx context.Context, verticalID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error
+	RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage UsageTokens, exact bool, meta any) error
 }
 
 type Runtime interface {

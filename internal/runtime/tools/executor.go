@@ -536,8 +536,8 @@ func AuthorizeRoutingForTest(actor, target models.AgentConfig, status string) er
 	return authorizeRouting(actor, target, status)
 }
 
-func AuthorizeManageForTest(actor models.AgentConfig, targetRole, targetVerticalID string) error {
-	return authorizeManage(actor, targetRole, targetVerticalID)
+func AuthorizeManageForTest(actor models.AgentConfig, targetRole, targetEntityID string) error {
+	return authorizeManage(actor, targetRole, targetEntityID)
 }
 
 func AuthorizeMailboxSendForTest(actor models.AgentConfig) error {

@@ -98,15 +98,15 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	if strings.HasPrefix(eventType, "budget.") {
 		return false, ""
 	}
-	verticalID := strings.TrimSpace(evt.EntityID())
-	if verticalID == "" {
-		verticalID = cfg.EffectiveEntityID()
+	entityID := strings.TrimSpace(evt.EntityID())
+	if entityID == "" {
+		entityID = cfg.EffectiveEntityID()
 	}
 
-	if tracker.IsEntityEmergency(verticalID) {
+	if tracker.IsEntityEmergency(entityID) {
 		return true, "suppressed by budget emergency guardrail"
 	}
-	if tracker.IsEntityThrottle(verticalID) {
+	if tracker.IsEntityThrottle(entityID) {
 		if strings.HasPrefix(eventType, "scan.") {
 			return true, "suppressed by budget throttle: scan work paused"
 		}
@@ -316,16 +316,16 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	am.mu.RLock()
 	cfg, cfgOK := am.agentCfg[agentID]
 	am.mu.RUnlock()
-	verticalID := ""
+	entityID := ""
 	if cfgOK {
-		verticalID = cfg.EffectiveEntityID()
+		entityID = cfg.EffectiveEntityID()
 	}
 
 	payload := mustJSON(map[string]any{
 		"event_id":     eventID,
 		"agent_id":     agentID,
 		"manager_id":   managerID,
-		"entity_id":    verticalID,
+		"entity_id":    entityID,
 		"retry_count":  receipt.RetryCount,
 		"error":        strings.TrimSpace(receipt.Error),
 		"instruction":  "Event delivery dead-lettered after 3 retries. Decide: retry (requeue), skip, or escalate.",
@@ -338,7 +338,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		SourceAgent: "runtime",
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}).WithEntityID(verticalID), []string{managerID}); err != nil {
+	}).WithEntityID(entityID), []string{managerID}); err != nil {
 		RuntimeWarn("agent-manager", "ops.dead_letter_escalation publish failed agent=%s manager=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(managerID), strings.TrimSpace(eventID), err)
 	}
 }

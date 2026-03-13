@@ -15,7 +15,7 @@ type ConversationMode int
 const (
 	TaskScoped ConversationMode = iota
 	SessionScoped
-	SessionPerVerticalScoped
+	SessionPerEntityScoped
 )
 
 const defaultMaxToolRounds = 8
@@ -56,7 +56,7 @@ func ConversationModeString(mode ConversationMode) string {
 	switch mode {
 	case TaskScoped:
 		return "task"
-	case SessionPerVerticalScoped:
+	case SessionPerEntityScoped:
 		return "session_per_entity"
 	default:
 		return "session"
@@ -131,7 +131,7 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 	}
 	scopeKey := ""
 	switch c.Mode {
-	case TaskScoped, SessionPerVerticalScoped:
+	case TaskScoped, SessionPerEntityScoped:
 		scopeKey = strings.TrimSpace(c.TaskID)
 	}
 	ctx = sessions.WithScope(ctx, ConversationModeString(c.Mode), scopeKey)

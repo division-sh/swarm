@@ -136,8 +136,8 @@ type ManagerPersistence interface {
 type BudgetGuard interface {
 	IsEntityEmergency(entityID string) bool
 	IsEntityThrottle(entityID string) bool
-	IsEmergency(verticalID string) bool
-	IsThrottle(verticalID string) bool
+	IsEmergency(entityID string) bool
+	IsThrottle(entityID string) bool
 }
 
 type StrategicContext = json.RawMessage

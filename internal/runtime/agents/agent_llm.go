@@ -114,7 +114,7 @@ func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 	case "session", "session_scoped", "session-scoped":
 		return llm.SessionScoped, true
 	case "session_per_entity", "session-per-entity", "session_per_scope":
-		return llm.SessionPerVerticalScoped, true
+		return llm.SessionPerEntityScoped, true
 	default:
 		return llm.TaskScoped, false
 	}
@@ -298,20 +298,20 @@ func (a *LLMAgent) resetConversationScopeIfNeeded(evt events.Event) {
 }
 
 func taskScopeKeyForEvent(evt events.Event) string {
-	verticalID, taskID := extractContextIDs(evt)
+	entityID, taskID := extractContextIDs(evt)
 	if strings.TrimSpace(taskID) != "" {
 		return strings.TrimSpace(taskID)
 	}
-	return strings.TrimSpace(verticalID)
+	return strings.TrimSpace(entityID)
 }
 
 func conversationScopeKeyForEvent(mode llm.ConversationMode, evt events.Event) string {
 	switch mode {
 	case llm.TaskScoped:
 		return taskScopeKeyForEvent(evt)
-	case llm.SessionPerVerticalScoped:
-		verticalID, _ := extractContextIDs(evt)
-		return strings.TrimSpace(verticalID)
+	case llm.SessionPerEntityScoped:
+		entityID, _ := extractContextIDs(evt)
+		return strings.TrimSpace(entityID)
 	default:
 		return ""
 	}

@@ -69,13 +69,13 @@ func NewBudgetTracker(db *sql.DB, bus *EventBus, cfg *config.Config, mailbox run
 	}
 }
 
-func (t *BudgetTracker) CurrentState(scope string, verticalID string) string {
+func (t *BudgetTracker) CurrentState(scope string, entityID string) string {
 	if t == nil {
 		return "ok"
 	}
 	scope = strings.TrimSpace(scope)
-	verticalID = strings.TrimSpace(verticalID)
-	key := scope + "|" + verticalID
+	entityID = strings.TrimSpace(entityID)
+	key := scope + "|" + entityID
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	state := strings.TrimSpace(t.lastState[key])
@@ -99,8 +99,8 @@ func (t *BudgetTracker) IsEntityEmergency(entityID string) bool {
 	return false
 }
 
-func (t *BudgetTracker) IsEmergency(verticalID string) bool {
-	return t.IsEntityEmergency(verticalID)
+func (t *BudgetTracker) IsEmergency(entityID string) bool {
+	return t.IsEntityEmergency(entityID)
 }
 
 func (t *BudgetTracker) IsEntityThrottle(entityID string) bool {
@@ -121,8 +121,8 @@ func (t *BudgetTracker) IsEntityThrottle(entityID string) bool {
 	return false
 }
 
-func (t *BudgetTracker) IsThrottle(verticalID string) bool {
-	return t.IsEntityThrottle(verticalID)
+func (t *BudgetTracker) IsThrottle(entityID string) bool {
+	return t.IsEntityThrottle(entityID)
 }
 
 func (t *BudgetTracker) RecordEntityLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
@@ -131,11 +131,11 @@ func (t *BudgetTracker) RecordEntityLLMUsage(ctx context.Context, entityID strin
 
 // LockExecutionScope serializes budget-critical LLM execution checks/records
 // per entity scope within the current process.
-func (t *BudgetTracker) LockExecutionScope(verticalID string) func() {
+func (t *BudgetTracker) LockExecutionScope(entityID string) func() {
 	if t == nil {
 		return func() {}
 	}
-	scopeKey := strings.TrimSpace(verticalID)
+	scopeKey := strings.TrimSpace(entityID)
 	if scopeKey == "" {
 		scopeKey = "__system__"
 	}
@@ -232,7 +232,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 
 	const q = `
 		INSERT INTO spend_ledger (
-			vertical_id, agent_id, category, amount_cents, currency, description, approved_by, source, metadata, created_at
+			entity_id, agent_id, category, amount_cents, currency, description, approved_by, source, metadata, created_at
 		) VALUES (
 			NULLIF($1,'')::uuid, NULLIF($2,''), $3, $4, $5, NULLIF($6,''), NULLIF($7,''), $8, $9::jsonb, $10
 		)
@@ -257,11 +257,11 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	return nil
 }
 
-func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, verticalID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
+func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
 	if t == nil || t.db == nil {
 		return nil
 	}
-	verticalID = strings.TrimSpace(verticalID)
+	entityID = strings.TrimSpace(entityID)
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	usage.Model = strings.TrimSpace(usage.Model)
@@ -275,7 +275,7 @@ func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, verticalID string, a
 	desc := fmt.Sprintf("llm usage agent=%s runtime=%s model=%s in=%d out=%d",
 		agentID, runtimeMode, usage.Model, usage.InputTokens, usage.OutputTokens)
 	return t.RecordSpend(ctx, SpendRecord{
-		EntityID:    verticalID,
+		EntityID:    entityID,
 		Category:    "llm",
 		AmountCents: amount,
 		Currency:    "USD",
@@ -380,7 +380,7 @@ func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) er
 	return nil
 }
 
-func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, verticalID string, capCents int) error {
+func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityID string, capCents int) error {
 	if capCents <= 0 {
 		return nil
 	}
@@ -396,20 +396,20 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			FROM spend_ledger
 			WHERE created_at >= $1
 		`, start).Scan(&spent)
-	case verticalID == "":
+	case entityID == "":
 		err = t.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(amount_cents), 0)
 			FROM spend_ledger
-			WHERE vertical_id IS NULL
+			WHERE entity_id IS NULL
 			  AND created_at >= $1
 		`, start).Scan(&spent)
 	default:
 		err = t.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(amount_cents), 0)
 			FROM spend_ledger
-			WHERE vertical_id = $1::uuid
+			WHERE entity_id = $1::uuid
 			  AND created_at >= $2
-		`, verticalID, start).Scan(&spent)
+		`, entityID, start).Scan(&spent)
 	}
 	if err != nil {
 		return err
@@ -428,7 +428,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		state = "ok"
 	}
 
-	key := scope + "|" + verticalID
+	key := scope + "|" + entityID
 	t.mu.Lock()
 	prev := t.lastState[key]
 	// Don't spam. Only emit on transitions, except resumed should only emit when
@@ -449,7 +449,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 
 	payload := map[string]any{
 		"scope":        scope,
-		"entity_id":    verticalID,
+		"entity_id":    entityID,
 		"cap_cents":    capCents,
 		"spent_cents":  spent,
 		"month_start":  start.Format(time.RFC3339),
@@ -464,7 +464,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		SourceAgent: "runtime",
 		Payload: mustJSON(map[string]any{
 			"scope":           scope,
-			"entity_id":       verticalID,
+			"entity_id":       entityID,
 			"cap_cents":       capCents,
 			"spent_cents":     spent,
 			"month_start":     start.Format(time.RFC3339),
@@ -474,7 +474,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			"evaluated_at":    now.Format(time.RFC3339),
 		}),
 		CreatedAt: time.Now(),
-	}).WithEntityID(verticalID)
+	}).WithEntityID(entityID)
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err
 	}
@@ -485,16 +485,16 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			scope, spent, capCents, ratio*100.0)
 		// Best-effort: avoid breaking spend path if mailbox insert fails.
 		if _, err := t.mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-			EventID:    evtID,
-			EntityID:   verticalID,
-			FromAgent:  t.mailboxFrom,
-			Type:       "budget_increase",
-			Priority:   "critical",
-			Status:     "pending",
-			Context:    mustJSON(payload),
-			Summary:    summary,
+			EventID:   evtID,
+			EntityID:  entityID,
+			FromAgent: t.mailboxFrom,
+			Type:      "budget_increase",
+			Priority:  "critical",
+			Status:    "pending",
+			Context:   mustJSON(payload),
+			Summary:   summary,
 		}); err != nil {
-			runtimeWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", verticalID, scope, err)
+			runtimeWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", entityID, scope, err)
 		}
 	}
 	return nil

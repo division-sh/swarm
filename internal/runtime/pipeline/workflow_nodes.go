@@ -12,7 +12,7 @@ import (
 
 type WorkflowEventPolicy struct {
 	Consume           bool
-	RequireVertical   bool
+	RequireEntity     bool
 	VisibleDownstream bool
 }
 
@@ -342,13 +342,13 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	eventType = strings.TrimSpace(eventType)
 	entry, ok := source.EventEntry(eventType)
 	if !ok {
-		return WorkflowEventPolicy{RequireVertical: drivesTransition}
+		return WorkflowEventPolicy{RequireEntity: drivesTransition}
 	}
 	requireVertical := drivesTransition
 	consume, visible := deriveWorkflowEventDelivery(entry)
 	return WorkflowEventPolicy{
 		Consume:           consume,
-		RequireVertical:   requireVertical,
+		RequireEntity:     requireVertical,
 		VisibleDownstream: visible,
 	}
 }

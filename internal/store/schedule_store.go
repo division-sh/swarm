@@ -33,7 +33,7 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 		    cancelled_at = now()
 		WHERE agent_id = $1
 		  AND event_type = $2
-		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
 	`, sc.AgentID, sc.EventType, sc.EntityID, strings.TrimSpace(sc.TaskID)); err != nil {
@@ -48,7 +48,7 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO schedules (
-			agent_id, vertical_id, event_type, mode, cron_expr,
+			agent_id, entity_id, event_type, mode, cron_expr,
 			at_time, next_fire_at, payload, active, created_at
 		)
 		VALUES (
@@ -94,7 +94,7 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 		    cancelled_at = now()
 		WHERE agent_id = $1
 		  AND event_type = $2
-		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
 	`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
@@ -112,7 +112,7 @@ func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipel
 			mode,
 			COALESCE(cron_expr, ''),
 			at_time,
-			COALESCE(vertical_id::text, ''),
+			COALESCE(entity_id::text, ''),
 			payload
 		FROM schedules
 		WHERE active = true
@@ -194,7 +194,7 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 			    next_fire_at = NULL
 			WHERE agent_id = $1
 			  AND event_type = $2
-			  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+			  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 			  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 			  AND active = true
 		`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
@@ -208,7 +208,7 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 		SET last_fired_at = now()
 		WHERE agent_id = $1
 		  AND event_type = $2
-		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
+		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
 	`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))

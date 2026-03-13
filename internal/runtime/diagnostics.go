@@ -96,7 +96,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 	_, err := l.db.ExecContext(withoutSQLTxContext(ctx), `
 		INSERT INTO runtime_log (
 			level, component, action,
-			event_id, event_type, agent_id, vertical_id, campaign_id, scan_id, session_id,
+			event_id, event_type, agent_id, entity_id, campaign_id, scan_id, session_id,
 			detail, error, duration_us
 		)
 		VALUES (

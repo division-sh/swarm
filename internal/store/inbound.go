@@ -23,9 +23,9 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 		return false, fmt.Errorf("provider is required")
 	}
 	const q = `
-		INSERT INTO inbound_events (provider_event_id, vertical_id, provider, received_at)
+		INSERT INTO inbound_events (provider_event_id, entity_id, provider, received_at)
 		VALUES ($1, $2::uuid, $3, now())
-		ON CONFLICT (provider_event_id, vertical_id) DO NOTHING
+		ON CONFLICT (provider_event_id, entity_id) DO NOTHING
 	`
 	res, err := s.DB.ExecContext(ctx, q, providerEventID, entityID, provider)
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before tim
 	}
 	const q = `
 		WITH doomed AS (
-			SELECT provider_event_id, vertical_id
+			SELECT provider_event_id, entity_id
 			FROM inbound_events
 			WHERE received_at < $1
 			ORDER BY received_at ASC
@@ -86,7 +86,7 @@ func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before tim
 		DELETE FROM inbound_events i
 		USING doomed d
 		WHERE i.provider_event_id = d.provider_event_id
-		  AND i.vertical_id = d.vertical_id
+		  AND i.entity_id = d.entity_id
 	`
 	res, err := s.DB.ExecContext(ctx, q, before, limit)
 	if err != nil {

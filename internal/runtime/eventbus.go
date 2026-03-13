@@ -83,12 +83,12 @@ func isValidEventTypeName(raw string) bool {
 	return runtimebus.IsValidEventTypeName(raw)
 }
 
-func filterOutVerticalScopedAgentIDs(in []string, verticalID string) []string {
-	verticalID = strings.TrimSpace(verticalID)
-	if len(in) == 0 || verticalID == "" {
+func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
+	entityID = strings.TrimSpace(entityID)
+	if len(in) == 0 || entityID == "" {
 		return in
 	}
-	suffix := "-" + verticalID
+	suffix := "-" + entityID
 	out := make([]string, 0, len(in))
 	for _, v := range in {
 		v = strings.TrimSpace(v)
@@ -104,7 +104,7 @@ type runtimeLoggerHook struct {
 	logger *RuntimeLogger
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level, component, action, eventID, eventType, agentID, verticalID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int) {
+func (h runtimeLoggerHook) Log(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int) {
 	if h.logger == nil {
 		return
 	}
@@ -115,7 +115,7 @@ func (h runtimeLoggerHook) Log(ctx context.Context, level, component, action, ev
 		EventID:    eventID,
 		EventType:  eventType,
 		AgentID:    agentID,
-		EntityID:   strings.TrimSpace(verticalID),
+		EntityID:   strings.TrimSpace(entityID),
 		CampaignID: campaignID,
 		ScanID:     scanID,
 		SessionID:  sessionID,

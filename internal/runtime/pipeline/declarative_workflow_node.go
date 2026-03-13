@@ -35,7 +35,7 @@ func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.E
 	if !ok {
 		return false, false
 	}
-	if policy.RequireVertical && workflowEventEntityID(evt) == "" {
+	if policy.RequireEntity && workflowEventEntityID(evt) == "" {
 		return false, false
 	}
 	return policy.Consume, true

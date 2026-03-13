@@ -88,7 +88,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 func buildFlowAgentConfig(
 	templateID string,
 	instanceID string,
-	verticalID string,
+	entityID string,
 	key string,
 	entry runtimecontracts.AgentRegistryEntry,
 	vars map[string]string,
@@ -139,7 +139,7 @@ func buildFlowAgentConfig(
 		Type:          strings.TrimSpace(entry.Type),
 		Role:          strings.TrimSpace(entry.Role),
 		Mode:          templateID,
-		EntityID:      verticalID,
+		EntityID:      entityID,
 		Subscriptions: rendered,
 		Config:        rawConfig,
 	}, nil

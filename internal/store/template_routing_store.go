@@ -151,7 +151,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 			    source = $6,
 			    bootstrap_version = $7,
 			    deactivated_at = now()
-			WHERE vertical_id = $1::uuid
+			WHERE entity_id = $1::uuid
 			  AND event_pattern = $2
 			  AND subscriber_id = $3
 			  AND status <> 'deactivated'
@@ -173,7 +173,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 		}
 		const insertDeactivatedQ = `
 			INSERT INTO routing_rules (
-				vertical_id, event_pattern, subscriber_id, installed_by, reason,
+				entity_id, event_pattern, subscriber_id, installed_by, reason,
 				status, source, bootstrap_version, deactivated_at, created_at
 			) VALUES (
 				$1::uuid, $2, $3, $4, NULLIF($5,''),
@@ -196,13 +196,13 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 
 	const q = `
 		INSERT INTO routing_rules (
-			vertical_id, event_pattern, subscriber_id, installed_by, reason,
+			entity_id, event_pattern, subscriber_id, installed_by, reason,
 			status, source, bootstrap_version, created_at
 		) VALUES (
 			$1::uuid, $2, $3, $4, NULLIF($5,''),
 			$6, $7, $8, now()
 		)
-		ON CONFLICT (vertical_id, event_pattern, subscriber_id) WHERE status = 'active' DO UPDATE SET
+		ON CONFLICT (entity_id, event_pattern, subscriber_id) WHERE status = 'active' DO UPDATE SET
 			installed_by = EXCLUDED.installed_by,
 			reason = EXCLUDED.reason,
 			status = EXCLUDED.status,
@@ -228,7 +228,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.PersistedRoutingRule, error) {
 	const q = `
 		SELECT
-			vertical_id::text, event_pattern, subscriber_id, installed_by,
+			entity_id::text, event_pattern, subscriber_id, installed_by,
 			COALESCE(reason, ''), status, source, COALESCE(bootstrap_version, 0)
 		FROM routing_rules
 		WHERE status IN ('active', 'proposed')
@@ -271,7 +271,7 @@ func (s *PostgresStore) DeactivateRoutingRulesByEntity(ctx context.Context, enti
 		UPDATE routing_rules
 		SET status = 'deactivated',
 		    deactivated_at = now()
-		WHERE vertical_id = $1::uuid
+		WHERE entity_id = $1::uuid
 		  AND status <> 'deactivated'
 	`
 	_, err := s.DB.ExecContext(ctx, q, entityID)

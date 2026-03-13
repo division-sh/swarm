@@ -64,7 +64,7 @@ services:
     ports:
       - "8070:8070"
 
-  # Per-vertical and privileged workspaces are created dynamically by runtime policy.
+  # Per-entity and privileged workspaces are created dynamically by runtime policy.
   # This image is the base for those dynamic containers.
   workspace-base:
     build:

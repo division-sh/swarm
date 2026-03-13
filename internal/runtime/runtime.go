@@ -423,7 +423,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 		return err
 	}
 	for _, instance := range instances {
-		verticalID := strings.TrimSpace(instance.InstanceID)
+		entityID := strings.TrimSpace(instance.InstanceID)
 		for _, timerState := range instance.TimerState {
 			if timerState.Cancelled {
 				continue
@@ -442,13 +442,13 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				continue
 			}
 			sc := runtimepipeline.Schedule{
-				AgentID:    owner,
-				EventType:  eventType,
-				Mode:       "once",
-				At:         timerState.FiresAt,
-				EntityID:   verticalID,
-				TaskID:     timerID,
-				Payload:    mustJSON(map[string]any{"timer_id": timerID, "trigger_reason": timerID}),
+				AgentID:   owner,
+				EventType: eventType,
+				Mode:      "once",
+				At:        timerState.FiresAt,
+				EntityID:  entityID,
+				TaskID:    timerID,
+				Payload:   mustJSON(map[string]any{"timer_id": timerID, "trigger_reason": timerID}),
 			}
 			if err := store.UpsertSchedule(ctx, sc); err != nil {
 				return err
