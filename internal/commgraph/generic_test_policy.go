@@ -32,8 +32,8 @@ func (genericTestPolicy) RoutingAuthorities() []RoutingAuthority {
 
 func (genericTestPolicy) ManagementAuthorities() []ManagementAuthority {
 	return []ManagementAuthority{
-		{ActorRole: "coordinator", AllowCrossVertical: true},
-		{ActorRole: "reviewer", AllowedTargetRoles: []string{"worker"}, AllowCrossVertical: false},
+		{ActorRole: "coordinator", AllowCrossEntity: true},
+		{ActorRole: "reviewer", AllowedTargetRoles: []string{"worker"}, AllowCrossEntity: false},
 	}
 }
 

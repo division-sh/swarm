@@ -34,7 +34,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 		Config: runtimeactors.AgentConfig{
 			ID:     "coordinator",
 			Role:   "coordinator",
-			Mode:   "holding",
+			Mode:   "global",
 			Type:   "worker",
 			Config: json.RawMessage(`{"system_prompt":"base prompt"}`),
 		},

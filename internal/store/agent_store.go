@@ -12,6 +12,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if rec.Config.ID == "" {
 		return fmt.Errorf("agent id is required")
 	}
+	rec.Config.NormalizeEntityID()
 	cfgJSON, err := mergeAgentConfigJSON(rec.Config)
 	if err != nil {
 		return fmt.Errorf("marshal agent config: %w", err)
@@ -52,7 +53,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 		nullable(rec.Config.Type, "generic"),
 		rec.Config.Role,
 		nullable(rec.Config.Mode, "factory"),
-		rec.Config.VerticalID,
+		rec.Config.EffectiveEntityID(),
 		nullable(rec.ParentAgentID, rec.Config.ParentAgent),
 		nullable(rec.Status, "active"),
 		rec.CoordinatorID,
@@ -100,7 +101,7 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 			&rec.Config.Type,
 			&rec.Config.Role,
 			&rec.Config.Mode,
-			&rec.Config.VerticalID,
+			&rec.Config.EntityID,
 			&rec.ParentAgentID,
 			&rec.Status,
 			&rec.CoordinatorID,
@@ -114,6 +115,7 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 		}
 
 		rec.Config.ParentAgent = rec.ParentAgentID
+		rec.Config.NormalizeEntityID()
 		rec.Config.Config = cfgRaw
 		rec.Config.Subscriptions = extractSubscriptions(cfgRaw)
 		out = append(out, rec)
@@ -190,9 +192,11 @@ func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string)
 	}
 	var slug string
 	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(slug, ''), '')
-		FROM verticals
-		WHERE id = $1::uuid
+		SELECT COALESCE(NULLIF(metadata->>'slug', ''), '')
+		FROM workflow_instances
+		WHERE instance_id = $1::uuid
+		ORDER BY created_at DESC, updated_at DESC
+		LIMIT 1
 	`, entityID).Scan(&slug); err != nil {
 		return fmt.Errorf("lookup entity slug: %w", err)
 	}
@@ -205,8 +209,4 @@ func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string)
 		return fmt.Errorf("create entity schema %s: %w", schema, err)
 	}
 	return nil
-}
-
-func (s *PostgresStore) EnsureVerticalSchema(ctx context.Context, verticalID string) error {
-	return s.EnsureEntitySchema(ctx, verticalID)
 }

@@ -140,7 +140,6 @@ func buildFlowAgentConfig(
 		Role:          strings.TrimSpace(entry.Role),
 		Mode:          templateID,
 		EntityID:      verticalID,
-		VerticalID:    verticalID,
 		Subscriptions: rendered,
 		Config:        rawConfig,
 	}, nil

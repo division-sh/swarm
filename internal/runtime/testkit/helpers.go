@@ -75,7 +75,7 @@ func SeedVertical(t testing.TB, ctx context.Context, db *sql.DB, slug, credsJSON
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
 		VALUES ($1::uuid, 'TestCo', $2, 'us', 'operating', 'operating', $3::jsonb, now(), now())
 	`, verticalID, slug, credsJSON); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 	return verticalID
 }

@@ -183,8 +183,8 @@ func validatorNormalizeRuntimeToolInput(name string, input any) any {
 			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
 				config["mode"] = mode
 			}
-			if verticalID := strings.TrimSpace(asString(payload["vertical_id"])); verticalID != "" {
-				config["vertical_id"] = verticalID
+			if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
+				config["entity_id"] = entityID
 			}
 			rawConfig := map[string]any{}
 			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
@@ -240,7 +240,9 @@ func validatorNormalizeRuntimeToolInput(name string, input any) any {
 			payload["context"] = payload["payload"]
 		}
 	case "human_task_request":
-		delete(payload, "vertical_id")
+		if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
+			payload["entity_id"] = entityID
+		}
 		if strings.TrimSpace(asString(payload["deadline"])) == "" &&
 			strings.TrimSpace(asString(payload["deadline_at"])) == "" &&
 			strings.TrimSpace(asString(payload["deadline_rfc3339"])) == "" {

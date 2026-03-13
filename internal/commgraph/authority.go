@@ -21,8 +21,8 @@ type RoutingAuthority struct {
 type ManagementAuthority struct {
 	ActorRole               string
 	AllowedTargetRoles      []string
-	AllowCrossVertical      bool
-	CrossVerticalDenyReason string
+	AllowCrossEntity        bool
+	CrossEntityDenyReason   string
 	TargetDenyReason        string
 }
 
@@ -101,19 +101,20 @@ func AuthorizeRouting(actor, target models.AgentConfig, status string) error {
 	return fmt.Errorf("role %s is not authorized to configure routing", actor.Role)
 }
 
-func AuthorizeManagement(actor models.AgentConfig, targetRole, targetVerticalID string) error {
+func AuthorizeManagement(actor models.AgentConfig, targetRole, targetEntityID string) error {
 	actorRole := canonicalRole(actor.Role)
 	targetRole = canonicalRole(targetRole)
-	targetVerticalID = strings.TrimSpace(targetVerticalID)
+	targetEntityID = strings.TrimSpace(targetEntityID)
+	actorEntityID := actor.EffectiveEntityID()
 	for _, rule := range ManagementAuthorities() {
 		if canonicalRole(rule.ActorRole) != actorRole {
 			continue
 		}
-		if !rule.AllowCrossVertical && actor.VerticalID != "" && targetVerticalID != "" && actor.VerticalID != targetVerticalID {
-			if strings.TrimSpace(rule.CrossVerticalDenyReason) != "" {
-				return errors.New(strings.TrimSpace(rule.CrossVerticalDenyReason))
+		if !rule.AllowCrossEntity && actorEntityID != "" && targetEntityID != "" && actorEntityID != targetEntityID {
+			if strings.TrimSpace(rule.CrossEntityDenyReason) != "" {
+				return errors.New(strings.TrimSpace(rule.CrossEntityDenyReason))
 			}
-			return errors.New("cross-vertical management is not allowed")
+			return errors.New("cross-entity management is not allowed")
 		}
 		if len(rule.AllowedTargetRoles) > 0 && !containsCanonical(rule.AllowedTargetRoles, targetRole) {
 			if strings.TrimSpace(rule.TargetDenyReason) != "" {
@@ -177,8 +178,8 @@ func cloneManagementAuthorities(in []ManagementAuthority) []ManagementAuthority 
 		out[i] = ManagementAuthority{
 			ActorRole:               rule.ActorRole,
 			AllowedTargetRoles:      append([]string(nil), rule.AllowedTargetRoles...),
-			AllowCrossVertical:      rule.AllowCrossVertical,
-			CrossVerticalDenyReason: rule.CrossVerticalDenyReason,
+			AllowCrossEntity:        rule.AllowCrossEntity,
+			CrossEntityDenyReason:   rule.CrossEntityDenyReason,
 			TargetDenyReason:        rule.TargetDenyReason,
 		}
 	}
@@ -204,12 +205,14 @@ func messageScopeAllowed(actor, target models.AgentConfig, scope string) bool {
 	switch scope {
 	case "", "any":
 		return true
-	case "holding":
-		return strings.TrimSpace(actor.VerticalID) == "" && strings.TrimSpace(target.VerticalID) == ""
-	case "opco":
-		actorVertical := strings.TrimSpace(actor.VerticalID)
-		targetVertical := strings.TrimSpace(target.VerticalID)
-		return actorVertical != "" && actorVertical == targetVertical
+	case "global":
+		return actor.EffectiveEntityID() == "" && target.EffectiveEntityID() == ""
+	case "entity":
+		actorEntityID := actor.EffectiveEntityID()
+		targetEntityID := target.EffectiveEntityID()
+		return actorEntityID != "" && actorEntityID == targetEntityID
+	case "local":
+		return actor.EffectiveEntityID() == target.EffectiveEntityID()
 	default:
 		return false
 	}

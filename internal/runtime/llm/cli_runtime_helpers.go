@@ -315,10 +315,10 @@ func shouldIncludePartialMessages(cfg *config.Config) bool {
 
 func permissionModeArgs() []string {
 	args := make([]string, 0, 3)
-	if mode := strings.TrimSpace(os.Getenv("EMPIREAI_CLAUDE_PERMISSION_MODE")); mode != "" {
+	if mode := strings.TrimSpace(os.Getenv("MAS_CLAUDE_PERMISSION_MODE")); mode != "" {
 		args = append(args, "--permission-mode", mode)
 	}
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("EMPIREAI_CLAUDE_BYPASS_PERMISSIONS")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_CLAUDE_BYPASS_PERMISSIONS")))
 	if v == "1" || v == "true" || v == "yes" {
 		args = append(args, "--dangerously-skip-permissions")
 	}

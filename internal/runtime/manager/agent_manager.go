@@ -19,7 +19,7 @@ import (
 )
 
 type OpCOTeardownCompletePayload struct {
-	VerticalID       string `json:"vertical_id"`
+	EntityID         string `json:"entity_id"`
 	AgentsRemoved    int    `json:"agents_removed"`
 	RoutingCleared   bool   `json:"routing_cleared"`
 	WorkspaceStopped bool   `json:"workspace_stopped"`
@@ -214,14 +214,14 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	runCtx := am.runCtx
 	am.runMu.Unlock()
 	if persist {
-		entityID := FirstNonEmptyString(rec.Config.EntityID, rec.Config.VerticalID)
+		entityID := rec.Config.EffectiveEntityID()
 		payload := mustJSON(map[string]any{
 			"agent_id":    rec.Config.ID,
 			"agent_type":  rec.Config.Type,
 			"role":        rec.Config.Role,
 			"mode":        rec.Config.Mode,
 			"entity_id":   entityID,
-			"vertical_id": rec.Config.VerticalID,
+			"vertical_id": entityID,
 			"hired_by":    rec.HiredBy,
 		})
 		if err := am.bus.Publish(am.runtimeContext(), (events.Event{

@@ -118,7 +118,7 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		"agent_id":    agentID,
 		"event_id":    strings.TrimSpace(evt.ID),
 		"event_type":  strings.TrimSpace(string(evt.Type)),
-		"vertical_id": strings.TrimSpace(evt.EntityID()),
+		"entity_id":   strings.TrimSpace(evt.EntityID()),
 		"panic_count": count,
 		"error":       strings.TrimSpace(panicText),
 	}
@@ -167,9 +167,6 @@ func normalizedManagerFallback(cfg runtimeactors.AgentConfig, managerID string) 
 	managerID = strings.TrimSpace(managerID)
 	if managerID == "" {
 		return ""
-	}
-	if strings.TrimSpace(cfg.Mode) == "operating" && strings.TrimSpace(cfg.VerticalID) != "" && strings.HasPrefix(managerID, "opco-") && !strings.Contains(managerID, "/") {
-		return opCoAgentID(managerID, cfg.VerticalID)
 	}
 	return managerID
 }
@@ -438,11 +435,11 @@ func (am *AgentManager) ResetRuntimeState() error {
 		am.bus.ResetInMemoryState()
 	}
 
-	verticals := map[string]struct{}{}
+	entities := map[string]struct{}{}
 	am.mu.Lock()
 	for _, cfg := range am.agentCfg {
-		if strings.TrimSpace(cfg.VerticalID) != "" {
-			verticals[cfg.VerticalID] = struct{}{}
+		if entityID := cfg.EffectiveEntityID(); entityID != "" {
+			entities[entityID] = struct{}{}
 		}
 	}
 	am.agents = make(map[string]Agent)
@@ -454,9 +451,9 @@ func (am *AgentManager) ResetRuntimeState() error {
 	am.poisonPanicCounts = make(map[string]int)
 	am.poisonMu.Unlock()
 
-	for verticalID := range verticals {
+	for entityID := range entities {
 		if am.workspaces != nil {
-			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), verticalID)
+			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), entityID)
 		}
 	}
 	return nil
@@ -557,28 +554,27 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	}
 	log.Printf("agent loop panic: agent=%s count=%d err=%s", agent.ID(), consecutivePanics, panicText)
 
-	verticalID := ""
+	entityID := ""
 	am.mu.RLock()
 	cfg, ok := am.agentCfg[agent.ID()]
 	am.mu.RUnlock()
 	if ok {
-		verticalID = FirstNonEmptyString(strings.TrimSpace(cfg.EntityID), strings.TrimSpace(cfg.VerticalID))
+		entityID = cfg.EffectiveEntityID()
 	}
 
 	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
-		Payload: mustJSON(map[string]any{
-			"agent_id":           agent.ID(),
-			"entity_id":          verticalID,
-			"vertical_id":        verticalID,
-			"consecutive_panics": consecutivePanics,
-			"error":              panicText,
+			Payload: mustJSON(map[string]any{
+				"agent_id":           agent.ID(),
+				"entity_id":          entityID,
+				"consecutive_panics": consecutivePanics,
+				"error":              panicText,
 			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
 		}),
 		CreatedAt: time.Now(),
-	}).WithEntityID(verticalID)); err != nil {
+	}).WithEntityID(entityID)); err != nil {
 		RuntimeWarn("agent-manager", "ops.agent_panic publish failed agent=%s err=%v", agent.ID(), err)
 	}
 
@@ -610,14 +606,13 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			Payload: mustJSON(map[string]any{
 				"agent_id":           agent.ID(),
 				"manager_id":         managerID,
-				"entity_id":          verticalID,
-				"vertical_id":        verticalID,
+				"entity_id":          entityID,
 				"consecutive_panics": consecutivePanics,
 				"error":              panicText,
 				"instruction":        "Agent loop failed after repeated panics. Decide: reconfigure, restart, or replace agent.",
 			}),
 			CreatedAt: time.Now(),
-		}).WithEntityID(verticalID), []string{managerID}); err != nil {
+		}).WithEntityID(entityID), []string{managerID}); err != nil {
 			RuntimeWarn("agent-manager", "ops.agent_failed publish failed agent=%s manager=%s err=%v", agent.ID(), managerID, err)
 		}
 	}

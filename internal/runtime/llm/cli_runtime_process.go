@@ -206,7 +206,7 @@ func (r *ClaudeCLIRuntime) effectiveCLITimeout(ctx context.Context) time.Duratio
 		}
 	}
 	// Explicit env override wins (operator emergency control).
-	if raw := strings.TrimSpace(os.Getenv("EMPIREAI_CLAUDE_TIMEOUT_SECONDS")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("MAS_CLAUDE_TIMEOUT_SECONDS")); raw != "" {
 		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
 			timeout = time.Duration(seconds) * time.Second
 		}
@@ -245,20 +245,20 @@ func summarizeCLIErrorOutput(raw string) string {
 
 func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, target *workspace.Target) *exec.Cmd {
 	if target != nil && target.Enabled() {
-		dockerBin := strings.TrimSpace(os.Getenv("EMPIREAI_DOCKER_BIN"))
+		dockerBin := strings.TrimSpace(os.Getenv("MAS_DOCKER_BIN"))
 		if dockerBin == "" {
 			dockerBin = "docker"
 		}
 		dockerArgs := []string{"exec", "-i"}
-		gatewayURL := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_URL"))
+		gatewayURL := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_URL"))
 		if gatewayURL == "" {
 			gatewayURL = "http://orchestrator:8090"
 		}
 		if gatewayURL != "" {
-			dockerArgs = append(dockerArgs, "-e", "EMPIREAI_TOOL_GATEWAY_URL="+gatewayURL)
+			dockerArgs = append(dockerArgs, "-e", "MAS_TOOL_GATEWAY_URL="+gatewayURL)
 		}
-		if gatewayToken := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")); gatewayToken != "" {
-			dockerArgs = append(dockerArgs, "-e", "EMPIREAI_TOOL_GATEWAY_TOKEN="+gatewayToken)
+		if gatewayToken := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_TOKEN")); gatewayToken != "" {
+			dockerArgs = append(dockerArgs, "-e", "MAS_TOOL_GATEWAY_TOKEN="+gatewayToken)
 		}
 		if oauthToken := strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")); oauthToken != "" {
 			dockerArgs = append(dockerArgs, "-e", "CLAUDE_CODE_OAUTH_TOKEN="+oauthToken)

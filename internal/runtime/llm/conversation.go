@@ -57,7 +57,7 @@ func ConversationModeString(mode ConversationMode) string {
 	case TaskScoped:
 		return "task"
 	case SessionPerVerticalScoped:
-		return "session_per_vertical"
+		return "session_per_entity"
 	default:
 		return "session"
 	}

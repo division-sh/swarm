@@ -53,7 +53,7 @@ func (e *Executor) execInstagramHandleCheck(ctx context.Context, actor models.Ag
 }
 
 func (e *Executor) execEmailAPI(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	creds, err := e.loadVerticalCredentials(ctx, actor.VerticalID)
+	creds, err := e.loadVerticalCredentials(ctx, actor.EffectiveEntityID())
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (e *Executor) execEmailAPI(ctx context.Context, actor models.AgentConfig, i
 }
 
 func (e *Executor) execExternalProxy(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
-	creds, err := e.loadExternalCredentials(ctx, actor.VerticalID, toolName)
+	creds, err := e.loadExternalCredentials(ctx, actor.EffectiveEntityID(), toolName)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +228,7 @@ func (e *Executor) loadVerticalCredentials(ctx context.Context, verticalID strin
 		return nil, errors.New("sql db is not configured")
 	}
 	if strings.TrimSpace(verticalID) == "" {
-		return nil, errors.New("vertical_id is required for credentialed tool")
+		return nil, errors.New("entity_id is required for credentialed tool")
 	}
 	var raw []byte
 	if err := db.QueryRowContext(ctx, `
@@ -294,7 +294,7 @@ func (e *Executor) decryptCredentialValue(ctx context.Context, v any) any {
 		if !strings.HasPrefix(t, prefix) {
 			return t
 		}
-		key := strings.TrimSpace(os.Getenv("EMPIREAI_CREDENTIALS_KEY"))
+		key := strings.TrimSpace(os.Getenv("MAS_CREDENTIALS_KEY"))
 		if key == "" {
 			return t
 		}

@@ -78,18 +78,14 @@ func (s *PostgresStore) SetEntityTemplateVersion(ctx context.Context, entityID, 
 		return fmt.Errorf("template version is required")
 	}
 	if _, err := s.DB.ExecContext(ctx, `
-		UPDATE verticals
-		SET template_version = $2,
+		UPDATE workflow_instances
+		SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('template_version', $2::text),
 		    updated_at = now()
-		WHERE id = $1::uuid
+		WHERE instance_id = $1::uuid
 	`, entityID, version); err != nil {
 		return fmt.Errorf("set entity template_version: %w", err)
 	}
 	return nil
-}
-
-func (s *PostgresStore) SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error {
-	return s.SetEntityTemplateVersion(ctx, verticalID, version)
 }
 
 func (s *PostgresStore) ResolveBootstrapVersion(ctx context.Context, templateVersion string) (int, error) {
@@ -133,9 +129,11 @@ func (s *PostgresStore) ResolveBootstrapVersion(ctx context.Context, templateVer
 }
 
 func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanager.PersistedRoutingRule) error {
-	if rule.VerticalID == "" || rule.EventPattern == "" || rule.SubscriberID == "" || rule.InstalledBy == "" {
-		return fmt.Errorf("vertical_id, event_pattern, subscriber_id, and installed_by are required")
+	entityID := rule.EffectiveEntityID()
+	if entityID == "" || rule.EventPattern == "" || rule.SubscriberID == "" || rule.InstalledBy == "" {
+		return fmt.Errorf("entity_id, event_pattern, subscriber_id, and installed_by are required")
 	}
+	rule.EntityID = entityID
 	status := nullable(rule.Status, "active")
 	source := nullable(rule.Source, "bootstrap")
 
@@ -159,7 +157,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 			  AND status <> 'deactivated'
 		`
 		res, err := s.DB.ExecContext(ctx, deactivateQ,
-			rule.VerticalID,
+			rule.EntityID,
 			rule.EventPattern,
 			rule.SubscriberID,
 			rule.InstalledBy,
@@ -183,7 +181,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 			)
 		`
 		if _, err := s.DB.ExecContext(ctx, insertDeactivatedQ,
-			rule.VerticalID,
+			rule.EntityID,
 			rule.EventPattern,
 			rule.SubscriberID,
 			rule.InstalledBy,
@@ -213,7 +211,7 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanag
 			deactivated_at = NULL
 	`
 	if _, err := s.DB.ExecContext(ctx, q,
-		rule.VerticalID,
+		rule.EntityID,
 		rule.EventPattern,
 		rule.SubscriberID,
 		rule.InstalledBy,
@@ -246,7 +244,7 @@ func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.
 	for rows.Next() {
 		var r runtimemanager.PersistedRoutingRule
 		if err := rows.Scan(
-			&r.VerticalID,
+			&r.EntityID,
 			&r.EventPattern,
 			&r.SubscriberID,
 			&r.InstalledBy,
@@ -265,9 +263,9 @@ func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]runtimemanager.
 	return out, nil
 }
 
-func (s *PostgresStore) DeactivateRoutingRulesByVertical(ctx context.Context, verticalID string) error {
-	if strings.TrimSpace(verticalID) == "" {
-		return fmt.Errorf("vertical_id is required")
+func (s *PostgresStore) DeactivateRoutingRulesByEntity(ctx context.Context, entityID string) error {
+	if strings.TrimSpace(entityID) == "" {
+		return fmt.Errorf("entity_id is required")
 	}
 	const q = `
 		UPDATE routing_rules
@@ -276,9 +274,9 @@ func (s *PostgresStore) DeactivateRoutingRulesByVertical(ctx context.Context, ve
 		WHERE vertical_id = $1::uuid
 		  AND status <> 'deactivated'
 	`
-	_, err := s.DB.ExecContext(ctx, q, verticalID)
+	_, err := s.DB.ExecContext(ctx, q, entityID)
 	if err != nil {
-		return fmt.Errorf("deactivate routing rules by vertical: %w", err)
+		return fmt.Errorf("deactivate routing rules by entity: %w", err)
 	}
 	return nil
 }

@@ -326,7 +326,6 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		"agent_id":     agentID,
 		"manager_id":   managerID,
 		"entity_id":    verticalID,
-		"vertical_id":  verticalID,
 		"retry_count":  receipt.RetryCount,
 		"error":        strings.TrimSpace(receipt.Error),
 		"instruction":  "Event delivery dead-lettered after 3 retries. Decide: retry (requeue), skip, or escalate.",
@@ -354,9 +353,6 @@ func (am *AgentManager) resolveManagerAgentID(agentID string) string {
 		}
 		if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
 			return managerID
-		}
-		if strings.TrimSpace(cfg.Mode) == "operating" && strings.TrimSpace(cfg.VerticalID) != "" && strings.TrimSpace(cfg.Role) != "opco-ceo" {
-			return opCoAgentID("opco-ceo", cfg.VerticalID)
 		}
 	}
 	return am.defaultManagerAgentID(cfg)

@@ -113,7 +113,7 @@ func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 		return llm.TaskScoped, true
 	case "session", "session_scoped", "session-scoped":
 		return llm.SessionScoped, true
-	case "session_per_vertical", "session-per-vertical", "session_per_scope":
+	case "session_per_entity", "session-per-entity", "session_per_scope":
 		return llm.SessionPerVerticalScoped, true
 	default:
 		return llm.TaskScoped, false

@@ -13,7 +13,6 @@ func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	pc := NewFactoryPipelineCoordinatorWithOptions(bus, nil, FactoryPipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
-	pc.validationGate.states["ent-1"] = &validationPipelineState{}
 
 	engine := newCoordinatorHandlerExecutionEngine(pc, "node-a")
 	if engine == nil {

@@ -20,16 +20,33 @@ import (
 )
 
 type InboundPersistence interface {
-	RecordInboundEvent(ctx context.Context, providerEventID, verticalID, provider string) (bool, error)
-	ResolveInboundTarget(ctx context.Context, verticalKey, provider string) (InboundTarget, error)
+	RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error)
+	ResolveInboundTarget(ctx context.Context, entityKey, provider string) (InboundTarget, error)
 	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
 type InboundTarget struct {
 	EntityID      string
-	VerticalID    string
-	VerticalSlug  string
+	EntitySlug    string
 	WebhookSecret string
+}
+
+func (t InboundTarget) EffectiveEntityID() string {
+	return firstNonEmpty(t.EntityID)
+}
+
+func (t InboundTarget) EffectiveEntitySlug() string {
+	return firstNonEmpty(t.EntitySlug)
+}
+
+func (t *InboundTarget) NormalizeEntity() {
+	if t == nil {
+		return
+	}
+	entityID := t.EffectiveEntityID()
+	entitySlug := t.EffectiveEntitySlug()
+	t.EntityID = entityID
+	t.EntitySlug = entitySlug
 }
 
 type InboundGateway struct {
@@ -65,9 +82,9 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	verticalKey, provider, ok := parseWebhookPath(r.URL.Path)
+	entityKey, provider, ok := parseWebhookPath(r.URL.Path)
 	if !ok {
-		http.Error(w, "expected /webhooks/{vertical}/{provider}", http.StatusBadRequest)
+		http.Error(w, "expected /webhooks/{entity}/{provider}", http.StatusBadRequest)
 		return
 	}
 
@@ -81,18 +98,18 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := InboundTarget{
-		EntityID:     verticalKey,
-		VerticalID:   verticalKey,
-		VerticalSlug: verticalKey,
+		EntityID:     entityKey,
+		EntitySlug:   entityKey,
 	}
 	if g.store != nil {
-		resolved, err := g.store.ResolveInboundTarget(r.Context(), verticalKey, provider)
+		resolved, err := g.store.ResolveInboundTarget(r.Context(), entityKey, provider)
 		if err != nil {
-			http.Error(w, "unknown vertical", http.StatusNotFound)
+			http.Error(w, "unknown entity", http.StatusNotFound)
 			return
 		}
 		target = resolved
 	}
+	target.NormalizeEntity()
 	if !verifyProviderSignature(provider, target.WebhookSecret, body, r.Header) {
 		http.Error(w, "invalid signature", http.StatusUnauthorized)
 		return
@@ -102,10 +119,8 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		payload = map[string]any{"raw": string(body)}
 	}
-	entityID := strings.TrimSpace(target.EntityID)
-	if entityID == "" {
-		entityID = strings.TrimSpace(target.VerticalID)
-	}
+	entityID := target.EffectiveEntityID()
+	entitySlug := target.EffectiveEntitySlug()
 	providerEventID := firstNonEmpty(
 		r.Header.Get("X-Provider-Event-ID"),
 		r.Header.Get("X-Request-ID"),
@@ -146,25 +161,25 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":            "accepted",
-		"vertical_id":       entityID,
-		"vertical_slug":     target.VerticalSlug,
+		"entity_id":         entityID,
+		"entity_slug":       entitySlug,
 		"provider":          provider,
 		"provider_event_id": providerEventID,
 	})
 }
 
-func parseWebhookPath(path string) (verticalID, provider string, ok bool) {
+func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 	p := strings.Trim(path, "/")
 	parts := strings.Split(p, "/")
 	if len(parts) != 3 || parts[0] != "webhooks" {
 		return "", "", false
 	}
-	verticalID = strings.TrimSpace(parts[1])
+	entityID = strings.TrimSpace(parts[1])
 	provider = strings.TrimSpace(parts[2])
-	if verticalID == "" || provider == "" {
+	if entityID == "" || provider == "" {
 		return "", "", false
 	}
-	return verticalID, provider, true
+	return entityID, provider, true
 }
 
 func extractProviderEventID(payload any) string {
@@ -180,9 +195,9 @@ func extractProviderEventID(payload any) string {
 	return ""
 }
 
-func fingerprintInbound(verticalID, provider string, body []byte) string {
+func fingerprintInbound(entityID, provider string, body []byte) string {
 	h := sha1.New()
-	_, _ = h.Write([]byte(verticalID))
+	_, _ = h.Write([]byte(entityID))
 	_, _ = h.Write([]byte("|"))
 	_, _ = h.Write([]byte(provider))
 	_, _ = h.Write([]byte("|"))
@@ -199,12 +214,12 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func buildInboundPublishPayload(provider, verticalID, providerEventID string, rawPayload any, now time.Time) (events.EventType, map[string]any) {
+func buildInboundPublishPayload(provider, entityID, providerEventID string, rawPayload any, now time.Time) (events.EventType, map[string]any) {
 	obj, _ := rawPayload.(map[string]any)
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "whatsapp":
 		return events.EventType("inbound.whatsapp_message"), map[string]any{
-			"vertical_id":       strings.TrimSpace(verticalID),
+			"entity_id":         strings.TrimSpace(entityID),
 			"from":              firstStringByKeys(obj, "from", "sender", "wa_id", "phone", "contact"),
 			"message":           firstStringByKeys(obj, "message", "text", "body"),
 			"timestamp":         firstNonEmpty(firstStringByKeys(obj, "timestamp", "time"), now.Format(time.RFC3339)),
@@ -216,7 +231,7 @@ func buildInboundPublishPayload(provider, verticalID, providerEventID string, ra
 		}
 	case "email":
 		return events.EventType("inbound.email"), map[string]any{
-			"vertical_id":       strings.TrimSpace(verticalID),
+			"entity_id":         strings.TrimSpace(entityID),
 			"from":              firstStringByKeys(obj, "from", "sender", "email"),
 			"subject":           firstStringByKeys(obj, "subject"),
 			"body":              firstStringByKeys(obj, "body", "text", "message"),
@@ -228,7 +243,7 @@ func buildInboundPublishPayload(provider, verticalID, providerEventID string, ra
 		}
 	default:
 		return events.EventType("inbound." + normalizeEventToken(provider)), map[string]any{
-			"vertical_id":       strings.TrimSpace(verticalID),
+			"entity_id":         strings.TrimSpace(entityID),
 			"provider":          strings.TrimSpace(provider),
 			"event_type":        resolveProviderEventType(provider, rawPayload),
 			"provider_event_id": strings.TrimSpace(providerEventID),

@@ -19,7 +19,8 @@ const (
 	mcpActorIDHeader      = "X-Empire-Agent-Id"
 	mcpActorRoleHeader    = "X-Empire-Agent-Role"
 	mcpActorModeHeader    = "X-Empire-Agent-Mode"
-	mcpEntityIDHeader     = "X-Empire-Vertical-Id"
+	mcpEntityIDHeader     = "X-MAS-Entity-Id"
+	mcpLegacyEntityIDHeader = "X-Empire-Vertical-Id"
 	mcpAllowedToolsHeader = "X-Empire-Allowed-Tools"
 	mcpContextTokenHeader = "X-Empire-Context-Token"
 	mcpTraceIDHeader      = "X-Empire-Trace-Id"
@@ -27,7 +28,8 @@ const (
 	mcpActorIDQuery      = "empire_agent_id"
 	mcpActorRoleQuery    = "empire_agent_role"
 	mcpActorModeQuery    = "empire_agent_mode"
-	mcpEntityIDQuery     = "empire_vertical_id"
+	mcpEntityIDQuery     = "entity_id"
+	mcpLegacyEntityIDQuery = "empire_vertical_id"
 	mcpAllowedToolsQuery = "empire_allowed_tools"
 	mcpContextTokenQuery = "empire_ctx_token"
 	mcpTraceIDQuery      = "empire_trace_id"
@@ -60,7 +62,7 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 		return "", "", false, nil
 	}
 
-	gatewayURL := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_URL"))
+	gatewayURL := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_URL"))
 	if gatewayURL == "" {
 		gatewayURL = "http://orchestrator:8090"
 	}
@@ -70,13 +72,14 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	}
 	allowedTools := toolNamesCSV(s.Tools)
 	headers := map[string]string{
-		mcpActorIDHeader:      strings.TrimSpace(actor.ID),
-		mcpActorRoleHeader:    strings.TrimSpace(actor.Role),
-		mcpActorModeHeader:    strings.TrimSpace(actor.Mode),
-		mcpEntityIDHeader:     strings.TrimSpace(actor.VerticalID),
-		mcpAllowedToolsHeader: allowedTools,
+		mcpActorIDHeader:        strings.TrimSpace(actor.ID),
+		mcpActorRoleHeader:      strings.TrimSpace(actor.Role),
+		mcpActorModeHeader:      strings.TrimSpace(actor.Mode),
+		mcpEntityIDHeader:       strings.TrimSpace(actor.EffectiveEntityID()),
+		mcpLegacyEntityIDHeader: strings.TrimSpace(actor.EffectiveEntityID()),
+		mcpAllowedToolsHeader:   allowedTools,
 	}
-	if token := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")); token != "" {
+	if token := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
 	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
@@ -128,7 +131,7 @@ func (r *ClaudeCLIRuntime) mcpContextTokenTTL(ctx context.Context) time.Duration
 }
 
 func shouldUseMCPBridge() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("EMPIREAI_CLAUDE_USE_MCP")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_CLAUDE_USE_MCP")))
 	return v == "1" || v == "true" || v == "yes"
 }
 
@@ -174,8 +177,9 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	if v := strings.TrimSpace(actor.Mode); v != "" {
 		q.Set(mcpActorModeQuery, v)
 	}
-	if v := strings.TrimSpace(actor.VerticalID); v != "" {
+	if v := strings.TrimSpace(actor.EffectiveEntityID()); v != "" {
 		q.Set(mcpEntityIDQuery, v)
+		q.Set(mcpLegacyEntityIDQuery, v)
 	}
 	if v := strings.TrimSpace(allowedTools); v != "" {
 		q.Set(mcpAllowedToolsQuery, v)

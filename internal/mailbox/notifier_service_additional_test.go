@@ -19,7 +19,7 @@ type notifierStub2 struct {
 func (n notifierStub2) NotifyCritical(context.Context, runtimetools.MailboxItem) error { return n.err }
 
 func TestNotify_Multi_Webhook_Telegram_Email(t *testing.T) {
-	item := runtimetools.MailboxItem{ID: "m1", Type: "spend_request", VerticalID: "v", Summary: "x", TimeoutAt: time.Now()}
+	item := runtimetools.MailboxItem{ID: "m1", Type: "spend_request", EntityID: "v", Summary: "x", TimeoutAt: time.Now()}
 	ctx := context.Background()
 
 	if NewMultiCriticalNotifier(nil) != nil {
@@ -227,7 +227,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 		Priority:   "critical",
 		Status:     "pending",
 		FromAgent:  "a",
-		VerticalID: "v",
+		EntityID:   "v",
 		Summary:    strings.Repeat("x", 200),
 		TimeoutAt:  time.Now().Add(10 * time.Minute),
 	})
@@ -262,7 +262,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 		Priority:   "normal",
 		Status:     "pending",
 		FromAgent:  "a2",
-		VerticalID: "v2",
+		EntityID:   "v2",
 		Summary:    "hello",
 	})
 	buf.Reset()

@@ -50,31 +50,31 @@ func TestParseAndResolveHelpers(t *testing.T) {
 		if got := parseEventTypeExpr(parseExpr(t, `events.EventType("scan.requested")`)); got != "scan.requested" {
 			t.Fatalf("event type call parse failed: %q", got)
 		}
-		if got := parseEventTypeExpr(parseExpr(t, `"vertical.shortlisted"`)); got != "vertical.shortlisted" {
+		if got := parseEventTypeExpr(parseExpr(t, `"entity.shortlisted"`)); got != "entity.shortlisted" {
 			t.Fatalf("event type literal parse failed: %q", got)
 		}
 	})
 
 	t.Run("parseMapCompositeLiteral", func(t *testing.T) {
-		fs := parseMapCompositeLiteral(parseExpr(t, `map[string]any{"vertical_id":"v","geography":"us"}`).(*ast.CompositeLit))
+		fs := parseMapCompositeLiteral(parseExpr(t, `map[string]any{"entity_id":"v","geography":"us"}`).(*ast.CompositeLit))
 		if fs.dynamic {
 			t.Fatal("expected map literal to be static")
 		}
-		if _, ok := fs.guaranteed["vertical_id"]; !ok {
+		if _, ok := fs.guaranteed["entity_id"]; !ok {
 			t.Fatalf("missing expected key: %+v", fs.guaranteed)
 		}
-		structFS := parseMapCompositeLiteral(parseExpr(t, `OpCOTeardownCompletePayload{VerticalID:"v1",Priority:"normal"}`).(*ast.CompositeLit))
+		structFS := parseMapCompositeLiteral(parseExpr(t, `EntityTeardownCompletePayload{EntityID:"v1",Priority:"normal"}`).(*ast.CompositeLit))
 		if structFS.dynamic {
 			t.Fatalf("expected typed struct literal to be static: %+v", structFS)
 		}
-		if _, ok := structFS.guaranteed["vertical_id"]; !ok {
+		if _, ok := structFS.guaranteed["entity_id"]; !ok {
 			t.Fatalf("expected snake-case field from struct literal: %+v", structFS.guaranteed)
 		}
 	})
 
 	t.Run("resolveFieldSet", func(t *testing.T) {
 		vars := map[string]fieldSet{
-			"payload": newFieldSet(false, "vertical_id", "geography"),
+			"payload": newFieldSet(false, "entity_id", "geography"),
 		}
 		fromVar := resolveFieldSet(parseExpr(t, "payload"), vars)
 		if fromVar.dynamic || len(fromVar.guaranteed) != 2 {
@@ -88,7 +88,7 @@ func TestParseAndResolveHelpers(t *testing.T) {
 			t.Fatalf("missing mustJSON key: %+v", fromMustJSON.guaranteed)
 		}
 		typed := resolveFieldSet(parseExpr(t, "pc.buildValidationStartedPayload(\"v\", nil, nil)"), vars)
-		if _, ok := typed.guaranteed["vertical_name"]; !ok {
+		if _, ok := typed.guaranteed["entity_name"]; !ok {
 			t.Fatalf("expected typed constructor fields: %+v", typed.guaranteed)
 		}
 		typedScan := resolveFieldSet(parseExpr(t, "pc.buildScanAssignedPayload(\"s\", \"c\", \"saas_gap\", \"argentina\", nil, 0)"), vars)
@@ -113,8 +113,8 @@ func TestParseAndResolveHelpers(t *testing.T) {
 }
 
 func TestContractAndPromptMatchingHelpers(t *testing.T) {
-	siteA := emitSite{eventType: "validation.started", file: "a.go", line: 10, fields: newFieldSet(false, "vertical_id", "geography")}
-	siteB := emitSite{eventType: "validation.started", file: "b.go", line: 12, fields: newFieldSet(false, "vertical_id", "scoring")}
+	siteA := emitSite{eventType: "validation.started", file: "a.go", line: 10, fields: newFieldSet(false, "entity_id", "geography")}
+	siteB := emitSite{eventType: "validation.started", file: "b.go", line: 12, fields: newFieldSet(false, "entity_id", "scoring")}
 	siteC := emitSite{eventType: "scan.requested", file: "c.go", line: 20, fields: newFieldSet(true, "scan_id")}
 
 	contracts := buildContracts([]emitSite{siteA, siteB, siteC})
@@ -122,8 +122,8 @@ func TestContractAndPromptMatchingHelpers(t *testing.T) {
 	if v == nil {
 		t.Fatal("expected validation.started contract")
 	}
-	// guaranteed intersection across sites => vertical_id only.
-	if _, ok := v.guaranteed["vertical_id"]; !ok || len(v.guaranteed) != 1 {
+	// guaranteed intersection across sites => entity_id only.
+	if _, ok := v.guaranteed["entity_id"]; !ok || len(v.guaranteed) != 1 {
 		t.Fatalf("unexpected guaranteed intersection: %+v", v.guaranteed)
 	}
 	if _, ok := v.union["geography"]; !ok {
@@ -135,7 +135,7 @@ func TestContractAndPromptMatchingHelpers(t *testing.T) {
 
 	prompt := strings.Join([]string{
 		"validation.started:",
-		"- payload contains vertical_id and geography",
+		"- payload contains entity_id and geography",
 		"scan.requested:",
 		"- read scan_id and mode from payload",
 	}, "\n")
@@ -143,26 +143,26 @@ func TestContractAndPromptMatchingHelpers(t *testing.T) {
 	if len(sections) != 1 {
 		t.Fatalf("expected one matching section, got %d", len(sections))
 	}
-	expected := expectedFieldsForEvent(prompt, "validation.started", []string{"vertical_id", "geography", "scoring"})
-	if len(expected) == 0 || expected[0] != "geography" && expected[0] != "vertical_id" {
+	expected := expectedFieldsForEvent(prompt, "validation.started", []string{"entity_id", "geography", "scoring"})
+	if len(expected) == 0 || expected[0] != "geography" && expected[0] != "entity_id" {
 		t.Fatalf("expected fields extraction failed: %+v", expected)
 	}
 	if !isEventHeaderLine("validation.started:") || isEventHeaderLine("not an event header") {
 		t.Fatal("event header detection mismatch")
 	}
-	if !isInputHintLine("payload contains vertical_id") || isInputHintLine("just text") {
+	if !isInputHintLine("payload contains entity_id") || isInputHintLine("just text") {
 		t.Fatal("input hint detection mismatch")
 	}
 	if isInputHintLine("call emit_spec_requested with payload") {
 		t.Fatal("action lines mentioning payload should not be treated as input hints")
 	}
-	if !mentionsField("read vertical id", "vertical_id") {
+	if !mentionsField("read entity id", "entity_id") {
 		t.Fatal("field alias detection failed")
 	}
 	if !containsWord("scan_id available", "scan_id") {
 		t.Fatal("containsWord should match token boundary")
 	}
-	if got := camelToSnake("VerticalID"); got != "vertical_id" {
+	if got := camelToSnake("EntityID"); got != "entity_id" {
 		t.Fatalf("camelToSnake mismatch, got %q", got)
 	}
 	if !matchesSubscription("scan.*", "scan.requested") || matchesSubscription("scan.requested", "scan.completed") {
@@ -174,7 +174,7 @@ func TestContractAndPromptMatchingHelpers(t *testing.T) {
 		role:          "business-research-agent",
 		file:          "agent.yaml",
 		subscriptions: []string{"validation.started"},
-		systemPrompt:  "validation.started: payload contains vertical_id and geography and scoring.",
+		systemPrompt:  "validation.started: payload contains entity_id and geography and scoring.",
 	}}
 	findings := auditContractsAgainstPrompts(contracts, agents)
 	if len(findings) == 0 {
@@ -195,7 +195,7 @@ func TestCollectEmitSitesAndLoadAgentSpecs(t *testing.T) {
 	src := strings.Join([]string{
 		"package runtime",
 		"func f(pc *FactoryPipelineCoordinator, bus *EventBus) {",
-		`  payload := map[string]any{"vertical_id":"v","geography":"us"}`,
+		`  payload := map[string]any{"entity_id":"v","geography":"us"}`,
 		`  pc.publish(nil, "validation.started", "factory", payload)`,
 		`  _ = bus.Publish(nil, events.Event{Type: events.EventType("scan.requested"), SourceAgent: "runtime", Payload: mustJSON(map[string]any{"scan_id":"s","mode":"saas_gap"})})`,
 		"}",
@@ -231,7 +231,7 @@ func TestCollectEmitSitesAndLoadAgentSpecs(t *testing.T) {
 		"subscriptions:",
 		"  - validation.started",
 		"system_prompt: |",
-		"  validation.started: read vertical_id and geography from payload",
+		"  validation.started: read entity_id and geography from payload",
 	}, "\n")
 	if err := os.WriteFile(filepath.Join(agentsDir, "business-research-agent.yaml"), []byte(agentYAML), 0o644); err != nil {
 		t.Fatalf("write agent yaml: %v", err)
@@ -250,8 +250,8 @@ func TestReportAndMiscHelpers(t *testing.T) {
 	contracts := map[string]*eventContract{
 		"validation.started": {
 			eventType:  "validation.started",
-			guaranteed: map[string]struct{}{"vertical_id": {}},
-			union:      map[string]struct{}{"vertical_id": {}, "geography": {}},
+			guaranteed: map[string]struct{}{"entity_id": {}},
+			union:      map[string]struct{}{"entity_id": {}, "geography": {}},
 			dynamicAny: false,
 			sites: []emitSite{
 				{eventType: "validation.started", file: "internal/runtime/pipeline_coordinator.go", line: 123},
@@ -263,8 +263,8 @@ func TestReportAndMiscHelpers(t *testing.T) {
 		agentID:        "business-research-agent",
 		agentRole:      "business-research-agent",
 		subscription:   "validation.started",
-		expectedFields: []string{"vertical_id", "geography"},
-		guaranteed:     []string{"vertical_id"},
+		expectedFields: []string{"entity_id", "geography"},
+		guaranteed:     []string{"entity_id"},
 		missing:        []string{"geography"},
 	}}
 	report := buildReport(contracts, findings, "internal/runtime", []string{"configs/agents", "configs/agents/templates"})

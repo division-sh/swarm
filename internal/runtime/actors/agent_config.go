@@ -15,19 +15,12 @@ type AgentConfig struct {
 	Mode           string          `json:"mode"`
 	Subscriptions  []string        `json:"subscriptions,omitempty"`
 	EntityID       string          `json:"entity_id,omitempty"`
-	VerticalID     string          `json:"vertical_id,omitempty"`
 	ParentAgent    string          `json:"parent_agent_id,omitempty"`
 	Config         json.RawMessage `json:"config,omitempty"`
 	BudgetEnvelope float64         `json:"budget_envelope,omitempty"`
 }
 
-func (cfg AgentConfig) EffectiveEntityID() string {
-	entityID := strings.TrimSpace(cfg.EntityID)
-	if entityID != "" {
-		return entityID
-	}
-	return strings.TrimSpace(cfg.VerticalID)
-}
+func (cfg AgentConfig) EffectiveEntityID() string { return strings.TrimSpace(cfg.EntityID) }
 
 func (cfg *AgentConfig) NormalizeEntityID() {
 	if cfg == nil {
@@ -36,8 +29,5 @@ func (cfg *AgentConfig) NormalizeEntityID() {
 	entityID := cfg.EffectiveEntityID()
 	if strings.TrimSpace(cfg.EntityID) == "" {
 		cfg.EntityID = entityID
-	}
-	if strings.TrimSpace(cfg.VerticalID) == "" {
-		cfg.VerticalID = entityID
 	}
 }

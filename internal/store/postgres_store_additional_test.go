@@ -111,7 +111,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	for _, id := range []string{"coordinator", "reviewer"} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-			VALUES ($1, 'stub', $1, 'holding', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
+			VALUES ($1, 'stub', $1, 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
 		`, id); err != nil {
 			t.Fatalf("seed agent %s: %v", id, err)
 		}
@@ -161,7 +161,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('coordinator', 'stub', 'coordinator', 'holding', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
+		VALUES ('coordinator', 'stub', 'coordinator', 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -237,19 +237,19 @@ func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
 		t.Fatal("expected provider_event_id required")
 	}
 	if _, err := s.RecordInboundEvent(ctx, "e", "", "p"); err == nil {
-		t.Fatal("expected vertical_id required")
+		t.Fatal("expected entity_id required")
 	}
 	if _, err := s.RecordInboundEvent(ctx, "e", "v", ""); err == nil {
 		t.Fatal("expected provider required")
 	}
 
 	if _, err := s.ResolveInboundTarget(ctx, "", "p"); err == nil {
-		t.Fatal("expected vertical key required")
+		t.Fatal("expected entity key required")
 	}
 	if _, err := s.ResolveInboundTarget(ctx, "k", ""); err == nil {
 		t.Fatal("expected provider required")
 	}
-	if _, err := s.ResolveInboundTarget(ctx, "missing", "whatsapp"); err == nil || !strings.Contains(err.Error(), "vertical not found") {
+	if _, err := s.ResolveInboundTarget(ctx, "missing", "whatsapp"); err == nil || !strings.Contains(err.Error(), "entity not found") {
 		t.Fatalf("expected not found, got %v", err)
 	}
 }
@@ -260,8 +260,8 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 	ctx := context.Background()
 
 	key := "k"
-	os.Setenv("EMPIREAI_CREDENTIALS_KEY", key)
-	defer os.Unsetenv("EMPIREAI_CREDENTIALS_KEY")
+	os.Setenv("MAS_CREDENTIALS_KEY", key)
+	defer os.Unsetenv("MAS_CREDENTIALS_KEY")
 
 	var enc string
 	if err := db.QueryRowContext(ctx, `SELECT encode(pgp_sym_encrypt('senc', $1::text), 'base64')`, key).Scan(&enc); err != nil {
@@ -270,10 +270,15 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 
 	verticalID1 := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
-		VALUES ($1::uuid,'V','legacy','us','operating','operating', $2::jsonb, now(), now())
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'legacy', 'credentials', $2::jsonb), now(), now()
+		)
 	`, verticalID1, `{"whatsapp": {"token":"legacy"}}`); err != nil {
-		t.Fatalf("seed legacy: %v", err)
+		t.Fatalf("seed workflow instance legacy: %v", err)
 	}
 	target, err := s.ResolveInboundTarget(ctx, "legacy", "whatsapp")
 	if err != nil {
@@ -285,10 +290,15 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 
 	verticalID2 := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
-		VALUES ($1::uuid,'V','flat','us','operating','operating', $2::jsonb, now(), now())
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'flat', 'credentials', $2::jsonb), now(), now()
+		)
 	`, verticalID2, `{"whatsapp_webhook_secret":" flat "}`); err != nil {
-		t.Fatalf("seed flat: %v", err)
+		t.Fatalf("seed workflow instance flat: %v", err)
 	}
 	target2, err := s.ResolveInboundTarget(ctx, "flat", "whatsapp")
 	if err != nil {
@@ -308,10 +318,15 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 	})
 	credsEnc := string(b)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
-		VALUES ($1::uuid,'V','enc','us','operating','operating', $2::jsonb, now(), now())
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'enc', 'credentials', $2::jsonb), now(), now()
+		)
 	`, verticalID3, credsEnc); err != nil {
-		t.Fatalf("seed enc: %v", err)
+		t.Fatalf("seed workflow instance enc: %v", err)
 	}
 	target3, err := s.ResolveInboundTarget(ctx, "enc", "whatsapp")
 	if err != nil {
@@ -325,11 +340,11 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 		t.Fatalf("expected empty secret for invalid json, got %q", got)
 	}
 
-	os.Unsetenv("EMPIREAI_CREDENTIALS_KEY")
+	os.Unsetenv("MAS_CREDENTIALS_KEY")
 	if got := s.decryptCredentialValue(ctx, "enc::AAAA"); got != "enc::AAAA" {
 		t.Fatalf("expected passthrough without key, got %#v", got)
 	}
-	os.Setenv("EMPIREAI_CREDENTIALS_KEY", key)
+	os.Setenv("MAS_CREDENTIALS_KEY", key)
 	if got := s.decryptCredentialValue(ctx, "enc::"); got != "" {
 		t.Fatalf("expected empty encoded to return empty string, got %#v", got)
 	}
@@ -342,10 +357,21 @@ func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
 
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
-		VALUES ($1::uuid,'V','purge','us','operating','operating','{}'::jsonb, now(), now())
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid,'Purge','purge','us','operating','operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed compatibility entity: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"purge","credentials":{}}'::jsonb, now(), now()
+		)
+	`, verticalID); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
 	if ok, err := s.RecordInboundEvent(ctx, "evt-old", verticalID, "whatsapp"); err != nil || !ok {
 		t.Fatalf("record old ok=%v err=%v", ok, err)
@@ -371,21 +397,32 @@ func TestPostgresStore_Inbound_RecordResolveAndSecrets(t *testing.T) {
 
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', $2::jsonb, now(), now())
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
+	`, verticalID); err != nil {
+		t.Fatalf("seed compatibility entity: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'testco', 'credentials', $2::jsonb), now(), now()
+		)
 	`, verticalID, `{
 		"webhooks": { "whatsapp": { "secret": "s1" } },
 		"whatsapp": { "token": "legacy" },
 		"whatsapp_webhook_secret": "flat"
 	}`); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed workflow instance: %v", err)
 	}
 
 	target, err := s.ResolveInboundTarget(ctx, "testco", "whatsapp")
 	if err != nil {
 		t.Fatalf("resolve inbound: %v", err)
 	}
-	if target.VerticalID != verticalID || target.VerticalSlug != "testco" {
+	if target.EntityID != verticalID || target.EntitySlug != "testco" {
 		t.Fatalf("unexpected target: %+v", target)
 	}
 	if target.WebhookSecret != "s1" {
@@ -416,14 +453,14 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 
 	id, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		VerticalID: verticalID,
-		FromAgent:  "coordinator",
-		Type:       "spend_request",
-		Summary:    "need approval",
+		EntityID:  verticalID,
+		FromAgent: "coordinator",
+		Type:      "spend_request",
+		Summary:   "need approval",
 	})
 	if err != nil || id == "" {
 		t.Fatalf("insert mailbox: id=%q err=%v", id, err)
@@ -456,13 +493,13 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	}
 
 	expID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		VerticalID: verticalID,
-		FromAgent:  "coordinator",
-		Type:       "review",
-		Priority:   "critical",
-		Status:     "pending",
-		Context:    []byte(`{"x":1}`),
-		TimeoutAt:  time.Now().Add(-2 * time.Second),
+		EntityID:  verticalID,
+		FromAgent: "coordinator",
+		Type:      "review",
+		Priority:  "critical",
+		Status:    "pending",
+		Context:   []byte(`{"x":1}`),
+		TimeoutAt: time.Now().Add(-2 * time.Second),
 	})
 	if err != nil {
 		t.Fatalf("insert expiring mailbox: %v", err)
@@ -485,13 +522,13 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	}
 
 	critID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		VerticalID: verticalID,
-		FromAgent:  "coordinator",
-		Type:       "spend_request",
-		Priority:   "critical",
-		Status:     "pending",
-		Summary:    "critical",
-		TimeoutAt:  time.Now().Add(2 * time.Hour),
+		EntityID:  verticalID,
+		FromAgent: "coordinator",
+		Type:      "spend_request",
+		Priority:  "critical",
+		Status:    "pending",
+		Summary:   "critical",
+		TimeoutAt: time.Now().Add(2 * time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("insert critical mailbox: %v", err)
@@ -594,7 +631,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'coordinator', 'holding', 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'coordinator', 'global', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -660,33 +697,33 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'V', 'v', 'us', 'approved', 'factory', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('validation-orchestrator', 'stub', 'validation-orchestrator', 'holding', 'active', '{}'::jsonb, now(), now())
+		VALUES ('validation-orchestrator', 'stub', 'validation-orchestrator', 'global', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 
 	first := runtimepipeline.Schedule{
-		AgentID:    "validation-orchestrator",
-		EventType:  "timer.validation_timeout",
-		Mode:       "once",
-		At:         time.Now().Add(30 * time.Minute).UTC(),
-		VerticalID: verticalID,
-		TaskID:     "timer-a",
-		Payload:    []byte(`{"timer_id":"timer-a"}`),
+		AgentID:   "validation-orchestrator",
+		EventType: "timer.validation_timeout",
+		Mode:      "once",
+		At:        time.Now().Add(30 * time.Minute).UTC(),
+		EntityID:  verticalID,
+		TaskID:    "timer-a",
+		Payload:   []byte(`{"timer_id":"timer-a"}`),
 	}
 	second := runtimepipeline.Schedule{
-		AgentID:    "validation-orchestrator",
-		EventType:  "timer.validation_timeout",
-		Mode:       "once",
-		At:         time.Now().Add(60 * time.Minute).UTC(),
-		VerticalID: verticalID,
-		TaskID:     "timer-b",
-		Payload:    []byte(`{"timer_id":"timer-b"}`),
+		AgentID:   "validation-orchestrator",
+		EventType: "timer.validation_timeout",
+		Mode:      "once",
+		At:        time.Now().Add(60 * time.Minute).UTC(),
+		EntityID:  verticalID,
+		TaskID:    "timer-b",
+		Payload:   []byte(`{"timer_id":"timer-b"}`),
 	}
 	if err := pg.UpsertSchedule(ctx, first); err != nil {
 		t.Fatalf("upsert first exact schedule: %v", err)
@@ -701,7 +738,7 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	}
 	var exact []runtimepipeline.Schedule
 	for _, sc := range active {
-		if sc.AgentID == "validation-orchestrator" && sc.EventType == "timer.validation_timeout" && sc.VerticalID == verticalID {
+		if sc.AgentID == "validation-orchestrator" && sc.EventType == "timer.validation_timeout" && sc.EntityID == verticalID {
 			exact = append(exact, sc)
 		}
 	}
@@ -728,7 +765,7 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	}
 	exact = exact[:0]
 	for _, sc := range active {
-		if sc.AgentID == "validation-orchestrator" && sc.EventType == "timer.validation_timeout" && sc.VerticalID == verticalID {
+		if sc.AgentID == "validation-orchestrator" && sc.EventType == "timer.validation_timeout" && sc.EntityID == verticalID {
 			exact = append(exact, sc)
 		}
 	}
@@ -747,11 +784,11 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'V', 'v', 'us', 'discovered', 'factory', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, vertical_id, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'coordinator', 'holding', NULL, 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'coordinator', 'global', NULL, 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -884,11 +921,11 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'V', 'v', 'us', 'discovered', 'factory', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'a1', 'holding', 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'a1', 'global', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -935,19 +972,19 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'V', 'v', 'us', 'operating', 'operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('sub', 'stub', 'sub', 'holding', 'active', '{}'::jsonb, now(), now()),
-		       ('inst', 'stub', 'inst', 'holding', 'active', '{}'::jsonb, now(), now())
+		VALUES ('sub', 'stub', 'sub', 'global', 'active', '{}'::jsonb, now(), now()),
+		       ('inst', 'stub', 'inst', 'global', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agents: %v", err)
 	}
 
 	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
-		VerticalID:   verticalID,
+		EntityID:     verticalID,
 		EventPattern: "x.*",
 		SubscriberID: "sub",
 		InstalledBy:  "inst",
@@ -957,7 +994,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("UpsertRoutingRule: %v", err)
 	}
 	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
-		VerticalID:   verticalID,
+		EntityID:     verticalID,
 		EventPattern: "y.*",
 		SubscriberID: "sub",
 		InstalledBy:  "inst",
@@ -973,8 +1010,8 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	if len(rules) != 1 || rules[0].EventPattern != "x.*" {
 		t.Fatalf("expected only active/proposed rules, got %#v", rules)
 	}
-	if err := pg.DeactivateRoutingRulesByVertical(ctx, ""); err == nil {
-		t.Fatalf("expected vertical_id required")
+	if err := pg.DeactivateRoutingRulesByEntity(ctx, ""); err == nil {
+		t.Fatalf("expected entity_id required")
 	}
 
 	if err := pg.MarkAgentTerminated(ctx, " "); err == nil {
@@ -993,7 +1030,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	_ = time.Second
 }
 
-func TestManagerStore_EnsureVerticalSchema_AndTemplates(t *testing.T) {
+func TestManagerStore_EnsureEntitySchema_AndTemplates(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1001,12 +1038,23 @@ func TestManagerStore_EnsureVerticalSchema_AndTemplates(t *testing.T) {
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'V', 'vslug', 'us', 'operating', 'operating', now(), now())
+		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed compatibility entity: %v", err)
 	}
-	if err := pg.EnsureVerticalSchema(ctx, verticalID); err != nil {
-		t.Fatalf("EnsureVerticalSchema: %v", err)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"vslug"}'::jsonb, now(), now()
+		)
+	`, verticalID); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	if err := pg.EnsureEntitySchema(ctx, verticalID); err != nil {
+		t.Fatalf("EnsureEntitySchema: %v", err)
 	}
 
 	if _, err := pg.LoadOrgTemplate(ctx, ""); err == nil {
@@ -1046,7 +1094,7 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'V', 'vslug', 'us', 'operating', 'operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 
 	if _, err := db.ExecContext(ctx, `
@@ -1059,7 +1107,7 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 	}
 
 	r := runtimemanager.PersistedRoutingRule{
-		VerticalID:       verticalID,
+		EntityID:         verticalID,
 		EventPattern:     "inbound.*",
 		SubscriberID:     "sub",
 		InstalledBy:      "inst",
@@ -1088,8 +1136,8 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 		t.Fatalf("expected deactivated_at set")
 	}
 
-	if err := pg.DeactivateRoutingRulesByVertical(ctx, verticalID); err != nil {
-		t.Fatalf("DeactivateRoutingRulesByVertical: %v", err)
+	if err := pg.DeactivateRoutingRulesByEntity(ctx, verticalID); err != nil {
+		t.Fatalf("DeactivateRoutingRulesByEntity: %v", err)
 	}
 }
 
@@ -1100,7 +1148,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'a1', 'holding', 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'a1', 'global', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -1162,7 +1210,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 			ID:            "a1",
 			Type:          "sonnet",
 			Role:          "a1",
-			Mode:          "holding",
+			Mode:          "global",
 			Subscriptions: []string{"inbound.*"},
 			Config:        []byte(`{"system_prompt":"x"}`),
 		},
@@ -1223,26 +1271,37 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, template_version, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating','v1', now(), now())
+		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
+		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed compatibility entity: %v", err)
 	}
-	if err := pg.EnsureVerticalSchema(ctx, verticalID); err != nil {
-		t.Fatalf("EnsureVerticalSchema: %v", err)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco","template_version":"v1"}'::jsonb, now(), now()
+		)
+	`, verticalID); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
-	if err := pg.SetVerticalTemplateVersion(ctx, verticalID, "v2"); err != nil {
-		t.Fatalf("SetVerticalTemplateVersion: %v", err)
+	if err := pg.EnsureEntitySchema(ctx, verticalID); err != nil {
+		t.Fatalf("EnsureEntitySchema: %v", err)
+	}
+	if err := pg.SetEntityTemplateVersion(ctx, verticalID, "v2"); err != nil {
+		t.Fatalf("SetEntityTemplateVersion: %v", err)
 	}
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "a1",
-			Role:       "role",
-			Mode:       "holding",
-			Type:       "sonnet",
-			VerticalID: "",
-			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["system.*"]}`),
+			ID:       "a1",
+			Role:     "role",
+			Mode:     "global",
+			Type:     "sonnet",
+			EntityID: "",
+			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["system.*"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -1256,12 +1315,12 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "ephemeral-shard-1",
-			Role:       "worker",
-			Mode:       "factory",
-			Type:       "sonnet",
-			VerticalID: "",
-			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["review.ready"]}`),
+			ID:       "ephemeral-shard-1",
+			Role:     "worker",
+			Mode:     "factory",
+			Type:     "sonnet",
+			EntityID: "",
+			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.ready"]}`),
 		},
 		Status:          "ephemeral",
 		HiredBy:         "runtime",
@@ -1286,12 +1345,12 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	ceoID := "operator-" + verticalID
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         ceoID,
-			Role:       "operator",
-			Mode:       "operating",
-			Type:       "sonnet",
-			VerticalID: verticalID,
-			Config:     json.RawMessage(`{"system_prompt":"x","subscriptions":["review.*"]}`),
+			ID:       ceoID,
+			Role:     "operator",
+			Mode:     "operating",
+			Type:     "sonnet",
+			EntityID: verticalID,
+			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.*"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -1299,7 +1358,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		TemplateVersion: "v2",
 	})
 	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
-		VerticalID:   verticalID,
+		EntityID:     verticalID,
 		EventPattern: "review.*",
 		SubscriberID: ceoID,
 		InstalledBy:  ceoID,
@@ -1309,8 +1368,8 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertRoutingRule: %v", err)
 	}
-	if err := pg.DeactivateRoutingRulesByVertical(ctx, verticalID); err != nil {
-		t.Fatalf("DeactivateRoutingRulesByVertical: %v", err)
+	if err := pg.DeactivateRoutingRulesByEntity(ctx, verticalID); err != nil {
+		t.Fatalf("DeactivateRoutingRulesByEntity: %v", err)
 	}
 
 	evt := (events.Event{

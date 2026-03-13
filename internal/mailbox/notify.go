@@ -75,7 +75,7 @@ func (n *WebhookNotifier) NotifyCritical(ctx context.Context, item runtimetools.
 		"type":       item.Type,
 		"from_agent": item.FromAgent,
 		"entity_id":  item.EffectiveEntityID(),
-		"vertical":   item.EffectiveEntityID(),
+		"entity":     item.EffectiveEntityID(),
 		"summary":    item.Summary,
 		"timeout_at": item.TimeoutAt.UTC().Format(time.RFC3339),
 		"context":    json.RawMessage(item.Context),

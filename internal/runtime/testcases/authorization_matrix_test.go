@@ -13,9 +13,9 @@ func TestGenericBundle_AuthorizationMatrix(t *testing.T) {
 	})
 
 	coordinator := models.AgentConfig{ID: "coordinator", Role: "coordinator"}
-	reviewer := models.AgentConfig{ID: "reviewer", Role: "reviewer", VerticalID: "item-123"}
-	worker := models.AgentConfig{ID: "worker-a", Role: "worker", VerticalID: "item-123"}
-	otherWorker := models.AgentConfig{ID: "worker-b", Role: "worker", VerticalID: "item-999"}
+	reviewer := models.AgentConfig{ID: "reviewer", Role: "reviewer", EntityID: "item-123"}
+	worker := models.AgentConfig{ID: "worker-a", Role: "worker", EntityID: "item-123"}
+	otherWorker := models.AgentConfig{ID: "worker-b", Role: "worker", EntityID: "item-999"}
 
 	if !commgraph.HasMessageAuthority(coordinator, reviewer) {
 		t.Fatal("expected coordinator to message reviewer")
@@ -29,10 +29,10 @@ func TestGenericBundle_AuthorizationMatrix(t *testing.T) {
 	if err := commgraph.AuthorizeRouting(reviewer, worker, "active"); err == nil {
 		t.Fatal("expected reviewer routing to be constrained by status")
 	}
-	if err := commgraph.AuthorizeManagement(coordinator, worker.Role, otherWorker.VerticalID); err != nil {
+	if err := commgraph.AuthorizeManagement(coordinator, worker.Role, otherWorker.EntityID); err != nil {
 		t.Fatalf("expected coordinator cross-scope management: %v", err)
 	}
-	if err := commgraph.AuthorizeManagement(reviewer, worker.Role, otherWorker.VerticalID); err == nil {
+	if err := commgraph.AuthorizeManagement(reviewer, worker.Role, otherWorker.EntityID); err == nil {
 		t.Fatal("expected reviewer cross-scope management denial")
 	}
 	if err := commgraph.AuthorizeMailboxSend(reviewer); err != nil {

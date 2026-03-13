@@ -11,8 +11,8 @@ func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 	var n int
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM verticals
-		WHERE stage IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
+		FROM workflow_instances
+		WHERE current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
 	`).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
@@ -42,18 +42,18 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 			GROUP BY vertical_id
 		)
 		SELECT
-			v.id::text,
-			v.name,
-			v.stage,
+			wi.instance_id::text,
+			COALESCE(NULLIF(wi.metadata->>'name', ''), NULLIF(wi.metadata->>'entity_name', ''), wi.instance_id::text),
+			wi.current_state,
 			COALESCE(m.users_total, 0),
 			COALESCE(m.mrr_cents, 0),
 			COALESCE(s.spend_cents_30d, 0),
-			COALESCE(m.period_end::timestamp, v.updated_at)
-		FROM verticals v
-		LEFT JOIN latest_metrics m ON m.vertical_id = v.id
-		LEFT JOIN spend_30d s ON s.vertical_id = v.id
-		WHERE v.stage IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
-		ORDER BY COALESCE(m.mrr_cents, 0) DESC, COALESCE(m.users_total, 0) DESC, v.created_at ASC
+			COALESCE(m.period_end::timestamp, wi.updated_at)
+		FROM workflow_instances wi
+		LEFT JOIN latest_metrics m ON m.vertical_id = wi.instance_id::uuid
+		LEFT JOIN spend_30d s ON s.vertical_id = wi.instance_id::uuid
+		WHERE wi.current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
+		ORDER BY COALESCE(m.mrr_cents, 0) DESC, COALESCE(m.users_total, 0) DESC, wi.created_at ASC
 		LIMIT $1
 	`
 

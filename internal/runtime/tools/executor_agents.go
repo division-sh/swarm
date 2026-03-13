@@ -26,7 +26,6 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		EventType      string   `json:"event_type"`
 		SourceAgent    string   `json:"source_agent"`
 		EntityID       string   `json:"entity_id"`
-		VerticalID     string   `json:"vertical_id"`
 		TaskID         string   `json:"task_id"`
 		Message        string   `json:"message"`
 		Payload        any      `json:"payload"`
@@ -61,7 +60,8 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
 	}
-	targetEntity := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID))
+	targetEntity := strings.TrimSpace(in.EntityID)
+	in.EntityID = targetEntity
 	actorEntityID := actor.EffectiveEntityID()
 	for _, targetID := range targets {
 		targetCfg, ok := manager.GetAgentConfig(targetID)
@@ -71,13 +71,13 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		targetCfgEntityID := targetCfg.EffectiveEntityID()
 		if actor.Mode == "operating" && actorEntityID != "" {
 			if targetCfgEntityID != actorEntityID {
-				return nil, errors.New("cross-vertical agent_message is not allowed in operating mode")
+				return nil, errors.New("cross-entity agent_message is not allowed in operating mode")
 			}
 		}
 		if targetEntity == "" {
 			targetEntity = targetCfgEntityID
 		}
-		if targetArg := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID)); targetArg != "" && targetCfgEntityID != targetArg {
+		if targetArg := strings.TrimSpace(in.EntityID); targetArg != "" && targetCfgEntityID != targetArg {
 			return nil, errors.New("entity_id does not match target agent entity")
 		}
 		if err := authorizeAgentMessage(actor, targetCfg, manager); err != nil {
@@ -158,9 +158,9 @@ func messageScopeAllowed(actor, target models.AgentConfig, scope string) bool {
 	switch scope {
 	case "", "any":
 		return true
-	case "holding":
+	case "global":
 		return actor.EffectiveEntityID() == "" && target.EffectiveEntityID() == ""
-	case "opco":
+	case "entity":
 		actorEntity := actor.EffectiveEntityID()
 		targetEntity := target.EffectiveEntityID()
 		return actorEntity != "" && actorEntity == targetEntity
@@ -180,8 +180,6 @@ func normalizeCommRole(role string) string {
 		return "vp-growth"
 	case "cto":
 		return "cto-agent"
-	case "opco-devops":
-		return "devops-agent"
 	default:
 		return role
 	}
@@ -246,7 +244,6 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		Cron       string `json:"cron"`
 		At         string `json:"at"`
 		EntityID   string `json:"entity_id"`
-		VerticalID string `json:"vertical_id"`
 		TaskID     string `json:"task_id"`
 		Payload    any    `json:"payload"`
 	}
@@ -262,7 +259,8 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	if in.AgentID != actor.ID {
 		return nil, errors.New("agents can only schedule for themselves")
 	}
-	entityID := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID))
+	entityID := strings.TrimSpace(in.EntityID)
+	in.EntityID = entityID
 	if entityID == "" {
 		entityID = actor.EffectiveEntityID()
 	}
@@ -294,7 +292,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		Mode:       in.Mode,
 		Cron:       in.Cron,
 		At:         at,
-		VerticalID: entityID,
+		EntityID:   entityID,
 		TaskID:     in.TaskID,
 		Payload:    payload,
 	}
@@ -322,7 +320,6 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	}
 	var in struct {
 		EntityID   string             `json:"entity_id"`
-		VerticalID string             `json:"vertical_id"`
 		Config     models.AgentConfig `json:"config"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
@@ -331,16 +328,18 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if in.Config.ID == "" {
 		return nil, errors.New("config.id is required")
 	}
-	if in.Config.VerticalID == "" {
-		in.Config.VerticalID = coalesce(in.EntityID, in.VerticalID, actor.VerticalID)
+	in.EntityID = coalesce(in.EntityID, actor.EffectiveEntityID())
+	if in.Config.EntityID == "" {
+		in.Config.EntityID = in.EntityID
 	}
+	in.Config.NormalizeEntityID()
 	if in.Config.Mode == "" {
 		in.Config.Mode = coalesce(actor.Mode, "operating")
 	}
-	if err := authorizeManage(actor, in.Config.Role, in.Config.VerticalID); err != nil {
+	if err := authorizeManage(actor, in.Config.Role, in.Config.EffectiveEntityID()); err != nil {
 		return nil, err
 	}
-	if err := manager.SpawnAgentForEntity(coalesce(in.EntityID, in.VerticalID), in.Config); err != nil {
+	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
@@ -364,7 +363,7 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if !ok {
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
-	if err := authorizeManage(actor, targetCfg.Role, targetCfg.VerticalID); err != nil {
+	if err := authorizeManage(actor, targetCfg.Role, targetCfg.EffectiveEntityID()); err != nil {
 		return nil, err
 	}
 	if err := manager.TeardownAgent(in.AgentID); err != nil {
@@ -392,7 +391,7 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	if !ok {
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
-	if err := authorizeManage(actor, targetCfg.Role, targetCfg.VerticalID); err != nil {
+	if err := authorizeManage(actor, targetCfg.Role, targetCfg.EffectiveEntityID()); err != nil {
 		return nil, err
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {

@@ -14,7 +14,7 @@ const (
 	actorIDHeader      = "X-Empire-Agent-Id"
 	actorRoleHeader    = "X-Empire-Agent-Role"
 	actorModeHeader    = "X-Empire-Agent-Mode"
-	entityIDHeader     = "X-Empire-Vertical-Id"
+	entityIDHeader     = "X-MAS-Entity-Id"
 	allowedToolsHeader = "X-Empire-Allowed-Tools"
 	contextTokenHeader = "X-Empire-Context-Token"
 	traceIDHeader      = "X-Empire-Trace-Id"
@@ -22,7 +22,7 @@ const (
 	actorIDQuery      = "empire_agent_id"
 	actorRoleQuery    = "empire_agent_role"
 	actorModeQuery    = "empire_agent_mode"
-	entityIDQuery     = "empire_vertical_id"
+	entityIDQuery     = "entity_id"
 	allowedToolsQuery = "empire_allowed_tools"
 	contextTokenQuery = "empire_ctx_token"
 	traceIDQuery      = "empire_trace_id"
@@ -32,9 +32,19 @@ type ToolGatewayRequest struct {
 	Actor      models.AgentConfig `json:"actor"`
 	AgentID    string             `json:"agent_id"`
 	AgentRole  string             `json:"agent_role"`
-	VerticalID string             `json:"vertical_id"`
+	EntityID   string             `json:"entity_id"`
 	Mode       string             `json:"mode"`
 	Input      any                `json:"input"`
+}
+
+func (r ToolGatewayRequest) EffectiveEntityID() string { return strings.TrimSpace(r.EntityID) }
+
+func (r *ToolGatewayRequest) NormalizeEntityID() {
+	if r == nil {
+		return
+	}
+	entityID := r.EffectiveEntityID()
+	r.EntityID = entityID
 }
 
 type ToolGatewayResponse struct {
@@ -69,7 +79,7 @@ type ToolDef struct {
 }
 
 func RequireContextToken() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("EMPIREAI_MCP_REQUIRE_CONTEXT_TOKEN")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_MCP_REQUIRE_CONTEXT_TOKEN")))
 	if v == "" {
 		return true
 	}
@@ -77,7 +87,7 @@ func RequireContextToken() bool {
 }
 
 func AllowContextFallbackOnMiss() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("EMPIREAI_MCP_CONTEXT_FALLBACK_ON_MISS")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_MCP_CONTEXT_FALLBACK_ON_MISS")))
 	if v == "" {
 		return true
 	}
@@ -91,10 +101,13 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 	actor := models.AgentConfig{
 		ID:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorIDHeader)), strings.TrimSpace(r.URL.Query().Get(actorIDQuery))),
 		Role:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(actorRoleQuery))),
-		EntityID: FirstNonEmpty(strings.TrimSpace(r.Header.Get(entityIDHeader)), strings.TrimSpace(r.URL.Query().Get(entityIDQuery))),
+		EntityID: FirstNonEmpty(
+			strings.TrimSpace(r.Header.Get(entityIDHeader)),
+			strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
+		),
 		Mode:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorModeHeader)), strings.TrimSpace(r.URL.Query().Get(actorModeQuery))),
 	}
-	actor.VerticalID = actor.EntityID
+	actor.NormalizeEntityID()
 	if strings.TrimSpace(actor.ID) == "" {
 		return models.AgentConfig{}, false
 	}

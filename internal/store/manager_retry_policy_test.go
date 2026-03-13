@@ -215,9 +215,9 @@ func insertOrUpdateReceipt(t *testing.T, ctx context.Context, pg *store.Postgres
 func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
 	t.Helper()
 
-	adminDSN := os.Getenv("EMPIREAI_PG_ADMIN_DSN")
+	adminDSN := os.Getenv("MAS_PG_ADMIN_DSN")
 	if strings.TrimSpace(adminDSN) == "" {
-		t.Skip("set EMPIREAI_PG_ADMIN_DSN to run postgres store retry policy tests")
+		t.Skip("set MAS_PG_ADMIN_DSN to run postgres store retry policy tests")
 	}
 
 	ctx := context.Background()
@@ -227,7 +227,7 @@ func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
 	}
 	if err := admin.PingContext(ctx); err != nil {
 		_ = admin.Close()
-		t.Skipf("postgres not reachable from EMPIREAI_PG_ADMIN_DSN: %v", err)
+		t.Skipf("postgres not reachable from MAS_PG_ADMIN_DSN: %v", err)
 	}
 
 	var owner string
@@ -286,7 +286,7 @@ func seedVerticalAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 		INSERT INTO verticals (id, name, geography, stage, mode)
 		VALUES ($1::uuid, 'Store Retry Policy Test', 'US', 'approved', 'factory')
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
 	}
 
 	agentID = "agent-" + uuid.NewString()

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -49,6 +50,21 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func cloneStringAnyMap(in map[string]any) map[string]any {
+	return cloneMap(in)
+}
+
+func policyDocumentToMap(doc runtimecontracts.PolicyDocument) map[string]any {
+	if len(doc.Values) == 0 {
+		return nil
+	}
+	m := make(map[string]any, len(doc.Values))
+	for k, v := range doc.Values {
+		m[k] = v.Value
+	}
+	return m
 }
 
 func asString(v any) string {

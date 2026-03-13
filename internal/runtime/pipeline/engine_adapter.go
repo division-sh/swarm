@@ -149,7 +149,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
-		r.coordinator.updateVerticalStage(ctx, entityID.String(), next, "")
+		r.coordinator.updateEntityState(ctx, entityID.String(), next, "")
 	}
 	if len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
 		r.coordinator.applyWorkflowGateMutation(ctx, entityID.String(), "", strings.TrimSpace(mutation.SetGate), len(mutation.ClearGates) > 0)
@@ -373,9 +373,6 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 				metadata["revision_count"] = asInt(metadata["revision_count"]) + 1
 			})
 		}
-		pc.mutateValidationState(ctx, execCtx.Request.EntityID.String(), func(state *validationPipelineState) {
-			state.RevisionCount++
-		})
 		return true, nil
 	case identity.ActionRecordStateChange.String(),
 		identity.ActionUpdateState.String(),
@@ -448,7 +445,13 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 	entityProjection := workflowMutableStateBucket(instance, workflowStateBucketEntityProjection)
 	for _, write := range mutation.DataAccumulation.Writes {
-		targetField := normalizeHandlerStateField(write.Target())
+		targetField := strings.TrimSpace(write.Target())
+		switch {
+		case strings.HasPrefix(targetField, "entity."):
+			targetField = strings.TrimSpace(strings.TrimPrefix(targetField, "entity."))
+		case strings.HasPrefix(targetField, "metadata."):
+			targetField = strings.TrimSpace(strings.TrimPrefix(targetField, "metadata."))
+		}
 		if targetField == "" {
 			continue
 		}

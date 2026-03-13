@@ -12,12 +12,12 @@ import (
 	"empireai/internal/runtime"
 )
 
-func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, verticalID, provider string) (bool, error) {
+func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
 	if strings.TrimSpace(providerEventID) == "" {
 		return false, fmt.Errorf("provider_event_id is required")
 	}
-	if strings.TrimSpace(verticalID) == "" {
-		return false, fmt.Errorf("vertical_id is required")
+	if strings.TrimSpace(entityID) == "" {
+		return false, fmt.Errorf("entity_id is required")
 	}
 	if strings.TrimSpace(provider) == "" {
 		return false, fmt.Errorf("provider is required")
@@ -27,7 +27,7 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 		VALUES ($1, $2::uuid, $3, now())
 		ON CONFLICT (provider_event_id, vertical_id) DO NOTHING
 	`
-	res, err := s.DB.ExecContext(ctx, q, providerEventID, verticalID, provider)
+	res, err := s.DB.ExecContext(ctx, q, providerEventID, entityID, provider)
 	if err != nil {
 		return false, fmt.Errorf("record inbound event: %w", err)
 	}
@@ -35,11 +35,11 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 	return n > 0, nil
 }
 
-func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, verticalKey, provider string) (runtime.InboundTarget, error) {
-	verticalKey = strings.TrimSpace(verticalKey)
+func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
+	entityKey = strings.TrimSpace(entityKey)
 	provider = strings.TrimSpace(strings.ToLower(provider))
-	if verticalKey == "" {
-		return runtime.InboundTarget{}, fmt.Errorf("vertical key is required")
+	if entityKey == "" {
+		return runtime.InboundTarget{}, fmt.Errorf("entity key is required")
 	}
 	if provider == "" {
 		return runtime.InboundTarget{}, fmt.Errorf("provider is required")
@@ -49,25 +49,24 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, verticalKey, p
 	var credentialsRaw []byte
 	const q = `
 		SELECT
-			id::text,
-			COALESCE(NULLIF(slug, ''), ''),
-			COALESCE(credentials, '{}'::jsonb)
-		FROM verticals
-		WHERE slug = $1
-		   OR id::text = $1
-		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END
+			instance_id::text,
+			COALESCE(NULLIF(metadata->>'slug', ''), ''),
+			COALESCE(metadata->'credentials', '{}'::jsonb)
+		FROM workflow_instances
+		WHERE metadata->>'slug' = $1
+		   OR instance_id::text = $1
+		ORDER BY CASE WHEN metadata->>'slug' = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
 		LIMIT 1
 	`
-	if err := s.DB.QueryRowContext(ctx, q, verticalKey).Scan(&target.EntityID, &target.VerticalSlug, &credentialsRaw); err != nil {
+	if err := s.DB.QueryRowContext(ctx, q, entityKey).Scan(&target.EntityID, &target.EntitySlug, &credentialsRaw); err != nil {
 		if err == sql.ErrNoRows {
-			return runtime.InboundTarget{}, fmt.Errorf("vertical not found for key: %s", verticalKey)
+			return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
 		}
 		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
 	}
-	if target.VerticalSlug == "" {
-		target.VerticalSlug = verticalKey
+	if target.EntitySlug == "" {
+		target.EntitySlug = entityKey
 	}
-	target.VerticalID = target.EntityID
 	target.WebhookSecret = s.extractWebhookSecret(ctx, credentialsRaw, provider)
 	return target, nil
 }
@@ -150,7 +149,7 @@ func (s *PostgresStore) decryptCredentialValue(ctx context.Context, v any) any {
 		if !strings.HasPrefix(t, prefix) {
 			return t
 		}
-		key := strings.TrimSpace(os.Getenv("EMPIREAI_CREDENTIALS_KEY"))
+		key := strings.TrimSpace(os.Getenv("MAS_CREDENTIALS_KEY"))
 		if key == "" {
 			return t
 		}

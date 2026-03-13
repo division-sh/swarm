@@ -308,8 +308,8 @@ func normalizeRuntimeToolInput(name string, input any) any {
 			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
 				config["mode"] = mode
 			}
-			if verticalID := strings.TrimSpace(asString(payload["vertical_id"])); verticalID != "" {
-				config["vertical_id"] = verticalID
+			if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
+				config["entity_id"] = entityID
 			}
 			rawConfig := map[string]any{}
 			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
@@ -365,7 +365,9 @@ func normalizeRuntimeToolInput(name string, input any) any {
 			payload["context"] = payload["payload"]
 		}
 	case "human_task_request":
-		delete(payload, "vertical_id")
+		if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
+			payload["entity_id"] = entityID
+		}
 		if strings.TrimSpace(asString(payload["deadline"])) == "" &&
 			strings.TrimSpace(asString(payload["deadline_at"])) == "" &&
 			strings.TrimSpace(asString(payload["deadline_rfc3339"])) == "" {
@@ -455,7 +457,8 @@ func (e *Executor) emitToolExecutionEvent(
 	payload, _ := json.Marshal(map[string]any{
 		"agent_id":     actor.ID,
 		"agent_role":   actor.Role,
-		"vertical_id":  actor.VerticalID,
+		"entity_id":    actor.EffectiveEntityID(),
+		"vertical_id":  actor.EffectiveEntityID(),
 		"tool_name":    toolName,
 		"ok":           execErr == nil,
 		"error":        toolExecErrorText(execErr),
@@ -470,7 +473,7 @@ func (e *Executor) emitToolExecutionEvent(
 		SourceAgent: actor.ID,
 		Payload:     payload,
 		CreatedAt:   time.Now(),
-	}).WithEntityID(actor.VerticalID)); err != nil {
+	}).WithEntityID(actor.EffectiveEntityID())); err != nil {
 		runtimeWarn(
 			"tool-executor",
 			"failed to publish agent.tool_execution actor=%s tool=%s: %v",
@@ -662,8 +665,8 @@ func authorizeRouting(actor, target models.AgentConfig, status string) error {
 	return commgraph.AuthorizeRouting(actor, target, status)
 }
 
-func authorizeManage(actor models.AgentConfig, targetRole, targetVerticalID string) error {
-	return commgraph.AuthorizeManagement(actor, targetRole, targetVerticalID)
+func authorizeManage(actor models.AgentConfig, targetRole, targetEntityID string) error {
+	return commgraph.AuthorizeManagement(actor, targetRole, targetEntityID)
 }
 
 func authorizeMailboxSend(actor models.AgentConfig) error {

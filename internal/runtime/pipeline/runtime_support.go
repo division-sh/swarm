@@ -21,13 +21,24 @@ type RuntimeLogEntry struct {
 	EventType  string
 	AgentID    string
 	EntityID   string
-	VerticalID string
 	CampaignID string
 	ScanID     string
 	SessionID  string
 	Detail     any
 	Error      string
 	DurationUS int
+}
+
+func (e RuntimeLogEntry) EffectiveEntityID() string {
+	return strings.TrimSpace(e.EntityID)
+}
+
+func (e *RuntimeLogEntry) NormalizeEntityID() {
+	if e == nil {
+		return
+	}
+	entityID := e.EffectiveEntityID()
+	e.EntityID = entityID
 }
 
 type Bus interface {
@@ -277,7 +288,7 @@ func dbQueryRowContext(ctx context.Context, db *sql.DB, query string, args ...an
 }
 
 func shouldSQLDebugLog() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("EMPIREAI_SQL_DEBUG")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_SQL_DEBUG")))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 

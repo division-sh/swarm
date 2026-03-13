@@ -28,7 +28,7 @@ type WorkflowAction struct {
 }
 
 type WorkflowState struct {
-	EntityID string          `json:"vertical_id,omitempty"`
+	EntityID string          `json:"entity_id,omitempty"`
 	Stage    WorkflowStateID `json:"stage"`
 	Status   string          `json:"status,omitempty"`
 	Metadata map[string]any  `json:"metadata,omitempty"`

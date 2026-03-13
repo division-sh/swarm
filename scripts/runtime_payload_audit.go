@@ -61,13 +61,13 @@ type finding struct {
 
 var (
 	fieldAliasRegex = map[string][]*regexp.Regexp{
-		"vertical_id": {
-			regexp.MustCompile(`(?i)\bvertical_id\b`),
-			regexp.MustCompile(`(?i)\bvertical\s+id\b`),
+		"entity_id": {
+			regexp.MustCompile(`(?i)\bentity_id\b`),
+			regexp.MustCompile(`(?i)\bentity\s+id\b`),
 		},
-		"vertical_name": {
-			regexp.MustCompile(`(?i)\bvertical_name\b`),
-			regexp.MustCompile(`(?i)\bvertical\s+name\b`),
+		"entity_name": {
+			regexp.MustCompile(`(?i)\bentity_name\b`),
+			regexp.MustCompile(`(?i)\bentity\s+name\b`),
 		},
 		"geography": {
 			regexp.MustCompile(`(?i)\bgeography\b`),
@@ -85,8 +85,8 @@ var (
 		},
 	}
 	coreFieldCandidates = []string{
-		"vertical_id",
-		"vertical_name",
+		"entity_id",
+		"entity_name",
 		"geography",
 		"mode",
 		"scan_id",
@@ -95,34 +95,34 @@ var (
 		"taxonomy_categories",
 	}
 	typedPayloadBuilderFields = map[string][]string{
-		"buildValidationStartedPayload":       {"vertical_id", "scoring", "vertical_name", "name", "geography"},
-		"buildBrandRequestedPayload":          {"vertical_id", "vertical_name", "name", "geography", "scoring", "business_brief"},
-		"buildValidationPackageReadyPayload":  {"vertical_id", "vertical_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version"},
-		"buildSpecValidationRequestedPayload": {"vertical_id", "vertical_name", "geography", "spec", "spec_version", "validation_tier"},
-		"buildCTOSpecReviewRequestedPayload":  {"vertical_id", "vertical_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring"},
-		"buildSpecRevisionRequestedPayload":   {"vertical_id", "vertical_name", "geography", "source", "feedback", "research", "spec", "scoring"},
-		"buildValidationMoreDataPayload":      {"vertical_id", "vertical_name", "geography", "request", "research", "spec", "scoring"},
-		"buildBrandRevisionNeededPayload":     {"vertical_id", "vertical_name", "geography", "feedback", "brand"},
-		"buildVerticalKilledPayload":          {"vertical_id", "vertical_name", "geography", "source_event", "priority", "reason"},
+		"buildValidationStartedPayload":       {"entity_id", "scoring", "entity_name", "name", "geography"},
+		"buildBrandRequestedPayload":          {"entity_id", "entity_name", "name", "geography", "scoring", "business_brief"},
+		"buildValidationPackageReadyPayload":  {"entity_id", "entity_name", "geography", "research", "spec", "cto_notes", "brand", "scoring", "spec_version"},
+		"buildSpecValidationRequestedPayload": {"entity_id", "entity_name", "geography", "spec", "spec_version", "validation_tier"},
+		"buildCTOSpecReviewRequestedPayload":  {"entity_id", "entity_name", "geography", "spec_validation", "spec_version", "research", "spec", "scoring"},
+		"buildSpecRevisionRequestedPayload":   {"entity_id", "entity_name", "geography", "source", "feedback", "research", "spec", "scoring"},
+		"buildValidationMoreDataPayload":      {"entity_id", "entity_name", "geography", "request", "research", "spec", "scoring"},
+		"buildBrandRevisionNeededPayload":     {"entity_id", "entity_name", "geography", "feedback", "brand"},
+		"buildEntityKilledPayload":            {"entity_id", "entity_name", "geography", "source_event", "priority", "reason"},
 		"buildScanAssignedPayload":            {"scan_id", "campaign_id", "mode", "geography", "geography_id", "taxonomy_categories", "priority", "campaign_context", "directive_id", "strategic_context", "requested_at", "planned_shards"},
 		"buildSynthesisNeededPayload":         {"scan_id", "campaign_id", "mode", "geography", "category", "subcategory", "conflict_notes", "raw_report"},
-		"buildDedupAmbiguousPayload":          {"scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_vertical"},
-		"buildVerticalDiscoveredPayload":      {"vertical_id", "name", "geography", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals"},
+		"buildDedupAmbiguousPayload":          {"scan_id", "dedup_event_id", "similarity", "new_candidate", "existing_entity"},
+		"buildEntityDiscoveredPayload":        {"entity_id", "name", "geography", "mode", "scan_id", "campaign_id", "signal_strength", "discovery_source", "raw_signals"},
 		"buildScanCompletedPayload":           {"scan_id", "campaign_id", "mode", "geography", "reports_received", "agents_expected", "agents_complete", "verticals_discovered", "verticals_skipped", "pending_dedup", "timed_out", "shards_total", "shards_completed", "shards_failed"},
-		"buildScoringRequestedPayload":        {"vertical_id", "vertical_name", "geography", "mode", "rubric", "dimensions_requested"},
-		"buildScoringContestedPayload":        {"vertical_id", "dimension", "scores", "evidence", "spread", "rubric", "mode"},
-		"buildVerticalScoredPayload":          {"vertical_id", "result", "reason", "composite_score", "viability_score", "market_score", "dimensions", "rubric", "partial", "mode", "vertical_name", "geography"},
-		"buildVerticalShortlistedPayload":     {"vertical_id", "composite_score", "viability_score", "scoring_payload"},
-		"buildVerticalMarginalPayload":        {"vertical_id", "composite_score", "viability_score", "dimensions", "promotion_eligible"},
-		"buildVerticalRejectedPayload":        {"vertical_id", "reason"},
+		"buildScoringRequestedPayload":        {"entity_id", "entity_name", "geography", "mode", "rubric", "dimensions_requested"},
+		"buildScoringContestedPayload":        {"entity_id", "dimension", "scores", "evidence", "spread", "rubric", "mode"},
+		"buildEntityScoredPayload":            {"entity_id", "result", "reason", "composite_score", "viability_score", "market_score", "dimensions", "rubric", "partial", "mode", "entity_name", "geography"},
+		"buildEntityShortlistedPayload":       {"entity_id", "composite_score", "viability_score", "scoring_payload"},
+		"buildEntityMarginalPayload":          {"entity_id", "composite_score", "viability_score", "dimensions", "promotion_eligible"},
+		"buildEntityRejectedPayload":          {"entity_id", "reason"},
 		"buildPortfolioDigestTimerPayload":    {"source", "timestamp", "recent_rejections", "rejection_count", "scoring_rejections_injected", "scoring_rejections_count", "scoring_rejection_summaries"},
 	}
 )
 
 func main() {
 	runtimeDir := flag.String("runtime", "internal/runtime", "path to runtime package directory")
-	agentsDir := flag.String("agents", "configs/agents", "path to holding/factory agent YAML directory")
-	templatesDir := flag.String("templates", "configs/agents/templates", "path to opco template agent YAML directory")
+	agentsDir := flag.String("agents", "configs/agents", "path to agent YAML directory")
+	templatesDir := flag.String("templates", "configs/agents/templates", "path to template agent YAML directory")
 	outPath := flag.String("out", "docs/reports/runtime-payload-audit.md", "output markdown report path")
 	flag.Parse()
 

@@ -29,7 +29,6 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 
 	var in struct {
 		EntityID        string `json:"entity_id"`
-		VerticalID      string `json:"vertical_id"`
 		Category        string `json:"category"`
 		Description     string `json:"description"`
 		TalkingPoints   any    `json:"talking_points"`
@@ -43,8 +42,8 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		return nil, err
 	}
 
-	entityID := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID, actor.VerticalID))
-	in.VerticalID = entityID
+	entityID := strings.TrimSpace(coalesce(in.EntityID, actor.EffectiveEntityID()))
+	in.EntityID = entityID
 	in.Category = strings.TrimSpace(in.Category)
 	in.Description = strings.TrimSpace(in.Description)
 	in.ExpectedValue = strings.TrimSpace(in.ExpectedValue)
@@ -105,7 +104,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	`
 	if err := db.QueryRowContext(ctx, q,
 		actor.ID,
-		in.VerticalID,
+		in.EntityID,
 		in.Category,
 		in.Description,
 		talkingJSON,
@@ -129,7 +128,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		SourceAgent: actor.ID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}).WithEntityID(in.VerticalID)); err != nil {
+	}).WithEntityID(entityID)); err != nil {
 		runtimeWarn(
 			"tool-executor",
 			"failed to publish human_task.requested task_id=%s actor=%s: %v",

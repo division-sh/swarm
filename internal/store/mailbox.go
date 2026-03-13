@@ -123,7 +123,7 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 		if err := rows.Scan(
 			&it.ID,
 			&it.EventID,
-			&it.VerticalID,
+			&it.EntityID,
 			&it.FromAgent,
 			&it.Type,
 			&it.Priority,
@@ -140,7 +140,6 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 		if timeout.Valid {
 			it.TimeoutAt = timeout.Time
 		}
-		it.EntityID = it.EffectiveEntityID()
 		out = append(out, it)
 	}
 	if err := rows.Err(); err != nil {
@@ -200,7 +199,7 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 	if err := s.DB.QueryRowContext(ctx, q, id).Scan(
 		&it.ID,
 		&it.EventID,
-		&it.VerticalID,
+		&it.EntityID,
 		&it.FromAgent,
 		&it.Type,
 		&it.Priority,
@@ -220,7 +219,6 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 	if timeout.Valid {
 		it.TimeoutAt = timeout.Time
 	}
-	it.EntityID = it.EffectiveEntityID()
 	return it, nil
 }
 
@@ -310,7 +308,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 		if err := rows.Scan(
 			&it.ID,
 			&it.EventID,
-			&it.VerticalID,
+			&it.EntityID,
 			&it.FromAgent,
 			&it.Type,
 			&it.Priority,
@@ -327,7 +325,6 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 		if timeout.Valid {
 			it.TimeoutAt = timeout.Time
 		}
-		it.EntityID = it.EffectiveEntityID()
 		out = append(out, it)
 	}
 	if err := rows.Err(); err != nil {
@@ -381,7 +378,7 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 		if err := rows.Scan(
 			&it.ID,
 			&it.EventID,
-			&it.VerticalID,
+			&it.EntityID,
 			&it.FromAgent,
 			&it.Type,
 			&it.Priority,
@@ -398,7 +395,6 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 		if timeout.Valid {
 			it.TimeoutAt = timeout.Time
 		}
-		it.EntityID = it.EffectiveEntityID()
 		out = append(out, it)
 	}
 	if err := rows.Err(); err != nil {
@@ -408,10 +404,7 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 }
 
 func coalesceMailboxEntityID(item runtimetools.MailboxItem) string {
-	if strings.TrimSpace(item.EntityID) != "" {
-		return strings.TrimSpace(item.EntityID)
-	}
-	return strings.TrimSpace(item.VerticalID)
+	return strings.TrimSpace(item.EntityID)
 }
 
 func (s *PostgresStore) MarkMailboxItemNotified(ctx context.Context, id string) error {

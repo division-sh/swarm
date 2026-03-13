@@ -69,12 +69,12 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 	actions := make([]func(), 0, 2)
 	ctx := withPipelinePostCommitActions(context.Background(), &actions)
 	sc := Schedule{
-		AgentID:    "owner",
-		EventType:  "timer.review",
-		Mode:       "once",
-		At:         time.Now().Add(time.Hour),
-		VerticalID: "ent-1",
-		TaskID:     "timer-1",
+		AgentID:   "owner",
+		EventType: "timer.review",
+		Mode:      "once",
+		At:        time.Now().Add(time.Hour),
+		EntityID:  "ent-1",
+		TaskID:    "timer-1",
 	}
 
 	pc.persistWorkflowTimerSchedule(ctx, sc)

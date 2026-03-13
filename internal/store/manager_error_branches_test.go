@@ -22,19 +22,24 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		t.Fatal("expected missing agent id error")
 	}
 
-	// EnsureVerticalSchema: invalid/missing slug.
+	// EnsureEntitySchema: invalid/missing slug.
 	vid := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'Bad','', 'us','operating','operating', now(), now())
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, now(), now()
+		)
 	`, vid); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed workflow instance: %v", err)
 	}
-	if err := pg.EnsureVerticalSchema(ctx, vid); err == nil {
-		t.Fatal("expected EnsureVerticalSchema to fail for empty slug")
+	if err := pg.EnsureEntitySchema(ctx, vid); err == nil {
+		t.Fatal("expected EnsureEntitySchema to fail for empty slug")
 	}
-	if err := pg.EnsureVerticalSchema(ctx, ""); err == nil {
-		t.Fatal("expected EnsureVerticalSchema to require vertical_id")
+	if err := pg.EnsureEntitySchema(ctx, ""); err == nil {
+		t.Fatal("expected EnsureEntitySchema to require entity_id")
 	}
 
 	// LoadLatestOrgTemplate: no rows should error.
@@ -42,12 +47,12 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 		t.Fatal("expected LoadLatestOrgTemplate to error without templates")
 	}
 
-	// SetVerticalTemplateVersion: validation.
-	if err := pg.SetVerticalTemplateVersion(ctx, "", "v1"); err == nil {
-		t.Fatal("expected SetVerticalTemplateVersion to require vertical_id")
+	// SetEntityTemplateVersion: validation.
+	if err := pg.SetEntityTemplateVersion(ctx, "", "v1"); err == nil {
+		t.Fatal("expected SetEntityTemplateVersion to require entity_id")
 	}
-	if err := pg.SetVerticalTemplateVersion(ctx, vid, ""); err == nil {
-		t.Fatal("expected SetVerticalTemplateVersion to require version")
+	if err := pg.SetEntityTemplateVersion(ctx, vid, ""); err == nil {
+		t.Fatal("expected SetEntityTemplateVersion to require version")
 	}
 
 	// MarkAgentTerminated: validation.
@@ -63,7 +68,7 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	// UpsertEventReceipt should accept empty errText; also exercise invalid status guardrails indirectly.
 	aid := "a1"
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{ID: aid, Role: "r", Mode: "holding", Type: "stub", Config: []byte(`{"subscriptions":["*"]}`)},
+		Config: runtimeactors.AgentConfig{ID: aid, Role: "r", Mode: "global", Type: "stub", Config: []byte(`{"subscriptions":["*"]}`)},
 		Status: "active", HiredBy: "t", StartedAt: time.Now(),
 	})
 	evtID := uuid.NewString()

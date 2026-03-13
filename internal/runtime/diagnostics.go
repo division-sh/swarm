@@ -22,7 +22,6 @@ type RuntimeLogEntry struct {
 	EventType  string
 	AgentID    string
 	EntityID   string
-	VerticalID string
 	CampaignID string
 	ScanID     string
 	SessionID  string
@@ -30,6 +29,18 @@ type RuntimeLogEntry struct {
 	Detail     any
 	Error      string
 	DurationUS int
+}
+
+func (e RuntimeLogEntry) EffectiveEntityID() string {
+	return strings.TrimSpace(e.EntityID)
+}
+
+func (e *RuntimeLogEntry) NormalizeEntityID() {
+	if e == nil {
+		return
+	}
+	entityID := e.EffectiveEntityID()
+	e.EntityID = entityID
 }
 
 type RuntimeLogger struct {
@@ -78,10 +89,8 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 	if action == "" {
 		action = "unknown"
 	}
-	entityID := strings.TrimSpace(e.EntityID)
-	if entityID == "" {
-		entityID = strings.TrimSpace(e.VerticalID)
-	}
+	e.NormalizeEntityID()
+	entityID := e.EffectiveEntityID()
 
 	detail := marshalJSONOrEmpty(e.Detail)
 	_, err := l.db.ExecContext(withoutSQLTxContext(ctx), `

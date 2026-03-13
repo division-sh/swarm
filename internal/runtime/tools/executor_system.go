@@ -11,8 +11,8 @@ import (
 )
 
 func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig, _ any) (any, error) {
-	if actor.Role != "holding-devops" {
-		return nil, errors.New("nginx_reload is restricted to holding-devops")
+	if actor.Role != "system-admin" {
+		return nil, errors.New("nginx_reload is restricted to system-admin")
 	}
 	if out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("nginx config test failed: %w: %s", err, strings.TrimSpace(string(out)))
@@ -24,8 +24,8 @@ func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig
 }
 
 func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if actor.Role != "holding-devops" {
-		return nil, errors.New("systemd_control is restricted to holding-devops")
+	if actor.Role != "system-admin" {
+		return nil, errors.New("systemd_control is restricted to system-admin")
 	}
 	var in struct {
 		Action  string `json:"action"`
@@ -45,8 +45,8 @@ func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentCon
 	default:
 		return nil, fmt.Errorf("unsupported systemd action: %s", action)
 	}
-	if !strings.HasPrefix(unit, "empireai-") {
-		return nil, errors.New("systemd unit must start with empireai-")
+	if !strings.HasPrefix(unit, "mas-") {
+		return nil, errors.New("systemd unit must start with mas-")
 	}
 	if action == "status" {
 		out, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).CombinedOutput()
@@ -67,8 +67,8 @@ func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentCon
 }
 
 func (e *Executor) execCertbotExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if actor.Role != "holding-devops" {
-		return nil, errors.New("certbot_execute is restricted to holding-devops")
+	if actor.Role != "system-admin" {
+		return nil, errors.New("certbot_execute is restricted to system-admin")
 	}
 	var in struct {
 		Domain string `json:"domain"`

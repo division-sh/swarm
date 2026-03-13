@@ -98,9 +98,10 @@ required_agents:
   emits: []
   description: Customer support
 instance_variables:
-  description: Variables populated at instance creation from the vertical validation kit
+  description: Variables populated at instance creation from the entity validation kit
   variables:
-    vertical_name: Name of the approved vertical
+    entity_name: Name of the approved entity
+    entity_description: Description of the approved entity
     mandate_document: Full validation kit (business brief, spec, CTO review, brand)
     brand_name: Selected brand identity
     geography: Target geography

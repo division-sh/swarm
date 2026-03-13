@@ -130,7 +130,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("runtime config is required")
 	}
 	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
-		if runtimeEnvBool("EMPIREAI_EMIT_SCHEMA_STRICT", true) {
+		if runtimeEnvBool("MAS_EMIT_SCHEMA_STRICT", true) {
 			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
 		}
 		sample := generated
@@ -182,7 +182,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			TaskID:      sc.TaskID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		}).WithEntityID(sc.VerticalID)); err != nil {
+		}).WithEntityID(sc.EffectiveEntityID())); err != nil {
 			log.Printf("schedule publish failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 		}
 		if stores.ScheduleStore != nil {
@@ -458,7 +458,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				EventType:  eventType,
 				Mode:       "once",
 				At:         timerState.FiresAt,
-				VerticalID: verticalID,
+				EntityID:   verticalID,
 				TaskID:     timerID,
 				Payload:    mustJSON(map[string]any{"timer_id": timerID, "trigger_reason": timerID}),
 			}
@@ -505,12 +505,12 @@ func ensureInfraHealthCheckSchedule(ctx context.Context, store runtimepipeline.S
 	if store == nil {
 		return nil
 	}
-	cron := strings.TrimSpace(os.Getenv("EMPIREAI_INFRA_HEALTH_CRON"))
+	cron := strings.TrimSpace(os.Getenv("MAS_INFRA_HEALTH_CRON"))
 	if cron == "" {
 		cron = "0 * * * *"
 	}
 	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "holding-devops",
+		AgentID:   "system-admin",
 		EventType: "timer.infra_health_check",
 		Mode:      "cron",
 		Cron:      cron,

@@ -112,7 +112,6 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 			"flow_instance_path": instancePath,
 			"instance_id":        instanceID,
 			"template_id":        templateID,
-			"vertical_id":        instanceID,
 		}
 		for _, subscriberTemplate := range templateDef.Subscribers {
 			subscriber := Subscriber{
@@ -143,7 +142,7 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 	rt.instances[instancePath] = struct{}{}
 	rt.addEventPathsLocked(instancePath, localEvents)
 	subscriber := Subscriber{
-		ID:   routeRenderTemplate(template.ID, map[string]string{"instance_id": routeLastPathSegment(instancePath), "vertical_id": routeLastPathSegment(instancePath)}),
+		ID:   routeRenderTemplate(template.ID, map[string]string{"instance_id": routeLastPathSegment(instancePath)}),
 		Type: "node",
 		Path: instancePath,
 	}

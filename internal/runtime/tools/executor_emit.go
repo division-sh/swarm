@@ -79,9 +79,9 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		TaskID:      strings.TrimSpace(asString(payloadMap["task_id"])),
 		Payload:     mustJSON(payloadMap),
 		CreatedAt:   time.Now(),
-	}).WithEntityID(strings.TrimSpace(asString(payloadMap["vertical_id"])))
+	}).WithEntityID(strings.TrimSpace(asString(payloadMap["entity_id"])))
 	if emitted.EntityID() == "" {
-		emitted = emitted.WithEntityID(strings.TrimSpace(actor.VerticalID))
+		emitted = emitted.WithEntityID(strings.TrimSpace(actor.EffectiveEntityID()))
 	}
 	if emitted.TaskID == "" {
 		emitted.TaskID = strings.TrimSpace(inbound.TaskID)
@@ -89,8 +89,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if emitted.EntityID() == "" {
 		emitted = emitted.WithEntityID(strings.TrimSpace(inbound.EntityID()))
 	}
-	if strings.TrimSpace(asString(payloadMap["vertical_id"])) == "" && emitted.EntityID() != "" {
-		payloadMap["vertical_id"] = emitted.EntityID()
+	if emitted.EntityID() != "" {
+		if strings.TrimSpace(asString(payloadMap["entity_id"])) == "" {
+			payloadMap["entity_id"] = emitted.EntityID()
+		}
 		emitted.Payload = mustJSON(payloadMap)
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {

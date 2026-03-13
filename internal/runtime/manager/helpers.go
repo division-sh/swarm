@@ -71,9 +71,9 @@ func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
 }
 
 func RenderMandateText(m runtimeactors.MandateDocument) string {
+	entityID := m.EffectiveEntityID()
 	obj := map[string]any{
-		"entity_id":          strings.TrimSpace(FirstNonEmptyString(m.VerticalID)),
-		"vertical_id":        strings.TrimSpace(m.VerticalID),
+		"entity_id":          entityID,
 		"geography":          strings.TrimSpace(m.Geography),
 		"founder_notes":      strings.TrimSpace(m.FounderNotes),
 		"founder_directives": strings.TrimSpace(m.FounderDirectives),
@@ -174,9 +174,6 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.EntityID != "" {
 		out.EntityID = patch.EntityID
 	}
-	if patch.VerticalID != "" {
-		out.VerticalID = patch.VerticalID
-	}
 	if patch.ParentAgent != "" {
 		out.ParentAgent = patch.ParentAgent
 	}
@@ -189,12 +186,7 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.BudgetEnvelope != 0 {
 		out.BudgetEnvelope = patch.BudgetEnvelope
 	}
-	if out.EntityID == "" {
-		out.EntityID = out.VerticalID
-	}
-	if out.VerticalID == "" {
-		out.VerticalID = out.EntityID
-	}
+	out.NormalizeEntityID()
 	return out
 }
 

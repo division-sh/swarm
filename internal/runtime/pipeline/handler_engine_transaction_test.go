@@ -215,7 +215,6 @@ func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.
 		Module: NewGenericTestWorkflowModule(),
 	})
 	entityID := "ent-1"
-	pc.validationGate.states[entityID] = &validationPipelineState{}
 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		Action: runtimecontracts.ActionSpec{ID: "increment_revision_count"},
@@ -231,10 +230,6 @@ func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.
 	}
 	if got := result.Outcome.ActionsExecuted; len(got) != 1 || got[0] != "increment_revision_count" {
 		t.Fatalf("actions executed = %#v, want [increment_revision_count]", got)
-	}
-	snapshot := pc.validationStateSnapshot(entityID)
-	if snapshot == nil || snapshot.RevisionCount != 1 {
-		t.Fatalf("revision count = %#v, want 1", snapshot)
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("bus published count = %d, want 0", got)

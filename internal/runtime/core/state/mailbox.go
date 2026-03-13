@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -10,7 +11,6 @@ type MailboxItem struct {
 	ID            string          `json:"id"`
 	EventID       string          `json:"event_id,omitempty"`
 	EntityID      string          `json:"entity_id,omitempty"`
-	VerticalID    string          `json:"vertical_id,omitempty"`
 	FromAgent     string          `json:"from_agent,omitempty"`
 	Type          string          `json:"type"`
 	Priority      string          `json:"priority"`
@@ -26,8 +26,13 @@ type MailboxItem struct {
 }
 
 func (m MailboxItem) EffectiveEntityID() string {
-	if m.EntityID != "" {
-		return m.EntityID
+	return strings.TrimSpace(m.EntityID)
+}
+
+func (m *MailboxItem) NormalizeEntityID() {
+	if m == nil {
+		return
 	}
-	return m.VerticalID
+	entityID := m.EffectiveEntityID()
+	m.EntityID = entityID
 }

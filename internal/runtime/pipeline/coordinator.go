@@ -36,23 +36,6 @@ func pipelineSourceAgent(ctx context.Context) string {
 	return ""
 }
 
-type workflowTransitionOutcome struct {
-	Transition       WorkflowTransition
-	PreviousState    WorkflowState
-	CurrentState     WorkflowState
-	GuardsEvaluated  []string
-	ActionsExecuted  []string
-	TriggerEventID   string
-	TriggerEventType string
-}
-
-type WorkflowHookContext struct {
-	Event    events.Event
-	EntityID string
-	Payload  map[string]any
-	State    WorkflowState
-}
-
 type workflowTriggerContext struct {
 	Event events.Event
 	State WorkflowState
@@ -91,18 +74,8 @@ func workflowEventEntityID(evt events.Event) string {
 func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) string {
 	return strings.TrimSpace(firstNonEmptyString(
 		asString(payload["entity_id"]),
-		asString(payload["vertical_id"]),
 		evt.EntityID(),
 	))
-}
-
-func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowHookContext {
-	return WorkflowHookContext{
-		Event:    triggerCtx.Event,
-		EntityID: workflowEventEntityID(triggerCtx.Event),
-		Payload:  parsePayloadMap(triggerCtx.Event.Payload),
-		State:    triggerCtx.State,
-	}
 }
 
 func handlerGuardID(spec *runtimecontracts.GuardSpec) string {
@@ -110,6 +83,13 @@ func handlerGuardID(spec *runtimecontracts.GuardSpec) string {
 		return ""
 	}
 	return strings.TrimSpace(spec.ID)
+}
+
+func gateSpecString(spec *runtimecontracts.GateSpec) string {
+	if spec == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Name)
 }
 
 func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
@@ -185,93 +165,6 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	return steps
 }
 
-type entityCandidate struct {
-	ID        string
-	Name      string
-	Geography string
-}
-
-type pendingCandidate struct {
-	DedupEventID string
-	ExistingID   string
-	ScanID       string
-	CampaignID   string
-	Mode         string
-	Geography    string
-	Name         string
-	Signal       float64
-	Payload      map[string]any
-}
-
-type scanAccumulator struct {
-	ScanID      string
-	CampaignID  string
-	Mode        string
-	Geography   string
-	Expected    int
-	CompletedBy map[string]struct{}
-	ReportData  []map[string]any
-	Reports     int
-	Discovered  int
-	Skipped     int
-	CreatedAt   time.Time
-}
-
-type validationPipelineState struct {
-	EntityID           string
-	Status             string
-	G1Research         bool
-	G2Spec             bool
-	G3CTO              bool
-	G4Brand            bool
-	RevisionCount      int
-	InnerRevisionCount int
-	SpecVersion        int
-}
-
-func (s *validationPipelineState) gateContext() map[string]bool {
-	if s == nil {
-		return map[string]bool{}
-	}
-	return map[string]bool{
-		"g1_research": s.G1Research,
-		"g2_spec":     s.G2Spec,
-		"g3_cto":      s.G3CTO,
-		"g4_brand":    s.G4Brand,
-	}
-}
-
-type ScanCoordinator struct {
-	runtime      scanWorkflowRuntime
-	pendingDedup map[string]pendingCandidate
-}
-
-func NewScanCoordinator() *ScanCoordinator {
-	return &ScanCoordinator{pendingDedup: make(map[string]pendingCandidate)}
-}
-
-func (*ScanCoordinator) handlePortfolioDigestTimer(context.Context, events.Event) {}
-func (*ScanCoordinator) handleScanRequested(context.Context, events.Event)         {}
-func (*ScanCoordinator) handleDiscoveryReport(context.Context, events.Event)       {}
-func (*ScanCoordinator) handleScanCompletion(context.Context, events.Event)        {}
-func (*ScanCoordinator) handleDedupResolved(context.Context, events.Event)         {}
-func (*ScanCoordinator) handleSynthesisResolved(context.Context, events.Event)     {}
-func (*ScanCoordinator) handleScanTimeout(context.Context, events.Event)           {}
-func (*ScanCoordinator) handleCampaignDeadline(context.Context, events.Event)      {}
-func (*ScanCoordinator) checkTimeouts(context.Context, time.Time)                  {}
-
-type ScoringState struct{}
-
-func NewScoringState() *ScoringState { return &ScoringState{} }
-
-type ValidationGate struct {
-	states map[string]*validationPipelineState
-}
-
-func NewValidationGate() *ValidationGate {
-	return &ValidationGate{states: make(map[string]*validationPipelineState)}
-}
-
 type FactoryPipelineCoordinator struct {
 	bus Bus
 	db  *sql.DB
@@ -281,14 +174,11 @@ type FactoryPipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	scanCoordinator *ScanCoordinator
-	scoringState    *ScoringState
-	validationGate  *ValidationGate
-	module            WorkflowModule
-	workflowStore     *WorkflowInstanceStore
-	expressionEval    *workflowExpressionEvaluator
-	instanceActivator FlowInstanceActivator
-	timerScheduler    *Scheduler
+	module             WorkflowModule
+	workflowStore      *WorkflowInstanceStore
+	expressionEval     *workflowExpressionEvaluator
+	instanceActivator  FlowInstanceActivator
+	timerScheduler     *Scheduler
 	timerScheduleStore SchedulePersistence
 
 	testSubscribeHook   func()
@@ -317,20 +207,6 @@ type FlowInstanceActivationRequest struct {
 
 type FlowInstanceActivator func(context.Context, FlowInstanceActivationRequest) error
 
-func (pc *FactoryPipelineCoordinator) runtimeHandlerID(eventType string) string {
-	eventType = strings.TrimSpace(eventType)
-	if eventType != "" {
-		if source := pc.SemanticSource(); source != nil {
-			if entry, ok := source.EventEntry(eventType); ok {
-				if owner := strings.TrimSpace(entry.OwningNode); owner != "" {
-					return owner
-				}
-			}
-		}
-	}
-	return runtimeWorkflowID
-}
-
 func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryPipelineCoordinatorOptions) *FactoryPipelineCoordinator {
 	if bus == nil {
 		return nil
@@ -339,22 +215,15 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	if module == nil {
 		module = defaultWorkflowModule()
 	}
-	pc := &FactoryPipelineCoordinator{
+	return &FactoryPipelineCoordinator{
 		bus:               bus,
 		db:                db,
-		scanCoordinator:   NewScanCoordinator(),
-		scoringState:      NewScoringState(),
-		validationGate:    NewValidationGate(),
 		module:            module,
 		workflowStore:     NewWorkflowInstanceStore(db),
 		expressionEval:    newWorkflowExpressionEvaluator(),
 		instanceActivator: opts.InstanceActivator,
 		entityLocks:       make(map[string]*sync.Mutex),
 	}
-	if pc.scanCoordinator != nil {
-		pc.scanCoordinator.runtime = pc
-	}
-	return pc
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -387,10 +256,6 @@ func (pc *FactoryPipelineCoordinator) SetTestEntityStateHook(fn func(entityID, s
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) SetTestVerticalStageHook(fn func(verticalID, stage string)) {
-	pc.SetTestEntityStateHook(fn)
-}
-
 func (pc *FactoryPipelineCoordinator) SetInstanceActivator(activator FlowInstanceActivator) {
 	if pc == nil {
 		return
@@ -409,8 +274,6 @@ func (pc *FactoryPipelineCoordinator) SetTimerScheduling(scheduler *Scheduler, s
 	pc.timerScheduleStore = store
 	pc.mu.Unlock()
 }
-
-func (pc *FactoryPipelineCoordinator) SetShardPlanner(any) {}
 
 func (pc *FactoryPipelineCoordinator) Run(ctx context.Context) {
 	if pc == nil || pc.bus == nil {
@@ -580,21 +443,48 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 	return state
 }
 
-func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, entityID, stage, sourceEvent string) {
-	if pc == nil {
+func (pc *FactoryPipelineCoordinator) updateEntityState(ctx context.Context, entityID, nextState, sourceEvent string) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
 	}
 	entityID = strings.TrimSpace(entityID)
-	stage = strings.TrimSpace(string(NormalizeWorkflowStateID(stage)))
-	if entityID == "" || stage == "" {
+	nextState = strings.TrimSpace(string(NormalizeWorkflowStateID(nextState)))
+	sourceEvent = strings.TrimSpace(sourceEvent)
+	if entityID == "" || nextState == "" {
 		return
 	}
 	current := pc.currentWorkflowState(ctx, entityID)
-	currentStage := strings.TrimSpace(string(current.Stage))
-	current.Stage = NormalizeWorkflowStateID(stage)
-	current.EntityID = entityID
-	pc.persistWorkflowStageProjection(ctx, entityID, currentStage, stage, strings.TrimSpace(sourceEvent), current)
-	pc.notifyTestEntityStateUpdated(entityID, stage)
+	currentState := strings.TrimSpace(string(current.Stage))
+	source := pc.SemanticSource()
+	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		enteredStateAt := time.Now().UTC()
+		if strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
+			enteredStateAt = instance.EnteredStageAt
+		}
+		if strings.TrimSpace(instance.WorkflowName) == "" {
+			instance.WorkflowName = source.WorkflowName()
+		}
+		if strings.TrimSpace(instance.WorkflowVersion) == "" {
+			instance.WorkflowVersion = source.WorkflowVersion()
+		}
+		metadata := cloneStringAnyMap(current.Metadata)
+		if strings.TrimSpace(current.Status) != "" {
+			metadata["status"] = strings.TrimSpace(current.Status)
+		}
+		if sourceEvent != "" {
+			metadata["last_source_event"] = sourceEvent
+		}
+		instance.CurrentState = nextState
+		instance.EnteredStageAt = enteredStateAt
+		instance.Metadata = metadata
+		if currentState != "" && currentState != nextState {
+			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(currentState, nextState, sourceEvent))
+		} else if currentState == "" && len(instance.TransitionHistory) == 0 {
+			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord("", nextState, sourceEvent))
+		}
+	})
+	pc.notifyTestEntityStateUpdated(entityID, nextState)
+	pc.reconcileWorkflowStageTimers(ctx, entityID, currentState, nextState, sourceEvent)
 }
 
 func (pc *FactoryPipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) {
@@ -706,71 +596,26 @@ func (pc *FactoryPipelineCoordinator) lockWorkflowEntity(entityID string) func()
 	return lock.Unlock
 }
 
-func (pc *FactoryPipelineCoordinator) validationStateSnapshot(entityID string) *validationPipelineState {
-	if pc == nil || pc.validationGate == nil {
-		return nil
+func workflowTransitionRecord(fromState, toState, sourceEvent string) WorkflowTransitionRecord {
+	fromState = strings.TrimSpace(string(NormalizeWorkflowStateID(fromState)))
+	toState = strings.TrimSpace(string(NormalizeWorkflowStateID(toState)))
+	sourceEvent = strings.TrimSpace(sourceEvent)
+	state := WorkflowState{Stage: NormalizeWorkflowStateID(fromState)}
+	transition, ok := DefaultPipelineWorkflow().Transition(state, NormalizeWorkflowStateID(toState))
+	record := WorkflowTransitionRecord{
+		From:            fromState,
+		To:              toState,
+		GuardsEvaluated: nil,
+		FiredAt:         time.Now().UTC(),
 	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return nil
+	if ok {
+		record.TransitionID = strings.TrimSpace(transition.Name)
+		record.GuardsEvaluated = append([]string{}, transition.GuardIDs...)
+	} else {
+		record.TransitionID = firstNonEmptyString(
+			sourceEvent,
+			"legacy_"+strings.ReplaceAll(fromState, "-", "_")+"_to_"+strings.ReplaceAll(toState, "-", "_"),
+		)
 	}
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	st := pc.validationGate.states[entityID]
-	if st == nil {
-		return nil
-	}
-	copied := *st
-	return &copied
+	return record
 }
-
-func (pc *FactoryPipelineCoordinator) mutateValidationState(_ context.Context, entityID string, mutate func(*validationPipelineState)) *validationPipelineState {
-	if pc == nil || pc.validationGate == nil || mutate == nil {
-		return nil
-	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return nil
-	}
-	pc.mu.Lock()
-	defer pc.mu.Unlock()
-	st := pc.validationGate.states[entityID]
-	if st == nil {
-		st = &validationPipelineState{EntityID: entityID, Status: "active"}
-		pc.validationGate.states[entityID] = st
-	}
-	mutate(st)
-	copied := *st
-	return &copied
-}
-
-func (pc *FactoryPipelineCoordinator) handlePortfolioDigestTimer(context.Context, events.Event) {}
-
-func (pc *FactoryPipelineCoordinator) planAndPersistShards(context.Context, events.Event, string, string, map[string]any) int {
-	return 0
-}
-
-func (pc *FactoryPipelineCoordinator) logPrefilterSkip(context.Context, events.Event, string, string, string, string, map[string]any, float64, float64) {
-}
-
-func (pc *FactoryPipelineCoordinator) markShardCompletedByAgent(context.Context, string) string {
-	return ""
-}
-
-func (pc *FactoryPipelineCoordinator) shardTerminalProgress(context.Context, string) (int, int, int, bool) {
-	return 0, 0, 0, false
-}
-
-func (pc *FactoryPipelineCoordinator) loadEntitiesByGeography(context.Context, string) ([]entityCandidate, error) {
-	return nil, nil
-}
-
-func (pc *FactoryPipelineCoordinator) ensureEntityDiscovered(context.Context, string, string, string, map[string]any) (string, error) {
-	return "", nil
-}
-
-func (pc *FactoryPipelineCoordinator) loadWorkflowScanProjection(context.Context, string) (*scanAccumulator, map[string]pendingCandidate, bool) {
-	return nil, nil, false
-}
-
-func (pc *FactoryPipelineCoordinator) applyMarginalKillTimer(context.Context, events.Event) {}

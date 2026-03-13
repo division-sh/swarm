@@ -164,3 +164,42 @@ func NewContractActionRegistry(source semanticview.Source) ActionRegistry {
 		instructions: actionInstructions,
 	}
 }
+
+func normalizeWorkflowBuiltinGuardID(id string) string {
+	return strings.TrimSpace(strings.ToLower(id))
+}
+
+func normalizeWorkflowBuiltinActionID(id string) string {
+	return strings.TrimSpace(strings.ToLower(id))
+}
+
+func isSupportedWorkflowGuardBuiltin(id string) bool {
+	switch normalizeWorkflowBuiltinGuardID(id) {
+	case "has_entity_id",
+		"has_human_decision",
+		"not_in_terminal_state",
+		"not_in_terminal_stage",
+		"not_in_operating_phase",
+		"revision_count_below_limit",
+		"inner_revision_count_below_limit",
+		"state_in_phase":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedWorkflowActionBuiltin(id string) bool {
+	switch normalizeWorkflowBuiltinActionID(id) {
+	case "increment_revision_count",
+		"record_state_change",
+		"update_state",
+		"cancel_state_timers",
+		"start_state_timers",
+		"record_evidence",
+		"create_flow_instance":
+		return true
+	default:
+		return false
+	}
+}

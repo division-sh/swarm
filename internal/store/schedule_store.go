@@ -17,6 +17,8 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	if strings.TrimSpace(sc.Mode) == "" {
 		sc.Mode = "once"
 	}
+	entityID := sc.EffectiveEntityID()
+	sc.EntityID = entityID
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin schedule tx: %w", err)
@@ -34,7 +36,7 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
-	`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID)); err != nil {
+	`, sc.AgentID, sc.EventType, sc.EntityID, strings.TrimSpace(sc.TaskID)); err != nil {
 		return fmt.Errorf("deactivate previous schedule: %w", err)
 	}
 
@@ -53,7 +55,7 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 			$1, NULLIF($2,'')::uuid, $3, $4, NULLIF($5,''),
 			$6, $7, $8::jsonb, true, now()
 		)
-	`, sc.AgentID, sc.VerticalID, sc.EventType, sc.Mode, sc.Cron, atTime, nextFire, string(payload)); err != nil {
+	`, sc.AgentID, sc.EntityID, sc.EventType, sc.Mode, sc.Cron, atTime, nextFire, string(payload)); err != nil {
 		return fmt.Errorf("insert schedule: %w", err)
 	}
 
@@ -85,6 +87,7 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
+	entityID := sc.EffectiveEntityID()
 	_, err := s.DB.ExecContext(ctx, `
 		UPDATE schedules
 		SET active = false,
@@ -94,7 +97,7 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
-	`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID))
+	`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
 	if err != nil {
 		return fmt.Errorf("cancel exact schedule: %w", err)
 	}
@@ -129,7 +132,7 @@ func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipel
 			&sc.Mode,
 			&sc.Cron,
 			&at,
-			&sc.VerticalID,
+			&sc.EntityID,
 			&sc.Payload,
 		); err != nil {
 			return nil, fmt.Errorf("scan active schedule: %w", err)
@@ -182,6 +185,7 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return nil
 	}
+	entityID := sc.EffectiveEntityID()
 	if sc.Mode == "once" {
 		_, err := s.DB.ExecContext(ctx, `
 			UPDATE schedules
@@ -193,7 +197,7 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 			  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 			  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 			  AND active = true
-		`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID))
+		`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
 		if err != nil {
 			return fmt.Errorf("mark exact once schedule fired: %w", err)
 		}
@@ -207,7 +211,7 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 		  AND vertical_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
 		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
 		  AND active = true
-	`, sc.AgentID, sc.EventType, sc.VerticalID, strings.TrimSpace(sc.TaskID))
+	`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
 	if err != nil {
 		return fmt.Errorf("mark exact schedule fired: %w", err)
 	}

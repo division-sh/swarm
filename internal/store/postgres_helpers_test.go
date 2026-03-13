@@ -50,7 +50,7 @@ func fmtSscanf(s string, out *int) {
 	*out = n
 }
 
-func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
+func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	port := portFromDSN(t, dsn)
@@ -88,13 +88,24 @@ func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
 		t.Fatalf("ApplyMigrationFile: %v", err)
 	}
 
-	// Seed verticals for digest/vertical info.
+	// Seed verticals for digest coverage.
 	verticalID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed entity: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco","name":"TestCo"}'::jsonb, now(), now()
+		)
+	`, verticalID); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
 	// Active count includes operating.
 	if n, err := pg.CountActiveInstances(ctx); err != nil || n < 1 {
@@ -122,8 +133,8 @@ func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
 	// Active agent ids.
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a','stub','a','holding','active','{}'::jsonb, now(), now()),
-		       ('t','stub','t','holding','terminated','{}'::jsonb, now(), now())
+		VALUES ('a','stub','a','global','active','{}'::jsonb, now(), now()),
+		       ('t','stub','t','global','terminated','{}'::jsonb, now(), now())
 	`); err != nil {
 		t.Fatalf("seed agents: %v", err)
 	}
@@ -132,13 +143,6 @@ func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
 		t.Fatalf("ListActiveAgentIDs err=%v ids=%v", err, ids)
 	}
 
-	// Vertical info.
-	if _, _, err := pg.GetVerticalInfo(ctx, ""); err == nil {
-		t.Fatal("expected missing id error")
-	}
-	if info, ok, err := pg.GetVerticalInfo(ctx, verticalID); err != nil || !ok || strings.TrimSpace(info.Name) == "" {
-		t.Fatalf("GetVerticalInfo ok=%v err=%v info=%+v", ok, err, info)
-	}
 }
 
 func TestPostgresStore_ApplyManagedMigrations(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 )
 
 // budgetExecutionScopeKey controls intra-process serialization for LLM budget
-// preflight/recording. Vertical-scoped agents keep per-vertical locking.
+// preflight/recording. Entity-scoped agents keep per-entity locking.
 // Factory-shard agents (no vertical_id) get per-agent scope keys so sharded
 // scans can execute concurrently instead of funneling through one global lock.
 func budgetExecutionScopeKey(actor models.AgentConfig) string {
@@ -87,7 +87,7 @@ func (t *BudgetTracker) IsEntityEmergency(entityID string) bool {
 	if t.CurrentState("portfolio", "") == "emergency" {
 		return true
 	}
-	if entityID != "" && t.CurrentState("vertical", entityID) == "emergency" {
+	if entityID != "" && t.CurrentState("entity", entityID) == "emergency" {
 		return true
 	}
 	return false
@@ -109,7 +109,7 @@ func (t *BudgetTracker) IsEntityThrottle(entityID string) bool {
 	if t.CurrentState("portfolio", "") == "throttle" {
 		return true
 	}
-	if entityID != "" && t.CurrentState("vertical", entityID) == "throttle" {
+	if entityID != "" && t.CurrentState("entity", entityID) == "throttle" {
 		return true
 	}
 	return false
@@ -124,7 +124,7 @@ func (t *BudgetTracker) RecordEntityLLMUsage(ctx context.Context, entityID strin
 }
 
 // LockExecutionScope serializes budget-critical LLM execution checks/records
-// per vertical scope within the current process.
+// per entity scope within the current process.
 func (t *BudgetTracker) LockExecutionScope(verticalID string) func() {
 	if t == nil {
 		return func() {}
@@ -151,11 +151,11 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	// Evaluate portfolio/factory.
 	_ = t.evaluateAndEmit(ctx, "")
 
-	// Evaluate each active vertical with any spend/metrics.
+	// Evaluate each active entity with any spend/metrics.
 	rows, err := t.db.QueryContext(ctx, `
 		SELECT instance_id::text
 		FROM workflow_instances
-		WHERE COALESCE(metadata->>'instance_kind', '') = 'vertical'
+			WHERE COALESCE(metadata->>'instance_kind', '') = 'entity'
 		  AND current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
 		ORDER BY created_at ASC
 	`)
@@ -173,7 +173,7 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 }
 
 type SpendRecord struct {
-	VerticalID   string
+	EntityID     string
 	Category     string
 	AmountCents  int
 	Currency     string
@@ -184,6 +184,18 @@ type SpendRecord struct {
 	RecordedBy   string
 	RecordedAt   time.Time
 	RequestingID string
+}
+
+func (r SpendRecord) EffectiveEntityID() string {
+	return strings.TrimSpace(r.EntityID)
+}
+
+func (r *SpendRecord) NormalizeEntityID() {
+	if r == nil {
+		return
+	}
+	entityID := r.EffectiveEntityID()
+	r.EntityID = entityID
 }
 
 func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error {
@@ -203,6 +215,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	if rec.Source == "" {
 		rec.Source = "exact"
 	}
+	rec.NormalizeEntityID()
 
 	metaJSON := []byte("null")
 	if rec.Meta != nil {
@@ -219,7 +232,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 		)
 	`
 	if _, err := t.db.ExecContext(ctx, q,
-		strings.TrimSpace(rec.VerticalID),
+		rec.EffectiveEntityID(),
 		strings.TrimSpace(rec.RecordedBy),
 		strings.TrimSpace(rec.Category),
 		rec.AmountCents,
@@ -234,7 +247,7 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	}
 
 	// Best-effort guardrail evaluation.
-	_ = t.evaluateAndEmit(ctx, strings.TrimSpace(rec.VerticalID))
+	_ = t.evaluateAndEmit(ctx, rec.EffectiveEntityID())
 	return nil
 }
 
@@ -256,7 +269,7 @@ func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, verticalID string, a
 	desc := fmt.Sprintf("llm usage agent=%s runtime=%s model=%s in=%d out=%d",
 		agentID, runtimeMode, usage.Model, usage.InputTokens, usage.OutputTokens)
 	return t.RecordSpend(ctx, SpendRecord{
-		VerticalID:  verticalID,
+		EntityID:    verticalID,
 		Category:    "llm",
 		AmountCents: amount,
 		Currency:    "USD",
@@ -345,9 +358,9 @@ func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, verticalID string) 
 		}
 	}
 
-	// Per-vertical cap.
+// Per-entity cap.
 	if verticalID != "" && t.cfg.Budget().PerVerticalMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "vertical", verticalID, t.cfg.Budget().PerVerticalMonthlyCap); err != nil {
+		if err := t.evaluateScope(ctx, "entity", verticalID, t.cfg.Budget().PerVerticalMonthlyCap); err != nil {
 			return err
 		}
 	}
@@ -467,7 +480,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		// Best-effort: avoid breaking spend path if mailbox insert fails.
 		if _, err := t.mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			EventID:    evtID,
-			VerticalID: verticalID,
+			EntityID:   verticalID,
 			FromAgent:  t.mailboxFrom,
 			Type:       "budget_increase",
 			Priority:   "critical",
@@ -475,7 +488,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 			Context:    mustJSON(payload),
 			Summary:    summary,
 		}); err != nil {
-			runtimeWarn("budget", "failed to insert emergency budget mailbox item vertical=%s scope=%s: %v", verticalID, scope, err)
+			runtimeWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", verticalID, scope, err)
 		}
 	}
 	return nil

@@ -286,5 +286,5 @@ func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, ev
 }
 
 func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) {
-	eb.logRuntime(ctx, entry.Level, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.VerticalID, entry.CampaignID, entry.ScanID, entry.SessionID, entry.Detail, entry.Error, entry.DurationUS)
+	eb.logRuntime(ctx, entry.Level, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.CampaignID, entry.ScanID, entry.SessionID, entry.Detail, entry.Error, entry.DurationUS)
 }

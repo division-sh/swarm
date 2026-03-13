@@ -249,8 +249,8 @@ func isAllowedRuntimePromptToken(token string) bool {
 	switch strings.TrimSpace(token) {
 	case "name",
 		"type",
-		"vertical_name",
-		"vertical_description",
+		"entity_name",
+		"entity_description",
 		"geography",
 		"mandate_document",
 		"founder_directives",

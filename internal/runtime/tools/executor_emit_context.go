@@ -18,12 +18,12 @@ func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound ev
 	if emitSchemaAllowsProperty(eventType, "task_id") && strings.TrimSpace(asString(out["task_id"])) == "" {
 		out["task_id"] = strings.TrimSpace(inbound.TaskID)
 	}
-	if emitSchemaAllowsProperty(eventType, "vertical_id") && strings.TrimSpace(asString(out["vertical_id"])) == "" {
-		verticalID := strings.TrimSpace(actor.VerticalID)
-		if verticalID == "" {
-			verticalID = strings.TrimSpace(inbound.EntityID())
-		}
-		out["vertical_id"] = verticalID
+	entityID := actor.EffectiveEntityID()
+	if entityID == "" {
+		entityID = strings.TrimSpace(inbound.EntityID())
+	}
+	if emitSchemaAllowsProperty(eventType, "entity_id") && strings.TrimSpace(asString(out["entity_id"])) == "" {
+		out["entity_id"] = entityID
 	}
 	return out
 }

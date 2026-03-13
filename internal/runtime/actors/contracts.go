@@ -1,10 +1,13 @@
 package actors
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // MandateDocument is the handoff artifact from factory to an operating flow.
 type MandateDocument struct {
-	VerticalID        string          `json:"vertical_id"`
+	EntityID          string          `json:"entity_id,omitempty"`
 	Geography         string          `json:"geography,omitempty"`
 	LaunchTargets     json.RawMessage `json:"launch_targets,omitempty"`
 	FounderDirectives string          `json:"founder_directives,omitempty"`
@@ -17,9 +20,19 @@ type MandateDocument struct {
 	Infrastructure    json.RawMessage `json:"infrastructure,omitempty"`
 }
 
+func (m MandateDocument) EffectiveEntityID() string { return strings.TrimSpace(m.EntityID) }
+
+func (m *MandateDocument) NormalizeEntityID() {
+	if m == nil {
+		return
+	}
+	entityID := m.EffectiveEntityID()
+	m.EntityID = entityID
+}
+
 // DeployManifest is the deployment contract exchanged between runtime agents.
 type DeployManifest struct {
-	VerticalID        string            `json:"vertical_id"`
+	EntityID          string            `json:"entity_id,omitempty"`
 	VerticalName      string            `json:"vertical_name,omitempty"`
 	Environment       string            `json:"environment"`
 	BinaryPath        string            `json:"binary_path,omitempty"`
@@ -29,4 +42,14 @@ type DeployManifest struct {
 	SkipStaging       bool              `json:"skip_staging,omitempty"`
 	Version           int               `json:"version"`
 	RollbackMigration string            `json:"rollback_migration,omitempty"`
+}
+
+func (m DeployManifest) EffectiveEntityID() string { return strings.TrimSpace(m.EntityID) }
+
+func (m *DeployManifest) NormalizeEntityID() {
+	if m == nil {
+		return
+	}
+	entityID := m.EffectiveEntityID()
+	m.EntityID = entityID
 }

@@ -35,8 +35,6 @@ type Lifecycle interface {
 	EnsureSystemWorkspaces(ctx context.Context) error
 	EnsureEntityWorkspace(ctx context.Context, entityID string) error
 	StopEntityWorkspace(ctx context.Context, entityID string) error
-	EnsureVerticalWorkspace(ctx context.Context, verticalID string) error
-	StopVerticalWorkspace(ctx context.Context, verticalID string) error
 }
 
 type OrphanKiller interface {
@@ -52,34 +50,28 @@ type DockerConfig struct {
 	FactoryVolume           string
 	InfraContainer          string
 	InfraWorkdir            string
-	InfraVerticalsVolume    string
 	InfraEntitiesVolume     string
 	InfraNginxVolume        string
 	InfraSystemdVolume      string
-	VerticalContainerPrefix string
 	EntityContainerPrefix   string
-	VerticalWorkdir         string
 	EntityWorkdir           string
 }
 
 func DefaultDockerConfig() DockerConfig {
 	return DockerConfig{
-		DockerBin:               EnvOrDefault("EMPIREAI_DOCKER_BIN", "docker"),
-		WorkspaceImage:          EnvOrDefault("EMPIREAI_WORKSPACE_IMAGE", "empireai-workspace:latest"),
-		WorkspaceNetwork:        EnvOrDefault("EMPIREAI_WORKSPACE_NETWORK", "empireai_default"),
-		FactoryContainer:        EnvOrDefault("EMPIREAI_FACTORY_CONTAINER", "empireai-factory"),
-		FactoryWorkdir:          EnvOrDefault("EMPIREAI_FACTORY_WORKDIR", "/opt/empireai/scaffold"),
-		FactoryVolume:           EnvOrDefault("EMPIREAI_FACTORY_VOLUME", "scaffold"),
-		InfraContainer:          EnvOrDefault("EMPIREAI_INFRA_CONTAINER", "empireai-infra"),
-		InfraWorkdir:            EnvOrDefault("EMPIREAI_INFRA_WORKDIR", "/opt/empireai"),
-		InfraVerticalsVolume:    EnvOrDefault("EMPIREAI_INFRA_VERTICALS_VOLUME", "verticals"),
-		InfraEntitiesVolume:     EnvOrDefault("EMPIREAI_INFRA_VERTICALS_VOLUME", "verticals"),
-		InfraNginxVolume:        EnvOrDefault("EMPIREAI_INFRA_NGINX_VOLUME", "nginx"),
-		InfraSystemdVolume:      EnvOrDefault("EMPIREAI_INFRA_SYSTEMD_VOLUME", "systemd"),
-		VerticalContainerPrefix: EnvOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-"),
-		EntityContainerPrefix:   EnvOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-"),
-		VerticalWorkdir:         EnvOrDefault("EMPIREAI_VERTICAL_WORKDIR", "/workspace"),
-		EntityWorkdir:           EnvOrDefault("EMPIREAI_VERTICAL_WORKDIR", "/workspace"),
+		DockerBin:               EnvOrDefault("MAS_DOCKER_BIN", "docker"),
+		WorkspaceImage:          EnvOrDefault("MAS_WORKSPACE_IMAGE", "mas-workspace:latest"),
+		WorkspaceNetwork:        EnvOrDefault("MAS_WORKSPACE_NETWORK", "mas_default"),
+		FactoryContainer:        EnvOrDefault("MAS_FACTORY_CONTAINER", "mas-factory"),
+		FactoryWorkdir:          EnvOrDefault("MAS_FACTORY_WORKDIR", "/opt/mas/scaffold"),
+		FactoryVolume:           EnvOrDefault("MAS_FACTORY_VOLUME", "scaffold"),
+		InfraContainer:          EnvOrDefault("MAS_INFRA_CONTAINER", "mas-infra"),
+		InfraWorkdir:            EnvOrDefault("MAS_INFRA_WORKDIR", "/opt/mas"),
+		InfraEntitiesVolume:     EnvOrDefault("MAS_INFRA_ENTITIES_VOLUME", "entities"),
+		InfraNginxVolume:        EnvOrDefault("MAS_INFRA_NGINX_VOLUME", "nginx"),
+		InfraSystemdVolume:      EnvOrDefault("MAS_INFRA_SYSTEMD_VOLUME", "systemd"),
+		EntityContainerPrefix:   EnvOrDefault("MAS_ENTITY_CONTAINER_PREFIX", "mas-"),
+		EntityWorkdir:           EnvOrDefault("MAS_ENTITY_WORKDIR", "/workspace"),
 	}
 }
 
@@ -133,8 +125,8 @@ func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
 
 	if err := m.EnsureContainerRunning(ctx, m.cfg.InfraContainer, []string{
 		"--privileged",
-		"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraEntitiesVolume),
-		"-v", fmt.Sprintf("%s:/opt/empireai/nginx", m.cfg.InfraNginxVolume),
+		"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.InfraEntitiesVolume),
+		"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.InfraNginxVolume),
 		"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.InfraSystemdVolume),
 		"-w", m.cfg.InfraWorkdir,
 		m.cfg.WorkspaceImage,
@@ -164,10 +156,6 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 	})
 }
 
-func (m *DockerManager) EnsureVerticalWorkspace(ctx context.Context, verticalID string) error {
-	return m.EnsureEntityWorkspace(ctx, verticalID)
-}
-
 func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string) error {
 	slug, err := m.LookupEntitySlug(ctx, entityID)
 	if err != nil {
@@ -181,10 +169,6 @@ func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string
 		return fmt.Errorf("stop entity workspace %s: %w", container, err)
 	}
 	return nil
-}
-
-func (m *DockerManager) StopVerticalWorkspace(ctx context.Context, verticalID string) error {
-	return m.StopEntityWorkspace(ctx, verticalID)
 }
 
 func (m *DockerManager) KillOrphanProcesses(ctx context.Context) error {
@@ -224,7 +208,7 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 		rows, err := m.db.QueryContext(ctx, `
 			SELECT DISTINCT COALESCE(NULLIF(metadata->>'slug', ''), '')
 			FROM workflow_instances
-			WHERE COALESCE(metadata->>'instance_kind', '') = 'vertical'
+			WHERE COALESCE(metadata->>'instance_kind', '') = 'entity'
 		`)
 		if err != nil {
 			return nil, fmt.Errorf("list instance slugs: %w", err)
@@ -333,7 +317,7 @@ func workspaceRouteClass(class string) string {
 	switch strings.ToLower(strings.TrimSpace(class)) {
 	case "factory":
 		return "factory"
-	case "infra", "holding":
+	case "infra":
 		return "infra"
 	default:
 		return ""
@@ -489,16 +473,8 @@ func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (
 	return slug, nil
 }
 
-func (m *DockerManager) LookupVerticalSlug(ctx context.Context, verticalID string) (string, error) {
-	return m.LookupEntitySlug(ctx, verticalID)
-}
-
 func (m *DockerManager) EntityContainerName(slug string) string {
 	return m.cfg.EntityContainerPrefix + SanitizeSlug(slug)
-}
-
-func (m *DockerManager) VerticalContainerName(slug string) string {
-	return m.EntityContainerName(slug)
 }
 
 func SanitizeSlug(raw string) string {

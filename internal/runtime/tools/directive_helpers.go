@@ -9,34 +9,34 @@ import (
 )
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {
-	verticalID, taskID := extractContextIDs(primary)
-	if strings.TrimSpace(verticalID) == "" || strings.TrimSpace(taskID) == "" {
+	entityID, taskID := extractContextIDs(primary)
+	if strings.TrimSpace(entityID) == "" || strings.TrimSpace(taskID) == "" {
 		fallbackVertical, fallbackTask := extractContextIDs(fallback)
-		if strings.TrimSpace(verticalID) == "" {
-			verticalID = fallbackVertical
+		if strings.TrimSpace(entityID) == "" {
+			entityID = fallbackVertical
 		}
 		if strings.TrimSpace(taskID) == "" {
 			taskID = fallbackTask
 		}
 	}
-	return verticalID + "|" + taskID
+	return entityID + "|" + taskID
 }
 
-func extractContextIDs(evt events.Event) (verticalID, taskID string) {
-	verticalID = strings.TrimSpace(evt.EntityID())
+func extractContextIDs(evt events.Event) (entityID, taskID string) {
+	entityID = strings.TrimSpace(evt.EntityID())
 	taskID = strings.TrimSpace(evt.TaskID)
 	if len(evt.Payload) == 0 {
-		return verticalID, taskID
+		return entityID, taskID
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(evt.Payload, &payload); err != nil || payload == nil {
-		return verticalID, taskID
+		return entityID, taskID
 	}
-	if verticalID == "" {
-		for _, key := range []string{"vertical_id", "vertical_ref"} {
+	if entityID == "" {
+		for _, key := range []string{"entity_id"} {
 			v := strings.TrimSpace(asString(payload[key]))
 			if v != "" {
-				verticalID = v
+				entityID = v
 				break
 			}
 		}
@@ -50,7 +50,7 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 			}
 		}
 	}
-	return verticalID, taskID
+	return entityID, taskID
 }
 
 func parsePayloadMap(raw []byte) map[string]any {

@@ -26,17 +26,28 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("seed geography: %v", err)
 	}
 
-	// Seed vertical.
+	// Seed entity.
 	verticalID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
 		VALUES ($1::uuid, 'TestCo', 'testco', 'us', 'operating', 'operating', now(), now())
 	`, verticalID); err != nil {
-		t.Fatalf("seed vertical: %v", err)
+		t.Fatalf("seed compatibility entity: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO workflow_instances (
+			instance_id, workflow_name, workflow_version, current_state,
+			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		) VALUES (
+			$1::uuid, 'test', 'v1', 'operating',
+			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco"}'::jsonb, now(), now()
+		)
+	`, verticalID); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	// Ensure vertical schema.
-	if err := pg.EnsureVerticalSchema(ctx, verticalID); err != nil {
+	// Ensure entity schema.
+	if err := pg.EnsureEntitySchema(ctx, verticalID); err != nil {
 		t.Fatalf("ensure schema: %v", err)
 	}
 
@@ -53,10 +64,10 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Upsert agent + load agents.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         "coordinator",
-			Role:       "coordinator",
-			Mode:       "holding",
-			VerticalID: "",
+			ID:       "coordinator",
+			Role:     "coordinator",
+			Mode:     "global",
+			EntityID: "",
 			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
 			Config: json.RawMessage(`{"system_prompt":"You are the coordinator.","tools":[],"subscriptions":["system.started"]}`),
 		},
@@ -76,11 +87,11 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	ceoID := "operator-" + verticalID
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:         ceoID,
-			Role:       "operator",
-			Mode:       "operating",
-			VerticalID: verticalID,
-			Config:     json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
+			ID:       ceoID,
+			Role:     "operator",
+			Mode:     "operating",
+			EntityID: verticalID,
+			Config:   json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -92,7 +103,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Routing rules.
 	rule := runtimemanager.PersistedRoutingRule{
-		VerticalID:       verticalID,
+		EntityID:         verticalID,
 		EventPattern:     "review.*",
 		SubscriberID:     ceoID,
 		InstalledBy:      "coordinator",
@@ -128,15 +139,15 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Mailbox.
 	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EventID:    evt.ID,
-		VerticalID: verticalID,
-		FromAgent:  "coordinator",
-		Type:       "review",
-		Priority:   "normal",
-		Status:     "pending",
-		Context:    []byte(`{"a":1}`),
-		Summary:    "test mailbox",
-		TimeoutAt:  time.Now().Add(24 * time.Hour),
+		EventID:   evt.ID,
+		EntityID:  verticalID,
+		FromAgent: "coordinator",
+		Type:      "review",
+		Priority:  "normal",
+		Status:    "pending",
+		Context:   []byte(`{"a":1}`),
+		Summary:   "test mailbox",
+		TimeoutAt: time.Now().Add(24 * time.Hour),
 	})
 	if err != nil {
 		t.Fatalf("insert mailbox: %v", err)
@@ -156,15 +167,15 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Inbound: accept unsigned email, reject unsigned whatsapp.
 	_, err = db.ExecContext(ctx, `
-		UPDATE verticals
-		SET credentials = '{"webhooks":{"whatsapp":{"secret":"s3cr3t"}}}'::jsonb
-		WHERE id = $1::uuid
+		UPDATE workflow_instances
+		SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"credentials":{"webhooks":{"whatsapp":{"secret":"s3cr3t"}}}}'::jsonb
+		WHERE instance_id = $1::uuid
 	`, verticalID)
 	if err != nil {
 		t.Fatalf("seed credentials: %v", err)
 	}
 	target, err := pg.ResolveInboundTarget(ctx, "testco", "whatsapp")
-	if err != nil || target.VerticalID != verticalID || target.WebhookSecret == "" {
+	if err != nil || target.EntityID != verticalID || target.WebhookSecret == "" {
 		t.Fatalf("resolve inbound target err=%v target=%+v", err, target)
 	}
 	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "whatsapp"); err != nil || !ok {

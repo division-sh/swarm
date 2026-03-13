@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"empireai/internal/events"
@@ -48,7 +49,6 @@ type PersistedAgent struct {
 
 type PersistedRoutingRule struct {
 	EntityID         string
-	VerticalID       string
 	EventPattern     string
 	SubscriberID     string
 	InstalledBy      string
@@ -58,14 +58,16 @@ type PersistedRoutingRule struct {
 	BootstrapVersion int
 }
 
-// VerticalInfo is a legacy read model sourced from the verticals table for
-// compatibility surfaces only. New platform state belongs in workflow_instances.
-type VerticalInfo struct {
-	ID        string
-	Name      string
-	Slug      string
-	Geography string
-	Stage     string
+func (r PersistedRoutingRule) EffectiveEntityID() string {
+	return strings.TrimSpace(r.EntityID)
+}
+
+func (r *PersistedRoutingRule) NormalizeEntityID() {
+	if r == nil {
+		return
+	}
+	entityID := r.EffectiveEntityID()
+	r.EntityID = entityID
 }
 
 type EventReceipt struct {
@@ -110,11 +112,9 @@ type AgentPersistence interface {
 
 type TemplatePersistence interface {
 	EnsureEntitySchema(ctx context.Context, entityID string) error
-	EnsureVerticalSchema(ctx context.Context, verticalID string) error
 	LoadLatestOrgTemplate(ctx context.Context) (OrgTemplateRecord, error)
 	LoadOrgTemplate(ctx context.Context, version string) (OrgTemplateRecord, error)
 	SetEntityTemplateVersion(ctx context.Context, entityID, version string) error
-	SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error
 }
 
 type ReceiptPersistence interface {

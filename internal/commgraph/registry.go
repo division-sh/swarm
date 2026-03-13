@@ -23,7 +23,7 @@ const (
 type MessageAuthority struct {
 	SenderRole     string
 	RecipientRoles []string
-	Scope          string // holding | opco | any
+	Scope          string // global | entity | local | any
 }
 
 type MailboxRoundTrip struct {
@@ -42,7 +42,7 @@ type authorityKey struct {
 var extraProducerEvents = map[string][]string{
 	"inbound-gateway": {"inbound.whatsapp_message", "inbound.email"},
 	"dashboard":       {"human_task.assigned", "runtime.reset"},
-	"actor-agent":     {"opco.routing_updated"},
+	"actor-agent":     {"entity.routing_updated"},
 }
 
 type contractProducerRegistry struct {
@@ -61,24 +61,7 @@ var (
 	humanTaskDecisionData []string
 )
 
-var roleAliases = map[string]string{
-	"head-of-product":      "vp-product",
-	"head-of-growth":       "vp-growth",
-	"cto":                  "cto-agent",
-	"devops":               "holding-devops",
-	"opco-head-of-product": "vp-product",
-	"opco-head-of-growth":  "vp-growth",
-	"opco-chief-of-staff":  "chief-of-staff",
-	"opco-support":         "support-agent",
-	"opco-marketing":       "marketing-agent",
-	"opco-cto":             "cto-agent",
-	"opco-pm":              "pm-agent",
-	"opco-qa":              "qa-agent",
-	"opco-tech-writer":     "tech-writer",
-	"opco-backend":         "backend-agent",
-	"opco-frontend":        "frontend-agent",
-	"opco-devops":          "devops-agent",
-}
+var roleAliases = map[string]string{}
 
 func RuntimeEvents() []string {
 	reg := contractProducerData()
@@ -397,8 +380,8 @@ func loadMessageAuthorityRegistry() ([]MessageAuthority, error) {
 		}
 		ancestors := templateAncestors(role, parentByRole)
 		for _, ancestor := range ancestors {
-			addAuthorityRecipient(byKey, authorityKey{sender: ancestor, scope: "opco"}, role)
-			addAuthorityRecipient(byKey, authorityKey{sender: role, scope: "opco"}, ancestor)
+			addAuthorityRecipient(byKey, authorityKey{sender: ancestor, scope: "entity"}, role)
+			addAuthorityRecipient(byKey, authorityKey{sender: role, scope: "entity"}, ancestor)
 		}
 	}
 	authorities = authorities[:0]

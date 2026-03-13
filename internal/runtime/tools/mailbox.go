@@ -8,8 +8,8 @@ import (
 func NormalizeMailboxType(raw string) (string, error) {
 	t := strings.ToLower(strings.TrimSpace(raw))
 	switch t {
-	case "vertical_decision", "vertical_promotion_review", "vertical-promotion-review", "vertical.promotion_review", "promotion_review", "approval":
-		t = "vertical_approval"
+	case "entity_decision", "entity_promotion_review", "entity-promotion-review", "entity.promotion_review", "promotion_review", "approval":
+		t = "entity_approval"
 	case "template_migration_review", "template_migration":
 		t = "migration_approval"
 	case "escalation_request", "customer_escalation", "health_warning":
@@ -22,7 +22,7 @@ func NormalizeMailboxType(raw string) (string, error) {
 		t = "budget_increase"
 	}
 	switch t {
-	case "review", "escalation", "spend_request", "budget_increase", "digest", "vertical_approval", "migration_approval", "domain_approval":
+	case "review", "escalation", "spend_request", "budget_increase", "digest", "entity_approval", "migration_approval", "domain_approval":
 		return t, nil
 	default:
 		return "", fmt.Errorf("invalid mailbox type %q", raw)

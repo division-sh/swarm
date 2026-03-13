@@ -16,9 +16,21 @@ type Schedule struct {
 	Mode       string // once | cron
 	Cron       string // supports "@every <duration>" and plain duration string
 	At         time.Time
-	VerticalID string
+	EntityID   string
 	TaskID     string
 	Payload    []byte
+}
+
+func (s Schedule) EffectiveEntityID() string {
+	return strings.TrimSpace(s.EntityID)
+}
+
+func (s *Schedule) NormalizeEntityID() {
+	if s == nil {
+		return
+	}
+	entityID := s.EffectiveEntityID()
+	s.EntityID = entityID
 }
 
 type Scheduler struct {
@@ -52,6 +64,7 @@ func (s *Scheduler) Register(sc Schedule) error {
 	if sc.AgentID == "" || sc.EventType == "" {
 		return errors.New("agent_id and event_type are required")
 	}
+	sc.NormalizeEntityID()
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}
@@ -202,7 +215,7 @@ func scheduleKey(sc Schedule) string {
 	return strings.Join([]string{
 		strings.TrimSpace(sc.AgentID),
 		strings.TrimSpace(sc.EventType),
-		strings.TrimSpace(sc.VerticalID),
+		strings.TrimSpace(sc.EffectiveEntityID()),
 		strings.TrimSpace(sc.TaskID),
 	}, "|")
 }

@@ -164,7 +164,6 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 		Action:     strings.TrimSpace(action),
 		AgentID:    strings.TrimSpace(agentID),
 		EntityID:   strings.TrimSpace(verticalID),
-		VerticalID: strings.TrimSpace(verticalID),
 		Detail:     detail,
 		Error:      strings.TrimSpace(errText),
 	})

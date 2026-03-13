@@ -396,6 +396,35 @@ func validateWorkflowGuardOnFail(onFail string) error {
 	}
 }
 
+func handlerGuardOnFail(spec *runtimecontracts.GuardSpec) string {
+	if spec == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.OnFail)
+}
+
+func normalizeWorkflowGuardFailureAction(action string) string {
+	action = strings.TrimSpace(strings.ToLower(action))
+	switch action {
+	case "":
+		return ""
+	case "block":
+		return "blocked"
+	default:
+		return action
+	}
+}
+
+func stateSchemaGateNames(schema runtimecontracts.NodeStateSchema) map[string]struct{} {
+	gates := map[string]struct{}{}
+	for _, f := range schema.Fields {
+		if strings.TrimSpace(f.Name) != "" {
+			gates[strings.TrimSpace(f.Name)] = struct{}{}
+		}
+	}
+	return gates
+}
+
 func scopedContractLocalID(scopedID string) string {
 	scopedID = strings.TrimSpace(scopedID)
 	if scopedID == "" {

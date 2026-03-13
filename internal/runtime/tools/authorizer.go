@@ -58,7 +58,6 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 			"agent_role":   actor.Role,
 			"tool_name":    toolName,
 			"entity_id":    entityID,
-			"vertical_id":  actor.VerticalID,
 			"runtime_tool": true,
 		})
 		if marshalErr == nil {

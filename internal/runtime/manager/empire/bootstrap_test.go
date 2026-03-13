@@ -7,7 +7,7 @@ import (
 )
 
 func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
-	key := runtimemanager.RouteRuleKey("v-123", "operating/*/opco.ceo_ready", "opco-ceo-v-123")
+	key := runtimemanager.RouteRuleKey("v-123", "operating/*/entity.ceo_ready", "ceo-v-123")
 	if key == "" {
 		t.Fatal("expected route rule key")
 	}
