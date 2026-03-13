@@ -1,6 +1,0 @@
-business-research-agent:
-  id: business-research-agent
-  type: factory
-  role: business_research
-  subscriptions: [validation.started]
-  emit_events: [research.completed, research.vertical_rejected]

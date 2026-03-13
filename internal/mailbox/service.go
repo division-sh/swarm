@@ -101,8 +101,8 @@ func PrintPendingWithOptions(ctx context.Context, store runtimetools.MailboxPers
 		if len(summary) > 140 {
 			summary = summary[:140] + "..."
 		}
-		if _, err := fmt.Fprintf(out, "- id=%s type=%s priority=%s from=%s vertical=%s timeout=%s summary=%s\n",
-			it.ID, it.Type, it.Priority, it.FromAgent, it.VerticalID, timeout, summary); err != nil {
+		if _, err := fmt.Fprintf(out, "- id=%s type=%s priority=%s from=%s entity=%s timeout=%s summary=%s\n",
+			it.ID, it.Type, it.Priority, it.FromAgent, it.EffectiveEntityID(), timeout, summary); err != nil {
 			return err
 		}
 	}
@@ -125,8 +125,8 @@ func PrintItem(ctx context.Context, store runtimetools.MailboxPersistence, out i
 		timeout = item.TimeoutAt.UTC().Format(time.RFC3339)
 	}
 	_, err = fmt.Fprintf(out,
-		"mailbox item\nid: %s\ntype: %s\npriority: %s\nstatus: %s\nfrom: %s\nvertical: %s\ntimeout_at: %s\ndecision: %s\nnotes: %s\nsummary: %s\n",
-		item.ID, item.Type, item.Priority, item.Status, item.FromAgent, item.VerticalID, timeout, item.Decision, item.DecisionNotes, strings.TrimSpace(item.Summary),
+		"mailbox item\nid: %s\ntype: %s\npriority: %s\nstatus: %s\nfrom: %s\nentity: %s\ntimeout_at: %s\ndecision: %s\nnotes: %s\nsummary: %s\n",
+		item.ID, item.Type, item.Priority, item.Status, item.FromAgent, item.EffectiveEntityID(), timeout, item.Decision, item.DecisionNotes, strings.TrimSpace(item.Summary),
 	)
 	return err
 }

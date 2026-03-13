@@ -1,6 +1,0 @@
-composite_shortlist: 75
-hard_gate_floor: 50
-max_derivation_depth: 2
-tier1_weight: 0.6
-tier2_weight: 0.3
-tier3_weight: 0.1

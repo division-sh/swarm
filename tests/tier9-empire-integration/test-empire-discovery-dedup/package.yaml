@@ -1,7 +1,0 @@
-name: test-empire-discovery-dedup
-version: 1.0.0
-description: >
-  dedup.resolved with strategy=keep_best routes via rules in discovery-aggregator,
-  storing best_signal via data_accumulation.
-platform_version: ">=1.1.0"
-flows: [discovery]

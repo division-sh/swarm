@@ -1,7 +1,0 @@
-name: test-empire-operating-teardown
-version: 1.0.0
-description: >
-  opco.teardown_requested advances to winding_down. Then opco.teardown_complete
-  advances to killed and emits opco.terminated.
-platform_version: ">=1.1.0"
-flows: [operating]

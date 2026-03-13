@@ -36,8 +36,8 @@ type RuntimeLogger struct {
 	db *sql.DB
 }
 
-type VerticalDigestRow struct {
-	VerticalID     string
+type InstanceDigestRow struct {
+	EntityID       string
 	Name           string
 	Stage          string
 	UsersTotal     int
@@ -47,8 +47,8 @@ type VerticalDigestRow struct {
 }
 
 type DigestPersistence interface {
-	CountActiveVerticals(ctx context.Context) (int, error)
-	ListVerticalDigestRows(ctx context.Context, limit int) ([]VerticalDigestRow, error)
+	CountActiveInstances(ctx context.Context) (int, error)
+	ListInstanceDigestRows(ctx context.Context, limit int) ([]InstanceDigestRow, error)
 }
 
 type deferredPipelineTransition struct {

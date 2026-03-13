@@ -273,23 +273,83 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 	if pc == nil {
 		return false, false, nil
 	}
-	handler, ok := lookupWorkflowBuiltinGuard(firstNonEmptyString(entry.Builtin, id.String()))
-	if !ok {
+	builtin := strings.TrimSpace(firstNonEmptyString(entry.Builtin, id.String()))
+	state := workflowStateFromEngine(execCtx.Request.State)
+	payload := parsePayloadMap(execCtx.Request.Event.Payload)
+	switch builtin {
+	case "has_entity_id", "has_vertical_id":
+		return strings.TrimSpace(execCtx.Request.EntityID.String()) != "", true, nil
+	case "has_human_decision":
+		source := strings.TrimSpace(execCtx.Request.Event.SourceAgent)
+		if strings.EqualFold(source, "human") || strings.EqualFold(source, "mailbox") {
+			return true, true, nil
+		}
+		if strings.EqualFold(strings.TrimSpace(asString(payload["decision_path"])), "mailbox") {
+			return true, true, nil
+		}
+		return strings.TrimSpace(asString(payload["mailbox_decision_id"])) != "", true, nil
+	case "not_in_terminal_state", "not_in_terminal_stage", "not_in_operating_phase":
+		if pc.SemanticSource() == nil {
+			return true, true, nil
+		}
+		currentState := strings.TrimSpace(string(state.Stage))
+		if currentState == "" {
+			return true, true, nil
+		}
+		workflow := pc.WorkflowDefinition()
+		if workflow != nil {
+			if stage, ok := workflow.Stage(state.Stage); ok {
+				return !stage.Terminal, true, nil
+			}
+		}
+		for _, terminal := range pc.SemanticSource().WorkflowTerminalStages() {
+			if strings.EqualFold(strings.TrimSpace(terminal), currentState) {
+				return false, true, nil
+			}
+		}
+		return true, true, nil
+	case "revision_count_below_limit", "inner_revision_count_below_limit":
+		limit := 3
+		for _, key := range []string{strings.TrimSpace(entry.PolicyRef), "max_revisions"} {
+			if key == "" {
+				continue
+			}
+			if value, ok := workflowExpressionLookupPath(execCtx.Base.Policy.Raw(), key); ok {
+				if parsed := asInt(value); parsed > 0 {
+					limit = parsed
+					break
+				}
+			}
+			if parsed := asInt(execCtx.Base.Policy.Raw()[key]); parsed > 0 {
+				limit = parsed
+				break
+			}
+		}
+		return asInt(state.Metadata["revision_count"]) < limit, true, nil
+	case "state_in_phase":
+		if pc.WorkflowDefinition() == nil {
+			return false, true, nil
+		}
+		stage, ok := pc.WorkflowDefinition().Stage(state.Stage)
+		if !ok {
+			return false, true, nil
+		}
+		required := strings.TrimSpace(entry.PolicyRef)
+		if required != "" {
+			if value, ok := workflowExpressionLookupPath(execCtx.Base.Policy.Raw(), required); ok {
+				required = strings.TrimSpace(asString(value))
+			}
+		}
+		if required == "" {
+			required = strings.TrimSpace(asString(execCtx.Base.Policy.Raw()["required_phase"]))
+		}
+		if required == "" {
+			return false, true, runtimeengine.ErrInvalidConfig
+		}
+		return strings.EqualFold(strings.TrimSpace(stage.Phase), required), true, nil
+	default:
 		return false, false, nil
 	}
-	exec := &handlerEngineExecution{
-		ctx:         ctx,
-		scope:       &handlerEngineContext{coordinator: pc, nodeID: execCtx.Request.NodeID.String()},
-		state:       workflowStateFromEngine(execCtx.Request.State),
-		handler:     execCtx.Request.Handler,
-		event:       execCtx.Request.Event,
-		payload:     parsePayloadMap(execCtx.Request.Event.Payload),
-		entityID:    execCtx.Request.EntityID.String(),
-		policy:      cloneStringAnyMap(execCtx.Base.Policy.Raw()),
-		accumulated: cloneStringAnyMap(execCtx.Base.Accumulated.Raw()),
-		fanOut:      cloneStringAnyMap(execCtx.Base.FanOut.Raw()),
-	}
-	return handler(exec, strings.TrimSpace(entry.PolicyRef))
 }
 
 type pipelineEngineActionRunner struct {
@@ -305,11 +365,23 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	if actionID == "" {
 		return false, nil
 	}
-	if handler, ok := lookupWorkflowBuiltinAction(actionID); ok {
-		hookCtx := workflowHookContextFromTrigger(engineTriggerContext(execCtx.Request))
-		return handler(ctx, pc, hookCtx, strings.TrimSpace(entry.PolicyRef))
-	}
 	switch strings.TrimSpace(action.ID) {
+	case "increment_revision_count":
+		if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+			_ = pc.workflowStore.Mutate(ctx, execCtx.Request.EntityID.String(), func(instance *WorkflowInstance) {
+				metadata := workflowMutableMetadata(instance)
+				metadata["revision_count"] = asInt(metadata["revision_count"]) + 1
+			})
+		}
+		pc.mutateValidationState(ctx, execCtx.Request.EntityID.String(), func(state *validationPipelineState) {
+			state.RevisionCount++
+		})
+		return true, nil
+	case identity.ActionRecordStateChange.String(),
+		identity.ActionUpdateState.String(),
+		identity.ActionCancelStateTimers.String(),
+		identity.ActionStartStateTimers.String():
+		return true, nil
 	case "record_evidence":
 		payload := parsePayloadMap(execCtx.Request.Event.Payload)
 		return pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), execCtx.Request.NodeID.String(), payload), nil

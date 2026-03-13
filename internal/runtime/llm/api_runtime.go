@@ -106,10 +106,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		return nil, errors.New("nil session")
 	}
 	actor, _ := runtimeactor.ActorFromContext(ctx)
-	entityID := strings.TrimSpace(actor.EntityID)
-	if entityID == "" {
-		entityID = strings.TrimSpace(actor.VerticalID)
-	}
+	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
@@ -312,10 +309,7 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 				model = strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel)
 			}
 		}
-		actorEntityID := strings.TrimSpace(actor.EntityID)
-		if actorEntityID == "" {
-			actorEntityID = strings.TrimSpace(actor.VerticalID)
-		}
+		actorEntityID := actor.EffectiveEntityID()
 		if r.budget != nil && r.budget.IsEntityThrottle(actorEntityID) {
 			// Degradation on throttle: force cheaper model tier when configured.
 			if strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel) != "" {

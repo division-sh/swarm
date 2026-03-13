@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 )
 
-func mergeAgentConfigJSON(cfg models.AgentConfig) ([]byte, error) {
+func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
 	obj := map[string]any{}
 	if len(cfg.Config) > 0 && json.Valid(cfg.Config) {
 		_ = json.Unmarshal(cfg.Config, &obj)

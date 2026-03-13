@@ -1,8 +1,0 @@
-initial_state: approved
-terminal_states: [killed]
-states: [approved, building, pre_launch, launched, operating, growth, winding_down, killed]
-pins:
-  inputs:
-    events: [deploy.requested]
-  outputs:
-    events: [deploy.authorized]

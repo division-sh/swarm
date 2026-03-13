@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	empireconfig "empireai/internal/empire/config"
 	runtimesharding "empireai/internal/runtime/core/sharding"
 	"gopkg.in/yaml.v3"
 )
@@ -123,12 +122,12 @@ func (c *Config) Sharding() runtimesharding.Config {
 }
 
 // Budget returns the budget extension config, or zero value if not configured.
-func (c *Config) Budget() empireconfig.BudgetConfig {
+func (c *Config) Budget() BudgetConfig {
 	if c == nil || len(c.Extensions) == 0 {
-		return empireconfig.BudgetConfig{}
+		return BudgetConfig{}
 	}
 	var ext struct {
-		Budget empireconfig.BudgetConfig `yaml:"budget"`
+		Budget BudgetConfig `yaml:"budget"`
 	}
 	_ = c.DecodeExtensions(&ext)
 	return ext.Budget

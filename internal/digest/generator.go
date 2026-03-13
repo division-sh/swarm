@@ -10,10 +10,10 @@ import (
 )
 
 type Snapshot struct {
-	ActiveVerticals int
+	ActiveInstances int
 	MailboxPending  int
 	MailboxCritical int
-	TopVerticals    []runtime.VerticalDigestRow
+	TopInstances    []runtime.InstanceDigestRow
 }
 
 func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mailbox runtimetools.MailboxPersistence, topN int) (Snapshot, error) {
@@ -23,11 +23,11 @@ func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mai
 	if mailbox == nil {
 		return Snapshot{}, fmt.Errorf("mailbox source is required")
 	}
-	active, err := portfolio.CountActiveVerticals(ctx)
+	active, err := portfolio.CountActiveInstances(ctx)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	rows, err := portfolio.ListVerticalDigestRows(ctx, topN)
+	rows, err := portfolio.ListInstanceDigestRows(ctx, topN)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -47,21 +47,21 @@ func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mai
 	}
 
 	return Snapshot{
-		ActiveVerticals: active,
+		ActiveInstances: active,
 		MailboxPending:  pending,
 		MailboxCritical: critical,
-		TopVerticals:    rows,
+		TopInstances:    rows,
 	}, nil
 }
 
 func RenderText(s Snapshot) string {
 	var b strings.Builder
 	b.WriteString("portfolio_digest\n")
-	b.WriteString(fmt.Sprintf("active_verticals: %d\n", s.ActiveVerticals))
+	b.WriteString(fmt.Sprintf("active_instances: %d\n", s.ActiveInstances))
 	b.WriteString(fmt.Sprintf("mailbox_pending: %d\n", s.MailboxPending))
 	b.WriteString(fmt.Sprintf("mailbox_critical: %d\n", s.MailboxCritical))
-	b.WriteString("top_verticals:\n")
-	for _, v := range s.TopVerticals {
+	b.WriteString("top_instances:\n")
+	for _, v := range s.TopInstances {
 		b.WriteString(fmt.Sprintf("- %s (%s): users=%d mrr=$%.2f spend_30d=$%.2f\n",
 			v.Name,
 			v.Stage,

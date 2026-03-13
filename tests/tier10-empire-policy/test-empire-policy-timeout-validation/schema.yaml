@@ -1,8 +1,0 @@
-initial_state: validating
-terminal_states: [validated, escalated]
-states: [validating, validated, escalated]
-pins:
-  inputs:
-    events: [timer.validation_timeout]
-  outputs:
-    events: [validation.timeout_escalation]

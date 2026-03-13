@@ -59,45 +59,17 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 
 	inbound, _ := InboundEventFromContext(ctx)
-	if err := e.trackTransitionPrerequisites(actor, inbound); err != nil {
-		return nil, WrapRuntimeError(
-			"emit_transition_prerequisite_failed",
-			"tool-executor",
-			"handle_emit_tool.track_prerequisites",
-			false,
-			err,
-			"emit transition prerequisites failed",
-		)
-	}
-
-	payloadMap = e.preNormalizeEmitPayload(actor, inbound, eventType, payloadMap)
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
 	payloadMap = trimEmitPayloadToSchema(eventType, payloadMap)
 	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
 			"schema_validation_failed",
 			"tool-executor",
-			"handle_emit_tool.validate_schema_pre_normalize",
+			"handle_emit_tool.validate_schema",
 			false,
 			err,
 			"emit payload schema validation failed",
 		)
-	}
-
-	payloadMap = e.normalizeEmitPayload(actor, inbound, eventType, payloadMap)
-	payloadMap = trimEmitPayloadToSchema(eventType, payloadMap)
-	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
-		return nil, WrapRuntimeError(
-			"schema_validation_failed",
-			"tool-executor",
-			"handle_emit_tool.validate_schema_post_normalize",
-			false,
-			err,
-			"emit payload schema validation failed",
-		)
-	}
-	if err := e.enforceMigrationGuardrail(ctx, actor, eventType, payloadMap); err != nil {
-		return nil, err
 	}
 
 	emitted := (events.Event{
@@ -120,17 +92,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if strings.TrimSpace(asString(payloadMap["vertical_id"])) == "" && emitted.EntityID() != "" {
 		payloadMap["vertical_id"] = emitted.EntityID()
 		emitted.Payload = mustJSON(payloadMap)
-	}
-
-	if err := e.validateEmitTransition(actor, inbound, emitted); err != nil {
-		return nil, WrapRuntimeError(
-			"emit_transition_guardrail_violation",
-			"tool-executor",
-			"handle_emit_tool.validate_transition",
-			false,
-			err,
-			"emit transition rejected by guardrail",
-		)
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {
 		return nil, WrapRuntimeError(

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 	"strings"
 	"sync"
@@ -10,7 +9,6 @@ import (
 
 	runtimeactor "empireai/internal/runtime/actorctx"
 	runtimebus "empireai/internal/runtime/bus"
-	runtimecorpus "empireai/internal/runtime/corpusobs"
 	llm "empireai/internal/runtime/llm"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimetools "empireai/internal/runtime/tools"
@@ -24,7 +22,6 @@ type mcpTurnRegistry struct {
 
 var globalMCPTurnRegistry = newMCPTurnRegistry()
 var defaultMCPTurnContextTTL = 2 * time.Hour
-var mcpStallDiagSeen sync.Map
 
 const (
 	ErrCodeMCPAuthMissingBearer = runtimemcp.ErrCodeAuthMissingBearer
@@ -36,7 +33,6 @@ const (
 	ErrCodeMCPToolNotAllowed    = runtimemcp.ErrCodeToolNotAllowed
 	ErrCodeMCPToolExecFailed    = runtimemcp.ErrCodeToolExecFailed
 	ErrCodeMCPInvalidRequest    = runtimemcp.ErrCodeInvalidRequest
-	ErrCodeMCPStallDetected     = runtimemcp.ErrCodeStallDetected
 )
 
 func init() {
@@ -175,89 +171,5 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 }
 
 func runtimeMCPAfterToolSuccess(logger *RuntimeLogger, ctx context.Context, r *http.Request, toolName string) {
-	if logger == nil {
-		return
-	}
-	if meta, snapshot, ok := runtimecorpus.RecordEmitFromContext(ctx, toolName, time.Now().UTC()); ok && snapshot.EmitCount == 1 {
-		runtimeMCPLogCorpusFirstEmit(logger, ctx, r, meta, snapshot, toolName)
-	}
-}
-
-func runtimeMCPLogCorpusFirstEmit(logger *RuntimeLogger, ctx context.Context, r *http.Request, meta runtimecorpus.TurnMeta, snapshot runtimecorpus.EmitSnapshot, toolName string) {
-	if logger == nil {
-		return
-	}
-	agentID := strings.TrimSpace(meta.AgentID)
-	if actor, ok := runtimeactor.ActorFromContext(ctx); ok && strings.TrimSpace(actor.ID) != "" {
-		agentID = strings.TrimSpace(actor.ID)
-	}
-	verticalID := strings.TrimSpace(meta.VerticalID)
-	if actor, ok := runtimeactor.ActorFromContext(ctx); ok && strings.TrimSpace(actor.VerticalID) != "" {
-		verticalID = strings.TrimSpace(actor.VerticalID)
-	}
-	msToFirstEmit := int64(0)
-	if !meta.AssignedAt.IsZero() && !snapshot.FirstEmitAt.IsZero() {
-		msToFirstEmit = snapshot.FirstEmitAt.Sub(meta.AssignedAt).Milliseconds()
-		if msToFirstEmit < 0 {
-			msToFirstEmit = 0
-		}
-	}
-	logger.Log(ctx, RuntimeLogEntry{
-		Level:      "debug",
-		Component:  "mcp-gateway",
-		Action:     "corpus.first_emit",
-		EventID:    strings.TrimSpace(meta.EventID),
-		EventType:  strings.TrimSpace(meta.EventType),
-		AgentID:    agentID,
-		EntityID:   verticalID,
-		VerticalID: verticalID,
-		CampaignID: strings.TrimSpace(meta.CampaignID),
-		ScanID:     strings.TrimSpace(meta.ScanID),
-		Detail: map[string]any{
-			"tool_name":        strings.TrimSpace(toolName),
-			"trace_id":         runtimemcp.TraceIDFromRequest(r),
-			"batch_size":       meta.BatchSize,
-			"payload_bytes":    meta.PayloadBytes,
-			"ms_to_first_emit": msToFirstEmit,
-		},
-	})
-}
-
-func DefaultMCPStallDiagnosticConfig() runtimemcp.StallDiagnosticConfig {
-	return runtimemcp.DefaultStallDiagnosticConfig()
-}
-
-func StartMCPStallDiagnosticLoop(ctx context.Context, db *sql.DB, logger *RuntimeLogger, cfg runtimemcp.StallDiagnosticConfig) {
-	if logger == nil {
-		return
-	}
-	runtimemcp.StartStallDiagnosticLoop(ctx, db, runtimeMCPDiagnosticLogger(logger), cfg)
-}
-
-func runMCPStallDiagnosticsPass(ctx context.Context, db *sql.DB, logger *RuntimeLogger, cfg runtimemcp.StallDiagnosticConfig) {
-	runtimemcp.ResetStallDiagnosticsForTest()
-	mcpStallDiagSeen = sync.Map{}
-	if logger == nil {
-		return
-	}
-	runtimemcp.RunStallDiagnosticsPass(ctx, db, runtimeMCPDiagnosticLogger(logger), cfg)
-}
-
-func classifyMCPStallCause(code string) string {
-	return runtimemcp.ClassifyStallCause(code)
-}
-
-func runtimeMCPDiagnosticLogger(logger *RuntimeLogger) runtimemcp.StallDiagnosticLogger {
-	return func(ctx context.Context, level, component, action, agentID, verticalID string, detail map[string]any, errText string) {
-		logger.Log(ctx, RuntimeLogEntry{
-			Level:      level,
-			Component:  component,
-			Action:     action,
-			AgentID:    agentID,
-			EntityID:   verticalID,
-			VerticalID: verticalID,
-			Detail:     detail,
-			Error:      errText,
-		})
-	}
+	_, _, _, _ = logger, ctx, r, toolName
 }

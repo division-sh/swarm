@@ -10,10 +10,27 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/protocolheaders"
 	runtimeactor "empireai/internal/runtime/actorctx"
 	models "empireai/internal/runtime/actors"
 	workspace "empireai/internal/runtime/workspace"
+)
+
+const (
+	mcpActorIDHeader      = "X-Empire-Agent-Id"
+	mcpActorRoleHeader    = "X-Empire-Agent-Role"
+	mcpActorModeHeader    = "X-Empire-Agent-Mode"
+	mcpEntityIDHeader     = "X-Empire-Vertical-Id"
+	mcpAllowedToolsHeader = "X-Empire-Allowed-Tools"
+	mcpContextTokenHeader = "X-Empire-Context-Token"
+	mcpTraceIDHeader      = "X-Empire-Trace-Id"
+
+	mcpActorIDQuery      = "empire_agent_id"
+	mcpActorRoleQuery    = "empire_agent_role"
+	mcpActorModeQuery    = "empire_agent_mode"
+	mcpEntityIDQuery     = "empire_vertical_id"
+	mcpAllowedToolsQuery = "empire_allowed_tools"
+	mcpContextTokenQuery = "empire_ctx_token"
+	mcpTraceIDQuery      = "empire_trace_id"
 )
 
 func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, error) {
@@ -53,11 +70,11 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	}
 	allowedTools := toolNamesCSV(s.Tools)
 	headers := map[string]string{
-		protocolheaders.ActorIDHeader:      strings.TrimSpace(actor.ID),
-		protocolheaders.ActorRoleHeader:    strings.TrimSpace(actor.Role),
-		protocolheaders.ActorModeHeader:    strings.TrimSpace(actor.Mode),
-		protocolheaders.VerticalIDHeader:   strings.TrimSpace(actor.VerticalID),
-		protocolheaders.AllowedToolsHeader: allowedTools,
+		mcpActorIDHeader:      strings.TrimSpace(actor.ID),
+		mcpActorRoleHeader:    strings.TrimSpace(actor.Role),
+		mcpActorModeHeader:    strings.TrimSpace(actor.Mode),
+		mcpEntityIDHeader:     strings.TrimSpace(actor.VerticalID),
+		mcpAllowedToolsHeader: allowedTools,
 	}
 	if token := strings.TrimSpace(os.Getenv("EMPIREAI_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
@@ -65,10 +82,10 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
 	traceID := strings.TrimSpace(contextToken)
 	if contextToken != "" {
-		headers[protocolheaders.ContextTokenHeader] = contextToken
+		headers[mcpContextTokenHeader] = contextToken
 	}
 	if traceID != "" {
-		headers[protocolheaders.TraceIDHeader] = traceID
+		headers[mcpTraceIDHeader] = traceID
 	}
 	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools, traceID)
 	cfg := map[string]any{
@@ -146,25 +163,25 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	}
 	q := u.Query()
 	if v := strings.TrimSpace(contextToken); v != "" {
-		q.Set(protocolheaders.ContextTokenQuery, v)
+		q.Set(mcpContextTokenQuery, v)
 	}
 	if v := strings.TrimSpace(actor.ID); v != "" {
-		q.Set(protocolheaders.ActorIDQuery, v)
+		q.Set(mcpActorIDQuery, v)
 	}
 	if v := strings.TrimSpace(actor.Role); v != "" {
-		q.Set(protocolheaders.ActorRoleQuery, v)
+		q.Set(mcpActorRoleQuery, v)
 	}
 	if v := strings.TrimSpace(actor.Mode); v != "" {
-		q.Set(protocolheaders.ActorModeQuery, v)
+		q.Set(mcpActorModeQuery, v)
 	}
 	if v := strings.TrimSpace(actor.VerticalID); v != "" {
-		q.Set(protocolheaders.VerticalIDQuery, v)
+		q.Set(mcpEntityIDQuery, v)
 	}
 	if v := strings.TrimSpace(allowedTools); v != "" {
-		q.Set(protocolheaders.AllowedToolsQuery, v)
+		q.Set(mcpAllowedToolsQuery, v)
 	}
 	if v := strings.TrimSpace(traceID); v != "" {
-		q.Set(protocolheaders.TraceIDQuery, v)
+		q.Set(mcpTraceIDQuery, v)
 	}
 	u.RawQuery = q.Encode()
 	return strings.TrimSpace(u.String())

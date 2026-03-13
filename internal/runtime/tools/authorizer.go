@@ -51,11 +51,13 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 	}
 	err := fmt.Errorf("tool %s is not allowed for agent %s", toolName, actor.ID)
 	if a.bus != nil {
+		entityID := actor.EffectiveEntityID()
 		payload, marshalErr := json.Marshal(map[string]any{
 			"reason":       "tool_not_allowed",
 			"agent_id":     actor.ID,
 			"agent_role":   actor.Role,
 			"tool_name":    toolName,
+			"entity_id":    entityID,
 			"vertical_id":  actor.VerticalID,
 			"runtime_tool": true,
 		})
@@ -66,7 +68,7 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 				SourceAgent: "runtime",
 				Payload:     payload,
 				CreatedAt:   time.Now(),
-			}).WithEntityID(actor.VerticalID)); pubErr != nil {
+			}).WithEntityID(entityID)); pubErr != nil {
 				runtimeWarn(
 					"tool-executor",
 					"failed to publish spec.contradiction_detected actor=%s tool=%s: %v",

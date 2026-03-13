@@ -97,8 +97,8 @@ func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
 		t.Fatalf("seed vertical: %v", err)
 	}
 	// Active count includes operating.
-	if n, err := pg.CountActiveVerticals(ctx); err != nil || n < 1 {
-		t.Fatalf("CountActiveVerticals n=%d err=%v", n, err)
+	if n, err := pg.CountActiveInstances(ctx); err != nil || n < 1 {
+		t.Fatalf("CountActiveInstances n=%d err=%v", n, err)
 	}
 
 	// Digest rows: metrics + spend.
@@ -115,8 +115,8 @@ func TestPostgresStore_HelpersAndDigestAndVerticals(t *testing.T) {
 	`, uuid.NewString(), verticalID); err != nil {
 		t.Fatalf("seed spend: %v", err)
 	}
-	if rows, err := pg.ListVerticalDigestRows(ctx, 10); err != nil || len(rows) == 0 {
-		t.Fatalf("ListVerticalDigestRows err=%v len=%d", err, len(rows))
+	if rows, err := pg.ListInstanceDigestRows(ctx, 10); err != nil || len(rows) == 0 {
+		t.Fatalf("ListInstanceDigestRows err=%v len=%d", err, len(rows))
 	}
 
 	// Active agent ids.

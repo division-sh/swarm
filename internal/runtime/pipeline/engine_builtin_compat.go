@@ -1,81 +1,10 @@
 package pipeline
 
 import (
-	"context"
 	"strings"
-	"sync"
 
-	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-
-	"github.com/google/uuid"
 )
-
-type handlerEngineContext struct {
-	coordinator *FactoryPipelineCoordinator
-	nodeID      string
-	preview     bool
-}
-
-type handlerEngineAccumulator struct {
-	Expected       []string         `json:"expected,omitempty"`
-	ExpectedCount  int              `json:"expected_count,omitempty"`
-	Received       map[string]bool  `json:"received,omitempty"`
-	Items          []map[string]any `json:"items,omitempty"`
-	LastEventID    string           `json:"last_event_id,omitempty"`
-	LastEventType  string           `json:"last_event_type,omitempty"`
-	LastSource     string           `json:"last_source,omitempty"`
-	LastReceivedAt string           `json:"last_received_at,omitempty"`
-}
-
-type handlerEngineExecution struct {
-	ctx         context.Context
-	scope       *handlerEngineContext
-	state       *WorkflowState
-	handler     runtimecontracts.SystemNodeEventHandler
-	event       events.Event
-	payload     map[string]any
-	entityID    string
-	policy      map[string]any
-	accumulated map[string]any
-	fanOut      map[string]any
-	transformed map[string]any
-	outcome     handlerExecutionOutcome
-	ruleApplied bool
-}
-
-func (e *handlerEngineExecution) coordinator() *FactoryPipelineCoordinator {
-	if e == nil || e.scope == nil {
-		return nil
-	}
-	return e.scope.coordinator
-}
-
-func (pc *FactoryPipelineCoordinator) lockWorkflowEntity(entityID string) func() {
-	if pc == nil {
-		return func() {}
-	}
-	entityID = strings.TrimSpace(entityID)
-	if entityID == "" {
-		return func() {}
-	}
-	pc.entityLockMu.Lock()
-	mu := pc.entityLocks[entityID]
-	if mu == nil {
-		mu = &sync.Mutex{}
-		pc.entityLocks[entityID] = mu
-	}
-	pc.entityLockMu.Unlock()
-	mu.Lock()
-	return func() {
-		mu.Unlock()
-	}
-}
-
-func hasValidUUID(text string) bool {
-	_, err := uuid.Parse(strings.TrimSpace(text))
-	return err == nil
-}
 
 func normalizeHandlerStateField(field string) string {
 	field = strings.TrimSpace(field)
@@ -105,5 +34,45 @@ func normalizeWorkflowGuardFailureAction(action string) string {
 		return "blocked"
 	default:
 		return action
+	}
+}
+
+func normalizeWorkflowBuiltinGuardID(id string) string {
+	return strings.TrimSpace(strings.ToLower(id))
+}
+
+func normalizeWorkflowBuiltinActionID(id string) string {
+	return strings.TrimSpace(strings.ToLower(id))
+}
+
+func isSupportedWorkflowGuardBuiltin(id string) bool {
+	switch normalizeWorkflowBuiltinGuardID(id) {
+	case "has_entity_id",
+		"has_vertical_id",
+		"has_human_decision",
+		"not_in_terminal_state",
+		"not_in_terminal_stage",
+		"not_in_operating_phase",
+		"revision_count_below_limit",
+		"inner_revision_count_below_limit",
+		"state_in_phase":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedWorkflowActionBuiltin(id string) bool {
+	switch normalizeWorkflowBuiltinActionID(id) {
+	case "increment_revision_count",
+		"record_state_change",
+		"update_state",
+		"cancel_state_timers",
+		"start_state_timers",
+		"record_evidence",
+		"create_flow_instance":
+		return true
+	default:
+		return false
 	}
 }

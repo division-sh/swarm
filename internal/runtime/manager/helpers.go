@@ -304,38 +304,3 @@ func ExtractDirectiveText(payload []byte) string {
 	}
 	return strings.TrimSpace(text)
 }
-
-func IsEmergencyAllowedFlow(role, eventType string) bool {
-	if role == "support-agent" {
-		return true
-	}
-	if strings.Contains(eventType, "bug") || strings.Contains(eventType, "incident") || strings.Contains(eventType, "outage") {
-		return true
-	}
-	if strings.HasPrefix(eventType, "human_task.") || strings.HasPrefix(eventType, "runtime.") || strings.HasPrefix(eventType, "ops.") {
-		return true
-	}
-	return false
-}
-
-func IsGrowthRole(role string) bool {
-	switch strings.TrimSpace(strings.ToLower(role)) {
-	case "vp-growth", "marketing-agent", "discovery-coordinator",
-		"market-research-agent", "trend-research-agent", "scanner-agent", "analysis-agent":
-		return true
-	default:
-		return false
-	}
-}
-
-func IsProactiveHeartbeat(role, eventType string) bool {
-	if !strings.HasPrefix(eventType, "heartbeat.") {
-		return false
-	}
-	switch strings.TrimSpace(strings.ToLower(role)) {
-	case "opco-ceo", "chief-of-staff", "vp-product", "vp-growth":
-		return true
-	default:
-		return false
-	}
-}

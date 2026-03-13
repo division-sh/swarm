@@ -1,8 +1,0 @@
-initial_state: pending
-terminal_states: [derived, discarded]
-states: [pending, derived, discarded]
-pins:
-  inputs:
-    events: [vertical.derived]
-  outputs:
-    events: [scoring.derived_requested]

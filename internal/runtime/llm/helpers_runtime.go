@@ -10,9 +10,9 @@ import (
 )
 
 func budgetExecutionScopeKey(actor models.AgentConfig) string {
-	verticalID := strings.TrimSpace(actor.VerticalID)
-	if verticalID != "" {
-		return verticalID
+	entityID := actor.EffectiveEntityID()
+	if entityID != "" {
+		return entityID
 	}
 	mode := strings.ToLower(strings.TrimSpace(actor.Mode))
 	if mode == "factory" {

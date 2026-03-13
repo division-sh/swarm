@@ -60,14 +60,6 @@ func (m *previewWorkflowModule) ActionRegistry() ActionRegistry {
 	return m.actionRegistry
 }
 
-func (*previewWorkflowModule) DiscoveryPolicy() DiscoveryPolicy { return genericTestModule{} }
-
-func (*previewWorkflowModule) ScanPolicy() ScanPolicy { return genericTestModule{} }
-
-func (*previewWorkflowModule) ScoringPolicy() ScoringPolicy { return genericTestModule{} }
-
-func (*previewWorkflowModule) PayloadFactory() PayloadFactory { return genericTestModule{} }
-
 type previewBus struct{}
 
 func (previewBus) Subscribe(string, ...events.EventType) <-chan events.Event {

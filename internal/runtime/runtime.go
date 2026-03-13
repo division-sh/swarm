@@ -48,29 +48,21 @@ type RuntimeOptions struct {
 }
 
 type Runtime struct {
-	Config          *config.Config
-	Stores          Stores
-	Options         RuntimeOptions
-	Bus             *EventBus
-	Logger          *RuntimeLogger
-	Pipeline        *runtimepipeline.PipelineCoordinator
-	SystemNodes     []runtimepipeline.BackgroundNode
-	Scheduler       *runtimepipeline.Scheduler
-	Workspace       workspace.Lifecycle
-	Budget          *BudgetTracker
-	LLM             llm.Runtime
-	ToolExecutor    *runtimetools.Executor
-	Manager         *runtimemanager.AgentManager
-	InboundGateway  *InboundGateway
-	ToolGateway     *runtimemcp.Gateway
-	ShardDispatcher *runtimepipeline.ShardDispatcher
-}
-
-func cycleTrackerForDB(db *sql.DB) *runtimebus.OpCoCycleTracker {
-	if db == nil {
-		return nil
-	}
-	return runtimebus.NewOpCoCycleTracker(db)
+	Config         *config.Config
+	Stores         Stores
+	Options        RuntimeOptions
+	Bus            *EventBus
+	Logger         *RuntimeLogger
+	Pipeline       *runtimepipeline.PipelineCoordinator
+	SystemNodes    []runtimepipeline.BackgroundNode
+	Scheduler      *runtimepipeline.Scheduler
+	Workspace      workspace.Lifecycle
+	Budget         *BudgetTracker
+	LLM            llm.Runtime
+	ToolExecutor   *runtimetools.Executor
+	Manager        *runtimemanager.AgentManager
+	InboundGateway *InboundGateway
+	ToolGateway    *runtimemcp.Gateway
 }
 
 var (
@@ -99,7 +91,7 @@ func controlPlaneRecipientFromSource(source semanticview.Source) string {
 	if source == nil {
 		return ""
 	}
-	for _, logicalID := range []string{"coordinator", "empire-coordinator"} {
+	for _, logicalID := range []string{"coordinator"} {
 		if entry, ok := semanticview.FindAgentEntry(source, logicalID, ""); ok {
 			if agentID := strings.TrimSpace(entry.ID); agentID != "" {
 				return agentID
@@ -161,7 +153,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
-	rt.Bus = NewEventBusWithOptions(stores.EventStore, rt.Logger, cycleTrackerForDB(stores.SQLDB), func() []runtimebus.EventInterceptor {
+	rt.Bus = NewEventBusWithOptions(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -169,8 +161,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	})
 	if stores.SQLDB != nil {
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
-			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding()),
-			Module:       opts.WorkflowModule,
+			Module: opts.WorkflowModule,
 		})
 		if rt.Pipeline != nil {
 			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
@@ -253,9 +244,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}
 	if opts.EnableToolGateway {
 		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger))
-	}
-	if stores.SQLDB != nil {
-		rt.ShardDispatcher = runtimepipeline.NewShardDispatcher(stores.SQLDB, rt.Bus, rt.Manager, cfg.Sharding())
 	}
 
 	return rt, nil
@@ -343,10 +331,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.Manager.Run(ctx)
 	}
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
-		go StartMCPStallDiagnosticLoop(ctx, rt.Stores.SQLDB, rt.Logger, runtimemcp.DefaultStallDiagnosticConfig())
-	}
-	if rt.ShardDispatcher != nil {
-		go rt.ShardDispatcher.Run(ctx)
 	}
 	if rt.Options.SelfCheck {
 		if err := rt.selfCheck(); err != nil {

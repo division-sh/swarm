@@ -27,7 +27,6 @@ type EventBus struct {
 	routeTable          *RouteTable
 	interceptors        []EventInterceptor
 	interceptorProvider func() []EventInterceptor
-	cycleTracker        *OpCoCycleTracker
 	store               EventStore
 	logger              LoggerHook
 	semanticSource      semanticview.Source
@@ -36,7 +35,6 @@ type EventBus struct {
 
 type EventBusOptions struct {
 	Logger              LoggerHook
-	CycleTracker        *OpCoCycleTracker
 	Interceptors        []EventInterceptor
 	InterceptorProvider func() []EventInterceptor
 	ContractBundle      semanticview.Source
@@ -90,7 +88,6 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 		routeTable:          routeTable,
 		store:               store,
 		logger:              opts.Logger,
-		cycleTracker:        opts.CycleTracker,
 		interceptors:        filtered,
 		interceptorProvider: opts.InterceptorProvider,
 		semanticSource:      semanticSource,
@@ -151,15 +148,6 @@ func (eb *EventBus) SetInterceptors(interceptors ...EventInterceptor) {
 	eb.mu.Unlock()
 }
 
-func (eb *EventBus) SetCycleTracker(tracker *OpCoCycleTracker) {
-	if eb == nil {
-		return
-	}
-	eb.mu.Lock()
-	eb.cycleTracker = tracker
-	eb.mu.Unlock()
-}
-
 func (eb *EventBus) ResetInMemoryState() {
 	if eb == nil {
 		return
@@ -173,9 +161,6 @@ func (eb *EventBus) ResetInMemoryState() {
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
 	eb.routeTable = eb.deriveBootRouteTableLocked()
-	if eb.cycleTracker != nil {
-		eb.cycleTracker.ResetAll(context.Background())
-	}
 }
 
 func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {

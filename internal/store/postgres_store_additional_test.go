@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimellm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
@@ -1158,7 +1158,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	ctx := context.Background()
 
 	rec := runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:            "a1",
 			Type:          "sonnet",
 			Role:          "a1",
@@ -1189,7 +1189,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 		t.Fatalf("expected agent loaded")
 	}
 
-	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: models.AgentConfig{}}); err == nil {
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{}}); err == nil {
 		t.Fatalf("expected agent id required error")
 	}
 
@@ -1236,7 +1236,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	}
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:         "a1",
 			Role:       "role",
 			Mode:       "holding",
@@ -1255,7 +1255,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("MarkAgentTerminated: %v", err)
 	}
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:         "ephemeral-shard-1",
 			Role:       "worker",
 			Mode:       "factory",
@@ -1285,7 +1285,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	ceoID := "operator-" + verticalID
 	_ = pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:         ceoID,
 			Role:       "operator",
 			Mode:       "operating",
@@ -1406,7 +1406,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	ctx := context.Background()
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:   "agent-cleanup-1",
 			Role: "worker",
 			Mode: "factory",

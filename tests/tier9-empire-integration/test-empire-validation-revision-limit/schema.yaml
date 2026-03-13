@@ -1,8 +1,0 @@
-initial_state: researching
-terminal_states: [killed]
-states: [researching, mvp_speccing, cto_review, branding, ready_for_review, killed]
-pins:
-  inputs:
-    events: [spec.validation_failed]
-  outputs:
-    events: [spec.revision_requested, validation.revision_limit_reached]

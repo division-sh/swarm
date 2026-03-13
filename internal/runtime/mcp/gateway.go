@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/protocolheaders"
 	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	llm "empireai/internal/runtime/llm"
@@ -334,7 +333,7 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 			}
 		}
 	}
-	role := strings.TrimSpace(r.Header.Get(protocolheaders.ActorRoleHeader))
+	role := strings.TrimSpace(r.Header.Get(actorRoleHeader))
 	if role != "" && g.hooks.EmitTools != nil {
 		for _, def := range g.hooks.EmitTools(role) {
 			name := strings.TrimSpace(def.Name)
@@ -430,12 +429,12 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 		return
 	}
 	agentID := FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get(protocolheaders.ActorIDHeader)),
-		strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorIDQuery)),
+		strings.TrimSpace(r.Header.Get(actorIDHeader)),
+		strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
 	)
 	verticalID := FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get(protocolheaders.VerticalIDHeader)),
-		strings.TrimSpace(r.URL.Query().Get(protocolheaders.VerticalIDQuery)),
+		strings.TrimSpace(r.Header.Get(entityIDHeader)),
+		strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
 	)
 	errText := ""
 	if err != nil {

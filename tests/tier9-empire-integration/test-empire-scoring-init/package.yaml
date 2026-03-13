@@ -1,7 +1,0 @@
-name: test-empire-scoring-init
-version: 1.0.0
-description: >
-  vertical.discovered arrives at scoring-node. Entity fields are written via
-  data_accumulation, rubric selected by mode=saas_gap via rules, scoring.requested emitted.
-platform_version: ">=1.1.0"
-flows: [scoring]

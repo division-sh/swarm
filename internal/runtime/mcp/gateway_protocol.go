@@ -7,8 +7,25 @@ import (
 	"os"
 	"strings"
 
-	"empireai/internal/protocolheaders"
 	models "empireai/internal/runtime/actors"
+)
+
+const (
+	actorIDHeader      = "X-Empire-Agent-Id"
+	actorRoleHeader    = "X-Empire-Agent-Role"
+	actorModeHeader    = "X-Empire-Agent-Mode"
+	entityIDHeader     = "X-Empire-Vertical-Id"
+	allowedToolsHeader = "X-Empire-Allowed-Tools"
+	contextTokenHeader = "X-Empire-Context-Token"
+	traceIDHeader      = "X-Empire-Trace-Id"
+
+	actorIDQuery      = "empire_agent_id"
+	actorRoleQuery    = "empire_agent_role"
+	actorModeQuery    = "empire_agent_mode"
+	entityIDQuery     = "empire_vertical_id"
+	allowedToolsQuery = "empire_allowed_tools"
+	contextTokenQuery = "empire_ctx_token"
+	traceIDQuery      = "empire_trace_id"
 )
 
 type ToolGatewayRequest struct {
@@ -72,10 +89,10 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 		return models.AgentConfig{}, false
 	}
 	actor := models.AgentConfig{
-		ID:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorIDQuery))),
-		Role:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorRoleQuery))),
-		EntityID: FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.VerticalIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.VerticalIDQuery))),
-		Mode:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorModeHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorModeQuery))),
+		ID:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorIDHeader)), strings.TrimSpace(r.URL.Query().Get(actorIDQuery))),
+		Role:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(actorRoleQuery))),
+		EntityID: FirstNonEmpty(strings.TrimSpace(r.Header.Get(entityIDHeader)), strings.TrimSpace(r.URL.Query().Get(entityIDQuery))),
+		Mode:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorModeHeader)), strings.TrimSpace(r.URL.Query().Get(actorModeQuery))),
 	}
 	actor.VerticalID = actor.EntityID
 	if strings.TrimSpace(actor.ID) == "" {
@@ -104,18 +121,18 @@ func ParseToolListHeader(raw string) map[string]struct{} {
 }
 
 func ParseAllowedToolsFromRequest(r *http.Request) map[string]struct{} {
-	allowed := ParseToolListHeader(strings.TrimSpace(r.Header.Get(protocolheaders.AllowedToolsHeader)))
+	allowed := ParseToolListHeader(strings.TrimSpace(r.Header.Get(allowedToolsHeader)))
 	if len(allowed) > 0 {
 		return allowed
 	}
-	return ParseToolListHeader(strings.TrimSpace(r.URL.Query().Get(protocolheaders.AllowedToolsQuery)))
+	return ParseToolListHeader(strings.TrimSpace(r.URL.Query().Get(allowedToolsQuery)))
 }
 
 func ContextTokenFromRequest(r *http.Request) string {
-	if token := strings.TrimSpace(r.Header.Get(protocolheaders.ContextTokenHeader)); token != "" {
+	if token := strings.TrimSpace(r.Header.Get(contextTokenHeader)); token != "" {
 		return token
 	}
-	return strings.TrimSpace(r.URL.Query().Get(protocolheaders.ContextTokenQuery))
+	return strings.TrimSpace(r.URL.Query().Get(contextTokenQuery))
 }
 
 func ToolResultText(v any) string {
@@ -138,9 +155,9 @@ func ToolResultText(v any) string {
 
 func TraceIDFromRequest(r *http.Request) string {
 	return FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get(protocolheaders.TraceIDHeader)),
-		strings.TrimSpace(r.URL.Query().Get(protocolheaders.TraceIDQuery)),
-		strings.TrimSpace(r.URL.Query().Get(protocolheaders.ContextTokenQuery)),
+		strings.TrimSpace(r.Header.Get(traceIDHeader)),
+		strings.TrimSpace(r.URL.Query().Get(traceIDQuery)),
+		strings.TrimSpace(r.URL.Query().Get(contextTokenQuery)),
 	)
 }
 

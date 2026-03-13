@@ -10,8 +10,6 @@ import (
 
 	"empireai/internal/events"
 	runtimeengine "empireai/internal/runtime/engine"
-	runtimescanmode "empireai/internal/runtime/scanmode"
-	"empireai/internal/runtime/semanticview"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -289,56 +287,4 @@ func compactSQLSnippet(q string) string {
 		return q[:240] + "..."
 	}
 	return q
-}
-
-func normalizeScanMode(raw string) string     { return runtimescanmode.NormalizeMode(raw) }
-func normalizeScanPriority(raw string) string { return runtimescanmode.NormalizePriority(raw) }
-
-func bundleDefaultScanMode(source semanticview.Source) string {
-	if source != nil {
-		if value, ok := scanModePolicyValue(source, "default_scan_mode"); ok {
-			if mode := strings.TrimSpace(asString(value)); mode != "" {
-				return normalizeScanMode(mode)
-			}
-		}
-	}
-	return normalizeScanMode(runtimescanmode.DefaultMode())
-}
-
-func compatibilityExpectedScannerCount(mode string, expectedScanners []string, storedExpected int) int {
-	if storedExpected > 0 {
-		return storedExpected
-	}
-	if len(expectedScanners) == 1 && strings.TrimSpace(expectedScanners[0]) == "scanner" {
-		if expected := runtimescanmode.ExpectedScannerCount(mode); expected > 0 {
-			return expected
-		}
-	}
-	return len(expectedScanners)
-}
-
-func scanDispatchExpectedAgents(mode string, expectedScanners []string) int {
-	if strings.TrimSpace(mode) != "" && len(expectedScanners) > 0 {
-		if expected := runtimescanmode.ExpectedScannerCount(mode); expected > 0 {
-			return expected
-		}
-	}
-	if len(expectedScanners) > 0 {
-		return len(expectedScanners)
-	}
-	return 1
-}
-
-func coalesce(values ...string) string {
-	for _, v := range values {
-		v = strings.TrimSpace(v)
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func firstNonEmpty(values ...string) string {
-	return coalesce(values...)
 }

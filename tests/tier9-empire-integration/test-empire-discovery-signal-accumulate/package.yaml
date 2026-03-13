@@ -1,7 +1,0 @@
-name: test-empire-discovery-signal-accumulate
-version: 1.0.0
-description: >
-  3 category.assessed events arrive at discovery-aggregator. Signals are
-  accumulated into the pending_dedup_candidates state table.
-platform_version: ">=1.1.0"
-flows: [discovery]

@@ -9,6 +9,7 @@ import (
 type MailboxItem struct {
 	ID            string          `json:"id"`
 	EventID       string          `json:"event_id,omitempty"`
+	EntityID      string          `json:"entity_id,omitempty"`
 	VerticalID    string          `json:"vertical_id,omitempty"`
 	FromAgent     string          `json:"from_agent,omitempty"`
 	Type          string          `json:"type"`
@@ -22,4 +23,11 @@ type MailboxItem struct {
 	DecisionNotes string          `json:"decision_notes,omitempty"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
+}
+
+func (m MailboxItem) EffectiveEntityID() string {
+	if m.EntityID != "" {
+		return m.EntityID
+	}
+	return m.VerticalID
 }

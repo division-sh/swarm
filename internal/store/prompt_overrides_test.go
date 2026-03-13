@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 )
@@ -31,7 +31,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 	}
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:     "coordinator",
 			Role:   "coordinator",
 			Mode:   "holding",

@@ -1,7 +1,0 @@
-name: test-empire-validation-revision-limit
-version: 1.0.0
-description: >
-  spec.validation_failed with revision_count=3 (= inner_revision_max).
-  Guard fails, on_fail escalates validation.revision_limit_reached.
-platform_version: ">=1.1.0"
-flows: [validation]

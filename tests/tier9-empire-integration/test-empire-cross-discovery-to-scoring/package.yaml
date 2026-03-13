@@ -1,8 +1,0 @@
-name: test-empire-cross-discovery-to-scoring
-version: 1.0.0
-description: >
-  Cross-flow test: vertical.discovered emitted by discovery flow is consumed
-  by scoring-node. Tests scoring-node's vertical.discovered handler writes
-  entity fields and emits scoring.requested.
-platform_version: ">=1.1.0"
-flows: [discovery, scoring]

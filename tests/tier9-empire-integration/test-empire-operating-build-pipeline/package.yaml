@@ -1,9 +1,0 @@
-name: test-empire-operating-build-pipeline
-version: 1.0.0
-description: >
-  Sequential gate enforcement in build-orchestrator: product_spec_ready sets
-  g_product_spec, technical_spec_ready (guarded by g_product_spec) sets g_tech_spec,
-  qa.validation_passed (guarded by g_tech_spec) sets g_qa_passed and emits
-  build_complete, deploy.requested (guarded by g_qa_passed) emits deploy.authorized.
-platform_version: ">=1.1.0"
-flows: [operating]

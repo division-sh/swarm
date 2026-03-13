@@ -31,9 +31,6 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
-	if eb.cycleTracker != nil {
-		eb.cycleTracker.HandleResetEvent(ctx, evt)
-	}
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	ictx := runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
@@ -354,14 +351,6 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 
 func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
 	plan := eventDeliveryPlan{Event: evt}
-	if tracker := eb.snapshotCycleTracker(); tracker != nil {
-		blocked, escalation := tracker.Check(ctx, evt)
-		if blocked {
-			plan.BlockedByCycle = true
-			plan.CycleEscalation = escalation
-			return plan, nil
-		}
-	}
 	// Budget events are broadcast guardrails. Deliver via delivery manifest so
 	// operating (OpCo) agents also receive them during backlog replay.
 	if strings.HasPrefix(string(evt.Type), "budget.") {
@@ -409,15 +398,6 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 		plan.ContradictionReason = "contract route resolved zero recipients"
 	}
 	return plan, nil
-}
-
-func (eb *EventBus) snapshotCycleTracker() *OpCoCycleTracker {
-	if eb == nil {
-		return nil
-	}
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
-	return eb.cycleTracker
 }
 
 func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, recipients []string) error {

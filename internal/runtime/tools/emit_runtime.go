@@ -24,7 +24,7 @@ func ensureEventSchemaRegistry() {
 	emitToolIndexOnce.Do(func() {
 		activeSchemas = runtimecontracts.EventSchemaRegistry()
 		generatedSchemas = make(map[string]struct{})
-		missing := MissingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
+		missing := missingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
 		for _, eventType := range missing {
 			generatedSchemas[eventType] = struct{}{}
 		}
@@ -33,6 +33,23 @@ func ensureEventSchemaRegistry() {
 			emitToolToEvent[EmitToolName(eventType)] = eventType
 		}
 	})
+}
+
+func missingProducerEventSchemas(producerRoles func() []string, producerEvents func(string) []string, registry map[string]EmitSchema) []string {
+	missing := make([]string, 0, 16)
+	for _, role := range producerRoles() {
+		for _, eventType := range producerEvents(role) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			if _, ok := registry[eventType]; ok {
+				continue
+			}
+			missing = append(missing, eventType)
+		}
+	}
+	return UniqueNonEmpty(missing)
 }
 
 func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...any)) []llm.ToolDefinition {

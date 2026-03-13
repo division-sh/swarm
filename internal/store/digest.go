@@ -7,19 +7,19 @@ import (
 	"empireai/internal/runtime"
 )
 
-func (s *PostgresStore) CountActiveVerticals(ctx context.Context) (int, error) {
+func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 	var n int
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM verticals
 		WHERE stage IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
 	`).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count active verticals: %w", err)
+		return 0, fmt.Errorf("count active instances: %w", err)
 	}
 	return n, nil
 }
 
-func (s *PostgresStore) ListVerticalDigestRows(ctx context.Context, limit int) ([]runtime.VerticalDigestRow, error) {
+func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) ([]runtime.InstanceDigestRow, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -63,11 +63,11 @@ func (s *PostgresStore) ListVerticalDigestRows(ctx context.Context, limit int) (
 	}
 	defer rows.Close()
 
-	out := make([]runtime.VerticalDigestRow, 0)
+	out := make([]runtime.InstanceDigestRow, 0)
 	for rows.Next() {
-		var r runtime.VerticalDigestRow
+		var r runtime.InstanceDigestRow
 		if err := rows.Scan(
-			&r.VerticalID,
+			&r.EntityID,
 			&r.Name,
 			&r.Stage,
 			&r.UsersTotal,

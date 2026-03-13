@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
@@ -52,7 +52,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 
 	// Upsert agent + load agents.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:         "coordinator",
 			Role:       "coordinator",
 			Mode:       "holding",
@@ -75,7 +75,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Seed an operating agent id so routing_rules FK constraints are satisfied.
 	ceoID := "operator-" + verticalID
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
-		Config: models.AgentConfig{
+		Config: runtimeactors.AgentConfig{
 			ID:         ceoID,
 			Role:       "operator",
 			Mode:       "operating",

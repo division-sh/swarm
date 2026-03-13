@@ -1,5 +1,60 @@
 **Phase 3 Completion Plan**
 
+**Execution Rubric**
+
+Classify every remaining Empire leak before editing it:
+- `a` extract to `internal/empire/**`
+- `b` parameterize behind `WorkflowModule`, product hooks, or runtime config
+- `c` move to contract-derived configuration
+- `d` delete
+
+Execution order:
+1. `d` delete dead generic residue
+2. `a` extract product-owned logic out of generic runtime
+3. `b` parameterize the remaining platform seams behind module/config hooks
+4. `c` move hardcoded vocab, schemas, and stages to contract-derived configuration
+
+**Current High-Signal Inventory**
+
+1. `pipeline/`
+- Hardcoded Empire event names: `a`
+- Empire domain structs: `a`
+- Empire business constants: `a`
+- Empire methods in `coordinator_*`: `a`
+- Payload factories: `b`
+- Empire workflow stages: `c`
+
+2. `tools/`
+- Hardcoded role names: `b`
+- Hardcoded event schemas in `emit_registry.go`: `c`
+- Role-event transition rules: `b`
+- Scan mode normalization: `a`
+- Geography hardcoding: `a`
+- `executor_sql.go`: `d` once no live handler/tool path depends on it
+- Mailbox type normalization: `a`
+
+3. `manager/`
+- Hardcoded role lists in `helpers.go`: `b`
+- Default manager hardcoding: `b`
+- OpCo lifecycle/control/path logic: `a`
+
+4. `bus/`
+- `OpCoCycleTracker`: `a`
+- `FactoryEventPrefixes`: `d`
+
+5. `workspace/`
+- `EMPIREAI_*` env vars: `b`
+- Empire container naming and paths: `b`
+
+6. `contracts/`
+- Hardcoded Empire default contract root: `d`
+- Generated registry tied to Empire bundle path: `c`
+
+7. `store/` and `models/`
+- `internal/models` alias stubs: `d` once no callers remain
+- Empire compat shims: `d`
+- Empire store logic in generic store files: `a`
+
 1. Finish generic runtime API cleanup.
 - Remove remaining platform-owned `vertical` terms where the platform controls the type or method name.
 - Focus areas:

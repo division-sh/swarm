@@ -72,6 +72,7 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 
 	id, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
 		EventID:    in.EventID,
+		EntityID:   entityID,
 		VerticalID: entityID,
 		FromAgent:  actor.ID,
 		Type:       in.Type,

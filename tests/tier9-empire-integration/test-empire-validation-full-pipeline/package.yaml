@@ -1,8 +1,0 @@
-name: test-empire-validation-full-pipeline
-version: 1.0.0
-description: >
-  Full 4-gate validation pipeline: vertical.shortlisted -> researching ->
-  mvp_speccing -> cto_review -> branding -> ready_for_review. All agent fixtures
-  provided. All 4 gates set, final state=ready_for_review.
-platform_version: ">=1.1.0"
-flows: [validation]

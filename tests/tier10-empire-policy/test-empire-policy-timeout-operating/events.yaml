@@ -1,7 +1,0 @@
-timer.operating_timeout:
-  payload:
-    entity_id: string
-    elapsed_hours: number
-operating.timeout_escalation:
-  payload:
-    entity_id: string

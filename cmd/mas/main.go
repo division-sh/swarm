@@ -210,13 +210,6 @@ type masWorkflowModule struct {
 	nodes          []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
 	actionRegistry runtimepipeline.ActionRegistry
-	policies       interface {
-		runtimepipeline.WorkflowModule
-		ScanPolicy() runtimepipeline.ScanPolicy
-		DiscoveryPolicy() runtimepipeline.DiscoveryPolicy
-		ScoringPolicy() runtimepipeline.ScoringPolicy
-		PayloadFactory() runtimepipeline.PayloadFactory
-	}
 }
 
 func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
@@ -233,7 +226,6 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 	if err != nil {
 		return nil, nil, err
 	}
-	policies := runtimepipeline.NewGenericTestWorkflowModule()
 	return &masWorkflowModule{
 		bundle:         bundle,
 		source:         source,
@@ -241,13 +233,6 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 		nodes:          nodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
-		policies: policies.(interface {
-			runtimepipeline.WorkflowModule
-			ScanPolicy() runtimepipeline.ScanPolicy
-			DiscoveryPolicy() runtimepipeline.DiscoveryPolicy
-			ScoringPolicy() runtimepipeline.ScoringPolicy
-			PayloadFactory() runtimepipeline.PayloadFactory
-		}),
 	}, bundle, nil
 }
 
@@ -260,16 +245,6 @@ func (m *masWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 }
 func (m *masWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return m.guardRegistry }
 func (m *masWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return m.actionRegistry }
-func (m *masWorkflowModule) ScanPolicy() runtimepipeline.ScanPolicy         { return m.policies.ScanPolicy() }
-func (m *masWorkflowModule) DiscoveryPolicy() runtimepipeline.DiscoveryPolicy {
-	return m.policies.DiscoveryPolicy()
-}
-func (m *masWorkflowModule) ScoringPolicy() runtimepipeline.ScoringPolicy {
-	return m.policies.ScoringPolicy()
-}
-func (m *masWorkflowModule) PayloadFactory() runtimepipeline.PayloadFactory {
-	return m.policies.PayloadFactory()
-}
 
 func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string) {
 	steps := []struct {

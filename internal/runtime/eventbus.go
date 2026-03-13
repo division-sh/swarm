@@ -21,14 +21,13 @@ func NewEventBus(store runtimebus.EventStore) *EventBus {
 	return &EventBus{EventBus: runtimebus.NewEventBus(store)}
 }
 
-func NewEventBusWithOptions(store runtimebus.EventStore, logger *RuntimeLogger, cycleTracker *runtimebus.OpCoCycleTracker, interceptorProvider func() []runtimebus.EventInterceptor) *EventBus {
+func NewEventBusWithOptions(store runtimebus.EventStore, logger *RuntimeLogger, interceptorProvider func() []runtimebus.EventInterceptor) *EventBus {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
 	}
 	return &EventBus{EventBus: runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
 		Logger:              hook,
-		CycleTracker:        cycleTracker,
 		InterceptorProvider: interceptorProvider,
 	})}
 }
@@ -79,19 +78,6 @@ func (eb *EventBus) deliverByType(evt events.Event) {
 	}
 	recipients := eb.ResolveSubscribedRecipients(string(evt.Type))
 	eb.PublishDirect(context.Background(), evt, recipients)
-}
-
-func (eb *EventBus) isFactoryEvent(eventType events.EventType) bool {
-	name := strings.TrimSpace(string(eventType))
-	if name == "" {
-		return false
-	}
-	for _, prefix := range runtimebus.FactoryEventPrefixes {
-		if strings.HasPrefix(name, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func isValidEventTypeName(raw string) bool {

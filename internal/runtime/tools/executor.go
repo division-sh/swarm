@@ -638,10 +638,6 @@ func (e *Executor) ExecHumanTaskDecideDirect(ctx context.Context, actor models.A
 	return e.execHumanTaskDecide(ctx, actor, input)
 }
 
-func (e *Executor) ExecSQLExecuteDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execSQLExecute(ctx, actor, input)
-}
-
 func (e *Executor) ExecNginxReloadDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execNginxReload(ctx, actor, input)
 }

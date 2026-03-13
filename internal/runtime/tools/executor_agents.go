@@ -62,13 +62,13 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		return nil, errors.New("agent manager is not configured")
 	}
 	targetEntity := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID))
-	actorEntityID := strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
+	actorEntityID := actor.EffectiveEntityID()
 	for _, targetID := range targets {
 		targetCfg, ok := manager.GetAgentConfig(targetID)
 		if !ok {
 			return nil, fmt.Errorf("target agent not found: %s", targetID)
 		}
-		targetCfgEntityID := strings.TrimSpace(coalesce(targetCfg.EntityID, targetCfg.VerticalID))
+		targetCfgEntityID := targetCfg.EffectiveEntityID()
 		if actor.Mode == "operating" && actorEntityID != "" {
 			if targetCfgEntityID != actorEntityID {
 				return nil, errors.New("cross-vertical agent_message is not allowed in operating mode")
@@ -159,10 +159,10 @@ func messageScopeAllowed(actor, target models.AgentConfig, scope string) bool {
 	case "", "any":
 		return true
 	case "holding":
-		return strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID)) == "" && strings.TrimSpace(coalesce(target.EntityID, target.VerticalID)) == ""
+		return actor.EffectiveEntityID() == "" && target.EffectiveEntityID() == ""
 	case "opco":
-		actorEntity := strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
-		targetEntity := strings.TrimSpace(coalesce(target.EntityID, target.VerticalID))
+		actorEntity := actor.EffectiveEntityID()
+		targetEntity := target.EffectiveEntityID()
 		return actorEntity != "" && actorEntity == targetEntity
 	default:
 		return false
@@ -264,9 +264,9 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	}
 	entityID := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID))
 	if entityID == "" {
-		entityID = strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
+		entityID = actor.EffectiveEntityID()
 	}
-	actorEntityID := strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
+	actorEntityID := actor.EffectiveEntityID()
 	if entityID != "" && actorEntityID != "" && entityID != actorEntityID {
 		return nil, errors.New("cross-entity schedule is not allowed")
 	}

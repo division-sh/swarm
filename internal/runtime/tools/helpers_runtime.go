@@ -5,7 +5,6 @@ import (
 	"log"
 	"strings"
 
-	runtimescanmode "empireai/internal/runtime/scanmode"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -30,11 +29,36 @@ func mustJSON(v any) []byte {
 }
 
 func normalizeScanMode(raw string) string {
-	return runtimescanmode.NormalizeMode(raw)
+	mode := strings.ToLower(strings.TrimSpace(raw))
+	mode = strings.ReplaceAll(mode, "-", "_")
+	mode = strings.Join(strings.Fields(mode), "_")
+	switch mode {
+	case "automation_micro", "local_services", "saas_gap", "saas_trend", "corpus", "derived":
+		return mode
+	case "local_underserved", "local", "local_service", "services":
+		return "local_services"
+	case "discovery", "scan", "default", "automation", "micro", "saas":
+		return "saas_gap"
+	case "trend", "trend_scan", "saas_trend_scan", "trend_opportunity", "adjacent_opportunity":
+		return "saas_trend"
+	case "corpus_mode", "signal_corpus":
+		return "corpus"
+	default:
+		return ""
+	}
 }
 
 func normalizeScanPriority(raw string) string {
-	return runtimescanmode.NormalizePriority(raw)
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "low", "normal", "high", "critical":
+		return strings.ToLower(strings.TrimSpace(raw))
+	case "med", "medium", "default":
+		return "normal"
+	case "urgent":
+		return "critical"
+	default:
+		return ""
+	}
 }
 
 func asInt(v any) int {

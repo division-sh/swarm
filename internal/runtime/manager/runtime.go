@@ -50,10 +50,6 @@ func (am *AgentManager) Shutdown() error {
 		am.cancelRun()
 		am.cancelRun = nil
 	}
-	if am.controlCancel != nil {
-		am.controlCancel()
-		am.controlCancel = nil
-	}
 	for id, cancel := range am.loopCancel {
 		cancel()
 		delete(am.loopCancel, id)
@@ -141,22 +137,16 @@ func deterministicOutputEventID(inbound events.Event, agentID string, index int,
 
 func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) string {
 	if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
-		if managerID == "coordinator" {
-			return "empire-coordinator"
-		}
 		return managerID
 	}
 	if source := runtimepipeline.DefaultWorkflowSemanticSourceOrNil(); source != nil {
 		if _, entry, ok := semanticview.ResolveAgentRegistryEntry(source, cfg); ok {
 			if managerID := normalizedManagerFallback(cfg, strings.TrimSpace(entry.ManagerFallback)); managerID != "" {
-				if managerID == "coordinator" {
-					return "empire-coordinator"
-				}
 				return managerID
 			}
 		}
 	}
-	return "empire-coordinator"
+	return "coordinator"
 }
 
 func managerFallbackFromConfig(cfg runtimeactors.AgentConfig) string {
@@ -255,7 +245,6 @@ func (am *AgentManager) Run(ctx context.Context) {
 	for _, a := range agents {
 		am.startAgentLoop(am.runCtx, a)
 	}
-	am.startControlLoop(am.runCtx)
 
 	am.runWG.Add(1)
 	go func() {
@@ -267,10 +256,6 @@ func (am *AgentManager) Run(ctx context.Context) {
 		<-am.runCtx.Done()
 		am.runMu.Lock()
 		am.running = false
-		if am.controlCancel != nil {
-			am.controlCancel()
-			am.controlCancel = nil
-		}
 		for id, cancel := range am.loopCancel {
 			cancel()
 			delete(am.loopCancel, id)
@@ -584,12 +569,12 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
-			Payload: mustJSON(map[string]any{
-				"agent_id":           agent.ID(),
-				"entity_id":          verticalID,
-				"vertical_id":        verticalID,
-				"consecutive_panics": consecutivePanics,
-				"error":              panicText,
+		Payload: mustJSON(map[string]any{
+			"agent_id":           agent.ID(),
+			"entity_id":          verticalID,
+			"vertical_id":        verticalID,
+			"consecutive_panics": consecutivePanics,
+			"error":              panicText,
 			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
 		}),
 		CreatedAt: time.Now(),
@@ -634,96 +619,6 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			CreatedAt: time.Now(),
 		}).WithEntityID(verticalID), []string{managerID}); err != nil {
 			RuntimeWarn("agent-manager", "ops.agent_failed publish failed agent=%s manager=%s err=%v", agent.ID(), managerID, err)
-		}
-	}
-}
-
-func (am *AgentManager) startControlLoop(parent context.Context) {
-	ctrlCtx, cancel := context.WithCancel(parent)
-	am.runMu.Lock()
-	if am.controlCancel != nil {
-		am.controlCancel()
-	}
-	am.controlCancel = cancel
-	am.runMu.Unlock()
-
-	subscriptions := []events.EventType{events.EventType("opco.teardown_requested")}
-	if !am.disableSpinupControl {
-		subscriptions = append([]events.EventType{events.EventType("opco.spinup_requested")}, subscriptions...)
-	}
-	ch := am.bus.Subscribe("agent-manager-controller", subscriptions...)
-	am.runWG.Add(1)
-	go func() {
-		defer am.runWG.Done()
-		for {
-			select {
-			case <-ctrlCtx.Done():
-				return
-			case evt, ok := <-ch:
-				if !ok {
-					return
-				}
-				am.handleControlEvent(evt)
-			}
-		}
-	}()
-}
-
-func (am *AgentManager) handleControlEvent(evt events.Event) {
-	switch string(evt.Type) {
-	case "opco.spinup_requested":
-		var payload struct {
-			EntityID   string                        `json:"entity_id"`
-			VerticalID string                        `json:"vertical_id"`
-			Mandate    runtimeactors.MandateDocument `json:"mandate"`
-		}
-		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
-			return
-		}
-		verticalID := FirstNonEmptyString(strings.TrimSpace(payload.EntityID), strings.TrimSpace(payload.VerticalID))
-		if verticalID == "" {
-			verticalID = strings.TrimSpace(evt.EntityID())
-		}
-		if verticalID == "" {
-			return
-		}
-		if strings.TrimSpace(payload.Mandate.VerticalID) == "" {
-			payload.Mandate.VerticalID = verticalID
-		}
-		_ = am.SpawnOpCo(verticalID, payload.Mandate)
-	case "opco.teardown_requested":
-		var payload struct {
-			EntityID   string `json:"entity_id"`
-			VerticalID string `json:"vertical_id"`
-			Reason     string `json:"reason"`
-		}
-		_ = json.Unmarshal(evt.Payload, &payload)
-		verticalID := FirstNonEmptyString(strings.TrimSpace(payload.EntityID), strings.TrimSpace(payload.VerticalID))
-		if verticalID == "" {
-			verticalID = strings.TrimSpace(evt.EntityID())
-		}
-		if verticalID == "" {
-			return
-		}
-		if err := am.TeardownOpCo(verticalID); err != nil {
-			RuntimeWarn("agent-manager", "opco teardown failed vertical=%s err=%v", verticalID, err)
-			return
-		}
-		if am.bus != nil {
-			if err := am.bus.Publish(am.runtimeContext(), (events.Event{
-				ID:          uuid.NewString(),
-				Type:        events.EventType("vertical.killed"),
-				SourceAgent: "agent-manager",
-				Payload: mustJSON(map[string]any{
-					"entity_id":  verticalID,
-					"vertical_id": verticalID,
-					"reason":      FirstNonEmptyString(strings.TrimSpace(payload.Reason), "opco teardown requested"),
-					"source":      "opco.teardown_requested",
-				}),
-				CreatedAt: time.Now(),
-			}).WithEntityID(verticalID)); err != nil {
-				RuntimeWarn("agent-manager", "vertical.killed publish failed vertical=%s err=%v", verticalID, err)
-			}
 		}
 	}
 }

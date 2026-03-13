@@ -12,5 +12,6 @@ var (
 	ErrMissingDispatcher    = errors.New("engine: post-commit dispatcher is required")
 	ErrMissingNodeID        = errors.New("engine: node id is required")
 	ErrMissingNodeHandler   = errors.New("engine: node handler is required")
+	ErrInvalidConfig        = errors.New("engine: invalid config")
 	ErrNotImplemented       = errors.New("engine: not implemented")
 )

@@ -26,6 +26,10 @@ type WorkflowNodeExecutor interface {
 	Handle(ctx context.Context, evt events.Event) bool
 }
 
+type BackgroundNode interface {
+	Run(context.Context)
+}
+
 type BackgroundWorkflowExecutorProvider interface {
 	BackgroundWorkflowExecutor() WorkflowNodeExecutor
 }

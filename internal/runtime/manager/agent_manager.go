@@ -41,15 +41,13 @@ type AgentManager struct {
 	inFlightMu  sync.Mutex
 	inFlight    map[string]struct{}
 
-	runMu                sync.Mutex
-	running              bool
-	authBreakerTripped   bool
-	runCtx               context.Context
-	cancelRun            context.CancelFunc
-	loopCancel           map[string]context.CancelFunc
-	controlCancel        context.CancelFunc
-	runWG                sync.WaitGroup
-	disableSpinupControl bool
+	runMu              sync.Mutex
+	running            bool
+	authBreakerTripped bool
+	runCtx             context.Context
+	cancelRun          context.CancelFunc
+	loopCancel         map[string]context.CancelFunc
+	runWG              sync.WaitGroup
 
 	poisonMu          sync.Mutex
 	poisonPanicCounts map[string]int
@@ -71,28 +69,20 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 	if len(stores) > 0 {
 		store = stores[0]
 	}
-	disableSpinupControl := true
-	if opts.EnableLegacySpinupControl {
-		disableSpinupControl = false
-	}
-	if opts.DisableSpinupControl {
-		disableSpinupControl = true
-	}
 	return &AgentManager{
-		agents:               make(map[string]Agent),
-		agentCfg:             make(map[string]models.AgentConfig),
-		agentUpAt:            make(map[string]time.Time),
-		bus:                  bus,
-		factory:              factory,
-		store:                store,
-		workspaces:           opts.Workspaces,
-		sessions:             opts.Sessions,
-		runtimeMode:          strings.TrimSpace(opts.RuntimeMode),
-		budget:               opts.Budget,
-		disableSpinupControl: disableSpinupControl,
-		inFlight:             make(map[string]struct{}),
-		loopCancel:           make(map[string]context.CancelFunc),
-		poisonPanicCounts:    make(map[string]int),
+		agents:            make(map[string]Agent),
+		agentCfg:          make(map[string]models.AgentConfig),
+		agentUpAt:         make(map[string]time.Time),
+		bus:               bus,
+		factory:           factory,
+		store:             store,
+		workspaces:        opts.Workspaces,
+		sessions:          opts.Sessions,
+		runtimeMode:       strings.TrimSpace(opts.RuntimeMode),
+		budget:            opts.Budget,
+		inFlight:          make(map[string]struct{}),
+		loopCancel:        make(map[string]context.CancelFunc),
+		poisonPanicCounts: make(map[string]int),
 	}
 }
 
@@ -132,12 +122,7 @@ func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) erro
 }
 
 func (am *AgentManager) SpawnAgent(cfg models.AgentConfig) error {
-	if strings.TrimSpace(cfg.EntityID) == "" {
-		cfg.EntityID = strings.TrimSpace(cfg.VerticalID)
-	}
-	if strings.TrimSpace(cfg.VerticalID) == "" {
-		cfg.VerticalID = strings.TrimSpace(cfg.EntityID)
-	}
+	cfg.NormalizeEntityID()
 	rec := PersistedAgent{
 		Config:  cfg,
 		Status:  "active",
@@ -150,9 +135,7 @@ func (am *AgentManager) SpawnAgentForEntity(entityID string, cfg models.AgentCon
 	if strings.TrimSpace(cfg.EntityID) == "" {
 		cfg.EntityID = strings.TrimSpace(entityID)
 	}
-	if strings.TrimSpace(cfg.VerticalID) == "" {
-		cfg.VerticalID = strings.TrimSpace(cfg.EntityID)
-	}
+	cfg.NormalizeEntityID()
 	return am.SpawnAgentFor(entityID, cfg)
 }
 

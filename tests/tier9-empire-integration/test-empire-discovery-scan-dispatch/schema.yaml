@@ -1,8 +1,0 @@
-initial_state: null
-terminal_states: []
-states: []
-pins:
-  inputs:
-    events: [scan.requested]
-  outputs:
-    events: [scan.category_dispatch, scan.source_dispatch, market_research.scan_assigned]

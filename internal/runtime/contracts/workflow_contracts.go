@@ -2114,11 +2114,36 @@ func DefaultPlatformSpecFile(repoRoot string) string {
 }
 
 func DefaultWorkflowContractsDir(repoRoot string) string {
-	return filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts")
+	if env := strings.TrimSpace(os.Getenv("MAS_CONTRACTS_DIR")); env != "" {
+		return env
+	}
+	base := filepath.Join(repoRoot, "docs", "specs", "mas-platform")
+	entries, err := os.ReadDir(base)
+	if err == nil {
+		candidates := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			name := strings.TrimSpace(entry.Name())
+			if name == "" || name == "platform" || name == "tests" {
+				continue
+			}
+			dir := filepath.Join(base, name, "contracts")
+			if existingFile(filepath.Join(dir, "package.yaml")) != "" {
+				candidates = append(candidates, dir)
+			}
+		}
+		sort.Strings(candidates)
+		if len(candidates) > 0 {
+			return candidates[0]
+		}
+	}
+	return ""
 }
 
 func RepoRootHasMASContracts(repoRoot string) bool {
-	return existingFile(filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts", "package.yaml")) != ""
+	return existingFile(filepath.Join(DefaultWorkflowContractsDir(repoRoot), "package.yaml")) != ""
 }
 
 func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) ContractPaths {

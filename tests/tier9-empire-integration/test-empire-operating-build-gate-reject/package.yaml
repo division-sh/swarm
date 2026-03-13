@@ -1,7 +1,0 @@
-name: test-empire-operating-build-gate-reject
-version: 1.0.0
-description: >
-  deploy.requested arrives at build-orchestrator without g_qa_passed gate set.
-  Guard qa_gate fails with on_fail=reject. Handler outcome is reject.
-platform_version: ">=1.1.0"
-flows: [operating]

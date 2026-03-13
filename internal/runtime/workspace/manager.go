@@ -287,13 +287,14 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		}, nil
 	}
 
-	if strings.TrimSpace(actor.VerticalID) == "" {
+	entityID := actor.EffectiveEntityID()
+	if entityID == "" {
 		return nil, nil
 	}
-	if err := m.EnsureEntityWorkspace(ctx, actor.VerticalID); err != nil {
+	if err := m.EnsureEntityWorkspace(ctx, entityID); err != nil {
 		return nil, err
 	}
-	slug, err := m.LookupEntitySlug(ctx, actor.VerticalID)
+	slug, err := m.LookupEntitySlug(ctx, entityID)
 	if err != nil {
 		return nil, err
 	}

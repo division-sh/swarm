@@ -11,11 +11,11 @@ import (
 
 type fakePortfolio struct{}
 
-func (fakePortfolio) CountActiveVerticals(context.Context) (int, error) { return 2, nil }
-func (fakePortfolio) ListVerticalDigestRows(context.Context, int) ([]runtime.VerticalDigestRow, error) {
-	return []runtime.VerticalDigestRow{
+func (fakePortfolio) CountActiveInstances(context.Context) (int, error) { return 2, nil }
+func (fakePortfolio) ListInstanceDigestRows(context.Context, int) ([]runtime.InstanceDigestRow, error) {
+	return []runtime.InstanceDigestRow{
 		{
-			VerticalID:     "v1",
+			EntityID:       "v1",
 			Name:           "V1",
 			Stage:          "operating",
 			UsersTotal:     12,
@@ -57,8 +57,8 @@ func TestBuildSnapshotAndRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build snapshot: %v", err)
 	}
-	if s.ActiveVerticals != 2 {
-		t.Fatalf("unexpected active count: %d", s.ActiveVerticals)
+	if s.ActiveInstances != 2 {
+		t.Fatalf("unexpected active count: %d", s.ActiveInstances)
 	}
 	if s.MailboxCritical != 1 {
 		t.Fatalf("unexpected critical count: %d", s.MailboxCritical)

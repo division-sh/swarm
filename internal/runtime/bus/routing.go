@@ -11,9 +11,6 @@ import (
 var eventTypeTokenPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
 var eventPathSegmentPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
-// Deprecated compatibility placeholder. Runtime routing is now contract-derived.
-var FactoryEventPrefixes []string
-
 func RouteMatches(pattern, eventType string) bool {
 	switch {
 	case pattern == "", pattern == "*":

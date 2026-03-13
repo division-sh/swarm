@@ -1,6 +1,0 @@
-agent_fixtures:
-  analysis-agent:
-    - on: scoring.requested
-      emits:
-        - event: score.dimension_complete
-          payload: { entity_id: "{{entity_id}}", dimension: build_complexity, score: 80 }

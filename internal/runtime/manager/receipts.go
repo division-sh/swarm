@@ -9,8 +9,6 @@ import (
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
-	runtimecorpus "empireai/internal/runtime/corpusobs"
-	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimerterr "empireai/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
@@ -27,26 +25,11 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 	if am.shouldSkipEvent(agent.ID(), evt.ID) {
 		return nil
 	}
-	corpusMeta, corpusMode := runtimecorpus.TurnMetaFromEvent(evt)
-	var corpusStartedAt time.Time
-	if corpusMode {
-		corpusMeta.AgentID = agent.ID()
-		corpusStartedAt = time.Now().UTC()
-		am.logCorpusTurnLifecycle(ctx, "corpus.turn_started", corpusMeta, 0, runtimecorpus.EmitSnapshot{}, "")
-	}
 	if suppress, reason := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
-		if corpusMode {
-			duration := time.Since(corpusStartedAt)
-			am.logCorpusTurnLifecycle(ctx, "corpus.turn_suppressed", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), reason)
-		}
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", reason)
 		return nil
 	}
 	if am.shouldInterceptDirective(agent.ID(), evt) {
-		if corpusMode {
-			duration := time.Since(corpusStartedAt)
-			am.logCorpusTurnLifecycle(ctx, "corpus.turn_intercepted", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), "intercepted simple directive (runtime-handled)")
-		}
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "intercepted simple directive (runtime-handled)")
 		return nil
 	}
@@ -68,10 +51,6 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 			strings.TrimSpace(string(evt.Type)),
 		)
 		am.maybeTripAuthCircuitBreaker(agent.ID(), evt.ID, err)
-		if corpusMode {
-			duration := time.Since(corpusStartedAt)
-			am.logCorpusTurnLifecycle(ctx, "corpus.turn_failed", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), runtimerterr.FormatRuntimeError(agentErr))
-		}
 		am.writeReceipt(ctx, evt.ID, agent.ID(), "error", runtimerterr.FormatRuntimeError(agentErr))
 		return agentErr
 	}
@@ -94,70 +73,12 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 				strings.TrimSpace(string(e.Type)),
 				agent.ID(),
 			)
-			if corpusMode {
-				duration := time.Since(corpusStartedAt)
-				am.logCorpusTurnLifecycle(ctx, "corpus.turn_failed", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), runtimerterr.FormatRuntimeError(pubErr))
-			}
 			am.writeReceipt(ctx, evt.ID, agent.ID(), "error", runtimerterr.FormatRuntimeError(pubErr))
 			return pubErr
 		}
 	}
-	if corpusMode {
-		duration := time.Since(corpusStartedAt)
-		am.logCorpusTurnLifecycle(ctx, "corpus.turn_completed", corpusMeta, duration, runtimecorpus.ConsumeEmitSnapshot(evt.ID), "")
-	}
 	am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "")
 	return nil
-}
-
-func (am *AgentManager) logCorpusTurnLifecycle(
-	ctx context.Context,
-	action string,
-	meta runtimecorpus.TurnMeta,
-	duration time.Duration,
-	snapshot runtimecorpus.EmitSnapshot,
-	errText string,
-) {
-	if am == nil || am.bus == nil {
-		return
-	}
-	if strings.TrimSpace(action) == "" {
-		return
-	}
-	detail := map[string]any{
-		"batch_size":          meta.BatchSize,
-		"payload_bytes":       meta.PayloadBytes,
-		"emit_count":          snapshot.EmitCount,
-		"scan_complete_emits": snapshot.ScanCompleteEmits,
-	}
-	if duration > 0 {
-		detail["duration_ms"] = int(duration / time.Millisecond)
-	}
-	if !snapshot.FirstEmitAt.IsZero() {
-		detail["first_emit_at"] = snapshot.FirstEmitAt.UTC().Format(time.RFC3339Nano)
-		if !meta.AssignedAt.IsZero() {
-			ms := snapshot.FirstEmitAt.Sub(meta.AssignedAt).Milliseconds()
-			if ms < 0 {
-				ms = 0
-			}
-			detail["ms_to_first_emit"] = ms
-		}
-	}
-	am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-		Level:      "debug",
-		Component:  "agent-manager",
-		Action:     strings.TrimSpace(action),
-		EventID:    strings.TrimSpace(meta.EventID),
-		EventType:  strings.TrimSpace(meta.EventType),
-		AgentID:    FirstNonEmptyString(strings.TrimSpace(meta.AgentID), "unknown-agent"),
-		EntityID:   strings.TrimSpace(meta.VerticalID),
-		VerticalID: strings.TrimSpace(meta.VerticalID),
-		CampaignID: strings.TrimSpace(meta.CampaignID),
-		ScanID:     strings.TrimSpace(meta.ScanID),
-		Detail:     detail,
-		Error:      strings.TrimSpace(errText),
-		DurationUS: int(duration / time.Microsecond),
-	})
 }
 
 func (am *AgentManager) shouldInterceptDirective(agentID string, evt events.Event) bool {
@@ -177,25 +98,15 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 	if strings.HasPrefix(eventType, "budget.") {
 		return false, ""
 	}
-	role := strings.ToLower(strings.TrimSpace(cfg.Role))
 	verticalID := strings.TrimSpace(evt.EntityID())
 	if verticalID == "" {
-		verticalID = strings.TrimSpace(cfg.VerticalID)
+		verticalID = cfg.EffectiveEntityID()
 	}
 
 	if tracker.IsEntityEmergency(verticalID) {
-		if IsEmergencyAllowedFlow(role, eventType) {
-			return false, ""
-		}
 		return true, "suppressed by budget emergency guardrail"
 	}
 	if tracker.IsEntityThrottle(verticalID) {
-		if IsGrowthRole(role) {
-			return true, "suppressed by budget throttle: growth paused"
-		}
-		if IsProactiveHeartbeat(role, eventType) {
-			return true, "suppressed by budget throttle: proactive heartbeat paused"
-		}
 		if strings.HasPrefix(eventType, "scan.") {
 			return true, "suppressed by budget throttle: scan work paused"
 		}
@@ -407,13 +318,14 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	am.mu.RUnlock()
 	verticalID := ""
 	if cfgOK {
-		verticalID = strings.TrimSpace(cfg.VerticalID)
+		verticalID = cfg.EffectiveEntityID()
 	}
 
 	payload := mustJSON(map[string]any{
 		"event_id":     eventID,
 		"agent_id":     agentID,
 		"manager_id":   managerID,
+		"entity_id":    verticalID,
 		"vertical_id":  verticalID,
 		"retry_count":  receipt.RetryCount,
 		"error":        strings.TrimSpace(receipt.Error),

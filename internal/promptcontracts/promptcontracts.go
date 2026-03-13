@@ -239,10 +239,16 @@ func unresolvedPromptTokens(promptText string) []string {
 }
 
 // ResolveDir discovers the default MAS prompt directory. It checks:
-// 1) EMPIREAI_PROMPTS_DIR
-// 2) docs/specs/mas-platform/empire/contracts/prompts walking up from CWD
-// 3) docs/specs/mas-platform/empire/contracts/prompts relative to this repo.
+// 1) MAS_PROMPTS_DIR
+// 2) EMPIREAI_PROMPTS_DIR (legacy compatibility)
+// 3) any docs/specs/mas-platform/*/contracts/prompts walking up from CWD
+// 4) any docs/specs/mas-platform/*/contracts/prompts relative to this repo.
 func ResolveDir() (string, bool) {
+	if env := strings.TrimSpace(os.Getenv("MAS_PROMPTS_DIR")); env != "" {
+		if isDir(env) {
+			return filepath.Clean(env), true
+		}
+	}
 	if env := strings.TrimSpace(os.Getenv("EMPIREAI_PROMPTS_DIR")); env != "" {
 		if isDir(env) {
 			return filepath.Clean(env), true
@@ -250,14 +256,14 @@ func ResolveDir() (string, bool) {
 	}
 
 	if cwd, err := os.Getwd(); err == nil {
-		if dir, ok := findDirUp(cwd, "docs", "specs", "mas-platform", "empire", "contracts", "prompts"); ok {
+		if dir, ok := findAnyPromptDirUp(cwd); ok {
 			return dir, true
 		}
 	}
 
 	if _, thisFile, _, ok := runtime.Caller(0); ok {
 		repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-		if dir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts", "prompts"); isDir(dir) {
+		if dir, ok := findAnyPromptDirUp(repoRoot); ok {
 			return dir, true
 		}
 	}
@@ -271,6 +277,26 @@ func findDirUp(start string, pathParts ...string) (string, bool) {
 		candidate := filepath.Join(append([]string{cur}, pathParts...)...)
 		if isDir(candidate) {
 			return candidate, true
+		}
+		next := filepath.Dir(cur)
+		if next == cur {
+			return "", false
+		}
+		cur = next
+	}
+}
+
+func findAnyPromptDirUp(start string) (string, bool) {
+	cur := filepath.Clean(start)
+	for {
+		pattern := filepath.Join(cur, "docs", "specs", "mas-platform", "*", "contracts", "prompts")
+		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
+			sort.Strings(matches)
+			for _, match := range matches {
+				if isDir(match) {
+					return filepath.Clean(match), true
+				}
+			}
 		}
 		next := filepath.Dir(cur)
 		if next == cur {

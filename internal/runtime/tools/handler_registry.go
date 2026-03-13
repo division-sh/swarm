@@ -41,7 +41,6 @@ func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {
 }
 
 func (e *Executor) registerInfraHandlers(handlers map[string]ToolHandler) {
-	handlers["sql_execute"] = e.execSQLExecute
 	handlers["nginx_reload"] = e.execNginxReload
 	handlers["systemd_control"] = e.execSystemdControl
 	handlers["certbot_execute"] = e.execCertbotExecute

@@ -1,8 +1,0 @@
-initial_state: discovered
-terminal_states: [scoring, derived_scoring]
-states: [discovered, scoring, derived_scoring]
-pins:
-  inputs:
-    events: [vertical.discovered, vertical.derived]
-  outputs:
-    events: [scoring.requested, scoring.derived_requested]

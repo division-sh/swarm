@@ -74,7 +74,8 @@ func (n *WebhookNotifier) NotifyCritical(ctx context.Context, item runtimetools.
 		"mailbox_id": item.ID,
 		"type":       item.Type,
 		"from_agent": item.FromAgent,
-		"vertical":   item.VerticalID,
+		"entity_id":  item.EffectiveEntityID(),
+		"vertical":   item.EffectiveEntityID(),
 		"summary":    item.Summary,
 		"timeout_at": item.TimeoutAt.UTC().Format(time.RFC3339),
 		"context":    json.RawMessage(item.Context),
@@ -115,9 +116,9 @@ func (n *TelegramNotifier) NotifyCritical(ctx context.Context, item runtimetools
 		client = &http.Client{Timeout: 8 * time.Second}
 	}
 	text := fmt.Sprintf(
-		"[Portfolio] CRITICAL mailbox item\nid=%s\nvertical=%s\ntype=%s\nfrom=%s\nsummary=%s",
+		"[Portfolio] CRITICAL mailbox item\nid=%s\nentity=%s\ntype=%s\nfrom=%s\nsummary=%s",
 		item.ID,
-		item.VerticalID,
+		item.EffectiveEntityID(),
 		item.Type,
 		item.FromAgent,
 		strings.TrimSpace(item.Summary),
@@ -207,8 +208,8 @@ func (n *EmailNotifier) NotifyCritical(ctx context.Context, item runtimetools.Ma
 	}
 	subject := fmt.Sprintf("Critical mailbox item [%s]", item.Type)
 	body := fmt.Sprintf(
-		"Critical mailbox item\n\nid: %s\nvertical: %s\ntype: %s\nfrom: %s\nsummary: %s\n",
-		item.ID, item.VerticalID, item.Type, item.FromAgent, strings.TrimSpace(item.Summary),
+		"Critical mailbox item\n\nid: %s\nentity: %s\ntype: %s\nfrom: %s\nsummary: %s\n",
+		item.ID, item.EffectiveEntityID(), item.Type, item.FromAgent, strings.TrimSpace(item.Summary),
 	)
 	msg := []byte(
 		"To: " + strings.Join(n.To, ",") + "\r\n" +

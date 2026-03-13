@@ -70,8 +70,15 @@ func TestPhase1DefaultContractPathsAreMASOnly(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	paths := ResolveWorkflowContractPaths(repoRoot)
 
-	if got := filepath.ToSlash(DefaultWorkflowContractsDir(repoRoot)); got != "docs/specs/mas-platform/empire/contracts" && !strings.HasSuffix(got, "/docs/specs/mas-platform/empire/contracts") {
-		t.Fatalf("unexpected default workflow contracts dir %q", got)
+	got := filepath.ToSlash(DefaultWorkflowContractsDir(repoRoot))
+	if got == "" {
+		t.Fatal("expected default workflow contracts dir to resolve from MAS product bundles")
+	}
+	if !strings.Contains(got, "/docs/specs/mas-platform/") && !strings.HasPrefix(got, "docs/specs/mas-platform/") {
+		t.Fatalf("unexpected non-MAS default workflow contracts dir %q", got)
+	}
+	if strings.Contains(got, "/platform/contracts") || strings.HasSuffix(got, "/tests/test-guard-pass") || strings.Contains(got, "/tests/") {
+		t.Fatalf("unexpected non-product workflow contracts dir %q", got)
 	}
 	if strings.Contains(filepath.ToSlash(paths.WorkflowDir), "/contracts/") && !strings.Contains(filepath.ToSlash(paths.WorkflowDir), "/docs/specs/mas-platform/") {
 		t.Fatalf("unexpected legacy workflow dir %q", paths.WorkflowDir)

@@ -22,9 +22,9 @@ import (
 // Factory-shard agents (no vertical_id) get per-agent scope keys so sharded
 // scans can execute concurrently instead of funneling through one global lock.
 func budgetExecutionScopeKey(actor models.AgentConfig) string {
-	verticalID := strings.TrimSpace(actor.VerticalID)
-	if verticalID != "" {
-		return verticalID
+	entityID := actor.EffectiveEntityID()
+	if entityID != "" {
+		return entityID
 	}
 	mode := strings.ToLower(strings.TrimSpace(actor.Mode))
 	if mode == "factory" {

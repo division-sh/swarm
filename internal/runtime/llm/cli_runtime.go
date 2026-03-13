@@ -119,10 +119,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		return nil, errors.New("nil session")
 	}
 	actor, _ := runtimeactor.ActorFromContext(ctx)
-	entityID := strings.TrimSpace(actor.EntityID)
-	if entityID == "" {
-		entityID = strings.TrimSpace(actor.VerticalID)
-	}
+	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop

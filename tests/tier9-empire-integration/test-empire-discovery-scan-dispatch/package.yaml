@@ -1,8 +1,0 @@
-name: test-empire-discovery-scan-dispatch
-version: 1.0.0
-description: >
-  scan.requested with mode=saas_gap triggers rules routing in scan-orchestrator,
-  emitting scan.category_dispatch and scan.source_dispatch, then fan_out emits
-  3 market_research.scan_assigned events per subcategory.
-platform_version: ">=1.1.0"
-flows: [discovery]

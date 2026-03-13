@@ -1,7 +1,0 @@
-composite_shortlist: 75
-hard_gate_floor: 50
-max_derivation_depth: 2
-min_derivation_signal: 40
-min_icp_score: 50
-min_evidence_for_derivation: 3
-min_retention_score: 40

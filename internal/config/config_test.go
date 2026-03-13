@@ -6,8 +6,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	empireconfig "empireai/internal/empire/config"
 )
 
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
@@ -63,22 +61,22 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		t.Fatalf("expected lock ttl > 0")
 	}
 
-	var empire empireconfig.EmpireConfig
-	if err := cfg.DecodeExtensions(&empire); err != nil {
+	var ext ExtensionsConfig
+	if err := cfg.DecodeExtensions(&ext); err != nil {
 		t.Fatalf("DecodeExtensions: %v", err)
 	}
-	empire.ApplyDefaults()
-	if empire.Budget.HumanTasks.AutoExpireHours != 168 {
-		t.Fatalf("expected default auto_expire_hours 168, got %d", empire.Budget.HumanTasks.AutoExpireHours)
+	ext.ApplyDefaults()
+	if ext.Budget.HumanTasks.AutoExpireHours != 168 {
+		t.Fatalf("expected default auto_expire_hours 168, got %d", ext.Budget.HumanTasks.AutoExpireHours)
 	}
-	if empire.Budget.HumanTasks.BudgetReset != "monday" {
-		t.Fatalf("expected default budget_reset monday, got %q", empire.Budget.HumanTasks.BudgetReset)
+	if ext.Budget.HumanTasks.BudgetReset != "monday" {
+		t.Fatalf("expected default budget_reset monday, got %q", ext.Budget.HumanTasks.BudgetReset)
 	}
-	if empire.Sharding.MaxShardsPerScan != 8 {
-		t.Fatalf("expected default sharding.max_shards_per_scan=8, got %d", empire.Sharding.MaxShardsPerScan)
+	if ext.Sharding.MaxShardsPerScan != 8 {
+		t.Fatalf("expected default sharding.max_shards_per_scan=8, got %d", ext.Sharding.MaxShardsPerScan)
 	}
-	if empire.Sharding.Stages.MarketResearch.TargetItemsPerShard != 13 {
-		t.Fatalf("expected default sharding.stages.market_research.target_items_per_shard=13, got %d", empire.Sharding.Stages.MarketResearch.TargetItemsPerShard)
+	if ext.Sharding.Stages.MarketResearch.TargetItemsPerShard != 13 {
+		t.Fatalf("expected default sharding.stages.market_research.target_items_per_shard=13, got %d", ext.Sharding.Stages.MarketResearch.TargetItemsPerShard)
 	}
 }
 
@@ -107,8 +105,8 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 	}
 }
 
-func TestEmpireConfig_ApplyDefaultsAndClamps(t *testing.T) {
-	c := &empireconfig.EmpireConfig{}
+func TestExtensionsConfig_ApplyDefaultsAndClamps(t *testing.T) {
+	c := &ExtensionsConfig{}
 	c.Sharding.MaxShardsPerScan = 6
 	c.Sharding.MaxConcurrentShards = 0
 	c.Sharding.PerShardTimeout = 0
