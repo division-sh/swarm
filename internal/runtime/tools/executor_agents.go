@@ -69,10 +69,8 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 			return nil, fmt.Errorf("target agent not found: %s", targetID)
 		}
 		targetCfgEntityID := targetCfg.EffectiveEntityID()
-		if actor.Mode == "operating" && actorEntityID != "" {
-			if targetCfgEntityID != actorEntityID {
-				return nil, errors.New("cross-entity agent_message is not allowed in operating mode")
-			}
+		if actorEntityID != "" && targetCfgEntityID != actorEntityID {
+			return nil, errors.New("cross-entity agent_message is not allowed")
 		}
 		if targetEntity == "" {
 			targetEntity = targetCfgEntityID
@@ -173,16 +171,7 @@ func normalizeCommRole(role string) string {
 	role = strings.TrimSpace(strings.ToLower(role))
 	role = strings.ReplaceAll(role, "_", "-")
 	role = strings.Join(strings.Fields(role), "-")
-	switch role {
-	case "head-of-product":
-		return "vp-product"
-	case "head-of-growth":
-		return "vp-growth"
-	case "cto":
-		return "cto-agent"
-	default:
-		return role
-	}
+	return role
 }
 
 func isManagerAncestor(manager Manager, managerID, targetID string) bool {
@@ -334,7 +323,7 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	}
 	in.Config.NormalizeEntityID()
 	if in.Config.Mode == "" {
-		in.Config.Mode = coalesce(actor.Mode, "operating")
+		in.Config.Mode = coalesce(actor.Mode, "entity")
 	}
 	if err := authorizeManage(actor, in.Config.Role, in.Config.EffectiveEntityID()); err != nil {
 		return nil, err

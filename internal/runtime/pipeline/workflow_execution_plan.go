@@ -1,0 +1,138 @@
+package pipeline
+
+import (
+	"strings"
+
+	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/core/paths"
+)
+
+type workflowTriggerContext struct {
+	Event events.Event
+	State WorkflowState
+}
+
+type handlerExecutionPlan struct {
+	NodeID           string
+	EventType        string
+	Guard            string
+	GuardSpec        *runtimecontracts.GuardSpec
+	Action           string
+	Template         string
+	InstanceIDFrom   string
+	InstanceIDPath   paths.Path
+	ConfigFrom       *runtimecontracts.ConfigFromSpec
+	CompletionRule   string
+	Accumulate       *runtimecontracts.AccumulateSpec
+	Compute          *runtimecontracts.ComputeSpec
+	FanOut           *runtimecontracts.FanOutSpec
+	AdvancesTo       string
+	SetsGate         string
+	ClearGates       bool
+	DataAccumulation runtimecontracts.WorkflowDataAccumulation
+	PayloadTransform *runtimecontracts.PayloadTransformSpec
+	Emits            string
+	EmitEvents       []string
+	Rules            []runtimecontracts.HandlerRuleEntry
+	OnComplete       []runtimecontracts.HandlerRuleEntry
+	ExecutionOrder   []string
+}
+
+func workflowEventEntityID(evt events.Event) string {
+	return workflowEventEntityIDWithPayload(evt, parsePayloadMap(evt.Payload))
+}
+
+func workflowEventEntityIDWithPayload(evt events.Event, payload map[string]any) string {
+	return strings.TrimSpace(firstNonEmptyString(
+		asString(payload["entity_id"]),
+		evt.EntityID(),
+	))
+}
+
+func handlerGuardID(spec *runtimecontracts.GuardSpec) string {
+	if spec == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.ID)
+}
+
+func gateSpecString(spec *runtimecontracts.GateSpec) string {
+	if spec == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Name)
+}
+
+func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
+	plan := handlerExecutionPlan{
+		NodeID:           strings.TrimSpace(nodeID),
+		EventType:        strings.TrimSpace(eventType),
+		Guard:            handlerGuardID(handler.Guard),
+		GuardSpec:        handler.Guard,
+		Action:           strings.TrimSpace(handler.Action.ID),
+		Template:         strings.TrimSpace(handler.Action.Template),
+		InstanceIDFrom:   strings.TrimSpace(handler.Action.InstanceIDFrom),
+		InstanceIDPath:   handler.Action.InstanceIDPath,
+		ConfigFrom:       handler.Action.ConfigFrom,
+		CompletionRule:   strings.TrimSpace(handler.CompletionRule),
+		Accumulate:       handler.Accumulate,
+		Compute:          handler.Compute,
+		FanOut:           handler.FanOut,
+		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
+		SetsGate:         gateSpecString(handler.SetsGate),
+		ClearGates:       len(handler.ClearGates) > 0,
+		DataAccumulation: handler.DataAccumulation,
+		PayloadTransform: handler.PayloadTransform,
+		Emits:            strings.TrimSpace(handler.Emits.First()),
+		EmitEvents:       handler.Emits.Values(),
+		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), handler.Rules...),
+		OnComplete:       append([]runtimecontracts.HandlerRuleEntry(nil), handler.OnComplete...),
+	}
+	plan.ExecutionOrder = handlerExecutionOrderForPlan(plan)
+	return plan
+}
+
+func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
+	steps := make([]string, 0, 12)
+	if plan.ClearGates {
+		steps = append(steps, "clear_gates")
+	}
+	if strings.TrimSpace(plan.Guard) != "" || plan.GuardSpec != nil {
+		steps = append(steps, "guard")
+	}
+	if plan.Accumulate != nil {
+		steps = append(steps, "accumulate")
+	}
+	if plan.Compute != nil {
+		steps = append(steps, "compute")
+	}
+	if plan.FanOut != nil {
+		steps = append(steps, "fan_out")
+	}
+	if len(plan.OnComplete) > 0 {
+		steps = append(steps, "on_complete")
+	}
+	if len(plan.Rules) > 0 {
+		steps = append(steps, "rules")
+	}
+	if plan.AdvancesTo != "" {
+		steps = append(steps, "advances_to")
+	}
+	if plan.SetsGate != "" {
+		steps = append(steps, "sets_gate")
+	}
+	if plan.DataAccumulation.HasWrites() || strings.TrimSpace(plan.DataAccumulation.SourceEvent) != "" {
+		steps = append(steps, "data_accumulation")
+	}
+	if plan.PayloadTransform != nil {
+		steps = append(steps, "payload_transform")
+	}
+	if len(plan.EmitEvents) > 0 || plan.Emits != "" {
+		steps = append(steps, "emits")
+	}
+	if plan.Action != "" {
+		steps = append(steps, "action")
+	}
+	return steps
+}

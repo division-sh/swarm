@@ -16,23 +16,21 @@ import (
 )
 
 const (
-	mcpActorIDHeader      = "X-Empire-Agent-Id"
-	mcpActorRoleHeader    = "X-Empire-Agent-Role"
-	mcpActorModeHeader    = "X-Empire-Agent-Mode"
+	mcpActorIDHeader      = "X-MAS-Agent-Id"
+	mcpActorRoleHeader    = "X-MAS-Agent-Role"
+	mcpActorModeHeader    = "X-MAS-Agent-Mode"
 	mcpEntityIDHeader     = "X-MAS-Entity-Id"
-	mcpLegacyEntityIDHeader = "X-Empire-Vertical-Id"
-	mcpAllowedToolsHeader = "X-Empire-Allowed-Tools"
-	mcpContextTokenHeader = "X-Empire-Context-Token"
-	mcpTraceIDHeader      = "X-Empire-Trace-Id"
+	mcpAllowedToolsHeader = "X-MAS-Allowed-Tools"
+	mcpContextTokenHeader = "X-MAS-Context-Token"
+	mcpTraceIDHeader      = "X-MAS-Trace-Id"
 
-	mcpActorIDQuery      = "empire_agent_id"
-	mcpActorRoleQuery    = "empire_agent_role"
-	mcpActorModeQuery    = "empire_agent_mode"
+	mcpActorIDQuery      = "agent_id"
+	mcpActorRoleQuery    = "agent_role"
+	mcpActorModeQuery    = "agent_mode"
 	mcpEntityIDQuery     = "entity_id"
-	mcpLegacyEntityIDQuery = "empire_vertical_id"
-	mcpAllowedToolsQuery = "empire_allowed_tools"
-	mcpContextTokenQuery = "empire_ctx_token"
-	mcpTraceIDQuery      = "empire_trace_id"
+	mcpAllowedToolsQuery = "allowed_tools"
+	mcpContextTokenQuery = "ctx_token"
+	mcpTraceIDQuery      = "trace_id"
 )
 
 func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, error) {
@@ -51,9 +49,6 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	actor, _ := runtimeactor.ActorFromContext(ctx)
 	if strings.TrimSpace(actor.ID) == "" {
 		actor.ID = strings.TrimSpace(s.AgentID)
-	}
-	if strings.TrimSpace(actor.Mode) == "" {
-		actor.Mode = "operating"
 	}
 	if strings.TrimSpace(actor.Role) == "" {
 		actor.Role = actor.ID
@@ -74,10 +69,11 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	headers := map[string]string{
 		mcpActorIDHeader:        strings.TrimSpace(actor.ID),
 		mcpActorRoleHeader:      strings.TrimSpace(actor.Role),
-		mcpActorModeHeader:      strings.TrimSpace(actor.Mode),
 		mcpEntityIDHeader:       strings.TrimSpace(actor.EffectiveEntityID()),
-		mcpLegacyEntityIDHeader: strings.TrimSpace(actor.EffectiveEntityID()),
 		mcpAllowedToolsHeader:   allowedTools,
+	}
+	if mode := strings.TrimSpace(actor.Mode); mode != "" {
+		headers[mcpActorModeHeader] = mode
 	}
 	if token := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
@@ -179,7 +175,6 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	}
 	if v := strings.TrimSpace(actor.EffectiveEntityID()); v != "" {
 		q.Set(mcpEntityIDQuery, v)
-		q.Set(mcpLegacyEntityIDQuery, v)
 	}
 	if v := strings.TrimSpace(allowedTools); v != "" {
 		q.Set(mcpAllowedToolsQuery, v)

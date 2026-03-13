@@ -14,7 +14,7 @@ func TestDefaultOpCoRoutesBootstrapSeededCounts(t *testing.T) {
 }
 
 func TestDefaultOpCoRosterCEOIncludesCrossDomainReport(t *testing.T) {
-	if got := runtimemanager.OpCoAgentID("ceo", "v-456"); got != "ceo-v-456" {
-		t.Fatalf("OpCoAgentID() = %q, want ceo-v-456", got)
+	if got := runtimemanager.EntityScopedAgentID("ceo", "v-456"); got != "ceo-v-456" {
+		t.Fatalf("EntityScopedAgentID() = %q, want ceo-v-456", got)
 	}
 }

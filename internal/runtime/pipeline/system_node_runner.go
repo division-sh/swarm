@@ -177,8 +177,8 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		"last_error":  msg,
 		"retry_count": maxInt(n.retryLimit, 1),
 	}
-	if verticalID := workflowEventEntityID(evt); verticalID != "" {
-		payload["vertical_id"] = verticalID
+	if entityID := workflowEventEntityID(evt); entityID != "" {
+		payload["entity_id"] = entityID
 	}
 	if err := n.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),

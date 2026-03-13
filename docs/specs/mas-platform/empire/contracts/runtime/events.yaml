@@ -173,7 +173,7 @@ inbound.email:
       items: string
   _status: planned
   _source: external (messaging gateway)
-inbound.whatsapp_message:
+inbound.chat:
   payload:
     vertical_id: string
     from: string
@@ -284,7 +284,7 @@ template.version_published:
 timer.infra_health_check:
   payload:
     check_type: string
-timer.portfolio_digest:
+timer.instance_digest:
   payload:
     trigger_reason: string
 vertical.health_warning:
@@ -384,13 +384,13 @@ budget.alert_sent:
     entity_id: string
     alert_type: string
     details: object
-market_research.scan_complete:
+primary.scan_complete:
   payload:
     scan_id: string
     categories_assessed: integer
     high_signal_count: integer
     geography: string
-trend_research.scan_complete:
+secondary.scan_complete:
   payload:
     scan_id: string
     trends_identified: string
@@ -640,7 +640,7 @@ dedup.ambiguous:
     new_candidate: string
     existing_vertical: string
     similarity: string
-market_research.scan_assigned:
+primary.scan_assigned:
   payload:
     geography: string
     scan_id: string
@@ -689,7 +689,7 @@ scanner.yelp.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
-trend_research.scan_assigned:
+secondary.scan_assigned:
   payload:
     geography: string
     scan_id: string

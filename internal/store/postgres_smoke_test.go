@@ -9,7 +9,6 @@ import (
 	"empireai/internal/events"
 	runtimeactors "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
-	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
@@ -64,12 +63,12 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Upsert agent + load agents.
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:       "coordinator",
-			Role:     "coordinator",
+			ID:       "control-plane",
+			Role:     "control-plane",
 			Mode:     "global",
 			EntityID: "",
 			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
-			Config: json.RawMessage(`{"system_prompt":"You are the coordinator.","tools":[],"subscriptions":["system.started"]}`),
+			Config: json.RawMessage(`{"system_prompt":"You are the control plane.","tools":[],"subscriptions":["system.started"]}`),
 		},
 		Status:          "active",
 		HiredBy:         "test",
@@ -106,7 +105,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		EntityID:         verticalID,
 		EventPattern:     "review.*",
 		SubscriberID:     ceoID,
-		InstalledBy:      "coordinator",
+		InstalledBy:      "control-plane",
 		Reason:           "tests",
 		Status:           "active",
 		Source:           "bootstrap",
@@ -130,10 +129,10 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if err := pg.AppendEvent(ctx, evt); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
-	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"coordinator"}); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"control-plane"}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID, "coordinator", "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID, "control-plane", "processed", ""); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
 
@@ -141,7 +140,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EventID:   evt.ID,
 		EntityID:  verticalID,
-		FromAgent: "coordinator",
+		FromAgent: "control-plane",
 		Type:      "review",
 		Priority:  "normal",
 		Status:    "pending",
@@ -165,42 +164,24 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("decide mailbox: %v", err)
 	}
 
-	// Inbound: accept unsigned email, reject unsigned whatsapp.
+	// Inbound: accept unsigned email, reject unsigned chat.
 	_, err = db.ExecContext(ctx, `
 		UPDATE workflow_instances
-		SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"credentials":{"webhooks":{"whatsapp":{"secret":"s3cr3t"}}}}'::jsonb
+		SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"credentials":{"webhooks":{"chat":{"secret":"s3cr3t"}}}}'::jsonb
 		WHERE instance_id = $1::uuid
 	`, verticalID)
 	if err != nil {
 		t.Fatalf("seed credentials: %v", err)
 	}
-	target, err := pg.ResolveInboundTarget(ctx, "testco", "whatsapp")
+	target, err := pg.ResolveInboundTarget(ctx, "testco", "chat")
 	if err != nil || target.EntityID != verticalID || target.WebhookSecret == "" {
 		t.Fatalf("resolve inbound target err=%v target=%+v", err, target)
 	}
-	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "whatsapp"); err != nil || !ok {
+	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "chat"); err != nil || !ok {
 		t.Fatalf("record inbound err=%v ok=%v", err, ok)
 	}
-	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "whatsapp"); err != nil || ok {
+	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", verticalID, "chat"); err != nil || ok {
 		t.Fatalf("record inbound duplicate err=%v ok=%v", err, ok)
 	}
 
-	// Scan campaigns.
-	camp, err := pg.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
-		GeographyID: geoID,
-		Mode:        "seed",
-		Categories:  []string{"local"},
-		Priority:    "high",
-		Status:      "queued",
-	})
-	if err != nil || camp.ID == "" {
-		t.Fatalf("create scan campaign err=%v camp=%+v", err, camp)
-	}
-	if got, err := pg.ListScanCampaigns(ctx, runtimepipeline.ScanCampaignFilter{Status: "queued", Limit: 10}); err != nil || len(got) == 0 {
-		t.Fatalf("list scan campaigns err=%v len=%d", err, len(got))
-	}
-	claimed, ok, err := pg.ClaimNextDueScanCampaign(ctx)
-	if err != nil || !ok || claimed.ID != camp.ID {
-		t.Fatalf("claim campaign err=%v ok=%v claimed=%+v", err, ok, claimed)
-	}
 }

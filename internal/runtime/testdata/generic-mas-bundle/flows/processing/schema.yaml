@@ -23,7 +23,7 @@ pins:
       - score
       - status
 required_agents:
-  - role: coordinator
+  - role: control-plane
     subscribes_to:
       - item.completed
       - item.rejected

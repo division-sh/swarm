@@ -147,7 +147,7 @@ func buildFlowAgentConfig(
 
 func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
 	vars := map[string]string{
-		"vertical_id": strings.TrimSpace(req.EntityID),
+		"entity_id":   strings.TrimSpace(req.EntityID),
 		"instance_id": strings.TrimSpace(req.InstanceID),
 	}
 	for key, value := range req.Config {

@@ -20,14 +20,14 @@ func TestLoadFromDir_DefaultAndModeVariant(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "prompt-variables.yaml"), []byte("signal_threshold: 55\n"), 0o644); err != nil {
 		t.Fatalf("write prompt variables: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "market-research-agent.md"), []byte("default prompt"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "generic-agent.md"), []byte("default prompt"), 0o644); err != nil {
 		t.Fatalf("write default prompt: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "market-research-agent.corpus.md"), []byte("corpus prompt"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "generic-agent.corpus.md"), []byte("corpus prompt"), 0o644); err != nil {
 		t.Fatalf("write mode prompt: %v", err)
 	}
 
-	got, found, err := LoadFromDir(dir, "market-research-agent", "corpus")
+	got, found, err := LoadFromDir(dir, "generic-agent", "corpus")
 	if err != nil {
 		t.Fatalf("load mode prompt: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestLoadFromDir_DefaultAndModeVariant(t *testing.T) {
 		t.Fatalf("expected mode prompt, found=%v got=%q", found, got)
 	}
 
-	got, found, err = LoadFromDir(dir, "market-research-agent", "saas_gap")
+	got, found, err = LoadFromDir(dir, "generic-agent", "saas_gap")
 	if err != nil {
 		t.Fatalf("load fallback prompt: %v", err)
 	}
@@ -78,11 +78,11 @@ Blocking:
 Tier2:
   {{tier2_capabilities}}
 `
-	if err := os.WriteFile(filepath.Join(dir, "market-research-agent.md"), []byte(prompt), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "generic-agent.md"), []byte(prompt), 0o644); err != nil {
 		t.Fatalf("write prompt: %v", err)
 	}
 
-	got, found, err := LoadFromDir(dir, "market-research-agent", "")
+	got, found, err := LoadFromDir(dir, "generic-agent", "")
 	if err != nil {
 		t.Fatalf("load prompt with variables: %v", err)
 	}

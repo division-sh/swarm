@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -270,49 +269,6 @@ func validatorNormalizeRuntimeToolInput(name string, input any) any {
 				payload["unit"] = service
 			}
 		}
-	case "email_api":
-		if arr, ok := payload["to"].([]string); ok && len(arr) == 1 {
-			payload["to"] = strings.TrimSpace(arr[0])
-		}
-	case "whatsapp_business_api":
-		if body, ok := payload["body"].(map[string]any); ok {
-			if strings.TrimSpace(asString(payload["to"])) == "" {
-				payload["to"] = strings.TrimSpace(asString(body["to"]))
-			}
-			if strings.TrimSpace(asString(payload["message"])) == "" {
-				payload["message"] = strings.TrimSpace(asString(body["message"]))
-			}
-		}
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "instagram_api":
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "domain_purchase":
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "domain_availability_check":
-		if strings.TrimSpace(asString(payload["domain"])) == "" {
-			if query, ok := payload["query"].(map[string]any); ok {
-				if domain := strings.TrimSpace(asString(query["domain"])); domain != "" {
-					payload["domain"] = domain
-				}
-			}
-		}
-		if strings.TrimSpace(asString(payload["method"])) == "" {
-			payload["method"] = http.MethodGet
-		}
-		if payload["query"] == nil && strings.TrimSpace(asString(payload["domain"])) != "" {
-			payload["query"] = map[string]any{"domain": strings.TrimSpace(asString(payload["domain"]))}
-		}
-	case "dns_configure":
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "whatsapp_name_check":
-		if strings.TrimSpace(asString(payload["name"])) == "" {
-			if query, ok := payload["query"].(map[string]any); ok {
-				if name := strings.TrimSpace(asString(query["name"])); name != "" {
-					payload["name"] = name
-				}
-			}
-		}
-		NormalizeExternalContractPayload(payload, http.MethodPost)
 	}
 	return payload
 }

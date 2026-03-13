@@ -160,7 +160,7 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 	}
 	pipelineType := strings.TrimSpace(in.PipelineType)
 	if pipelineType == "" {
-		pipelineType = "validation"
+		pipelineType = "workflow"
 	}
 	action := strings.TrimSpace(in.Action)
 	if action == "" {

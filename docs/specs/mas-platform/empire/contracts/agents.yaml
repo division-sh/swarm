@@ -29,7 +29,7 @@ empire-coordinator:
   - cto.extraction_recommended
   - board.directive
   - board.chat
-  - timer.portfolio_digest
+  - timer.instance_digest
   - operating/*/timer.marginal_review
   - operating/*/opco.growth_triggered
   - operating/*/opco.growth_stabilized

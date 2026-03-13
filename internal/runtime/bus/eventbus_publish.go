@@ -352,7 +352,7 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
 	plan := eventDeliveryPlan{Event: evt}
 	// Budget events are broadcast guardrails. Deliver via delivery manifest so
-	// operating (OpCo) agents also receive them during backlog replay.
+	// active agents also receive them during backlog replay.
 	if strings.HasPrefix(string(evt.Type), "budget.") {
 		recipients := []string{}
 		if lister, ok := eb.store.(ActiveAgentLister); ok {
@@ -369,13 +369,13 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 		return plan, nil
 	}
 
-	// Human task events must always reach the requesting agent (even if operating
+	// Human task events must always reach the requesting agent (even if active
 	// and not subscribed) and should also be visible to subscribers like the
-	// control-plane roles. Treat them as global events, not OpCo-routed events.
+	// control-plane roles. Treat them as global events, not entity-routed events.
 	if strings.HasPrefix(string(evt.Type), "human_task.") {
 		recipients := eb.resolveSubscribedRecipients(string(evt.Type))
 		// Only outcome/decision events are forced to the requesting agent; the
-		// initial request event is intended for coordinator review.
+		// initial request event is intended for control-plane review.
 		switch string(evt.Type) {
 		case "human_task.approved",
 			"human_task.rejected",

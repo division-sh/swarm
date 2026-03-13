@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -395,49 +394,6 @@ func normalizeRuntimeToolInput(name string, input any) any {
 				payload["unit"] = service
 			}
 		}
-	case "email_api":
-		if arr, ok := payload["to"].([]string); ok && len(arr) == 1 {
-			payload["to"] = strings.TrimSpace(arr[0])
-		}
-	case "whatsapp_business_api":
-		if body, ok := payload["body"].(map[string]any); ok {
-			if strings.TrimSpace(asString(payload["to"])) == "" {
-				payload["to"] = strings.TrimSpace(asString(body["to"]))
-			}
-			if strings.TrimSpace(asString(payload["message"])) == "" {
-				payload["message"] = strings.TrimSpace(asString(body["message"]))
-			}
-		}
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "instagram_api":
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "domain_purchase":
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "domain_availability_check":
-		if strings.TrimSpace(asString(payload["domain"])) == "" {
-			if query, ok := payload["query"].(map[string]any); ok {
-				if domain := strings.TrimSpace(asString(query["domain"])); domain != "" {
-					payload["domain"] = domain
-				}
-			}
-		}
-		if strings.TrimSpace(asString(payload["method"])) == "" {
-			payload["method"] = http.MethodGet
-		}
-		if payload["query"] == nil && strings.TrimSpace(asString(payload["domain"])) != "" {
-			payload["query"] = map[string]any{"domain": strings.TrimSpace(asString(payload["domain"]))}
-		}
-	case "dns_configure":
-		NormalizeExternalContractPayload(payload, http.MethodPost)
-	case "whatsapp_name_check":
-		if strings.TrimSpace(asString(payload["name"])) == "" {
-			if query, ok := payload["query"].(map[string]any); ok {
-				if name := strings.TrimSpace(asString(query["name"])); name != "" {
-					payload["name"] = name
-				}
-			}
-		}
-		NormalizeExternalContractPayload(payload, http.MethodPost)
 	}
 	return payload
 }
@@ -458,7 +414,6 @@ func (e *Executor) emitToolExecutionEvent(
 		"agent_id":     actor.ID,
 		"agent_role":   actor.Role,
 		"entity_id":    actor.EffectiveEntityID(),
-		"vertical_id":  actor.EffectiveEntityID(),
 		"tool_name":    toolName,
 		"ok":           execErr == nil,
 		"error":        toolExecErrorText(execErr),
@@ -589,22 +544,6 @@ func AuthorizeMailboxSendForTest(actor models.AgentConfig) error {
 	return authorizeMailboxSend(actor)
 }
 
-func (e *Executor) LoadVerticalCredentialsForTest(ctx context.Context, verticalID string) (map[string]any, error) {
-	return e.loadVerticalCredentials(ctx, verticalID)
-}
-
-func (e *Executor) LoadExternalCredentialsForTest(ctx context.Context, verticalID, toolName string) (map[string]any, error) {
-	return e.loadExternalCredentials(ctx, verticalID, toolName)
-}
-
-func (e *Executor) DecryptCredentialValueForTest(ctx context.Context, value any) any {
-	return e.decryptCredentialValue(ctx, value)
-}
-
-func (e *Executor) DecryptCredentialMapForTest(ctx context.Context, in map[string]any) map[string]any {
-	return e.decryptCredentialMap(ctx, in)
-}
-
 func (e *Executor) ExecAgentMessageDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execAgentMessage(ctx, actor, input)
 }
@@ -651,14 +590,6 @@ func (e *Executor) ExecSystemdControlDirect(ctx context.Context, actor models.Ag
 
 func (e *Executor) ExecCertbotExecuteDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execCertbotExecute(ctx, actor, input)
-}
-
-func (e *Executor) ExecInstagramHandleCheckDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execInstagramHandleCheck(ctx, actor, input)
-}
-
-func (e *Executor) ExecEmailAPIDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execEmailAPI(ctx, actor, input)
 }
 
 func authorizeRouting(actor, target models.AgentConfig, status string) error {

@@ -130,7 +130,7 @@ The taxonomy is not exhaustive. If your research reveals a
 subcategory not listed, report it.
 
 When you have assessed ALL subcategories (or all filtered ones):
-→ Call emit_market_research_scan_complete with:
+→ Call emit_primary_scan_complete with:
   {scan_id: <from assignment>, categories_assessed: N,
    high_signal_count: N, geography: "..."}
 Without this, the scan will eventually timeout.

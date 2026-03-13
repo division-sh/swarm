@@ -26,7 +26,7 @@ func TestWebhookNotifier(t *testing.T) {
 	}
 }
 
-func TestTelegramNotifier(t *testing.T) {
+func TestChatNotifier(t *testing.T) {
 	var called bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -34,7 +34,7 @@ func TestTelegramNotifier(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	n := &TelegramNotifier{
+	n := &ChatNotifier{
 		BotToken: "token",
 		ChatID:   "chat",
 		BaseURL:  srv.URL,

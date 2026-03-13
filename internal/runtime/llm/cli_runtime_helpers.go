@@ -212,14 +212,7 @@ func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig)
 	outTokens := estimateTokensFromBytes(outRaw)
 
 	minIn := 800
-	role := strings.ToLower(strings.TrimSpace(actor.Role))
-	id := strings.ToLower(strings.TrimSpace(actor.ID))
-	switch {
-	case strings.Contains(role, "ceo") || strings.Contains(id, "ceo"):
-		minIn = 2000
-	case strings.Contains(role, "cto") || strings.Contains(id, "cto"):
-		minIn = 1200
-	case actor.Mode == "factory":
+	if strings.TrimSpace(actor.EffectiveEntityID()) == "" {
 		minIn = 1200
 	}
 	if inTokens < minIn {

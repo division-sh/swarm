@@ -18,14 +18,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type OpCOTeardownCompletePayload struct {
-	EntityID         string `json:"entity_id"`
-	AgentsRemoved    int    `json:"agents_removed"`
-	RoutingCleared   bool   `json:"routing_cleared"`
-	WorkspaceStopped bool   `json:"workspace_stopped"`
-	Priority         string `json:"priority"`
-}
-
 type AgentManager struct {
 	mu          sync.RWMutex
 	agents      map[string]Agent
@@ -136,7 +128,7 @@ func (am *AgentManager) SpawnAgentForEntity(entityID string, cfg models.AgentCon
 		cfg.EntityID = strings.TrimSpace(entityID)
 	}
 	cfg.NormalizeEntityID()
-	return am.SpawnAgentFor(entityID, cfg)
+	return am.SpawnAgent(cfg)
 }
 
 // SpawnEphemeralClone creates a task-scoped clone of a base agent. Ephemeral
@@ -221,7 +213,6 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			"role":        rec.Config.Role,
 			"mode":        rec.Config.Mode,
 			"entity_id":   entityID,
-			"vertical_id": entityID,
 			"hired_by":    rec.HiredBy,
 		})
 		if err := am.bus.Publish(am.runtimeContext(), (events.Event{
@@ -390,10 +381,6 @@ func (am *AgentManager) RevertAgentPromptOverride(ctx context.Context, agentID s
 		return err
 	}
 	return am.ReconfigureAgent(agentID, models.AgentConfig{})
-}
-
-func (am *AgentManager) SpawnAgentFor(_ string, cfg models.AgentConfig) error {
-	return am.SpawnAgent(cfg)
 }
 
 func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {

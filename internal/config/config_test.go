@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	runtimesharding "empireai/internal/runtime/core/sharding"
 )
 
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
@@ -36,9 +38,9 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"    no_session_persistence: false",
 		"    use_tmux: false",
 		"budget:",
-		"  factory_monthly_cap: 50000",
-		"  per_vertical_monthly_cap: 20000",
-		"  portfolio_monthly_cap: 100000",
+		"  global_monthly_cap: 50000",
+		"  per_entity_monthly_cap: 20000",
+		"  system_monthly_cap: 100000",
 		"  auto_approve_spend_below: 1500",
 		"  human_tasks:",
 		"    max_tasks_per_week: 3",
@@ -75,8 +77,8 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if ext.Sharding.MaxShardsPerScan != 8 {
 		t.Fatalf("expected default sharding.max_shards_per_scan=8, got %d", ext.Sharding.MaxShardsPerScan)
 	}
-	if ext.Sharding.Stages.MarketResearch.TargetItemsPerShard != 13 {
-		t.Fatalf("expected default sharding.stages.market_research.target_items_per_shard=13, got %d", ext.Sharding.Stages.MarketResearch.TargetItemsPerShard)
+	if ext.Sharding.Stages["primary"].TargetItemsPerShard != 13 {
+		t.Fatalf("expected default sharding.stages.primary.target_items_per_shard=13, got %d", ext.Sharding.Stages["primary"].TargetItemsPerShard)
 	}
 }
 
@@ -113,7 +115,9 @@ func TestExtensionsConfig_ApplyDefaultsAndClamps(t *testing.T) {
 	c.Sharding.PerShardBudgetCents = 0
 	c.Sharding.MaxRetriesPerShard = -1
 	c.Sharding.CircuitBreakerThreshold = 2.0
-	c.Sharding.Stages.MarketResearch.MaxShards = 99
+	c.Sharding.Stages = map[string]runtimesharding.StageConfig{
+		"primary": {MaxShards: 99},
+	}
 
 	c.ApplyDefaults()
 	if c.Sharding.MaxConcurrentShards != 12 {
@@ -134,7 +138,7 @@ func TestExtensionsConfig_ApplyDefaultsAndClamps(t *testing.T) {
 	if c.Sharding.CircuitBreakerThreshold != 0.5 {
 		t.Fatalf("expected default circuit_breaker_threshold=0.5, got %f", c.Sharding.CircuitBreakerThreshold)
 	}
-	if c.Sharding.Stages.MarketResearch.MaxShards != 6 {
-		t.Fatalf("expected market_research.max_shards clamped to 6, got %d", c.Sharding.Stages.MarketResearch.MaxShards)
+	if c.Sharding.Stages["primary"].MaxShards != 6 {
+		t.Fatalf("expected primary.max_shards clamped to 6, got %d", c.Sharding.Stages["primary"].MaxShards)
 	}
 }

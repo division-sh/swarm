@@ -270,10 +270,11 @@ func uniqueStrings(values ...string) []string {
 func promptWorkflowBundle() (*WorkflowContractBundle, error) {
 	promptBundleOnce.Do(func() {
 		repoRoot := promptContractsRepoRoot()
+		contractsDir := DefaultWorkflowContractsDir(repoRoot)
 		promptBundle, promptBundleErr = LoadWorkflowContractBundleWithOverrides(
 			repoRoot,
-			filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"),
-			filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml"),
+			contractsDir,
+			DefaultPlatformSpecFile(repoRoot),
 		)
 	})
 	return promptBundle, promptBundleErr

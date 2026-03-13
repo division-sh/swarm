@@ -19,25 +19,22 @@ import (
 
 // budgetExecutionScopeKey controls intra-process serialization for LLM budget
 // preflight/recording. Entity-scoped agents keep per-entity locking.
-// Factory-shard agents (no vertical_id) get per-agent scope keys so sharded
-// scans can execute concurrently instead of funneling through one global lock.
+// Global/no-entity agents get per-agent scope keys so sharded work can execute
+// concurrently instead of funneling through one global lock.
 func budgetExecutionScopeKey(actor models.AgentConfig) string {
 	entityID := actor.EffectiveEntityID()
 	if entityID != "" {
 		return entityID
 	}
-	mode := strings.ToLower(strings.TrimSpace(actor.Mode))
-	if mode == "factory" {
-		if agentID := strings.TrimSpace(actor.ID); agentID != "" {
-			return "__factory_agent__:" + agentID
-		}
+	if agentID := strings.TrimSpace(actor.ID); agentID != "" {
+		return "__agent__:" + agentID
 	}
 	return ""
 }
 
 // BudgetTracker is a pragmatic Phase-1 guardrail:
 // - records spend in spend_ledger (exact for API usage, estimated for CLI usage)
-// - emits internal budget.threshold_crossed signals for coordinator handling
+// - emits internal budget.threshold_crossed signals for control-plane handling
 //
 // It is not accounting-grade. The intent is runaway-spend prevention.
 type BudgetTracker struct {
@@ -48,7 +45,7 @@ type BudgetTracker struct {
 	mailboxFrom string
 
 	mu        sync.Mutex
-	lastState map[string]string // key(scope|vertical_id) => ok|warning|throttle|emergency
+	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
 	scopeMu   sync.Map          // key(scope) => *sync.Mutex
 }
 
@@ -84,7 +81,7 @@ func (t *BudgetTracker) IsEntityEmergency(entityID string) bool {
 	if t == nil {
 		return false
 	}
-	if t.CurrentState("portfolio", "") == "emergency" {
+	if t.CurrentState("system", "") == "emergency" {
 		return true
 	}
 	if entityID != "" && t.CurrentState("entity", entityID) == "emergency" {
@@ -106,7 +103,7 @@ func (t *BudgetTracker) IsEntityThrottle(entityID string) bool {
 	if t.IsEntityEmergency(entityID) {
 		return true
 	}
-	if t.CurrentState("portfolio", "") == "throttle" {
+	if t.CurrentState("system", "") == "throttle" {
 		return true
 	}
 	if entityID != "" && t.CurrentState("entity", entityID) == "throttle" {
@@ -148,7 +145,7 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	if t == nil || t.db == nil {
 		return
 	}
-	// Evaluate portfolio/factory.
+	// Evaluate system-wide budget.
 	_ = t.evaluateAndEmit(ctx, "")
 
 	// Evaluate each active entity with any spend/metrics.
@@ -156,7 +153,7 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		SELECT instance_id::text
 		FROM workflow_instances
 			WHERE COALESCE(metadata->>'instance_kind', '') = 'entity'
-		  AND current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
+		  AND current_state IN ('approved', 'building', 'pre_launch', 'launched', 'active', 'expanding')
 		ORDER BY created_at ASC
 	`)
 	if err != nil {
@@ -345,29 +342,29 @@ func modelTier(model string) string {
 	}
 }
 
-func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, verticalID string) error {
+func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) error {
 	if t == nil || t.db == nil || t.bus == nil || t.cfg == nil {
 		return nil
 	}
-	verticalID = strings.TrimSpace(verticalID)
+	entityID = strings.TrimSpace(entityID)
 
-	// Portfolio cap applies to all spend across all verticals + factory.
-	if t.cfg.Budget().PortfolioMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "portfolio", "", t.cfg.Budget().PortfolioMonthlyCap); err != nil {
+	// System cap applies to all spend across all entities + global scope.
+	if t.cfg.Budget().SystemMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, "system", "", t.cfg.Budget().SystemMonthlyCap); err != nil {
 			return err
 		}
 	}
 
-// Per-entity cap.
-	if verticalID != "" && t.cfg.Budget().PerVerticalMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "entity", verticalID, t.cfg.Budget().PerVerticalMonthlyCap); err != nil {
+	// Per-entity cap.
+	if entityID != "" && t.cfg.Budget().PerEntityMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, "entity", entityID, t.cfg.Budget().PerEntityMonthlyCap); err != nil {
 			return err
 		}
 	}
 
-	// Factory/global cap (spend rows with NULL vertical_id).
-	if verticalID == "" && t.cfg.Budget().FactoryMonthlyCap > 0 {
-		if err := t.evaluateScope(ctx, "factory", "", t.cfg.Budget().FactoryMonthlyCap); err != nil {
+	// Global cap (spend rows with NULL entity scope).
+	if entityID == "" && t.cfg.Budget().GlobalMonthlyCap > 0 {
+		if err := t.evaluateScope(ctx, "global", "", t.cfg.Budget().GlobalMonthlyCap); err != nil {
 			return err
 		}
 	}
@@ -384,7 +381,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 	var spent int
 	var err error
 	switch {
-	case scope == "portfolio":
+	case scope == "system":
 		err = t.db.QueryRowContext(ctx, `
 			SELECT COALESCE(SUM(amount_cents), 0)
 			FROM spend_ledger
@@ -443,7 +440,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 
 	payload := map[string]any{
 		"scope":        scope,
-		"vertical_id":  verticalID,
+		"entity_id":    verticalID,
 		"cap_cents":    capCents,
 		"spent_cents":  spent,
 		"month_start":  start.Format(time.RFC3339),
@@ -458,7 +455,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, vertica
 		SourceAgent: "runtime",
 		Payload: mustJSON(map[string]any{
 			"scope":           scope,
-			"vertical_id":     verticalID,
+			"entity_id":       verticalID,
 			"cap_cents":       capCents,
 			"spent_cents":     spent,
 			"month_start":     start.Format(time.RFC3339),

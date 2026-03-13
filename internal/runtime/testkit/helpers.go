@@ -1,8 +1,6 @@
 package testkit
 
 import (
-	"context"
-	"database/sql"
 	"io"
 	"net/http"
 	"os"
@@ -11,7 +9,6 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"github.com/google/uuid"
 )
 
 func TempScript(t testing.TB, name, body string) string {
@@ -66,18 +63,6 @@ func HTTPResponse(code int, body string) *http.Response {
 		Body:       io.NopCloser(strings.NewReader(body)),
 		Header:     make(http.Header),
 	}
-}
-
-func SeedVertical(t testing.TB, ctx context.Context, db *sql.DB, slug, credsJSON string) string {
-	t.Helper()
-	verticalID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, credentials, created_at, updated_at)
-		VALUES ($1::uuid, 'TestCo', $2, 'us', 'operating', 'operating', $3::jsonb, now(), now())
-	`, verticalID, slug, credsJSON); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-	return verticalID
 }
 
 // Wrapped to keep helper package small and avoid os import churn in test files.

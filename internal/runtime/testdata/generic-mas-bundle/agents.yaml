@@ -1,7 +1,7 @@
-coordinator:
-  id: coordinator
-  role: coordinator
-  manager_fallback: coordinator
+control-plane:
+  id: control-plane
+  role: control-plane
+  manager_fallback: control-plane
   subscriptions:
     - item.review_requested
     - item.completed
@@ -10,7 +10,7 @@ coordinator:
 worker-a:
   id: worker-a
   role: worker
-  manager_fallback: coordinator
+  manager_fallback: control-plane
   subscriptions:
     - item.review_requested
   emit_events:
@@ -19,7 +19,7 @@ worker-a:
 worker-b:
   id: worker-b
   role: worker
-  manager_fallback: coordinator
+  manager_fallback: control-plane
   subscriptions:
     - item.review_requested
   emit_events:

@@ -10,12 +10,7 @@ type Config struct {
 	PerShardBudgetCents     int          `yaml:"per_shard_budget_cents"`
 	MaxRetriesPerShard      int          `yaml:"max_retries_per_shard"`
 	CircuitBreakerThreshold float64      `yaml:"circuit_breaker_threshold"`
-	Stages                  StagesConfig `yaml:"stages"`
-}
-
-type StagesConfig struct {
-	MarketResearch StageConfig `yaml:"market_research"`
-	TrendResearch  StageConfig `yaml:"trend_research"`
+	Stages                  map[string]StageConfig `yaml:"stages"`
 }
 
 type StageConfig struct {
@@ -60,6 +55,16 @@ func (c *Config) ApplyDefaults() {
 			stage.MaxShards = c.MaxShardsPerScan
 		}
 	}
-	normalizeStage(&c.Stages.MarketResearch, 13, 8)
-	normalizeStage(&c.Stages.TrendResearch, 3, 4)
+	if c.Stages == nil {
+		c.Stages = map[string]StageConfig{}
+	}
+	defaultStages := map[string]StageConfig{
+		"primary":   {TargetItemsPerShard: 13, MaxShards: 8},
+		"secondary": {TargetItemsPerShard: 3, MaxShards: 4},
+	}
+	for name, defaults := range defaultStages {
+		stage := c.Stages[name]
+		normalizeStage(&stage, defaults.TargetItemsPerShard, defaults.MaxShards)
+		c.Stages[name] = stage
+	}
 }

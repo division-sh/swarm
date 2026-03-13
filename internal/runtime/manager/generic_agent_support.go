@@ -57,8 +57,6 @@ func (a *genericAgent) OnEvent(context.Context, events.Event) ([]events.Event, e
 	return nil, nil
 }
 
-func opCoAgentID(role, verticalID string) string { return OpCoAgentID(role, verticalID) }
-
 func mergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.AgentConfig {
 	return MergeAgentConfig(base, patch)
 }

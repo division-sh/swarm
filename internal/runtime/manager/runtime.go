@@ -146,7 +146,7 @@ func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) str
 			}
 		}
 	}
-	return "coordinator"
+	return "control-plane"
 }
 
 func managerFallbackFromConfig(cfg runtimeactors.AgentConfig) string {
@@ -394,14 +394,12 @@ func (am *AgentManager) pendingEventsForAgent(
 		pendingByID[evt.ID] = evt
 	}
 
-	if cfg.Mode != "operating" {
-		subscribed, err := am.store.ListPendingSubscribedEvents(ctx, agentID, agent.Subscriptions(), since, 300)
-		if err != nil {
-			return nil, fmt.Errorf("load pending subscribed events for %s: %w", agentID, err)
-		}
-		for _, evt := range subscribed {
-			pendingByID[evt.ID] = evt
-		}
+	subscribed, err := am.store.ListPendingSubscribedEvents(ctx, agentID, agent.Subscriptions(), since, 300)
+	if err != nil {
+		return nil, fmt.Errorf("load pending subscribed events for %s: %w", agentID, err)
+	}
+	for _, evt := range subscribed {
+		pendingByID[evt.ID] = evt
 	}
 
 	for _, evt := range pendingByID {

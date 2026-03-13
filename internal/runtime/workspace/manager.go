@@ -45,14 +45,14 @@ type DockerConfig struct {
 	DockerBin               string
 	WorkspaceImage          string
 	WorkspaceNetwork        string
-	FactoryContainer        string
-	FactoryWorkdir          string
-	FactoryVolume           string
-	InfraContainer          string
-	InfraWorkdir            string
-	InfraEntitiesVolume     string
-	InfraNginxVolume        string
-	InfraSystemdVolume      string
+	ScaffoldContainer       string
+	ScaffoldWorkdir         string
+	ScaffoldVolume          string
+	SystemContainer         string
+	SystemWorkdir           string
+	SystemEntitiesVolume    string
+	SystemNginxVolume       string
+	SystemSystemdVolume     string
 	EntityContainerPrefix   string
 	EntityWorkdir           string
 }
@@ -62,14 +62,14 @@ func DefaultDockerConfig() DockerConfig {
 		DockerBin:               EnvOrDefault("MAS_DOCKER_BIN", "docker"),
 		WorkspaceImage:          EnvOrDefault("MAS_WORKSPACE_IMAGE", "mas-workspace:latest"),
 		WorkspaceNetwork:        EnvOrDefault("MAS_WORKSPACE_NETWORK", "mas_default"),
-		FactoryContainer:        EnvOrDefault("MAS_FACTORY_CONTAINER", "mas-factory"),
-		FactoryWorkdir:          EnvOrDefault("MAS_FACTORY_WORKDIR", "/opt/mas/scaffold"),
-		FactoryVolume:           EnvOrDefault("MAS_FACTORY_VOLUME", "scaffold"),
-		InfraContainer:          EnvOrDefault("MAS_INFRA_CONTAINER", "mas-infra"),
-		InfraWorkdir:            EnvOrDefault("MAS_INFRA_WORKDIR", "/opt/mas"),
-		InfraEntitiesVolume:     EnvOrDefault("MAS_INFRA_ENTITIES_VOLUME", "entities"),
-		InfraNginxVolume:        EnvOrDefault("MAS_INFRA_NGINX_VOLUME", "nginx"),
-		InfraSystemdVolume:      EnvOrDefault("MAS_INFRA_SYSTEMD_VOLUME", "systemd"),
+		ScaffoldContainer:       EnvOrDefault("MAS_SCAFFOLD_CONTAINER", "mas-scaffold"),
+		ScaffoldWorkdir:         EnvOrDefault("MAS_SCAFFOLD_WORKDIR", "/opt/mas/scaffold"),
+		ScaffoldVolume:          EnvOrDefault("MAS_SCAFFOLD_VOLUME", "scaffold"),
+		SystemContainer:         EnvOrDefault("MAS_SYSTEM_CONTAINER", "mas-system"),
+		SystemWorkdir:           EnvOrDefault("MAS_SYSTEM_WORKDIR", "/opt/mas"),
+		SystemEntitiesVolume:    EnvOrDefault("MAS_SYSTEM_ENTITIES_VOLUME", "entities"),
+		SystemNginxVolume:       EnvOrDefault("MAS_SYSTEM_NGINX_VOLUME", "nginx"),
+		SystemSystemdVolume:     EnvOrDefault("MAS_SYSTEM_SYSTEMD_VOLUME", "systemd"),
 		EntityContainerPrefix:   EnvOrDefault("MAS_ENTITY_CONTAINER_PREFIX", "mas-"),
 		EntityWorkdir:           EnvOrDefault("MAS_ENTITY_WORKDIR", "/workspace"),
 	}
@@ -114,25 +114,25 @@ func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Conte
 }
 
 func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
-	if err := m.EnsureContainerRunning(ctx, m.cfg.FactoryContainer, []string{
-		"-v", fmt.Sprintf("%s:%s", m.cfg.FactoryVolume, m.cfg.FactoryWorkdir),
-		"-w", m.cfg.FactoryWorkdir,
+	if err := m.EnsureContainerRunning(ctx, m.cfg.ScaffoldContainer, []string{
+		"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
+		"-w", m.cfg.ScaffoldWorkdir,
 		m.cfg.WorkspaceImage,
 		"sleep", "infinity",
 	}); err != nil {
-		return fmt.Errorf("ensure factory workspace: %w", err)
+		return fmt.Errorf("ensure scaffold workspace: %w", err)
 	}
 
-	if err := m.EnsureContainerRunning(ctx, m.cfg.InfraContainer, []string{
+	if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, []string{
 		"--privileged",
-		"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.InfraEntitiesVolume),
-		"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.InfraNginxVolume),
-		"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.InfraSystemdVolume),
-		"-w", m.cfg.InfraWorkdir,
+		"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.SystemEntitiesVolume),
+		"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.SystemNginxVolume),
+		"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
+		"-w", m.cfg.SystemWorkdir,
 		m.cfg.WorkspaceImage,
 		"sleep", "infinity",
 	}); err != nil {
-		return fmt.Errorf("ensure infra workspace: %w", err)
+		return fmt.Errorf("ensure system workspace: %w", err)
 	}
 	return nil
 }
@@ -196,8 +196,8 @@ func (m *DockerManager) KillOrphanProcesses(ctx context.Context) error {
 func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]string, error) {
 	set := map[string]struct{}{}
 	for _, name := range []string{
-		strings.TrimSpace(m.cfg.FactoryContainer),
-		strings.TrimSpace(m.cfg.InfraContainer),
+		strings.TrimSpace(m.cfg.ScaffoldContainer),
+		strings.TrimSpace(m.cfg.SystemContainer),
 	} {
 		if name != "" {
 			set[name] = struct{}{}
@@ -240,34 +240,34 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 
 func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error) {
 	switch workspaceRouteClass(WorkspaceClass(actor)) {
-	case "factory":
-		if err := m.EnsureContainerRunning(ctx, m.cfg.FactoryContainer, []string{
-			"-v", fmt.Sprintf("%s:%s", m.cfg.FactoryVolume, m.cfg.FactoryWorkdir),
-			"-w", m.cfg.FactoryWorkdir,
+	case "scaffold":
+		if err := m.EnsureContainerRunning(ctx, m.cfg.ScaffoldContainer, []string{
+			"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
+			"-w", m.cfg.ScaffoldWorkdir,
 			m.cfg.WorkspaceImage,
 			"sleep", "infinity",
 		}); err != nil {
 			return nil, err
 		}
 		return &Target{
-			Container: m.cfg.FactoryContainer,
-			Workdir:   m.cfg.FactoryWorkdir,
+			Container: m.cfg.ScaffoldContainer,
+			Workdir:   m.cfg.ScaffoldWorkdir,
 		}, nil
-	case "infra":
-		if err := m.EnsureContainerRunning(ctx, m.cfg.InfraContainer, []string{
+	case "system":
+		if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, []string{
 			"--privileged",
-			"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraEntitiesVolume),
-			"-v", fmt.Sprintf("%s:/opt/empireai/nginx", m.cfg.InfraNginxVolume),
-			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.InfraSystemdVolume),
-			"-w", m.cfg.InfraWorkdir,
+			"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.SystemEntitiesVolume),
+			"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.SystemNginxVolume),
+			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
+			"-w", m.cfg.SystemWorkdir,
 			m.cfg.WorkspaceImage,
 			"sleep", "infinity",
 		}); err != nil {
 			return nil, err
 		}
 		return &Target{
-			Container: m.cfg.InfraContainer,
-			Workdir:   m.cfg.InfraWorkdir,
+			Container: m.cfg.SystemContainer,
+			Workdir:   m.cfg.SystemWorkdir,
 		}, nil
 	}
 
@@ -315,10 +315,10 @@ func RoleWorkspaceClass(role string) string {
 
 func workspaceRouteClass(class string) string {
 	switch strings.ToLower(strings.TrimSpace(class)) {
-	case "factory":
-		return "factory"
-	case "infra":
-		return "infra"
+	case "scaffold":
+		return "scaffold"
+	case "system":
+		return "system"
 	default:
 		return ""
 	}

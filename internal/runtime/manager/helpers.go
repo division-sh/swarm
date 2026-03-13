@@ -72,29 +72,9 @@ func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
 
 func RenderMandateText(m runtimeactors.MandateDocument) string {
 	entityID := m.EffectiveEntityID()
-	obj := map[string]any{
-		"entity_id":          entityID,
-		"geography":          strings.TrimSpace(m.Geography),
-		"founder_notes":      strings.TrimSpace(m.FounderNotes),
-		"founder_directives": strings.TrimSpace(m.FounderDirectives),
-	}
-	if len(m.BusinessBrief) > 0 {
-		obj["business_brief"] = json.RawMessage(m.BusinessBrief)
-	}
-	if len(m.MVPSpec) > 0 {
-		obj["mvp_spec"] = json.RawMessage(m.MVPSpec)
-	}
-	if len(m.Brand) > 0 {
-		obj["brand"] = json.RawMessage(m.Brand)
-	}
-	if len(m.Budget) > 0 {
-		obj["budget"] = json.RawMessage(m.Budget)
-	}
-	if len(m.CTOFeasibility) > 0 {
-		obj["cto_feasibility"] = json.RawMessage(m.CTOFeasibility)
-	}
-	if len(m.LaunchTargets) > 0 {
-		obj["launch_targets"] = json.RawMessage(m.LaunchTargets)
+	obj := map[string]any{"entity_id": entityID}
+	if len(m.Metadata) > 0 {
+		obj["metadata"] = json.RawMessage(m.Metadata)
 	}
 	b, _ := json.MarshalIndent(obj, "", "  ")
 	return string(b)

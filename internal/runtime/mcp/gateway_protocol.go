@@ -11,21 +11,21 @@ import (
 )
 
 const (
-	actorIDHeader      = "X-Empire-Agent-Id"
-	actorRoleHeader    = "X-Empire-Agent-Role"
-	actorModeHeader    = "X-Empire-Agent-Mode"
+	actorIDHeader      = "X-MAS-Agent-Id"
+	actorRoleHeader    = "X-MAS-Agent-Role"
+	actorModeHeader    = "X-MAS-Agent-Mode"
 	entityIDHeader     = "X-MAS-Entity-Id"
-	allowedToolsHeader = "X-Empire-Allowed-Tools"
-	contextTokenHeader = "X-Empire-Context-Token"
-	traceIDHeader      = "X-Empire-Trace-Id"
+	allowedToolsHeader = "X-MAS-Allowed-Tools"
+	contextTokenHeader = "X-MAS-Context-Token"
+	traceIDHeader      = "X-MAS-Trace-Id"
 
-	actorIDQuery      = "empire_agent_id"
-	actorRoleQuery    = "empire_agent_role"
-	actorModeQuery    = "empire_agent_mode"
+	actorIDQuery      = "agent_id"
+	actorRoleQuery    = "agent_role"
+	actorModeQuery    = "agent_mode"
 	entityIDQuery     = "entity_id"
-	allowedToolsQuery = "empire_allowed_tools"
-	contextTokenQuery = "empire_ctx_token"
-	traceIDQuery      = "empire_trace_id"
+	allowedToolsQuery = "allowed_tools"
+	contextTokenQuery = "ctx_token"
+	traceIDQuery      = "trace_id"
 )
 
 type ToolGatewayRequest struct {
@@ -110,9 +110,6 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 	actor.NormalizeEntityID()
 	if strings.TrimSpace(actor.ID) == "" {
 		return models.AgentConfig{}, false
-	}
-	if strings.TrimSpace(actor.Mode) == "" {
-		actor.Mode = "operating"
 	}
 	return actor, true
 }

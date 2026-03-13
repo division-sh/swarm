@@ -40,7 +40,6 @@ type authorityKey struct {
 }
 
 var extraProducerEvents = map[string][]string{
-	"inbound-gateway": {"inbound.whatsapp_message", "inbound.email"},
 	"dashboard":       {"human_task.assigned", "runtime.reset"},
 	"actor-agent":     {"entity.routing_updated"},
 }
@@ -267,8 +266,6 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 		case strings.HasPrefix(eventType, "board."):
 			humanSet[eventType] = struct{}{}
 		case strings.HasPrefix(eventType, "timer."):
-			runtimeSet[eventType] = struct{}{}
-		case eventType == "cycle_limit_reached", eventType == "founder_input.response", eventType == "user_onboarded":
 			runtimeSet[eventType] = struct{}{}
 		}
 	}

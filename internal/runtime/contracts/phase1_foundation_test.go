@@ -55,11 +55,11 @@ func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
 		t.Fatal("expected generated contract event schema registry entries")
 	}
 	for eventType, schema := range generatedContractEventSchemaRegistry {
-		if !strings.Contains(schema.Description, "docs/specs/mas-platform/") {
-			t.Fatalf("expected MAS contract source in schema description for %s, got %q", eventType, schema.Description)
+		if !strings.Contains(schema.Description, "resolved MAS contract bundle") {
+			t.Fatalf("expected generic MAS contract source in schema description for %s, got %q", eventType, schema.Description)
 		}
-		if strings.Contains(schema.Description, "contracts/event-catalog.yaml") {
-			t.Fatalf("unexpected legacy event catalog source in schema description for %s: %q", eventType, schema.Description)
+		if strings.Contains(schema.Description, "empire/contracts") || strings.Contains(schema.Description, "contracts/event-catalog.yaml") {
+			t.Fatalf("unexpected product-specific or legacy source in schema description for %s: %q", eventType, schema.Description)
 		}
 	}
 }

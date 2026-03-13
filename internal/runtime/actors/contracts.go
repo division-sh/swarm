@@ -5,19 +5,10 @@ import (
 	"strings"
 )
 
-// MandateDocument is the handoff artifact from factory to an operating flow.
+// MandateDocument is a generic handoff artifact carried as opaque metadata.
 type MandateDocument struct {
-	EntityID          string          `json:"entity_id,omitempty"`
-	Geography         string          `json:"geography,omitempty"`
-	LaunchTargets     json.RawMessage `json:"launch_targets,omitempty"`
-	FounderDirectives string          `json:"founder_directives,omitempty"`
-	BusinessBrief     json.RawMessage `json:"business_brief,omitempty"`
-	MVPSpec           json.RawMessage `json:"mvp_spec,omitempty"`
-	Brand             json.RawMessage `json:"brand,omitempty"`
-	CTOFeasibility    json.RawMessage `json:"cto_feasibility,omitempty"`
-	FounderNotes      string          `json:"founder_notes,omitempty"`
-	Budget            json.RawMessage `json:"budget,omitempty"`
-	Infrastructure    json.RawMessage `json:"infrastructure,omitempty"`
+	EntityID string          `json:"entity_id,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 func (m MandateDocument) EffectiveEntityID() string { return strings.TrimSpace(m.EntityID) }
@@ -30,10 +21,9 @@ func (m *MandateDocument) NormalizeEntityID() {
 	m.EntityID = entityID
 }
 
-// DeployManifest is the deployment contract exchanged between runtime agents.
+// DeployManifest is the generic deployment contract exchanged between runtime agents.
 type DeployManifest struct {
 	EntityID          string            `json:"entity_id,omitempty"`
-	VerticalName      string            `json:"vertical_name,omitempty"`
 	Environment       string            `json:"environment"`
 	BinaryPath        string            `json:"binary_path,omitempty"`
 	MigrationSQL      string            `json:"migration_sql,omitempty"`
@@ -42,6 +32,7 @@ type DeployManifest struct {
 	SkipStaging       bool              `json:"skip_staging,omitempty"`
 	Version           int               `json:"version"`
 	RollbackMigration string            `json:"rollback_migration,omitempty"`
+	Metadata          json.RawMessage   `json:"metadata,omitempty"`
 }
 
 func (m DeployManifest) EffectiveEntityID() string { return strings.TrimSpace(m.EntityID) }

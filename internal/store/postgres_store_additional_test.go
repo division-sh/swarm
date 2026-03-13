@@ -27,7 +27,7 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 	err := pg.AppendEvent(ctx, (events.Event{
 		ID:          eventID,
 		Type:        events.EventType("review.requested"),
-		SourceAgent: "coordinator",
+		SourceAgent: "control-plane",
 		TaskID:      "legacy-task-key",
 		Payload:     []byte(`{"name":"Telemedicine Platform"}`),
 		CreatedAt:   time.Now(),
@@ -108,7 +108,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	for _, id := range []string{"coordinator", "reviewer"} {
+	for _, id := range []string{"control-plane", "reviewer"} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
 			VALUES ($1, 'stub', $1, 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
@@ -134,7 +134,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 		_ = tx.Rollback()
 		t.Fatalf("AppendEventTx: %v", err)
 	}
-	if err := pg.InsertEventDeliveriesTx(ctx, tx, eventID, []string{"coordinator", "reviewer"}); err != nil {
+	if err := pg.InsertEventDeliveriesTx(ctx, tx, eventID, []string{"control-plane", "reviewer"}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("InsertEventDeliveriesTx: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('coordinator', 'stub', 'coordinator', 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
+		VALUES ('control-plane', 'stub', 'control-plane', 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 		SourceAgent: "human",
 		Payload:     []byte(`{"directive":"SaaS in Argentina"}`),
 		CreatedAt:   time.Now().UTC(),
-	}, []string{" coordinator ", "", "coordinator"}); err != nil {
+	}, []string{" control-plane ", "", "control-plane"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries success path: %v", err)
 	}
 
@@ -249,7 +249,7 @@ func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
 	if _, err := s.ResolveInboundTarget(ctx, "k", ""); err == nil {
 		t.Fatal("expected provider required")
 	}
-	if _, err := s.ResolveInboundTarget(ctx, "missing", "whatsapp"); err == nil || !strings.Contains(err.Error(), "entity not found") {
+	if _, err := s.ResolveInboundTarget(ctx, "missing", "chat"); err == nil || !strings.Contains(err.Error(), "entity not found") {
 		t.Fatalf("expected not found, got %v", err)
 	}
 }
@@ -277,10 +277,10 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 			$1::uuid, 'test', 'v1', 'operating',
 			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'legacy', 'credentials', $2::jsonb), now(), now()
 		)
-	`, verticalID1, `{"whatsapp": {"token":"legacy"}}`); err != nil {
+	`, verticalID1, `{"chat": {"token":"legacy"}}`); err != nil {
 		t.Fatalf("seed workflow instance legacy: %v", err)
 	}
-	target, err := s.ResolveInboundTarget(ctx, "legacy", "whatsapp")
+	target, err := s.ResolveInboundTarget(ctx, "legacy", "chat")
 	if err != nil {
 		t.Fatalf("resolve legacy: %v", err)
 	}
@@ -297,10 +297,10 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 			$1::uuid, 'test', 'v1', 'operating',
 			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'flat', 'credentials', $2::jsonb), now(), now()
 		)
-	`, verticalID2, `{"whatsapp_webhook_secret":" flat "}`); err != nil {
+	`, verticalID2, `{"chat_webhook_secret":" flat "}`); err != nil {
 		t.Fatalf("seed workflow instance flat: %v", err)
 	}
-	target2, err := s.ResolveInboundTarget(ctx, "flat", "whatsapp")
+	target2, err := s.ResolveInboundTarget(ctx, "flat", "chat")
 	if err != nil {
 		t.Fatalf("resolve flat: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 	verticalID3 := uuid.NewString()
 	b, _ := json.Marshal(map[string]any{
 		"webhooks": map[string]any{
-			"whatsapp": map[string]any{
+			"chat": map[string]any{
 				"secret": "enc::" + enc,
 			},
 		},
@@ -328,7 +328,7 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 	`, verticalID3, credsEnc); err != nil {
 		t.Fatalf("seed workflow instance enc: %v", err)
 	}
-	target3, err := s.ResolveInboundTarget(ctx, "enc", "whatsapp")
+	target3, err := s.ResolveInboundTarget(ctx, "enc", "chat")
 	if err != nil {
 		t.Fatalf("resolve enc: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
 		t.Fatalf("expected decrypted secret, got %q", target3.WebhookSecret)
 	}
 
-	if got := s.extractWebhookSecret(ctx, []byte("{"), "whatsapp"); got != "" {
+	if got := s.extractWebhookSecret(ctx, []byte("{"), "chat"); got != "" {
 		t.Fatalf("expected empty secret for invalid json, got %q", got)
 	}
 
@@ -373,7 +373,7 @@ func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
 	`, verticalID); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
-	if ok, err := s.RecordInboundEvent(ctx, "evt-old", verticalID, "whatsapp"); err != nil || !ok {
+	if ok, err := s.RecordInboundEvent(ctx, "evt-old", verticalID, "chat"); err != nil || !ok {
 		t.Fatalf("record old ok=%v err=%v", ok, err)
 	}
 
@@ -411,14 +411,14 @@ func TestPostgresStore_Inbound_RecordResolveAndSecrets(t *testing.T) {
 			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'testco', 'credentials', $2::jsonb), now(), now()
 		)
 	`, verticalID, `{
-		"webhooks": { "whatsapp": { "secret": "s1" } },
-		"whatsapp": { "token": "legacy" },
-		"whatsapp_webhook_secret": "flat"
+		"webhooks": { "chat": { "secret": "s1" } },
+		"chat": { "token": "legacy" },
+		"chat_webhook_secret": "flat"
 	}`); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	target, err := s.ResolveInboundTarget(ctx, "testco", "whatsapp")
+	target, err := s.ResolveInboundTarget(ctx, "testco", "chat")
 	if err != nil {
 		t.Fatalf("resolve inbound: %v", err)
 	}
@@ -429,11 +429,11 @@ func TestPostgresStore_Inbound_RecordResolveAndSecrets(t *testing.T) {
 		t.Fatalf("expected preferred webhook secret, got %q", target.WebhookSecret)
 	}
 
-	ok, err := s.RecordInboundEvent(ctx, "evt-1", verticalID, "whatsapp")
+	ok, err := s.RecordInboundEvent(ctx, "evt-1", verticalID, "chat")
 	if err != nil || !ok {
 		t.Fatalf("record inbound ok=%v err=%v", ok, err)
 	}
-	ok, err = s.RecordInboundEvent(ctx, "evt-1", verticalID, "whatsapp")
+	ok, err = s.RecordInboundEvent(ctx, "evt-1", verticalID, "chat")
 	if err != nil || ok {
 		t.Fatalf("expected duplicate record to be no-op ok=%v err=%v", ok, err)
 	}
@@ -458,7 +458,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 
 	id, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EntityID:  verticalID,
-		FromAgent: "coordinator",
+		FromAgent: "control-plane",
 		Type:      "spend_request",
 		Summary:   "need approval",
 	})
@@ -494,7 +494,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 
 	expID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EntityID:  verticalID,
-		FromAgent: "coordinator",
+		FromAgent: "control-plane",
 		Type:      "review",
 		Priority:  "critical",
 		Status:    "pending",
@@ -523,7 +523,7 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 
 	critID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EntityID:  verticalID,
-		FromAgent: "coordinator",
+		FromAgent: "control-plane",
 		Type:      "spend_request",
 		Priority:  "critical",
 		Status:    "pending",
@@ -631,7 +631,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'coordinator', 'global', 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'control-plane', 'global', 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -788,7 +788,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agents (id, type, role, mode, vertical_id, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'coordinator', 'global', NULL, 'active', '{}'::jsonb, now(), now())
+		VALUES ('a1', 'stub', 'control-plane', 'global', NULL, 'active', '{}'::jsonb, now(), now())
 		ON CONFLICT (id) DO NOTHING
 	`); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -1020,11 +1020,11 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO schedules (id, agent_id, event_type, mode, next_fire_at, created_at)
-		VALUES ($1::uuid, 'sub', 'timer.portfolio_digest', 'cron', now(), now())
+		VALUES ($1::uuid, 'sub', 'timer.recurring_digest', 'cron', now(), now())
 	`, uuid.NewString()); err != nil {
 		t.Fatalf("seed schedule: %v", err)
 	}
-	if err := pg.CancelSchedule(ctx, "sub", "timer.portfolio_digest"); err != nil {
+	if err := pg.CancelSchedule(ctx, "sub", "timer.recurring_digest"); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
 	}
 	_ = time.Second
@@ -1567,219 +1567,4 @@ func TestManagerHelpers_MatchingAndRedaction(t *testing.T) {
 	_ = redactText("sk-ant-foo")
 	_ = redactName("John Doe")
 	_ = isNameKey("name")
-}
-
-func TestScanCampaigns_CRUDAndTransitions(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	geoID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO geographies (id, name, country, region, created_at)
-		VALUES ($1::uuid, 'San Francisco', 'US', 'CA', now())
-	`, geoID); err != nil {
-		t.Fatalf("seed geography: %v", err)
-	}
-
-	next := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
-	c1, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
-		GeographyID:    geoID,
-		Mode:           "factory",
-		Categories:     []string{"saas", "b2b"},
-		RescanInterval: "30d",
-		NextRescanAt:   &next,
-		Status:         "",
-		Priority:       "",
-	})
-	if err != nil {
-		t.Fatalf("CreateScanCampaign: %v", err)
-	}
-	if c1.ID == "" || c1.Status != "queued" || c1.Priority != "normal" {
-		t.Fatalf("unexpected create output: %+v", c1)
-	}
-	if len(c1.Categories) != 2 || c1.Categories[0] != "saas" {
-		t.Fatalf("unexpected categories: %#v", c1.Categories)
-	}
-	if c1.NextRescanAt == nil || !c1.NextRescanAt.Equal(next) {
-		t.Fatalf("expected next_rescan_at=%s got=%v", next.Format(time.RFC3339), c1.NextRescanAt)
-	}
-
-	c2, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{
-		GeographyID: geoID,
-		Mode:        "factory",
-		Priority:    "high",
-		Status:      "queued",
-	})
-	if err != nil {
-		t.Fatalf("CreateScanCampaign2: %v", err)
-	}
-	if c2.Priority != "high" {
-		t.Fatalf("expected high priority, got %q", c2.Priority)
-	}
-
-	list, err := s.ListScanCampaigns(ctx, runtimepipeline.ScanCampaignFilter{Status: "queued", Limit: 10})
-	if err != nil {
-		t.Fatalf("ListScanCampaigns: %v", err)
-	}
-	if len(list) < 2 {
-		t.Fatalf("expected 2 queued campaigns, got %d", len(list))
-	}
-
-	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET status='active' WHERE id=$1::uuid`, c1.ID); err != nil {
-		t.Fatalf("set active: %v", err)
-	}
-	_, ok, err := s.ClaimNextDueScanCampaign(ctx)
-	if err != nil || ok {
-		t.Fatalf("expected no claim when active exists ok=%v err=%v", ok, err)
-	}
-
-	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET status='queued' WHERE id=$1::uuid`, c1.ID); err != nil {
-		t.Fatalf("reset queued: %v", err)
-	}
-	claimed, ok, err := s.ClaimNextDueScanCampaign(ctx)
-	if err != nil || !ok {
-		t.Fatalf("ClaimNextDueScanCampaign ok=%v err=%v", ok, err)
-	}
-	if claimed.ID != c2.ID || claimed.Status != "active" {
-		t.Fatalf("expected claimed=%s active got=%+v", c2.ID, claimed)
-	}
-
-	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET rescan_interval='30d' WHERE id=$1::uuid`, claimed.ID); err != nil {
-		t.Fatalf("set rescan_interval: %v", err)
-	}
-	if err := s.MarkScanCampaignCompleted(ctx, claimed.ID, 7); err != nil {
-		t.Fatalf("MarkScanCampaignCompleted: %v", err)
-	}
-	var status string
-	var discoveries int
-	var nextAt *time.Time
-	if err := db.QueryRowContext(ctx, `
-		SELECT status, COALESCE(discoveries,0), next_rescan_at
-		FROM scan_campaigns
-		WHERE id=$1::uuid
-	`, claimed.ID).Scan(&status, &discoveries, &nextAt); err != nil {
-		t.Fatalf("load completed: %v", err)
-	}
-	if status != "completed" || discoveries != 7 || nextAt == nil {
-		t.Fatalf("expected completed/discoveries/next_rescan_at got status=%s discoveries=%d next=%v", status, discoveries, nextAt)
-	}
-
-	now := time.Now().UTC().Add(45 * 24 * time.Hour)
-	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET next_rescan_at=$2 WHERE id=$1::uuid`, claimed.ID, now.Add(-time.Minute)); err != nil {
-		t.Fatalf("set next_rescan_at past: %v", err)
-	}
-	n, err := s.RequeueDueRescans(ctx, now)
-	if err != nil {
-		t.Fatalf("RequeueDueRescans: %v", err)
-	}
-	if n < 1 {
-		t.Fatalf("expected requeue >=1, got %d", n)
-	}
-
-	paused, err := s.PauseQueuedScanCampaigns(ctx)
-	if err != nil || paused < 1 {
-		t.Fatalf("PauseQueuedScanCampaigns paused=%d err=%v", paused, err)
-	}
-	resumed, err := s.ResumePausedScanCampaigns(ctx)
-	if err != nil || resumed < 1 {
-		t.Fatalf("ResumePausedScanCampaigns resumed=%d err=%v", resumed, err)
-	}
-
-	label, err := s.LookupGeographyLabel(ctx, geoID)
-	if err != nil {
-		t.Fatalf("LookupGeographyLabel: %v", err)
-	}
-	if label != "San Francisco, CA, US" {
-		t.Fatalf("unexpected label: %q", label)
-	}
-}
-
-func TestParseRescanInterval(t *testing.T) {
-	if d := parseRescanInterval(""); d != 0 {
-		t.Fatalf("expected 0 for empty, got %v", d)
-	}
-	if d := parseRescanInterval("30d"); d != 30*24*time.Hour {
-		t.Fatalf("expected 30d got %v", d)
-	}
-	if d := parseRescanInterval("1h"); d != time.Hour {
-		t.Fatalf("expected 1h got %v", d)
-	}
-	if d := parseRescanInterval("bad"); d != 0 {
-		t.Fatalf("expected 0 for bad got %v", d)
-	}
-	if d := parseRescanInterval("-1h"); d != 0 {
-		t.Fatalf("expected 0 for negative got %v", d)
-	}
-	if d := parseRescanInterval("0d"); d != 0 {
-		t.Fatalf("expected 0 for 0d got %v", d)
-	}
-}
-
-func TestCreateScanCampaign_Validations(t *testing.T) {
-	ctx := context.Background()
-	if _, err := (*PostgresStore)(nil).CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{}); err == nil {
-		t.Fatalf("expected store required error")
-	}
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	if _, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{GeographyID: "", Mode: ""}); err == nil {
-		t.Fatalf("expected required fields error")
-	}
-}
-
-func TestScanCampaigns_MoreBranches(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	geoID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO geographies (id, name, country, region, created_at)
-		VALUES ($1::uuid, 'X', 'US', NULL, now())
-	`, geoID); err != nil {
-		t.Fatalf("seed geography: %v", err)
-	}
-
-	if _, ok, err := s.ClaimNextDueScanCampaign(ctx); err != nil || ok {
-		t.Fatalf("expected no claim ok=%v err=%v", ok, err)
-	}
-
-	if _, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{GeographyID: geoID, Mode: "factory"}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	list, err := s.ListScanCampaigns(ctx, runtimepipeline.ScanCampaignFilter{})
-	if err != nil || len(list) == 0 {
-		t.Fatalf("ListScanCampaigns default err=%v len=%d", err, len(list))
-	}
-
-	if err := s.MarkScanCampaignCompleted(ctx, "", 1); err == nil {
-		t.Fatalf("expected campaign_id required")
-	}
-
-	c, err := s.CreateScanCampaign(ctx, runtimepipeline.CreateScanCampaignInput{GeographyID: geoID, Mode: "factory", Status: "queued", RescanInterval: "bad"})
-	if err != nil {
-		t.Fatalf("create bad interval: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE scan_campaigns SET status='active' WHERE id=$1::uuid`, c.ID); err != nil {
-		t.Fatalf("set active: %v", err)
-	}
-	if err := s.MarkScanCampaignCompleted(ctx, c.ID, -5); err != nil {
-		t.Fatalf("MarkScanCampaignCompleted: %v", err)
-	}
-	var next *time.Time
-	if err := db.QueryRowContext(ctx, `SELECT next_rescan_at FROM scan_campaigns WHERE id=$1::uuid`, c.ID).Scan(&next); err != nil {
-		t.Fatalf("load next_rescan_at: %v", err)
-	}
-	if next != nil {
-		t.Fatalf("expected next_rescan_at NULL for invalid interval")
-	}
-
-	if _, err := s.LookupGeographyLabel(ctx, ""); err == nil {
-		t.Fatalf("expected geography_id required")
-	}
-
-	if _, err := s.RequeueDueRescans(ctx, time.Time{}); err != nil {
-		t.Fatalf("RequeueDueRescans: %v", err)
-	}
 }

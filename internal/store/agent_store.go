@@ -52,7 +52,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 		rec.Config.ID,
 		nullable(rec.Config.Type, "generic"),
 		rec.Config.Role,
-		nullable(rec.Config.Mode, "factory"),
+		nullable(rec.Config.Mode, "scoped"),
 		rec.Config.EffectiveEntityID(),
 		nullable(rec.ParentAgentID, rec.Config.ParentAgent),
 		nullable(rec.Status, "active"),

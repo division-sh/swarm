@@ -14,11 +14,8 @@ func budgetExecutionScopeKey(actor models.AgentConfig) string {
 	if entityID != "" {
 		return entityID
 	}
-	mode := strings.ToLower(strings.TrimSpace(actor.Mode))
-	if mode == "factory" {
-		if agentID := strings.TrimSpace(actor.ID); agentID != "" {
-			return "__factory_agent__:" + agentID
-		}
+	if agentID := strings.TrimSpace(actor.ID); agentID != "" {
+		return "__agent__:" + agentID
 	}
 	return ""
 }

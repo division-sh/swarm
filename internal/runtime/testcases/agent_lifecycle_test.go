@@ -10,14 +10,14 @@ func TestGenericBundle_AgentLifecyclePatterns(t *testing.T) {
 	if !ok {
 		t.Fatal("expected worker-a runtime agent entry")
 	}
-	if workerEntry.ManagerFallback != "coordinator" {
-		t.Fatalf("expected coordinator manager fallback, got %+v", workerEntry)
+	if workerEntry.ManagerFallback != "control-plane" {
+		t.Fatalf("expected control-plane manager fallback, got %+v", workerEntry)
 	}
 
 	reconfigured := agentConfigFromEntry("worker-a", workerEntry)
-	reconfigured.Role = bundle.Agents["coordinator"].Role
+	reconfigured.Role = bundle.Agents["control-plane"].Role
 	reconfigured.Subscriptions = []string{"item.review_requested"}
-	if reconfigured.Role != "coordinator" || !hasAll(reconfigured.Subscriptions, "item.review_requested") {
+	if reconfigured.Role != "control-plane" || !hasAll(reconfigured.Subscriptions, "item.review_requested") {
 		t.Fatalf("unexpected reconfigured agent shape: %+v", reconfigured)
 	}
 

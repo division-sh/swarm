@@ -11,8 +11,8 @@ import (
 )
 
 func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig, _ any) (any, error) {
-	if actor.Role != "system-admin" {
-		return nil, errors.New("nginx_reload is restricted to system-admin")
+	if actor.Role != "control-plane" {
+		return nil, errors.New("nginx_reload is restricted to control-plane")
 	}
 	if out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("nginx config test failed: %w: %s", err, strings.TrimSpace(string(out)))
@@ -24,8 +24,8 @@ func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig
 }
 
 func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if actor.Role != "system-admin" {
-		return nil, errors.New("systemd_control is restricted to system-admin")
+	if actor.Role != "control-plane" {
+		return nil, errors.New("systemd_control is restricted to control-plane")
 	}
 	var in struct {
 		Action  string `json:"action"`
@@ -67,8 +67,8 @@ func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentCon
 }
 
 func (e *Executor) execCertbotExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if actor.Role != "system-admin" {
-		return nil, errors.New("certbot_execute is restricted to system-admin")
+	if actor.Role != "control-plane" {
+		return nil, errors.New("certbot_execute is restricted to control-plane")
 	}
 	var in struct {
 		Domain string `json:"domain"`

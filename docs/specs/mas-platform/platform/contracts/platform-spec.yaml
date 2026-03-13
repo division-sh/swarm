@@ -533,7 +533,7 @@ execution_primitives:
           mapping: {google_maps: "scanner.google_maps.scan_assigned", instagram: "scanner.instagram.scan_assigned"}}'
       side_effect: Writes fan_out.count to entity state (for accumulation tracking)
       example: "fan_out:\n  items_from: payload.subcategories\n  target: discovery/market-research-agent\n  emit_per_item:\
-        \ market_research.scan_assigned"
+        \ primary.scan_assigned"
     filter:
       description: Keep items from a list that match a condition.
       fields:
@@ -1152,8 +1152,8 @@ engine:
     - 6. Recurring timers restart after firing unless cancelled.
     crash_recovery: Timers are persisted. On restart, platform checks for expired timers and fires them.
     example: "timers:\n  - id: validation_gate_timeout\n    event: timer.validation_timeout\n    delay: \"{{validation_gate_timeout_hours}}h\"\
-      \n    start_on: state:researching\n    cancel_on: state:ready_for_review\n    recurring: false\n  - id: portfolio_digest\n\
-      \    event: timer.portfolio_digest\n    delay: \"{{digest_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
+      \n    start_on: state:researching\n    cancel_on: state:ready_for_review\n    recurring: false\n  - id: instance_digest\n\
+      \    event: timer.instance_digest\n    delay: \"{{digest_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
   expression_language:
     description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.

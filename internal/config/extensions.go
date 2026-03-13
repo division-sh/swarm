@@ -12,9 +12,9 @@ type ExtensionsConfig struct {
 }
 
 type BudgetConfig struct {
-	FactoryMonthlyCap     int              `yaml:"factory_monthly_cap"`
-	PerVerticalMonthlyCap int              `yaml:"per_vertical_monthly_cap"`
-	PortfolioMonthlyCap   int              `yaml:"portfolio_monthly_cap"`
+	GlobalMonthlyCap      int              `yaml:"global_monthly_cap"`
+	PerEntityMonthlyCap   int              `yaml:"per_entity_monthly_cap"`
+	SystemMonthlyCap      int              `yaml:"system_monthly_cap"`
 	AutoApproveSpendBelow int              `yaml:"auto_approve_spend_below"`
 	HumanTasks            HumanTasksConfig `yaml:"human_tasks"`
 }

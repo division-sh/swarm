@@ -84,19 +84,12 @@ func runtimeControlPlaneRecipient() string {
 	if strings.TrimSpace(defaultControlPlaneRecipientValue) != "" {
 		return strings.TrimSpace(defaultControlPlaneRecipientValue)
 	}
-	return "coordinator"
+	return "control-plane"
 }
 
 func controlPlaneRecipientFromSource(source semanticview.Source) string {
 	if source == nil {
 		return ""
-	}
-	for _, logicalID := range []string{"coordinator"} {
-		if entry, ok := semanticview.FindAgentEntry(source, logicalID, ""); ok {
-			if agentID := strings.TrimSpace(entry.ID); agentID != "" {
-				return agentID
-			}
-		}
 	}
 	for _, key := range []string{"control_plane_agent_id", "manager_fallback_agent_id"} {
 		if value, ok := semanticview.PolicyValueForFlow(source, "", key); ok {
@@ -112,7 +105,7 @@ func DefaultControlPlaneRecipient() string {
 	if recipient := strings.TrimSpace(runtimeControlPlaneRecipient()); recipient != "" {
 		return recipient
 	}
-	return "coordinator"
+	return "control-plane"
 }
 
 func ensureWorkflowBootWiring(opts RuntimeOptions) error {
@@ -282,9 +275,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Pipeline); err != nil {
 			log.Printf("workflow recurring schedule ensure failed: %v", err)
 		}
-		if err := ensureInfraHealthCheckSchedule(ctx, rt.Stores.ScheduleStore); err != nil {
-			log.Printf("infra health schedule ensure failed: %v", err)
-		}
 	}
 	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		if err := rt.Manager.Recover(ctx); err != nil {
@@ -294,9 +284,8 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			}
 			if rt.Stores.MailboxStore != nil {
 				ctxPayload := mustJSON(map[string]any{
-					"error":        err.Error(),
-					"instruction":  "Runtime recovery failed. Use dashboard control actions (reset_db + seed-org) to reinitialize, or fix persisted config and restart.",
-					"spec_version": "v2.0.15",
+					"error":       err.Error(),
+					"instruction": "Runtime recovery failed. Reinitialize or repair persisted runtime state before restart.",
 				})
 				if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					FromAgent: "runtime",
@@ -310,8 +299,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				}
 			}
 			payload := mustJSON(map[string]any{
-				"error":        err.Error(),
-				"spec_version": "v2.0.15",
+				"error": err.Error(),
 			})
 			if publishErr := rt.Bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
@@ -493,29 +481,11 @@ func recurringWorkflowTimerSpec(timer runtimecontracts.WorkflowTimerContract) (s
 }
 
 func recurringWorkflowTimerPayload(timer runtimecontracts.WorkflowTimerContract) []byte {
-	switch strings.TrimSpace(timer.Event) {
-	case "timer.portfolio_digest":
-		return mustJSON(map[string]any{"trigger_reason": strings.TrimSpace(timer.ID)})
-	default:
+	timerID := strings.TrimSpace(timer.ID)
+	if timerID == "" {
 		return mustJSON(map[string]any{})
 	}
-}
-
-func ensureInfraHealthCheckSchedule(ctx context.Context, store runtimepipeline.SchedulePersistence) error {
-	if store == nil {
-		return nil
-	}
-	cron := strings.TrimSpace(os.Getenv("MAS_INFRA_HEALTH_CRON"))
-	if cron == "" {
-		cron = "0 * * * *"
-	}
-	return store.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "system-admin",
-		EventType: "timer.infra_health_check",
-		Mode:      "cron",
-		Cron:      cron,
-		Payload:   []byte(`{"trigger":"infra_health_check"}`),
-	})
+	return mustJSON(map[string]any{"trigger_reason": timerID})
 }
 
 func runtimeEnvBool(key string, fallback bool) bool {

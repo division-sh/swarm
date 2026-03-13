@@ -12,7 +12,6 @@ func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 	e.registerMailboxHandlers(handlers)
 	e.registerHumanTaskHandlers(handlers)
 	e.registerInfraHandlers(handlers)
-	e.registerExternalHandlers(handlers)
 	return handlers
 }
 
@@ -44,27 +43,4 @@ func (e *Executor) registerInfraHandlers(handlers map[string]ToolHandler) {
 	handlers["nginx_reload"] = e.execNginxReload
 	handlers["systemd_control"] = e.execSystemdControl
 	handlers["certbot_execute"] = e.execCertbotExecute
-}
-
-func (e *Executor) registerExternalHandlers(handlers map[string]ToolHandler) {
-	handlers["whatsapp_business_api"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execExternalProxy(ctx, actor, "whatsapp_business_api", input)
-	}
-	handlers["email_api"] = e.execEmailAPI
-	handlers["instagram_api"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execExternalProxy(ctx, actor, "instagram_api", input)
-	}
-	handlers["domain_purchase"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execExternalProxy(ctx, actor, "domain_purchase", input)
-	}
-	handlers["domain_availability_check"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execExternalProxy(ctx, actor, "domain_availability_check", input)
-	}
-	handlers["dns_configure"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execExternalProxy(ctx, actor, "dns_configure", input)
-	}
-	handlers["instagram_handle_check"] = e.execInstagramHandleCheck
-	handlers["whatsapp_name_check"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-		return e.execExternalProxy(ctx, actor, "whatsapp_name_check", input)
-	}
 }

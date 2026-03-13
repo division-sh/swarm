@@ -30,10 +30,8 @@ func (e Event) EntityID() string {
 	if len(e.Payload) > 0 {
 		var payload map[string]any
 		if err := json.Unmarshal(e.Payload, &payload); err == nil && payload != nil {
-			for _, key := range []string{"entity_id", "vertical_id"} {
-				if value := strings.TrimSpace(asString(payload[key])); value != "" {
-					return value
-				}
+			if value := strings.TrimSpace(asString(payload["entity_id"])); value != "" {
+				return value
 			}
 		}
 	}
@@ -51,9 +49,7 @@ func withEntityIDPayload(raw json.RawMessage, entityID string) json.RawMessage {
 			return raw
 		}
 	}
-	if _, ok := payload["vertical_id"]; !ok {
-		payload["vertical_id"] = entityID
-	}
+	payload["entity_id"] = entityID
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return raw

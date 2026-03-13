@@ -16,18 +16,18 @@ type Snapshot struct {
 	TopInstances    []runtime.InstanceDigestRow
 }
 
-func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mailbox runtimetools.MailboxPersistence, topN int) (Snapshot, error) {
-	if portfolio == nil {
-		return Snapshot{}, fmt.Errorf("portfolio digest source is required")
+func BuildSnapshot(ctx context.Context, source runtime.DigestPersistence, mailbox runtimetools.MailboxPersistence, topN int) (Snapshot, error) {
+	if source == nil {
+		return Snapshot{}, fmt.Errorf("digest source is required")
 	}
 	if mailbox == nil {
 		return Snapshot{}, fmt.Errorf("mailbox source is required")
 	}
-	active, err := portfolio.CountActiveInstances(ctx)
+	active, err := source.CountActiveInstances(ctx)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	rows, err := portfolio.ListInstanceDigestRows(ctx, topN)
+	rows, err := source.ListInstanceDigestRows(ctx, topN)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -56,7 +56,7 @@ func BuildSnapshot(ctx context.Context, portfolio runtime.DigestPersistence, mai
 
 func RenderText(s Snapshot) string {
 	var b strings.Builder
-	b.WriteString("portfolio_digest\n")
+	b.WriteString("instance_digest\n")
 	b.WriteString(fmt.Sprintf("active_instances: %d\n", s.ActiveInstances))
 	b.WriteString(fmt.Sprintf("mailbox_pending: %d\n", s.MailboxPending))
 	b.WriteString(fmt.Sprintf("mailbox_critical: %d\n", s.MailboxCritical))

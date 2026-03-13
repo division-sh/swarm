@@ -277,7 +277,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 	state := workflowStateFromEngine(execCtx.Request.State)
 	payload := parsePayloadMap(execCtx.Request.Event.Payload)
 	switch builtin {
-	case "has_entity_id", "has_vertical_id":
+	case "has_entity_id":
 		return strings.TrimSpace(execCtx.Request.EntityID.String()) != "", true, nil
 	case "has_human_decision":
 		source := strings.TrimSpace(execCtx.Request.Event.SourceAgent)
@@ -288,7 +288,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 			return true, true, nil
 		}
 		return strings.TrimSpace(asString(payload["mailbox_decision_id"])) != "", true, nil
-	case "not_in_terminal_state", "not_in_terminal_stage", "not_in_operating_phase":
+	case "not_in_terminal_state", "not_in_terminal_stage":
 		if pc.SemanticSource() == nil {
 			return true, true, nil
 		}
@@ -523,7 +523,7 @@ func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerCon
 	if len(payload) == 0 {
 		payload = map[string]any{}
 		if !req.EntityID.IsZero() {
-			payload["vertical_id"] = req.EntityID.String()
+			payload["entity_id"] = req.EntityID.String()
 			if encoded, err := json.Marshal(payload); err == nil {
 				req.Event.Payload = encoded
 			}

@@ -58,7 +58,7 @@ func TestNotify_Multi_Webhook_Telegram_Email(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer tsTG.Close()
-	tg := &TelegramNotifier{BotToken: "tok", ChatID: "1", BaseURL: tsTG.URL, Client: tsTG.Client()}
+	tg := &ChatNotifier{BotToken: "tok", ChatID: "1", BaseURL: tsTG.URL, Client: tsTG.Client()}
 	if err := tg.NotifyCritical(ctx, item); err != nil {
 		t.Fatalf("telegram notify: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestNotify_Multi_Webhook_Telegram_Email(t *testing.T) {
 	}
 }
 
-func TestTelegramNotifier_RetryBeforeSuccess(t *testing.T) {
+func TestChatNotifier_RetryBeforeSuccess(t *testing.T) {
 	var calls int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r
@@ -85,7 +85,7 @@ func TestTelegramNotifier_RetryBeforeSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tg := &TelegramNotifier{BotToken: "tok", ChatID: "1", BaseURL: ts.URL, Client: ts.Client()}
+	tg := &ChatNotifier{BotToken: "tok", ChatID: "1", BaseURL: ts.URL, Client: ts.Client()}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	if err := tg.NotifyText(ctx, "hello"); err != nil {

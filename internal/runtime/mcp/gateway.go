@@ -105,9 +105,6 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "actor id is required"})
 		return
 	}
-	if strings.TrimSpace(actor.Mode) == "" {
-		actor.Mode = "operating"
-	}
 
 	ctx := r.Context()
 	if g.hooks.WithActor != nil {

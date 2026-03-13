@@ -30,7 +30,7 @@ empire-coordinator:
   - cto.extraction_recommended
   - board.directive
   - board.chat
-  - timer.portfolio_digest
+  - timer.instance_digest
   - operating/*/timer.marginal_review
   - operating/*/opco.growth_triggered
   - operating/*/opco.growth_stabilized
@@ -169,11 +169,11 @@ market-research-agent:
   conversation_mode: session
   max_turns_per_task: 40
   subscriptions:
-  - market_research.scan_assigned
+  - primary.scan_assigned
   tools_tier2: []
   emit_events:
   - category.assessed
-  - market_research.scan_complete
+  - primary.scan_complete
   permissions_bundle: worker
   permissions: &id002
   - message_peers
@@ -187,11 +187,11 @@ trend-research-agent:
   conversation_mode: session
   max_turns_per_task: 40
   subscriptions:
-  - trend_research.scan_assigned
+  - secondary.scan_assigned
   tools_tier2: []
   emit_events:
   - trend.identified
-  - trend_research.scan_complete
+  - secondary.scan_complete
   permissions_bundle: worker
   permissions: *id002
   workspace_class: factory
@@ -795,6 +795,6 @@ opco-support:
   workspace_class: opco
   manager_fallback: opco-head-of-product
   subscriptions:
-  - inbound.whatsapp_message
+  - inbound.chat
   - inbound.email
   - bug_fix_deployed

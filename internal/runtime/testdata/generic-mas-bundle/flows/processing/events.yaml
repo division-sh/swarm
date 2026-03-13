@@ -12,4 +12,4 @@ item.rejected:
   emitter:
     - processing-node
   consumer:
-    - coordinator
+    - control-plane

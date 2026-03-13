@@ -179,7 +179,6 @@ func isSupportedWorkflowGuardBuiltin(id string) bool {
 		"has_human_decision",
 		"not_in_terminal_state",
 		"not_in_terminal_stage",
-		"not_in_operating_phase",
 		"revision_count_below_limit",
 		"inner_revision_count_below_limit",
 		"state_in_phase":

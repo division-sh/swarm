@@ -1,6 +1,6 @@
 item.created:
   emitter:
-    - coordinator
+    - control-plane
   consumer:
     - intake-router
 item.processed:
@@ -18,4 +18,4 @@ item.rejected:
   emitter:
     - processing-node
   consumer:
-    - coordinator
+    - control-plane

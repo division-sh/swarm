@@ -644,24 +644,19 @@ func collectEntitySchemaFields(raw any, out map[string]struct{}) {
 }
 
 func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]struct{} {
-	out := map[string]struct{}{
-		ScoringNodeID:             {},
-		"scan-orchestrator":       {},
-		"discovery-aggregator":    {},
-		"validation-orchestrator": {},
-		"lifecycle-orchestrator":  {},
-		"portfolio-node":          {},
-	}
+	out := map[string]struct{}{}
 	if source == nil {
 		return out
 	}
-	filtered := make(map[string]struct{}, len(out))
-	for nodeID := range out {
-		if _, ok := source.NodeEntries()[nodeID]; ok {
-			filtered[nodeID] = struct{}{}
+	for nodeID, entry := range source.NodeEntries() {
+		if strings.TrimSpace(nodeID) == "" {
+			continue
+		}
+		if len(source.NodeEventHandlers(nodeID)) > 0 || len(entry.EventHandlers) > 0 {
+			out[nodeID] = struct{}{}
 		}
 	}
-	return filtered
+	return out
 }
 
 func requiresOwningNode(runtimeHandling string) bool {

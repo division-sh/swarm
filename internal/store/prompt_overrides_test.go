@@ -32,8 +32,8 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:     "coordinator",
-			Role:   "coordinator",
+			ID:     "control-plane",
+			Role:   "control-plane",
 			Mode:   "global",
 			Type:   "worker",
 			Config: json.RawMessage(`{"system_prompt":"base prompt"}`),
@@ -46,7 +46,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 		t.Fatalf("seed agent: %v", err)
 	}
 
-	_, found, err := pg.GetPromptOverride(ctx, "coordinator")
+	_, found, err := pg.GetPromptOverride(ctx, "control-plane")
 	if err != nil {
 		t.Fatalf("get initial override: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 	}
 
 	if err := pg.UpsertPromptOverride(ctx, runtimemanager.PromptOverrideRecord{
-		AgentID:        "coordinator",
+		AgentID:        "control-plane",
 		Prompt:         "override prompt",
 		PreviousPrompt: "base prompt",
 		Source:         "cli",
@@ -64,7 +64,7 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 		t.Fatalf("upsert prompt override: %v", err)
 	}
 
-	rec, found, err := pg.GetPromptOverride(ctx, "coordinator")
+	rec, found, err := pg.GetPromptOverride(ctx, "control-plane")
 	if err != nil {
 		t.Fatalf("get override: %v", err)
 	}
@@ -75,10 +75,10 @@ func TestPostgresStore_PromptOverridesCRUD(t *testing.T) {
 		t.Fatalf("unexpected override record: %+v", rec)
 	}
 
-	if err := pg.DeletePromptOverride(ctx, "coordinator"); err != nil {
+	if err := pg.DeletePromptOverride(ctx, "control-plane"); err != nil {
 		t.Fatalf("delete override: %v", err)
 	}
-	_, found, err = pg.GetPromptOverride(ctx, "coordinator")
+	_, found, err = pg.GetPromptOverride(ctx, "control-plane")
 	if err != nil {
 		t.Fatalf("get after delete: %v", err)
 	}

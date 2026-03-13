@@ -26,6 +26,21 @@ var (
 	contractSchemasErr  error
 )
 
+var supportedRuntimeToolNames = map[string]struct{}{
+	"agent_message":     {},
+	"schedule":          {},
+	"configure_routing": {},
+	"agent_hire":        {},
+	"agent_fire":        {},
+	"agent_reconfigure": {},
+	"mailbox_send":      {},
+	"human_task_request": {},
+	"human_task_decide":  {},
+	"nginx_reload":      {},
+	"systemd_control":   {},
+	"certbot_execute":   {},
+}
+
 func LoadContractSchemas() (map[string]ContractSchemaEntry, error) {
 	contractSchemasOnce.Do(func() {
 		bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot())
@@ -36,6 +51,10 @@ func LoadContractSchemas() (map[string]ContractSchemaEntry, error) {
 		source := semanticview.Wrap(bundle)
 		parsed := map[string]ContractSchemaEntry{}
 		for name, entry := range source.ToolEntries() {
+			name = strings.TrimSpace(name)
+			if _, ok := supportedRuntimeToolNames[name]; !ok {
+				continue
+			}
 			schema := map[string]any{}
 			raw, marshalErr := json.Marshal(entry.InputSchema)
 			if marshalErr != nil {

@@ -225,9 +225,6 @@ func buildWorkflowNodePolicies(source semanticview.Source, nodeID string, subscr
 			continue
 		}
 		policy := deriveWorkflowEventPolicy(source, eventType, transitionTriggers[eventType])
-		if override, ok := workflowNodeRuntimePolicyOverride(nodeID, eventType); ok {
-			policy = override
-		}
 		policies[eventType] = policy
 	}
 	if len(policies) == 0 {
@@ -309,36 +306,6 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, 
 		return nil
 	}
 	return out
-}
-
-func workflowNodeRuntimePolicyOverride(nodeID, eventType string) (WorkflowEventPolicy, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	eventType = strings.TrimSpace(eventType)
-	switch nodeID {
-	case "portfolio-node":
-		switch eventType {
-		case "timer.portfolio_digest", "runtime.reset", "system.directive":
-			return WorkflowEventPolicy{Consume: true}, true
-		case "budget.threshold_crossed":
-			return WorkflowEventPolicy{Consume: false, VisibleDownstream: true}, true
-		}
-	case "scan-orchestrator":
-		switch eventType {
-		case "scan.requested":
-			return WorkflowEventPolicy{Consume: true}, true
-		}
-	case "scoring-node":
-		switch eventType {
-		case "score.dimension_complete", "scoring.contest_resolved":
-			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
-		}
-	case "validation-orchestrator":
-		switch eventType {
-		case "spec.validation_passed", "spec.validation_failed":
-			return WorkflowEventPolicy{Consume: false, RequireVertical: true, VisibleDownstream: true}, true
-		}
-	}
-	return WorkflowEventPolicy{}, false
 }
 
 func workflowNodeTransitionTriggers(source semanticview.Source, nodeID string) map[string]bool {

@@ -27,11 +27,11 @@ market-research-agent:
   conversation_mode: session
   max_turns_per_task: 40
   subscriptions:
-  - market_research.scan_assigned
+  - primary.scan_assigned
   tools_tier2: []
   emit_events:
   - category.assessed
-  - market_research.scan_complete
+  - primary.scan_complete
   permissions_bundle: worker
   permissions: &id001
   - message_peers
@@ -45,11 +45,11 @@ trend-research-agent:
   conversation_mode: session
   max_turns_per_task: 40
   subscriptions:
-  - trend_research.scan_assigned
+  - secondary.scan_assigned
   tools_tier2: []
   emit_events:
   - trend.identified
-  - trend_research.scan_complete
+  - secondary.scan_complete
   permissions_bundle: worker
   permissions: *id001
   workspace_class: factory

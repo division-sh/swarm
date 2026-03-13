@@ -215,41 +215,13 @@ func firstNonEmpty(values ...string) string {
 }
 
 func buildInboundPublishPayload(provider, entityID, providerEventID string, rawPayload any, now time.Time) (events.EventType, map[string]any) {
-	obj, _ := rawPayload.(map[string]any)
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "whatsapp":
-		return events.EventType("inbound.whatsapp_message"), map[string]any{
-			"entity_id":         strings.TrimSpace(entityID),
-			"from":              firstStringByKeys(obj, "from", "sender", "wa_id", "phone", "contact"),
-			"message":           firstStringByKeys(obj, "message", "text", "body"),
-			"timestamp":         firstNonEmpty(firstStringByKeys(obj, "timestamp", "time"), now.Format(time.RFC3339)),
-			"media_urls":        firstStringSliceByKeys(obj, "media_urls", "media", "attachments"),
-			"provider_event_id": strings.TrimSpace(providerEventID),
-			"provider":          "whatsapp",
-			"payload":           rawPayload,
-			"received_at":       now.Format(time.RFC3339),
-		}
-	case "email":
-		return events.EventType("inbound.email"), map[string]any{
-			"entity_id":         strings.TrimSpace(entityID),
-			"from":              firstStringByKeys(obj, "from", "sender", "email"),
-			"subject":           firstStringByKeys(obj, "subject"),
-			"body":              firstStringByKeys(obj, "body", "text", "message"),
-			"attachments":       firstStringSliceByKeys(obj, "attachments"),
-			"provider_event_id": strings.TrimSpace(providerEventID),
-			"provider":          "email",
-			"payload":           rawPayload,
-			"received_at":       now.Format(time.RFC3339),
-		}
-	default:
-		return events.EventType("inbound." + normalizeEventToken(provider)), map[string]any{
-			"entity_id":         strings.TrimSpace(entityID),
-			"provider":          strings.TrimSpace(provider),
-			"event_type":        resolveProviderEventType(provider, rawPayload),
-			"provider_event_id": strings.TrimSpace(providerEventID),
-			"payload":           rawPayload,
-			"received_at":       now.Format(time.RFC3339),
-		}
+	return events.EventType("inbound." + normalizeEventToken(provider)), map[string]any{
+		"entity_id":         strings.TrimSpace(entityID),
+		"provider":          strings.TrimSpace(provider),
+		"event_type":        resolveProviderEventType(provider, rawPayload),
+		"provider_event_id": strings.TrimSpace(providerEventID),
+		"payload":           rawPayload,
+		"received_at":       now.Format(time.RFC3339),
 	}
 }
 
@@ -318,26 +290,13 @@ func firstStringSliceByKeys(obj map[string]any, keys ...string) []string {
 }
 
 func resolveProviderEventType(provider string, payload any) string {
-	switch provider {
-	case "whatsapp":
-		return "message"
-	case "email":
-		return "received"
-	case "domain":
-		m, _ := payload.(map[string]any)
-		if v, ok := m["status"].(string); ok && strings.TrimSpace(v) != "" {
+	m, _ := payload.(map[string]any)
+	for _, key := range []string{"event_type", "type", "status", "kind", "action"} {
+		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
 			return normalizeEventToken(v)
 		}
-		return "confirmed"
-	case "stripe":
-		m, _ := payload.(map[string]any)
-		if v, ok := m["type"].(string); ok && strings.TrimSpace(v) != "" {
-			return normalizeEventToken(v)
-		}
-		return "payment_event"
-	default:
-		return "event"
 	}
+	return "event"
 }
 
 func normalizeEventToken(raw string) string {
@@ -353,26 +312,18 @@ func normalizeEventToken(raw string) string {
 
 func verifyProviderSignature(provider, secret string, body []byte, headers http.Header) bool {
 	secret = strings.TrimSpace(secret)
-	// If no secret is configured, accept only explicitly unsigned providers.
+	// If no secret is configured, accept unsigned ingress.
 	if secret == "" {
-		return provider == "email"
+		return true
 	}
-	switch provider {
-	case "whatsapp":
-		sig := strings.TrimSpace(headers.Get("X-Hub-Signature-256"))
-		if !strings.HasPrefix(strings.ToLower(sig), "sha256=") {
-			return false
-		}
+	if sig := strings.TrimSpace(headers.Get("X-Hub-Signature-256")); strings.HasPrefix(strings.ToLower(sig), "sha256=") {
 		given := strings.TrimPrefix(sig, "sha256=")
 		mac := hmac.New(sha256.New, []byte(secret))
 		_, _ = mac.Write(body)
 		expected := hex.EncodeToString(mac.Sum(nil))
 		return hmac.Equal([]byte(strings.ToLower(given)), []byte(strings.ToLower(expected)))
-	case "stripe":
-		sig := strings.TrimSpace(headers.Get("Stripe-Signature"))
-		if sig == "" {
-			return false
-		}
+	}
+	if sig := strings.TrimSpace(headers.Get("Stripe-Signature")); sig != "" {
 		timestamp := ""
 		v1Sigs := make([]string, 0, 2)
 		for _, part := range strings.Split(sig, ",") {
@@ -401,16 +352,15 @@ func verifyProviderSignature(provider, secret string, body []byte, headers http.
 			}
 		}
 		return false
-	default:
-		token := strings.TrimSpace(headers.Get("X-Webhook-Token"))
-		if token == "" {
-			auth := strings.TrimSpace(headers.Get("Authorization"))
-			if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-				token = strings.TrimSpace(auth[7:])
-			}
-		}
-		return hmac.Equal([]byte(token), []byte(secret))
 	}
+	token := strings.TrimSpace(headers.Get("X-Webhook-Token"))
+	if token == "" {
+		auth := strings.TrimSpace(headers.Get("Authorization"))
+		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
+			token = strings.TrimSpace(auth[7:])
+		}
+	}
+	return hmac.Equal([]byte(token), []byte(secret))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

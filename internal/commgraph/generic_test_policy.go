@@ -8,38 +8,38 @@ func NewGenericTestPolicy() Policy {
 
 func (genericTestPolicy) MessageAuthorities() []MessageAuthority {
 	return []MessageAuthority{
-		{SenderRole: "coordinator", RecipientRoles: []string{"reviewer", "worker"}, Scope: "any"},
-		{SenderRole: "reviewer", RecipientRoles: []string{"coordinator"}, Scope: "local"},
+		{SenderRole: "control-plane", RecipientRoles: []string{"reviewer", "worker"}, Scope: "any"},
+		{SenderRole: "reviewer", RecipientRoles: []string{"control-plane"}, Scope: "local"},
 	}
 }
 
 func (genericTestPolicy) MailboxRoundTrips() []MailboxRoundTrip {
 	return []MailboxRoundTrip{
-		{SenderRole: "reviewer", MailboxType: "generic_review", DecisionEvents: []string{"review.approved", "review.rejected"}, ReturnToRole: "coordinator"},
+		{SenderRole: "reviewer", MailboxType: "generic_review", DecisionEvents: []string{"review.approved", "review.rejected"}, ReturnToRole: "control-plane"},
 	}
 }
 
 func (genericTestPolicy) HumanTaskDecisionRoles() []string {
-	return []string{"coordinator", "reviewer"}
+	return []string{"control-plane", "reviewer"}
 }
 
 func (genericTestPolicy) RoutingAuthorities() []RoutingAuthority {
 	return []RoutingAuthority{
-		{ActorRole: "coordinator"},
+		{ActorRole: "control-plane"},
 		{ActorRole: "reviewer", AllowedStatuses: []string{"proposed"}},
 	}
 }
 
 func (genericTestPolicy) ManagementAuthorities() []ManagementAuthority {
 	return []ManagementAuthority{
-		{ActorRole: "coordinator", AllowCrossEntity: true},
+		{ActorRole: "control-plane", AllowCrossEntity: true},
 		{ActorRole: "reviewer", AllowedTargetRoles: []string{"worker"}, AllowCrossEntity: false},
 	}
 }
 
 func (genericTestPolicy) MailboxSendRoles() []string {
 	return []string{
-		"coordinator",
+		"control-plane",
 		"reviewer",
 	}
 }

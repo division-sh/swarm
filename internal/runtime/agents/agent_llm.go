@@ -45,7 +45,7 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	maxTurns := 1000
 	mode := llm.SessionScoped
-	if cfg.Mode == "factory" {
+	if cfg.EffectiveEntityID() == "" {
 		mode = llm.TaskScoped
 		maxTurns = 100
 	}
@@ -523,7 +523,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	strictRequirement := ""
 	strictRequirement = runtimetools.RequiredEmitToolContractText(cfg.Role, evt)
 	return fmt.Sprintf(
-		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- vertical_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s",
+		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s",
 		cfg.ID,
 		cfg.Role,
 		cfg.Mode,
@@ -547,37 +547,28 @@ func contractRemediationPrompt(cfg models.AgentConfig, evt events.Event, contrac
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {
-	verticalID, taskID := extractContextIDs(primary)
-	if strings.TrimSpace(verticalID) == "" || strings.TrimSpace(taskID) == "" {
-		fallbackVertical, fallbackTask := extractContextIDs(fallback)
-		if strings.TrimSpace(verticalID) == "" {
-			verticalID = fallbackVertical
+	entityID, taskID := extractContextIDs(primary)
+	if strings.TrimSpace(entityID) == "" || strings.TrimSpace(taskID) == "" {
+		fallbackEntity, fallbackTask := extractContextIDs(fallback)
+		if strings.TrimSpace(entityID) == "" {
+			entityID = fallbackEntity
 		}
 		if strings.TrimSpace(taskID) == "" {
 			taskID = fallbackTask
 		}
 	}
-	return verticalID + "|" + taskID
+	return entityID + "|" + taskID
 }
 
-func extractContextIDs(evt events.Event) (verticalID, taskID string) {
-	verticalID = strings.TrimSpace(evt.EntityID())
+func extractContextIDs(evt events.Event) (entityID, taskID string) {
+	entityID = strings.TrimSpace(evt.EntityID())
 	taskID = strings.TrimSpace(evt.TaskID)
 	if len(evt.Payload) == 0 {
-		return verticalID, taskID
+		return entityID, taskID
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(evt.Payload, &payload); err != nil || payload == nil {
-		return verticalID, taskID
-	}
-	if verticalID == "" {
-		for _, key := range []string{"vertical_id", "vertical_ref"} {
-			v := strings.TrimSpace(sharedjson.AsString(payload[key]))
-			if v != "" {
-				verticalID = v
-				break
-			}
-		}
+		return entityID, taskID
 	}
 	if taskID == "" {
 		for _, key := range []string{"task_id", "task_ref"} {
@@ -588,7 +579,7 @@ func extractContextIDs(evt events.Event) (verticalID, taskID string) {
 			}
 		}
 	}
-	return verticalID, taskID
+	return entityID, taskID
 }
 
 func normalizeScanMode(raw string) string {

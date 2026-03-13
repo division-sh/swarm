@@ -198,10 +198,10 @@ func (r *ClaudeCLIRuntime) effectiveCLITimeout(ctx context.Context) time.Duratio
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
-	// Factory agents routinely run deeper research loops; apply a floor to
-	// prevent repeated hard-kill timeouts at the process layer.
+	// Global/no-entity agents routinely run deeper research loops; apply a floor
+	// to prevent repeated hard-kill timeouts at the process layer.
 	if actor, ok := runtimeactor.ActorFromContext(ctx); ok {
-		if strings.EqualFold(strings.TrimSpace(actor.Mode), "factory") && timeout < 300*time.Second {
+		if strings.TrimSpace(actor.EffectiveEntityID()) == "" && timeout < 300*time.Second {
 			timeout = 300 * time.Second
 		}
 	}

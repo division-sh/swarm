@@ -5,10 +5,7 @@ import (
 	"time"
 )
 
-const (
-	workflowStateBucketEntityProjection       = "entity_projection"
-	workflowStateBucketValidationOrchestrator = "validation_state"
-)
+const workflowStateBucketEntityProjection = "entity_projection"
 
 func workflowStateBucketObject(instance WorkflowInstance, key string) (map[string]any, bool) {
 	if instance.StateBuckets == nil {
@@ -92,8 +89,4 @@ func parseWorkflowTime(v any) time.Time {
 
 func workflowMetadataSnapshot(instance WorkflowInstance) map[string]any {
 	return cloneStringAnyMap(instance.Metadata)
-}
-
-func workflowValidationProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
-	return workflowStateBucketObject(instance, workflowStateBucketValidationOrchestrator)
 }

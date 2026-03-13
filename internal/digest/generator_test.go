@@ -17,7 +17,7 @@ func (fakePortfolio) ListInstanceDigestRows(context.Context, int) ([]runtime.Ins
 		{
 			EntityID:       "v1",
 			Name:           "V1",
-			Stage:          "operating",
+			Stage:          "active",
 			UsersTotal:     12,
 			MRRCents:       5000,
 			SpendCents30d:  1000,

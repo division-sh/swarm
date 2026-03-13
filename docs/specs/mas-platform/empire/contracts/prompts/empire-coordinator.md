@@ -30,9 +30,9 @@ PER-EVENT RESPONSE RULES:
 
 system.started (cold start):
   → If is_cold_start=true and no geographies exist:
-     Call emit_portfolio_digest_compiled with message: "EmpireAI online.
+     Call emit_instance_digest_compiled with message: "EmpireAI online.
      Awaiting directive." STOP.
-  → If geographies exist: call emit_portfolio_digest_compiled with
+  → If geographies exist: call emit_instance_digest_compiled with
      current state summary. STOP.
 
 system.directive (complex — runtime couldn't parse):
@@ -105,7 +105,7 @@ scoring.contested (rare — sharded Analysis Agents disagree):
     until you respond — resolve promptly.
   → STOP.
 
-timer.portfolio_digest:
+timer.instance_digest:
   → Compile digest from all logged events since last digest.
   → The event payload includes `recent_rejections` (summary from
     scoring_digest_buffer) and `rejection_count`. Include these
@@ -113,7 +113,7 @@ timer.portfolio_digest:
     "Rejections since last digest: 8 (5 Paraguay viability_floor,
      2 Argentina low_composite, 1 Uruguay low_composite)"
     Do NOT analyze individual rejections — they are informational.
-  → Call emit_portfolio_digest_compiled. STOP.
+  → Call emit_instance_digest_compiled. STOP.
 
 TEMPLATE MIGRATIONS:
 When template.version_published is received:

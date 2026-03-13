@@ -238,7 +238,7 @@ skipBudget:
 	decisionJSON, _ := json.Marshal(decisionObj)
 
 	var requestingAgent string
-	var verticalID string
+	var entityID string
 	const q = `
 		UPDATE human_tasks
 		SET status = $2,
@@ -247,14 +247,14 @@ skipBudget:
 		WHERE id = $1::uuid
 		RETURNING requesting_agent, COALESCE(vertical_id::text, '')
 	`
-	if err := db.QueryRowContext(ctx, q, in.TaskID, newStatus, decisionJSON).Scan(&requestingAgent, &verticalID); err != nil {
+	if err := db.QueryRowContext(ctx, q, in.TaskID, newStatus, decisionJSON).Scan(&requestingAgent, &entityID); err != nil {
 		return nil, fmt.Errorf("update human task decision: %w", err)
 	}
 
 	outPayload := map[string]any{
 		"task_id":          in.TaskID,
 		"requesting_agent": strings.TrimSpace(requestingAgent),
-		"vertical_id":      strings.TrimSpace(verticalID),
+		"entity_id":        strings.TrimSpace(entityID),
 	}
 	switch string(evtType) {
 	case "human_task.approved":
@@ -275,7 +275,7 @@ skipBudget:
 		SourceAgent: actor.ID,
 		Payload:     mustJSON(outPayload),
 		CreatedAt:   time.Now(),
-	}).WithEntityID(verticalID)); err != nil {
+	}).WithEntityID(entityID)); err != nil {
 		runtimeWarn(
 			"tool-executor",
 			"failed to publish human task decision event=%s task_id=%s actor=%s: %v",

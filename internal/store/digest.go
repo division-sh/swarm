@@ -24,36 +24,17 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 		limit = 10
 	}
 	const q = `
-		WITH latest_metrics AS (
-			SELECT DISTINCT ON (vertical_id)
-				vertical_id,
-				users_total,
-				mrr_cents,
-				period_end
-			FROM vertical_metrics
-			ORDER BY vertical_id, period_end DESC
-		),
-		spend_30d AS (
-			SELECT
-				vertical_id,
-				COALESCE(SUM(amount_cents), 0) AS spend_cents_30d
-			FROM spend_ledger
-			WHERE created_at >= now() - interval '30 days'
-			GROUP BY vertical_id
-		)
 		SELECT
 			wi.instance_id::text,
 			COALESCE(NULLIF(wi.metadata->>'name', ''), NULLIF(wi.metadata->>'entity_name', ''), wi.instance_id::text),
 			wi.current_state,
-			COALESCE(m.users_total, 0),
-			COALESCE(m.mrr_cents, 0),
-			COALESCE(s.spend_cents_30d, 0),
-			COALESCE(m.period_end::timestamp, wi.updated_at)
+			0,
+			0,
+			0,
+			wi.updated_at
 		FROM workflow_instances wi
-		LEFT JOIN latest_metrics m ON m.vertical_id = wi.instance_id::uuid
-		LEFT JOIN spend_30d s ON s.vertical_id = wi.instance_id::uuid
 		WHERE wi.current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
-		ORDER BY COALESCE(m.mrr_cents, 0) DESC, COALESCE(m.users_total, 0) DESC, wi.created_at ASC
+		ORDER BY wi.updated_at DESC, wi.created_at ASC
 		LIMIT $1
 	`
 
