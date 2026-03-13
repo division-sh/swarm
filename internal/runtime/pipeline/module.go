@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 
-	empirepayloads "empireai/internal/empire/payloads"
 	"empireai/internal/events"
 	"empireai/internal/runtime/semanticview"
 )
@@ -17,33 +16,79 @@ type BackgroundNode interface{ Run(context.Context) }
 type validationContextSnapshot = ValidationContextSnapshot
 type scanCompletedBuildInput = ScanCompletedBuildInput
 
-type ValidationStartedPayload = empirepayloads.ValidationStartedPayload
-type BrandRequestedPayload = empirepayloads.BrandRequestedPayload
-type ValidationPackageReadyPayload = empirepayloads.ValidationPackageReadyPayload
-type SpecValidationRequestedPayload = empirepayloads.SpecValidationRequestedPayload
-type CTOSpecReviewRequestedPayload = empirepayloads.CTOSpecReviewRequestedPayload
-type SpecRevisionRequestedPayload = empirepayloads.SpecRevisionRequestedPayload
-type ValidationMoreDataNeededPayload = empirepayloads.ValidationMoreDataNeededPayload
-type BrandRevisionNeededPayload = empirepayloads.BrandRevisionNeededPayload
-type VerticalKilledPayload = empirepayloads.VerticalKilledPayload
-type ScanAssignedPayload = empirepayloads.ScanAssignedPayload
-type SynthesisNeededPayload = empirepayloads.SynthesisNeededPayload
-type DedupAmbiguousPayload = empirepayloads.DedupAmbiguousPayload
-type VerticalDiscoveredPayload = empirepayloads.VerticalDiscoveredPayload
-type ScanCompletedBuildInput = empirepayloads.ScanCompletedBuildInput
-type ScanCompletedPayload = empirepayloads.ScanCompletedPayload
-type ScoringRequestedPayload = empirepayloads.ScoringRequestedPayload
-type ScoringContestedPayload = empirepayloads.ScoringContestedPayload
-type ValidationContextSnapshot = empirepayloads.ValidationContextSnapshot
-type ScoreDimensionResult = empirepayloads.ScoreDimensionResult
-type ContestedDimension = empirepayloads.ContestedDimension
-type ScoringComposite = empirepayloads.ScoringComposite
-type ScoringAccumulatorInput = empirepayloads.ScoringAccumulatorInput
-type VerticalScoredPayload = empirepayloads.VerticalScoredPayload
-type VerticalShortlistedPayload = empirepayloads.VerticalShortlistedPayload
-type VerticalMarginalPayload = empirepayloads.VerticalMarginalPayload
-type VerticalRejectedPayload = empirepayloads.VerticalRejectedPayload
-type PortfolioDigestTimerPayload = empirepayloads.PortfolioDigestTimerPayload
+type ValidationContextSnapshot struct {
+	Research    map[string]any
+	Spec        map[string]any
+	CTONotes    map[string]any
+	Brand       map[string]any
+	Scoring     map[string]any
+	SpecVersion int
+}
+
+type ScoreDimensionResult struct {
+	Score      int
+	Evidence   string
+	Confidence string
+}
+
+type ContestedDimension struct {
+	Dimension string
+	Scores    []int
+	Evidence  []string
+	Spread    int
+	Options   []ScoreDimensionResult
+}
+
+type ScoringComposite struct {
+	Result         string
+	Reason         string
+	CompositeScore float64
+	ViabilityScore float64
+	MarketScore    float64
+	Dimensions     map[string]ScoreDimensionResult
+	Rubric         string
+	Partial        bool
+}
+
+type ScoringAccumulatorInput struct {
+	Rubric    string
+	Expected  []string
+	Received  map[string]ScoreDimensionResult
+	Contested map[string]ContestedDimension
+	Partial   bool
+}
+
+type ScanCompletedBuildInput struct {
+	ScanID          string
+	CampaignID      string
+	Mode            string
+	Geography       string
+	ReportsReceived int
+	Expected        int
+	Complete        int
+	Discovered      int
+	Skipped         int
+	PendingDedup    int
+	TimedOut        bool
+	ShardsTotal     int
+	ShardsCompleted int
+	ShardsFailed    int
+}
+
+type PortfolioDigestTimerPayload struct {
+	Message                   string
+	DigestText                string
+	TriggerReason             string
+	Snapshot                  map[string]any
+	Metadata                  map[string]any
+	VerticalID                string
+	TaskID                    string
+	RecentRejections          []map[string]any
+	RejectionCount            int
+	ScoringRejectionsInjected bool
+	ScoringRejectionsCount    int
+	ScoringRejectionSummaries []map[string]any
+}
 
 type DiscoveryPolicy interface {
 	EvaluateDiscoveryPreFilter(payload map[string]any, rawSignal float64) (bool, float64, string)
@@ -59,7 +104,7 @@ type DiscoveryCandidate struct {
 }
 
 type ScanPolicy interface {
-	ExpandScanAssignments(mode string, payload map[string]any, assigned ScanAssignedPayload, batchSize int) ([]ScanAssignedPayload, error)
+	ExpandScanAssignments(mode string, payload map[string]any, assigned map[string]any, batchSize int) ([]map[string]any, error)
 	ReadJSONLBatches(path string, batchSize int) ([][]map[string]any, error)
 	ParseDirective(text string) ParsedDirective
 	ParseDirectiveGeography(text string) (name, country, region string)
@@ -82,32 +127,32 @@ type ScoringPolicy interface {
 }
 
 type PayloadFactory interface {
-	BuildScanAssignedPayload(scanID, campaignID, mode, geography string, source map[string]any, plannedShards int) ScanAssignedPayload
-	BuildSynthesisNeededPayload(scanID, campaignID, mode, geography string, raw map[string]any) SynthesisNeededPayload
-	BuildDedupAmbiguousPayload(scanID, dedupEventID string, similarity float64, candidateName, geography string, signal float64, existingID, existingName string) DedupAmbiguousPayload
-	BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID string, signal float64, discoverySource string, rawSignals map[string]any) VerticalDiscoveredPayload
-	BuildScanCompletedPayload(in ScanCompletedBuildInput) ScanCompletedPayload
-	BuildScoringRequestedPayload(verticalID, verticalName, geography, mode, rubric string, dimensions []string, discoveryContext map[string]any) ScoringRequestedPayload
-	BuildScoringContestedPayload(verticalID, dimension string, contest ContestedDimension, rubric, mode string) ScoringContestedPayload
-	BuildVerticalScoredPayload(verticalID string, result ScoringComposite, verticalName, geography, mode string) VerticalScoredPayload
-	BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload
-	BuildVerticalMarginalPayload(verticalID string, result ScoringComposite) VerticalMarginalPayload
-	BuildVerticalRejectedPayload(verticalID string, result ScoringComposite) VerticalRejectedPayload
+	BuildScanAssignedPayload(scanID, campaignID, mode, geography string, source map[string]any, plannedShards int) map[string]any
+	BuildSynthesisNeededPayload(scanID, campaignID, mode, geography string, raw map[string]any) map[string]any
+	BuildDedupAmbiguousPayload(scanID, dedupEventID string, similarity float64, candidateName, geography string, signal float64, existingID, existingName string) map[string]any
+	BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID string, signal float64, discoverySource string, rawSignals map[string]any) map[string]any
+	BuildScanCompletedPayload(in ScanCompletedBuildInput) map[string]any
+	BuildScoringRequestedPayload(verticalID, verticalName, geography, mode, rubric string, dimensions []string, discoveryContext map[string]any) map[string]any
+	BuildScoringContestedPayload(verticalID, dimension string, contest ContestedDimension, rubric, mode string) map[string]any
+	BuildVerticalScoredPayload(verticalID string, result ScoringComposite, verticalName, geography, mode string) map[string]any
+	BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) map[string]any
+	BuildVerticalMarginalPayload(verticalID string, result ScoringComposite) map[string]any
+	BuildVerticalRejectedPayload(verticalID string, result ScoringComposite) map[string]any
 
-	BuildBrandRequestedPayload(verticalID, name, geography string, scoring, brief map[string]any) BrandRequestedPayload
-	BuildValidationPackageReadyPayload(verticalID, name, geography string, snap ValidationContextSnapshot) ValidationPackageReadyPayload
-	BuildSpecValidationRequestedPayload(verticalID string, spec map[string]any) SpecValidationRequestedPayload
-	BuildCTOSpecReviewRequestedPayload(verticalID, name, geography string, specValidation map[string]any, snap ValidationContextSnapshot) CTOSpecReviewRequestedPayload
-	BuildSpecRevisionRequestedPayload(verticalID, source, name, geography string, feedback map[string]any, snap ValidationContextSnapshot) SpecRevisionRequestedPayload
-	BuildValidationMoreDataPayload(verticalID, name, geography string, request map[string]any, snap ValidationContextSnapshot) ValidationMoreDataNeededPayload
-	BuildBrandRevisionNeededPayload(verticalID, name, geography string, feedback, brand map[string]any) BrandRevisionNeededPayload
-	BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent string, reason map[string]any) VerticalKilledPayload
-	BuildValidationStartedPayload(verticalID, name, geography string, scoring map[string]any) ValidationStartedPayload
+	BuildBrandRequestedPayload(verticalID, name, geography string, scoring, brief map[string]any) map[string]any
+	BuildValidationPackageReadyPayload(verticalID, name, geography string, snap ValidationContextSnapshot) map[string]any
+	BuildSpecValidationRequestedPayload(verticalID string, spec map[string]any) map[string]any
+	BuildCTOSpecReviewRequestedPayload(verticalID, name, geography string, specValidation map[string]any, snap ValidationContextSnapshot) map[string]any
+	BuildSpecRevisionRequestedPayload(verticalID, source, name, geography string, feedback map[string]any, snap ValidationContextSnapshot) map[string]any
+	BuildValidationMoreDataPayload(verticalID, name, geography string, request map[string]any, snap ValidationContextSnapshot) map[string]any
+	BuildBrandRevisionNeededPayload(verticalID, name, geography string, feedback, brand map[string]any) map[string]any
+	BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent string, reason map[string]any) map[string]any
+	BuildValidationStartedPayload(verticalID, name, geography string, scoring map[string]any) map[string]any
 }
 
 type WorkflowHookContext struct {
 	Event      events.Event
-	VerticalID string
+	EntityID   string
 	Payload    map[string]any
 	State      WorkflowState
 }

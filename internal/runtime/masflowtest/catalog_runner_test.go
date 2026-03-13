@@ -224,6 +224,27 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 	seen := map[string]struct{}{}
 	completion := strings.ToLower(strings.TrimSpace(accumulate.Completion.String()))
 	for _, step := range steps {
+		if strings.EqualFold(strings.TrimSpace(step.Event), "accumulate.timeout") {
+			if strings.EqualFold(strings.TrimSpace(accumulate.Completion.String()), "timeout") {
+				result = executeCatalogHandlerStep(t, handler, step, entity, policy, result)
+				break
+			}
+			if accumulate.OnTimeout != nil {
+				result.handlerOutcome = "success"
+				if next := strings.TrimSpace(accumulate.OnTimeout.AdvancesTo); next != "" {
+					result.entityState = next
+				}
+				if !accumulate.OnTimeout.Emits.Empty() {
+					result.emittedEvents = append(result.emittedEvents, accumulate.OnTimeout.Emits.Values()...)
+				}
+				if accumulate.OnTimeout.DataAccumulation.HasWrites() {
+					applyCatalogDataAccumulation(accumulate.OnTimeout.DataAccumulation, step.Payload, entity)
+					result.entityFields = cloneStringAnyMapCatalog(entity)
+				}
+				break
+			}
+			continue
+		}
 		key := catalogAccumulationKey(step.Payload)
 		if _, ok := seen[key]; ok {
 			continue
@@ -243,6 +264,80 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 		result.entityState = state
 	}
 	return result, expected
+}
+
+func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpectedDocument) bool {
+	t.Helper()
+	if !catalogCaseSimpleHarnessEligible(expected) {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(dir, "tier1-primitives/"):
+		nodesBytes, err := os.ReadFile(filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir), "nodes.yaml"))
+		if err != nil {
+			return false
+		}
+		raw := string(nodesBytes)
+		if strings.Contains(raw, "clear_gates: true") || strings.Contains(raw, "sets_gates:") || strings.Contains(raw, "data_accumulation:") {
+			return false
+		}
+		if strings.Contains(raw, "checks:") || strings.Contains(raw, "&&") || strings.Contains(raw, "||") {
+			return false
+		}
+		if strings.Contains(raw, "on_fail: \"escalate:") || strings.Contains(raw, "on_fail: escalate:") {
+			return false
+		}
+		if strings.HasSuffix(dir, "/test-guard-reject") {
+			return false
+		}
+		return true
+	case strings.HasPrefix(dir, "tier2-accumulation/"):
+		nodesBytes, err := os.ReadFile(filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir), "nodes.yaml"))
+		if err != nil {
+			return false
+		}
+		raw := string(nodesBytes)
+		if strings.Contains(raw, "\n        from:") {
+			return false
+		}
+		if strings.Contains(raw, "on_complete:") && strings.Contains(raw, "compute:") {
+			return false
+		}
+		if strings.Contains(raw, "\n        threshold:") {
+			return false
+		}
+		if strings.Contains(dir, "test-accumulate-partial") || strings.Contains(dir, "test-accumulate-idempotent") {
+			return false
+		}
+		return true
+	case strings.HasPrefix(dir, "tier3-list-processing/"):
+		nodesBytes, err := os.ReadFile(filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir), "nodes.yaml"))
+		if err != nil {
+			return false
+		}
+		raw := string(nodesBytes)
+		if strings.Contains(raw, "emit_mapping:") {
+			return false
+		}
+		var nodes map[string]runtimecontracts.SystemNodeContract
+		root := filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir))
+		loadYAMLForCatalogTest(t, filepath.Join(root, "nodes.yaml"), &nodes)
+		for _, node := range nodes {
+			for _, handler := range node.EventHandlers {
+				if handler.FanOut == nil {
+					return false
+				}
+				if handler.Filter != nil || handler.Reduce != nil || handler.Count != nil || handler.Query != nil {
+					return false
+				}
+			}
+		}
+		return true
+	case strings.HasPrefix(dir, "tier6-event-loop/"):
+		return false
+	default:
+		return false
+	}
 }
 
 func executeCatalogHandlerStep(t testing.TB, handler runtimecontracts.SystemNodeEventHandler, step catalogTriggerStep, entity map[string]any, policy map[string]any, result catalogRunResult) catalogRunResult {
@@ -440,19 +535,20 @@ func applyCatalogFanOut(spec *runtimecontracts.FanOutSpec, payload, entity map[s
 	if spec == nil || result == nil {
 		return
 	}
-	items, _ := resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}).([]any)
+	rawItems := resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity})
+	items, _ := rawItems.([]any)
 	if len(items) == 0 {
-		if raw, ok := resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}).([]map[string]any); ok {
+		if raw, ok := rawItems.([]map[string]any); ok {
 			items = make([]any, 0, len(raw))
 			for _, item := range raw {
 				items = append(items, item)
 			}
 		}
 	}
+	entity["fan_out_count"] = len(items)
 	if len(items) == 0 {
 		return
 	}
-	entity["fan_out_count"] = len(items)
 	for _, item := range items {
 		if len(spec.EmitMapping) > 0 {
 			for key, eventType := range spec.EmitMapping {

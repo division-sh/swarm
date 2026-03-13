@@ -61,10 +61,9 @@ func workflowExpressionEntityContext(state WorkflowState, validationState *valid
 func workflowExpressionGateContext(entity map[string]any, validationState *validationPipelineState) map[string]any {
 	gates := map[string]any{}
 	if validationState != nil {
-		gates["g1_research"] = validationState.G1Research
-		gates["g2_spec"] = validationState.G2Spec
-		gates["g3_cto"] = validationState.G3CTO
-		gates["g4_brand"] = validationState.G4Brand
+		for key, value := range validationState.gateContext() {
+			gates[key] = value
+		}
 	}
 	for key, value := range entity {
 		key = strings.TrimSpace(key)

@@ -53,7 +53,7 @@ type Runtime struct {
 	Options         RuntimeOptions
 	Bus             *EventBus
 	Logger          *RuntimeLogger
-	Pipeline        *runtimepipeline.FactoryPipelineCoordinator
+	Pipeline        *runtimepipeline.PipelineCoordinator
 	SystemNodes     []runtimepipeline.BackgroundNode
 	Scheduler       *runtimepipeline.Scheduler
 	Workspace       workspace.Lifecycle
@@ -168,7 +168,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return []runtimebus.EventInterceptor{rt.Pipeline}
 	})
 	if stores.SQLDB != nil {
-		rt.Pipeline = runtimepipeline.NewFactoryPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.FactoryPipelineCoordinatorOptions{
+		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
 			ShardPlanner: runtimepipeline.NewShardPlanner(cfg.Sharding()),
 			Module:       opts.WorkflowModule,
 		})

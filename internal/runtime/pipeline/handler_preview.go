@@ -139,7 +139,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		Handler:  handler,
 		Preview:  true,
 		State: runtimeengine.StateSnapshot{
-			EntityID:     identity.NormalizeEntityID(state.VerticalID),
+			EntityID:     identity.NormalizeEntityID(state.EntityID),
 			CurrentState: strings.TrimSpace(string(state.Stage)),
 			Metadata:     cloneStringAnyMap(state.Metadata),
 			StateBuckets: map[string]any{},

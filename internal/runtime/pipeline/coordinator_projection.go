@@ -106,7 +106,7 @@ func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventTy
 func (vg *ValidationGate) getStateLocked(verticalID string) *validationPipelineState {
 	st := vg.states[verticalID]
 	if st == nil {
-		st = &validationPipelineState{VerticalID: verticalID, Status: "active"}
+		st = &validationPipelineState{EntityID: verticalID, Status: "active"}
 		vg.states[verticalID] = st
 	}
 	if st.Status == "" {
@@ -149,8 +149,8 @@ func (vg *ValidationGate) stageForState(st *validationPipelineState) string {
 
 func workflowStateForVertical(verticalID, stage string, st *validationPipelineState) WorkflowState {
 	state := WorkflowState{
-		VerticalID: strings.TrimSpace(verticalID),
-		Stage:      NormalizeWorkflowStateID(stage),
+		EntityID: strings.TrimSpace(verticalID),
+		Stage:    NormalizeWorkflowStateID(stage),
 	}
 	if st == nil {
 		return state
@@ -180,7 +180,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 	if verticalID == "" || stage == "" {
 		return
 	}
-	defer pc.notifyTestVerticalStageUpdated(verticalID, stage)
+	defer pc.notifyTestEntityStateUpdated(verticalID, stage)
 	var currentStage string
 	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
 		if instance, ok, err := pc.workflowStore.Load(ctx, verticalID); err == nil && ok {
@@ -336,7 +336,7 @@ func (pc *FactoryPipelineCoordinator) transitionStateSnapshot(eventType string, 
 	if verticalID != "" {
 		if st := pc.validationStateSnapshot(verticalID); st != nil {
 			out["validation_state"] = map[string]any{
-				"vertical_id":          st.VerticalID,
+				"vertical_id":          st.EntityID,
 				"status":               st.Status,
 				"g1_research":          st.G1Research,
 				"g2_spec":              st.G2Spec,

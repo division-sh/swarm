@@ -95,7 +95,7 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 	}
 	entityID := strings.TrimSpace(firstNonEmptyString(
 		workflowEventEntityID(triggerCtx.Event),
-		triggerCtx.State.VerticalID,
+		triggerCtx.State.EntityID,
 	))
 	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
 	if err != nil {

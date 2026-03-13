@@ -75,7 +75,7 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 		ContractBundle: semanticview.Wrap(bundle),
 		TemplateID:     "review",
 		InstanceID:     "inst-1",
-		VerticalID:     "ent-1",
+		EntityID:       "ent-1",
 		FlowPath:       "review/inst-1",
 		InitialState:   "queued",
 	})

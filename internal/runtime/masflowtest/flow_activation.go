@@ -48,7 +48,7 @@ func ActivateOperatingFlowInstance(t testing.TB, am *runtimemanager.AgentManager
 		ContractBundle: semanticview.Wrap(LoadMASWorkflowBundle(t)),
 		TemplateID:     "operating",
 		InstanceID:     verticalID,
-		VerticalID:     verticalID,
+		EntityID:       verticalID,
 		FlowPath:       "operating/" + verticalID,
 		InitialState:   "approved",
 		Config:         payload,

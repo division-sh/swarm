@@ -14,8 +14,8 @@ type scanWorkflowRuntime interface {
 	logPrefilterSkip(context.Context, events.Event, string, string, string, string, map[string]any, float64, float64)
 	markShardCompletedByAgent(context.Context, string) string
 	shardTerminalProgress(context.Context, string) (int, int, int, bool)
-	loadVerticalsByGeography(context.Context, string) ([]verticalCandidate, error)
-	ensureVerticalDiscovered(context.Context, string, string, string, map[string]any) (string, error)
+	loadEntitiesByGeography(context.Context, string) ([]entityCandidate, error)
+	ensureEntityDiscovered(context.Context, string, string, string, map[string]any) (string, error)
 	loadWorkflowScanProjection(context.Context, string) (*scanAccumulator, map[string]pendingCandidate, bool)
 }
 

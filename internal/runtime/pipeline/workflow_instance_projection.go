@@ -151,7 +151,7 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx cont
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || acc == nil {
 		return
 	}
-	verticalID := strings.TrimSpace(acc.VerticalID)
+	verticalID := strings.TrimSpace(acc.EntityID)
 	if verticalID == "" {
 		return
 	}
@@ -225,8 +225,8 @@ func (pc *FactoryPipelineCoordinator) hydrateWorkflowScoringAccumulator(ctx cont
 	if pc == nil || acc == nil {
 		return
 	}
-	name, geography, mode, geographicScope, discoveryContext := pc.loadScoringSeedDetails(ctx, acc.VerticalID)
-	acc.VerticalName = firstNonEmptyString(acc.VerticalName, name)
+	name, geography, mode, geographicScope, discoveryContext := pc.loadScoringSeedDetails(ctx, acc.EntityID)
+	acc.EntityName = firstNonEmptyString(acc.EntityName, name)
 	acc.Geography = firstNonEmptyString(acc.Geography, geography)
 	acc.GeographicScope = firstNonEmptyString(acc.GeographicScope, geographicScope)
 	acc.Mode = firstNonEmptyString(normalizeScanMode(acc.Mode), normalizeScanMode(mode))
@@ -345,7 +345,7 @@ func restoreValidationStateFromInstance(instance WorkflowInstance) (*validationP
 		return nil, false
 	}
 	st := &validationPipelineState{
-		VerticalID:         verticalID,
+		EntityID:           verticalID,
 		Status:             strings.TrimSpace(asString(metadata["status"])),
 		G1Research:         truthyMetadataFlag(metadata["g1_research"]),
 		G2Spec:             truthyMetadataFlag(metadata["g2_spec"]),
@@ -388,7 +388,7 @@ func restoreScoringAccumulatorFromInstance(instance WorkflowInstance) (*scoringA
 		return nil, false
 	}
 	acc := &scoringAccumulator{
-		VerticalID:      verticalID,
+		EntityID:        verticalID,
 		Expected:        stringSliceFromAny(nodeBucket["dimensions_requested"]),
 		Received:        decodeScoreDimensionResults(nodeBucket["dimensions_received"]),
 		RequestedAt:     parseWorkflowTime(nodeBucket["started_at"]),
@@ -530,8 +530,8 @@ func encodeScoringAccumulator(acc *scoringAccumulator) map[string]any {
 		return map[string]any{}
 	}
 	out := map[string]any{
-		"vertical_id":       strings.TrimSpace(acc.VerticalID),
-		"vertical_name":     strings.TrimSpace(acc.VerticalName),
+		"vertical_id":       strings.TrimSpace(acc.EntityID),
+		"vertical_name":     strings.TrimSpace(acc.EntityName),
 		"geography":         strings.TrimSpace(acc.Geography),
 		"geographic_scope":  strings.TrimSpace(acc.GeographicScope),
 		"mode":              strings.TrimSpace(acc.Mode),
@@ -588,7 +588,7 @@ func encodeScoringAccumulatorForWorkflow(source semanticview.Source, acc *scorin
 	}
 	out := map[string]any{}
 	if _, ok := fields["vertical_id"]; ok {
-		out["vertical_id"] = strings.TrimSpace(acc.VerticalID)
+		out["vertical_id"] = strings.TrimSpace(acc.EntityID)
 	}
 	if _, ok := fields["dimensions_requested"]; ok {
 		out["dimensions_requested"] = append([]string(nil), acc.Expected...)

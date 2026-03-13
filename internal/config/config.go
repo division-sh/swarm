@@ -8,6 +8,7 @@ import (
 	"time"
 
 	empireconfig "empireai/internal/empire/config"
+	runtimesharding "empireai/internal/runtime/core/sharding"
 	"gopkg.in/yaml.v3"
 )
 
@@ -109,14 +110,15 @@ func (c *Config) Validate() error {
 }
 
 // Sharding returns the sharding extension config, or zero value if not configured.
-func (c *Config) Sharding() empireconfig.ShardingConfig {
+func (c *Config) Sharding() runtimesharding.Config {
 	if c == nil || len(c.Extensions) == 0 {
-		return empireconfig.ShardingConfig{}
+		return runtimesharding.Config{}
 	}
 	var ext struct {
-		Sharding empireconfig.ShardingConfig `yaml:"sharding"`
+		Sharding runtimesharding.Config `yaml:"sharding"`
 	}
 	_ = c.DecodeExtensions(&ext)
+	ext.Sharding.ApplyDefaults()
 	return ext.Sharding
 }
 

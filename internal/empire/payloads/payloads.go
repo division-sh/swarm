@@ -125,6 +125,27 @@ type DedupCandidatePayload struct {
 	ID             string  `json:"id,omitempty"`
 }
 
+type VerticalDerivedPayload struct {
+	OpportunityID         string         `json:"opportunity_id,omitempty"`
+	ParentID              string         `json:"parent_id"`
+	GenerationDepth       int            `json:"generation_depth"`
+	GeneratorAgentID      string         `json:"generator_agent_id"`
+	CampaignID            string         `json:"campaign_id,omitempty"`
+	DerivationRationale   map[string]any `json:"derivation_rationale"`
+	OpportunityName       string         `json:"opportunity_name"`
+	PreliminaryICP        string         `json:"preliminary_icp,omitempty"`
+	BuildSketch           map[string]any `json:"build_sketch,omitempty"`
+	Evidence              map[string]any `json:"evidence,omitempty"`
+	GeographicScope       string         `json:"geographic_scope,omitempty"`
+	SignalStrength        float64        `json:"signal_strength"`
+	DiscoveryContext      map[string]any `json:"discovery_context,omitempty"`
+	OpportunityHypothesis string         `json:"opportunity_hypothesis,omitempty"`
+	Geography             string         `json:"geography,omitempty"`
+	OpportunityPattern    string         `json:"opportunity_pattern,omitempty"`
+	SignalSources         any            `json:"signal_sources,omitempty"`
+	RequiredCapabilities  any            `json:"required_capabilities,omitempty"`
+}
+
 type DedupAmbiguousPayload struct {
 	ScanID           string                `json:"scan_id"`
 	DedupID          string                `json:"dedup_id"`

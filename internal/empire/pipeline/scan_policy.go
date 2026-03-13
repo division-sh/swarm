@@ -29,26 +29,26 @@ func maxInt(a, b int) int {
 	return b
 }
 
-func (module) ExpandScanAssignments(mode string, payload map[string]any, assigned runtimepipeline.ScanAssignedPayload, batchSize int) ([]runtimepipeline.ScanAssignedPayload, error) {
+func (module) ExpandScanAssignments(mode string, payload map[string]any, assigned map[string]any, batchSize int) ([]map[string]any, error) {
 	mode = normalizeEmpireScanMode(mode)
 	if mode != "corpus" {
-		return []runtimepipeline.ScanAssignedPayload{assigned}, nil
+		return []map[string]any{assigned}, nil
 	}
 	corpusPath := strings.TrimSpace(asString(payload["corpus_path"]))
-	assigned.CorpusPath = corpusPath
+	assigned["corpus_path"] = corpusPath
 	batches, err := readJSONLFile(corpusPath, batchSize)
 	if err != nil {
-		assigned.CorpusSignals = []map[string]any{}
-		return []runtimepipeline.ScanAssignedPayload{assigned}, err
+		assigned["corpus_signals"] = []map[string]any{}
+		return []map[string]any{assigned}, err
 	}
 	if len(batches) == 0 {
-		assigned.CorpusSignals = []map[string]any{}
-		return []runtimepipeline.ScanAssignedPayload{assigned}, nil
+		assigned["corpus_signals"] = []map[string]any{}
+		return []map[string]any{assigned}, nil
 	}
-	out := make([]runtimepipeline.ScanAssignedPayload, 0, len(batches))
+	out := make([]map[string]any, 0, len(batches))
 	for _, batch := range batches {
-		perBatch := assigned
-		perBatch.CorpusSignals = batch
+		perBatch := cloneMap(assigned)
+		perBatch["corpus_signals"] = batch
 		out = append(out, perBatch)
 	}
 	return out, nil

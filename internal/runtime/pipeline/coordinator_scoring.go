@@ -28,7 +28,7 @@ type scoringStateRuntime interface {
 	loadWorkflowScoringAccumulator(context.Context, string) (*scoringAccumulator, bool)
 	publish(context.Context, string, string, map[string]any)
 	applyWorkflowEventTransition(context.Context, events.Event) (workflowTransitionOutcome, bool)
-	appendScoringDigestBuffer(context.Context, VerticalScoredPayload)
+	appendScoringDigestBuffer(context.Context, map[string]any)
 	persistWorkflowScoringAccumulator(context.Context, *scoringAccumulator)
 	clearWorkflowScoringAccumulator(context.Context, string)
 }
@@ -211,8 +211,8 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 	acc := pc.scoringAccumulatorSnapshot(ctx, verticalID)
 	if acc == nil {
 		acc = &scoringAccumulator{
-			VerticalID:       verticalID,
-			VerticalName:     name,
+			EntityID:         verticalID,
+			EntityName:       name,
 			Geography:        geography,
 			GeographicScope:  geographicScope,
 			Mode:             mode,
@@ -227,7 +227,7 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 		}
 	} else {
 		// Keep existing progress but refresh metadata when discovery details improve.
-		acc.VerticalName = firstNonEmptyString(name, acc.VerticalName)
+		acc.EntityName = firstNonEmptyString(name, acc.EntityName)
 		acc.Geography = firstNonEmptyString(geography, acc.Geography)
 		if strings.TrimSpace(geographicScope) != "" {
 			acc.GeographicScope = geographicScope
@@ -257,9 +257,9 @@ func (pc *FactoryPipelineCoordinator) handleScoringRequested(ctx context.Context
 
 	scoringPayload := pc.payloadFactory.BuildScoringRequestedPayload(verticalID, acc)
 	if excluded := pc.payloadFactory.DerivedScoringGeneratorAgent(ctx, acc); excluded != "" {
-		scoringPayload.ExcludedAnalysisAgentID = excluded
+		scoringPayload["excluded_analysis_agent_id"] = excluded
 		if assigned := pc.payloadFactory.SelectScoringAnalysisRecipient(excluded); assigned != "" {
-			scoringPayload.AssignedAnalysisAgentID = assigned
+			scoringPayload["assigned_analysis_agent_id"] = assigned
 			pc.publishDirect(ctx, "scoring.requested", verticalID, payloadMap(scoringPayload), []string{assigned})
 			return
 		}
@@ -301,7 +301,7 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 	}
 	geography := strings.TrimSpace(asString(payload["geography"]))
 	if geography == "" {
-		_, geo, err := pc.loadVerticalIdentity(ctx, parentID)
+		_, geo, err := pc.loadEntityIdentity(ctx, parentID)
 		if err == nil {
 			geography = strings.TrimSpace(geo)
 		}
@@ -319,7 +319,7 @@ func (pc *FactoryPipelineCoordinator) handleVerticalDerived(ctx context.Context,
 	}
 
 	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
-	verticalID, err := pc.ensureVerticalDiscovered(ctx, name, geography, "derived", payload)
+	verticalID, err := pc.ensureEntityDiscovered(ctx, name, geography, "derived", payload)
 	if err != nil {
 		log.Printf("scoring-node: ensure derived vertical failed parent=%s name=%s err=%v", parentID, name, err)
 		return
@@ -502,7 +502,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 	}
 	if acc == nil {
 		acc = &scoringAccumulator{
-			VerticalID:      verticalID,
+			EntityID:        verticalID,
 			Rubric:          "universal",
 			Expected:        ss.scoring.ExpectedScoringDimensions("universal"),
 			Received:        map[string]scoreDimensionResult{},
@@ -511,7 +511,7 @@ func (ss *ScoringState) handleScoreDimensionComplete(ctx context.Context, evt ev
 			RequestedAt:     time.Now().UTC(),
 		}
 		name, geo, mode := ss.runtime.loadScoringSeed(ctx, verticalID)
-		acc.VerticalName = name
+		acc.EntityName = name
 		acc.Geography = geo
 		acc.Mode = mode
 		if acc.Mode == "" {
@@ -710,8 +710,8 @@ func (pc *FactoryPipelineCoordinator) handlePortfolioDigestTimer(ctx context.Con
 
 type scoringDigestEntry struct {
 	ID           string
-	VerticalID   string
-	VerticalName string
+	EntityID     string
+	EntityName   string
 	Geography    string
 	Result       string
 	Reason       string
@@ -720,7 +720,7 @@ type scoringDigestEntry struct {
 	ScoredAt     time.Time
 }
 
-func (pc *FactoryPipelineCoordinator) appendScoringDigestBuffer(ctx context.Context, scored VerticalScoredPayload) {
+func (pc *FactoryPipelineCoordinator) appendScoringDigestBuffer(ctx context.Context, scored map[string]any) {
 	if pc == nil || pc.db == nil {
 		return
 	}
@@ -740,28 +740,28 @@ func (pc *FactoryPipelineCoordinator) appendScoringDigestBuffer(ctx context.Cont
 		)
 	`,
 		uuid.NewString(),
-		strings.TrimSpace(scored.VerticalID),
-		strings.TrimSpace(coalesce(strings.TrimSpace(scored.VerticalName), strings.TrimSpace(scored.VerticalID))),
-		strings.TrimSpace(coalesce(strings.TrimSpace(scored.Geography), "unspecified")),
-		scored.CompositeScore,
-		scored.ViabilityScore,
-		strings.TrimSpace(coalesce(strings.TrimSpace(scored.Result), "rejected")),
-		strings.TrimSpace(coalesce(strings.TrimSpace(scored.Reason), summary)),
+		strings.TrimSpace(asString(scored["vertical_id"])),
+		strings.TrimSpace(coalesce(strings.TrimSpace(asString(scored["vertical_name"])), strings.TrimSpace(asString(scored["vertical_id"])))),
+		strings.TrimSpace(coalesce(strings.TrimSpace(asString(scored["geography"])), "unspecified")),
+		asFloat(scored["composite_score"]),
+		asFloat(scored["viability_score"]),
+		strings.TrimSpace(coalesce(strings.TrimSpace(asString(scored["result"])), "rejected")),
+		strings.TrimSpace(coalesce(strings.TrimSpace(asString(scored["reason"])), summary)),
 	); err != nil {
-		log.Printf("pipeline: append scoring digest buffer failed vertical=%s err=%v", strings.TrimSpace(scored.VerticalID), err)
+		log.Printf("pipeline: append scoring digest buffer failed vertical=%s err=%v", strings.TrimSpace(asString(scored["vertical_id"])), err)
 	}
 }
 
-func buildScoringRejectionSummary(scored VerticalScoredPayload) string {
-	name := strings.TrimSpace(scored.VerticalName)
+func buildScoringRejectionSummary(scored map[string]any) string {
+	name := strings.TrimSpace(asString(scored["vertical_name"]))
 	if name == "" {
-		name = strings.TrimSpace(scored.VerticalID)
+		name = strings.TrimSpace(asString(scored["vertical_id"]))
 	}
-	geography := strings.TrimSpace(scored.Geography)
+	geography := strings.TrimSpace(asString(scored["geography"]))
 	if geography == "" {
 		geography = "unspecified"
 	}
-	reason := strings.TrimSpace(scored.Reason)
+	reason := strings.TrimSpace(asString(scored["reason"]))
 	if reason == "" {
 		reason = "rejected"
 	}
@@ -770,8 +770,8 @@ func buildScoringRejectionSummary(scored VerticalScoredPayload) string {
 		name,
 		geography,
 		reason,
-		scored.CompositeScore,
-		scored.ViabilityScore,
+		asFloat(scored["composite_score"]),
+		asFloat(scored["viability_score"]),
 	)
 }
 
@@ -810,8 +810,8 @@ func (pc *FactoryPipelineCoordinator) consumeScoringDigestEntries(ctx context.Co
 		var rec scoringDigestEntry
 		if scanErr := rows.Scan(
 			&rec.ID,
-			&rec.VerticalID,
-			&rec.VerticalName,
+			&rec.EntityID,
+			&rec.EntityName,
 			&rec.Geography,
 			&rec.Result,
 			&rec.Reason,
@@ -826,7 +826,7 @@ func (pc *FactoryPipelineCoordinator) consumeScoringDigestEntries(ctx context.Co
 		}
 		summary := fmt.Sprintf(
 			"%s (%s) rejected in scoring: reason=%s composite=%.2f viability=%.2f",
-			coalesce(strings.TrimSpace(rec.VerticalName), strings.TrimSpace(rec.VerticalID)),
+			coalesce(strings.TrimSpace(rec.EntityName), strings.TrimSpace(rec.EntityID)),
 			coalesce(strings.TrimSpace(rec.Geography), "unspecified"),
 			coalesce(strings.TrimSpace(rec.Reason), "rejected"),
 			rec.Composite,
@@ -834,8 +834,8 @@ func (pc *FactoryPipelineCoordinator) consumeScoringDigestEntries(ctx context.Co
 		)
 		out = append(out, map[string]any{
 			"id":              rec.ID,
-			"vertical_id":     rec.VerticalID,
-			"vertical_name":   rec.VerticalName,
+			"vertical_id":     rec.EntityID,
+			"vertical_name":   rec.EntityName,
 			"geography":       rec.Geography,
 			"result":          rec.Result,
 			"reason":          rec.Reason,

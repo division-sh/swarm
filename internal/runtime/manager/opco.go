@@ -48,7 +48,7 @@ func (am *AgentManager) SpawnOpCo(verticalID string, mandate runtimeactors.Manda
 		ContractBundle: semanticview.Wrap(bundle),
 		TemplateID:     "operating",
 		InstanceID:     verticalID,
-		VerticalID:     verticalID,
+		EntityID:       verticalID,
 		FlowPath:       "operating/" + verticalID,
 		InitialState:   "approved",
 		Config:         config,

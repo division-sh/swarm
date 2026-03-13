@@ -16,7 +16,7 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 		"risk":         80.0,
 		"priority":     "urgent",
 	}, runtimepipeline.WorkflowState{
-		VerticalID: "item-123",
+		EntityID:   "item-123",
 		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
 		Status:     "ready",
 		Metadata:   map[string]any{},
@@ -38,7 +38,7 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 		"completeness": 55.0,
 		"risk":         40.0,
 	}, runtimepipeline.WorkflowState{
-		VerticalID: "item-456",
+		EntityID:   "item-456",
 		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
 		Status:     "ready",
 		Metadata:   map[string]any{},

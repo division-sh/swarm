@@ -84,7 +84,7 @@ func (pf *PipelinePayloadFactory) validationContextFromWorkflowProjection(vertic
 }
 
 func (pf *PipelinePayloadFactory) identityForPayload(ctx context.Context, verticalID string) (string, string) {
-	name, geography, err := pf.coordinator.loadVerticalIdentity(ctx, verticalID)
+	name, geography, err := pf.coordinator.loadEntityIdentity(ctx, verticalID)
 	if err != nil {
 		log.Printf("pipeline: identity lookup failed vertical=%s err=%v", verticalID, err)
 		return "", ""
@@ -96,11 +96,11 @@ func (pf *PipelinePayloadFactory) BuildScanAssignedPayload(
 	scanID, campaignID, mode, geography string,
 	source map[string]any,
 	plannedShards int,
-) ScanAssignedPayload {
+) map[string]any {
 	return pf.module.BuildScanAssignedPayload(scanID, campaignID, mode, geography, source, plannedShards)
 }
 
-func (pf *PipelinePayloadFactory) BuildSynthesisNeededPayload(scanID string, acc *scanAccumulator, raw map[string]any) SynthesisNeededPayload {
+func (pf *PipelinePayloadFactory) BuildSynthesisNeededPayload(scanID string, acc *scanAccumulator, raw map[string]any) map[string]any {
 	campaignID, mode, geography := "", "", ""
 	if acc != nil {
 		campaignID = acc.CampaignID
@@ -109,7 +109,7 @@ func (pf *PipelinePayloadFactory) BuildSynthesisNeededPayload(scanID string, acc
 	}
 	out := pf.module.BuildSynthesisNeededPayload(scanID, campaignID, mode, geography, raw)
 	if acc != nil {
-		out.Geography = firstNonEmptyString(strings.TrimSpace(out.Geography), strings.TrimSpace(acc.Geography))
+		out["geography"] = firstNonEmptyString(strings.TrimSpace(asString(out["geography"])), strings.TrimSpace(acc.Geography))
 	}
 	return out
 }
@@ -120,7 +120,7 @@ func (pf *PipelinePayloadFactory) BuildDedupAmbiguousPayload(
 	candidateName, geography string,
 	signal float64,
 	existingID, existingName string,
-) DedupAmbiguousPayload {
+) map[string]any {
 	return pf.module.BuildDedupAmbiguousPayload(scanID, dedupEventID, similarity, candidateName, geography, signal, existingID, existingName)
 }
 
@@ -129,21 +129,21 @@ func (pf *PipelinePayloadFactory) BuildVerticalDiscoveredPayload(
 	signal float64,
 	discoverySource string,
 	rawSignals map[string]any,
-) VerticalDiscoveredPayload {
+) map[string]any {
 	return pf.module.BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID, signal, discoverySource, rawSignals)
 }
 
-func (pf *PipelinePayloadFactory) BuildScanCompletedPayload(in scanCompletedBuildInput) ScanCompletedPayload {
+func (pf *PipelinePayloadFactory) BuildScanCompletedPayload(in scanCompletedBuildInput) map[string]any {
 	return pf.module.BuildScanCompletedPayload(in)
 }
 
-func (pf *PipelinePayloadFactory) BuildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) ScoringRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildScoringRequestedPayload(verticalID string, acc *scoringAccumulator) map[string]any {
 	if acc == nil {
 		return pf.module.BuildScoringRequestedPayload(strings.TrimSpace(verticalID), "", "", "", "", nil, nil)
 	}
 	return pf.module.BuildScoringRequestedPayload(
 		strings.TrimSpace(verticalID),
-		acc.VerticalName,
+		acc.EntityName,
 		acc.Geography,
 		acc.Mode,
 		acc.Rubric,
@@ -205,7 +205,7 @@ func (pf *PipelinePayloadFactory) SelectScoringAnalysisRecipient(excludedAgent s
 	)
 }
 
-func (pf *PipelinePayloadFactory) BuildScoringContestedPayload(verticalID, dimension string, contest contestedDimension, acc *scoringAccumulator) ScoringContestedPayload {
+func (pf *PipelinePayloadFactory) BuildScoringContestedPayload(verticalID, dimension string, contest contestedDimension, acc *scoringAccumulator) map[string]any {
 	rubric, mode := "", ""
 	if acc != nil {
 		rubric = acc.Rubric
@@ -214,70 +214,70 @@ func (pf *PipelinePayloadFactory) BuildScoringContestedPayload(verticalID, dimen
 	return pf.module.BuildScoringContestedPayload(verticalID, dimension, contest, rubric, mode)
 }
 
-func (pf *PipelinePayloadFactory) BuildVerticalScoredPayload(verticalID string, result scoringComposite, acc *scoringAccumulator) VerticalScoredPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalScoredPayload(verticalID string, result scoringComposite, acc *scoringAccumulator) map[string]any {
 	verticalName, geography, mode := "", "", ""
 	if acc != nil {
-		verticalName = acc.VerticalName
+		verticalName = acc.EntityName
 		geography = acc.Geography
 		mode = acc.Mode
 	}
 	return pf.module.BuildVerticalScoredPayload(verticalID, result, verticalName, geography, mode)
 }
 
-func (pf *PipelinePayloadFactory) BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) map[string]any {
 	return pf.module.BuildVerticalShortlistedPayload(verticalID, composite, viability, scoringPayload)
 }
 
-func (pf *PipelinePayloadFactory) BuildVerticalMarginalPayload(verticalID string, result scoringComposite) VerticalMarginalPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalMarginalPayload(verticalID string, result scoringComposite) map[string]any {
 	return pf.module.BuildVerticalMarginalPayload(verticalID, result)
 }
 
-func (pf *PipelinePayloadFactory) BuildVerticalRejectedPayload(verticalID string, result scoringComposite) VerticalRejectedPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalRejectedPayload(verticalID string, result scoringComposite) map[string]any {
 	return pf.module.BuildVerticalRejectedPayload(verticalID, result)
 }
 
-func (pf *PipelinePayloadFactory) BuildBrandRequestedPayload(ctx context.Context, verticalID string, scoring map[string]any, brief map[string]any) BrandRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildBrandRequestedPayload(ctx context.Context, verticalID string, scoring map[string]any, brief map[string]any) map[string]any {
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildBrandRequestedPayload(verticalID, name, geography, scoring, brief)
 }
 
-func (pf *PipelinePayloadFactory) BuildValidationPackageReadyPayload(ctx context.Context, verticalID string, snap validationContextSnapshot) ValidationPackageReadyPayload {
+func (pf *PipelinePayloadFactory) BuildValidationPackageReadyPayload(ctx context.Context, verticalID string, snap validationContextSnapshot) map[string]any {
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildValidationPackageReadyPayload(verticalID, name, geography, snap)
 }
 
-func (pf *PipelinePayloadFactory) BuildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any) SpecValidationRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildSpecValidationRequestedPayload(ctx context.Context, verticalID string, spec map[string]any) map[string]any {
 	return pf.module.BuildSpecValidationRequestedPayload(verticalID, spec)
 }
 
-func (pf *PipelinePayloadFactory) BuildCTOSpecReviewRequestedPayload(ctx context.Context, verticalID string, specValidation map[string]any) CTOSpecReviewRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildCTOSpecReviewRequestedPayload(ctx context.Context, verticalID string, specValidation map[string]any) map[string]any {
 	snap := pf.ValidationContext(verticalID)
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildCTOSpecReviewRequestedPayload(verticalID, name, geography, specValidation, snap)
 }
 
-func (pf *PipelinePayloadFactory) BuildSpecRevisionRequestedPayload(ctx context.Context, verticalID, source string, feedback map[string]any) SpecRevisionRequestedPayload {
+func (pf *PipelinePayloadFactory) BuildSpecRevisionRequestedPayload(ctx context.Context, verticalID, source string, feedback map[string]any) map[string]any {
 	snap := pf.ValidationContext(verticalID)
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildSpecRevisionRequestedPayload(verticalID, source, name, geography, feedback, snap)
 }
 
-func (pf *PipelinePayloadFactory) BuildValidationMoreDataPayload(ctx context.Context, verticalID string, request map[string]any, snap validationContextSnapshot) ValidationMoreDataNeededPayload {
+func (pf *PipelinePayloadFactory) BuildValidationMoreDataPayload(ctx context.Context, verticalID string, request map[string]any, snap validationContextSnapshot) map[string]any {
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildValidationMoreDataPayload(verticalID, name, geography, request, snap)
 }
 
-func (pf *PipelinePayloadFactory) BuildBrandRevisionNeededPayload(ctx context.Context, verticalID string, feedback map[string]any, brand map[string]any) BrandRevisionNeededPayload {
+func (pf *PipelinePayloadFactory) BuildBrandRevisionNeededPayload(ctx context.Context, verticalID string, feedback map[string]any, brand map[string]any) map[string]any {
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildBrandRevisionNeededPayload(verticalID, name, geography, feedback, brand)
 }
 
-func (pf *PipelinePayloadFactory) BuildVerticalKilledPayload(ctx context.Context, verticalID, sourceEvent string, reason map[string]any) VerticalKilledPayload {
+func (pf *PipelinePayloadFactory) BuildVerticalKilledPayload(ctx context.Context, verticalID, sourceEvent string, reason map[string]any) map[string]any {
 	name, geography := pf.identityForPayload(ctx, verticalID)
 	return pf.module.BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent, reason)
 }
 
-func (pf *PipelinePayloadFactory) BuildValidationStartedPayload(ctx context.Context, verticalID string, scoring map[string]any, seed map[string]any) ValidationStartedPayload {
+func (pf *PipelinePayloadFactory) BuildValidationStartedPayload(ctx context.Context, verticalID string, scoring map[string]any, seed map[string]any) map[string]any {
 	name := firstNonEmptyString(
 		asString(seed["vertical_name"]),
 		asString(seed["name"]),
@@ -288,7 +288,7 @@ func (pf *PipelinePayloadFactory) BuildValidationStartedPayload(ctx context.Cont
 		asString(seed["geography"]),
 		asString(scoring["geography"]),
 	)
-	dbName, dbGeography, err := pf.coordinator.loadVerticalIdentity(ctx, verticalID)
+	dbName, dbGeography, err := pf.coordinator.loadEntityIdentity(ctx, verticalID)
 	if err != nil {
 		log.Printf("pipeline: validation payload enrichment failed vertical=%s err=%v", verticalID, err)
 	} else {

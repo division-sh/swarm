@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -16,6 +17,161 @@ func (sc *ScanCoordinator) handleDiscoveryReport(ctx context.Context, evt events
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
 		pc.handleDiscoveryReport(ctx, evt)
 	}
+}
+
+func discoveryRuntimeDefaultScanMode(runtime scanWorkflowRuntime) string {
+	if pc, ok := runtime.(*FactoryPipelineCoordinator); ok {
+		return defaultPipelineScanMode(pc.SemanticSource())
+	}
+	return defaultPipelineScanMode(nil)
+}
+
+func discoveryRuntimeResolveScanMode(runtime scanWorkflowRuntime, raw string) string {
+	if pc, ok := runtime.(*FactoryPipelineCoordinator); ok {
+		return resolvePipelineScanMode(pc.SemanticSource(), raw)
+	}
+	return resolvePipelineScanMode(nil, raw)
+}
+
+func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil {
+		return
+	}
+	sc := pc.scanCoordinator
+	payload := parsePayloadMap(evt.Payload)
+	scanID := strings.TrimSpace(asString(payload["scan_id"]))
+	if scanID == "" {
+		runtimeWarn(
+			"discovery-aggregator",
+			"dropping discovery report missing scan_id event_id=%s type=%s source=%s",
+			strings.TrimSpace(evt.ID),
+			strings.TrimSpace(string(evt.Type)),
+			strings.TrimSpace(evt.SourceAgent),
+		)
+		return
+	}
+
+	sc.mu.Lock()
+	acc := sc.scans[scanID]
+	if acc == nil {
+		acc = &scanAccumulator{
+			ScanID:      scanID,
+			Mode:        discoveryRuntimeResolveScanMode(sc.runtime, asString(payload["mode"])),
+			Geography:   strings.TrimSpace(asString(payload["geography"])),
+			Expected:    1,
+			CompletedBy: make(map[string]struct{}),
+			ReportData:  make([]map[string]any, 0),
+			CreatedAt:   time.Now(),
+		}
+		if acc.Mode == "" {
+			acc.Mode = discoveryRuntimeDefaultScanMode(sc.runtime)
+		}
+		sc.scans[scanID] = acc
+	}
+	acc.ReportData = append(acc.ReportData, cloneMap(payload))
+	acc.Reports++
+	sc.mu.Unlock()
+
+	if payloadIndicatesSynthesisNeeded(payload) {
+		sc.runtime.publish(ctx, "synthesis.needed", "", payloadMap(sc.payloadFactory.BuildSynthesisNeededPayload(scanID, acc, payload)))
+		return
+	}
+
+	candidates := buildDiscoveryCandidatesForReport(acc.Mode, payload)
+	for _, cand := range candidates {
+		pc.processDiscoveryCandidate(ctx, evt, scanID, acc, cand)
+	}
+}
+
+func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
+	ctx context.Context,
+	evt events.Event,
+	scanID string,
+	acc *scanAccumulator,
+	candidate discoveryCandidate,
+) {
+	if pc == nil || pc.scanCoordinator == nil || acc == nil {
+		return
+	}
+	sc := pc.scanCoordinator
+	signal := candidate.Signal
+	allowed, adjustedSignal, reason := sc.discovery.EvaluateDiscoveryPreFilter(candidate.Payload, signal)
+	if !allowed {
+		sc.runtime.logPrefilterSkip(ctx, evt, scanID, acc.CampaignID, reason, candidate.Mode, candidate.Payload, signal, adjustedSignal)
+		sc.mu.Lock()
+		acc.Skipped++
+		sc.mu.Unlock()
+		return
+	}
+	signal = adjustedSignal
+	candidate.Payload["signal_strength"] = adjustedSignal
+
+	payload := candidate.Payload
+	name := deriveDiscoveryCandidateName(payload)
+	if name == "" {
+		runtimeWarn(
+			"discovery-aggregator",
+			"skipping discovery candidate with missing name scan_id=%s event_id=%s source=%s mode=%s",
+			scanID,
+			strings.TrimSpace(evt.ID),
+			strings.TrimSpace(evt.SourceAgent),
+			candidate.Mode,
+		)
+		sc.mu.Lock()
+		acc.Skipped++
+		sc.mu.Unlock()
+		return
+	}
+
+	geography := strings.TrimSpace(firstNonEmptyString(asString(payload["geography"]), acc.Geography))
+	if geography == "" {
+		geography = "unknown"
+	}
+
+	existing, err := sc.runtime.loadEntitiesByGeography(ctx, geography)
+	if err != nil {
+		log.Printf("pipeline: dedup lookup failed scan=%s geo=%s err=%v", scanID, geography, err)
+		existing = nil
+	}
+	for _, v := range existing {
+		if normalizeName(v.Name) == normalizeName(name) {
+			sc.mu.Lock()
+			acc.Skipped++
+			sc.mu.Unlock()
+			return
+		}
+	}
+
+	if best, score := fuzzyBestMatch(name, existing); best.ID != "" && score >= 0.70 {
+		dedupEventID := uuid.NewString()
+		cand := pendingCandidate{
+			DedupEventID: dedupEventID,
+			ExistingID:   strings.TrimSpace(best.ID),
+			ScanID:       scanID,
+			CampaignID:   acc.CampaignID,
+			Mode:         candidate.Mode,
+			Geography:    geography,
+			Name:         name,
+			Signal:       signal,
+			Payload:      payload,
+		}
+		sc.mu.Lock()
+		sc.pendingDedup[dedupEventID] = cand
+		sc.mu.Unlock()
+		sc.runtime.publish(ctx, "dedup.ambiguous", "", payloadMap(sc.payloadFactory.BuildDedupAmbiguousPayload(scanID, dedupEventID, score, name, geography, signal, best.ID, best.Name)))
+		return
+	}
+
+	verticalID, err := sc.runtime.ensureEntityDiscovered(ctx, name, geography, candidate.Mode, payload)
+	if err != nil {
+		log.Printf("pipeline: ensure discovered vertical failed name=%s geo=%s mode=%s err=%v", name, geography, candidate.Mode, err)
+		return
+	}
+	sc.mu.Lock()
+	acc.Discovered++
+	sc.mu.Unlock()
+	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(verticalID, name, geography, candidate.Mode, scanID, acc.CampaignID, signal, evt.SourceAgent, payload))
+	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
 }
 
 type discoveryCandidate = DiscoveryCandidate
@@ -125,10 +281,136 @@ func (sc *ScanCoordinator) handleDedupResolved(ctx context.Context, evt events.E
 	}
 }
 
+func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil {
+		return
+	}
+	sc := pc.scanCoordinator
+	payload := parsePayloadMap(evt.Payload)
+	dedupEventID := strings.TrimSpace(asString(payload["dedup_event_id"]))
+	if dedupEventID == "" {
+		return
+	}
+
+	sc.mu.Lock()
+	cand, ok := sc.pendingDedup[dedupEventID]
+	if ok {
+		delete(sc.pendingDedup, dedupEventID)
+	}
+	sc.mu.Unlock()
+	if !ok {
+		sc.ensureScanProjectionLoaded(ctx, strings.TrimSpace(asString(payload["scan_id"])))
+		sc.mu.Lock()
+		cand, ok = sc.pendingDedup[dedupEventID]
+		if ok {
+			delete(sc.pendingDedup, dedupEventID)
+		}
+		sc.mu.Unlock()
+	}
+	if !ok {
+		return
+	}
+
+	action := strings.ToLower(strings.TrimSpace(asString(payload["action"])))
+	if action == "merge" {
+		sc.mu.Lock()
+		if acc := sc.scans[cand.ScanID]; acc != nil {
+			acc.Skipped++
+		}
+		sc.mu.Unlock()
+		return
+	}
+
+	verticalID, err := sc.runtime.ensureEntityDiscovered(ctx, cand.Name, cand.Geography, cand.Mode, cand.Payload)
+	if err != nil {
+		log.Printf("pipeline: dedup keep_both insert failed err=%v", err)
+		return
+	}
+	sc.mu.Lock()
+	if acc := sc.scans[cand.ScanID]; acc != nil {
+		acc.Discovered++
+	}
+	sc.mu.Unlock()
+	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "discovery-aggregator", cand.Payload))
+	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
+}
+
 func (sc *ScanCoordinator) handleSynthesisResolved(ctx context.Context, evt events.Event) {
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
 		pc.handleSynthesisResolved(ctx, evt)
 	}
+}
+
+func (pc *FactoryPipelineCoordinator) handleSynthesisResolved(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil || pc.scanCoordinator.runtime == nil {
+		return
+	}
+	sc := pc.scanCoordinator
+	payload := parsePayloadMap(evt.Payload)
+	resolution := strings.ToLower(strings.TrimSpace(firstNonEmptyString(
+		asString(payload["resolution"]),
+		asString(payload["action"]),
+		asString(payload["resolved_assessment"]),
+	)))
+	if resolution == "" {
+		resolution = "conflict_resolved"
+	}
+	if resolution == "irreconcilable" || resolution == "discard" || resolution == "discard_both" {
+		return
+	}
+
+	name := deriveDiscoveryCandidateName(payload)
+	if name == "" {
+		return
+	}
+	mode := discoveryRuntimeResolveScanMode(sc.runtime, asString(payload["mode"]))
+	if mode == "" {
+		mode = discoveryRuntimeDefaultScanMode(sc.runtime)
+	}
+	geography := strings.TrimSpace(asString(payload["geography"]))
+	if geography == "" {
+		geography = "unknown"
+	}
+	scanID := strings.TrimSpace(asString(payload["scan_id"]))
+	campaignID := strings.TrimSpace(asString(payload["campaign_id"]))
+	signal := asFloat(payload["signal_strength"])
+
+	verticalID, err := sc.runtime.ensureEntityDiscovered(ctx, name, geography, mode, payload)
+	if err != nil {
+		log.Printf("pipeline: synthesized discovery insert failed name=%s geo=%s mode=%s err=%v", name, geography, mode, err)
+		return
+	}
+	if scanID != "" {
+		sc.ensureScanProjectionLoaded(ctx, scanID)
+		sc.mu.Lock()
+		if acc := sc.scans[scanID]; acc != nil {
+			acc.Discovered++
+			if campaignID == "" {
+				campaignID = acc.CampaignID
+			}
+			if geography == "unknown" && strings.TrimSpace(acc.Geography) != "" {
+				geography = strings.TrimSpace(acc.Geography)
+			}
+		}
+		sc.mu.Unlock()
+	}
+
+	discoverySource := strings.TrimSpace(evt.SourceAgent)
+	if discoverySource == "" {
+		discoverySource = "discovery-aggregator"
+	}
+	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(
+		verticalID,
+		name,
+		geography,
+		mode,
+		scanID,
+		campaignID,
+		signal,
+		discoverySource,
+		payload,
+	))
+	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
 }
 
 func (sc *ScanCoordinator) ensureScanProjectionLoaded(ctx context.Context, scanID string) {
@@ -171,12 +453,12 @@ func (sc *ScanCoordinator) pendingDedupCountForScan(scanID string) int {
 	return count
 }
 
-type verticalCandidate struct {
+type entityCandidate struct {
 	ID   string
 	Name string
 }
 
-func (pc *FactoryPipelineCoordinator) loadVerticalsByGeography(ctx context.Context, geography string) ([]verticalCandidate, error) {
+func (pc *FactoryPipelineCoordinator) loadEntitiesByGeography(ctx context.Context, geography string) ([]entityCandidate, error) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(geography) == "" {
 		return nil, nil
 	}
@@ -184,7 +466,7 @@ func (pc *FactoryPipelineCoordinator) loadVerticalsByGeography(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	out := make([]verticalCandidate, 0, 32)
+	out := make([]entityCandidate, 0, 32)
 	target := strings.ToLower(strings.TrimSpace(geography))
 	for i := len(items) - 1; i >= 0; i-- {
 		item := items[i]
@@ -199,7 +481,7 @@ func (pc *FactoryPipelineCoordinator) loadVerticalsByGeography(ctx context.Conte
 		if strings.ToLower(strings.TrimSpace(itemGeo)) != target {
 			continue
 		}
-		out = append(out, verticalCandidate{ID: strings.TrimSpace(item.InstanceID), Name: name})
+		out = append(out, entityCandidate{ID: strings.TrimSpace(item.InstanceID), Name: name})
 		if len(out) >= 500 {
 			break
 		}
@@ -207,11 +489,11 @@ func (pc *FactoryPipelineCoordinator) loadVerticalsByGeography(ctx context.Conte
 	return out, nil
 }
 
-func (pc *FactoryPipelineCoordinator) loadVerticalIdentity(ctx context.Context, verticalID string) (string, string, error) {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(verticalID) == "" {
+func (pc *FactoryPipelineCoordinator) loadEntityIdentity(ctx context.Context, entityID string) (string, string, error) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(entityID) == "" {
 		return "", "", nil
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
+	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
 	if err != nil {
 		return "", "", err
 	}
@@ -222,8 +504,8 @@ func (pc *FactoryPipelineCoordinator) loadVerticalIdentity(ctx context.Context, 
 	return strings.TrimSpace(name), strings.TrimSpace(geography), nil
 }
 
-func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Context, name, geography, mode string, payload map[string]any) (string, error) {
-	existing, err := pc.loadVerticalsByGeography(ctx, geography)
+func (pc *FactoryPipelineCoordinator) ensureEntityDiscovered(ctx context.Context, name, geography, mode string, payload map[string]any) (string, error) {
+	existing, err := pc.loadEntitiesByGeography(ctx, geography)
 	if err != nil {
 		return "", err
 	}
@@ -251,7 +533,7 @@ func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Conte
 			"instance_kind": "vertical",
 			"instance_id":   verticalID,
 			"name":          strings.TrimSpace(name),
-			"slug":          buildVerticalSlug(name, verticalID),
+			"slug":          buildEntitySlug(name, verticalID),
 			"geography":     strings.TrimSpace(geography),
 			"mode":          "factory",
 			"raw_signals":   cloneMap(payload),
@@ -259,11 +541,11 @@ func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Conte
 	}); err != nil {
 		return "", err
 	}
-	_ = pc.updateVerticalDiscoveryMetadata(ctx, verticalID, mode, payload)
+	_ = pc.updateEntityDiscoveryMetadata(ctx, verticalID, mode, payload)
 	return verticalID, nil
 }
 
-func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx context.Context, verticalID, mode string, payload map[string]any) error {
+func (pc *FactoryPipelineCoordinator) updateEntityDiscoveryMetadata(ctx context.Context, verticalID, mode string, payload map[string]any) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(verticalID) == "" {
 		return nil
 	}
@@ -324,7 +606,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 			metadata["name"] = deriveDiscoveryCandidateName(payload)
 		}
 		if strings.TrimSpace(asString(metadata["slug"])) == "" {
-			metadata["slug"] = buildVerticalSlug(asString(metadata["name"]), verticalID)
+			metadata["slug"] = buildEntitySlug(asString(metadata["name"]), verticalID)
 		}
 		if strings.TrimSpace(asString(metadata["geography"])) == "" {
 			metadata["geography"] = strings.TrimSpace(asString(payload["geography"]))
@@ -353,7 +635,7 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 var punctuationHeavyName = regexp.MustCompile(`[.!?;:]`)
 
-var knownVerticalAcronyms = map[string]string{
+var knownEntityAcronyms = map[string]string{
 	"ai":    "AI",
 	"api":   "API",
 	"b2b":   "B2B",
@@ -383,7 +665,7 @@ func deriveDiscoveryCandidateName(payload map[string]any) string {
 		return ""
 	}
 	for _, key := range []string{"opportunity_name", "vertical_name", "name", "title"} {
-		if v := normalizeProvidedVerticalName(asString(payload[key]), false); v != "" {
+		if v := normalizeProvidedEntityName(asString(payload[key]), false); v != "" {
 			return v
 		}
 	}
@@ -397,14 +679,14 @@ func deriveDiscoveryCandidateName(payload map[string]any) string {
 		return v
 	}
 	for _, key := range []string{"trend_description", "opportunity_hypothesis"} {
-		if v := normalizeProvidedVerticalName(asString(payload[key]), true); v != "" {
+		if v := normalizeProvidedEntityName(asString(payload[key]), true); v != "" {
 			return v
 		}
 	}
 	return ""
 }
 
-func normalizeProvidedVerticalName(raw string, strictNarrative bool) string {
+func normalizeProvidedEntityName(raw string, strictNarrative bool) string {
 	name := strings.TrimSpace(raw)
 	if name == "" {
 		return ""
@@ -421,8 +703,8 @@ func normalizeProvidedVerticalName(raw string, strictNarrative bool) string {
 			return ""
 		}
 	}
-	if len(name) > maxVerticalNameLen {
-		name = strings.TrimSpace(truncateRunes(name, maxVerticalNameLen))
+	if len(name) > maxEntityNameLen {
+		name = strings.TrimSpace(truncateRunes(name, maxEntityNameLen))
 	}
 	// If the candidate looks like a taxonomy token, present a readable label.
 	if !strings.Contains(name, " ") && (strings.Contains(name, "_") || strings.Contains(name, "-") || strings.Contains(name, "/")) {
@@ -440,7 +722,7 @@ func humanizeTaxonomyLabel(raw string) string {
 	}
 	parts := strings.Fields(norm)
 	for i, part := range parts {
-		if acronym, ok := knownVerticalAcronyms[part]; ok {
+		if acronym, ok := knownEntityAcronyms[part]; ok {
 			parts[i] = acronym
 			continue
 		}
@@ -450,21 +732,21 @@ func humanizeTaxonomyLabel(raw string) string {
 		parts[i] = strings.ToUpper(part[:1]) + part[1:]
 	}
 	name := strings.Join(parts, " ")
-	if len(name) > maxVerticalNameLen {
-		name = strings.TrimSpace(truncateRunes(name, maxVerticalNameLen))
+	if len(name) > maxEntityNameLen {
+		name = strings.TrimSpace(truncateRunes(name, maxEntityNameLen))
 	}
 	return name
 }
 
-func buildVerticalSlug(name, id string) string {
+func buildEntitySlug(name, id string) string {
 	base := normalizeName(name)
 	base = strings.ReplaceAll(base, " ", "-")
 	base = strings.Trim(base, "-")
 	if base == "" {
 		base = "vertical"
 	}
-	if len(base) > maxVerticalSlugLen {
-		base = strings.Trim(base[:maxVerticalSlugLen], "-")
+	if len(base) > maxEntitySlugLen {
+		base = strings.Trim(base[:maxEntitySlugLen], "-")
 	}
 	if base == "" {
 		base = "vertical"
@@ -476,9 +758,9 @@ func buildVerticalSlug(name, id string) string {
 	return base + "-" + suffix
 }
 
-func fuzzyBestMatch(name string, existing []verticalCandidate) (verticalCandidate, float64) {
+func fuzzyBestMatch(name string, existing []entityCandidate) (entityCandidate, float64) {
 	cand := tokenSet(normalizeName(name))
-	best := verticalCandidate{}
+	best := entityCandidate{}
 	bestScore := 0.0
 	for _, v := range existing {
 		score := jaccard(cand, tokenSet(normalizeName(v.Name)))

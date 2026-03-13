@@ -100,7 +100,7 @@ func workflowHookContextFromTrigger(triggerCtx workflowTriggerContext) WorkflowH
 	verticalID := workflowEventEntityIDWithPayload(triggerCtx.Event, payload)
 	return WorkflowHookContext{
 		Event:      triggerCtx.Event,
-		VerticalID: verticalID,
+		EntityID:   verticalID,
 		Payload:    payload,
 		State:      triggerCtx.State,
 	}
@@ -464,7 +464,7 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(
 			ContractBundle: source,
 			TemplateID:     templateID,
 			InstanceID:     instanceID,
-			VerticalID:     verticalID,
+			EntityID:       verticalID,
 			FlowPath:       flowPath,
 			InitialState:   initialState,
 			Config:         config,
@@ -918,7 +918,7 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowPlatformBuiltinGuard(
 		state:       &triggerCtx.State,
 		event:       triggerCtx.Event,
 		payload:     cloneStringAnyMap(hookCtx.Payload),
-		entityID:    strings.TrimSpace(hookCtx.VerticalID),
+		entityID:    strings.TrimSpace(hookCtx.EntityID),
 		policy:      map[string]any{},
 		accumulated: map[string]any{},
 		fanOut:      map[string]any{},
@@ -1192,7 +1192,7 @@ func (pc *FactoryPipelineCoordinator) executeWorkflowAction(
 	}
 	if emitEvent := strings.TrimSpace(entry.Emits); emitEvent != "" {
 		payload := pc.workflowActionEmitPayload(ctx, triggerCtx, emitEvent)
-		pc.publish(ctx, emitEvent, hookCtx.VerticalID, payload)
+		pc.publish(ctx, emitEvent, hookCtx.EntityID, payload)
 		return true
 	}
 	return false

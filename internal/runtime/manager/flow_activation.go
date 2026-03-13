@@ -26,9 +26,9 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}
 	templateID := strings.TrimSpace(req.TemplateID)
 	instanceID := strings.TrimSpace(req.InstanceID)
-	verticalID := strings.TrimSpace(req.VerticalID)
-	if templateID == "" || instanceID == "" || verticalID == "" {
-		return fmt.Errorf("template_id, instance_id, and vertical_id are required")
+	entityID := strings.TrimSpace(req.EntityID)
+	if templateID == "" || instanceID == "" || entityID == "" {
+		return fmt.Errorf("template_id, instance_id, and entity_id are required")
 	}
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
@@ -39,12 +39,12 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("flow schema not found: %s", templateID)
 	}
 	if am.workspaces != nil {
-		if err := am.workspaces.EnsureVerticalWorkspace(ctx, verticalID); err != nil {
+		if err := am.workspaces.EnsureVerticalWorkspace(ctx, entityID); err != nil {
 			return fmt.Errorf("ensure vertical workspace: %w", err)
 		}
 	}
 	if am.store != nil {
-		if err := am.store.EnsureVerticalSchema(ctx, verticalID); err != nil {
+		if err := am.store.EnsureVerticalSchema(ctx, entityID); err != nil {
 			return fmt.Errorf("ensure vertical schema: %w", err)
 		}
 	}
@@ -62,7 +62,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 
 	for _, key := range agentKeys {
 		entry := scope.Agents[key]
-		cfg, err := buildFlowAgentConfig(templateID, instanceID, verticalID, key, entry, vars, localEvents, req.Config)
+		cfg, err := buildFlowAgentConfig(templateID, instanceID, entityID, key, entry, vars, localEvents, req.Config)
 		if err != nil {
 			return err
 		}
@@ -147,7 +147,7 @@ func buildFlowAgentConfig(
 
 func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
 	vars := map[string]string{
-		"vertical_id": strings.TrimSpace(req.VerticalID),
+		"vertical_id": strings.TrimSpace(req.EntityID),
 		"instance_id": strings.TrimSpace(req.InstanceID),
 	}
 	for key, value := range req.Config {

@@ -151,7 +151,7 @@ func builtinActionIncrementRevisionCount(ctx context.Context, pc *FactoryPipelin
 		return false, fmt.Errorf("increment_revision_count requires runtime coordinator")
 	}
 	applyRevisionMutation := func() {
-		pc.mutateValidationState(context.Background(), hookCtx.VerticalID, func(st *validationPipelineState) {
+		pc.mutateValidationState(context.Background(), hookCtx.EntityID, func(st *validationPipelineState) {
 			st.RevisionCount++
 		})
 	}
@@ -159,7 +159,7 @@ func builtinActionIncrementRevisionCount(ctx context.Context, pc *FactoryPipelin
 		applyRevisionMutation()
 	}
 	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
-		_ = pc.workflowStore.Mutate(ctx, hookCtx.VerticalID, func(instance *WorkflowInstance) {
+		_ = pc.workflowStore.Mutate(ctx, hookCtx.EntityID, func(instance *WorkflowInstance) {
 			metadata := workflowMutableMetadata(instance)
 			metadata["revision_count"] = asInt(metadata["revision_count"]) + 1
 			if bucket, ok := workflowValidationProjectionBucket(*instance); ok {

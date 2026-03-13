@@ -122,10 +122,10 @@ func (genericTestModule) BuildDiscoveryCandidatesForReport(scanMode string, payl
 	}}
 }
 
-func (genericTestModule) ExpandScanAssignments(mode string, payload map[string]any, assigned ScanAssignedPayload, batchSize int) ([]ScanAssignedPayload, error) {
+func (genericTestModule) ExpandScanAssignments(mode string, payload map[string]any, assigned map[string]any, batchSize int) ([]map[string]any, error) {
 	mode = normalizeCampaignScanMode(mode)
 	if mode != "corpus" {
-		return []ScanAssignedPayload{assigned}, nil
+		return []map[string]any{assigned}, nil
 	}
 	corpusPath, err := genericTestResolveCorpusPath(payload, assigned)
 	if err != nil {
@@ -135,17 +135,17 @@ func (genericTestModule) ExpandScanAssignments(mode string, payload map[string]a
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ScanAssignedPayload, 0, len(batches))
+	out := make([]map[string]any, 0, len(batches))
 	for i, batch := range batches {
-		next := assigned
-		next.CorpusPath = corpusPath
-		next.CorpusSignals = batch
-		next.PlannedShards = len(batches)
-		next.RequestedAt = fmt.Sprintf("shard-%d", i)
+		next := cloneMap(assigned)
+		next["corpus_path"] = corpusPath
+		next["corpus_signals"] = batch
+		next["planned_shards"] = len(batches)
+		next["requested_at"] = fmt.Sprintf("shard-%d", i)
 		out = append(out, next)
 	}
 	if len(out) == 0 {
-		return []ScanAssignedPayload{assigned}, nil
+		return []map[string]any{assigned}, nil
 	}
 	return out, nil
 }
@@ -190,7 +190,7 @@ func (m genericTestModule) ResolveDirectiveCorpusPath(mode string, parsed Parsed
 	if strings.TrimSpace(parsed.CorpusPath) != "" {
 		return strings.TrimSpace(parsed.CorpusPath), nil
 	}
-	if path, err := genericTestResolveCorpusPath(payload, ScanAssignedPayload{}); err == nil {
+	if path, err := genericTestResolveCorpusPath(payload, map[string]any{}); err == nil {
 		return path, nil
 	}
 	return "", fmt.Errorf("corpus_path is required for corpus mode")
@@ -292,246 +292,250 @@ func (genericTestModule) ApplyScoringRestoreDelta(acc *ScoringAccumulator, delta
 	ApplyScoringRestoreDelta(acc, delta)
 }
 
-func (genericTestModule) BuildScanAssignedPayload(scanID, campaignID, mode, geography string, source map[string]any, plannedShards int) ScanAssignedPayload {
-	return ScanAssignedPayload{
-		ScanID:          scanID,
-		CampaignID:      campaignID,
-		Mode:            mode,
-		Geography:       geography,
-		CampaignContext: cloneMap(source),
-		CorpusPath:      strings.TrimSpace(asString(source["corpus_path"])),
-		PlannedShards:   plannedShards,
+func (genericTestModule) BuildScanAssignedPayload(scanID, campaignID, mode, geography string, source map[string]any, plannedShards int) map[string]any {
+	return map[string]any{
+		"scan_id":          scanID,
+		"campaign_id":      campaignID,
+		"mode":             mode,
+		"geography":        geography,
+		"campaign_context": cloneMap(source),
+		"corpus_path":      strings.TrimSpace(asString(source["corpus_path"])),
+		"planned_shards":   plannedShards,
 	}
 }
 
-func (genericTestModule) BuildSynthesisNeededPayload(scanID, campaignID, mode, geography string, raw map[string]any) SynthesisNeededPayload {
-	return SynthesisNeededPayload{
-		ScanID:      scanID,
-		CampaignID:  campaignID,
-		Mode:        mode,
-		Geography:   geography,
-		Category:    strings.TrimSpace(asString(raw["category"])),
-		Subcategory: strings.TrimSpace(asString(raw["subcategory"])),
-		RawReport:   cloneMap(raw),
+func (genericTestModule) BuildSynthesisNeededPayload(scanID, campaignID, mode, geography string, raw map[string]any) map[string]any {
+	return map[string]any{
+		"scan_id":     scanID,
+		"campaign_id": campaignID,
+		"mode":        mode,
+		"geography":   geography,
+		"category":    strings.TrimSpace(asString(raw["category"])),
+		"subcategory": strings.TrimSpace(asString(raw["subcategory"])),
+		"raw_report":  cloneMap(raw),
 	}
 }
 
-func (genericTestModule) BuildDedupAmbiguousPayload(scanID, dedupEventID string, similarity float64, candidateName, geography string, signal float64, existingID, existingName string) DedupAmbiguousPayload {
-	return DedupAmbiguousPayload{
-		ScanID:       scanID,
-		DedupEventID: dedupEventID,
-		Similarity:   similarity,
-		NewCandidate: DedupCandidatePayload{Name: candidateName, Geography: geography, SignalStrength: signal},
-		ExistingVertical: DedupCandidatePayload{
-			ID:             existingID,
-			Name:           existingName,
-			Geography:      geography,
-			SignalStrength: signal,
+func (genericTestModule) BuildDedupAmbiguousPayload(scanID, dedupEventID string, similarity float64, candidateName, geography string, signal float64, existingID, existingName string) map[string]any {
+	return map[string]any{
+		"scan_id":        scanID,
+		"dedup_event_id": dedupEventID,
+		"similarity":     similarity,
+		"new_candidate": map[string]any{
+			"name":            candidateName,
+			"geography":       geography,
+			"signal_strength": signal,
+		},
+		"existing_vertical": map[string]any{
+			"id":              existingID,
+			"name":            existingName,
+			"geography":       geography,
+			"signal_strength": signal,
 		},
 	}
 }
 
-func (genericTestModule) BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID string, signal float64, discoverySource string, rawSignals map[string]any) VerticalDiscoveredPayload {
-	return VerticalDiscoveredPayload{
-		VerticalID:       verticalID,
-		VerticalName:     name,
-		Name:             name,
-		Geography:        geography,
-		Mode:             mode,
-		ScanID:           scanID,
-		CampaignID:       campaignID,
-		SignalStrength:   signal,
-		DiscoverySource:  discoverySource,
-		RawSignals:       cloneMap(rawSignals),
-		DiscoveryContext: cloneMap(rawSignals),
+func (genericTestModule) BuildVerticalDiscoveredPayload(verticalID, name, geography, mode, scanID, campaignID string, signal float64, discoverySource string, rawSignals map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":       verticalID,
+		"vertical_name":     name,
+		"name":              name,
+		"geography":         geography,
+		"mode":              mode,
+		"scan_id":           scanID,
+		"campaign_id":       campaignID,
+		"signal_strength":   signal,
+		"discovery_source":  discoverySource,
+		"raw_signals":       cloneMap(rawSignals),
+		"discovery_context": cloneMap(rawSignals),
 	}
 }
 
-func (genericTestModule) BuildScanCompletedPayload(in ScanCompletedBuildInput) ScanCompletedPayload {
-	return ScanCompletedPayload{
-		ScanID:          in.ScanID,
-		CampaignID:      in.CampaignID,
-		Mode:            in.Mode,
-		Geography:       in.Geography,
-		ReportsReceived: in.ReportsReceived,
-		Expected:        in.Expected,
-		Complete:        in.Complete,
-		Discovered:      in.Discovered,
-		Skipped:         in.Skipped,
-		PendingDedup:    in.PendingDedup,
-		TimedOut:        in.TimedOut,
-		ShardsTotal:     in.ShardsTotal,
-		ShardsCompleted: in.ShardsCompleted,
-		ShardsFailed:    in.ShardsFailed,
+func (genericTestModule) BuildScanCompletedPayload(in ScanCompletedBuildInput) map[string]any {
+	return map[string]any{
+		"scan_id":          in.ScanID,
+		"campaign_id":      in.CampaignID,
+		"mode":             in.Mode,
+		"geography":        in.Geography,
+		"reports_received": in.ReportsReceived,
+		"expected":         in.Expected,
+		"complete":         in.Complete,
+		"discovered":       in.Discovered,
+		"skipped":          in.Skipped,
+		"pending_dedup":    in.PendingDedup,
+		"timed_out":        in.TimedOut,
+		"shards_total":     in.ShardsTotal,
+		"shards_completed": in.ShardsCompleted,
+		"shards_failed":    in.ShardsFailed,
 	}
 }
 
-func (genericTestModule) BuildScoringRequestedPayload(verticalID, verticalName, geography, mode, rubric string, dimensions []string, discoveryContext map[string]any) ScoringRequestedPayload {
-	return ScoringRequestedPayload{
-		VerticalID:          verticalID,
-		VerticalName:        verticalName,
-		Geography:           geography,
-		Mode:                mode,
-		Rubric:              rubric,
-		DimensionsRequested: append([]string(nil), dimensions...),
-		DiscoveryContext:    cloneMap(discoveryContext),
+func (genericTestModule) BuildScoringRequestedPayload(verticalID, verticalName, geography, mode, rubric string, dimensions []string, discoveryContext map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":           verticalID,
+		"vertical_name":         verticalName,
+		"geography":             geography,
+		"mode":                  mode,
+		"rubric":                rubric,
+		"dimensions_requested":  append([]string(nil), dimensions...),
+		"discovery_context":     cloneMap(discoveryContext),
 	}
 }
 
-func (genericTestModule) BuildScoringContestedPayload(verticalID, dimension string, contest ContestedDimension, rubric, mode string) ScoringContestedPayload {
-	return ScoringContestedPayload{
-		VerticalID: verticalID,
-		Dimension:  dimension,
-		Scores:     append([]int(nil), contest.Scores...),
-		Evidence:   append([]string(nil), contest.Evidence...),
-		Spread:     contest.Spread,
-		Rubric:     rubric,
-		Mode:       mode,
+func (genericTestModule) BuildScoringContestedPayload(verticalID, dimension string, contest ContestedDimension, rubric, mode string) map[string]any {
+	return map[string]any{
+		"vertical_id": verticalID,
+		"dimension":   dimension,
+		"scores":      append([]int(nil), contest.Scores...),
+		"evidence":    append([]string(nil), contest.Evidence...),
+		"spread":      contest.Spread,
+		"rubric":      rubric,
+		"mode":        mode,
 	}
 }
 
-func (genericTestModule) BuildVerticalScoredPayload(verticalID string, result ScoringComposite, verticalName, geography, mode string) VerticalScoredPayload {
-	return VerticalScoredPayload{
-		VerticalID:     verticalID,
-		Result:         result.Result,
-		Reason:         result.Reason,
-		CompositeScore: result.CompositeScore,
-		ViabilityScore: result.ViabilityScore,
-		MarketScore:    result.MarketScore,
-		Dimensions:     result.Dimensions,
-		Rubric:         result.Rubric,
-		Partial:        result.Partial,
-		Mode:           mode,
-		VerticalName:   verticalName,
-		Geography:      geography,
+func (genericTestModule) BuildVerticalScoredPayload(verticalID string, result ScoringComposite, verticalName, geography, mode string) map[string]any {
+	return map[string]any{
+		"vertical_id":     verticalID,
+		"result":          result.Result,
+		"reason":          result.Reason,
+		"composite_score": result.CompositeScore,
+		"viability_score": result.ViabilityScore,
+		"market_score":    result.MarketScore,
+		"dimensions":      result.Dimensions,
+		"rubric":          result.Rubric,
+		"partial":         result.Partial,
+		"mode":            mode,
+		"vertical_name":   verticalName,
+		"geography":       geography,
 	}
 }
 
-func (genericTestModule) BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) VerticalShortlistedPayload {
-	return VerticalShortlistedPayload{
-		VerticalID:     verticalID,
-		CompositeScore: composite,
-		ViabilityScore: viability,
-		ScoringPayload: cloneMap(scoringPayload),
+func (genericTestModule) BuildVerticalShortlistedPayload(verticalID string, composite, viability float64, scoringPayload map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":      verticalID,
+		"composite_score":  composite,
+		"viability_score":  viability,
+		"scoring_payload":  cloneMap(scoringPayload),
 	}
 }
 
-func (genericTestModule) BuildVerticalMarginalPayload(verticalID string, result ScoringComposite) VerticalMarginalPayload {
-	return VerticalMarginalPayload{
-		VerticalID:        verticalID,
-		CompositeScore:    result.CompositeScore,
-		ViabilityScore:    result.ViabilityScore,
-		Dimensions:        result.Dimensions,
-		PromotionEligible: result.CompositeScore >= 50,
+func (genericTestModule) BuildVerticalMarginalPayload(verticalID string, result ScoringComposite) map[string]any {
+	return map[string]any{
+		"vertical_id":         verticalID,
+		"composite_score":     result.CompositeScore,
+		"viability_score":     result.ViabilityScore,
+		"dimensions":          result.Dimensions,
+		"promotion_eligible":  result.CompositeScore >= 50,
 	}
 }
 
-func (genericTestModule) BuildVerticalRejectedPayload(verticalID string, result ScoringComposite) VerticalRejectedPayload {
-	return VerticalRejectedPayload{
-		VerticalID: verticalID,
-		Reason:     result.Reason,
+func (genericTestModule) BuildVerticalRejectedPayload(verticalID string, result ScoringComposite) map[string]any {
+	return map[string]any{
+		"vertical_id": verticalID,
+		"reason":      result.Reason,
 	}
 }
 
-func (genericTestModule) BuildBrandRequestedPayload(verticalID, name, geography string, scoring, brief map[string]any) BrandRequestedPayload {
-	return BrandRequestedPayload{
-		VerticalID:    verticalID,
-		VerticalName:  name,
-		Name:          name,
-		Geography:     geography,
-		Scoring:       cloneMap(scoring),
-		BusinessBrief: cloneMap(brief),
+func (genericTestModule) BuildBrandRequestedPayload(verticalID, name, geography string, scoring, brief map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":     verticalID,
+		"vertical_name":   name,
+		"name":            name,
+		"geography":       geography,
+		"scoring":         cloneMap(scoring),
+		"business_brief":  cloneMap(brief),
 	}
 }
 
-func (genericTestModule) BuildValidationPackageReadyPayload(verticalID, name, geography string, snap ValidationContextSnapshot) ValidationPackageReadyPayload {
-	return ValidationPackageReadyPayload{
-		VerticalID:   verticalID,
-		VerticalName: name,
-		Geography:    geography,
-		Research:     cloneMap(snap.Research),
-		Spec:         cloneMap(snap.Spec),
-		CTONotes:     cloneMap(snap.CTONotes),
-		Brand:        cloneMap(snap.Brand),
-		Scoring:      cloneMap(snap.Scoring),
-		SpecVersion:  snap.SpecVersion,
+func (genericTestModule) BuildValidationPackageReadyPayload(verticalID, name, geography string, snap ValidationContextSnapshot) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"vertical_name": name,
+		"geography":     geography,
+		"research":      cloneMap(snap.Research),
+		"spec":          cloneMap(snap.Spec),
+		"cto_notes":     cloneMap(snap.CTONotes),
+		"brand":         cloneMap(snap.Brand),
+		"scoring":       cloneMap(snap.Scoring),
+		"spec_version":  snap.SpecVersion,
 	}
 }
 
-func (genericTestModule) BuildSpecValidationRequestedPayload(verticalID string, spec map[string]any) SpecValidationRequestedPayload {
-	return SpecValidationRequestedPayload{
-		VerticalID:  verticalID,
-		SpecContent: cloneMap(spec),
-		SpecTier:    "generic",
+func (genericTestModule) BuildSpecValidationRequestedPayload(verticalID string, spec map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"spec_content":  cloneMap(spec),
+		"spec_tier":     "generic",
 	}
 }
 
-func (genericTestModule) BuildCTOSpecReviewRequestedPayload(verticalID, name, geography string, specValidation map[string]any, snap ValidationContextSnapshot) CTOSpecReviewRequestedPayload {
-	return CTOSpecReviewRequestedPayload{
-		VerticalID:     verticalID,
-		VerticalName:   name,
-		Geography:      geography,
-		SpecValidation: cloneMap(specValidation),
-		SpecVersion:    snap.SpecVersion,
-		Research:       cloneMap(snap.Research),
-		Spec:           cloneMap(snap.Spec),
-		Scoring:        cloneMap(snap.Scoring),
+func (genericTestModule) BuildCTOSpecReviewRequestedPayload(verticalID, name, geography string, specValidation map[string]any, snap ValidationContextSnapshot) map[string]any {
+	return map[string]any{
+		"vertical_id":      verticalID,
+		"vertical_name":    name,
+		"geography":        geography,
+		"spec_validation":  cloneMap(specValidation),
+		"spec_version":     snap.SpecVersion,
+		"research":         cloneMap(snap.Research),
+		"spec":             cloneMap(snap.Spec),
+		"scoring":          cloneMap(snap.Scoring),
 	}
 }
 
-func (genericTestModule) BuildSpecRevisionRequestedPayload(verticalID, source, name, geography string, feedback map[string]any, snap ValidationContextSnapshot) SpecRevisionRequestedPayload {
-	return SpecRevisionRequestedPayload{
-		VerticalID:   verticalID,
-		Source:       source,
-		VerticalName: name,
-		Geography:    geography,
-		Feedback:     cloneMap(feedback),
-		Research:     cloneMap(snap.Research),
-		Spec:         cloneMap(snap.Spec),
-		Scoring:      cloneMap(snap.Scoring),
+func (genericTestModule) BuildSpecRevisionRequestedPayload(verticalID, source, name, geography string, feedback map[string]any, snap ValidationContextSnapshot) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"source":        source,
+		"vertical_name": name,
+		"geography":     geography,
+		"feedback":      cloneMap(feedback),
+		"research":      cloneMap(snap.Research),
+		"spec":          cloneMap(snap.Spec),
+		"scoring":       cloneMap(snap.Scoring),
 	}
 }
 
-func (genericTestModule) BuildValidationMoreDataPayload(verticalID, name, geography string, request map[string]any, snap ValidationContextSnapshot) ValidationMoreDataNeededPayload {
-	return ValidationMoreDataNeededPayload{
-		VerticalID:   verticalID,
-		VerticalName: name,
-		Geography:    geography,
-		Request:      cloneMap(request),
-		Research:     cloneMap(snap.Research),
-		Spec:         cloneMap(snap.Spec),
-		Scoring:      cloneMap(snap.Scoring),
+func (genericTestModule) BuildValidationMoreDataPayload(verticalID, name, geography string, request map[string]any, snap ValidationContextSnapshot) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"vertical_name": name,
+		"geography":     geography,
+		"request":       cloneMap(request),
+		"research":      cloneMap(snap.Research),
+		"spec":          cloneMap(snap.Spec),
+		"scoring":       cloneMap(snap.Scoring),
 	}
 }
 
-func (genericTestModule) BuildBrandRevisionNeededPayload(verticalID, name, geography string, feedback, brand map[string]any) BrandRevisionNeededPayload {
-	return BrandRevisionNeededPayload{
-		VerticalID:   verticalID,
-		VerticalName: name,
-		Geography:    geography,
-		Feedback:     cloneMap(feedback),
-		Brand:        cloneMap(brand),
+func (genericTestModule) BuildBrandRevisionNeededPayload(verticalID, name, geography string, feedback, brand map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"vertical_name": name,
+		"geography":     geography,
+		"feedback":      cloneMap(feedback),
+		"brand":         cloneMap(brand),
 	}
 }
 
-func (genericTestModule) BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent string, reason map[string]any) VerticalKilledPayload {
-	return VerticalKilledPayload{
-		VerticalID:   verticalID,
-		VerticalName: name,
-		Geography:    geography,
-		SourceEvent:  sourceEvent,
-		Priority:     "normal",
-		Reason:       cloneMap(reason),
+func (genericTestModule) BuildVerticalKilledPayload(verticalID, name, geography, sourceEvent string, reason map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"vertical_name": name,
+		"geography":     geography,
+		"source_event":  sourceEvent,
+		"priority":      "normal",
+		"reason":        cloneMap(reason),
 	}
 }
 
-func (genericTestModule) BuildValidationStartedPayload(verticalID, name, geography string, scoring map[string]any) ValidationStartedPayload {
-	return ValidationStartedPayload{
-		VerticalID:   verticalID,
-		VerticalName: name,
-		Name:         name,
-		Geography:    geography,
-		Scoring:      cloneMap(scoring),
+func (genericTestModule) BuildValidationStartedPayload(verticalID, name, geography string, scoring map[string]any) map[string]any {
+	return map[string]any{
+		"vertical_id":   verticalID,
+		"vertical_name": name,
+		"name":          name,
+		"geography":     geography,
+		"scoring":       cloneMap(scoring),
 	}
 }
 
@@ -546,8 +550,8 @@ func genericTestSignalStrength(payload map[string]any) float64 {
 	}
 }
 
-func genericTestResolveCorpusPath(payload map[string]any, assigned ScanAssignedPayload) (string, error) {
-	if path := strings.TrimSpace(assigned.CorpusPath); path != "" {
+func genericTestResolveCorpusPath(payload map[string]any, assigned map[string]any) (string, error) {
+	if path := strings.TrimSpace(asString(assigned["corpus_path"])); path != "" {
 		return path, nil
 	}
 	if path := strings.TrimSpace(asString(payload["corpus_path"])); path != "" {

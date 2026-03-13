@@ -28,10 +28,10 @@ type WorkflowAction struct {
 }
 
 type WorkflowState struct {
-	VerticalID string          `json:"vertical_id,omitempty"`
-	Stage      WorkflowStateID `json:"stage"`
-	Status     string          `json:"status,omitempty"`
-	Metadata   map[string]any  `json:"metadata,omitempty"`
+	EntityID string          `json:"vertical_id,omitempty"`
+	Stage    WorkflowStateID `json:"stage"`
+	Status   string          `json:"status,omitempty"`
+	Metadata map[string]any  `json:"metadata,omitempty"`
 }
 
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool

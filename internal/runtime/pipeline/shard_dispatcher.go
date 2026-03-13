@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	empireconfig "empireai/internal/empire/config"
 	"empireai/internal/events"
+	runtimesharding "empireai/internal/runtime/core/sharding"
 	models "empireai/internal/runtime/actors"
 	"github.com/google/uuid"
 )
@@ -32,7 +32,7 @@ type ShardDispatcher struct {
 	db      *sql.DB
 	bus     ShardBus
 	manager ShardManager
-	cfg     empireconfig.ShardingConfig
+	cfg     runtimesharding.Config
 
 	pollInterval       time.Duration
 	startupGracePeriod time.Duration
@@ -64,7 +64,7 @@ func NewShardDispatcher(
 	db *sql.DB,
 	bus ShardBus,
 	manager ShardManager,
-	cfg empireconfig.ShardingConfig,
+	cfg runtimesharding.Config,
 ) *ShardDispatcher {
 	if db == nil || bus == nil || manager == nil {
 		return nil

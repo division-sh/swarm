@@ -231,7 +231,7 @@ func (s *Server) handleControlCreateVertical(w http.ResponseWriter, r *http.Requ
 					ContractBundle: source,
 					TemplateID:     "operating",
 					InstanceID:     verticalID,
-					VerticalID:     verticalID,
+					EntityID:       verticalID,
 					FlowPath:       "operating/" + verticalID,
 					InitialState:   "approved",
 					Config: map[string]any{

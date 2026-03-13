@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	empirepayloads "empireai/internal/empire/payloads"
 	"empireai/internal/events"
 	"empireai/internal/runtime/semanticview"
 )
@@ -19,8 +18,8 @@ const (
 	packagingTimeout   = 30 * time.Minute
 	scanTimeout        = 90 * time.Minute
 	scoringTimeout     = 60 * time.Minute
-	maxVerticalNameLen = 96
-	maxVerticalSlugLen = 72
+	maxEntityNameLen   = 96
+	maxEntitySlugLen   = 72
 
 	// Narrative fields are only last-resort naming fallbacks and should stay concise.
 	maxNarrativeFallbackNameLen   = 72
@@ -73,9 +72,9 @@ func (pc *FactoryPipelineCoordinator) runtimeHandlerID(eventType string) string 
 	return runtimeWorkflowID
 }
 
-// FactoryPipelineCoordinator handles deterministic factory state-machine work
-// (scan assignment/aggregation and validation gate orchestration) so LLM agents
-// focus on judgment tasks.
+// PipelineCoordinator handles deterministic workflow state-machine work
+// (scan assignment/aggregation and validation gate orchestration) so agents
+// can focus on judgment tasks.
 type FactoryPipelineCoordinator struct {
 	bus Bus
 	db  *sql.DB
@@ -112,8 +111,8 @@ type FactoryPipelineCoordinator struct {
 	scoringDigestBufferEnabled bool
 	lastScoringDigestReadAt    time.Time
 
-	testSubscribeHook     func()
-	testVerticalStageHook func(verticalID, stage string)
+	testSubscribeHook  func()
+	testEntityStateHook func(entityID, state string)
 }
 
 type FactoryPipelineCoordinatorOptions struct {
@@ -122,11 +121,14 @@ type FactoryPipelineCoordinatorOptions struct {
 	InstanceActivator FlowInstanceActivator
 }
 
+type PipelineCoordinator = FactoryPipelineCoordinator
+type PipelineCoordinatorOptions = FactoryPipelineCoordinatorOptions
+
 type FlowInstanceActivationRequest struct {
 	ContractBundle semanticview.Source
 	TemplateID     string
 	InstanceID     string
-	VerticalID     string
+	EntityID       string
 	FlowPath       string
 	InitialState   string
 	Config         map[string]any
@@ -186,6 +188,10 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	return pc
 }
 
+func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return NewFactoryPipelineCoordinatorWithOptions(bus, db, opts)
+}
+
 func (pc *FactoryPipelineCoordinator) SetTestSubscribeHook(fn func()) {
 	if pc == nil {
 		return
@@ -195,13 +201,17 @@ func (pc *FactoryPipelineCoordinator) SetTestSubscribeHook(fn func()) {
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) SetTestVerticalStageHook(fn func(verticalID, stage string)) {
+func (pc *FactoryPipelineCoordinator) SetTestEntityStateHook(fn func(entityID, state string)) {
 	if pc == nil {
 		return
 	}
 	pc.mu.Lock()
-	pc.testVerticalStageHook = fn
+	pc.testEntityStateHook = fn
 	pc.mu.Unlock()
+}
+
+func (pc *FactoryPipelineCoordinator) SetTestVerticalStageHook(fn func(verticalID, stage string)) {
+	pc.SetTestEntityStateHook(fn)
 }
 
 func (pc *FactoryPipelineCoordinator) SetInstanceActivator(activator FlowInstanceActivator) {
@@ -238,8 +248,8 @@ type scanAccumulator struct {
 }
 
 type scoringAccumulator struct {
-	VerticalID       string
-	VerticalName     string
+	EntityID         string
+	EntityName       string
 	Geography        string
 	GeographicScope  string
 	Mode             string
@@ -266,7 +276,7 @@ type pendingCandidate struct {
 }
 
 type validationPipelineState struct {
-	VerticalID string
+	EntityID string
 	Status     string
 
 	G1Research bool
@@ -289,31 +299,24 @@ type validationPipelineState struct {
 	PackagingRetries     int
 }
 
-type DedupCandidatePayload = empirepayloads.DedupCandidatePayload
-
-type VerticalDerivedPayload struct {
-	OpportunityID         string         `json:"opportunity_id,omitempty"`
-	ParentID              string         `json:"parent_id"`
-	GenerationDepth       int            `json:"generation_depth"`
-	GeneratorAgentID      string         `json:"generator_agent_id"`
-	CampaignID            string         `json:"campaign_id,omitempty"`
-	DerivationRationale   map[string]any `json:"derivation_rationale"`
-	OpportunityName       string         `json:"opportunity_name"`
-	PreliminaryICP        string         `json:"preliminary_icp,omitempty"`
-	BuildSketch           map[string]any `json:"build_sketch,omitempty"`
-	Evidence              map[string]any `json:"evidence,omitempty"`
-	GeographicScope       string         `json:"geographic_scope,omitempty"`
-	SignalStrength        float64        `json:"signal_strength"`
-	DiscoveryContext      map[string]any `json:"discovery_context,omitempty"`
-	OpportunityHypothesis string         `json:"opportunity_hypothesis,omitempty"`
-	Geography             string         `json:"geography,omitempty"`
-	OpportunityPattern    string         `json:"opportunity_pattern,omitempty"`
-	SignalSources         any            `json:"signal_sources,omitempty"`
-	RequiredCapabilities  any            `json:"required_capabilities,omitempty"`
+func (st *validationPipelineState) gateContext() map[string]any {
+	if st == nil {
+		return nil
+	}
+	return map[string]any{
+		"g1_research": st.G1Research,
+		"g2_spec":     st.G2Spec,
+		"g3_cto":      st.G3CTO,
+		"g4_brand":    st.G4Brand,
+	}
 }
 
 func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordinator {
 	return NewFactoryPipelineCoordinatorWithOptions(bus, db, FactoryPipelineCoordinatorOptions{Module: defaultWorkflowModule()})
+}
+
+func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
+	return NewFactoryPipelineCoordinator(bus, db)
 }
 
 func (pc *FactoryPipelineCoordinator) SetShardPlanner(planner *ShardPlanner) {
@@ -360,15 +363,15 @@ func (pc *FactoryPipelineCoordinator) notifyTestSubscribed() {
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) notifyTestVerticalStageUpdated(verticalID, stage string) {
+func (pc *FactoryPipelineCoordinator) notifyTestEntityStateUpdated(entityID, state string) {
 	if pc == nil {
 		return
 	}
 	pc.mu.Lock()
-	hook := pc.testVerticalStageHook
+	hook := pc.testEntityStateHook
 	pc.mu.Unlock()
 	if hook != nil {
-		hook(strings.TrimSpace(verticalID), strings.TrimSpace(stage))
+		hook(strings.TrimSpace(entityID), strings.TrimSpace(state))
 	}
 }
 
@@ -447,7 +450,7 @@ func (pc *FactoryPipelineCoordinator) interceptDropReason(eventType string, evt 
 	switch eventType {
 	case "spec.validation_passed", "spec.validation_failed", "vertical.ready_for_review", "spec.revision_needed":
 		if workflowEventEntityID(evt) == "" {
-			return "missing vertical_id"
+			return "missing entity_id"
 		}
 	}
 	return ""
