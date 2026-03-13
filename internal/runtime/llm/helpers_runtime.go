@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 

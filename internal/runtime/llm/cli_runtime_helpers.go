@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"empireai/internal/config"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	"empireai/internal/runtime/sessions"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )

@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"empireai/internal/models"
 	"empireai/internal/promptcontracts"
+	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
 )
 

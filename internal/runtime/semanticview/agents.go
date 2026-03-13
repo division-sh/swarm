@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
 )
 

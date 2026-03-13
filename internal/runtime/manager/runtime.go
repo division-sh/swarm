@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
@@ -86,7 +86,7 @@ func (am *AgentManager) IsRunning() bool {
 	return am.running
 }
 
-func (am *AgentManager) GetAgentConfig(agentID string) (models.AgentConfig, bool) {
+func (am *AgentManager) GetAgentConfig(agentID string) (runtimeactors.AgentConfig, bool) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 	cfg, ok := am.agentCfg[agentID]
@@ -116,7 +116,7 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 	am.writeReceipt(ctx, evt.ID, agentID, "processed", fmt.Sprintf("quarantined poison event after %d panics: %s", count, strings.TrimSpace(panicText)))
 	managerID := am.resolveManagerAgentID(agentID)
 	if strings.TrimSpace(managerID) == "" || managerID == agentID {
-		managerID = am.defaultManagerAgentID(models.AgentConfig{ID: agentID})
+		managerID = am.defaultManagerAgentID(runtimeactors.AgentConfig{ID: agentID})
 	}
 	payload := map[string]any{
 		"agent_id":    agentID,
@@ -139,7 +139,7 @@ func deterministicOutputEventID(inbound events.Event, agentID string, index int,
 	return DeterministicOutputEventID(inbound, agentID, index, out)
 }
 
-func (am *AgentManager) defaultManagerAgentID(cfg models.AgentConfig) string {
+func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) string {
 	if managerID := normalizedManagerFallback(cfg, managerFallbackFromConfig(cfg)); managerID != "" {
 		if managerID == "coordinator" {
 			return "empire-coordinator"
@@ -159,7 +159,7 @@ func (am *AgentManager) defaultManagerAgentID(cfg models.AgentConfig) string {
 	return "empire-coordinator"
 }
 
-func managerFallbackFromConfig(cfg models.AgentConfig) string {
+func managerFallbackFromConfig(cfg runtimeactors.AgentConfig) string {
 	if len(cfg.Config) == 0 {
 		return ""
 	}
@@ -173,7 +173,7 @@ func managerFallbackFromConfig(cfg models.AgentConfig) string {
 	return ""
 }
 
-func normalizedManagerFallback(cfg models.AgentConfig, managerID string) string {
+func normalizedManagerFallback(cfg runtimeactors.AgentConfig, managerID string) string {
 	managerID = strings.TrimSpace(managerID)
 	if managerID == "" {
 		return ""
@@ -397,7 +397,7 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 func (am *AgentManager) pendingEventsForAgent(
 	ctx context.Context,
 	agentID string,
-	cfg models.AgentConfig,
+	cfg runtimeactors.AgentConfig,
 	agent Agent,
 	since time.Time,
 ) ([]events.Event, error) {
@@ -461,7 +461,7 @@ func (am *AgentManager) ResetRuntimeState() error {
 		}
 	}
 	am.agents = make(map[string]Agent)
-	am.agentCfg = make(map[string]models.AgentConfig)
+	am.agentCfg = make(map[string]runtimeactors.AgentConfig)
 	am.agentUpAt = make(map[string]time.Time)
 	am.inFlight = make(map[string]struct{})
 	am.mu.Unlock()
@@ -671,8 +671,8 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 	switch string(evt.Type) {
 	case "opco.spinup_requested":
 		var payload struct {
-			VerticalID string                 `json:"vertical_id"`
-			Mandate    models.MandateDocument `json:"mandate"`
+			VerticalID string                        `json:"vertical_id"`
+			Mandate    runtimeactors.MandateDocument `json:"mandate"`
 		}
 		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
 			return

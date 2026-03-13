@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/sessions"
@@ -57,6 +57,8 @@ type PersistedRoutingRule struct {
 	BootstrapVersion int
 }
 
+// VerticalInfo is a legacy read model sourced from the verticals table for
+// compatibility surfaces only. New platform state belongs in workflow_instances.
 type VerticalInfo struct {
 	ID        string
 	Name      string

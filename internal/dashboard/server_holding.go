@@ -91,7 +91,7 @@ func (s *Server) handleHolding(w http.ResponseWriter, r *http.Request) {
 		       COALESCE((v.scores->>'composite_score')::text,''),
 		       COALESCE(v.kill_reason,''), COALESCE(v.killed_at_stage,''),
 		       COALESCE(v.created_at, now()), COALESCE(v.updated_at, now()), v.approved_at, v.parked_at, v.launched_at,
-		       COALESCE(wi.workflow_name, ''), COALESCE(wi.workflow_version, ''), COALESCE(wi.current_stage, ''),
+		       COALESCE(wi.workflow_name, ''), COALESCE(wi.workflow_version, ''), COALESCE(wi.current_state, ''),
 		       wi.entered_stage_at,
 		       COALESCE(wi.metadata, '{}'::jsonb),
 		       COALESCE(wi.timer_state, '[]'::jsonb),

@@ -5,7 +5,7 @@ import "testing"
 func TestBuildWorkflowExpressionContextIncludesStateValidationAndExecutionVars(t *testing.T) {
 	ctx := buildWorkflowExpressionContext(workflowExpressionContextInput{
 		State: WorkflowState{
-			Stage:  PipelineStage("reviewing"),
+			Stage:  WorkflowStateID("reviewing"),
 			Status: "active",
 			Metadata: map[string]any{
 				"g_product_spec": true,

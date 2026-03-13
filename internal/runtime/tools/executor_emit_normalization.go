@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 func (e *Executor) preNormalizeEmitPayload(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {

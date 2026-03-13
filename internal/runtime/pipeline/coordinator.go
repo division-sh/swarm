@@ -92,7 +92,6 @@ type FactoryPipelineCoordinator struct {
 	scoringPolicy   ScoringPolicy
 	payloads        PayloadFactory
 	processed       map[string]struct{}
-	stateStore      *PipelineStateStore
 	workflowStore   *WorkflowInstanceStore
 	stateLoaded     bool
 
@@ -143,9 +142,9 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	if module == nil {
 		module = defaultWorkflowModule()
 	}
-	discoveryPolicy := module.DiscoveryPolicy()
-	scoringPolicy := module.ScoringPolicy()
-	payloads := module.PayloadFactory()
+	discoveryPolicy := workflowModuleDiscoveryPolicy(module)
+	scoringPolicy := workflowModuleScoringPolicy(module)
+	payloads := workflowModulePayloadFactory(module)
 	pc := &FactoryPipelineCoordinator{
 		bus:               bus,
 		db:                db,
@@ -162,7 +161,6 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 		expressionEval:    newWorkflowExpressionEvaluator(),
 		instanceActivator: opts.InstanceActivator,
 	}
-	pc.stateStore = NewPipelineStateStore(db, &pc.mu)
 	pc.workflowStore = NewWorkflowInstanceStore(db)
 	pc.scanCoordinator.runtime = pc
 	pc.scanCoordinator.discovery = discoveryPolicy
@@ -392,7 +390,6 @@ func (pc *FactoryPipelineCoordinator) RunMaintenance(ctx context.Context) {
 		case <-ticker.C:
 			pc.checkScanTimeouts(ctx, time.Now().UTC())
 			pc.checkScoringTimeouts(ctx, time.Now().UTC())
-			(&ValidationOrchestrator{coordinator: pc}).checkPackagingTimeouts(ctx, time.Now().UTC())
 			pc.persistRuntimeState(ctx)
 		}
 	}
@@ -426,21 +423,6 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 		return true, nil, nil
 	}
 
-	if eventType == "spec.revision_needed" && workflowEventEntityID(evt) != "" {
-		escalated := false
-		if pc.validationGate != nil {
-			validator := &ValidationOrchestrator{coordinator: pc}
-			escalated = validator.handleInnerSpecRevision(ctx, evt)
-			validator.checkPackagingTimeouts(ctx, time.Now().UTC())
-		}
-		if escalated {
-			record("consumed", "", nil, nil)
-		} else {
-			record("processed", "", nil, nil)
-		}
-		return !escalated, nil, nil
-	}
-
 	consume, handled := pc.interceptPolicy(eventType, evt)
 	if !handled {
 		if dropReason := pc.interceptDropReason(eventType, evt); dropReason != "" {
@@ -456,7 +438,6 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 	// Opportunistic timer checks while events are flowing.
 	pc.checkScanTimeouts(ictx, time.Now().UTC())
 	pc.checkScoringTimeouts(ictx, time.Now().UTC())
-	(&ValidationOrchestrator{coordinator: pc}).checkPackagingTimeouts(ictx, time.Now().UTC())
 
 	if consume {
 		record("consumed", "", emitted, nil)
@@ -541,10 +522,7 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 
 	switch string(evt.Type) {
 	case "runtime.reset":
-		if pc.dispatchWorkflowNodeEvent(ctx, evt) {
-			return
-		}
-		(&LifecycleOrchestrator{coordinator: pc}).Handle(ctx, evt)
+		_ = pc.dispatchWorkflowNodeEvent(ctx, evt)
 		return
 	default:
 		_ = pc.dispatchWorkflowNodeEvent(ctx, evt)

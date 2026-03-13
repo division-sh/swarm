@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/runtime/sessions"

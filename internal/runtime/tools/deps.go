@@ -6,7 +6,7 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 )
 

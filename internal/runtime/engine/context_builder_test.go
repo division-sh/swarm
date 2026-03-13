@@ -9,9 +9,9 @@ import (
 
 func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 	input := ContextBuilderInput{
-		EntityID: "entity-1",
-		FlowID:   "flow-1",
+		FlowID: "flow-1",
 		State: StateSnapshot{
+			EntityID:        "entity-1",
 			WorkflowName:    "wf",
 			WorkflowVersion: "v1",
 			CurrentState:    "researching",

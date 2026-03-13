@@ -83,7 +83,7 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
-		State: WorkflowState{Stage: PipelineStage("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -114,7 +114,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
-		State: WorkflowState{Stage: PipelineStage("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -150,7 +150,7 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 			Type:    events.EventType("custom.trigger"),
 			Payload: mustJSON(map[string]any{"entity_id": "ent-1"}),
 		}.WithEntityID("ent-1"),
-		State: WorkflowState{Stage: PipelineStage("queued"), Metadata: map[string]any{"stage": "queued"}},
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{"stage": "queued"}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -196,7 +196,7 @@ func TestExecuteNodeContractHandlerRuleMatchOverridesDefaultEmit(t *testing.T) {
 			Type:    events.EventType("custom.trigger"),
 			Payload: mustJSON(map[string]any{"entity_id": "ent-1"}),
 		}.WithEntityID("ent-1"),
-		State: WorkflowState{Stage: PipelineStage("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -221,7 +221,7 @@ func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.
 		Action: runtimecontracts.ActionSpec{ID: "increment_revision_count"},
 	}, workflowTriggerContext{
 		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID(entityID),
-		State: WorkflowState{Stage: PipelineStage("queued"), Metadata: map[string]any{}},
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)

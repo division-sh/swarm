@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/models"
 	"empireai/internal/protocolheaders"
 	runtimeactor "empireai/internal/runtime/actorctx"
+	models "empireai/internal/runtime/actors"
 	workspace "empireai/internal/runtime/workspace"
 )
 

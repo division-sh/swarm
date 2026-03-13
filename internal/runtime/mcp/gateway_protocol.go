@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"empireai/internal/models"
 	"empireai/internal/protocolheaders"
+	models "empireai/internal/runtime/actors"
 )
 
 type ToolGatewayRequest struct {

@@ -117,40 +117,40 @@ func (vg *ValidationGate) getStateLocked(verticalID string) *validationPipelineS
 
 func (vg *ValidationGate) stageForState(st *validationPipelineState) string {
 	if st == nil {
-		return string(StageResearching)
+		return "researching"
 	}
 	switch strings.TrimSpace(st.Status) {
 	case "packaged":
-		return string(StageReadyForReview)
+		return "ready_for_review"
 	case "parked":
-		return string(StageReadyForReview)
+		return "ready_for_review"
 	case "approved":
-		return string(StageApproved)
+		return "approved"
 	case "rejected":
-		return string(StageKilled)
+		return "killed"
 	}
 	if !st.G1Research {
-		return string(StageResearching)
+		return "researching"
 	}
 	if !st.G2Spec {
 		if st.InnerRevisionCount > 0 {
-			return string(StageSpecReview)
+			return "spec_review"
 		}
-		return string(StageMVPSpeccing)
+		return "mvp_speccing"
 	}
 	if !st.G3CTO {
-		return string(StageCTOSpecReview)
+		return "cto_spec_review"
 	}
 	if !st.G4Brand {
-		return string(StageBranding)
+		return "branding"
 	}
-	return string(StageBranding)
+	return "branding"
 }
 
 func workflowStateForVertical(verticalID, stage string, st *validationPipelineState) WorkflowState {
 	state := WorkflowState{
 		VerticalID: strings.TrimSpace(verticalID),
-		Stage:      NormalizePipelineStage(stage),
+		Stage:      NormalizeWorkflowStateID(stage),
 	}
 	if st == nil {
 		return state
@@ -171,23 +171,23 @@ func workflowStateForVertical(verticalID, stage string, st *validationPipelineSt
 }
 
 func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, verticalID, stage, sourceEvent string) {
-	if pc == nil || pc.db == nil {
+	if pc == nil {
 		return
 	}
 	verticalID = strings.TrimSpace(verticalID)
-	stage = strings.TrimSpace(string(NormalizePipelineStage(stage)))
+	stage = strings.TrimSpace(string(NormalizeWorkflowStateID(stage)))
 	sourceEvent = strings.TrimSpace(sourceEvent)
 	if verticalID == "" || stage == "" {
 		return
 	}
 	defer pc.notifyTestVerticalStageUpdated(verticalID, stage)
 	var currentStage string
-	_ = dbQueryRowContext(ctx, pc.db, `
-		SELECT COALESCE(stage, '')
-		FROM verticals
-		WHERE id = $1::uuid
-	`, verticalID).Scan(&currentStage)
-	to := NormalizePipelineStage(stage)
+	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+		if instance, ok, err := pc.workflowStore.Load(ctx, verticalID); err == nil && ok {
+			currentStage = strings.TrimSpace(instance.CurrentState)
+		}
+	}
+	to := NormalizeWorkflowStateID(stage)
 	workflowState := workflowStateForVertical(verticalID, currentStage, pc.validationStateSnapshot(verticalID))
 	workflow := pc.WorkflowDefinition()
 	if workflow != nil {
@@ -202,53 +202,6 @@ func (pc *FactoryPipelineCoordinator) updateVerticalStage(ctx context.Context, v
 			)
 		}
 	}
-	if stage == "ready_for_review" || stage == "marginal_review" {
-		_, _ = dbExecContext(ctx, pc.db, `
-			UPDATE verticals
-			SET stage = $2,
-			    parked_at = COALESCE(parked_at, now()),
-			    updated_at = now()
-			WHERE id = $1::uuid
-		`, verticalID, stage)
-		pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
-		return
-	}
-	if stage == "approved" {
-		_, _ = dbExecContext(ctx, pc.db, `
-			UPDATE verticals
-			SET stage = $2,
-			    approved_at = COALESCE(approved_at, now()),
-			    parked_at = NULL,
-			    updated_at = now()
-			WHERE id = $1::uuid
-		`, verticalID, stage)
-		pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
-		return
-	}
-	if stage == "killed" {
-		_, _ = dbExecContext(ctx, pc.db, `
-			UPDATE verticals
-			SET stage = $2,
-			    kill_reason = CASE
-					WHEN COALESCE(kill_reason,'') = '' THEN NULLIF($3,'')
-					ELSE kill_reason
-				END,
-			    killed_at_stage = CASE
-					WHEN COALESCE(killed_at_stage,'') = '' THEN NULLIF($3,'')
-					ELSE killed_at_stage
-				END,
-			    updated_at = now()
-			WHERE id = $1::uuid
-		`, verticalID, stage, sourceEvent)
-		pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
-		return
-	}
-	_, _ = dbExecContext(ctx, pc.db, `
-		UPDATE verticals
-		SET stage = $2,
-		    updated_at = now()
-		WHERE id = $1::uuid
-	`, verticalID, stage)
 	pc.persistWorkflowStageProjection(ctx, verticalID, currentStage, stage, sourceEvent, workflowState)
 }
 

@@ -13,8 +13,8 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowStageProjection(ctx context
 		return
 	}
 	verticalID = strings.TrimSpace(verticalID)
-	currentStage = strings.TrimSpace(string(NormalizePipelineStage(currentStage)))
-	nextStage = strings.TrimSpace(string(NormalizePipelineStage(nextStage)))
+	currentStage = strings.TrimSpace(string(NormalizeWorkflowStateID(currentStage)))
+	nextStage = strings.TrimSpace(string(NormalizeWorkflowStateID(nextStage)))
 	sourceEvent = strings.TrimSpace(sourceEvent)
 	if verticalID == "" || nextStage == "" {
 		return
@@ -118,7 +118,7 @@ func encodeValidationProjection(source semanticview.Source, verticalID string, m
 }
 
 func validationProjectionCompleteStage(stage string) bool {
-	switch strings.TrimSpace(string(NormalizePipelineStage(stage))) {
+	switch strings.TrimSpace(string(NormalizeWorkflowStateID(stage))) {
 	case "ready_for_review", "killed":
 		return true
 	default:
@@ -127,11 +127,11 @@ func validationProjectionCompleteStage(stage string) bool {
 }
 
 func workflowTransitionRecord(fromStage, toStage, sourceEvent string) WorkflowTransitionRecord {
-	fromStage = strings.TrimSpace(string(NormalizePipelineStage(fromStage)))
-	toStage = strings.TrimSpace(string(NormalizePipelineStage(toStage)))
+	fromStage = strings.TrimSpace(string(NormalizeWorkflowStateID(fromStage)))
+	toStage = strings.TrimSpace(string(NormalizeWorkflowStateID(toStage)))
 	sourceEvent = strings.TrimSpace(sourceEvent)
-	state := WorkflowState{Stage: NormalizePipelineStage(fromStage)}
-	transition, ok := DefaultPipelineWorkflow().Transition(state, NormalizePipelineStage(toStage))
+	state := WorkflowState{Stage: NormalizeWorkflowStateID(fromStage)}
+	transition, ok := DefaultPipelineWorkflow().Transition(state, NormalizeWorkflowStateID(toStage))
 	record := WorkflowTransitionRecord{
 		From:            fromStage,
 		To:              toStage,

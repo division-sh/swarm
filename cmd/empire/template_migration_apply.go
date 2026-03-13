@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
 	"empireai/internal/runtime"
+	models "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"

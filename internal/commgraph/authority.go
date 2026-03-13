@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 type RoutingAuthority struct {

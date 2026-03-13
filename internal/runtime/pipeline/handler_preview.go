@@ -15,7 +15,7 @@ import (
 
 type HandlerPreview struct {
 	Status          HandlerOutcomeStatus
-	Stage           PipelineStage
+	Stage           WorkflowStateID
 	StatusText      string
 	Metadata        map[string]any
 	Emits           []string
@@ -156,7 +156,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	}
 	return HandlerPreview{
 		Status:          handlerOutcomeStatusFromEngine(result.Status),
-		Stage:           NormalizePipelineStage(firstNonEmptyString(result.NextState, result.CurrentState, string(state.Stage))),
+		Stage:           NormalizeWorkflowStateID(firstNonEmptyString(result.NextState, result.CurrentState, string(state.Stage))),
 		StatusText:      state.Status,
 		Metadata:        cloneStringAnyMap(result.StateMutation.Metadata),
 		Emits:           emits,

@@ -13,7 +13,6 @@ type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source
 	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
-	WorkflowStateStore() WorkflowStateStore
 	WorkflowInstanceStore() WorkflowInstancePersistence
 	TransitionEvaluator() TransitionEvaluator
 	GuardRegistry() GuardRegistry
@@ -31,14 +30,6 @@ type BackgroundWorkflowExecutorProvider interface {
 	BackgroundWorkflowExecutor() WorkflowNodeExecutor
 }
 
-type WorkflowStateStore interface {
-	Enabled(ctx context.Context, enabled bool) bool
-	Load(ctx context.Context) PipelineStateSnapshot
-	MarkProcessed(ctx context.Context, processed map[string]struct{}, eventID string) bool
-	Persist(ctx context.Context, scans map[string]*scanAccumulator, pending map[string]pendingCandidate, validations map[string]*validationPipelineState)
-	Clear(ctx context.Context, clearScoringDigest bool)
-}
-
 type WorkflowInstancePersistence interface {
 	Enabled() bool
 	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
@@ -49,8 +40,8 @@ type WorkflowInstancePersistence interface {
 }
 
 type TransitionEvaluator interface {
-	Transition(state WorkflowState, to PipelineStage) (WorkflowTransition, bool)
-	CanTransition(state WorkflowState, to PipelineStage) bool
+	Transition(state WorkflowState, to WorkflowStateID) (WorkflowTransition, bool)
+	CanTransition(state WorkflowState, to WorkflowStateID) bool
 }
 
 type GuardRegistry interface {
@@ -86,13 +77,6 @@ func (pc *FactoryPipelineCoordinator) WorkflowNodes() []WorkflowNode {
 		return nil
 	}
 	return pc.module.WorkflowNodes()
-}
-
-func (pc *FactoryPipelineCoordinator) WorkflowStateStore() WorkflowStateStore {
-	if pc == nil {
-		return nil
-	}
-	return pc.stateStore
 }
 
 func (pc *FactoryPipelineCoordinator) WorkflowInstanceStore() WorkflowInstancePersistence {

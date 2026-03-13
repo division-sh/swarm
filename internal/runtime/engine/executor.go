@@ -197,11 +197,10 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 		payload = map[string]any{}
 	}
 	base := BuildBaseContext(ContextBuilderInput{
-		Source:   e.deps.Source,
-		EntityID: req.EntityID,
-		FlowID:   req.FlowID,
-		State:    state,
-		Payload:  payload,
+		Source:  e.deps.Source,
+		FlowID:  req.FlowID.String(),
+		State:   state,
+		Payload: payload,
 	})
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
@@ -326,8 +325,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if acc.Received == nil {
 		acc.Received = map[string]bool{}
 	}
-	arrivalID := arrivalIdentifier(frame.req.Event, frame.payload)
-	arrivalID = dedupIdentifier(frame.base, frame.state, frame.req.Event, spec)
+	arrivalID := dedupIdentifier(frame.base, frame.state, frame.req.Event, spec)
 	if arrivalID != "" && !acc.Received[arrivalID] {
 		acc.Received[arrivalID] = true
 		acc.Items = append(acc.Items, map[string]any{
@@ -718,9 +716,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.Metadata))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.Gates))
-	ctx.Entity = frame.base.Entity.Clone()
-	ctx.Entity.Set("current_state", strings.TrimSpace(frame.state.State.CurrentState))
-	ctx.Entity.Set("gates", boolMapToAnyMap(frame.state.State.Gates))
+	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	return ctx
 }
 

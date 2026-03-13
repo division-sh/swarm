@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig, _ any) (any, error) {

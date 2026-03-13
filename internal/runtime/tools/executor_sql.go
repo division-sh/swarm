@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 func (e *Executor) execSQLExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -105,9 +105,9 @@ func (e *Executor) execSQLExecute(ctx context.Context, actor models.AgentConfig,
 func lookupVerticalSlug(ctx context.Context, db *sql.DB, verticalID string) (string, error) {
 	var slug string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(slug, ''), '')
-		FROM verticals
-		WHERE id = $1::uuid
+		SELECT COALESCE(NULLIF(metadata->>'slug', ''), '')
+		FROM workflow_instances
+		WHERE instance_id = $1::uuid
 	`, verticalID).Scan(&slug); err != nil {
 		return "", err
 	}

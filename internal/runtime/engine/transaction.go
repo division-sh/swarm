@@ -14,6 +14,15 @@ func ClassifyFailure(err error) FailureClass {
 		return FailureNone
 	case ErrChainDepthExceeded:
 		return FailureDeadLetter
+	case ErrMissingSemanticSource,
+		ErrMissingStateRepo,
+		ErrMissingTransaction,
+		ErrMissingEntityLocker,
+		ErrMissingOutbox,
+		ErrMissingDispatcher,
+		ErrMissingNodeID,
+		ErrMissingNodeHandler:
+		return FailureLogic
 	default:
 		return FailureTransient
 	}

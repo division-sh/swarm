@@ -24,11 +24,11 @@ func discoveryRuntimeResolveScanMode(runtime scanWorkflowRuntime, raw string) st
 	return resolvePipelineScanMode(nil, raw)
 }
 
-func (n *DiscoveryAggregator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
-	sc := n.scanCoordinator()
-	if sc == nil {
+func (pc *FactoryPipelineCoordinator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil {
 		return
 	}
+	sc := pc.scanCoordinator
 	payload := parsePayloadMap(evt.Payload)
 	scanID := strings.TrimSpace(asString(payload["scan_id"]))
 	if scanID == "" {
@@ -70,21 +70,21 @@ func (n *DiscoveryAggregator) handleDiscoveryReport(ctx context.Context, evt eve
 
 	candidates := buildDiscoveryCandidatesForReport(acc.Mode, payload)
 	for _, cand := range candidates {
-		n.processDiscoveryCandidate(ctx, evt, scanID, acc, cand)
+			pc.processDiscoveryCandidate(ctx, evt, scanID, acc, cand)
 	}
 }
 
-func (n *DiscoveryAggregator) processDiscoveryCandidate(
+func (pc *FactoryPipelineCoordinator) processDiscoveryCandidate(
 	ctx context.Context,
 	evt events.Event,
 	scanID string,
 	acc *scanAccumulator,
 	candidate discoveryCandidate,
 ) {
-	sc := n.scanCoordinator()
-	if sc == nil || acc == nil {
+	if pc == nil || pc.scanCoordinator == nil || acc == nil {
 		return
 	}
+	sc := pc.scanCoordinator
 	signal := candidate.Signal
 	allowed, adjustedSignal, reason := sc.discovery.EvaluateDiscoveryPreFilter(candidate.Payload, signal)
 	if !allowed {
@@ -165,11 +165,11 @@ func (n *DiscoveryAggregator) processDiscoveryCandidate(
 	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
 }
 
-func (n *DiscoveryAggregator) handleDedupResolved(ctx context.Context, evt events.Event) {
-	sc := n.scanCoordinator()
-	if sc == nil {
+func (pc *FactoryPipelineCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil {
 		return
 	}
+	sc := pc.scanCoordinator
 	payload := parsePayloadMap(evt.Payload)
 	dedupEventID := strings.TrimSpace(asString(payload["dedup_event_id"]))
 	if dedupEventID == "" {
@@ -215,15 +215,15 @@ func (n *DiscoveryAggregator) handleDedupResolved(ctx context.Context, evt event
 		acc.Discovered++
 	}
 	sc.mu.Unlock()
-	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, n.NodeID(), cand.Payload))
+	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(verticalID, cand.Name, cand.Geography, cand.Mode, cand.ScanID, cand.CampaignID, cand.Signal, "discovery-aggregator", cand.Payload))
 	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
 }
 
-func (n *DiscoveryAggregator) handleSynthesisResolved(ctx context.Context, evt events.Event) {
-	sc := n.scanCoordinator()
-	if sc == nil || sc.runtime == nil {
+func (pc *FactoryPipelineCoordinator) handleSynthesisResolved(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil || pc.scanCoordinator.runtime == nil {
 		return
 	}
+	sc := pc.scanCoordinator
 	payload := parsePayloadMap(evt.Payload)
 	resolution := strings.ToLower(strings.TrimSpace(firstNonEmptyString(
 		asString(payload["resolution"]),
@@ -275,7 +275,7 @@ func (n *DiscoveryAggregator) handleSynthesisResolved(ctx context.Context, evt e
 
 	discoverySource := strings.TrimSpace(evt.SourceAgent)
 	if discoverySource == "" {
-		discoverySource = n.NodeID()
+		discoverySource = "discovery-aggregator"
 	}
 	discoveredPayload := payloadMap(sc.payloadFactory.BuildVerticalDiscoveredPayload(
 		verticalID,
@@ -289,11 +289,4 @@ func (n *DiscoveryAggregator) handleSynthesisResolved(ctx context.Context, evt e
 		payload,
 	))
 	sc.runtime.publish(ctx, "vertical.discovered", verticalID, discoveredPayload)
-}
-
-func (n *DiscoveryAggregator) scanCoordinator() *ScanCoordinator {
-	if n == nil || n.coordinator == nil {
-		return nil
-	}
-	return n.coordinator.scanCoordinator
 }

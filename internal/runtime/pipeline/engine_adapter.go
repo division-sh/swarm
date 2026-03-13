@@ -408,7 +408,7 @@ func cloneEvent(evt events.Event) events.Event {
 func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowState {
 	state := &WorkflowState{
 		VerticalID: snapshot.EntityID.String(),
-		Stage:      NormalizePipelineStage(snapshot.CurrentState),
+		Stage:      NormalizeWorkflowStateID(snapshot.CurrentState),
 		Metadata:   cloneStringAnyMap(snapshot.Metadata),
 	}
 	if state.Metadata == nil {
@@ -458,7 +458,7 @@ func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerCon
 		Event: req.Event,
 		State: WorkflowState{
 			VerticalID: req.EntityID.String(),
-			Stage:      NormalizePipelineStage(req.State.CurrentState),
+			Stage:      NormalizeWorkflowStateID(req.State.CurrentState),
 			Metadata:   cloneStringAnyMap(req.State.Metadata),
 		},
 	}

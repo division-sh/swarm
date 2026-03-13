@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"
 )

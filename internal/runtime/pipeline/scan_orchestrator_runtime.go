@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -10,8 +11,11 @@ import (
 	"empireai/internal/runtime/semanticview"
 )
 
-func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.Event) {
-	sc := n.scanCoordinator()
+func (pc *FactoryPipelineCoordinator) handleScanRequested(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil {
+		return
+	}
+	sc := pc.scanCoordinator
 	if sc == nil {
 		return
 	}
@@ -60,9 +64,14 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 	if plannedShardCount > 0 && scanOrchestratorUsesShardedDispatch(assignmentEvents) {
 		return
 	}
-	assignments, err := defaultWorkflowModule().ScanPolicy().ExpandScanAssignments(mode, payload, assigned, corpusBatchSize)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		runtimeWarn("scan-orchestrator", "scan policy unavailable mode=%s", mode)
+		return
+	}
+	assignments, err := policy.ExpandScanAssignments(mode, payload, assigned, corpusBatchSize)
 	if err != nil {
-		runtimeWarn(n.NodeID(), "scan assignment expansion failed mode=%s err=%v", mode, err)
+		runtimeWarn("scan-orchestrator", "scan assignment expansion failed mode=%s err=%v", mode, err)
 	}
 	if len(assignments) == 0 {
 		assignments = []ScanAssignedPayload{assigned}
@@ -75,8 +84,11 @@ func (n *ScanOrchestrator) handleScanRequested(ctx context.Context, evt events.E
 	}
 }
 
-func (n *ScanOrchestrator) handleScanCompletion(ctx context.Context, evt events.Event) {
-	sc := n.scanCoordinator()
+func (pc *FactoryPipelineCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
+	if pc == nil || pc.scanCoordinator == nil {
+		return
+	}
+	sc := pc.scanCoordinator
 	if sc == nil {
 		return
 	}
@@ -84,7 +96,7 @@ func (n *ScanOrchestrator) handleScanCompletion(ctx context.Context, evt events.
 	scanID := strings.TrimSpace(asString(payload["scan_id"]))
 	if scanID == "" {
 		runtimeWarn(
-			n.NodeID(),
+			"scan-orchestrator",
 			"dropping scan completion missing scan_id event_id=%s type=%s source=%s",
 			strings.TrimSpace(evt.ID),
 			strings.TrimSpace(string(evt.Type)),
@@ -111,7 +123,7 @@ func (n *ScanOrchestrator) handleScanCompletion(ctx context.Context, evt events.
 	if acc == nil {
 		sc.mu.Unlock()
 		runtimeWarn(
-			n.NodeID(),
+			"scan-orchestrator",
 			"received scan completion for unknown accumulator scan_id=%s event_id=%s source=%s",
 			scanID,
 			strings.TrimSpace(evt.ID),
@@ -153,15 +165,12 @@ func (n *ScanOrchestrator) handleScanCompletion(ctx context.Context, evt events.
 	}
 }
 
-func (n *ScanOrchestrator) scanCoordinator() *ScanCoordinator {
-	if n == nil {
-		return nil
-	}
-	return n.coordinator
-}
-
 func readJSONLFile(path string, batchSize int) ([][]map[string]any, error) {
-	return defaultWorkflowModule().ScanPolicy().ReadJSONLBatches(path, batchSize)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		return nil, fmt.Errorf("pipeline: scan policy unavailable")
+	}
+	return policy.ReadJSONLBatches(path, batchSize)
 }
 
 func scanOrchestratorFallbackMode() string {

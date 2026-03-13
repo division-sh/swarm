@@ -7,7 +7,7 @@ import (
 )
 
 func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
-	if pc == nil || pc.db == nil || pc.stateStore == nil {
+	if pc == nil || pc.db == nil {
 		return
 	}
 	if !pc.isStatePersistenceEnabled(ctx) {
@@ -48,25 +48,20 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 			}
 		}
 	}
-	snapshot := pc.stateStore.Load(ctx)
-
 	pc.mu.Lock()
 	if pc.stateLoaded {
 		pc.mu.Unlock()
 		return
 	}
-	pc.scanCoordinator.scans = mergeScanAccumulators(snapshot.Scans, workflowScans)
+	pc.scanCoordinator.scans = mergeScanAccumulators(nil, workflowScans)
 	if pc.scoringState.accumulators == nil {
 		pc.scoringState.accumulators = make(map[string]*scoringAccumulator)
 	}
 	for verticalID, acc := range workflowScoring {
 		pc.scoringState.accumulators[verticalID] = acc
 	}
-	pc.scanCoordinator.pendingDedup = mergePendingCandidates(snapshot.PendingDedup, workflowPending)
-	pc.validationGate.states = mergeValidationStates(snapshot.Validations, workflowValidations)
-	if len(snapshot.Processed) > 0 {
-		pc.processed = snapshot.Processed
-	}
+	pc.scanCoordinator.pendingDedup = mergePendingCandidates(nil, workflowPending)
+	pc.validationGate.states = mergeValidationStates(nil, workflowValidations)
 	pc.stateLoaded = true
 	pc.mu.Unlock()
 
@@ -79,12 +74,6 @@ func (pc *FactoryPipelineCoordinator) ensureStateLoaded(ctx context.Context) {
 			pc.updateVerticalStage(ctx, verticalID, stage, "")
 		}
 		return
-	}
-	for verticalID, st := range snapshot.Validations {
-		if st == nil {
-			continue
-		}
-		pc.updateVerticalStage(ctx, verticalID, pc.validationGate.stageForState(st), "")
 	}
 }
 
@@ -164,13 +153,13 @@ func (pc *FactoryPipelineCoordinator) markEventProcessed(ctx context.Context, ev
 		pc.mu.Unlock()
 		return false
 	}
-	ok := pc.stateStore.MarkProcessed(ctx, pc.processed, eventID)
+	pc.processed[eventID] = struct{}{}
 	pc.mu.Unlock()
-	return ok
+	return true
 }
 
 func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
-	if pc == nil || pc.db == nil || pc.stateStore == nil {
+	if pc == nil || pc.db == nil {
 		return
 	}
 	ctx = withoutSQLTxContext(ctx)
@@ -180,20 +169,12 @@ func (pc *FactoryPipelineCoordinator) persistRuntimeState(ctx context.Context) {
 	pc.mu.Lock()
 	scans := pc.scanCoordinator.scans
 	pending := pc.scanCoordinator.pendingDedup
-	validations := pc.validationGate.states
 	defer pc.mu.Unlock()
-	pc.stateStore.Persist(ctx, scans, pending, validations)
 	pc.persistWorkflowScanProjection(ctx, scans, pending)
 }
 
 func (pc *FactoryPipelineCoordinator) clearPersistentState(ctx context.Context) {
-	if pc == nil || pc.db == nil || pc.stateStore == nil {
-		return
-	}
-	if !pc.isStatePersistenceEnabled(ctx) {
-		return
-	}
-	pc.stateStore.Clear(ctx, pc.isScoringDigestBufferEnabled(ctx))
+	_ = ctx
 }
 
 func (pc *FactoryPipelineCoordinator) isStatePersistenceEnabled(ctx context.Context) bool {
@@ -206,5 +187,12 @@ func (pc *FactoryPipelineCoordinator) isStatePersistenceEnabled(ctx context.Cont
 }
 
 func detectStatePersistence(ctx context.Context, db *sql.DB) bool {
-	return detectStatePersistenceTables(ctx, db)
+	if db == nil {
+		return false
+	}
+	var ok bool
+	if err := db.QueryRowContext(ctx, `SELECT to_regclass('public.workflow_instances') IS NOT NULL`).Scan(&ok); err != nil {
+		return false
+	}
+	return ok
 }

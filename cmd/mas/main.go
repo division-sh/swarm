@@ -210,7 +210,13 @@ type masWorkflowModule struct {
 	nodes          []runtimepipeline.WorkflowNode
 	guardRegistry  runtimepipeline.GuardRegistry
 	actionRegistry runtimepipeline.ActionRegistry
-	policies       runtimepipeline.WorkflowModule
+	policies       interface {
+		runtimepipeline.WorkflowModule
+		ScanPolicy() runtimepipeline.ScanPolicy
+		DiscoveryPolicy() runtimepipeline.DiscoveryPolicy
+		ScoringPolicy() runtimepipeline.ScoringPolicy
+		PayloadFactory() runtimepipeline.PayloadFactory
+	}
 }
 
 func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
@@ -227,6 +233,7 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 	if err != nil {
 		return nil, nil, err
 	}
+	policies := runtimepipeline.NewGenericTestWorkflowModule()
 	return &masWorkflowModule{
 		bundle:         bundle,
 		source:         source,
@@ -234,7 +241,13 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 		nodes:          nodes,
 		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
 		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
-		policies:       runtimepipeline.NewGenericTestWorkflowModule(),
+		policies: policies.(interface {
+			runtimepipeline.WorkflowModule
+			ScanPolicy() runtimepipeline.ScanPolicy
+			DiscoveryPolicy() runtimepipeline.DiscoveryPolicy
+			ScoringPolicy() runtimepipeline.ScoringPolicy
+			PayloadFactory() runtimepipeline.PayloadFactory
+		}),
 	}, bundle, nil
 }
 

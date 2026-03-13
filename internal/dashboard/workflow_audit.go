@@ -37,7 +37,7 @@ func workflowAuditSummary(ctx context.Context, db *sql.DB, contractVersion strin
 		SELECT COUNT(*)
 		FROM verticals v
 		JOIN workflow_instances wi ON wi.instance_id = v.id
-		WHERE COALESCE(v.stage, '') <> COALESCE(wi.current_stage, '')
+		WHERE COALESCE(v.stage, '') <> COALESCE(wi.current_state, '')
 	`).Scan(&stageDrift)
 	if strings.TrimSpace(contractVersion) != "" {
 		_ = db.QueryRowContext(ctx, `
@@ -50,7 +50,7 @@ func workflowAuditSummary(ctx context.Context, db *sql.DB, contractVersion strin
 		SELECT COUNT(*)
 		FROM workflow_instances wi
 		WHERE wi.entered_stage_at <= now() - interval '24 hours'
-		  AND wi.current_stage NOT IN ('killed', 'winding_down', 'operating', 'expanding')
+		  AND wi.current_state NOT IN ('killed', 'winding_down', 'operating', 'expanding')
 	`).Scan(&staleStage24h)
 	_ = db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -86,7 +86,7 @@ func workflowAuditSummary(ctx context.Context, db *sql.DB, contractVersion strin
 		appendWarning(fmt.Sprintf("%d active verticals are missing workflow_instances state", missingState))
 	}
 	if stageDrift > 0 {
-		appendWarning(fmt.Sprintf("%d verticals have stage drift between verticals.stage and workflow_instances.current_stage", stageDrift))
+		appendWarning(fmt.Sprintf("%d verticals have stage drift between verticals.stage and workflow_instances.current_state", stageDrift))
 	}
 	if versionMismatch > 0 && strings.TrimSpace(contractVersion) != "" {
 		appendWarning(fmt.Sprintf("%d workflow instances are not on contract version %s", versionMismatch, strings.TrimSpace(contractVersion)))
@@ -103,10 +103,10 @@ func workflowAuditSummary(ctx context.Context, db *sql.DB, contractVersion strin
 	out["warnings"] = warnings
 
 	driftRows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(NULLIF(v.slug, ''), v.id::text), COALESCE(v.stage, ''), COALESCE(wi.current_stage, '')
+		SELECT COALESCE(NULLIF(v.slug, ''), v.id::text), COALESCE(v.stage, ''), COALESCE(wi.current_state, '')
 		FROM verticals v
 		JOIN workflow_instances wi ON wi.instance_id = v.id
-		WHERE COALESCE(v.stage, '') <> COALESCE(wi.current_stage, '')
+		WHERE COALESCE(v.stage, '') <> COALESCE(wi.current_state, '')
 		ORDER BY wi.updated_at DESC
 		LIMIT 10
 	`)
@@ -128,11 +128,11 @@ func workflowAuditSummary(ctx context.Context, db *sql.DB, contractVersion strin
 	}
 
 	staleRows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(NULLIF(v.slug, ''), v.id::text), wi.current_stage, wi.entered_stage_at
+		SELECT COALESCE(NULLIF(v.slug, ''), v.id::text), wi.current_state, wi.entered_stage_at
 		FROM workflow_instances wi
 		LEFT JOIN verticals v ON v.id = wi.instance_id
 		WHERE wi.entered_stage_at <= now() - interval '24 hours'
-		  AND wi.current_stage NOT IN ('killed', 'winding_down', 'operating', 'expanding')
+		  AND wi.current_state NOT IN ('killed', 'winding_down', 'operating', 'expanding')
 		ORDER BY wi.entered_stage_at ASC
 		LIMIT 10
 	`)

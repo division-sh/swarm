@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
@@ -19,7 +19,7 @@ import (
 var errLegacyOpCoLifecycleDisabled = errors.New("legacy OpCo lifecycle is not part of the MAS runtime; flow instance activation replaces OpCo spawning (see manager/flow_activation.go)")
 var errMutableRoutingDisabled = errors.New("mutable routing is not part of the MAS runtime; routes derive from contracts")
 
-func (am *AgentManager) SpawnOpCo(verticalID string, mandate models.MandateDocument) error {
+func (am *AgentManager) SpawnOpCo(verticalID string, mandate runtimeactors.MandateDocument) error {
 	if am == nil {
 		return errLegacyOpCoLifecycleDisabled
 	}
@@ -86,7 +86,7 @@ type genericAgent struct {
 	subscriptions []events.EventType
 }
 
-func newGenericAgent(cfg models.AgentConfig) Agent {
+func newGenericAgent(cfg runtimeactors.AgentConfig) Agent {
 	if cfg.Type == "" {
 		cfg.Type = "generic"
 	}
@@ -130,7 +130,7 @@ func (a *genericAgent) OnEvent(context.Context, events.Event) ([]events.Event, e
 
 func opCoAgentID(role, verticalID string) string { return OpCoAgentID(role, verticalID) }
 
-func mergeAgentConfig(base, patch models.AgentConfig) models.AgentConfig {
+func mergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.AgentConfig {
 	return MergeAgentConfig(base, patch)
 }
 

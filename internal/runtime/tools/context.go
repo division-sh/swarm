@@ -3,8 +3,8 @@ package tools
 import (
 	"context"
 
-	"empireai/internal/models"
 	runtimeactor "empireai/internal/runtime/actorctx"
+	models "empireai/internal/runtime/actors"
 )
 
 func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {

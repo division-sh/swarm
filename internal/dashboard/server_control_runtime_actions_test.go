@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	models "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
 	"empireai/internal/testutil"

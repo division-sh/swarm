@@ -12,8 +12,8 @@ import (
 
 	"empireai/internal/config"
 	empireconfig "empireai/internal/empire/config"
-	"empireai/internal/models"
 	rt "empireai/internal/runtime"
+	models "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"

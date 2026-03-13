@@ -2,10 +2,10 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"regexp"
 	"strings"
+	"time"
 
 	"empireai/internal/events"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
@@ -14,15 +14,59 @@ import (
 
 func (sc *ScanCoordinator) handleDiscoveryReport(ctx context.Context, evt events.Event) {
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
-		(&DiscoveryAggregator{coordinator: pc}).handleDiscoveryReport(ctx, evt)
+		pc.handleDiscoveryReport(ctx, evt)
 	}
 }
 
 type discoveryCandidate = DiscoveryCandidate
 
+func workflowInstanceIdentity(instance WorkflowInstance) (string, string) {
+	metadata := workflowMetadataSnapshot(instance)
+	name := strings.TrimSpace(firstNonEmptyString(
+		asString(metadata["name"]),
+		asString(metadata["vertical_name"]),
+	))
+	geography := strings.TrimSpace(asString(metadata["geography"]))
+	if projection, ok := workflowEntityProjectionBucket(instance); ok {
+		if name == "" {
+			name = strings.TrimSpace(firstNonEmptyString(
+				asString(projection["name"]),
+				asString(projection["vertical_name"]),
+			))
+		}
+		if geography == "" {
+			geography = strings.TrimSpace(asString(projection["geography"]))
+		}
+	}
+	return name, geography
+}
+
+func workflowInstanceDiscoveryMode(instance WorkflowInstance) string {
+	metadata := workflowMetadataSnapshot(instance)
+	return strings.TrimSpace(firstNonEmptyString(
+		asString(metadata["mode"]),
+		asString(metadata["discovery_mode"]),
+	))
+}
+
+func workflowInstanceRawSignals(instance WorkflowInstance) map[string]any {
+	metadata := workflowMetadataSnapshot(instance)
+	if raw, ok := asObject(metadata["raw_signals"]); ok && len(raw) > 0 {
+		return cloneMap(raw)
+	}
+	if raw, ok := asObject(metadata["discovery_context"]); ok && len(raw) > 0 {
+		return cloneMap(raw)
+	}
+	return map[string]any{}
+}
+
 func buildDiscoveryCandidatesForReport(scanMode string, payload map[string]any) []DiscoveryCandidate {
 	module := defaultWorkflowModule()
-	return module.DiscoveryPolicy().BuildDiscoveryCandidatesForReport(scanMode, payload)
+	policy := workflowModuleDiscoveryPolicy(module)
+	if policy == nil {
+		return nil
+	}
+	return policy.BuildDiscoveryCandidatesForReport(scanMode, payload)
 }
 
 func (pc *FactoryPipelineCoordinator) logPrefilterSkip(ctx context.Context, evt events.Event, scanID, campaignID, reason, mode string, payload map[string]any, rawSignal, adjustedSignal float64) {
@@ -55,12 +99,20 @@ func cloneMap(in map[string]any) map[string]any {
 
 func EvaluateDiscoveryPreFilterForTest(payload map[string]any, rawSignal float64) (bool, float64, string) {
 	module := defaultWorkflowModule()
-	return module.DiscoveryPolicy().EvaluateDiscoveryPreFilter(payload, rawSignal)
+	policy := workflowModuleDiscoveryPolicy(module)
+	if policy == nil {
+		return false, rawSignal, ""
+	}
+	return policy.EvaluateDiscoveryPreFilter(payload, rawSignal)
 }
 
 func BuildPrefilterSkipDetailForTest(payload map[string]any, rawSignal, adjustedSignal float64, reason, mode string) map[string]any {
 	module := defaultWorkflowModule()
-	return module.DiscoveryPolicy().BuildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
+	policy := workflowModuleDiscoveryPolicy(module)
+	if policy == nil {
+		return nil
+	}
+	return policy.BuildPrefilterSkipDetail(payload, rawSignal, adjustedSignal, reason, mode)
 }
 
 func CloneMapForTest(in map[string]any) map[string]any {
@@ -69,13 +121,13 @@ func CloneMapForTest(in map[string]any) map[string]any {
 
 func (sc *ScanCoordinator) handleDedupResolved(ctx context.Context, evt events.Event) {
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
-		(&DiscoveryAggregator{coordinator: pc}).handleDedupResolved(ctx, evt)
+		pc.handleDedupResolved(ctx, evt)
 	}
 }
 
 func (sc *ScanCoordinator) handleSynthesisResolved(ctx context.Context, evt events.Event) {
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
-		(&DiscoveryAggregator{coordinator: pc}).handleSynthesisResolved(ctx, evt)
+		pc.handleSynthesisResolved(ctx, evt)
 	}
 }
 
@@ -125,50 +177,48 @@ type verticalCandidate struct {
 }
 
 func (pc *FactoryPipelineCoordinator) loadVerticalsByGeography(ctx context.Context, geography string) ([]verticalCandidate, error) {
-	if pc == nil || pc.db == nil || strings.TrimSpace(geography) == "" {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(geography) == "" {
 		return nil, nil
 	}
-	rows, err := dbQueryContext(ctx, pc.db, `
-		SELECT id::text, name
-		FROM verticals
-		WHERE lower(geography) = lower($1)
-		ORDER BY created_at DESC
-		LIMIT 500
-	`, geography)
+	items, err := pc.workflowStore.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	out := make([]verticalCandidate, 0, 32)
-	for rows.Next() {
-		var v verticalCandidate
-		if err := rows.Scan(&v.ID, &v.Name); err != nil {
-			return nil, err
+	target := strings.ToLower(strings.TrimSpace(geography))
+	for i := len(items) - 1; i >= 0; i-- {
+		item := items[i]
+		metadata := workflowMetadataSnapshot(item)
+		if strings.TrimSpace(asString(metadata["instance_kind"])) != "vertical" {
+			continue
 		}
-		out = append(out, v)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+		name, itemGeo := workflowInstanceIdentity(item)
+		if name == "" {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(itemGeo)) != target {
+			continue
+		}
+		out = append(out, verticalCandidate{ID: strings.TrimSpace(item.InstanceID), Name: name})
+		if len(out) >= 500 {
+			break
+		}
 	}
 	return out, nil
 }
 
 func (pc *FactoryPipelineCoordinator) loadVerticalIdentity(ctx context.Context, verticalID string) (string, string, error) {
-	if pc == nil || pc.db == nil || strings.TrimSpace(verticalID) == "" {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(verticalID) == "" {
 		return "", "", nil
 	}
-	var name, geography string
-	err := dbQueryRowContext(ctx, pc.db, `
-		SELECT COALESCE(name, ''), COALESCE(geography, '')
-		FROM verticals
-		WHERE id = $1::uuid
-	`, verticalID).Scan(&name, &geography)
-	if err == sql.ErrNoRows {
-		return "", "", nil
-	}
+	instance, ok, err := pc.workflowStore.Load(ctx, verticalID)
 	if err != nil {
 		return "", "", err
 	}
+	if !ok {
+		return "", "", nil
+	}
+	name, geography := workflowInstanceIdentity(instance)
 	return strings.TrimSpace(name), strings.TrimSpace(geography), nil
 }
 
@@ -184,14 +234,29 @@ func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Conte
 		}
 	}
 	verticalID := uuid.NewString()
-	if pc == nil || pc.db == nil {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return verticalID, nil
 	}
-	slug := buildVerticalSlug(name, verticalID)
-	if _, err := dbExecContext(ctx, pc.db, `
-		INSERT INTO verticals (id, name, slug, geography, stage, mode, raw_signals, created_at, updated_at)
-		VALUES ($1::uuid, $2, $3, $4, 'discovered', 'factory', $5::jsonb, now(), now())
-	`, verticalID, name, slug, geography, string(mustJSON(payload))); err != nil {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	source := pc.SemanticSource()
+	if err := pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      verticalID,
+		WorkflowName:    source.WorkflowName(),
+		WorkflowVersion: source.WorkflowVersion(),
+		CurrentState:    "discovered",
+		EnteredStageAt:  time.Now().UTC(),
+		Metadata: map[string]any{
+			"instance_kind": "vertical",
+			"instance_id":   verticalID,
+			"name":          strings.TrimSpace(name),
+			"slug":          buildVerticalSlug(name, verticalID),
+			"geography":     strings.TrimSpace(geography),
+			"mode":          "factory",
+			"raw_signals":   cloneMap(payload),
+		},
+	}); err != nil {
 		return "", err
 	}
 	_ = pc.updateVerticalDiscoveryMetadata(ctx, verticalID, mode, payload)
@@ -199,7 +264,7 @@ func (pc *FactoryPipelineCoordinator) ensureVerticalDiscovered(ctx context.Conte
 }
 
 func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx context.Context, verticalID, mode string, payload map[string]any) error {
-	if pc == nil || pc.db == nil || strings.TrimSpace(verticalID) == "" {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || strings.TrimSpace(verticalID) == "" {
 		return nil
 	}
 	if payload == nil {
@@ -241,25 +306,48 @@ func (pc *FactoryPipelineCoordinator) updateVerticalDiscoveryMetadata(ctx contex
 	if derivationRationale == nil {
 		derivationRationale = map[string]any{}
 	}
-	_, err := dbExecContext(ctx, pc.db, `
-		UPDATE verticals
-		SET
-			discovery_mode = $2,
-			opportunity_pattern = COALESCE(NULLIF($3, ''), opportunity_pattern),
-			signal_sources = COALESCE($4::jsonb, signal_sources),
-			required_capabilities = COALESCE($5::jsonb, required_capabilities),
-			parent_id = COALESCE(NULLIF($6, '')::uuid, parent_id),
-			generation_depth = CASE WHEN $7 > 0 THEN $7 ELSE generation_depth END,
-			generator_agent_id = COALESCE(NULLIF($8, ''), generator_agent_id),
-			derivation_rationale = COALESCE($9::jsonb, derivation_rationale),
-			updated_at = now()
-		WHERE id = $1::uuid
-	`, verticalID, discoveryMode, opportunityPattern, string(mustJSON(signalSources)), string(mustJSON(requiredCapabilities)), parentID, generationDepth, generatorAgentID, string(mustJSON(derivationRationale)))
-	if err != nil {
-		// Older test fixtures may not include newer columns; ignore metadata enrichment failures.
-		return err
-	}
-	return nil
+	return pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
+		source := pc.SemanticSource()
+		if strings.TrimSpace(instance.WorkflowName) == "" {
+			instance.WorkflowName = source.WorkflowName()
+		}
+		if strings.TrimSpace(instance.WorkflowVersion) == "" {
+			instance.WorkflowVersion = source.WorkflowVersion()
+		}
+		if strings.TrimSpace(instance.CurrentState) == "" {
+			instance.CurrentState = "discovered"
+		}
+		metadata := workflowMutableMetadata(instance)
+		metadata["instance_kind"] = "vertical"
+		metadata["instance_id"] = strings.TrimSpace(verticalID)
+		if strings.TrimSpace(asString(metadata["name"])) == "" {
+			metadata["name"] = deriveDiscoveryCandidateName(payload)
+		}
+		if strings.TrimSpace(asString(metadata["slug"])) == "" {
+			metadata["slug"] = buildVerticalSlug(asString(metadata["name"]), verticalID)
+		}
+		if strings.TrimSpace(asString(metadata["geography"])) == "" {
+			metadata["geography"] = strings.TrimSpace(asString(payload["geography"]))
+		}
+		if len(payload) > 0 {
+			metadata["raw_signals"] = cloneMap(payload)
+		}
+		metadata["mode"] = discoveryMode
+		metadata["discovery_mode"] = discoveryMode
+		if opportunityPattern != "" {
+			metadata["opportunity_pattern"] = opportunityPattern
+		}
+		metadata["signal_sources"] = signalSources
+		metadata["required_capabilities"] = requiredCapabilities
+		if parentID != "" {
+			metadata["parent_id"] = parentID
+		}
+		metadata["generation_depth"] = generationDepth
+		if generatorAgentID != "" {
+			metadata["generator_agent_id"] = generatorAgentID
+		}
+		metadata["derivation_rationale"] = derivationRationale
+	})
 }
 
 var nonAlnum = regexp.MustCompile(`[^a-z0-9]+`)

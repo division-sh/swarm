@@ -28,7 +28,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 		"entity_id": "item-123",
 	}, runtimepipeline.WorkflowState{
 		VerticalID: "item-123",
-		Stage:      runtimepipeline.NormalizePipelineStage("queued"),
+		Stage:      runtimepipeline.NormalizeWorkflowStateID("queued"),
 		Status:     "queued",
 		Metadata:   map[string]any{},
 	}, nil)
@@ -51,13 +51,13 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 		"received_count":   1,
 	}, runtimepipeline.WorkflowState{
 		VerticalID: "item-123",
-		Stage:      runtimepipeline.NormalizePipelineStage("collecting"),
+		Stage:      runtimepipeline.NormalizeWorkflowStateID("collecting"),
 		Status:     "collecting",
 		Metadata: map[string]any{
 			"received_count": 1,
 		},
 	}, nil)
-	if completed.Stage != runtimepipeline.NormalizePipelineStage("ready") {
+	if completed.Stage != runtimepipeline.NormalizeWorkflowStateID("ready") {
 		t.Fatalf("expected ready state after accumulation completion, got %+v", completed)
 	}
 	if !hasAll(completed.Emits, "item.review_requested") {

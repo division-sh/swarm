@@ -46,9 +46,7 @@ func (n *PortfolioNode) Handle(ctx context.Context, evt events.Event) bool {
 	case "runtime.reset":
 		n.coordinator.resetWorkflowRuntimeState(ctx)
 	case "budget.threshold_crossed":
-		if _, ok := n.coordinator.applyWorkflowEventTransition(ctx, evt); !ok {
-			n.coordinator.handleLifecycleBudgetThreshold(ctx, evt)
-		}
+		_, _ = n.coordinator.applyWorkflowEventTransition(ctx, evt)
 	case "system.directive":
 		n.coordinator.handlePortfolioSystemDirective(ctx, evt)
 	case "opco.spinup_requested":

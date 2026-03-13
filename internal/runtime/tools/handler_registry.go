@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 func (e *Executor) buildToolHandlers() map[string]ToolHandler {

@@ -18,11 +18,6 @@ type StateRepository interface {
 	SaveState(ctx context.Context, entityID identity.EntityID, mutation StateMutation) error
 }
 
-type InstanceRepository interface {
-	LoadInstance(ctx context.Context, instanceID string) (StateSnapshot, bool, error)
-	UpsertInstance(ctx context.Context, snapshot StateSnapshot) error
-}
-
 type Tx interface {
 	Context() context.Context
 }
@@ -74,7 +69,6 @@ type PayloadShaper interface {
 type RuntimeDependencies struct {
 	Source            semanticview.Source
 	StateRepo         StateRepository
-	InstanceRepo      InstanceRepository
 	TxRunner          TransactionRunner
 	Locker            EntityLocker
 	Outbox            OutboxWriter

@@ -378,8 +378,8 @@ func workflowTransitionFromHandlerPlan(state WorkflowState, plan handlerExecutio
 	}
 	return WorkflowTransition{
 		Name:             strings.TrimSpace(plan.NodeID) + ":" + strings.TrimSpace(plan.EventType),
-		From:             []PipelineStage{NormalizePipelineStage(string(state.Stage))},
-		To:               NormalizePipelineStage(to),
+		From:             []WorkflowStateID{NormalizeWorkflowStateID(string(state.Stage))},
+		To:               NormalizeWorkflowStateID(to),
 		Trigger:          strings.TrimSpace(plan.EventType),
 		Node:             strings.TrimSpace(plan.NodeID),
 		DataAccumulation: plan.DataAccumulation,
@@ -795,7 +795,7 @@ func equalWorkflowDataWrites(left []runtimecontracts.WorkflowDataWrite, right []
 }
 
 func workflowTransitionSemanticParity(flat WorkflowTransition, derived WorkflowTransition) (bool, string) {
-	if NormalizePipelineStage(string(flat.To)) != NormalizePipelineStage(string(derived.To)) {
+	if NormalizeWorkflowStateID(string(flat.To)) != NormalizeWorkflowStateID(string(derived.To)) {
 		return false, "target_mismatch"
 	}
 	if strings.TrimSpace(flat.Trigger) != strings.TrimSpace(derived.Trigger) {
@@ -1030,20 +1030,28 @@ func (pc *FactoryPipelineCoordinator) rewriteWorkflowExpressionRuntimeQueries(
 }
 
 func (pc *FactoryPipelineCoordinator) countWorkflowEntitiesByName(ctx context.Context, name string) (int, bool) {
-	if pc == nil || pc.db == nil {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return 0, true
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return 0, true
 	}
-	var count int
-	if err := dbQueryRowContext(ctx, pc.db, `
-		SELECT COUNT(*)
-		FROM verticals
-		WHERE lower(trim(name)) = lower(trim($1))
-	`, name).Scan(&count); err != nil {
+	items, err := pc.workflowStore.List(ctx)
+	if err != nil {
 		return 0, false
+	}
+	count := 0
+	target := strings.ToLower(strings.TrimSpace(name))
+	for _, item := range items {
+		metadata := workflowMetadataSnapshot(item)
+		if strings.TrimSpace(asString(metadata["instance_kind"])) != "vertical" {
+			continue
+		}
+		entityName, _ := workflowInstanceIdentity(item)
+		if strings.ToLower(strings.TrimSpace(entityName)) == target {
+			count++
+		}
 	}
 	return count, true
 }
@@ -1289,16 +1297,6 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 			return state
 		}
 	}
-	if pc.db != nil {
-		var stage string
-		if err := dbQueryRowContext(ctx, pc.db, `
-			SELECT COALESCE(stage, '')
-			FROM verticals
-			WHERE id = $1::uuid
-		`, verticalID).Scan(&stage); err == nil {
-			state.Stage = NormalizePipelineStage(stage)
-		}
-	}
 	return state
 }
 
@@ -1328,7 +1326,7 @@ func (pc *FactoryPipelineCoordinator) resolveWorkflowAction(actionID string) (ru
 
 func workflowStateFromInstance(instance WorkflowInstance, fallback WorkflowState) WorkflowState {
 	out := fallback
-	out.Stage = NormalizePipelineStage(instance.CurrentState)
+	out.Stage = NormalizeWorkflowStateID(instance.CurrentState)
 	if metadata := workflowMetadataSnapshot(instance); len(metadata) > 0 {
 		out.Metadata = metadata
 	}
@@ -1675,27 +1673,30 @@ func (pc *FactoryPipelineCoordinator) PipelineHasCapacity(ctx context.Context, l
 }
 
 func (pc *FactoryPipelineCoordinator) countVerticalsInStageRange(ctx context.Context, startStage, endStage string) int {
-	if pc == nil || pc.db == nil {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return 0
 	}
 	stages := pc.workflowStageRange(startStage, endStage)
 	if len(stages) == 0 {
 		return -1
 	}
-	placeholders := make([]string, 0, len(stages))
-	args := make([]any, 0, len(stages))
-	for idx, stage := range stages {
-		placeholders = append(placeholders, fmt.Sprintf("$%d", idx+1))
-		args = append(args, stage)
-	}
-	query := fmt.Sprintf(`
-		SELECT COUNT(*)
-		FROM verticals
-		WHERE stage IN (%s)
-	`, strings.Join(placeholders, ", "))
-	var count int
-	if err := dbQueryRowContext(ctx, pc.db, query, args...).Scan(&count); err != nil {
+	items, err := pc.workflowStore.List(ctx)
+	if err != nil {
 		return -1
+	}
+	allowed := make(map[string]struct{}, len(stages))
+	for _, stage := range stages {
+		allowed[strings.TrimSpace(stage)] = struct{}{}
+	}
+	count := 0
+	for _, item := range items {
+		metadata := workflowMetadataSnapshot(item)
+		if strings.TrimSpace(asString(metadata["instance_kind"])) != "vertical" {
+			continue
+		}
+		if _, ok := allowed[strings.TrimSpace(item.CurrentState)]; ok {
+			count++
+		}
 	}
 	return count
 }
@@ -1704,8 +1705,8 @@ func (pc *FactoryPipelineCoordinator) workflowStageRange(startStage, endStage st
 	if pc == nil || pc.SemanticSource() == nil {
 		return nil
 	}
-	startStage = strings.TrimSpace(string(NormalizePipelineStage(startStage)))
-	endStage = strings.TrimSpace(string(NormalizePipelineStage(endStage)))
+	startStage = strings.TrimSpace(string(NormalizeWorkflowStateID(startStage)))
+	endStage = strings.TrimSpace(string(NormalizeWorkflowStateID(endStage)))
 	if startStage == "" || endStage == "" {
 		return nil
 	}
@@ -1713,7 +1714,7 @@ func (pc *FactoryPipelineCoordinator) workflowStageRange(startStage, endStage st
 	startIdx := -1
 	endIdx := -1
 	for idx, stage := range stages {
-		stageID := strings.TrimSpace(string(NormalizePipelineStage(stage.ID)))
+		stageID := strings.TrimSpace(string(NormalizeWorkflowStateID(stage.ID)))
 		if stageID == startStage && startIdx < 0 {
 			startIdx = idx
 		}
@@ -1726,7 +1727,7 @@ func (pc *FactoryPipelineCoordinator) workflowStageRange(startStage, endStage st
 	}
 	out := make([]string, 0, endIdx-startIdx+1)
 	for _, stage := range stages[startIdx : endIdx+1] {
-		stageID := strings.TrimSpace(string(NormalizePipelineStage(stage.ID)))
+		stageID := strings.TrimSpace(string(NormalizeWorkflowStateID(stage.ID)))
 		if stageID != "" {
 			out = append(out, stageID)
 		}

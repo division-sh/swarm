@@ -9,6 +9,8 @@ import (
 	runtimemanager "empireai/internal/runtime/manager"
 )
 
+// GetVerticalInfo is a legacy compatibility read against the pre-spec
+// verticals table. New platform state must use workflow_instances instead.
 func (s *PostgresStore) GetVerticalInfo(ctx context.Context, verticalID string) (runtimemanager.VerticalInfo, bool, error) {
 	verticalID = strings.TrimSpace(verticalID)
 	if verticalID == "" {

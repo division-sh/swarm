@@ -12,7 +12,7 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/config"
-	models "empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	contracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/semanticview"
 	runtimetools "empireai/internal/runtime/tools"

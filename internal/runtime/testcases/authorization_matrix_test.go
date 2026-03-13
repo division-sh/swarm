@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"empireai/internal/commgraph"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 func TestGenericBundle_AuthorizationMatrix(t *testing.T) {

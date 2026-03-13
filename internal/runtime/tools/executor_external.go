@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 func (e *Executor) execInstagramHandleCheck(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -232,15 +232,15 @@ func (e *Executor) loadVerticalCredentials(ctx context.Context, verticalID strin
 	}
 	var raw []byte
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(credentials, '{}'::jsonb)
-		FROM verticals
-		WHERE id = $1::uuid
+		SELECT COALESCE(metadata->'credentials', '{}'::jsonb)
+		FROM workflow_instances
+		WHERE instance_id = $1::uuid
 	`, verticalID).Scan(&raw); err != nil {
-		return nil, fmt.Errorf("load vertical credentials: %w", err)
+		return nil, fmt.Errorf("load instance credentials: %w", err)
 	}
 	var out map[string]any
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("decode vertical credentials: %w", err)
+		return nil, fmt.Errorf("decode instance credentials: %w", err)
 	}
 	if out == nil {
 		out = map[string]any{}

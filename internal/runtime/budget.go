@@ -11,7 +11,7 @@ import (
 
 	"empireai/internal/config"
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -141,9 +141,10 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 
 	// Evaluate each active vertical with any spend/metrics.
 	rows, err := t.db.QueryContext(ctx, `
-		SELECT id::text
-		FROM verticals
-		WHERE stage IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
+		SELECT instance_id::text
+		FROM workflow_instances
+		WHERE COALESCE(metadata->>'instance_kind', '') = 'vertical'
+		  AND current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
 		ORDER BY created_at ASC
 	`)
 	if err != nil {

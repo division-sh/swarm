@@ -13,7 +13,7 @@ import (
 
 func (sc *ScanCoordinator) handleScanRequested(ctx context.Context, evt events.Event) {
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
-		(&ScanOrchestrator{coordinator: pc.scanCoordinator}).handleScanRequested(ctx, evt)
+		pc.handleScanRequested(ctx, evt)
 	}
 }
 
@@ -158,7 +158,7 @@ func stableUUID(raw string) uuid.UUID {
 
 func (sc *ScanCoordinator) handleScanCompletion(ctx context.Context, evt events.Event) {
 	if pc, ok := sc.runtime.(*FactoryPipelineCoordinator); ok {
-		(&ScanOrchestrator{coordinator: pc.scanCoordinator}).handleScanCompletion(ctx, evt)
+		pc.handleScanCompletion(ctx, evt)
 	}
 }
 

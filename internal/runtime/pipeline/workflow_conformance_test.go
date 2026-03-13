@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"empireai/internal/events"
@@ -26,21 +25,6 @@ func (pipelineTestBus) ResolveSubscribedRecipients(string) []string { return nil
 func (pipelineTestBus) EngineOutbox() runtimeengine.OutboxWriter    { return noOpEngineOutbox{} }
 func (pipelineTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return noOpEngineDispatcher{}
-}
-
-func TestPipelineStateStore_DefaultsAndProcessedTracking(t *testing.T) {
-	store := NewPipelineStateStore(nil, &sync.Mutex{})
-	snapshot := store.Load(context.Background())
-	if len(snapshot.Scans) != 0 || len(snapshot.PendingDedup) != 0 || len(snapshot.Validations) != 0 || len(snapshot.Processed) != 0 {
-		t.Fatalf("expected empty snapshot, got %+v", snapshot)
-	}
-	processed := map[string]struct{}{}
-	if !store.MarkProcessed(context.Background(), processed, "evt-1") {
-		t.Fatal("expected first event to be marked processed")
-	}
-	if store.MarkProcessed(context.Background(), processed, "evt-1") {
-		t.Fatal("expected duplicate processed event to be ignored")
-	}
 }
 
 func TestWorkflowRuntime_NodesOwnRegisteredPolicies(t *testing.T) {

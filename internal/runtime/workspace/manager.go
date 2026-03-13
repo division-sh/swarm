@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
@@ -205,15 +205,19 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 	}
 
 	if m.db != nil {
-		rows, err := m.db.QueryContext(ctx, `SELECT COALESCE(NULLIF(slug, ''), '') FROM verticals`)
+		rows, err := m.db.QueryContext(ctx, `
+			SELECT DISTINCT COALESCE(NULLIF(metadata->>'slug', ''), '')
+			FROM workflow_instances
+			WHERE COALESCE(metadata->>'instance_kind', '') = 'vertical'
+		`)
 		if err != nil {
-			return nil, fmt.Errorf("list vertical slugs: %w", err)
+			return nil, fmt.Errorf("list instance slugs: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var slug string
 			if scanErr := rows.Scan(&slug); scanErr != nil {
-				return nil, fmt.Errorf("scan vertical slug: %w", scanErr)
+				return nil, fmt.Errorf("scan instance slug: %w", scanErr)
 			}
 			slug = SanitizeSlug(slug)
 			if slug == "" {
@@ -222,7 +226,7 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 			set[m.VerticalContainerName(slug)] = struct{}{}
 		}
 		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("iterate vertical slugs: %w", err)
+			return nil, fmt.Errorf("iterate instance slugs: %w", err)
 		}
 	}
 
@@ -455,15 +459,15 @@ func (m *DockerManager) LookupVerticalSlug(ctx context.Context, verticalID strin
 	}
 	var slug string
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(slug, ''), '')
-		FROM verticals
-		WHERE id = $1::uuid
+		SELECT COALESCE(NULLIF(metadata->>'slug', ''), '')
+		FROM workflow_instances
+		WHERE instance_id = $1::uuid
 	`, trimmedID).Scan(&slug); err != nil {
-		return "", fmt.Errorf("lookup vertical slug: %w", err)
+		return "", fmt.Errorf("lookup instance slug: %w", err)
 	}
 	slug = SanitizeSlug(slug)
 	if slug == "" {
-		return "", fmt.Errorf("vertical %s has no slug", trimmedID)
+		return SanitizeSlug(trimmedID), nil
 	}
 	return slug, nil
 }

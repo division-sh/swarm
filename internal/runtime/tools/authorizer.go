@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	"github.com/google/uuid"
 )
 

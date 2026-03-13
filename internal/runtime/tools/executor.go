@@ -14,7 +14,7 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	llm "empireai/internal/runtime/llm"
 	"github.com/google/uuid"
 )

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) (any, error)

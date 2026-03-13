@@ -1,10 +1,7 @@
 package engine
 
 import (
-	"strings"
-
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
 	"empireai/internal/runtime/core/values"
 	"empireai/internal/runtime/semanticview"
 )
@@ -19,28 +16,21 @@ type ContextOverlay struct {
 
 type ContextBuilderInput struct {
 	Source   semanticview.Source
-	EntityID identity.EntityID
-	FlowID   identity.FlowID
+	FlowID   string
 	State    StateSnapshot
 	Payload  map[string]any
 }
 
 func BuildBaseContext(input ContextBuilderInput) BaseContext {
 	normalizeSnapshotGates(&input.State)
-	entity := cloneStringAnyMap(input.State.Metadata)
 	base := values.NewContext()
-	base.Entity = values.Wrap(entity)
+	base.Entity = values.Wrap(input.State.EntityContext())
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.Metadata))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.Gates))
 	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))
 	if input.Source != nil {
-		base.Policy = values.Wrap(policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID.String())))
+		base.Policy = values.Wrap(policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID)))
 	}
-	base.Entity.Set("entity_id", input.EntityID.String())
-	base.Entity.Set("current_state", strings.TrimSpace(input.State.CurrentState))
-	base.Entity.Set("workflow_name", strings.TrimSpace(input.State.WorkflowName))
-	base.Entity.Set("workflow_version", strings.TrimSpace(input.State.WorkflowVersion))
-	base.Entity.Set("gates", boolMapToAnyMap(input.State.Gates))
 	return base
 }
 

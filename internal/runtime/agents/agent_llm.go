@@ -10,8 +10,8 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
-	"empireai/internal/models"
 	runtimeactor "empireai/internal/runtime/actorctx"
+	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"

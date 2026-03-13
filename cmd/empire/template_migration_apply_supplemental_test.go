@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"

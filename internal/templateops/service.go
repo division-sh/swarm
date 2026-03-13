@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )

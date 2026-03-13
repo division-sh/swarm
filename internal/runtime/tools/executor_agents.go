@@ -10,7 +10,7 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	"github.com/google/uuid"
 )
 

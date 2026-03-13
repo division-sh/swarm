@@ -12,7 +12,7 @@ import (
 
 	empireconfig "empireai/internal/empire/config"
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	"github.com/google/uuid"
 )
 

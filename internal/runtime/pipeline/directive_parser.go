@@ -30,21 +30,41 @@ type ParsedDirective struct {
 type DirectiveParser struct{}
 
 func (DirectiveParser) Parse(text string) ParsedDirective {
-	return defaultWorkflowModule().ScanPolicy().ParseDirective(text)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		return ParsedDirective{}
+	}
+	return policy.ParseDirective(text)
 }
 
 func ParseDirectiveGeography(text string) (name, country, region string) {
-	return defaultWorkflowModule().ScanPolicy().ParseDirectiveGeography(text)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		return "", "", ""
+	}
+	return policy.ParseDirectiveGeography(text)
 }
 
 func SanitizeGeographyPhrase(text string) string {
-	return defaultWorkflowModule().ScanPolicy().SanitizeGeographyPhrase(text)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		return ""
+	}
+	return policy.SanitizeGeographyPhrase(text)
 }
 
 func IsComplexDirectiveText(text string) bool {
-	return defaultWorkflowModule().ScanPolicy().IsComplexDirectiveText(text)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		return false
+	}
+	return policy.IsComplexDirectiveText(text)
 }
 
 func ExtractCorpusPathFromStrategicContext(strategic map[string]any) string {
-	return defaultWorkflowModule().ScanPolicy().ExtractCorpusPathFromStrategicContext(strategic)
+	policy := workflowModuleScanPolicy(defaultWorkflowModule())
+	if policy == nil {
+		return ""
+	}
+	return policy.ExtractCorpusPathFromStrategicContext(strategic)
 }

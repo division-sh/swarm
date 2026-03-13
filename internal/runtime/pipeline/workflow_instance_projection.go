@@ -22,19 +22,20 @@ const (
 
 	workflowStateBucketValidationOrchestrator = "validation-orchestrator"
 	workflowStateBucketEntityProjection       = "entity_projection"
-	workflowStateBucketScoringNode            = "scoring-node"
-	workflowStateBucketBuildOrchestrator      = "build-orchestrator"
+	workflowStateBucketScoringState           = "scoring-state"
+	workflowStateBucketBuildState             = "build-state"
 	workflowStateBucketScoringRestore         = "scoring-restore"
 	workflowStateBucketScanState              = "scan-state"
 	workflowStateBucketPendingDedup           = "pending-dedup"
-	workflowStateBucketDiscoveryAggregator    = "discovery-aggregator"
+	workflowStateBucketDiscoveryState         = "discovery-state"
+	workflowStateNodeDiscoveryAggregator      = "discovery-aggregator"
 )
 
 func classifyWorkflowStateBucket(bucket string) workflowStateBucketOwnership {
 	switch strings.TrimSpace(bucket) {
 	case workflowStateBucketValidationOrchestrator, workflowStateBucketEntityProjection:
 		return workflowStateBucketOwnershipPlatform
-	case workflowStateBucketScoringNode, workflowStateBucketDiscoveryAggregator, workflowStateBucketBuildOrchestrator:
+	case workflowStateBucketScoringState, workflowStateBucketDiscoveryState, workflowStateBucketBuildState:
 		return workflowStateBucketOwnershipProductDerived
 	case workflowStateBucketScoringRestore, workflowStateBucketScanState, workflowStateBucketPendingDedup:
 		return workflowStateBucketOwnershipCompatibility
@@ -135,11 +136,11 @@ func workflowEntityProjectionBucket(instance WorkflowInstance) (map[string]any, 
 }
 
 func workflowScoringProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
-	return workflowStateBucketObject(instance, workflowStateBucketScoringNode)
+	return workflowStateBucketObject(instance, workflowStateBucketScoringState)
 }
 
 func workflowBuildProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
-	return workflowStateBucketObject(instance, workflowStateBucketBuildOrchestrator)
+	return workflowStateBucketObject(instance, workflowStateBucketBuildState)
 }
 
 func workflowScanProjectionBucket(instance WorkflowInstance) (map[string]any, bool) {
@@ -162,7 +163,7 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScoringAccumulator(ctx cont
 	encodedNode := encodeScoringAccumulatorForWorkflow(pc.SemanticSource(), acc)
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		workflowSetStateBucket(instance, restoreBucket, encoded)
-		workflowSetStateBucket(instance, workflowStateBucketScoringNode, encodedNode)
+		workflowSetStateBucket(instance, workflowStateBucketScoringState, encodedNode)
 	})
 }
 
@@ -176,7 +177,7 @@ func (pc *FactoryPipelineCoordinator) clearWorkflowScoringAccumulator(ctx contex
 	}
 	_ = pc.workflowStore.Mutate(ctx, verticalID, func(instance *WorkflowInstance) {
 		workflowDeleteStateBucket(instance, scoringRestoreDeltaBucket(pc))
-		workflowDeleteStateBucket(instance, workflowStateBucketScoringNode)
+		workflowDeleteStateBucket(instance, workflowStateBucketScoringState)
 	})
 }
 
@@ -285,7 +286,7 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowScanProjection(ctx context.
 			}
 			workflowSetStateBucket(instance, workflowStateBucketScanState, encodedScan)
 			workflowSetStateBucket(instance, workflowStateBucketPendingDedup, encodedPending)
-			workflowSetStateBucket(instance, workflowStateBucketDiscoveryAggregator, encodedDiscovery)
+			workflowSetStateBucket(instance, workflowStateBucketDiscoveryState, encodedDiscovery)
 			metadata := workflowMutableMetadata(instance)
 			metadata["instance_kind"] = "scan"
 		})
@@ -419,9 +420,11 @@ func scoringRestoreDeltaBucket(pc *FactoryPipelineCoordinator) string {
 			return bucket
 		}
 	}
-	if module := defaultWorkflowModuleOrNil(); module != nil && module.ScoringPolicy() != nil {
-		if bucket := strings.TrimSpace(module.ScoringPolicy().ScoringRestoreDeltaBucket()); bucket != "" {
-			return bucket
+	if module := defaultWorkflowModuleOrNil(); module != nil {
+		if policy := workflowModuleScoringPolicy(module); policy != nil {
+			if bucket := strings.TrimSpace(policy.ScoringRestoreDeltaBucket()); bucket != "" {
+				return bucket
+			}
 		}
 	}
 	return workflowStateBucketScoringRestore
@@ -448,9 +451,11 @@ func applyScoringCompatibilityDelta(acc *scoringAccumulator, compatBucket map[st
 	if acc == nil || len(compatBucket) == 0 {
 		return
 	}
-	if module := defaultWorkflowModuleOrNil(); module != nil && module.ScoringPolicy() != nil {
-		module.ScoringPolicy().ApplyScoringRestoreDelta((*ScoringAccumulator)(acc), compatBucket)
-		return
+	if module := defaultWorkflowModuleOrNil(); module != nil {
+		if policy := workflowModuleScoringPolicy(module); policy != nil {
+			policy.ApplyScoringRestoreDelta((*ScoringAccumulator)(acc), compatBucket)
+			return
+		}
 	}
 	ApplyScoringRestoreDelta((*ScoringAccumulator)(acc), compatBucket)
 }
@@ -853,7 +858,7 @@ func encodePendingCandidates(candidates []pendingCandidate) []map[string]any {
 
 func encodePendingCandidatesForWorkflow(source semanticview.Source, candidates []pendingCandidate) []map[string]any {
 	out := encodePendingCandidates(candidates)
-	fields := workflowSystemNodeStateSchemaFields(source, workflowStateBucketDiscoveryAggregator)
+	fields := workflowSystemNodeStateSchemaFields(source, workflowStateNodeDiscoveryAggregator)
 	if len(fields) == 0 {
 		return out
 	}
@@ -889,7 +894,7 @@ func encodePendingCandidatesForWorkflow(source semanticview.Source, candidates [
 }
 
 func encodeDiscoveryStateForWorkflow(source semanticview.Source, candidates []pendingCandidate) []map[string]any {
-	fields := workflowSystemNodeStateSchemaFields(source, workflowStateBucketDiscoveryAggregator)
+	fields := workflowSystemNodeStateSchemaFields(source, workflowStateNodeDiscoveryAggregator)
 	if len(fields) == 0 || len(candidates) == 0 {
 		return []map[string]any{}
 	}

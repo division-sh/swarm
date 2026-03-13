@@ -2,24 +2,11 @@ package tools
 
 import (
 	"context"
-	"time"
+
+	corestate "empireai/internal/runtime/core/state"
 )
 
-type MailboxItem struct {
-	ID            string
-	EventID       string
-	VerticalID    string
-	FromAgent     string
-	Type          string
-	Priority      string
-	Status        string
-	Notified      bool
-	Context       []byte
-	Summary       string
-	TimeoutAt     time.Time
-	Decision      string
-	DecisionNotes string
-}
+type MailboxItem = corestate.MailboxItem
 
 type MailboxPersistence interface {
 	InsertMailboxItem(ctx context.Context, item MailboxItem) (string, error)

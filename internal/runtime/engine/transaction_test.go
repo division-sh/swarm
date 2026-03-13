@@ -86,6 +86,9 @@ func TestClassifyFailure(t *testing.T) {
 	if got := ClassifyFailure(ErrChainDepthExceeded); got != FailureDeadLetter {
 		t.Fatalf("chain-depth failure class = %v", got)
 	}
+	if got := ClassifyFailure(ErrMissingStateRepo); got != FailureLogic {
+		t.Fatalf("missing-state-repo failure class = %v", got)
+	}
 	if got := ClassifyFailure(errors.New("temporary")); got != FailureTransient {
 		t.Fatalf("generic failure class = %v", got)
 	}

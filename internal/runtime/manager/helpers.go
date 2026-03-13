@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	runtimeactors "empireai/internal/runtime/actors"
 	"github.com/google/uuid"
 )
 
@@ -70,7 +70,7 @@ func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
 	return out, nil
 }
 
-func RenderMandateText(m models.MandateDocument) string {
+func RenderMandateText(m runtimeactors.MandateDocument) string {
 	obj := map[string]any{
 		"vertical_id":        strings.TrimSpace(m.VerticalID),
 		"geography":          strings.TrimSpace(m.Geography),
@@ -156,7 +156,7 @@ func FirstNonEmptyString(vals ...string) string {
 	return ""
 }
 
-func MergeAgentConfig(base, patch models.AgentConfig) models.AgentConfig {
+func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.AgentConfig {
 	out := base
 	if patch.ID != "" {
 		out.ID = patch.ID

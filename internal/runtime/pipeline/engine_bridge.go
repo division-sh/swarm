@@ -7,8 +7,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeengine "empireai/internal/runtime/engine"
 	"empireai/internal/runtime/core/identity"
+	runtimeengine "empireai/internal/runtime/engine"
 )
 
 type HandlerOutcomeStatus string
@@ -194,8 +194,8 @@ func workflowTransitionFromHandlerOutcome(state WorkflowState, nodeID, eventType
 	}
 	transition := WorkflowTransition{
 		Name:    strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(eventType),
-		From:    []PipelineStage{NormalizePipelineStage(string(state.Stage))},
-		To:      NormalizePipelineStage(target),
+		From:    []WorkflowStateID{NormalizeWorkflowStateID(string(state.Stage))},
+		To:      NormalizeWorkflowStateID(target),
 		Trigger: strings.TrimSpace(eventType),
 		Node:    strings.TrimSpace(nodeID),
 	}

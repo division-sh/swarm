@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
 	"empireai/internal/runtime"
+	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimemanager "empireai/internal/runtime/manager"
 	"github.com/DATA-DOG/go-sqlmock"

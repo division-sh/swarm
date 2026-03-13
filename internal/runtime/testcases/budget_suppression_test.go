@@ -13,7 +13,7 @@ func TestGenericBundle_BudgetSuppressionPatterns(t *testing.T) {
 		"score":     70.0,
 	}, runtimepipeline.WorkflowState{
 		VerticalID: "item-123",
-		Stage:      runtimepipeline.NormalizePipelineStage("ready"),
+		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
 		Status:     "ready",
 		Metadata:   map[string]any{},
 	}, map[string]any{"delivery_enabled": true})
@@ -26,7 +26,7 @@ func TestGenericBundle_BudgetSuppressionPatterns(t *testing.T) {
 		"score":     70.0,
 	}, runtimepipeline.WorkflowState{
 		VerticalID: "item-456",
-		Stage:      runtimepipeline.NormalizePipelineStage("ready"),
+		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
 		Status:     "ready",
 		Metadata:   map[string]any{},
 	}, map[string]any{"delivery_enabled": false})

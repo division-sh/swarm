@@ -74,13 +74,6 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) scoringTransitionExecutor() workflowNodeExecutor {
-	if pc == nil || pc.scoringState == nil {
-		return nil
-	}
-	return newScoringTransitionExecutor(pc)
-}
-
 func (pc *FactoryPipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
 	for _, executor := range pc.workflowNodeExecutors() {
 		if consume, handled := executor.InterceptPolicy(eventType, evt); handled {

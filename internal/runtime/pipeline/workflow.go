@@ -12,10 +12,10 @@ import (
 )
 
 type WorkflowStage struct {
-	Name        PipelineStage `json:"name"`
-	Phase       string        `json:"phase,omitempty"`
-	Description string        `json:"description,omitempty"`
-	Terminal    bool          `json:"terminal,omitempty"`
+	Name        WorkflowStateID `json:"name"`
+	Phase       string          `json:"phase,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Terminal    bool            `json:"terminal,omitempty"`
 }
 
 type WorkflowAction struct {
@@ -28,18 +28,18 @@ type WorkflowAction struct {
 }
 
 type WorkflowState struct {
-	VerticalID string         `json:"vertical_id,omitempty"`
-	Stage      PipelineStage  `json:"stage"`
-	Status     string         `json:"status,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
+	VerticalID string          `json:"vertical_id,omitempty"`
+	Stage      WorkflowStateID `json:"stage"`
+	Status     string          `json:"status,omitempty"`
+	Metadata   map[string]any  `json:"metadata,omitempty"`
 }
 
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool
 
 type WorkflowTransition struct {
 	Name             string                                    `json:"name"`
-	From             []PipelineStage                           `json:"from"`
-	To               PipelineStage                             `json:"to"`
+	From             []WorkflowStateID                         `json:"from"`
+	To               WorkflowStateID                           `json:"to"`
 	Reason           string                                    `json:"reason,omitempty"`
 	Trigger          string                                    `json:"trigger,omitempty"`
 	Node             string                                    `json:"node,omitempty"`
@@ -51,14 +51,14 @@ type WorkflowTransition struct {
 
 type WorkflowDefinition struct {
 	Name        string
-	stages      map[PipelineStage]WorkflowStage
+	stages      map[WorkflowStateID]WorkflowStage
 	transitions []WorkflowTransition
 }
 
 func NewWorkflowDefinition(name string, stages []WorkflowStage, transitions []WorkflowTransition) *WorkflowDefinition {
-	stageMap := make(map[PipelineStage]WorkflowStage, len(stages))
+	stageMap := make(map[WorkflowStateID]WorkflowStage, len(stages))
 	for _, stage := range stages {
-		stage.Name = NormalizePipelineStage(string(stage.Name))
+		stage.Name = NormalizeWorkflowStateID(string(stage.Name))
 		stageMap[stage.Name] = stage
 	}
 	def := &WorkflowDefinition{
@@ -67,12 +67,12 @@ func NewWorkflowDefinition(name string, stages []WorkflowStage, transitions []Wo
 		transitions: make([]WorkflowTransition, 0, len(transitions)),
 	}
 	for _, transition := range transitions {
-		normFrom := make([]PipelineStage, 0, len(transition.From))
+		normFrom := make([]WorkflowStateID, 0, len(transition.From))
 		for _, from := range transition.From {
-			normFrom = append(normFrom, NormalizePipelineStage(string(from)))
+			normFrom = append(normFrom, NormalizeWorkflowStateID(string(from)))
 		}
 		transition.From = normFrom
-		transition.To = NormalizePipelineStage(string(transition.To))
+		transition.To = NormalizeWorkflowStateID(string(transition.To))
 		if transition.Guard == nil {
 			transition.Guard = alwaysWorkflowGuard
 		}
@@ -83,17 +83,17 @@ func NewWorkflowDefinition(name string, stages []WorkflowStage, transitions []Wo
 
 func alwaysWorkflowGuard(_ WorkflowState, _ WorkflowTransition) bool { return true }
 
-func (wd *WorkflowDefinition) Stage(stage PipelineStage) (WorkflowStage, bool) {
+func (wd *WorkflowDefinition) Stage(stage WorkflowStateID) (WorkflowStage, bool) {
 	if wd == nil {
 		return WorkflowStage{}, false
 	}
-	stage = NormalizePipelineStage(string(stage))
+	stage = NormalizeWorkflowStateID(string(stage))
 	out, ok := wd.stages[stage]
 	return out, ok
 }
 
-func (wd *WorkflowDefinition) NormalizeStage(raw string) PipelineStage {
-	stage := NormalizePipelineStage(raw)
+func (wd *WorkflowDefinition) NormalizeStage(raw string) WorkflowStateID {
+	stage := NormalizeWorkflowStateID(raw)
 	if wd == nil {
 		return stage
 	}
@@ -103,7 +103,7 @@ func (wd *WorkflowDefinition) NormalizeStage(raw string) PipelineStage {
 	return stage
 }
 
-func (wd *WorkflowDefinition) Transition(state WorkflowState, to PipelineStage) (WorkflowTransition, bool) {
+func (wd *WorkflowDefinition) Transition(state WorkflowState, to WorkflowStateID) (WorkflowTransition, bool) {
 	if wd == nil {
 		return WorkflowTransition{}, false
 	}
@@ -113,7 +113,7 @@ func (wd *WorkflowDefinition) Transition(state WorkflowState, to PipelineStage) 
 		if _, ok := wd.stages[to]; ok {
 			return WorkflowTransition{
 				Name:   "seed-" + string(to),
-				From:   []PipelineStage{""},
+				From:   []WorkflowStateID{""},
 				To:     to,
 				Guard:  alwaysWorkflowGuard,
 				Reason: "synthetic seed transition",
@@ -124,7 +124,7 @@ func (wd *WorkflowDefinition) Transition(state WorkflowState, to PipelineStage) 
 		if transition.To != to {
 			continue
 		}
-		if !containsPipelineStage(transition.From, state.Stage) {
+		if !containsWorkflowStateID(transition.From, state.Stage) {
 			continue
 		}
 		if transition.Guard == nil || transition.Guard(state, transition) {
@@ -151,7 +151,7 @@ func (wd *WorkflowDefinition) TransitionByTrigger(
 		if strings.TrimSpace(transition.Trigger) != trigger {
 			continue
 		}
-		if !containsPipelineStage(transition.From, state.Stage) {
+		if !containsWorkflowStateID(transition.From, state.Stage) {
 			continue
 		}
 		if guardEvaluator != nil && !guardEvaluator(transition) {
@@ -164,17 +164,17 @@ func (wd *WorkflowDefinition) TransitionByTrigger(
 	return WorkflowTransition{}, false
 }
 
-func (wd *WorkflowDefinition) CanTransition(state WorkflowState, to PipelineStage) bool {
+func (wd *WorkflowDefinition) CanTransition(state WorkflowState, to WorkflowStateID) bool {
 	_, ok := wd.Transition(state, to)
 	return ok
 }
 
-func containsPipelineStage(stages []PipelineStage, want PipelineStage) bool {
+func containsWorkflowStateID(stages []WorkflowStateID, want WorkflowStateID) bool {
 	for _, stage := range stages {
 		if strings.TrimSpace(string(stage)) == "*" {
 			return true
 		}
-		if NormalizePipelineStage(string(stage)) == want {
+		if NormalizeWorkflowStateID(string(stage)) == want {
 			return true
 		}
 	}
@@ -210,7 +210,7 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 		}
 		_, isTerminal := terminal[stageID]
 		stages = append(stages, WorkflowStage{
-			Name:        PipelineStage(stageID),
+			Name:        WorkflowStateID(stageID),
 			Phase:       strings.TrimSpace(stage.Phase),
 			Description: strings.TrimSpace(stage.Description),
 			Terminal:    isTerminal,
@@ -260,7 +260,7 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 		transitions = append(transitions, WorkflowTransition{
 			Name:             id,
 			From:             workflowTransitionFromStages(transition.From),
-			To:               PipelineStage(to),
+			To:               WorkflowStateID(to),
 			Reason:           strings.TrimSpace(transition.Trigger),
 			Trigger:          strings.TrimSpace(transition.Trigger),
 			Node:             strings.TrimSpace(transition.Node),
@@ -273,22 +273,22 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 	return NewWorkflowDefinition(name, stages, transitions), nil
 }
 
-func workflowTransitionFromStages(raw any) []PipelineStage {
+func workflowTransitionFromStages(raw any) []WorkflowStateID {
 	switch typed := raw.(type) {
 	case string:
-		return []PipelineStage{PipelineStage(strings.TrimSpace(typed))}
+		return []WorkflowStateID{WorkflowStateID(strings.TrimSpace(typed))}
 	case []any:
-		out := make([]PipelineStage, 0, len(typed))
+		out := make([]WorkflowStateID, 0, len(typed))
 		for _, item := range typed {
 			if s, ok := item.(string); ok {
-				out = append(out, PipelineStage(strings.TrimSpace(s)))
+				out = append(out, WorkflowStateID(strings.TrimSpace(s)))
 			}
 		}
 		return out
 	case []string:
-		out := make([]PipelineStage, 0, len(typed))
+		out := make([]WorkflowStateID, 0, len(typed))
 		for _, item := range typed {
-			out = append(out, PipelineStage(strings.TrimSpace(item)))
+			out = append(out, WorkflowStateID(strings.TrimSpace(item)))
 		}
 		return out
 	default:
@@ -304,12 +304,12 @@ func WorkflowRepoRoot() string {
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 }
 
-func workflowHasTransition(transitions []WorkflowTransition, from, to PipelineStage) bool {
+func workflowHasTransition(transitions []WorkflowTransition, from, to WorkflowStateID) bool {
 	for _, transition := range transitions {
 		if transition.To != to {
 			continue
 		}
-		if containsPipelineStage(transition.From, from) {
+		if containsWorkflowStateID(transition.From, from) {
 			return true
 		}
 	}

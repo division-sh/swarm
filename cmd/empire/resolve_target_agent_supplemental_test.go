@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"empireai/internal/config"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 	"github.com/google/uuid"

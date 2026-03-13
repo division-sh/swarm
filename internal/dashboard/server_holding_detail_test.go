@@ -75,7 +75,7 @@ func TestDashboard_HoldingVerticalDetail_ReturnsArtifactsAndRelatedRecords(t *te
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_stage, entered_stage_at,
+			instance_id, workflow_name, workflow_version, current_state, entered_stage_at,
 			transition_history, accumulator_state, timer_state, metadata, created_at, updated_at
 		) VALUES (
 			$1::uuid, 'empire_vertical_pipeline', '2.1.0', 'ready_for_review', now() - interval '15 minutes',

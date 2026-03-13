@@ -3,7 +3,7 @@ package actorctx
 import (
 	"context"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 type key struct{}

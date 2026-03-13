@@ -36,6 +36,19 @@ func (s StateSnapshot) GatesBucket() values.Bucket {
 	return values.Wrap(boolMapToAnyMap(s.Gates))
 }
 
+func (s StateSnapshot) EntityContext() map[string]any {
+	out := cloneStringAnyMap(s.Metadata)
+	if out == nil {
+		out = map[string]any{}
+	}
+	out["entity_id"] = s.EntityID.String()
+	out["current_state"] = strings.TrimSpace(s.CurrentState)
+	out["workflow_name"] = strings.TrimSpace(s.WorkflowName)
+	out["workflow_version"] = strings.TrimSpace(s.WorkflowVersion)
+	out["gates"] = boolMapToAnyMap(s.Gates)
+	return out
+}
+
 func (s *StateSnapshot) EnsureStateBucketsBucket() values.Bucket {
 	if s.StateBuckets == nil {
 		s.StateBuckets = map[string]any{}

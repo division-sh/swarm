@@ -3,7 +3,7 @@ package contracts
 import (
 	"strings"
 
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 )
 
 type bundleAgentRecord struct {

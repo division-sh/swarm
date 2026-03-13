@@ -45,7 +45,7 @@ CREATE TABLE verticals (
     )),
     -- NOTE: This CHECK prevents invalid stage VALUES, not invalid TRANSITIONS.
     -- Valid transition graph is enforced at the runtime level via StageTransition():
-    --   runtime checks (current_stage, new_stage) against allowed transitions map.
+    --   runtime checks (current_state, new_state) against allowed transitions map.
     --   Invalid transitions return error; agent cannot skip stages.
     -- DB enforcement of transitions would require a trigger or stored procedure,
     -- which adds complexity for marginal benefit since all stage writes go through
@@ -804,7 +804,7 @@ CREATE TABLE workflow_instances (
     instance_id       UUID PRIMARY KEY,
     workflow_name     TEXT NOT NULL,
     workflow_version  TEXT NOT NULL,
-    current_stage     TEXT NOT NULL,
+    current_state     TEXT NOT NULL,
     entered_stage_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     transition_history JSONB NOT NULL DEFAULT '[]',
     accumulator_state JSONB NOT NULL DEFAULT '{}',
@@ -813,5 +813,5 @@ CREATE TABLE workflow_instances (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX idx_wi_workflow ON workflow_instances(workflow_name, current_stage);
-CREATE INDEX idx_wi_stage ON workflow_instances(current_stage);
+CREATE INDEX idx_wi_workflow ON workflow_instances(workflow_name, current_state);
+CREATE INDEX idx_wi_stage ON workflow_instances(current_state);

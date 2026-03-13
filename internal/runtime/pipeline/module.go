@@ -391,11 +391,12 @@ type WorkflowModule interface {
 	WorkflowNodes() []WorkflowNode
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
-	ScanPolicy() ScanPolicy
-	DiscoveryPolicy() DiscoveryPolicy
-	ScoringPolicy() ScoringPolicy
-	PayloadFactory() PayloadFactory
 }
+
+type workflowModuleScanPolicyProvider interface{ ScanPolicy() ScanPolicy }
+type workflowModuleDiscoveryPolicyProvider interface{ DiscoveryPolicy() DiscoveryPolicy }
+type workflowModuleScoringPolicyProvider interface{ ScoringPolicy() ScoringPolicy }
+type workflowModulePayloadFactoryProvider interface{ PayloadFactory() PayloadFactory }
 
 var defaultWorkflowModuleFactory func() WorkflowModule
 
@@ -428,4 +429,36 @@ func DefaultWorkflowSemanticSourceOrNil() semanticview.Source {
 		return nil
 	}
 	return module.SemanticSource()
+}
+
+func workflowModuleScanPolicy(module WorkflowModule) ScanPolicy {
+	provider, ok := module.(workflowModuleScanPolicyProvider)
+	if !ok {
+		return nil
+	}
+	return provider.ScanPolicy()
+}
+
+func workflowModuleDiscoveryPolicy(module WorkflowModule) DiscoveryPolicy {
+	provider, ok := module.(workflowModuleDiscoveryPolicyProvider)
+	if !ok {
+		return nil
+	}
+	return provider.DiscoveryPolicy()
+}
+
+func workflowModuleScoringPolicy(module WorkflowModule) ScoringPolicy {
+	provider, ok := module.(workflowModuleScoringPolicyProvider)
+	if !ok {
+		return nil
+	}
+	return provider.ScoringPolicy()
+}
+
+func workflowModulePayloadFactory(module WorkflowModule) PayloadFactory {
+	provider, ok := module.(workflowModulePayloadFactoryProvider)
+	if !ok {
+		return nil
+	}
+	return provider.PayloadFactory()
 }

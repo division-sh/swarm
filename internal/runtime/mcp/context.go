@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	"empireai/internal/models"
+	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	"github.com/google/uuid"
 )
