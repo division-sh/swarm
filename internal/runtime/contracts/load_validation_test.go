@@ -54,7 +54,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMultipleAuthoritati
 		t.Fatalf("LoadWorkflowContractBundle: %v", err)
 	}
 
-	bundle.Semantics.EventOwners["scan.completed"] = []string{"node-a", "node-b"}
+	bundle.Semantics.EventOwners["task.completed"] = []string{"node-a", "node-b"}
 
 	err = validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !strings.Contains(err.Error(), "multiple authoritative system node owners") {

@@ -47,7 +47,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"node-a": {
-					"scan.completed": {
+					"task.completed": {
 						AdvancesTo: "done",
 					},
 				},
@@ -69,7 +69,7 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed"},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed"},
 		State:    StateSnapshot{CurrentState: "pending"},
 	})
 	if err != nil {
@@ -95,7 +95,7 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 	node := NewDeclarativeNode("node-a", exec)
 	_, err = node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Event:    events.Event{Type: "scan.completed"},
+		Event:    events.Event{Type: "task.completed"},
 	})
 	if err != ErrMissingNodeHandler {
 		t.Fatalf("Handle error = %v, want %v", err, ErrMissingNodeHandler)
@@ -117,7 +117,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	node := NewDeclarativeNode("node-a", exec)
 	result, err := node.Handle(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		Event:    events.Event{Type: "scan.completed"},
+		Event:    events.Event{Type: "task.completed"},
 		Handler:  runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
 		State:    StateSnapshot{Gates: map[string]bool{"gate_a": true}},
 	})

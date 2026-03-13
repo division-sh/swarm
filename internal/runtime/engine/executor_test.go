@@ -213,11 +213,11 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},
-			Emits:      runtimecontracts.EventEmission{Single: "scan.recorded"},
+			Emits:      runtimecontracts.EventEmission{Single: "task.recorded"},
 			Action:     runtimecontracts.ActionSpec{ID: "record"},
 		},
 		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
@@ -277,7 +277,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Checks: []runtimecontracts.GuardCheck{
@@ -317,7 +317,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{
@@ -357,7 +357,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "scan.completed", Payload: json.RawMessage(`{"items":["a","b"]}`)},
+		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":["a","b"]}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom:   "payload.items",
@@ -408,7 +408,7 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed"},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed"},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"*"},
 		},
@@ -453,7 +453,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed"},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed"},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
 			Guard: &runtimecontracts.GuardSpec{
@@ -497,7 +497,7 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    events.Event{ID: "evt-1", Type: "scan.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Action: runtimecontracts.ActionSpec{ID: "notify"},
 		},
@@ -538,7 +538,7 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 		NodeID:     "node-1",
 		FlowID:     "flow-1",
 		ChainDepth: 1,
-		Event:      events.Event{ID: "evt-1", Type: "scan.completed", Payload: json.RawMessage(`{"ok":false}`)},
+		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"ok":false}`)},
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			Guard: &runtimecontracts.GuardSpec{
 				Check:  "payload.ok == true",

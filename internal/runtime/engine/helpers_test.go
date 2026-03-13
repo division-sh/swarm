@@ -132,7 +132,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		"nested": map[string]any{"value": "ok"},
 	}
 	spec := runtimecontracts.WorkflowDataAccumulation{
-		SourceEvent: "scan.completed",
+		SourceEvent: "task.completed",
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{TargetField: "entity.score", SourceField: "score"},
 			{TargetField: "metadata.status", SourceField: "nested.value"},
@@ -151,7 +151,7 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 	if got := state.Metadata["literal"]; got != "fixed" {
 		t.Fatalf("literal = %#v", got)
 	}
-	if got := state.Metadata["last_data_accumulation_source"]; got != "scan.completed" {
+	if got := state.Metadata["last_data_accumulation_source"]; got != "task.completed" {
 		t.Fatalf("source event = %#v", got)
 	}
 }
@@ -166,7 +166,7 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 		LastEventID:   "evt-1",
 	}
 
-	storeAccumulator(state, "node-1", events.EventType("scan.completed"), acc)
+	storeAccumulator(state, "node-1", events.EventType("task.completed"), acc)
 
 	nodeBucket, ok := state.StateBuckets["node-1"].(map[string]any)
 	if !ok {
@@ -176,11 +176,11 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	if !ok {
 		t.Fatalf("handler accumulator bucket missing: %#v", nodeBucket)
 	}
-	if _, ok := accBuckets["node-1:scan.completed"]; !ok {
+	if _, ok := accBuckets["node-1:task.completed"]; !ok {
 		t.Fatalf("handler key missing: %#v", accBuckets)
 	}
 
-	loaded, ok := loadAccumulator(*state, "node-1", events.EventType("scan.completed"))
+	loaded, ok := loadAccumulator(*state, "node-1", events.EventType("task.completed"))
 	if !ok {
 		t.Fatal("expected accumulator to load")
 	}

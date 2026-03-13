@@ -77,6 +77,117 @@ type catalogRunResult struct {
 	gates          map[string]any
 }
 
+type catalogNodeContract struct {
+	EventHandlers map[string]catalogSystemNodeEventHandler `yaml:"event_handlers"`
+}
+
+type catalogSystemNodeEventHandler struct {
+	Emits            runtimecontracts.EventEmission            `yaml:"emits"`
+	Guard            *runtimecontracts.GuardSpec               `yaml:"guard"`
+	AdvancesTo       string                                    `yaml:"advances_to"`
+	SetsGate         *runtimecontracts.GateSpec                `yaml:"sets_gate"`
+	SetsGates        map[string]any                            `yaml:"sets_gates"`
+	ClearGates       catalogClearGates                         `yaml:"clear_gates"`
+	DataAccumulation runtimecontracts.WorkflowDataAccumulation `yaml:"data_accumulation"`
+	OnComplete       catalogRuleList                           `yaml:"on_complete"`
+	Rules            catalogRuleList                           `yaml:"rules"`
+	Accumulate       *catalogAccumulateSpec                    `yaml:"accumulate"`
+	Compute          *catalogComputeSpec                       `yaml:"compute"`
+	FanOut           *catalogFanOutSpec                        `yaml:"fan_out"`
+	Filter           *runtimecontracts.FilterSpec              `yaml:"filter"`
+	Reduce           *runtimecontracts.ReduceSpec              `yaml:"reduce"`
+	Count            *runtimecontracts.CountSpec               `yaml:"count"`
+	GroupBy          *catalogGroupBySpec                       `yaml:"group_by"`
+}
+
+type catalogClearGates []string
+
+type catalogRule struct {
+	ID               string                                    `yaml:"id"`
+	Description      string                                    `yaml:"description"`
+	Condition        string                                    `yaml:"condition"`
+	AdvancesTo       string                                    `yaml:"advances_to"`
+	Emits            runtimecontracts.EventEmission            `yaml:"emits"`
+	DataAccumulation runtimecontracts.WorkflowDataAccumulation `yaml:"data_accumulation"`
+	Compute          *catalogComputeSpec                       `yaml:"compute"`
+}
+
+type catalogRuleList []catalogRule
+
+type catalogAccumulateSpec struct {
+	ExpectedFrom string          `yaml:"expected_from"`
+	DedupBy      string          `yaml:"dedup_by"`
+	Completion   string          `yaml:"completion"`
+	From         string          `yaml:"from"`
+	Threshold    int             `yaml:"threshold"`
+	OnComplete   catalogRuleList `yaml:"on_complete"`
+	OnTimeout    *catalogRule    `yaml:"on_timeout"`
+}
+
+type catalogComputeSpec struct {
+	StoreAs     string `yaml:"store_as"`
+	OutputField string `yaml:"output_field"`
+}
+
+type catalogFanOutSpec struct {
+	ItemsFrom   string                    `yaml:"items_from"`
+	Target      string                    `yaml:"target"`
+	EmitPerItem string                    `yaml:"emit_per_item"`
+	EmitMapping *catalogFanOutEmitMapping `yaml:"emit_mapping"`
+}
+
+type catalogFanOutEmitMapping struct {
+	KeyField string            `yaml:"key_field"`
+	Mapping  map[string]string `yaml:"mapping"`
+}
+
+type catalogGroupBySpec struct {
+	ItemsFrom string `yaml:"items_from"`
+	Key       string `yaml:"key"`
+	StoreAs   string `yaml:"store_as"`
+}
+
+func (g *catalogClearGates) UnmarshalYAML(node *yaml.Node) error {
+	if g == nil {
+		return nil
+	}
+	values, err := decodeCatalogClearGates(node)
+	if err != nil {
+		return err
+	}
+	*g = values
+	return nil
+}
+
+func (r *catalogRule) UnmarshalYAML(node *yaml.Node) error {
+	if r == nil {
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		r.Description = strings.TrimSpace(node.Value)
+		return nil
+	}
+	type alias catalogRule
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*r = catalogRule(aux)
+	return nil
+}
+
+func (r *catalogRuleList) UnmarshalYAML(node *yaml.Node) error {
+	if r == nil {
+		return nil
+	}
+	rules, err := decodeCatalogRuleList(node)
+	if err != nil {
+		return err
+	}
+	*r = rules
+	return nil
+}
+
 func TestCatalogRunner_ValidatesCurrentCatalogPackages(t *testing.T) {
 	for _, dir := range discoveredCatalogCaseDirs(t) {
 		dir := dir
@@ -155,7 +266,7 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 	t.Helper()
 	var schema runtimecontracts.FlowSchemaDocument
 	loadYAMLForCatalogTest(t, filepath.Join(dir, "schema.yaml"), &schema)
-	nodes := map[string]runtimecontracts.SystemNodeContract{}
+	nodes := map[string]catalogNodeContract{}
 	loadYAMLForCatalogTest(t, filepath.Join(dir, "nodes.yaml"), &nodes)
 	policy := map[string]any{}
 	loadYAMLForCatalogTest(t, filepath.Join(dir, "policy.yaml"), &policy)
@@ -184,7 +295,7 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 		entityFields: cloneStringAnyMapCatalog(entity),
 		gates:        cloneStringAnyMapCatalog(asMapForCatalog(entity["gates"])),
 	}
-	var handler runtimecontracts.SystemNodeEventHandler
+	var handler catalogSystemNodeEventHandler
 	var ok bool
 	for _, node := range nodes {
 		if strings.TrimSpace(expected.Trigger.Event) != "" {
@@ -222,10 +333,15 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 	}
 	received := 0
 	seen := map[string]struct{}{}
-	completion := strings.ToLower(strings.TrimSpace(accumulate.Completion.String()))
+	completion := strings.ToLower(strings.TrimSpace(accumulate.Completion))
 	for _, step := range steps {
+		if strings.EqualFold(strings.TrimSpace(accumulate.From), step.Sender) || strings.TrimSpace(accumulate.From) == "" {
+			// keep step
+		} else {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(step.Event), "accumulate.timeout") {
-			if strings.EqualFold(strings.TrimSpace(accumulate.Completion.String()), "timeout") {
+			if strings.EqualFold(strings.TrimSpace(accumulate.Completion), "timeout") {
 				result = executeCatalogHandlerStep(t, handler, step, entity, policy, result)
 				break
 			}
@@ -241,24 +357,27 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 					applyCatalogDataAccumulation(accumulate.OnTimeout.DataAccumulation, step.Payload, entity)
 					result.entityFields = cloneStringAnyMapCatalog(entity)
 				}
+				applyCatalogCompute(accumulate.OnTimeout.Compute, entity)
+				result.entityFields = cloneStringAnyMapCatalog(entity)
 				break
 			}
 			continue
 		}
-		key := catalogAccumulationKey(step.Payload)
+		key := catalogAccumulationKey(step.Payload, accumulate.DedupBy, entity, policy)
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
 		received++
 		entity["received_items"] = appendCatalogItem(entity["received_items"], step.Payload)
-		if catalogAccumulationComplete(completion, received, expectedCount) {
+		if catalogAccumulationComplete(completion, received, expectedCount, accumulate.Threshold) {
 			result = executeCatalogHandlerStep(t, handler, step, entity, policy, result)
 			break
 		}
 	}
 	if result.handlerOutcome == "" {
-		result.handlerOutcome = "pending"
+		result.handlerOutcome = "success"
+		result.entityState = catalogFirstNonEmptyString(result.entityState, "collecting")
 	}
 	if strings.TrimSpace(result.entityState) == "" {
 		result.entityState = state
@@ -273,65 +392,10 @@ func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpected
 	}
 	switch {
 	case strings.HasPrefix(dir, "tier1-primitives/"):
-		nodesBytes, err := os.ReadFile(filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir), "nodes.yaml"))
-		if err != nil {
-			return false
-		}
-		raw := string(nodesBytes)
-		if strings.Contains(raw, "clear_gates: true") || strings.Contains(raw, "sets_gates:") || strings.Contains(raw, "data_accumulation:") {
-			return false
-		}
-		if strings.Contains(raw, "checks:") || strings.Contains(raw, "&&") || strings.Contains(raw, "||") {
-			return false
-		}
-		if strings.Contains(raw, "on_fail: \"escalate:") || strings.Contains(raw, "on_fail: escalate:") {
-			return false
-		}
-		if strings.HasSuffix(dir, "/test-guard-reject") {
-			return false
-		}
 		return true
 	case strings.HasPrefix(dir, "tier2-accumulation/"):
-		nodesBytes, err := os.ReadFile(filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir), "nodes.yaml"))
-		if err != nil {
-			return false
-		}
-		raw := string(nodesBytes)
-		if strings.Contains(raw, "\n        from:") {
-			return false
-		}
-		if strings.Contains(raw, "on_complete:") && strings.Contains(raw, "compute:") {
-			return false
-		}
-		if strings.Contains(raw, "\n        threshold:") {
-			return false
-		}
-		if strings.Contains(dir, "test-accumulate-partial") || strings.Contains(dir, "test-accumulate-idempotent") {
-			return false
-		}
 		return true
 	case strings.HasPrefix(dir, "tier3-list-processing/"):
-		nodesBytes, err := os.ReadFile(filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir), "nodes.yaml"))
-		if err != nil {
-			return false
-		}
-		raw := string(nodesBytes)
-		if strings.Contains(raw, "emit_mapping:") {
-			return false
-		}
-		var nodes map[string]runtimecontracts.SystemNodeContract
-		root := filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir))
-		loadYAMLForCatalogTest(t, filepath.Join(root, "nodes.yaml"), &nodes)
-		for _, node := range nodes {
-			for _, handler := range node.EventHandlers {
-				if handler.FanOut == nil {
-					return false
-				}
-				if handler.Filter != nil || handler.Reduce != nil || handler.Count != nil || handler.Query != nil {
-					return false
-				}
-			}
-		}
 		return true
 	case strings.HasPrefix(dir, "tier6-event-loop/"):
 		return false
@@ -340,17 +404,21 @@ func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpected
 	}
 }
 
-func executeCatalogHandlerStep(t testing.TB, handler runtimecontracts.SystemNodeEventHandler, step catalogTriggerStep, entity map[string]any, policy map[string]any, result catalogRunResult) catalogRunResult {
+func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandler, step catalogTriggerStep, entity map[string]any, policy map[string]any, result catalogRunResult) catalogRunResult {
 	t.Helper()
 	payload := cloneStringAnyMapCatalog(step.Payload)
 	result.handlerOutcome = "success"
 	if !catalogGuardPasses(handler.Guard, payload, entity, policy) {
 		result.handlerOutcome = guardFailOutcome(handler.Guard)
 		if result.handlerOutcome == "" {
-			result.handlerOutcome = "blocked"
+			result.handlerOutcome = "reject"
 		}
 		if result.handlerOutcome == "kill" {
 			result.entityState = "killed"
+		}
+		if strings.HasPrefix(result.handlerOutcome, "escalate:") {
+			result.emittedEvents = append(result.emittedEvents, strings.TrimSpace(strings.TrimPrefix(result.handlerOutcome, "escalate:")))
+			result.handlerOutcome = "escalate"
 		}
 		return result
 	}
@@ -379,7 +447,14 @@ func executeCatalogHandlerStep(t testing.TB, handler runtimecontracts.SystemNode
 	if len(handler.ClearGates) > 0 {
 		gates := ensureCatalogGates(entity)
 		for _, gate := range handler.ClearGates {
-			gates[strings.TrimSpace(gate)] = false
+			gate = strings.TrimSpace(gate)
+			if gate == "*" {
+				for key := range gates {
+					gates[key] = false
+				}
+				continue
+			}
+			gates[gate] = false
 		}
 		result.gates = cloneStringAnyMapCatalog(gates)
 	}
@@ -388,25 +463,36 @@ func executeCatalogHandlerStep(t testing.TB, handler runtimecontracts.SystemNode
 		gates[strings.TrimSpace(gateSpecNameForCatalog(handler.SetsGate))] = true
 		result.gates = cloneStringAnyMapCatalog(gates)
 	}
+	if len(handler.SetsGates) > 0 {
+		gates := ensureCatalogGates(entity)
+		for gate, value := range handler.SetsGates {
+			gates[strings.TrimSpace(gate)] = truthyCatalog(value)
+		}
+		result.gates = cloneStringAnyMapCatalog(gates)
+	}
 	applyCatalogDataAccumulation(handler.DataAccumulation, payload, entity)
 	applyCatalogCompute(handler.Compute, entity)
 	applyCatalogFanOut(handler.FanOut, payload, entity, &result)
+	applyCatalogFilter(handler.Filter, payload, entity, policy)
+	applyCatalogReduce(handler.Reduce, payload, entity)
+	applyCatalogCount(handler.Count, payload, entity, policy)
+	applyCatalogGroupBy(handler.GroupBy, payload, entity)
 	result.entityFields = cloneStringAnyMapCatalog(entity)
 	result.emittedEvents = append(result.emittedEvents, handler.Emits.Values()...)
 	return result
 }
 
-func catalogRuleMatches(rule runtimecontracts.HandlerRuleEntry, payload, entity, policy map[string]any) bool {
+func catalogRuleMatches(rule catalogRule, payload, entity, policy map[string]any) bool {
 	condition := strings.TrimSpace(rule.Condition)
 	switch strings.ToLower(condition) {
 	case "", "else":
 		return true
 	default:
-		return catalogGuardPasses(map[string]any{"check": condition}, payload, entity, policy)
+		return catalogEvalCondition(condition, map[string]any{"payload": payload, "entity": entity, "policy": policy})
 	}
 }
 
-func applyCatalogRule(rule runtimecontracts.HandlerRuleEntry, payload, entity map[string]any, result catalogRunResult) catalogRunResult {
+func applyCatalogRule(rule catalogRule, payload, entity map[string]any, result catalogRunResult) catalogRunResult {
 	if next := strings.TrimSpace(rule.AdvancesTo); next != "" {
 		result.entityState = next
 	}
@@ -415,14 +501,20 @@ func applyCatalogRule(rule runtimecontracts.HandlerRuleEntry, payload, entity ma
 	}
 	if rule.DataAccumulation.HasWrites() {
 		applyCatalogDataAccumulation(rule.DataAccumulation, payload, entity)
-		result.entityFields = cloneStringAnyMapCatalog(entity)
 	}
+	applyCatalogCompute(rule.Compute, entity)
+	result.entityFields = cloneStringAnyMapCatalog(entity)
 	return result
 }
 
-func catalogAccumulationComplete(mode string, received, expected int) bool {
+func catalogAccumulationComplete(mode string, received, expected, threshold int) bool {
 	switch mode {
-	case "threshold", "all":
+	case "threshold":
+		if threshold > 0 {
+			return received >= threshold
+		}
+		return expected > 0 && received >= expected
+	case "all", "":
 		return expected > 0 && received >= expected
 	default:
 		return false
@@ -433,63 +525,49 @@ func catalogGuardPasses(spec any, payload, entity, policy map[string]any) bool {
 	if spec == nil {
 		return true
 	}
-	var (
-		check string
-		ok    bool
-	)
 	switch typed := spec.(type) {
 	case *runtimecontracts.GuardSpec:
 		if typed == nil {
 			return true
 		}
-		check = strings.TrimSpace(typed.Check)
-		ok = typed.Check != "" || typed.ID != "" || typed.OnFail != "" || len(typed.Checks) > 0
+		if len(typed.Checks) > 0 {
+			for _, check := range typed.Checks {
+				if !catalogEvalCondition(check.Check, map[string]any{"payload": payload, "entity": entity, "policy": policy}) {
+					return false
+				}
+			}
+			return true
+		}
+		if strings.TrimSpace(typed.Check) == "" {
+			return true
+		}
+		return catalogEvalCondition(typed.Check, map[string]any{"payload": payload, "entity": entity, "policy": policy})
 	case runtimecontracts.GuardSpec:
-		check = strings.TrimSpace(typed.Check)
-		ok = typed.Check != "" || typed.ID != "" || typed.OnFail != "" || len(typed.Checks) > 0
+		return catalogGuardPasses(&typed, payload, entity, policy)
 	case map[string]any:
 		if len(typed) == 0 {
 			return true
 		}
-		check = strings.TrimSpace(asStringForCatalog(typed["check"]))
-		ok = true
+		return catalogEvalCondition(asStringForCatalog(typed["check"]), map[string]any{"payload": payload, "entity": entity, "policy": policy})
 	default:
 		return true
 	}
-	if !ok {
-		return true
-	}
-	if check == "" {
-		return true
-	}
-	for _, op := range []string{">=", "<=", "==", "!=", ">", "<"} {
-		if !strings.Contains(check, op) {
-			continue
-		}
-		parts := strings.SplitN(check, op, 2)
-		if len(parts) != 2 {
-			return false
-		}
-		left := resolveCatalogRef(strings.TrimSpace(parts[0]), entity, map[string]any{"payload": payload, "policy": policy})
-		right := resolveCatalogRef(strings.TrimSpace(parts[1]), entity, map[string]any{"payload": payload, "policy": policy})
-		return compareCatalogValues(left, right, op)
-	}
-	return false
+	return true
 }
 
 func guardFailOutcome(spec any) string {
 	switch typed := spec.(type) {
 	case *runtimecontracts.GuardSpec:
 		if typed == nil {
-			return ""
+			return "reject"
 		}
-		return strings.TrimSpace(typed.OnFail)
+		return catalogFirstNonEmptyString(strings.TrimSpace(typed.OnFail), "reject")
 	case runtimecontracts.GuardSpec:
-		return strings.TrimSpace(typed.OnFail)
+		return catalogFirstNonEmptyString(strings.TrimSpace(typed.OnFail), "reject")
 	case map[string]any:
-		return strings.TrimSpace(asStringForCatalog(typed["on_fail"]))
+		return catalogFirstNonEmptyString(strings.TrimSpace(asStringForCatalog(typed["on_fail"])), "reject")
 	default:
-		return ""
+		return "reject"
 	}
 }
 
@@ -504,57 +582,58 @@ func applyCatalogDataAccumulation(spec runtimecontracts.WorkflowDataAccumulation
 		if target == "" {
 			continue
 		}
-		if write.HasLiteralValue() {
-			entity[target] = write.Value.Literal
+		if write.HasLiteralValue() || strings.TrimSpace(write.Value.CEL) != "" {
+			value := write.Value.Literal
+			if value == nil {
+				value = strings.TrimSpace(write.Value.CEL)
+			}
+			catalogSetEntityPath(entity, target, value)
 			continue
 		}
 		source := strings.TrimSpace(write.Source())
 		if source == "" {
 			continue
 		}
-		if value := resolveCatalogPath(write.SourcePath, source, entity, map[string]any{"payload": payload, "entity": entity}); value != nil {
-			entity[target] = value
+		value := resolveCatalogPath(write.SourcePath, source, entity, map[string]any{"payload": payload, "entity": entity})
+		if !write.SourcePath.HasExplicitRoot() {
+			if payloadValue, ok := lookupCatalogPath(payload, source); ok {
+				value = payloadValue
+			}
+		}
+		if value != nil {
+			catalogSetEntityPath(entity, target, value)
 		}
 	}
 }
 
-func applyCatalogCompute(spec *runtimecontracts.ComputeSpec, entity map[string]any) {
+func applyCatalogCompute(spec *catalogComputeSpec, entity map[string]any) {
 	if spec == nil {
 		return
 	}
-	field := strings.TrimSpace(spec.StoreAs)
+	field := catalogFirstNonEmptyString(spec.StoreAs, spec.OutputField)
 	field = strings.TrimPrefix(field, "entity.")
 	field = strings.TrimPrefix(field, "metadata.")
 	if field == "" {
 		return
 	}
-	entity[field] = "computed_value"
+	catalogSetEntityPath(entity, field, "computed_value")
 }
 
-func applyCatalogFanOut(spec *runtimecontracts.FanOutSpec, payload, entity map[string]any, result *catalogRunResult) {
+func applyCatalogFanOut(spec *catalogFanOutSpec, payload, entity map[string]any, result *catalogRunResult) {
 	if spec == nil || result == nil {
 		return
 	}
-	rawItems := resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity})
-	items, _ := rawItems.([]any)
-	if len(items) == 0 {
-		if raw, ok := rawItems.([]map[string]any); ok {
-			items = make([]any, 0, len(raw))
-			for _, item := range raw {
-				items = append(items, item)
-			}
-		}
-	}
+	rawItems := resolveCatalogPath(paths.Parse(strings.TrimSpace(spec.ItemsFrom)), strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity})
+	items := catalogSlice(rawItems)
 	entity["fan_out_count"] = len(items)
 	if len(items) == 0 {
 		return
 	}
 	for _, item := range items {
-		if len(spec.EmitMapping) > 0 {
-			for key, eventType := range spec.EmitMapping {
-				if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(asStringForCatalog(item))) {
-					result.emittedEvents = append(result.emittedEvents, strings.TrimSpace(eventType))
-				}
+		if spec.EmitMapping != nil && len(spec.EmitMapping.Mapping) > 0 {
+			mappingKey := resolveCatalogRef(strings.TrimSpace(spec.EmitMapping.KeyField), entity, map[string]any{"item": item, "entity": entity, "payload": payload})
+			if eventType, ok := spec.EmitMapping.Mapping[strings.TrimSpace(asStringForCatalog(mappingKey))]; ok {
+				result.emittedEvents = append(result.emittedEvents, strings.TrimSpace(eventType))
 			}
 			continue
 		}
@@ -562,6 +641,495 @@ func applyCatalogFanOut(spec *runtimecontracts.FanOutSpec, payload, entity map[s
 			result.emittedEvents = append(result.emittedEvents, emit)
 		}
 	}
+}
+
+func applyCatalogFilter(spec *runtimecontracts.FilterSpec, payload, entity, policy map[string]any) {
+	if spec == nil {
+		return
+	}
+	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}))
+	filtered := make([]any, 0, len(items))
+	for _, item := range items {
+		if catalogEvalCondition(spec.Condition, map[string]any{"item": item, "payload": payload, "entity": entity, "policy": policy}) {
+			filtered = append(filtered, item)
+		}
+	}
+	if target := catalogTrimEntityPath(spec.StoreAs); target != "" {
+		catalogSetEntityPath(entity, target, filtered)
+	}
+}
+
+func applyCatalogReduce(spec *runtimecontracts.ReduceSpec, payload, entity map[string]any) {
+	if spec == nil {
+		return
+	}
+	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}))
+	if target := catalogTrimEntityPath(spec.StoreAs); target != "" {
+		catalogSetEntityPath(entity, target, catalogReduceValue(items, strings.TrimSpace(spec.Operation)))
+	}
+}
+
+func applyCatalogCount(spec *runtimecontracts.CountSpec, payload, entity, policy map[string]any) {
+	if spec == nil {
+		return
+	}
+	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}))
+	count := 0
+	for _, item := range items {
+		if strings.TrimSpace(spec.Condition) == "" || catalogEvalCondition(spec.Condition, map[string]any{"item": item, "payload": payload, "entity": entity, "policy": policy}) {
+			count++
+		}
+	}
+	if target := catalogTrimEntityPath(spec.StoreAs); target != "" {
+		catalogSetEntityPath(entity, target, count)
+	}
+}
+
+func applyCatalogGroupBy(spec *catalogGroupBySpec, payload, entity map[string]any) {
+	if spec == nil {
+		return
+	}
+	items := catalogSlice(resolveCatalogPath(paths.Parse(strings.TrimSpace(spec.ItemsFrom)), strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}))
+	grouped := map[string]any{}
+	for _, item := range items {
+		key := strings.TrimSpace(asStringForCatalog(resolveCatalogRef(spec.Key, entity, map[string]any{"item": item, "payload": payload, "entity": entity})))
+		if key == "" {
+			continue
+		}
+		existing, _ := grouped[key].([]any)
+		grouped[key] = append(existing, item)
+	}
+	if target := catalogTrimEntityPath(spec.StoreAs); target != "" {
+		catalogSetEntityPath(entity, target, grouped)
+	}
+}
+
+func catalogEvalCondition(expr string, roots map[string]any) bool {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return true
+	}
+	expr = trimOuterCatalogParens(expr)
+	if parts := splitCatalogTopLevel(expr, "||"); len(parts) > 1 {
+		for _, part := range parts {
+			if catalogEvalCondition(part, roots) {
+				return true
+			}
+		}
+		return false
+	}
+	if parts := splitCatalogTopLevel(expr, "&&"); len(parts) > 1 {
+		for _, part := range parts {
+			if !catalogEvalCondition(part, roots) {
+				return false
+			}
+		}
+		return true
+	}
+	if strings.EqualFold(expr, "true") {
+		return true
+	}
+	if strings.EqualFold(expr, "false") {
+		return false
+	}
+	for _, op := range []string{">=", "<=", "==", "!=", ">", "<"} {
+		parts := splitCatalogTopLevel(expr, op)
+		if len(parts) != 2 {
+			continue
+		}
+		left := resolveCatalogOperand(parts[0], roots)
+		right := resolveCatalogOperand(parts[1], roots)
+		return compareCatalogValues(left, right, op)
+	}
+	return truthyCatalog(resolveCatalogOperand(expr, roots))
+}
+
+func splitCatalogTopLevel(expr, sep string) []string {
+	if !strings.Contains(expr, sep) {
+		return nil
+	}
+	var (
+		parts    []string
+		depth    int
+		quote    rune
+		start    int
+		runes    = []rune(expr)
+		sepRunes = []rune(sep)
+	)
+	for i := 0; i < len(runes); i++ {
+		switch runes[i] {
+		case '\'', '"':
+			if quote == 0 {
+				quote = runes[i]
+			} else if quote == runes[i] {
+				quote = 0
+			}
+		case '(':
+			if quote == 0 {
+				depth++
+			}
+		case ')':
+			if quote == 0 && depth > 0 {
+				depth--
+			}
+		}
+		if quote != 0 || depth != 0 || i+len(sepRunes) > len(runes) {
+			continue
+		}
+		match := true
+		for j := range sepRunes {
+			if runes[i+j] != sepRunes[j] {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		parts = append(parts, strings.TrimSpace(string(runes[start:i])))
+		i += len(sepRunes) - 1
+		start = i + 1
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	parts = append(parts, strings.TrimSpace(string(runes[start:])))
+	return parts
+}
+
+func trimOuterCatalogParens(expr string) string {
+	for {
+		expr = strings.TrimSpace(expr)
+		if len(expr) < 2 || expr[0] != '(' || expr[len(expr)-1] != ')' {
+			return expr
+		}
+		depth := 0
+		quote := rune(0)
+		wrapped := true
+		for i, r := range expr {
+			switch r {
+			case '\'', '"':
+				if quote == 0 {
+					quote = r
+				} else if quote == r {
+					quote = 0
+				}
+			case '(':
+				if quote == 0 {
+					depth++
+				}
+			case ')':
+				if quote == 0 {
+					depth--
+					if depth == 0 && i != len(expr)-1 {
+						wrapped = false
+					}
+				}
+			}
+		}
+		if !wrapped {
+			return expr
+		}
+		expr = expr[1 : len(expr)-1]
+	}
+}
+
+func resolveCatalogOperand(expr string, roots map[string]any) any {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	if strings.EqualFold(expr, "true") {
+		return true
+	}
+	if strings.EqualFold(expr, "false") {
+		return false
+	}
+	if (strings.HasPrefix(expr, "\"") && strings.HasSuffix(expr, "\"")) || (strings.HasPrefix(expr, "'") && strings.HasSuffix(expr, "'")) {
+		return strings.Trim(expr, "\"'")
+	}
+	if n, err := strconv.Atoi(expr); err == nil {
+		return n
+	}
+	if f, err := strconv.ParseFloat(expr, 64); err == nil {
+		return f
+	}
+	entity, _ := roots["entity"].(map[string]any)
+	return resolveCatalogRef(expr, entity, roots)
+}
+
+func catalogSlice(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return append([]any{}, typed...)
+	case []map[string]any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, item)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func catalogReduceValue(items []any, operation string) any {
+	switch strings.ToLower(operation) {
+	case "sum":
+		total := 0.0
+		for _, item := range items {
+			if n, ok := catalogNumericValue(item); ok {
+				total += n
+			}
+		}
+		return catalogNormalizeNumber(total)
+	case "min":
+		var (
+			min float64
+			ok  bool
+		)
+		for _, item := range items {
+			n, has := catalogNumericValue(item)
+			if !has {
+				continue
+			}
+			if !ok || n < min {
+				min = n
+				ok = true
+			}
+		}
+		return catalogNormalizeNumber(min)
+	case "max":
+		var (
+			max float64
+			ok  bool
+		)
+		for _, item := range items {
+			n, has := catalogNumericValue(item)
+			if !has {
+				continue
+			}
+			if !ok || n > max {
+				max = n
+				ok = true
+			}
+		}
+		return catalogNormalizeNumber(max)
+	case "count":
+		return len(items)
+	case "weighted_average":
+		total := 0.0
+		weightSum := 0.0
+		for _, item := range items {
+			obj, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			score, okScore := asFloatForCatalog(obj["score"])
+			weight, okWeight := asFloatForCatalog(obj["weight"])
+			if !okScore || !okWeight || weight == 0 {
+				continue
+			}
+			total += score * weight
+			weightSum += weight
+		}
+		if weightSum == 0 {
+			return 0
+		}
+		return catalogNormalizeNumber(total / weightSum)
+	case "pick_or_average":
+		best := 0.0
+		ok := false
+		for _, item := range items {
+			obj, isObj := item.(map[string]any)
+			if !isObj {
+				continue
+			}
+			score, has := asFloatForCatalog(obj["score"])
+			if !has {
+				continue
+			}
+			if !ok || score > best {
+				best = score
+				ok = true
+			}
+		}
+		return catalogNormalizeNumber(best)
+	default:
+		return nil
+	}
+}
+
+func catalogNumericValue(item any) (float64, bool) {
+	if n, ok := asFloatForCatalog(item); ok {
+		return n, true
+	}
+	if obj, ok := item.(map[string]any); ok {
+		if n, ok := asFloatForCatalog(obj["value"]); ok {
+			return n, true
+		}
+		if n, ok := asFloatForCatalog(obj["score"]); ok {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func catalogNormalizeNumber(n float64) any {
+	if float64(int(n)) == n {
+		return int(n)
+	}
+	return n
+}
+
+func normalizeStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func catalogTrimEntityPath(path string) string {
+	path = strings.TrimSpace(path)
+	path = strings.TrimPrefix(path, "entity.")
+	path = strings.TrimPrefix(path, "metadata.")
+	return path
+}
+
+func catalogSetEntityPath(entity map[string]any, path string, value any) {
+	if entity == nil {
+		return
+	}
+	segments := strings.Split(strings.TrimSpace(path), ".")
+	if len(segments) == 0 {
+		return
+	}
+	current := entity
+	for _, segment := range segments[:len(segments)-1] {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return
+		}
+		next, ok := current[segment].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			current[segment] = next
+		}
+		current = next
+	}
+	current[strings.TrimSpace(segments[len(segments)-1])] = value
+}
+
+func lookupCatalogPath(root map[string]any, path string) (any, bool) {
+	if len(root) == 0 {
+		return nil, false
+	}
+	current := any(root)
+	for _, segment := range strings.Split(strings.TrimSpace(path), ".") {
+		obj, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = obj[strings.TrimSpace(segment)]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func decodeCatalogClearGates(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			return nil, nil
+		}
+		var all bool
+		if err := node.Decode(&all); err == nil {
+			if all {
+				return []string{"*"}, nil
+			}
+			return nil, nil
+		}
+		return []string{strings.TrimSpace(node.Value)}, nil
+	case yaml.SequenceNode:
+		var values []string
+		if err := node.Decode(&values); err != nil {
+			return nil, err
+		}
+		return normalizeStrings(values), nil
+	default:
+		return nil, fmt.Errorf("unsupported clear_gates yaml node kind %d", node.Kind)
+	}
+}
+
+func decodeCatalogRuleList(node *yaml.Node) ([]catalogRule, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var rules []catalogRule
+		if err := node.Decode(&rules); err != nil {
+			return nil, err
+		}
+		return rules, nil
+	case yaml.MappingNode:
+		if hasAnyCatalogMappingKey(node, "condition", "advances_to", "emits", "data_accumulation", "compute") {
+			var rule catalogRule
+			if err := node.Decode(&rule); err != nil {
+				return nil, err
+			}
+			return []catalogRule{rule}, nil
+		}
+		rules := make([]catalogRule, 0, len(node.Content)/2)
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			id := strings.TrimSpace(node.Content[i].Value)
+			if id == "" {
+				continue
+			}
+			var rule catalogRule
+			if err := node.Content[i+1].Decode(&rule); err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(rule.ID) == "" {
+				rule.ID = id
+			}
+			rules = append(rules, rule)
+		}
+		return rules, nil
+	default:
+		return nil, fmt.Errorf("unsupported rule yaml node kind %d", node.Kind)
+	}
+}
+
+func hasAnyCatalogMappingKey(node *yaml.Node, keys ...string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	lookup := map[string]struct{}{}
+	for _, key := range keys {
+		lookup[strings.TrimSpace(key)] = struct{}{}
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if _, ok := lookup[strings.TrimSpace(node.Content[i].Value)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveCatalogRef(expr string, entity map[string]any, roots map[string]any) any {
@@ -574,6 +1142,13 @@ func resolveCatalogRef(expr string, entity map[string]any, roots map[string]any)
 	}
 	segments := strings.Split(expr, ".")
 	if len(segments) == 1 {
+		for _, rootName := range []string{"item", "payload", "entity", "policy"} {
+			if rootMap, ok := roots[rootName].(map[string]any); ok {
+				if value, ok := rootMap[segments[0]]; ok {
+					return value
+				}
+			}
+		}
 		return expr
 	}
 	root := strings.TrimSpace(segments[0])
@@ -654,15 +1229,24 @@ func appendCatalogItem(existing any, item map[string]any) []any {
 	return cp
 }
 
-func catalogAccumulationKey(item map[string]any) string {
+func catalogAccumulationKey(item map[string]any, dedupBy string, entity, policy map[string]any) string {
 	if item == nil {
 		return ""
 	}
-	if id := strings.TrimSpace(asStringForCatalog(item["item_id"])); id != "" {
-		return "item_id:" + id
+	if strings.TrimSpace(dedupBy) != "" {
+		if key := asStringForCatalog(resolveCatalogRef(strings.TrimSpace(dedupBy), entity, map[string]any{"payload": item, "entity": entity, "policy": policy})); key != "" {
+			return key
+		}
 	}
-	if id := strings.TrimSpace(asStringForCatalog(item["id"])); id != "" {
-		return "id:" + id
+	if raw, ok := item["item_id"]; ok && raw != nil {
+		if id := strings.TrimSpace(asStringForCatalog(raw)); id != "" && !strings.EqualFold(id, "null") {
+			return "item_id:" + id
+		}
+	}
+	if raw, ok := item["id"]; ok && raw != nil {
+		if id := strings.TrimSpace(asStringForCatalog(raw)); id != "" && !strings.EqualFold(id, "null") {
+			return "id:" + id
+		}
 	}
 	blob, err := json.Marshal(item)
 	if err != nil {
@@ -754,9 +1338,6 @@ func catalogCaseSimpleHarnessEligible(expected catalogExpectedDocument) bool {
 		return false
 	}
 	if expected.Trigger.AssertAtomicCommit || expected.Trigger.AssertPersistedBeforeDelivery || expected.Trigger.AssertSerialProcessing {
-		return false
-	}
-	if len(expected.Trigger.Entity) > 0 {
 		return false
 	}
 	if strings.TrimSpace(expected.Trigger.InjectFailure) != "" {

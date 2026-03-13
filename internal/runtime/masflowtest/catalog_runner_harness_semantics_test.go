@@ -46,7 +46,7 @@ trigger:
     expected_count: 3
 
 expected:
-  handler_outcome: pending
+  handler_outcome: success
   entity_state: collecting
   emitted_events: []
 `,
