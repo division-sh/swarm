@@ -116,7 +116,7 @@ type GuardFailure struct {
 	EventType string
 }
 
-func parseGuardFailure(action string) (GuardFailure, error) {
+func ParseGuardFailure(action string) (GuardFailure, error) {
 	normalized := strings.TrimSpace(strings.ToLower(action))
 	switch normalized {
 	case "", "reject":

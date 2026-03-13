@@ -890,7 +890,7 @@ func (e *Executor) resolveClearGates(frame *executionFrame) []string {
 }
 
 func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error {
-	parsed, err := parseGuardFailure(action)
+	parsed, err := ParseGuardFailure(action)
 	if err != nil {
 		return err
 	}

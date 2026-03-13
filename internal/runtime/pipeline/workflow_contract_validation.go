@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeengine "empireai/internal/runtime/engine"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -382,12 +383,18 @@ func workflowHandlerActionExecutable(source semanticview.Source, actionID string
 }
 
 func validateWorkflowGuardOnFail(onFail string) error {
-	onFail = normalizeWorkflowGuardFailureAction(onFail)
-	switch {
-	case onFail == "", onFail == "blocked", onFail == "discard", onFail == "reject", onFail == "kill":
+	parsed, err := runtimeengine.ParseGuardFailure(onFail)
+	if err != nil {
+		return err
+	}
+	switch parsed.Action {
+	case runtimeengine.GuardFailureReject,
+		runtimeengine.GuardFailureBlocked,
+		runtimeengine.GuardFailureDiscard,
+		runtimeengine.GuardFailureKill:
 		return nil
-	case strings.HasPrefix(onFail, "escalate:"):
-		if strings.TrimSpace(strings.TrimPrefix(onFail, "escalate:")) == "" {
+	case runtimeengine.GuardFailureEscalate:
+		if strings.TrimSpace(parsed.EventType) == "" {
 			return fmt.Errorf("on_fail escalate requires event type")
 		}
 		return nil
@@ -401,18 +408,6 @@ func handlerGuardOnFail(spec *runtimecontracts.GuardSpec) string {
 		return ""
 	}
 	return strings.TrimSpace(spec.OnFail)
-}
-
-func normalizeWorkflowGuardFailureAction(action string) string {
-	action = strings.TrimSpace(strings.ToLower(action))
-	switch action {
-	case "":
-		return ""
-	case "block":
-		return "blocked"
-	default:
-		return action
-	}
 }
 
 func stateSchemaGateNames(schema runtimecontracts.NodeStateSchema) map[string]struct{} {
