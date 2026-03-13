@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 func parseExpr(t *testing.T, src string) ast.Expr {
@@ -211,33 +213,28 @@ func TestCollectEmitSitesAndLoadAgentSpecs(t *testing.T) {
 		t.Fatalf("expected at least two emit sites, got %d", len(sites))
 	}
 
-	agentsDir := filepath.Join(tmp, "agents")
-	templatesDir := filepath.Join(tmp, "templates")
-	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
-		t.Fatalf("mkdir agents: %v", err)
+	promptsDir := filepath.Join(tmp, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts: %v", err)
 	}
-	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
-		t.Fatalf("mkdir templates: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(agentsDir, "roster.yaml"), []byte("agents: {}\n"), 0o644); err != nil {
-		t.Fatalf("write roster: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(templatesDir, "routes.yaml"), []byte("bootstrap: []\nseeded: []\n"), 0o644); err != nil {
-		t.Fatalf("write routes: %v", err)
-	}
-	agentYAML := strings.Join([]string{
-		"id: business-research-agent",
-		"role: business-research-agent",
-		"subscriptions:",
-		"  - validation.started",
-		"system_prompt: |",
-		"  validation.started: read entity_id and geography from payload",
-	}, "\n")
-	if err := os.WriteFile(filepath.Join(agentsDir, "business-research-agent.yaml"), []byte(agentYAML), 0o644); err != nil {
-		t.Fatalf("write agent yaml: %v", err)
+	if err := os.WriteFile(filepath.Join(promptsDir, "business-research-agent.md"), []byte("validation.started: read entity_id and geography from payload"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
 	}
 
-	specs, err := loadAgentSpecs(agentsDir, templatesDir)
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{
+			ProjectPromptsDir: promptsDir,
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"business-research-agent": {
+				ID:            "business-research-agent",
+				Role:          "business-research-agent",
+				Subscriptions: []string{"validation.started"},
+			},
+		},
+	}
+
+	specs, err := loadAgentSpecs(tmp, bundle)
 	if err != nil {
 		t.Fatalf("load agent specs: %v", err)
 	}
@@ -267,7 +264,7 @@ func TestReportAndMiscHelpers(t *testing.T) {
 		guaranteed:     []string{"entity_id"},
 		missing:        []string{"geography"},
 	}}
-	report := buildReport(contracts, findings, "internal/runtime", []string{"configs/agents", "configs/agents/templates"})
+	report := buildReport(contracts, findings, "internal/runtime", "docs/specs/mas-platform/empire/contracts")
 	if !strings.Contains(report, "# Runtime Payload Completeness Audit") {
 		t.Fatalf("unexpected report header: %s", report)
 	}

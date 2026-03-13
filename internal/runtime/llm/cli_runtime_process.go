@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	workspace "empireai/internal/runtime/workspace"
 )
 
@@ -200,7 +200,7 @@ func (r *ClaudeCLIRuntime) effectiveCLITimeout(ctx context.Context) time.Duratio
 	}
 	// Global/no-entity agents routinely run deeper research loops; apply a floor
 	// to prevent repeated hard-kill timeouts at the process layer.
-	if actor, ok := runtimeactor.ActorFromContext(ctx); ok {
+	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
 		if strings.TrimSpace(actor.EffectiveEntityID()) == "" && timeout < 300*time.Second {
 			timeout = 300 * time.Second
 		}
@@ -277,7 +277,7 @@ func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Tar
 	if r.workspaces == nil {
 		return nil, nil
 	}
-	actor, ok := runtimeactor.ActorFromContext(ctx)
+	actor, ok := runtimeactors.ActorFromContext(ctx)
 	if !ok {
 		return nil, nil
 	}

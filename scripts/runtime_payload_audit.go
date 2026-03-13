@@ -11,11 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	runtimecontracts "empireai/internal/runtime/contracts"
 )
 
 type fieldSet struct {
@@ -120,9 +121,10 @@ var (
 )
 
 func main() {
+	repo := repoRoot()
 	runtimeDir := flag.String("runtime", "internal/runtime", "path to runtime package directory")
-	agentsDir := flag.String("agents", "configs/agents", "path to agent YAML directory")
-	templatesDir := flag.String("templates", "configs/agents/templates", "path to template agent YAML directory")
+	contractsDir := flag.String("contracts", runtimecontracts.DefaultWorkflowContractsDir(repo), "path to workflow contract bundle root")
+	platformSpecPath := flag.String("platform-spec", runtimecontracts.DefaultPlatformSpecFile(repo), "path to platform spec yaml")
 	outPath := flag.String("out", "docs/reports/runtime-payload-audit.md", "output markdown report path")
 	flag.Parse()
 
@@ -135,13 +137,20 @@ func main() {
 	}
 	contracts := buildContracts(sites)
 
-	agents, err := loadAgentSpecs(*agentsDir, *templatesDir)
+	resolvedContractsDir := resolvePath(repo, *contractsDir)
+	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, resolvedContractsDir, resolvedPlatformSpecPath)
+	if err != nil {
+		fail(err)
+	}
+
+	agents, err := loadAgentSpecs(repo, bundle)
 	if err != nil {
 		fail(err)
 	}
 	findings := auditContractsAgainstPrompts(contracts, agents)
 
-	report := buildReport(contracts, findings, *runtimeDir, []string{*agentsDir, *templatesDir})
+	report := buildReport(contracts, findings, *runtimeDir, resolvedContractsDir)
 	if err := writeFile(*outPath, []byte(report)); err != nil {
 		fail(err)
 	}
@@ -548,57 +557,131 @@ func newFieldSet(dynamic bool, keys ...string) fieldSet {
 	return out
 }
 
-func loadAgentSpecs(paths ...string) ([]agentSpec, error) {
-	var specs []agentSpec
-	for _, root := range paths {
-		err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if d.IsDir() {
-				return nil
-			}
-			if !strings.HasSuffix(path, ".yaml") {
-				return nil
-			}
-			base := filepath.Base(path)
-			if base == "roster.yaml" || base == "routes.yaml" {
-				return nil
-			}
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			raw := map[string]any{}
-			if err := yaml.Unmarshal(content, &raw); err != nil {
-				return fmt.Errorf("parse %s: %w", path, err)
-			}
-			subscriptions := toStringSlice(raw["subscriptions"])
-			if len(subscriptions) == 0 {
-				return nil
-			}
-			id := strings.TrimSpace(asString(raw["id"]))
-			role := strings.TrimSpace(asString(raw["role"]))
-			if id == "" {
-				id = strings.TrimSuffix(base, filepath.Ext(base))
-			}
-			specs = append(specs, agentSpec{
-				id:            id,
-				role:          role,
-				file:          path,
-				subscriptions: subscriptions,
-				systemPrompt:  asString(raw["system_prompt"]),
-			})
-			return nil
-		})
+func loadAgentSpecs(repoRoot string, bundle *runtimecontracts.WorkflowContractBundle) ([]agentSpec, error) {
+	if bundle == nil {
+		return nil, errors.New("workflow contract bundle is required")
+	}
+	entries := bundle.AgentEntries()
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	specs := make([]agentSpec, 0, len(ids))
+	for _, id := range ids {
+		entry := entries[id]
+		subscriptions := uniqueStrings(entry.Subscriptions...)
+		subscriptions = uniqueStrings(append(subscriptions, entry.SubscriptionsBootstrap...)...)
+		subscriptions = uniqueStrings(append(subscriptions, entry.SubscribesTo...)...)
+		if len(subscriptions) == 0 {
+			continue
+		}
+		prompt, promptPath, err := loadAgentPrompt(repoRoot, bundle, id, entry)
 		if err != nil {
 			return nil, err
 		}
+		specs = append(specs, agentSpec{
+			id:            strings.TrimSpace(id),
+			role:          strings.TrimSpace(entry.Role),
+			file:          promptPath,
+			subscriptions: subscriptions,
+			systemPrompt:  prompt,
+		})
 	}
-	sort.Slice(specs, func(i, j int) bool {
-		return specs[i].id < specs[j].id
-	})
 	return specs, nil
+}
+
+func loadAgentPrompt(repoRoot string, bundle *runtimecontracts.WorkflowContractBundle, logicalID string, entry runtimecontracts.AgentRegistryEntry) (string, string, error) {
+	mode := promptModeForAgent(bundle, logicalID)
+	dirs := promptDirsForAgent(bundle, logicalID)
+	candidates := uniqueStrings(logicalID, strings.TrimSpace(entry.ID))
+	for _, dir := range dirs {
+		absDir := resolvePath(repoRoot, dir)
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			files := make([]string, 0, 2)
+			if mode != "" {
+				files = append(files, filepath.Join(absDir, candidate+"."+mode+".md"))
+			}
+			files = append(files, filepath.Join(absDir, candidate+".md"))
+			for _, path := range files {
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					return "", "", err
+				}
+				return string(raw), path, nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
+func promptDirsForAgent(bundle *runtimecontracts.WorkflowContractBundle, logicalID string) []string {
+	if bundle == nil {
+		return nil
+	}
+	dirs := make([]string, 0, 4)
+	if source, ok := bundle.AgentContractSource(logicalID); ok {
+		if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
+			if flow, ok := bundle.FlowViewByID(flowID); ok && strings.TrimSpace(flow.Paths.PromptsDir) != "" {
+				dirs = append(dirs, flow.Paths.PromptsDir)
+			}
+		}
+		if packageKey := strings.TrimSpace(source.PackageKey); packageKey != "" {
+			for _, pkg := range bundle.ProjectViews() {
+				if strings.TrimSpace(pkg.Paths.Key) == packageKey && strings.TrimSpace(pkg.Paths.ProjectPromptsDir) != "" {
+					dirs = append(dirs, pkg.Paths.ProjectPromptsDir)
+					break
+				}
+			}
+		}
+	}
+	if strings.TrimSpace(bundle.Paths.ProjectPromptsDir) != "" {
+		dirs = append(dirs, bundle.Paths.ProjectPromptsDir)
+	}
+	return uniqueStrings(dirs...)
+}
+
+func promptModeForAgent(bundle *runtimecontracts.WorkflowContractBundle, logicalID string) string {
+	if bundle == nil {
+		return ""
+	}
+	source, ok := bundle.AgentContractSource(logicalID)
+	if !ok || strings.TrimSpace(source.FlowID) == "" {
+		return ""
+	}
+	flow, ok := bundle.FlowViewByID(source.FlowID)
+	if !ok {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(flow.Paths.Mode))
+}
+
+func uniqueStrings(values ...string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		seen := false
+		for _, existing := range out {
+			if existing == value {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func auditContractsAgainstPrompts(contracts map[string]*eventContract, agents []agentSpec) []finding {
@@ -840,13 +923,13 @@ func matchesSubscription(subscription, eventType string) bool {
 	return rx.MatchString(eventType)
 }
 
-func buildReport(contracts map[string]*eventContract, findings []finding, runtimeDir string, configDirs []string) string {
+func buildReport(contracts map[string]*eventContract, findings []finding, runtimeDir, contractsRoot string) string {
 	var b strings.Builder
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.WriteString("# Runtime Payload Completeness Audit\n\n")
 	b.WriteString("- generated_at: " + now + "\n")
 	b.WriteString("- runtime_dir: `" + runtimeDir + "`\n")
-	b.WriteString("- config_dirs: `" + strings.Join(configDirs, "`, `") + "`\n")
+	b.WriteString("- contracts_root: `" + contractsRoot + "`\n")
 	b.WriteString("- scope: runtime-emitted events (Go-side publish paths) vs subscribed agent prompt field expectations\n\n")
 
 	eventNames := make([]string, 0, len(contracts))
@@ -894,6 +977,22 @@ func buildReport(contracts map[string]*eventContract, findings []finding, runtim
 	b.WriteString("\n## Suggested Next Step\n\n")
 	b.WriteString("Define typed payload structs for each runtime-emitted event and route all `Publish` payload construction through them to enforce compile-time field contracts.\n")
 	return b.String()
+}
+
+func repoRoot() string {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return "."
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), ".."))
+}
+
+func resolvePath(repoRoot, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(repoRoot, path)
 }
 
 func writeFile(path string, content []byte) error {

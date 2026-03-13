@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	"empireai/internal/runtime/sessions"
 )
 
@@ -105,7 +105,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
-	actor, _ := runtimeactor.ActorFromContext(ctx)
+	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
 
@@ -302,7 +302,7 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 	}
 
 	model := strings.TrimSpace(r.cfg.LLM.ClaudeAPI.DefaultModel)
-	if actor, ok := runtimeactor.ActorFromContext(ctx); ok {
+	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
 		switch strings.ToLower(strings.TrimSpace(actor.Type)) {
 		case "haiku":
 			if strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel) != "" {

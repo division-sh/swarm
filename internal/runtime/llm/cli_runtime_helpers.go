@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"empireai/internal/config"
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 	"empireai/internal/runtime/sessions"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
@@ -155,10 +155,6 @@ func dedupeToolCalls(calls []ToolCall) []ToolCall {
 		out = append(out, c)
 	}
 	return out
-}
-
-func DedupeToolCalls(calls []ToolCall) []ToolCall {
-	return dedupeToolCalls(calls)
 }
 
 type sessionIDAdopter interface {

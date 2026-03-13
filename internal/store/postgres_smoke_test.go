@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/actors"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/testutil"

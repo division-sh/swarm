@@ -1,6 +1,7 @@
 package actors
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 )
@@ -30,4 +31,19 @@ func (cfg *AgentConfig) NormalizeEntityID() {
 	if strings.TrimSpace(cfg.EntityID) == "" {
 		cfg.EntityID = entityID
 	}
+}
+
+type actorContextKey struct{}
+
+func WithActor(ctx context.Context, actor AgentConfig) context.Context {
+	return context.WithValue(ctx, actorContextKey{}, actor)
+}
+
+func ActorFromContext(ctx context.Context) (AgentConfig, bool) {
+	v := ctx.Value(actorContextKey{})
+	if v == nil {
+		return AgentConfig{}, false
+	}
+	cfg, ok := v.(AgentConfig)
+	return cfg, ok
 }

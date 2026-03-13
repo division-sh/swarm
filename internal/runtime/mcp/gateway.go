@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
+	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 )
 

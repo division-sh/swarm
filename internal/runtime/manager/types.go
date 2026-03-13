@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
+	models "empireai/internal/runtime/core/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/sessions"
 	workspace "empireai/internal/runtime/workspace"

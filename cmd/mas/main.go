@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -26,21 +27,13 @@ import (
 	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/store"
-	"gopkg.in/yaml.v3"
 )
 
 const (
-	defaultConfigPath       = "configs/mas.yaml"
 	defaultContractsPath    = "docs/specs/mas-platform/tests/generic-runtime/contracts"
 	defaultPlatformSpecPath = "docs/specs/mas-platform/platform/contracts/platform-spec.yaml"
 	defaultHealthAddr       = ":8081"
 )
-
-type runtimeConfigFile struct {
-	Runtime  config.RuntimeConfig  `yaml:"runtime"`
-	Database config.DatabaseConfig `yaml:"database"`
-	LLM      config.LLMConfig      `yaml:"llm"`
-}
 
 type storeBundle struct {
 	SQLDB             *sql.DB
@@ -66,7 +59,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 
 func main() {
 	repo := repoRoot()
-	configPath := flag.String("config", defaultConfigPath, "Path to MAS runtime config")
+	configPath := flag.String("config", "", "Optional path to MAS runtime config")
 	contractsPath := flag.String("contracts", defaultContractsPath, "Path to MAS contract bundle root")
 	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := flag.String("store", "inmemory", "Store mode: inmemory|postgres")
@@ -130,23 +123,113 @@ func main() {
 }
 
 func loadRuntimeConfig(path string) (*config.Config, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return defaultRuntimeConfig()
 	}
-	var parsed runtimeConfigFile
-	if err := yaml.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	cfg, err := config.Load(path)
+	if err != nil {
+		return nil, fmt.Errorf("load %s: %w", path, err)
+	}
+	return cfg, nil
+}
+
+func defaultRuntimeConfig() (*config.Config, error) {
+	mode := strings.TrimSpace(os.Getenv("MAS_LLM_RUNTIME_MODE"))
+	if mode == "" {
+		if strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")) != "" && strings.TrimSpace(os.Getenv("MAS_CLAUDE_DEFAULT_MODEL")) != "" {
+			mode = "api"
+		} else {
+			mode = "cli_test"
+		}
 	}
 	cfg := &config.Config{
-		Runtime:  parsed.Runtime,
-		Database: parsed.Database,
-		LLM:      parsed.LLM,
+		Runtime: config.RuntimeConfig{
+			MaxConcurrentAgents: envInt("MAS_RUNTIME_MAX_CONCURRENT_AGENTS", 10),
+			EventPollInterval:   envDuration("MAS_RUNTIME_EVENT_POLL_INTERVAL", time.Second),
+			RecoveryOnStartup:   envBool("MAS_RUNTIME_RECOVERY_ON_STARTUP", false),
+		},
+		Database: config.DatabaseConfig{
+			Host:     envOrDefault("MAS_DB_HOST", envOrDefault("PGHOST", "127.0.0.1")),
+			Port:     envInt("MAS_DB_PORT", envInt("PGPORT", 5432)),
+			Name:     envOrDefault("MAS_DB_NAME", envOrDefault("PGDATABASE", "empireai")),
+			User:     envOrDefault("MAS_DB_USER", envOrDefault("PGUSER", "postgres")),
+			Password: envOrDefault("MAS_DB_PASSWORD", envOrDefault("PGPASSWORD", "postgres")),
+			SSLMode:  envOrDefault("MAS_DB_SSLMODE", "disable"),
+			PoolSize: envInt("MAS_DB_POOL_SIZE", 5),
+		},
+		LLM: config.LLMConfig{
+			RuntimeMode: mode,
+			Session: config.LLMSessionConfig{
+				LockTTL:               envDuration("MAS_LLM_SESSION_LOCK_TTL", 10*time.Second),
+				RotateAfterTurns:      envInt("MAS_LLM_SESSION_ROTATE_AFTER_TURNS", 40),
+				RotateOnParseFailures: envInt("MAS_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", 3),
+			},
+			ClaudeAPI: config.ClaudeAPIConfig{
+				DefaultModel: envOrDefault("MAS_CLAUDE_DEFAULT_MODEL", ""),
+				HaikuModel:   envOrDefault("MAS_CLAUDE_HAIKU_MODEL", ""),
+				MaxRetries:   envInt("MAS_CLAUDE_API_MAX_RETRIES", 1),
+				RetryBackoff: envDuration("MAS_CLAUDE_API_RETRY_BACKOFF", 2*time.Second),
+			},
+			ClaudeCLI: config.ClaudeCLIConfig{
+				Command:              envOrDefault("MAS_CLAUDE_CLI_COMMAND", "claude"),
+				Timeout:              envDuration("MAS_CLAUDE_CLI_TIMEOUT", 15*time.Minute),
+				OutputFormat:         envOrDefault("MAS_CLAUDE_CLI_OUTPUT_FORMAT", "stream-json"),
+				Retries:              envInt("MAS_CLAUDE_CLI_RETRIES", 1),
+				NoSessionPersistence: envBool("MAS_CLAUDE_CLI_NO_SESSION_PERSISTENCE", false),
+				UseTMux:              envBool("MAS_CLAUDE_CLI_USE_TMUX", false),
+			},
+		},
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func envDuration(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func envBool(key string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	case "":
+		return fallback
+	default:
+		return fallback
+	}
 }
 
 func normalizeContractsRoot(path string) (string, error) {

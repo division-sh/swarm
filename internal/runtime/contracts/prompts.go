@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,22 +42,6 @@ func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, erro
 		}
 	}
 	return "", false, nil
-}
-
-func PromptAgentIDForConfig(cfg models.AgentConfig) string {
-	candidates := promptIDCandidates(cfg)
-	bundle, err := promptWorkflowBundle()
-	if err == nil && bundle != nil {
-		if matched, ok := resolveBundlePromptAgentID(bundle, cfg, candidates); ok {
-			return matched
-		}
-	}
-	for _, candidate := range candidates {
-		if candidate != "" {
-			return candidate
-		}
-	}
-	return ""
 }
 
 func promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {

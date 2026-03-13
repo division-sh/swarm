@@ -2,7 +2,7 @@ package semanticview
 
 import (
 	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeregistry "empireai/internal/runtime/registry"
+	runtimeregistry "empireai/internal/runtime/core/registry"
 )
 
 type Source interface {

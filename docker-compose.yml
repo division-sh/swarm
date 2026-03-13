@@ -32,8 +32,17 @@ services:
       EMPIREAI_CLAUDE_BYPASS_PERMISSIONS: ${EMPIREAI_CLAUDE_BYPASS_PERMISSIONS:-true}
       EMPIREAI_CLAUDE_TIMEOUT_SECONDS: ${EMPIREAI_CLAUDE_TIMEOUT_SECONDS:-900}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      MAS_DB_HOST: postgres
+      MAS_DB_PORT: "5432"
+      MAS_DB_NAME: empireai
+      MAS_DB_USER: postgres
+      MAS_DB_PASSWORD: postgres
+      MAS_DB_SSLMODE: disable
+      MAS_LLM_RUNTIME_MODE: cli_test
+      MAS_CLAUDE_CLI_COMMAND: claude
+      MAS_CLAUDE_CLI_OUTPUT_FORMAT: stream-json
     volumes:
-      - ./configs:/app/configs
+      - ./docs:/app/docs
       - ./migrations:/app/migrations
       - ./contracts:/app/contracts
       - ./internal:/app/internal
@@ -44,13 +53,10 @@ services:
       - "8080:8080"
       - "8090:8090"
     command:
-      - -config
-      - /app/configs/empire.docker.yaml
       - -store
       - postgres
-      - -migrate
-      - -migration-file
-      - /app/contracts/ddl-canonical.sql
+      - -contracts
+      - /app/docs/specs/mas-platform/empire/contracts
       - -self-check=false
 
   dashboard:

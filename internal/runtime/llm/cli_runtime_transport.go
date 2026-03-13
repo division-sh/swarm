@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	runtimeactor "empireai/internal/runtime/actorctx"
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 	workspace "empireai/internal/runtime/workspace"
 )
 
@@ -46,7 +45,7 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if !shouldUseMCPBridge() || s == nil || len(s.Tools) == 0 {
 		return "", "", false, nil
 	}
-	actor, _ := runtimeactor.ActorFromContext(ctx)
+	actor, _ := models.ActorFromContext(ctx)
 	if strings.TrimSpace(actor.ID) == "" {
 		actor.ID = strings.TrimSpace(s.AgentID)
 	}
@@ -67,10 +66,10 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	}
 	allowedTools := toolNamesCSV(s.Tools)
 	headers := map[string]string{
-		mcpActorIDHeader:        strings.TrimSpace(actor.ID),
-		mcpActorRoleHeader:      strings.TrimSpace(actor.Role),
-		mcpEntityIDHeader:       strings.TrimSpace(actor.EffectiveEntityID()),
-		mcpAllowedToolsHeader:   allowedTools,
+		mcpActorIDHeader:      strings.TrimSpace(actor.ID),
+		mcpActorRoleHeader:    strings.TrimSpace(actor.Role),
+		mcpEntityIDHeader:     strings.TrimSpace(actor.EffectiveEntityID()),
+		mcpAllowedToolsHeader: allowedTools,
 	}
 	if mode := strings.TrimSpace(actor.Mode); mode != "" {
 		headers[mcpActorModeHeader] = mode

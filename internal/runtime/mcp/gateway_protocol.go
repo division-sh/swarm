@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 )
 
 const (
@@ -29,12 +29,12 @@ const (
 )
 
 type ToolGatewayRequest struct {
-	Actor      models.AgentConfig `json:"actor"`
-	AgentID    string             `json:"agent_id"`
-	AgentRole  string             `json:"agent_role"`
-	EntityID   string             `json:"entity_id"`
-	Mode       string             `json:"mode"`
-	Input      any                `json:"input"`
+	Actor     models.AgentConfig `json:"actor"`
+	AgentID   string             `json:"agent_id"`
+	AgentRole string             `json:"agent_role"`
+	EntityID  string             `json:"entity_id"`
+	Mode      string             `json:"mode"`
+	Input     any                `json:"input"`
 }
 
 func (r ToolGatewayRequest) EffectiveEntityID() string { return strings.TrimSpace(r.EntityID) }
@@ -99,13 +99,13 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 		return models.AgentConfig{}, false
 	}
 	actor := models.AgentConfig{
-		ID:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorIDHeader)), strings.TrimSpace(r.URL.Query().Get(actorIDQuery))),
-		Role:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(actorRoleQuery))),
+		ID:   FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorIDHeader)), strings.TrimSpace(r.URL.Query().Get(actorIDQuery))),
+		Role: FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(actorRoleQuery))),
 		EntityID: FirstNonEmpty(
 			strings.TrimSpace(r.Header.Get(entityIDHeader)),
 			strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
 		),
-		Mode:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorModeHeader)), strings.TrimSpace(r.URL.Query().Get(actorModeQuery))),
+		Mode: FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorModeHeader)), strings.TrimSpace(r.URL.Query().Get(actorModeQuery))),
 	}
 	actor.NormalizeEntityID()
 	if strings.TrimSpace(actor.ID) == "" {

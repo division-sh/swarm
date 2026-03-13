@@ -9,8 +9,8 @@ import (
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/core/identity"
+	runtimeregistry "empireai/internal/runtime/core/registry"
 	runtimeengine "empireai/internal/runtime/engine"
-	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 

@@ -72,16 +72,6 @@ func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...
 	)
 }
 
-func GeneratedEmitSchemas() []string {
-	ensureEventSchemaRegistry()
-	out := make([]string, 0, len(generatedSchemas))
-	for eventType := range generatedSchemas {
-		out = append(out, eventType)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func GeneratedEmitSchemasForAgentRoles() []string {
 	ensureEventSchemaRegistry()
 	out := make([]string, 0, 64)

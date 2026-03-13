@@ -10,10 +10,9 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
-	runtimeactor "empireai/internal/runtime/actorctx"
-	models "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/runtime/sessions"
@@ -168,7 +167,7 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.applyPromptForEvent(evt)
 	a.resetConversationScopeIfNeeded(evt)
 
-	ctx = runtimeactor.WithActor(ctx, a.cfg)
+	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
@@ -402,7 +401,7 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	ctx = runtimeactor.WithActor(ctx, a.cfg)
+	ctx = models.WithActor(ctx, a.cfg)
 	resp, err := a.conversation.StepWithRole(ctx, "board_directive", directive)
 	if err != nil {
 		return "", err

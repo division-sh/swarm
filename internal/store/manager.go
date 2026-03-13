@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/actors"
+	runtimeactors "empireai/internal/runtime/core/actors"
 )
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {

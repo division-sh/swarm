@@ -51,11 +51,11 @@ func (t *InboundTarget) NormalizeEntity() {
 
 type InboundGateway struct {
 	mux   *http.ServeMux
-	bus   *EventBus
+	bus   *runtimebus.EventBus
 	store InboundPersistence
 }
 
-func NewInboundGateway(bus *EventBus, stores ...InboundPersistence) *InboundGateway {
+func NewInboundGateway(bus *runtimebus.EventBus, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
@@ -98,8 +98,8 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := InboundTarget{
-		EntityID:     entityKey,
-		EntitySlug:   entityKey,
+		EntityID:   entityKey,
+		EntitySlug: entityKey,
 	}
 	if g.store != nil {
 		resolved, err := g.store.ResolveInboundTarget(r.Context(), entityKey, provider)

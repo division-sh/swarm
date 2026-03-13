@@ -11,8 +11,8 @@ import (
 	"sort"
 	"strings"
 
-	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	models "empireai/internal/runtime/core/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
 )
@@ -42,36 +42,36 @@ type OrphanKiller interface {
 }
 
 type DockerConfig struct {
-	DockerBin               string
-	WorkspaceImage          string
-	WorkspaceNetwork        string
-	ScaffoldContainer       string
-	ScaffoldWorkdir         string
-	ScaffoldVolume          string
-	SystemContainer         string
-	SystemWorkdir           string
-	SystemEntitiesVolume    string
-	SystemNginxVolume       string
-	SystemSystemdVolume     string
-	EntityContainerPrefix   string
-	EntityWorkdir           string
+	DockerBin             string
+	WorkspaceImage        string
+	WorkspaceNetwork      string
+	ScaffoldContainer     string
+	ScaffoldWorkdir       string
+	ScaffoldVolume        string
+	SystemContainer       string
+	SystemWorkdir         string
+	SystemEntitiesVolume  string
+	SystemNginxVolume     string
+	SystemSystemdVolume   string
+	EntityContainerPrefix string
+	EntityWorkdir         string
 }
 
 func DefaultDockerConfig() DockerConfig {
 	return DockerConfig{
-		DockerBin:               EnvOrDefault("MAS_DOCKER_BIN", "docker"),
-		WorkspaceImage:          EnvOrDefault("MAS_WORKSPACE_IMAGE", "mas-workspace:latest"),
-		WorkspaceNetwork:        EnvOrDefault("MAS_WORKSPACE_NETWORK", "mas_default"),
-		ScaffoldContainer:       EnvOrDefault("MAS_SCAFFOLD_CONTAINER", "mas-scaffold"),
-		ScaffoldWorkdir:         EnvOrDefault("MAS_SCAFFOLD_WORKDIR", "/opt/mas/scaffold"),
-		ScaffoldVolume:          EnvOrDefault("MAS_SCAFFOLD_VOLUME", "scaffold"),
-		SystemContainer:         EnvOrDefault("MAS_SYSTEM_CONTAINER", "mas-system"),
-		SystemWorkdir:           EnvOrDefault("MAS_SYSTEM_WORKDIR", "/opt/mas"),
-		SystemEntitiesVolume:    EnvOrDefault("MAS_SYSTEM_ENTITIES_VOLUME", "entities"),
-		SystemNginxVolume:       EnvOrDefault("MAS_SYSTEM_NGINX_VOLUME", "nginx"),
-		SystemSystemdVolume:     EnvOrDefault("MAS_SYSTEM_SYSTEMD_VOLUME", "systemd"),
-		EntityContainerPrefix:   EnvOrDefault("MAS_ENTITY_CONTAINER_PREFIX", "mas-"),
-		EntityWorkdir:           EnvOrDefault("MAS_ENTITY_WORKDIR", "/workspace"),
+		DockerBin:             EnvOrDefault("MAS_DOCKER_BIN", "docker"),
+		WorkspaceImage:        EnvOrDefault("MAS_WORKSPACE_IMAGE", "mas-workspace:latest"),
+		WorkspaceNetwork:      EnvOrDefault("MAS_WORKSPACE_NETWORK", "mas_default"),
+		ScaffoldContainer:     EnvOrDefault("MAS_SCAFFOLD_CONTAINER", "mas-scaffold"),
+		ScaffoldWorkdir:       EnvOrDefault("MAS_SCAFFOLD_WORKDIR", "/opt/mas/scaffold"),
+		ScaffoldVolume:        EnvOrDefault("MAS_SCAFFOLD_VOLUME", "scaffold"),
+		SystemContainer:       EnvOrDefault("MAS_SYSTEM_CONTAINER", "mas-system"),
+		SystemWorkdir:         EnvOrDefault("MAS_SYSTEM_WORKDIR", "/opt/mas"),
+		SystemEntitiesVolume:  EnvOrDefault("MAS_SYSTEM_ENTITIES_VOLUME", "entities"),
+		SystemNginxVolume:     EnvOrDefault("MAS_SYSTEM_NGINX_VOLUME", "nginx"),
+		SystemSystemdVolume:   EnvOrDefault("MAS_SYSTEM_SYSTEMD_VOLUME", "systemd"),
+		EntityContainerPrefix: EnvOrDefault("MAS_ENTITY_CONTAINER_PREFIX", "mas-"),
+		EntityWorkdir:         EnvOrDefault("MAS_ENTITY_WORKDIR", "/workspace"),
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	"empireai/internal/events"
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	"github.com/google/uuid"
 )
@@ -530,18 +530,6 @@ func (e *Executor) SetSQLDB(db *sql.DB) {
 
 func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error {
 	return e.validateRuntimeToolInput(name, input)
-}
-
-func AuthorizeRoutingForTest(actor, target models.AgentConfig, status string) error {
-	return authorizeRouting(actor, target, status)
-}
-
-func AuthorizeManageForTest(actor models.AgentConfig, targetRole, targetEntityID string) error {
-	return authorizeManage(actor, targetRole, targetEntityID)
-}
-
-func AuthorizeMailboxSendForTest(actor models.AgentConfig) error {
-	return authorizeMailboxSend(actor)
 }
 
 func (e *Executor) ExecAgentMessageDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

@@ -3,7 +3,7 @@ package store
 import (
 	"context"
 	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/actors"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimellm "empireai/internal/runtime/llm"
 	runtimemanager "empireai/internal/runtime/manager"

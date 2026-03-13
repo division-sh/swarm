@@ -3,14 +3,13 @@ package tools
 import (
 	"context"
 
-	runtimeactor "empireai/internal/runtime/actorctx"
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 )
 
 func WithActor(ctx context.Context, actor models.AgentConfig) context.Context {
-	return runtimeactor.WithActor(ctx, actor)
+	return models.WithActor(ctx, actor)
 }
 
 func ActorFromContext(ctx context.Context) (models.AgentConfig, bool) {
-	return runtimeactor.ActorFromContext(ctx)
+	return models.ActorFromContext(ctx)
 }

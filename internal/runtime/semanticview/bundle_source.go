@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeregistry "empireai/internal/runtime/registry"
+	runtimeregistry "empireai/internal/runtime/core/registry"
 )
 
 type bundleSource struct {

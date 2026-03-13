@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 )
 
 func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -19,13 +19,13 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 		return nil, err
 	}
 	var in struct {
-		EventID    string `json:"event_id"`
-		EntityID   string `json:"entity_id"`
-		Type       string `json:"type"`
-		Priority   string `json:"priority"`
-		Summary    string `json:"summary"`
-		Context    any    `json:"context"`
-		TimeoutAt  string `json:"timeout_at"`
+		EventID   string `json:"event_id"`
+		EntityID  string `json:"entity_id"`
+		Type      string `json:"type"`
+		Priority  string `json:"priority"`
+		Summary   string `json:"summary"`
+		Context   any    `json:"context"`
+		TimeoutAt string `json:"timeout_at"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
@@ -68,15 +68,15 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	}
 
 	id, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
-		EventID:    in.EventID,
-		EntityID:   in.EntityID,
-		FromAgent:  actor.ID,
-		Type:       in.Type,
-		Priority:   in.Priority,
-		Status:     "pending",
-		Context:    ctxJSON,
-		Summary:    in.Summary,
-		TimeoutAt:  timeout,
+		EventID:   in.EventID,
+		EntityID:  in.EntityID,
+		FromAgent: actor.ID,
+		Type:      in.Type,
+		Priority:  in.Priority,
+		Status:    "pending",
+		Context:   ctxJSON,
+		Summary:   in.Summary,
+		TimeoutAt: timeout,
 	})
 	if err != nil {
 		return nil, err

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/actors"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
 

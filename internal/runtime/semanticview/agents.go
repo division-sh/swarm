@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	models "empireai/internal/runtime/core/actors"
 )
 
 type agentRecord struct {

@@ -6,7 +6,7 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/core/identity"
-	runtimeregistry "empireai/internal/runtime/registry"
+	runtimeregistry "empireai/internal/runtime/core/registry"
 	"empireai/internal/runtime/semanticview"
 )
 

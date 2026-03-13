@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/actors"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
@@ -564,11 +564,11 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
-			Payload: mustJSON(map[string]any{
-				"agent_id":           agent.ID(),
-				"entity_id":          entityID,
-				"consecutive_panics": consecutivePanics,
-				"error":              panicText,
+		Payload: mustJSON(map[string]any{
+			"agent_id":           agent.ID(),
+			"entity_id":          entityID,
+			"consecutive_panics": consecutivePanics,
+			"error":              panicText,
 			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
 		}),
 		CreatedAt: time.Now(),

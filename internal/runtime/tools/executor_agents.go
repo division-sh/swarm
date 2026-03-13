@@ -10,7 +10,7 @@ import (
 
 	"empireai/internal/commgraph"
 	"empireai/internal/events"
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
 
@@ -227,14 +227,14 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		return nil, errors.New("scheduler is not configured")
 	}
 	var in struct {
-		AgentID    string `json:"agent_id"`
-		EventType  string `json:"event_type"`
-		Mode       string `json:"mode"`
-		Cron       string `json:"cron"`
-		At         string `json:"at"`
-		EntityID   string `json:"entity_id"`
-		TaskID     string `json:"task_id"`
-		Payload    any    `json:"payload"`
+		AgentID   string `json:"agent_id"`
+		EventType string `json:"event_type"`
+		Mode      string `json:"mode"`
+		Cron      string `json:"cron"`
+		At        string `json:"at"`
+		EntityID  string `json:"entity_id"`
+		TaskID    string `json:"task_id"`
+		Payload   any    `json:"payload"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
@@ -276,14 +276,14 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	}
 
 	schedule := Schedule{
-		AgentID:    in.AgentID,
-		EventType:  in.EventType,
-		Mode:       in.Mode,
-		Cron:       in.Cron,
-		At:         at,
-		EntityID:   entityID,
-		TaskID:     in.TaskID,
-		Payload:    payload,
+		AgentID:   in.AgentID,
+		EventType: in.EventType,
+		Mode:      in.Mode,
+		Cron:      in.Cron,
+		At:        at,
+		EntityID:  entityID,
+		TaskID:    in.TaskID,
+		Payload:   payload,
 	}
 	if err := e.scheduler.Register(schedule); err != nil {
 		return nil, err
@@ -308,8 +308,8 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 		return nil, errors.New("agent manager is not configured")
 	}
 	var in struct {
-		EntityID   string             `json:"entity_id"`
-		Config     models.AgentConfig `json:"config"`
+		EntityID string             `json:"entity_id"`
+		Config   models.AgentConfig `json:"config"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err

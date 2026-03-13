@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/actors"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	workspace "empireai/internal/runtime/workspace"
 )
 

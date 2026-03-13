@@ -51,7 +51,7 @@ type Runtime struct {
 	Config         *config.Config
 	Stores         Stores
 	Options        RuntimeOptions
-	Bus            *EventBus
+	Bus            *runtimebus.EventBus
 	Logger         *RuntimeLogger
 	Pipeline       *runtimepipeline.PipelineCoordinator
 	SystemNodes    []runtimepipeline.BackgroundNode
@@ -146,7 +146,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
-	rt.Bus = NewEventBusWithOptions(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
+	rt.Bus = newRuntimeEventBus(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}

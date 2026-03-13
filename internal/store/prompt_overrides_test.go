@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	runtimeactors "empireai/internal/runtime/actors"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/testutil"
 )

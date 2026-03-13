@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
-	runtimeactor "empireai/internal/runtime/actorctx"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	"empireai/internal/runtime/sessions"
 	workspace "empireai/internal/runtime/workspace"
 )
@@ -118,7 +118,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if s == nil {
 		return nil, errors.New("nil session")
 	}
-	actor, _ := runtimeactor.ActorFromContext(ctx)
+	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
 

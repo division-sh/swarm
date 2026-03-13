@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"empireai/internal/events"
-	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	"empireai/internal/runtime/sessions"
 	workspace "empireai/internal/runtime/workspace"
@@ -208,12 +208,12 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if persist {
 		entityID := rec.Config.EffectiveEntityID()
 		payload := mustJSON(map[string]any{
-			"agent_id":    rec.Config.ID,
-			"agent_type":  rec.Config.Type,
-			"role":        rec.Config.Role,
-			"mode":        rec.Config.Mode,
-			"entity_id":   entityID,
-			"hired_by":    rec.HiredBy,
+			"agent_id":   rec.Config.ID,
+			"agent_type": rec.Config.Type,
+			"role":       rec.Config.Role,
+			"mode":       rec.Config.Mode,
+			"entity_id":  entityID,
+			"hired_by":   rec.HiredBy,
 		})
 		if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 			ID:          uuid.NewString(),

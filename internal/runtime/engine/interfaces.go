@@ -5,7 +5,7 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/core/identity"
-	runtimeregistry "empireai/internal/runtime/registry"
+	runtimeregistry "empireai/internal/runtime/core/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -67,17 +67,17 @@ type PayloadShaper interface {
 }
 
 type RuntimeDependencies struct {
-	Source            semanticview.Source
-	StateRepo         StateRepository
-	TxRunner          TransactionRunner
-	Locker            EntityLocker
-	Outbox            OutboxWriter
-	TimerApplier      TimerApplier
-	Dispatcher        PostCommitDispatcher
-	GuardRegistry     GuardRegistry
-	GuardRunner       GuardRunner
-	ActionRegistry    ActionRegistry
-	ActionRunner      ActionRunner
-	PayloadShaper     PayloadShaper
-	MaxChainDepth     int
+	Source         semanticview.Source
+	StateRepo      StateRepository
+	TxRunner       TransactionRunner
+	Locker         EntityLocker
+	Outbox         OutboxWriter
+	TimerApplier   TimerApplier
+	Dispatcher     PostCommitDispatcher
+	GuardRegistry  GuardRegistry
+	GuardRunner    GuardRunner
+	ActionRegistry ActionRegistry
+	ActionRunner   ActionRunner
+	PayloadShaper  PayloadShaper
+	MaxChainDepth  int
 }

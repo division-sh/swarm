@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	models "empireai/internal/runtime/actors"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	models "empireai/internal/runtime/core/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
 )

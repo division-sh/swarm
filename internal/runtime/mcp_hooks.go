@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	runtimeactor "empireai/internal/runtime/actorctx"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimeactors "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimetools "empireai/internal/runtime/tools"
@@ -36,7 +36,7 @@ const (
 )
 
 func init() {
-	runtimemcp.SetActorResolver(runtimeactor.ActorFromContext)
+	runtimemcp.SetActorResolver(runtimeactors.ActorFromContext)
 	llm.SetMCPTurnContextHooks(runtimemcp.RegisterTurnContextWithTTL, runtimemcp.UnregisterTurnContext)
 }
 
@@ -102,8 +102,8 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger) runtimemcp.GatewayHooks {
 		FormatError:               FormatRuntimeError,
 		NewRuntimeError:           newMCPRuntimeError,
 		RetryableFromError:        retryableFromGatewayError,
-		WithActor:                 runtimeactor.WithActor,
-		ActorFromContext:          runtimeactor.ActorFromContext,
+		WithActor:                 runtimeactors.WithActor,
+		ActorFromContext:          runtimeactors.ActorFromContext,
 		WithRuntimeEpoch:          runtimebus.WithRuntimeEpoch,
 		WithCurrentRuntimeEpoch:   runtimebus.WithCurrentRuntimeEpoch,
 		IsCurrentRuntimeEpoch:     runtimebus.IsCurrentRuntimeEpoch,

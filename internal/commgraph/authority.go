@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	models "empireai/internal/runtime/actors"
+	models "empireai/internal/runtime/core/actors"
 )
 
 type RoutingAuthority struct {
@@ -19,11 +19,11 @@ type RoutingAuthority struct {
 }
 
 type ManagementAuthority struct {
-	ActorRole               string
-	AllowedTargetRoles      []string
-	AllowCrossEntity        bool
-	CrossEntityDenyReason   string
-	TargetDenyReason        string
+	ActorRole             string
+	AllowedTargetRoles    []string
+	AllowCrossEntity      bool
+	CrossEntityDenyReason string
+	TargetDenyReason      string
 }
 
 var (
@@ -176,11 +176,11 @@ func cloneManagementAuthorities(in []ManagementAuthority) []ManagementAuthority 
 	out := make([]ManagementAuthority, len(in))
 	for i, rule := range in {
 		out[i] = ManagementAuthority{
-			ActorRole:               rule.ActorRole,
-			AllowedTargetRoles:      append([]string(nil), rule.AllowedTargetRoles...),
-			AllowCrossEntity:        rule.AllowCrossEntity,
-			CrossEntityDenyReason:   rule.CrossEntityDenyReason,
-			TargetDenyReason:        rule.TargetDenyReason,
+			ActorRole:             rule.ActorRole,
+			AllowedTargetRoles:    append([]string(nil), rule.AllowedTargetRoles...),
+			AllowCrossEntity:      rule.AllowCrossEntity,
+			CrossEntityDenyReason: rule.CrossEntityDenyReason,
+			TargetDenyReason:      rule.TargetDenyReason,
 		}
 	}
 	return out
