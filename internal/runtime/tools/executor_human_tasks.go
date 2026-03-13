@@ -28,6 +28,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	}
 
 	var in struct {
+		EntityID        string `json:"entity_id"`
 		VerticalID      string `json:"vertical_id"`
 		Category        string `json:"category"`
 		Description     string `json:"description"`
@@ -42,7 +43,8 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		return nil, err
 	}
 
-	in.VerticalID = strings.TrimSpace(coalesce(in.VerticalID, actor.VerticalID))
+	entityID := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID, actor.VerticalID))
+	in.VerticalID = entityID
 	in.Category = strings.TrimSpace(in.Category)
 	in.Description = strings.TrimSpace(in.Description)
 	in.ExpectedValue = strings.TrimSpace(in.ExpectedValue)

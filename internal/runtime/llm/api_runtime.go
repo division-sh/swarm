@@ -106,7 +106,10 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		return nil, errors.New("nil session")
 	}
 	actor, _ := runtimeactor.ActorFromContext(ctx)
-	verticalID := strings.TrimSpace(actor.VerticalID)
+	entityID := strings.TrimSpace(actor.EntityID)
+	if entityID == "" {
+		entityID = strings.TrimSpace(actor.VerticalID)
+	}
 	scopeKey := budgetExecutionScopeKey(actor)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
@@ -115,8 +118,8 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if r.budget != nil {
 		unlockScope := r.budget.LockExecutionScope(scopeKey)
 		defer unlockScope()
-		if r.budget.IsEmergency(verticalID) {
-			return nil, fmt.Errorf("budget emergency: refusing llm execution (vertical=%s)", verticalID)
+		if r.budget.IsEntityEmergency(entityID) {
+			return nil, fmt.Errorf("budget emergency: refusing llm execution (entity=%s)", entityID)
 		}
 	}
 
@@ -227,7 +230,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if r.budget != nil {
 		usage := extractUsageTokensFromJSON(rawResp)
 		usage.Model = strings.TrimSpace(coalesce(usage.Model, reqBody.Model))
-		if err := r.budget.RecordLLMUsage(ctx, verticalID, s.AgentID, "api", usage, true, map[string]any{
+		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "api", usage, true, map[string]any{
 			"session_id": s.ID,
 		}); err != nil {
 			log.Printf("failed to record api llm usage: agent=%s session=%s err=%v", s.AgentID, s.ID, err)
@@ -309,7 +312,11 @@ func (r *AnthropicAPIRuntime) buildRequest(ctx context.Context, s *Session, inpu
 				model = strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel)
 			}
 		}
-		if r.budget != nil && r.budget.IsThrottle(strings.TrimSpace(actor.VerticalID)) {
+		actorEntityID := strings.TrimSpace(actor.EntityID)
+		if actorEntityID == "" {
+			actorEntityID = strings.TrimSpace(actor.VerticalID)
+		}
+		if r.budget != nil && r.budget.IsEntityThrottle(actorEntityID) {
 			// Degradation on throttle: force cheaper model tier when configured.
 			if strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel) != "" {
 				model = strings.TrimSpace(r.cfg.LLM.ClaudeAPI.HaikuModel)

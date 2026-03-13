@@ -72,11 +72,12 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 		return models.AgentConfig{}, false
 	}
 	actor := models.AgentConfig{
-		ID:         FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorIDQuery))),
-		Role:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorRoleQuery))),
-		VerticalID: FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.VerticalIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.VerticalIDQuery))),
-		Mode:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorModeHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorModeQuery))),
+		ID:       FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorIDQuery))),
+		Role:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorRoleQuery))),
+		EntityID: FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.VerticalIDHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.VerticalIDQuery))),
+		Mode:     FirstNonEmpty(strings.TrimSpace(r.Header.Get(protocolheaders.ActorModeHeader)), strings.TrimSpace(r.URL.Query().Get(protocolheaders.ActorModeQuery))),
 	}
+	actor.VerticalID = actor.EntityID
 	if strings.TrimSpace(actor.ID) == "" {
 		return models.AgentConfig{}, false
 	}

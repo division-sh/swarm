@@ -25,6 +25,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		ToAgentIDs     []string `json:"to_agent_ids"`
 		EventType      string   `json:"event_type"`
 		SourceAgent    string   `json:"source_agent"`
+		EntityID       string   `json:"entity_id"`
 		VerticalID     string   `json:"vertical_id"`
 		TaskID         string   `json:"task_id"`
 		Message        string   `json:"message"`
@@ -60,22 +61,24 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
 	}
-	targetVertical := strings.TrimSpace(in.VerticalID)
+	targetEntity := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID))
+	actorEntityID := strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
 	for _, targetID := range targets {
 		targetCfg, ok := manager.GetAgentConfig(targetID)
 		if !ok {
 			return nil, fmt.Errorf("target agent not found: %s", targetID)
 		}
-		if actor.Mode == "operating" && strings.TrimSpace(actor.VerticalID) != "" {
-			if strings.TrimSpace(targetCfg.VerticalID) != strings.TrimSpace(actor.VerticalID) {
+		targetCfgEntityID := strings.TrimSpace(coalesce(targetCfg.EntityID, targetCfg.VerticalID))
+		if actor.Mode == "operating" && actorEntityID != "" {
+			if targetCfgEntityID != actorEntityID {
 				return nil, errors.New("cross-vertical agent_message is not allowed in operating mode")
 			}
 		}
-		if targetVertical == "" {
-			targetVertical = strings.TrimSpace(targetCfg.VerticalID)
+		if targetEntity == "" {
+			targetEntity = targetCfgEntityID
 		}
-		if strings.TrimSpace(in.VerticalID) != "" && strings.TrimSpace(targetCfg.VerticalID) != strings.TrimSpace(in.VerticalID) {
-			return nil, errors.New("vertical_id does not match target agent vertical")
+		if targetArg := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID)); targetArg != "" && targetCfgEntityID != targetArg {
+			return nil, errors.New("entity_id does not match target agent entity")
 		}
 		if err := authorizeAgentMessage(actor, targetCfg, manager); err != nil {
 			return nil, fmt.Errorf("agent_message target %s: %w", targetID, err)
@@ -102,7 +105,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 		TaskID:      in.TaskID,
 		Payload:     wirePayload,
 		CreatedAt:   time.Now(),
-	}).WithEntityID(targetVertical)
+	}).WithEntityID(targetEntity)
 	if err := e.bus.PublishDirect(ctx, evt, targets); err != nil {
 		return nil, err
 	}
@@ -156,11 +159,11 @@ func messageScopeAllowed(actor, target models.AgentConfig, scope string) bool {
 	case "", "any":
 		return true
 	case "holding":
-		return strings.TrimSpace(actor.VerticalID) == "" && strings.TrimSpace(target.VerticalID) == ""
+		return strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID)) == "" && strings.TrimSpace(coalesce(target.EntityID, target.VerticalID)) == ""
 	case "opco":
-		actorVertical := strings.TrimSpace(actor.VerticalID)
-		targetVertical := strings.TrimSpace(target.VerticalID)
-		return actorVertical != "" && actorVertical == targetVertical
+		actorEntity := strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
+		targetEntity := strings.TrimSpace(coalesce(target.EntityID, target.VerticalID))
+		return actorEntity != "" && actorEntity == targetEntity
 	default:
 		return false
 	}
@@ -242,6 +245,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		Mode       string `json:"mode"`
 		Cron       string `json:"cron"`
 		At         string `json:"at"`
+		EntityID   string `json:"entity_id"`
 		VerticalID string `json:"vertical_id"`
 		TaskID     string `json:"task_id"`
 		Payload    any    `json:"payload"`
@@ -258,11 +262,13 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	if in.AgentID != actor.ID {
 		return nil, errors.New("agents can only schedule for themselves")
 	}
-	if strings.TrimSpace(in.VerticalID) == "" {
-		in.VerticalID = actor.VerticalID
+	entityID := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID))
+	if entityID == "" {
+		entityID = strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
 	}
-	if strings.TrimSpace(in.VerticalID) != "" && strings.TrimSpace(actor.VerticalID) != "" && in.VerticalID != actor.VerticalID {
-		return nil, errors.New("cross-vertical schedule is not allowed")
+	actorEntityID := strings.TrimSpace(coalesce(actor.EntityID, actor.VerticalID))
+	if entityID != "" && actorEntityID != "" && entityID != actorEntityID {
+		return nil, errors.New("cross-entity schedule is not allowed")
 	}
 
 	var at time.Time
@@ -288,7 +294,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		Mode:       in.Mode,
 		Cron:       in.Cron,
 		At:         at,
-		VerticalID: in.VerticalID,
+		VerticalID: entityID,
 		TaskID:     in.TaskID,
 		Payload:    payload,
 	}
@@ -315,6 +321,7 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 		return nil, errors.New("agent manager is not configured")
 	}
 	var in struct {
+		EntityID   string             `json:"entity_id"`
 		VerticalID string             `json:"vertical_id"`
 		Config     models.AgentConfig `json:"config"`
 	}
@@ -325,7 +332,7 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 		return nil, errors.New("config.id is required")
 	}
 	if in.Config.VerticalID == "" {
-		in.Config.VerticalID = coalesce(in.VerticalID, actor.VerticalID)
+		in.Config.VerticalID = coalesce(in.EntityID, in.VerticalID, actor.VerticalID)
 	}
 	if in.Config.Mode == "" {
 		in.Config.Mode = coalesce(actor.Mode, "operating")
@@ -333,7 +340,7 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if err := authorizeManage(actor, in.Config.Role, in.Config.VerticalID); err != nil {
 		return nil, err
 	}
-	if err := manager.SpawnAgentFor(in.VerticalID, in.Config); err != nil {
+	if err := manager.SpawnAgentForEntity(coalesce(in.EntityID, in.VerticalID), in.Config); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil

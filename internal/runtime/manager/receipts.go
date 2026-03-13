@@ -150,6 +150,7 @@ func (am *AgentManager) logCorpusTurnLifecycle(
 		EventID:    strings.TrimSpace(meta.EventID),
 		EventType:  strings.TrimSpace(meta.EventType),
 		AgentID:    FirstNonEmptyString(strings.TrimSpace(meta.AgentID), "unknown-agent"),
+		EntityID:   strings.TrimSpace(meta.VerticalID),
 		VerticalID: strings.TrimSpace(meta.VerticalID),
 		CampaignID: strings.TrimSpace(meta.CampaignID),
 		ScanID:     strings.TrimSpace(meta.ScanID),
@@ -182,13 +183,13 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 		verticalID = strings.TrimSpace(cfg.VerticalID)
 	}
 
-	if tracker.IsEmergency(verticalID) {
+	if tracker.IsEntityEmergency(verticalID) {
 		if IsEmergencyAllowedFlow(role, eventType) {
 			return false, ""
 		}
 		return true, "suppressed by budget emergency guardrail"
 	}
-	if tracker.IsThrottle(verticalID) {
+	if tracker.IsEntityThrottle(verticalID) {
 		if IsGrowthRole(role) {
 			return true, "suppressed by budget throttle: growth paused"
 		}

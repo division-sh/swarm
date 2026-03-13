@@ -184,25 +184,29 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 	return nil
 }
 
-func (s *PostgresStore) EnsureVerticalSchema(ctx context.Context, verticalID string) error {
-	if strings.TrimSpace(verticalID) == "" {
-		return fmt.Errorf("vertical_id is required")
+func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string) error {
+	if strings.TrimSpace(entityID) == "" {
+		return fmt.Errorf("entity_id is required")
 	}
 	var slug string
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COALESCE(NULLIF(slug, ''), '')
 		FROM verticals
 		WHERE id = $1::uuid
-	`, verticalID).Scan(&slug); err != nil {
-		return fmt.Errorf("lookup vertical slug: %w", err)
+	`, entityID).Scan(&slug); err != nil {
+		return fmt.Errorf("lookup entity slug: %w", err)
 	}
 	schema := sanitizeSchemaIdent(slug)
 	if schema == "" {
-		return fmt.Errorf("vertical %s has no valid slug for schema creation", verticalID)
+		return fmt.Errorf("entity %s has no valid slug for schema creation", entityID)
 	}
 	schema = schema + "_schema"
 	if _, err := s.DB.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+quoteIdent(schema)); err != nil {
-		return fmt.Errorf("create vertical schema %s: %w", schema, err)
+		return fmt.Errorf("create entity schema %s: %w", schema, err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) EnsureVerticalSchema(ctx context.Context, verticalID string) error {
+	return s.EnsureEntitySchema(ctx, verticalID)
 }

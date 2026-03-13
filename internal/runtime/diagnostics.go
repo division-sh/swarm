@@ -21,6 +21,7 @@ type RuntimeLogEntry struct {
 	EventID    string
 	EventType  string
 	AgentID    string
+	EntityID   string
 	VerticalID string
 	CampaignID string
 	ScanID     string
@@ -77,6 +78,10 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 	if action == "" {
 		action = "unknown"
 	}
+	entityID := strings.TrimSpace(e.EntityID)
+	if entityID == "" {
+		entityID = strings.TrimSpace(e.VerticalID)
+	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
 	_, err := l.db.ExecContext(withoutSQLTxContext(ctx), `
@@ -97,7 +102,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 		nullableUUID(e.EventID),
 		strings.TrimSpace(e.EventType),
 		strings.TrimSpace(e.AgentID),
-		nullableUUID(e.VerticalID),
+		nullableUUID(entityID),
 		nullableUUID(e.CampaignID),
 		nullableUUID(e.ScanID),
 		nullableUUID(e.SessionID),

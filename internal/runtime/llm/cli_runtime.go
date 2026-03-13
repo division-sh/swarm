@@ -119,7 +119,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		return nil, errors.New("nil session")
 	}
 	actor, _ := runtimeactor.ActorFromContext(ctx)
-	verticalID := strings.TrimSpace(actor.VerticalID)
+	entityID := strings.TrimSpace(actor.EntityID)
+	if entityID == "" {
+		entityID = strings.TrimSpace(actor.VerticalID)
+	}
 	scopeKey := budgetExecutionScopeKey(actor)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
@@ -128,8 +131,8 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if r.budget != nil {
 		unlockScope := r.budget.LockExecutionScope(scopeKey)
 		defer unlockScope()
-		if r.budget.IsEmergency(verticalID) {
-			return nil, fmt.Errorf("budget emergency: refusing llm execution (vertical=%s)", verticalID)
+		if r.budget.IsEntityEmergency(entityID) {
+			return nil, fmt.Errorf("budget emergency: refusing llm execution (entity=%s)", entityID)
 		}
 	}
 
@@ -363,7 +366,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	// Spend ledger: CLI runtime does not expose exact usage; estimate from payload sizes.
 	if r.budget != nil {
 		usage := estimateCLIUsageTokens(message, resp, actor)
-		if err := r.budget.RecordLLMUsage(ctx, verticalID, s.AgentID, "cli_test", usage, false, map[string]any{
+		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "cli_test", usage, false, map[string]any{
 			"session_id": s.ID,
 		}); err != nil {
 			log.Printf("failed to record cli llm usage: agent=%s session=%s err=%v", s.AgentID, s.ID, err)

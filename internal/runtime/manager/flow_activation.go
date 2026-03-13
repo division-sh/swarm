@@ -39,13 +39,13 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("flow schema not found: %s", templateID)
 	}
 	if am.workspaces != nil {
-		if err := am.workspaces.EnsureVerticalWorkspace(ctx, entityID); err != nil {
-			return fmt.Errorf("ensure vertical workspace: %w", err)
+		if err := am.workspaces.EnsureEntityWorkspace(ctx, entityID); err != nil {
+			return fmt.Errorf("ensure entity workspace: %w", err)
 		}
 	}
 	if am.store != nil {
-		if err := am.store.EnsureVerticalSchema(ctx, entityID); err != nil {
-			return fmt.Errorf("ensure vertical schema: %w", err)
+		if err := am.store.EnsureEntitySchema(ctx, entityID); err != nil {
+			return fmt.Errorf("ensure entity schema: %w", err)
 		}
 	}
 
@@ -139,6 +139,7 @@ func buildFlowAgentConfig(
 		Type:          strings.TrimSpace(entry.Type),
 		Role:          strings.TrimSpace(entry.Role),
 		Mode:          templateID,
+		EntityID:      verticalID,
 		VerticalID:    verticalID,
 		Subscriptions: rendered,
 		Config:        rawConfig,

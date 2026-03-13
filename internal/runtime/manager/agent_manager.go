@@ -132,12 +132,28 @@ func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) erro
 }
 
 func (am *AgentManager) SpawnAgent(cfg models.AgentConfig) error {
+	if strings.TrimSpace(cfg.EntityID) == "" {
+		cfg.EntityID = strings.TrimSpace(cfg.VerticalID)
+	}
+	if strings.TrimSpace(cfg.VerticalID) == "" {
+		cfg.VerticalID = strings.TrimSpace(cfg.EntityID)
+	}
 	rec := PersistedAgent{
 		Config:  cfg,
 		Status:  "active",
 		HiredBy: "runtime",
 	}
 	return am.spawnAgentInternal(am.runtimeContext(), rec, true)
+}
+
+func (am *AgentManager) SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error {
+	if strings.TrimSpace(cfg.EntityID) == "" {
+		cfg.EntityID = strings.TrimSpace(entityID)
+	}
+	if strings.TrimSpace(cfg.VerticalID) == "" {
+		cfg.VerticalID = strings.TrimSpace(cfg.EntityID)
+	}
+	return am.SpawnAgentFor(entityID, cfg)
 }
 
 // SpawnEphemeralClone creates a task-scoped clone of a base agent. Ephemeral
@@ -215,11 +231,13 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	runCtx := am.runCtx
 	am.runMu.Unlock()
 	if persist {
+		entityID := FirstNonEmptyString(rec.Config.EntityID, rec.Config.VerticalID)
 		payload := mustJSON(map[string]any{
 			"agent_id":    rec.Config.ID,
 			"agent_type":  rec.Config.Type,
 			"role":        rec.Config.Role,
 			"mode":        rec.Config.Mode,
+			"entity_id":   entityID,
 			"vertical_id": rec.Config.VerticalID,
 			"hired_by":    rec.HiredBy,
 		})
@@ -229,7 +247,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 			SourceAgent: rec.Config.ID,
 			Payload:     payload,
 			CreatedAt:   time.Now(),
-		}).WithEntityID(rec.Config.VerticalID)); err != nil {
+		}).WithEntityID(entityID)); err != nil {
 			RuntimeWarn("agent-manager", "agent.started publish failed agent=%s err=%v", rec.Config.ID, err)
 		}
 	}

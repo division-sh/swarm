@@ -33,6 +33,8 @@ type Resolver interface {
 type Lifecycle interface {
 	Resolver
 	EnsureSystemWorkspaces(ctx context.Context) error
+	EnsureEntityWorkspace(ctx context.Context, entityID string) error
+	StopEntityWorkspace(ctx context.Context, entityID string) error
 	EnsureVerticalWorkspace(ctx context.Context, verticalID string) error
 	StopVerticalWorkspace(ctx context.Context, verticalID string) error
 }
@@ -51,10 +53,13 @@ type DockerConfig struct {
 	InfraContainer          string
 	InfraWorkdir            string
 	InfraVerticalsVolume    string
+	InfraEntitiesVolume     string
 	InfraNginxVolume        string
 	InfraSystemdVolume      string
 	VerticalContainerPrefix string
+	EntityContainerPrefix   string
 	VerticalWorkdir         string
+	EntityWorkdir           string
 }
 
 func DefaultDockerConfig() DockerConfig {
@@ -68,10 +73,13 @@ func DefaultDockerConfig() DockerConfig {
 		InfraContainer:          EnvOrDefault("EMPIREAI_INFRA_CONTAINER", "empireai-infra"),
 		InfraWorkdir:            EnvOrDefault("EMPIREAI_INFRA_WORKDIR", "/opt/empireai"),
 		InfraVerticalsVolume:    EnvOrDefault("EMPIREAI_INFRA_VERTICALS_VOLUME", "verticals"),
+		InfraEntitiesVolume:     EnvOrDefault("EMPIREAI_INFRA_VERTICALS_VOLUME", "verticals"),
 		InfraNginxVolume:        EnvOrDefault("EMPIREAI_INFRA_NGINX_VOLUME", "nginx"),
 		InfraSystemdVolume:      EnvOrDefault("EMPIREAI_INFRA_SYSTEMD_VOLUME", "systemd"),
 		VerticalContainerPrefix: EnvOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-"),
+		EntityContainerPrefix:   EnvOrDefault("EMPIREAI_VERTICAL_CONTAINER_PREFIX", "empireai-"),
 		VerticalWorkdir:         EnvOrDefault("EMPIREAI_VERTICAL_WORKDIR", "/workspace"),
+		EntityWorkdir:           EnvOrDefault("EMPIREAI_VERTICAL_WORKDIR", "/workspace"),
 	}
 }
 
@@ -125,7 +133,7 @@ func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
 
 	if err := m.EnsureContainerRunning(ctx, m.cfg.InfraContainer, []string{
 		"--privileged",
-		"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraVerticalsVolume),
+		"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraEntitiesVolume),
 		"-v", fmt.Sprintf("%s:/opt/empireai/nginx", m.cfg.InfraNginxVolume),
 		"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.InfraSystemdVolume),
 		"-w", m.cfg.InfraWorkdir,
@@ -137,38 +145,46 @@ func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	return nil
 }
 
-func (m *DockerManager) EnsureVerticalWorkspace(ctx context.Context, verticalID string) error {
-	slug, err := m.LookupVerticalSlug(ctx, verticalID)
+func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID string) error {
+	slug, err := m.LookupEntitySlug(ctx, entityID)
 	if err != nil {
 		return err
 	}
 	if slug == "" {
-		return fmt.Errorf("vertical %s slug is required for workspace container", verticalID)
+		return fmt.Errorf("entity %s slug is required for workspace container", entityID)
 	}
-	container := m.VerticalContainerName(slug)
+	container := m.EntityContainerName(slug)
 	volume := fmt.Sprintf("verticals_%s", slug)
 
 	return m.EnsureContainerRunning(ctx, container, []string{
-		"-v", fmt.Sprintf("%s:%s", volume, m.cfg.VerticalWorkdir),
-		"-w", m.cfg.VerticalWorkdir,
+		"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
+		"-w", m.cfg.EntityWorkdir,
 		m.cfg.WorkspaceImage,
 		"sleep", "infinity",
 	})
 }
 
-func (m *DockerManager) StopVerticalWorkspace(ctx context.Context, verticalID string) error {
-	slug, err := m.LookupVerticalSlug(ctx, verticalID)
+func (m *DockerManager) EnsureVerticalWorkspace(ctx context.Context, verticalID string) error {
+	return m.EnsureEntityWorkspace(ctx, verticalID)
+}
+
+func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string) error {
+	slug, err := m.LookupEntitySlug(ctx, entityID)
 	if err != nil {
 		return err
 	}
 	if slug == "" {
 		return nil
 	}
-	container := m.VerticalContainerName(slug)
+	container := m.EntityContainerName(slug)
 	if err := m.StopContainer(ctx, container); err != nil {
-		return fmt.Errorf("stop vertical workspace %s: %w", container, err)
+		return fmt.Errorf("stop entity workspace %s: %w", container, err)
 	}
 	return nil
+}
+
+func (m *DockerManager) StopVerticalWorkspace(ctx context.Context, verticalID string) error {
+	return m.StopEntityWorkspace(ctx, verticalID)
 }
 
 func (m *DockerManager) KillOrphanProcesses(ctx context.Context) error {
@@ -223,7 +239,7 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 			if slug == "" {
 				continue
 			}
-			set[m.VerticalContainerName(slug)] = struct{}{}
+			set[m.EntityContainerName(slug)] = struct{}{}
 		}
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate instance slugs: %w", err)
@@ -256,7 +272,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	case "infra":
 		if err := m.EnsureContainerRunning(ctx, m.cfg.InfraContainer, []string{
 			"--privileged",
-			"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraVerticalsVolume),
+			"-v", fmt.Sprintf("%s:/opt/empireai/verticals", m.cfg.InfraEntitiesVolume),
 			"-v", fmt.Sprintf("%s:/opt/empireai/nginx", m.cfg.InfraNginxVolume),
 			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.InfraSystemdVolume),
 			"-w", m.cfg.InfraWorkdir,
@@ -274,16 +290,16 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	if strings.TrimSpace(actor.VerticalID) == "" {
 		return nil, nil
 	}
-	if err := m.EnsureVerticalWorkspace(ctx, actor.VerticalID); err != nil {
+	if err := m.EnsureEntityWorkspace(ctx, actor.VerticalID); err != nil {
 		return nil, err
 	}
-	slug, err := m.LookupVerticalSlug(ctx, actor.VerticalID)
+	slug, err := m.LookupEntitySlug(ctx, actor.VerticalID)
 	if err != nil {
 		return nil, err
 	}
 	return &Target{
-		Container: m.VerticalContainerName(slug),
-		Workdir:   m.cfg.VerticalWorkdir,
+		Container: m.EntityContainerName(slug),
+		Workdir:   m.cfg.EntityWorkdir,
 	}, nil
 }
 
@@ -449,10 +465,10 @@ func (m *DockerManager) RunDocker(ctx context.Context, args ...string) (string, 
 	return out, nil
 }
 
-func (m *DockerManager) LookupVerticalSlug(ctx context.Context, verticalID string) (string, error) {
-	trimmedID := strings.TrimSpace(verticalID)
+func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (string, error) {
+	trimmedID := strings.TrimSpace(entityID)
 	if trimmedID == "" {
-		return "", errors.New("vertical_id is required")
+		return "", errors.New("entity_id is required")
 	}
 	if m.db == nil {
 		return SanitizeSlug(trimmedID), nil
@@ -472,8 +488,16 @@ func (m *DockerManager) LookupVerticalSlug(ctx context.Context, verticalID strin
 	return slug, nil
 }
 
+func (m *DockerManager) LookupVerticalSlug(ctx context.Context, verticalID string) (string, error) {
+	return m.LookupEntitySlug(ctx, verticalID)
+}
+
+func (m *DockerManager) EntityContainerName(slug string) string {
+	return m.cfg.EntityContainerPrefix + SanitizeSlug(slug)
+}
+
 func (m *DockerManager) VerticalContainerName(slug string) string {
-	return m.cfg.VerticalContainerPrefix + SanitizeSlug(slug)
+	return m.EntityContainerName(slug)
 }
 
 func SanitizeSlug(raw string) string {

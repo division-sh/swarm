@@ -26,6 +26,7 @@ type InboundPersistence interface {
 }
 
 type InboundTarget struct {
+	EntityID      string
 	VerticalID    string
 	VerticalSlug  string
 	WebhookSecret string
@@ -80,6 +81,7 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	target := InboundTarget{
+		EntityID:     verticalKey,
 		VerticalID:   verticalKey,
 		VerticalSlug: verticalKey,
 	}
@@ -100,15 +102,19 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &payload); err != nil {
 		payload = map[string]any{"raw": string(body)}
 	}
+	entityID := strings.TrimSpace(target.EntityID)
+	if entityID == "" {
+		entityID = strings.TrimSpace(target.VerticalID)
+	}
 	providerEventID := firstNonEmpty(
 		r.Header.Get("X-Provider-Event-ID"),
 		r.Header.Get("X-Request-ID"),
 		extractProviderEventID(payload),
-		fingerprintInbound(target.VerticalID, provider, body),
+		fingerprintInbound(entityID, provider, body),
 	)
 
 	if g.store != nil {
-		inserted, err := g.store.RecordInboundEvent(r.Context(), providerEventID, target.VerticalID, provider)
+		inserted, err := g.store.RecordInboundEvent(r.Context(), providerEventID, entityID, provider)
 		if err != nil {
 			http.Error(w, "record inbound failed", http.StatusInternalServerError)
 			return
@@ -120,7 +126,7 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	pubType, pubPayload := buildInboundPublishPayload(provider, target.VerticalID, providerEventID, payload, now)
+	pubType, pubPayload := buildInboundPublishPayload(provider, entityID, providerEventID, payload, now)
 	pubPayload["headers"] = map[string]any{
 		"user_agent": r.UserAgent(),
 	}
@@ -133,14 +139,14 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			SourceAgent: "inbound-gateway",
 			Payload:     envelopeBytes,
 			CreatedAt:   now,
-		}).WithEntityID(target.VerticalID)); err != nil {
-			log.Printf("inbound publish failed provider=%s vertical=%s err=%v", provider, target.VerticalID, err)
+		}).WithEntityID(entityID)); err != nil {
+			log.Printf("inbound publish failed provider=%s entity=%s err=%v", provider, entityID, err)
 		}
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":            "accepted",
-		"vertical_id":       target.VerticalID,
+		"vertical_id":       entityID,
 		"vertical_slug":     target.VerticalSlug,
 		"provider":          provider,
 		"provider_event_id": providerEventID,

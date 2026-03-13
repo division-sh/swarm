@@ -22,6 +22,7 @@ type RuntimeLogEntry struct {
 	EventID    string
 	EventType  string
 	AgentID    string
+	EntityID   string
 	VerticalID string
 	CampaignID string
 	ScanID     string

@@ -68,10 +68,10 @@ func (s *PostgresStore) LoadOrgTemplate(ctx context.Context, version string) (ru
 	return rec, nil
 }
 
-func (s *PostgresStore) SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error {
-	verticalID = strings.TrimSpace(verticalID)
-	if verticalID == "" {
-		return fmt.Errorf("vertical_id is required")
+func (s *PostgresStore) SetEntityTemplateVersion(ctx context.Context, entityID, version string) error {
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return fmt.Errorf("entity_id is required")
 	}
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -82,10 +82,14 @@ func (s *PostgresStore) SetVerticalTemplateVersion(ctx context.Context, vertical
 		SET template_version = $2,
 		    updated_at = now()
 		WHERE id = $1::uuid
-	`, verticalID, version); err != nil {
-		return fmt.Errorf("set vertical template_version: %w", err)
+	`, entityID, version); err != nil {
+		return fmt.Errorf("set entity template_version: %w", err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error {
+	return s.SetEntityTemplateVersion(ctx, verticalID, version)
 }
 
 func (s *PostgresStore) ResolveBootstrapVersion(ctx context.Context, templateVersion string) (int, error) {

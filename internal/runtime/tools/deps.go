@@ -26,6 +26,7 @@ type Scheduler interface {
 
 type Manager interface {
 	GetAgentConfig(agentID string) (models.AgentConfig, bool)
+	SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error
 	SpawnAgentFor(verticalID string, cfg models.AgentConfig) error
 	TeardownAgent(agentID string) error
 	ReconfigureAgent(agentID string, cfg models.AgentConfig) error

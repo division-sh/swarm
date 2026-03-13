@@ -20,6 +20,7 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	}
 	var in struct {
 		EventID    string `json:"event_id"`
+		EntityID   string `json:"entity_id"`
 		VerticalID string `json:"vertical_id"`
 		Type       string `json:"type"`
 		Priority   string `json:"priority"`
@@ -30,11 +31,12 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
 	}
+	entityID := strings.TrimSpace(coalesce(in.EntityID, in.VerticalID, actor.VerticalID))
 	if strings.TrimSpace(in.VerticalID) == "" {
-		in.VerticalID = actor.VerticalID
+		in.VerticalID = entityID
 	}
-	if strings.TrimSpace(in.VerticalID) != "" && strings.TrimSpace(actor.VerticalID) != "" && in.VerticalID != actor.VerticalID {
-		return nil, errors.New("cross-vertical mailbox item is not allowed")
+	if entityID != "" && strings.TrimSpace(actor.VerticalID) != "" && entityID != actor.VerticalID {
+		return nil, errors.New("cross-entity mailbox item is not allowed")
 	}
 	if strings.TrimSpace(in.Type) == "" {
 		return nil, errors.New("mailbox type is required")
@@ -70,7 +72,7 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 
 	id, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
 		EventID:    in.EventID,
-		VerticalID: in.VerticalID,
+		VerticalID: entityID,
 		FromAgent:  actor.ID,
 		Type:       in.Type,
 		Priority:   in.Priority,

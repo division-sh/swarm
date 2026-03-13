@@ -11,6 +11,7 @@ type AgentConfig struct {
 	Role           string          `json:"role"`
 	Mode           string          `json:"mode"`
 	Subscriptions  []string        `json:"subscriptions,omitempty"`
+	EntityID       string          `json:"entity_id,omitempty"`
 	VerticalID     string          `json:"vertical_id,omitempty"`
 	ParentAgent    string          `json:"parent_agent_id,omitempty"`
 	Config         json.RawMessage `json:"config,omitempty"`

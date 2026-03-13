@@ -97,8 +97,15 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(actor.ID) == "" {
 		actor.ID = strings.TrimSpace(req.AgentID)
 		actor.Role = strings.TrimSpace(req.AgentRole)
-		actor.VerticalID = strings.TrimSpace(req.VerticalID)
+		actor.EntityID = strings.TrimSpace(req.VerticalID)
+		actor.VerticalID = actor.EntityID
 		actor.Mode = strings.TrimSpace(req.Mode)
+	}
+	if strings.TrimSpace(actor.EntityID) == "" {
+		actor.EntityID = strings.TrimSpace(actor.VerticalID)
+	}
+	if strings.TrimSpace(actor.VerticalID) == "" {
+		actor.VerticalID = strings.TrimSpace(actor.EntityID)
 	}
 	if strings.TrimSpace(actor.ID) == "" {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "actor id is required"})

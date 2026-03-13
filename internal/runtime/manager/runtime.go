@@ -471,7 +471,7 @@ func (am *AgentManager) ResetRuntimeState() error {
 
 	for verticalID := range verticals {
 		if am.workspaces != nil {
-			_ = am.workspaces.StopVerticalWorkspace(am.runtimeContext(), verticalID)
+			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), verticalID)
 		}
 	}
 	return nil
@@ -577,18 +577,19 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	cfg, ok := am.agentCfg[agent.ID()]
 	am.mu.RUnlock()
 	if ok {
-		verticalID = strings.TrimSpace(cfg.VerticalID)
+		verticalID = FirstNonEmptyString(strings.TrimSpace(cfg.EntityID), strings.TrimSpace(cfg.VerticalID))
 	}
 
 	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType("ops.agent_panic"),
 		SourceAgent: "runtime",
-		Payload: mustJSON(map[string]any{
-			"agent_id":           agent.ID(),
-			"vertical_id":        verticalID,
-			"consecutive_panics": consecutivePanics,
-			"error":              panicText,
+			Payload: mustJSON(map[string]any{
+				"agent_id":           agent.ID(),
+				"entity_id":          verticalID,
+				"vertical_id":        verticalID,
+				"consecutive_panics": consecutivePanics,
+				"error":              panicText,
 			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
 		}),
 		CreatedAt: time.Now(),
@@ -624,6 +625,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 			Payload: mustJSON(map[string]any{
 				"agent_id":           agent.ID(),
 				"manager_id":         managerID,
+				"entity_id":          verticalID,
 				"vertical_id":        verticalID,
 				"consecutive_panics": consecutivePanics,
 				"error":              panicText,
@@ -671,13 +673,14 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 	switch string(evt.Type) {
 	case "opco.spinup_requested":
 		var payload struct {
+			EntityID   string                        `json:"entity_id"`
 			VerticalID string                        `json:"vertical_id"`
 			Mandate    runtimeactors.MandateDocument `json:"mandate"`
 		}
 		if err := json.Unmarshal(evt.Payload, &payload); err != nil {
 			return
 		}
-		verticalID := strings.TrimSpace(payload.VerticalID)
+		verticalID := FirstNonEmptyString(strings.TrimSpace(payload.EntityID), strings.TrimSpace(payload.VerticalID))
 		if verticalID == "" {
 			verticalID = strings.TrimSpace(evt.EntityID())
 		}
@@ -690,11 +693,12 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 		_ = am.SpawnOpCo(verticalID, payload.Mandate)
 	case "opco.teardown_requested":
 		var payload struct {
+			EntityID   string `json:"entity_id"`
 			VerticalID string `json:"vertical_id"`
 			Reason     string `json:"reason"`
 		}
 		_ = json.Unmarshal(evt.Payload, &payload)
-		verticalID := strings.TrimSpace(payload.VerticalID)
+		verticalID := FirstNonEmptyString(strings.TrimSpace(payload.EntityID), strings.TrimSpace(payload.VerticalID))
 		if verticalID == "" {
 			verticalID = strings.TrimSpace(evt.EntityID())
 		}
@@ -711,6 +715,7 @@ func (am *AgentManager) handleControlEvent(evt events.Event) {
 				Type:        events.EventType("vertical.killed"),
 				SourceAgent: "agent-manager",
 				Payload: mustJSON(map[string]any{
+					"entity_id":  verticalID,
 					"vertical_id": verticalID,
 					"reason":      FirstNonEmptyString(strings.TrimSpace(payload.Reason), "opco teardown requested"),
 					"source":      "opco.teardown_requested",

@@ -79,36 +79,48 @@ func (t *BudgetTracker) CurrentState(scope string, verticalID string) string {
 	return state
 }
 
-func (t *BudgetTracker) IsEmergency(verticalID string) bool {
-	verticalID = strings.TrimSpace(verticalID)
+func (t *BudgetTracker) IsEntityEmergency(entityID string) bool {
+	entityID = strings.TrimSpace(entityID)
 	if t == nil {
 		return false
 	}
 	if t.CurrentState("portfolio", "") == "emergency" {
 		return true
 	}
-	if verticalID != "" && t.CurrentState("vertical", verticalID) == "emergency" {
+	if entityID != "" && t.CurrentState("vertical", entityID) == "emergency" {
+		return true
+	}
+	return false
+}
+
+func (t *BudgetTracker) IsEmergency(verticalID string) bool {
+	return t.IsEntityEmergency(verticalID)
+}
+
+func (t *BudgetTracker) IsEntityThrottle(entityID string) bool {
+	entityID = strings.TrimSpace(entityID)
+	if t == nil {
+		return false
+	}
+	// Emergency implies throttle semantics too (harder).
+	if t.IsEntityEmergency(entityID) {
+		return true
+	}
+	if t.CurrentState("portfolio", "") == "throttle" {
+		return true
+	}
+	if entityID != "" && t.CurrentState("vertical", entityID) == "throttle" {
 		return true
 	}
 	return false
 }
 
 func (t *BudgetTracker) IsThrottle(verticalID string) bool {
-	verticalID = strings.TrimSpace(verticalID)
-	if t == nil {
-		return false
-	}
-	// Emergency implies throttle semantics too (harder).
-	if t.IsEmergency(verticalID) {
-		return true
-	}
-	if t.CurrentState("portfolio", "") == "throttle" {
-		return true
-	}
-	if verticalID != "" && t.CurrentState("vertical", verticalID) == "throttle" {
-		return true
-	}
-	return false
+	return t.IsEntityThrottle(verticalID)
+}
+
+func (t *BudgetTracker) RecordEntityLLMUsage(ctx context.Context, entityID string, agentID string, runtimeMode string, usage llm.UsageTokens, exact bool, meta any) error {
+	return t.RecordLLMUsage(ctx, entityID, agentID, runtimeMode, usage, exact, meta)
 }
 
 // LockExecutionScope serializes budget-critical LLM execution checks/records

@@ -47,6 +47,7 @@ type PersistedAgent struct {
 }
 
 type PersistedRoutingRule struct {
+	EntityID         string
 	VerticalID       string
 	EventPattern     string
 	SubscriberID     string
@@ -108,9 +109,11 @@ type AgentPersistence interface {
 }
 
 type TemplatePersistence interface {
+	EnsureEntitySchema(ctx context.Context, entityID string) error
 	EnsureVerticalSchema(ctx context.Context, verticalID string) error
 	LoadLatestOrgTemplate(ctx context.Context) (OrgTemplateRecord, error)
 	LoadOrgTemplate(ctx context.Context, version string) (OrgTemplateRecord, error)
+	SetEntityTemplateVersion(ctx context.Context, entityID, version string) error
 	SetVerticalTemplateVersion(ctx context.Context, verticalID, version string) error
 }
 
@@ -131,6 +134,8 @@ type ManagerPersistence interface {
 }
 
 type BudgetGuard interface {
+	IsEntityEmergency(entityID string) bool
+	IsEntityThrottle(entityID string) bool
 	IsEmergency(verticalID string) bool
 	IsThrottle(verticalID string) bool
 }

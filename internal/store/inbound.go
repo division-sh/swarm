@@ -58,7 +58,7 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, verticalKey, p
 		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END
 		LIMIT 1
 	`
-	if err := s.DB.QueryRowContext(ctx, q, verticalKey).Scan(&target.VerticalID, &target.VerticalSlug, &credentialsRaw); err != nil {
+	if err := s.DB.QueryRowContext(ctx, q, verticalKey).Scan(&target.EntityID, &target.VerticalSlug, &credentialsRaw); err != nil {
 		if err == sql.ErrNoRows {
 			return runtime.InboundTarget{}, fmt.Errorf("vertical not found for key: %s", verticalKey)
 		}
@@ -67,6 +67,7 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, verticalKey, p
 	if target.VerticalSlug == "" {
 		target.VerticalSlug = verticalKey
 	}
+	target.VerticalID = target.EntityID
 	target.WebhookSecret = s.extractWebhookSecret(ctx, credentialsRaw, provider)
 	return target, nil
 }
