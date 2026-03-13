@@ -344,11 +344,11 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	if !ok {
 		return WorkflowEventPolicy{RequireEntity: drivesTransition}
 	}
-	requireVertical := drivesTransition
+	requireEntity := drivesTransition
 	consume, visible := deriveWorkflowEventDelivery(entry)
 	return WorkflowEventPolicy{
 		Consume:           consume,
-		RequireEntity:     requireVertical,
+		RequireEntity:     requireEntity,
 		VisibleDownstream: visible,
 	}
 }
