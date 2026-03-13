@@ -9,6 +9,6 @@ trigger:
         data: late-update
 
 expected:
-  handler_outcome: success
+  handler_outcome: reject
   entity_state: done
   emitted_events: []

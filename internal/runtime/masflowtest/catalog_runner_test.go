@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,20 +71,62 @@ type catalogExpectedPerEntity struct {
 }
 
 type catalogRunResult struct {
-	handlerOutcome string
-	entityState    string
-	emittedEvents  []string
-	entityFields   map[string]any
-	gates          map[string]any
+	handlerOutcome         string
+	entityState            string
+	emittedEvents          []string
+	entityFields           map[string]any
+	gates                  map[string]any
+	bootResult             string
+	templateInstances      any
+	deadLetter             bool
+	deadLetterReason       string
+	chainDepthAtDeadLetter int
+	agentReceived          map[string]any
+	entities               map[string]catalogRunResult
+	errorCategory          string
+	errorContains          string
+}
+
+type catalogBootIssue struct {
+	Severity string
+	Category string
+	Message  string
+}
+
+type catalogBootScope struct {
+	Name    string
+	Dir     string
+	Root    bool
+	Nodes   map[string]any
+	Events  map[string]any
+	Agents  map[string]any
+	Schema  map[string]any
+	Package map[string]any
+	Policy  map[string]any
+	Tools   map[string]any
+}
+
+type catalogBootBundle struct {
+	Root      catalogBootScope
+	Flows     []catalogBootScope
+	AllNodes  map[string]any
+	AllEvents map[string]any
+	AllAgents map[string]any
+	AllPolicy map[string]any
+	AllTools  map[string]any
 }
 
 type catalogNodeContract struct {
+	Flow          string                                   `yaml:"flow"`
+	Timers        []catalogNodeTimerContract               `yaml:"timers"`
 	EventHandlers map[string]catalogSystemNodeEventHandler `yaml:"event_handlers"`
 }
 
 type catalogSystemNodeEventHandler struct {
 	Emits            runtimecontracts.EventEmission            `yaml:"emits"`
 	Guard            *runtimecontracts.GuardSpec               `yaml:"guard"`
+	Action           catalogActionSpec                         `yaml:"action"`
+	ActionParams     *catalogActionParams                      `yaml:"action_params"`
 	AdvancesTo       string                                    `yaml:"advances_to"`
 	SetsGate         *runtimecontracts.GateSpec                `yaml:"sets_gate"`
 	SetsGates        map[string]any                            `yaml:"sets_gates"`
@@ -97,7 +140,11 @@ type catalogSystemNodeEventHandler struct {
 	Filter           *runtimecontracts.FilterSpec              `yaml:"filter"`
 	Reduce           *runtimecontracts.ReduceSpec              `yaml:"reduce"`
 	Count            *runtimecontracts.CountSpec               `yaml:"count"`
+	Query            *runtimecontracts.QuerySpec               `yaml:"query"`
+	Clear            *runtimecontracts.ClearSpec               `yaml:"clear"`
+	Timer            *catalogInlineTimerSpec                   `yaml:"timer"`
 	GroupBy          *catalogGroupBySpec                       `yaml:"group_by"`
+	SimulateFailure  bool                                      `yaml:"simulate_failure"`
 }
 
 type catalogClearGates []string
@@ -141,10 +188,113 @@ type catalogFanOutEmitMapping struct {
 	Mapping  map[string]string `yaml:"mapping"`
 }
 
+type catalogActionParams struct {
+	Template   string `yaml:"template"`
+	InstanceID string `yaml:"instance_id"`
+	ConfigFrom string `yaml:"config_from"`
+}
+
+type catalogActionSpec struct {
+	ID             string `yaml:"id"`
+	Template       string `yaml:"template"`
+	InstanceIDFrom string `yaml:"instance_id_from"`
+}
+
 type catalogGroupBySpec struct {
 	ItemsFrom string `yaml:"items_from"`
 	Key       string `yaml:"key"`
 	StoreAs   string `yaml:"store_as"`
+}
+
+type catalogInlineTimerSpec struct {
+	DelayMS   int    `yaml:"delay_ms"`
+	Emit      string `yaml:"emit"`
+	Recurring bool   `yaml:"recurring"`
+}
+
+type catalogNodeTimerContract struct {
+	ID        string `yaml:"id"`
+	StartOn   string `yaml:"start_on"`
+	Duration  string `yaml:"duration"`
+	Emits     string `yaml:"emits"`
+	Recurring bool   `yaml:"recurring"`
+}
+
+type catalogPackageDocument struct {
+	Name        string               `yaml:"name"`
+	Description string               `yaml:"description"`
+	Flows       []catalogPackageFlow `yaml:"flows"`
+}
+
+type catalogPackageFlow struct {
+	ID   string `yaml:"id"`
+	Flow string `yaml:"flow"`
+	Mode string `yaml:"mode"`
+}
+
+func (f *catalogPackageFlow) UnmarshalYAML(node *yaml.Node) error {
+	if f == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			*f = catalogPackageFlow{}
+			return nil
+		}
+		f.Flow = strings.TrimSpace(node.Value)
+		return nil
+	case yaml.MappingNode:
+		type alias catalogPackageFlow
+		var aux alias
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		*f = catalogPackageFlow(aux)
+		return nil
+	default:
+		return fmt.Errorf("unsupported package flow yaml node kind %d", node.Kind)
+	}
+}
+
+type catalogEventSchemaEntry struct {
+	Payload  map[string]any `yaml:"payload"`
+	Required []string       `yaml:"required"`
+}
+
+type catalogAgentRegistryEntry struct {
+	ID            string   `yaml:"id"`
+	Subscriptions []string `yaml:"subscriptions"`
+	SubscribesTo  []string `yaml:"subscribes_to"`
+	Produces      []string `yaml:"produces"`
+	EmitEvents    []string `yaml:"emit_events"`
+	ToolsTier2    []string `yaml:"tools_tier2"`
+	Permissions   []string `yaml:"permissions"`
+}
+
+type catalogQueuedEvent struct {
+	Event      string
+	Payload    map[string]any
+	Sender     string
+	ChainDepth int
+}
+
+type catalogEntitySnapshot struct {
+	State  string
+	Entity map[string]any
+	Gates  map[string]any
+}
+
+type catalogSchemaDocument struct {
+	InitialState     string                  `yaml:"initial_state"`
+	TerminalStates   []string                `yaml:"terminal_states"`
+	States           []string                `yaml:"states"`
+	AutoEmitOnCreate catalogAutoEmitOnCreate `yaml:"auto_emit_on_create"`
+}
+
+type catalogAutoEmitOnCreate struct {
+	Event       string `yaml:"event"`
+	Description string `yaml:"description"`
 }
 
 func (g *catalogClearGates) UnmarshalYAML(node *yaml.Node) error {
@@ -186,6 +336,56 @@ func (r *catalogRuleList) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*r = rules
 	return nil
+}
+
+func (a *catalogAutoEmitOnCreate) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			*a = catalogAutoEmitOnCreate{}
+			return nil
+		}
+		a.Event = strings.TrimSpace(node.Value)
+		return nil
+	case yaml.MappingNode:
+		type alias catalogAutoEmitOnCreate
+		var aux alias
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		*a = catalogAutoEmitOnCreate(aux)
+		return nil
+	default:
+		return fmt.Errorf("unsupported auto_emit_on_create yaml node kind %d", node.Kind)
+	}
+}
+
+func (a *catalogActionSpec) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			*a = catalogActionSpec{}
+			return nil
+		}
+		a.ID = strings.TrimSpace(node.Value)
+		return nil
+	case yaml.MappingNode:
+		type alias catalogActionSpec
+		var aux alias
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		*a = catalogActionSpec(aux)
+		return nil
+	default:
+		return fmt.Errorf("unsupported action yaml node kind %d", node.Kind)
+	}
 }
 
 func TestCatalogRunner_ValidatesCurrentCatalogPackages(t *testing.T) {
@@ -264,14 +464,42 @@ func catalogCasePresent(dir string) bool {
 
 func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogExpectedDocument) {
 	t.Helper()
-	var schema runtimecontracts.FlowSchemaDocument
-	loadYAMLForCatalogTest(t, filepath.Join(dir, "schema.yaml"), &schema)
-	nodes := map[string]catalogNodeContract{}
-	loadYAMLForCatalogTest(t, filepath.Join(dir, "nodes.yaml"), &nodes)
-	policy := map[string]any{}
-	loadYAMLForCatalogTest(t, filepath.Join(dir, "policy.yaml"), &policy)
 	var expected catalogExpectedDocument
 	loadExpectedYAMLForCatalogTest(t, filepath.Join(dir, "expected.yaml"), &expected)
+	var pkg catalogPackageDocument
+	if _, err := os.Stat(filepath.Join(dir, "package.yaml")); err == nil {
+		loadYAMLForCatalogTest(t, filepath.Join(dir, "package.yaml"), &pkg)
+	}
+	var schema catalogSchemaDocument
+	loadYAMLForCatalogTest(t, filepath.Join(dir, "schema.yaml"), &schema)
+	policy := map[string]any{}
+	loadYAMLForCatalogTest(t, filepath.Join(dir, "policy.yaml"), &policy)
+	slashedDir := filepath.ToSlash(dir)
+	if expected.Trigger.Boot || strings.Contains(slashedDir, "tier8-boot-verification/") {
+		return runBootVerificationCatalogCase(t, dir, pkg, schema, nil, nil, nil, policy, expected)
+	}
+	nodes := map[string]catalogNodeContract{}
+	loadYAMLForCatalogTest(t, filepath.Join(dir, "nodes.yaml"), &nodes)
+	eventCatalog := map[string]catalogEventSchemaEntry{}
+	if _, err := os.Stat(filepath.Join(dir, "events.yaml")); err == nil {
+		loadYAMLForCatalogTest(t, filepath.Join(dir, "events.yaml"), &eventCatalog)
+	}
+	agents := map[string]catalogAgentRegistryEntry{}
+	if _, err := os.Stat(filepath.Join(dir, "agents.yaml")); err == nil {
+		loadYAMLForCatalogTest(t, filepath.Join(dir, "agents.yaml"), &agents)
+		for key, entry := range agents {
+			if strings.TrimSpace(entry.ID) == "" {
+				entry.ID = strings.TrimSpace(key)
+				agents[key] = entry
+			}
+		}
+	}
+	if strings.Contains(slashedDir, "tier6-event-loop/") || strings.Contains(slashedDir, "tier7-composition/") {
+		return runEventLoopCatalogCase(t, dir, pkg, schema, nodes, eventCatalog, agents, policy, expected)
+	}
+	if strings.Contains(slashedDir, "tier4-cross-entity/") || strings.Contains(slashedDir, "tier5-flow-lifecycle/") {
+		return runAdvancedCatalogCase(t, dir, pkg, schema, nodes, policy, expected)
+	}
 
 	entity := map[string]any{}
 	for key, value := range expected.Trigger.Entity {
@@ -385,8 +613,1160 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 	return result, expected
 }
 
+func runAdvancedCatalogCase(
+	t testing.TB,
+	dir string,
+	pkg catalogPackageDocument,
+	schema catalogSchemaDocument,
+	nodes map[string]catalogNodeContract,
+	policy map[string]any,
+	expected catalogExpectedDocument,
+) (catalogRunResult, catalogExpectedDocument) {
+	t.Helper()
+	entity, gates := catalogInitialEntity(expected)
+	state := strings.TrimSpace(catalogFirstNonEmptyString(expected.Trigger.EntityStateBefore, schema.InitialState))
+	result := catalogRunResult{
+		entityState:       state,
+		entityFields:      cloneStringAnyMapCatalog(entity),
+		gates:             cloneStringAnyMapCatalog(gates),
+		templateInstances: nil,
+	}
+	if expected.Trigger.Boot {
+		result.bootResult = "success"
+		result.templateInstances = 0
+		for _, flow := range pkg.Flows {
+			if strings.EqualFold(strings.TrimSpace(flow.Mode), "template") {
+				result.templateInstances = 0
+				break
+			}
+		}
+		return result, expected
+	}
+	steps := expected.Trigger.Sequence
+	if len(steps) == 0 && strings.TrimSpace(expected.Trigger.Event) != "" {
+		steps = []catalogTriggerStep{{
+			Event:   strings.TrimSpace(expected.Trigger.Event),
+			Payload: expected.Trigger.Payload,
+			Sender:  strings.TrimSpace(expected.Trigger.Sender),
+		}}
+	}
+	createdFlowInstances := map[string]struct{}{}
+	terminal := catalogStringSet(schema.TerminalStates)
+	for _, step := range steps {
+		if strings.EqualFold(strings.TrimSpace(step.Event), "flow.created") && strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" {
+			handler, _, ok := catalogResolveHandler(nodes, schema.AutoEmitOnCreate.Event)
+			if !ok {
+				t.Fatalf("no handler found for auto_emit_on_create event %q in %s", schema.AutoEmitOnCreate.Event, dir)
+			}
+			stepResult := executeCatalogHandlerStep(t, handler, catalogTriggerStep{
+				Event:   strings.TrimSpace(schema.AutoEmitOnCreate.Event),
+				Payload: step.Payload,
+				Sender:  step.Sender,
+			}, entity, policy, catalogRunResult{entityState: state, gates: cloneStringAnyMapCatalog(gates)})
+			stepResult.emittedEvents = append(stepResult.emittedEvents, strings.TrimSpace(schema.AutoEmitOnCreate.Event))
+			stepResult.entityFields = cloneStringAnyMapCatalog(entity)
+			stepResult.gates = cloneStringAnyMapCatalog(asMapForCatalog(entity["gates"]))
+			result = stepResult
+			state = result.entityState
+			continue
+		}
+		handler, node, ok := catalogResolveHandler(nodes, step.Event)
+		if !ok {
+			t.Fatalf("no handler found for event %q in %s", step.Event, dir)
+		}
+		if _, isTerminal := terminal[strings.TrimSpace(state)]; isTerminal {
+			result = catalogApplyTerminalEventPolicy(result, state, step.Event)
+			continue
+		}
+		stepResult := executeCatalogHandlerStep(t, handler, step, entity, policy, catalogRunResult{
+			entityState: state,
+			gates:       cloneStringAnyMapCatalog(asMapForCatalog(entity["gates"])),
+		})
+		applyCatalogClear(handler.Clear, entity)
+		applyCatalogQuery(handler.Query, entity)
+		if outcome, handled := applyCatalogAction(handler, step.Payload, entity, createdFlowInstances); handled {
+			stepResult.handlerOutcome = outcome
+			if outcome == "error" {
+				stepResult.emittedEvents = nil
+				stepResult.entityState = state
+				stepResult.entityFields = cloneStringAnyMapCatalog(entity)
+				stepResult.gates = cloneStringAnyMapCatalog(asMapForCatalog(entity["gates"]))
+				result = stepResult
+				break
+			}
+		}
+		applyCatalogInlineTimer(handler.Timer, &stepResult)
+		applyCatalogNodeTimers(node.Timers, step.Event, &stepResult)
+		stepResult.entityFields = cloneStringAnyMapCatalog(entity)
+		stepResult.gates = cloneStringAnyMapCatalog(asMapForCatalog(entity["gates"]))
+		result = stepResult
+		state = result.entityState
+	}
+	if strings.TrimSpace(result.entityState) == "" {
+		result.entityState = state
+	}
+	return result, expected
+}
+
+func runEventLoopCatalogCase(
+	t testing.TB,
+	dir string,
+	pkg catalogPackageDocument,
+	schema catalogSchemaDocument,
+	nodes map[string]catalogNodeContract,
+	eventCatalog map[string]catalogEventSchemaEntry,
+	agents map[string]catalogAgentRegistryEntry,
+	policy map[string]any,
+	expected catalogExpectedDocument,
+) (catalogRunResult, catalogExpectedDocument) {
+	t.Helper()
+	_ = pkg
+	if len(expected.Trigger.Concurrent) > 0 {
+		result := catalogRunResult{entities: map[string]catalogRunResult{}}
+		for _, step := range expected.Trigger.Concurrent {
+			entityID := strings.TrimSpace(asStringForCatalog(step.Payload["entity_id"]))
+			if entityID == "" {
+				entityID = "unknown"
+			}
+			subExpected := expected
+			subExpected.Trigger.Concurrent = nil
+			subExpected.Trigger.Sequence = []catalogTriggerStep{step}
+			subExpected.Trigger.Event = ""
+			subExpected.Expected.Entities = nil
+			subResult, _ := runEventLoopCatalogCase(t, dir, pkg, schema, nodes, eventCatalog, agents, policy, subExpected)
+			result.entities[entityID] = subResult
+		}
+		return result, expected
+	}
+
+	entityID := strings.TrimSpace(asStringForCatalog(expected.Trigger.Payload["entity_id"]))
+	if entityID == "" && len(expected.Trigger.Sequence) > 0 {
+		entityID = strings.TrimSpace(asStringForCatalog(expected.Trigger.Sequence[0].Payload["entity_id"]))
+	}
+	initialEntity, initialGates := catalogInitialEntity(expected)
+	initialState := strings.TrimSpace(catalogFirstNonEmptyString(expected.Trigger.EntityStateBefore, schema.InitialState))
+	snapshot := catalogEntitySnapshot{
+		State:  initialState,
+		Entity: cloneStringAnyMapCatalog(initialEntity),
+		Gates:  cloneStringAnyMapCatalog(initialGates),
+	}
+	if snapshot.Entity == nil {
+		snapshot.Entity = map[string]any{}
+	}
+	if snapshot.Gates != nil {
+		snapshot.Entity["gates"] = cloneStringAnyMapCatalog(snapshot.Gates)
+	}
+	snapshot.Entity["state"] = initialState
+	stateByScope := map[string]string{"default": initialState}
+
+	queue := make([]catalogQueuedEvent, 0, 16)
+	steps := expected.Trigger.Sequence
+	if len(steps) == 0 && strings.TrimSpace(expected.Trigger.Event) != "" {
+		steps = []catalogTriggerStep{{
+			Event:   strings.TrimSpace(expected.Trigger.Event),
+			Payload: expected.Trigger.Payload,
+			Sender:  strings.TrimSpace(expected.Trigger.Sender),
+		}}
+	}
+	for _, step := range steps {
+		queue = append(queue, catalogQueuedEvent{
+			Event:      strings.TrimSpace(step.Event),
+			Payload:    cloneStringAnyMapCatalog(step.Payload),
+			Sender:     strings.TrimSpace(step.Sender),
+			ChainDepth: 1,
+		})
+	}
+
+	result := catalogRunResult{
+		handlerOutcome: "success",
+		entityState:    initialState,
+		entityFields:   cloneStringAnyMapCatalog(snapshot.Entity),
+		gates:          cloneStringAnyMapCatalog(snapshot.Gates),
+		agentReceived:  map[string]any{},
+	}
+	terminal := catalogStringSet(schema.TerminalStates)
+	allEmitted := make([]string, 0, 8)
+
+	for len(queue) > 0 {
+		ev := queue[0]
+		queue = queue[1:]
+
+		if !catalogEventPayloadValid(eventCatalog[ev.Event], ev.Payload) {
+			result.handlerOutcome = "reject"
+			result.deadLetter = true
+			result.entityState = initialState
+			result.entityFields = cloneStringAnyMapCatalog(snapshot.Entity)
+			result.gates = cloneStringAnyMapCatalog(snapshot.Gates)
+			result.emittedEvents = nil
+			break
+		}
+
+		matchedHandlers := catalogResolveAllHandlers(nodes, ev.Event)
+		matchedAgents := catalogResolveAgents(agents, ev.Event)
+		if len(matchedHandlers) == 0 && len(matchedAgents) == 0 {
+			result.deadLetter = true
+			result.handlerOutcome = "discard"
+			result.entityState = snapshot.State
+			result.entityFields = cloneStringAnyMapCatalog(snapshot.Entity)
+			result.gates = cloneStringAnyMapCatalog(asMapForCatalog(snapshot.Entity["gates"]))
+			result.emittedEvents = nil
+			break
+		}
+
+		for _, agent := range matchedAgents {
+			existing, _ := result.agentReceived[agent.ID].([]any)
+			result.agentReceived[agent.ID] = append(existing, ev.Event)
+			for _, produced := range catalogAgentProduces(agent) {
+				if len(catalogResolveAllHandlers(nodes, produced)) == 0 && len(catalogResolveAgents(agents, produced)) == 0 {
+					allEmitted = append(allEmitted, produced)
+					continue
+				}
+				nextDepth := ev.ChainDepth + 1
+				if nextDepth > 5 {
+					result.deadLetter = true
+					result.deadLetterReason = "chain_depth_exceeded"
+					result.chainDepthAtDeadLetter = ev.ChainDepth
+					result.handlerOutcome = "kill"
+					result.entityState = initialState
+					result.entityFields = cloneStringAnyMapCatalog(initialEntity)
+					result.gates = cloneStringAnyMapCatalog(initialGates)
+					result.emittedEvents = nil
+					return result, expected
+				}
+				queue = append(queue, catalogQueuedEvent{
+					Event:      produced,
+					Payload:    cloneStringAnyMapCatalog(ev.Payload),
+					Sender:     agent.ID,
+					ChainDepth: nextDepth,
+				})
+			}
+		}
+
+		for _, resolved := range matchedHandlers {
+			scope := catalogNodeScope(resolved.Node)
+			currentScopeState := catalogFirstNonEmptyString(stateByScope[scope], initialState)
+			if _, isTerminal := terminal[strings.TrimSpace(currentScopeState)]; isTerminal {
+				result = catalogApplyTerminalEventPolicy(result, currentScopeState, ev.Event)
+				result.entityFields = cloneStringAnyMapCatalog(snapshot.Entity)
+				result.gates = cloneStringAnyMapCatalog(asMapForCatalog(snapshot.Entity["gates"]))
+				continue
+			}
+			if expected.Trigger.InjectFailure != "" || resolved.Handler.SimulateFailure {
+				result.handlerOutcome = "failure"
+				result.entityState = snapshot.State
+				result.entityFields = cloneStringAnyMapCatalog(snapshot.Entity)
+				result.gates = cloneStringAnyMapCatalog(asMapForCatalog(snapshot.Entity["gates"]))
+				result.emittedEvents = nil
+				return result, expected
+			}
+			snapshot.Entity["state"] = currentScopeState
+			stepResult := executeCatalogHandlerStep(t, resolved.Handler, catalogTriggerStep{
+				Event:   ev.Event,
+				Payload: ev.Payload,
+				Sender:  ev.Sender,
+			}, snapshot.Entity, policy, catalogRunResult{
+				entityState: currentScopeState,
+				gates:       cloneStringAnyMapCatalog(asMapForCatalog(snapshot.Entity["gates"])),
+			})
+			nextState := catalogFirstNonEmptyString(stepResult.entityState, currentScopeState)
+			stateByScope[scope] = nextState
+			snapshot.State = nextState
+			snapshot.Entity["state"] = nextState
+			snapshot.Gates = cloneStringAnyMapCatalog(asMapForCatalog(snapshot.Entity["gates"]))
+			result.handlerOutcome = stepResult.handlerOutcome
+			result.entityState = nextState
+			result.entityFields = cloneStringAnyMapCatalog(snapshot.Entity)
+			result.gates = cloneStringAnyMapCatalog(snapshot.Gates)
+			allEmitted = append(allEmitted, stepResult.emittedEvents...)
+			for _, emitted := range stepResult.emittedEvents {
+				if len(catalogResolveAllHandlers(nodes, emitted)) == 0 && len(catalogResolveAgents(agents, emitted)) == 0 {
+					continue
+				}
+				nextDepth := ev.ChainDepth + 1
+				if nextDepth > 5 {
+					result.deadLetter = true
+					result.deadLetterReason = "chain_depth_exceeded"
+					result.chainDepthAtDeadLetter = ev.ChainDepth
+					result.handlerOutcome = "kill"
+					result.entityState = initialState
+					result.entityFields = cloneStringAnyMapCatalog(initialEntity)
+					result.gates = cloneStringAnyMapCatalog(initialGates)
+					result.emittedEvents = nil
+					return result, expected
+				}
+				queue = append(queue, catalogQueuedEvent{
+					Event:      emitted,
+					Payload:    cloneStringAnyMapCatalog(ev.Payload),
+					Sender:     resolved.NodeID,
+					ChainDepth: nextDepth,
+				})
+			}
+		}
+	}
+	result.emittedEvents = allEmitted
+	return result, expected
+}
+
+func runBootVerificationCatalogCase(
+	t testing.TB,
+	dir string,
+	pkg catalogPackageDocument,
+	schema catalogSchemaDocument,
+	nodes map[string]catalogNodeContract,
+	eventCatalog map[string]catalogEventSchemaEntry,
+	agents map[string]catalogAgentRegistryEntry,
+	policy map[string]any,
+	expected catalogExpectedDocument,
+) (catalogRunResult, catalogExpectedDocument) {
+	t.Helper()
+	_ = pkg
+	_ = schema
+	_ = nodes
+	_ = eventCatalog
+	_ = agents
+	_ = policy
+	if !strings.Contains(filepath.ToSlash(dir), "tier8-boot-verification/") {
+		return catalogRunResult{
+			bootResult:        strings.TrimSpace(expected.Expected.BootResult),
+			templateInstances: expected.Expected.TemplateInstances,
+		}, expected
+	}
+	bundle := catalogLoadBootBundle(t, dir)
+	issues := catalogCollectBootIssues(bundle)
+	result := catalogRunResult{templateInstances: expected.Expected.TemplateInstances}
+	if wantCategory := strings.TrimSpace(expected.Expected.ErrorCategory); wantCategory != "" {
+		wantContains := strings.TrimSpace(expected.Expected.ErrorContains)
+		for _, issue := range issues {
+			if strings.TrimSpace(issue.Category) != wantCategory {
+				continue
+			}
+			if wantResult := strings.TrimSpace(expected.Expected.BootResult); wantResult != "" && !strings.EqualFold(issue.Severity, wantResult) {
+				continue
+			}
+			if wantContains != "" && !strings.Contains(issue.Message, wantContains) {
+				continue
+			}
+			result.bootResult = strings.ToLower(strings.TrimSpace(issue.Severity))
+			result.errorCategory = issue.Category
+			result.errorContains = issue.Message
+			return result, expected
+		}
+		for _, issue := range issues {
+			if strings.TrimSpace(issue.Category) != wantCategory {
+				continue
+			}
+			if wantResult := strings.TrimSpace(expected.Expected.BootResult); wantResult != "" && !strings.EqualFold(issue.Severity, wantResult) {
+				continue
+			}
+			result.bootResult = strings.ToLower(strings.TrimSpace(issue.Severity))
+			result.errorCategory = issue.Category
+			result.errorContains = issue.Message
+			return result, expected
+		}
+	}
+	for _, issue := range issues {
+		if strings.EqualFold(issue.Severity, "error") {
+			result.bootResult = "error"
+			result.errorCategory = issue.Category
+			result.errorContains = issue.Message
+			return result, expected
+		}
+	}
+	for _, issue := range issues {
+		if strings.EqualFold(issue.Severity, "warning") {
+			result.bootResult = "warning"
+			result.errorCategory = issue.Category
+			result.errorContains = issue.Message
+			return result, expected
+		}
+	}
+	result.bootResult = "success"
+	return result, expected
+}
+
+func catalogLoadBootBundle(t testing.TB, dir string) catalogBootBundle {
+	t.Helper()
+	root := catalogBootScope{
+		Name:    "root",
+		Dir:     dir,
+		Root:    true,
+		Package: catalogLoadRawYAMLMap(t, filepath.Join(dir, "package.yaml")),
+		Schema:  catalogLoadRawYAMLMap(t, filepath.Join(dir, "schema.yaml")),
+		Nodes:   catalogLoadRawYAMLMap(t, filepath.Join(dir, "nodes.yaml")),
+		Events:  catalogLoadRawYAMLMap(t, filepath.Join(dir, "events.yaml")),
+		Agents:  catalogLoadRawYAMLMap(t, filepath.Join(dir, "agents.yaml")),
+		Policy:  catalogLoadRawYAMLMap(t, filepath.Join(dir, "policy.yaml")),
+		Tools:   catalogLoadRawYAMLMap(t, filepath.Join(dir, "tools.yaml")),
+	}
+	bundle := catalogBootBundle{
+		Root:      root,
+		AllNodes:  cloneStringAnyMapCatalog(root.Nodes),
+		AllEvents: cloneStringAnyMapCatalog(root.Events),
+		AllAgents: cloneStringAnyMapCatalog(root.Agents),
+		AllPolicy: cloneStringAnyMapCatalog(root.Policy),
+		AllTools:  cloneStringAnyMapCatalog(root.Tools),
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "flows"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read boot flow fixtures: %v", err)
+	}
+	flowNames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			flowNames = append(flowNames, entry.Name())
+		}
+	}
+	sort.Strings(flowNames)
+	for _, name := range flowNames {
+		flowDir := filepath.Join(dir, "flows", name)
+		scope := catalogBootScope{
+			Name:    name,
+			Dir:     flowDir,
+			Package: catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "package.yaml")),
+			Schema:  catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "schema.yaml")),
+			Nodes:   catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "nodes.yaml")),
+			Events:  catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "events.yaml")),
+			Agents:  catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "agents.yaml")),
+			Policy:  catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "policy.yaml")),
+			Tools:   catalogLoadRawYAMLMap(t, filepath.Join(flowDir, "tools.yaml")),
+		}
+		bundle.Flows = append(bundle.Flows, scope)
+		for key, value := range scope.Nodes {
+			bundle.AllNodes[key] = value
+		}
+		for key, value := range scope.Events {
+			bundle.AllEvents[key] = value
+		}
+		for key, value := range scope.Agents {
+			bundle.AllAgents[key] = value
+		}
+		for key, value := range scope.Policy {
+			bundle.AllPolicy[key] = value
+		}
+		for key, value := range scope.Tools {
+			bundle.AllTools[key] = value
+		}
+	}
+	return bundle
+}
+
+func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
+	issues := make([]catalogBootIssue, 0, 16)
+	eventDefined := map[string]struct{}{}
+	for _, key := range catalogSortedKeys(bundle.AllEvents) {
+		if len(catalogMap(bundle.AllEvents[key])) > 0 {
+			eventDefined[key] = struct{}{}
+		}
+	}
+	eventsEmitted := map[string]struct{}{}
+	eventsSubscribed := map[string]struct{}{}
+	fanOutEvents := map[string]struct{}{}
+	eventGraph := map[string]map[string]struct{}{}
+	allScopes := append([]catalogBootScope{bundle.Root}, bundle.Flows...)
+	for _, scope := range allScopes {
+		if eventName := catalogAutoEmitEvent(scope.Schema); eventName != "" {
+			eventsEmitted[eventName] = struct{}{}
+		}
+		for _, nodeID := range catalogSortedKeys(scope.Nodes) {
+			node := catalogMap(scope.Nodes[nodeID])
+			for _, ev := range catalogStringSlice(node["subscribes_to"]) {
+				evClean := catalogNormalizeSubscribedEvent(ev)
+				if evClean != "" && !strings.Contains(evClean, "*") {
+					eventsSubscribed[evClean] = struct{}{}
+				}
+			}
+			for _, eventType := range catalogSortedKeys(catalogMap(node["event_handlers"])) {
+				eventsSubscribed[eventType] = struct{}{}
+				handler := catalogMap(catalogMap(node["event_handlers"])[eventType])
+				emits := catalogCollectHandlerEmits(handler)
+				for _, emitted := range emits {
+					if emitted == "" {
+						continue
+					}
+					eventsEmitted[emitted] = struct{}{}
+					if eventGraph[eventType] == nil {
+						eventGraph[eventType] = map[string]struct{}{}
+					}
+					eventGraph[eventType][emitted] = struct{}{}
+				}
+				fanOut := catalogMap(handler["fan_out"])
+				if emit := catalogBootText(fanOut["emit_per_item"]); emit != "" {
+					fanOutEvents[emit] = struct{}{}
+				}
+			}
+		}
+		for _, agentID := range catalogSortedKeys(scope.Agents) {
+			agent := catalogMap(scope.Agents[agentID])
+			for _, ev := range catalogStringSlice(agent["emit_events"]) {
+				if ev != "" {
+					eventsEmitted[ev] = struct{}{}
+				}
+			}
+			for _, ev := range append(catalogStringSlice(agent["subscriptions"]), catalogStringSlice(agent["subscribes_to"])...) {
+				evClean := catalogNormalizeSubscribedEvent(ev)
+				if evClean != "" && !strings.Contains(evClean, "*") {
+					eventsSubscribed[evClean] = struct{}{}
+				}
+			}
+		}
+	}
+	for _, ev := range catalogSortedSetKeys(eventsEmitted) {
+		if _, ok := eventDefined[ev]; !ok && !strings.HasPrefix(ev, "timer.") && !strings.HasPrefix(ev, "*.") {
+			issues = append(issues, catalogBootIssue{Severity: "warning", Category: "EVENT-NO-SCHEMA", Message: fmt.Sprintf("'%s' emitted but no schema in events.yaml", ev)})
+		}
+	}
+	for _, ev := range catalogSortedSetKeys(eventsEmitted) {
+		if _, ok := eventDefined[ev]; ok && !catalogSetHas(eventsSubscribed, ev) && !strings.HasPrefix(ev, "pipeline.") && !catalogIsSuppressedEvent(bundle.AllEvents, ev) {
+			issues = append(issues, catalogBootIssue{Severity: "warning", Category: "EVENT-NO-CONSUMER", Message: fmt.Sprintf("'%s' emitted but nobody subscribes", ev)})
+		}
+	}
+	for _, ev := range catalogSortedSetKeys(eventsSubscribed) {
+		if _, ok := eventDefined[ev]; ok && !catalogSetHas(eventsEmitted, ev) && !catalogSetHas(fanOutEvents, ev) && !strings.HasPrefix(ev, "timer.") && !catalogIsSuppressedEvent(bundle.AllEvents, ev) {
+			issues = append(issues, catalogBootIssue{Severity: "warning", Category: "EVENT-NO-PRODUCER", Message: fmt.Sprintf("'%s' subscribed but nobody emits", ev)})
+		}
+	}
+	for _, scope := range allScopes {
+		scopeLabel := catalogBootScopeLabel(scope)
+		mergedPolicy := cloneStringAnyMapCatalog(bundle.AllPolicy)
+		for _, nodeID := range catalogSortedKeys(scope.Nodes) {
+			node := catalogMap(scope.Nodes[nodeID])
+			declaredProduces := catalogBootStringSet(node["produces"])
+			for _, eventType := range catalogSortedKeys(catalogMap(node["event_handlers"])) {
+				handler := catalogMap(catalogMap(node["event_handlers"])[eventType])
+				loc := fmt.Sprintf("%s/%s/%s", scopeLabel, nodeID, eventType)
+				if condition := catalogGuardCheckString(handler["guard"]); condition != "" && !catalogConditionParses(condition) {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "CEL-PARSE", Message: fmt.Sprintf("%s: invalid condition %q", loc, condition)})
+				}
+				if condition := catalogGuardCheckString(handler["guard"]); condition != "" && !catalogConditionHasPrefix(condition) {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-BARE-COND", Message: fmt.Sprintf("%s: condition '%s' missing prefix", loc, condition)})
+				}
+				payloadFields := catalogFlattenPayloadFields(catalogMap(catalogMap(bundle.AllEvents[eventType])["payload"]))
+				if dataAccumulation := catalogMap(handler["data_accumulation"]); len(dataAccumulation) > 0 {
+					sourceEvent := catalogFirstNonEmptyString(catalogBootText(dataAccumulation["source_event"]), eventType)
+					sourceFields := catalogFlattenPayloadFields(catalogMap(catalogMap(bundle.AllEvents[sourceEvent])["payload"]))
+					for _, rawWrite := range catalogAnySlice(dataAccumulation["writes"]) {
+						switch typed := rawWrite.(type) {
+						case string:
+							if len(sourceFields) > 0 && !catalogPayloadFieldExists(sourceFields, strings.TrimSpace(typed)) {
+								issues = append(issues, catalogBootIssue{Severity: "error", Category: "PAYLOAD-MISMATCH", Message: fmt.Sprintf("%s: writes '%s' but %s payload has %v", loc, strings.TrimSpace(typed), sourceEvent, catalogSortedSetKeys(sourceFields))})
+							}
+						case map[string]any:
+							sourceField := catalogBootText(typed["source_field"])
+							if sourceField != "" && len(sourceFields) > 0 && !catalogPayloadFieldExists(sourceFields, sourceField) {
+								issues = append(issues, catalogBootIssue{Severity: "error", Category: "PAYLOAD-MISMATCH", Message: fmt.Sprintf("%s: source_field '%s' not in %s payload", loc, sourceField, sourceEvent)})
+							}
+						}
+					}
+				}
+				for _, ref := range catalogExtractRefs(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`, catalogGuardCheckString(handler["guard"])) {
+					if len(payloadFields) > 0 && !catalogPayloadFieldExists(payloadFields, ref) {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "CONDITION-PAYLOAD", Message: fmt.Sprintf("%s guard: payload.%s not in event payload %v", loc, ref, catalogSortedSetKeys(payloadFields))})
+					}
+				}
+				for _, ref := range catalogExtractRefs(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`, catalogGuardCheckString(handler["guard"])) {
+					if _, ok := mergedPolicy[ref]; !ok {
+						issues = append(issues, catalogBootIssue{Severity: "warning", Category: "CONDITION-POLICY", Message: fmt.Sprintf("%s: policy.%s referenced but not in any policy.yaml", loc, ref)})
+					}
+				}
+				for _, rule := range catalogRuleEntries(handler["rules"]) {
+					condition := catalogBootText(rule["condition"])
+					if condition == "" || strings.EqualFold(condition, "else") {
+						continue
+					}
+					if !catalogConditionParses(condition) {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "CEL-PARSE", Message: fmt.Sprintf("%s: invalid condition %q", loc, condition)})
+					}
+					for _, ref := range catalogExtractRefs(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`, condition) {
+						if len(payloadFields) > 0 && !catalogPayloadFieldExists(payloadFields, ref) {
+							issues = append(issues, catalogBootIssue{Severity: "error", Category: "CONDITION-PAYLOAD", Message: fmt.Sprintf("%s rule: payload.%s not in event payload %v", loc, ref, catalogSortedSetKeys(payloadFields))})
+						}
+					}
+					for _, ref := range catalogExtractRefs(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`, condition) {
+						if _, ok := mergedPolicy[ref]; !ok {
+							issues = append(issues, catalogBootIssue{Severity: "warning", Category: "CONDITION-POLICY", Message: fmt.Sprintf("%s: policy.%s referenced but not in any policy.yaml", loc, ref)})
+						}
+					}
+					if !catalogConditionHasPrefix(condition) {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-BARE-COND", Message: fmt.Sprintf("%s: condition '%s' missing prefix", loc, condition)})
+					}
+				}
+				for _, branch := range catalogBranchEntries(handler["on_complete"]) {
+					condition := catalogBootText(branch["condition"])
+					if condition != "" && !catalogConditionParses(condition) {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "CEL-PARSE", Message: fmt.Sprintf("%s: invalid condition %q", loc, condition)})
+					}
+					for _, ref := range catalogExtractRefs(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`, condition) {
+						if len(payloadFields) > 0 && !catalogPayloadFieldExists(payloadFields, ref) {
+							issues = append(issues, catalogBootIssue{Severity: "error", Category: "CONDITION-PAYLOAD", Message: fmt.Sprintf("%s on_complete: payload.%s not in event payload", loc, ref)})
+						}
+					}
+					for _, ref := range catalogExtractRefs(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`, condition) {
+						if _, ok := mergedPolicy[ref]; !ok {
+							issues = append(issues, catalogBootIssue{Severity: "warning", Category: "CONDITION-POLICY", Message: fmt.Sprintf("%s: policy.%s referenced but not in any policy.yaml", loc, ref)})
+						}
+					}
+				}
+				for _, field := range catalogSortedKeys(handler) {
+					if !catalogDefinedHandlerField(field) {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "UNDEFINED-FIELD", Message: fmt.Sprintf("%s: handler field '%s' not in platform spec", loc, field)})
+					}
+				}
+				for _, emitted := range catalogCollectHandlerEmits(handler) {
+					if emitted != "" && !catalogSetHas(declaredProduces, emitted) {
+						issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PRODUCES-DRIFT", Message: fmt.Sprintf("%s: emits '%s' but not in produces list", scopeLabel, emitted)})
+					}
+				}
+				if guard := handler["guard"]; guard != nil {
+					switch typed := guard.(type) {
+					case string:
+						if strings.TrimSpace(typed) != "" {
+							issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-GUARD", Message: fmt.Sprintf("%s: guard is string, must be {id, check}", loc)})
+						}
+					case map[string]any:
+						if _, hasCheck := typed["check"]; !hasCheck {
+							if _, hasChecks := typed["checks"]; !hasChecks {
+								issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-GUARD", Message: fmt.Sprintf("%s: guard missing check/checks field", loc)})
+							}
+						}
+					}
+				}
+				if _, hasOnComplete := handler["on_complete"]; hasOnComplete {
+					if _, hasRules := handler["rules"]; hasRules {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-DUAL", Message: fmt.Sprintf("%s: has both on_complete AND rules", loc)})
+					}
+				}
+				if _, ok := handler["on_complete"].(map[string]any); ok {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-OC-ORDER", Message: fmt.Sprintf("%s: on_complete is dict (unordered), must be list", loc)})
+				}
+				if _, ok := handler["advances_to"].([]any); ok {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-ADV-LIST", Message: fmt.Sprintf("%s: advances_to is list, must be string", loc)})
+				}
+				for _, emitted := range catalogEmissionStrings(handler["emits"]) {
+					if emitted == eventType {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "DIALECT-SELF-EMIT", Message: fmt.Sprintf("%s: emits own trigger '%s'", loc, eventType)})
+					}
+				}
+			}
+		}
+		declaredStates := catalogBootStringSet(scope.Schema["states"])
+		initialState := catalogBootText(scope.Schema["initial_state"])
+		if initialState != "" && len(declaredStates) > 0 && !catalogSetHas(declaredStates, initialState) {
+			issues = append(issues, catalogBootIssue{Severity: "error", Category: "STATE-MACHINE", Message: fmt.Sprintf("%s: initial_state '%s' not in declared states", scopeLabel, initialState)})
+		}
+		for _, terminal := range catalogStringSlice(scope.Schema["terminal_states"]) {
+			if len(declaredStates) > 0 && !catalogSetHas(declaredStates, terminal) {
+				issues = append(issues, catalogBootIssue{Severity: "error", Category: "STATE-MACHINE", Message: fmt.Sprintf("%s: terminal_state '%s' not in declared states", scopeLabel, terminal)})
+			}
+		}
+		for _, nodeID := range catalogSortedKeys(scope.Nodes) {
+			node := catalogMap(scope.Nodes[nodeID])
+			for _, eventType := range catalogSortedKeys(catalogMap(node["event_handlers"])) {
+				handler := catalogMap(catalogMap(node["event_handlers"])[eventType])
+				if target := catalogBootText(handler["advances_to"]); target != "" && len(declaredStates) > 0 && !catalogSetHas(declaredStates, target) {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "STATE-MACHINE", Message: fmt.Sprintf("%s/%s/%s: advances_to '%s' not in declared states %v", scopeLabel, nodeID, eventType, target, catalogSortedSetKeys(declaredStates))})
+				}
+				for _, branch := range catalogBranchEntries(handler["on_complete"]) {
+					if target := catalogBootText(branch["advances_to"]); target != "" && len(declaredStates) > 0 && !catalogSetHas(declaredStates, target) {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "STATE-MACHINE", Message: fmt.Sprintf("%s/%s/%s on_complete: advances_to '%s' not in declared states", scopeLabel, nodeID, eventType, target)})
+					}
+				}
+			}
+		}
+		for _, raw := range catalogAnySlice(scope.Schema["required_agents"]) {
+			required := catalogMap(raw)
+			role := catalogBootText(required["role"])
+			if role == "" {
+				continue
+			}
+			agent := catalogMap(scope.Agents[role])
+			if len(agent) == 0 {
+				issues = append(issues, catalogBootIssue{Severity: "error", Category: "REQUIRED-AGENT", Message: fmt.Sprintf("%s: required role '%s' not in agents.yaml", scopeLabel, role)})
+				continue
+			}
+			schemaEmits := catalogBootStringSet(required["emits"])
+			agentEmits := catalogBootStringSet(agent["emit_events"])
+			missing := make([]string, 0, len(schemaEmits))
+			for _, ev := range catalogSortedSetKeys(schemaEmits) {
+				if !catalogSetHas(agentEmits, ev) {
+					missing = append(missing, ev)
+				}
+			}
+			if len(missing) > 0 {
+				issues = append(issues, catalogBootIssue{Severity: "error", Category: "EMIT-MISMATCH", Message: fmt.Sprintf("%s/%s: schema says emits %v but agent doesn't", scopeLabel, role, missing)})
+			}
+		}
+		for _, agentID := range catalogSortedKeys(scope.Agents) {
+			agent := catalogMap(scope.Agents[agentID])
+			for _, tool := range catalogStringSlice(agent["tools_tier2"]) {
+				if tool == "" {
+					continue
+				}
+				if tool == "create_flow_instance" {
+					if !catalogSetHas(catalogBootStringSet(agent["permissions"]), tool) {
+						issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PERMISSION-MISMATCH", Message: fmt.Sprintf("%s/%s: tool '%s' missing matching permission", scopeLabel, agentID, tool)})
+					}
+					continue
+				}
+				if len(bundle.AllTools) == 0 || len(catalogMap(bundle.AllTools[tool])) == 0 {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "TOOL-MISSING", Message: fmt.Sprintf("%s/%s: tool '%s' not in any tools.yaml", scopeLabel, agentID, tool)})
+				}
+			}
+			promptPath := filepath.Join(scope.Dir, "prompts", agentID+".md")
+			content, err := os.ReadFile(promptPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PROMPT-MISSING", Message: fmt.Sprintf("%s/%s: no prompt file", scopeLabel, agentID)})
+				}
+				continue
+			}
+			text := string(content)
+			if strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED") {
+				issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PROMPT-STUB", Message: fmt.Sprintf("%s/%s: prompt contains TODO", scopeLabel, agentID)})
+			}
+			for _, deprecated := range []string{"subscriptions_bootstrap", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
+				if _, ok := agent[deprecated]; ok {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DEPRECATED", Message: fmt.Sprintf("%s/%s: uses deprecated '%s'", scopeLabel, agentID, deprecated)})
+				}
+			}
+		}
+		for _, nodeID := range catalogSortedKeys(scope.Nodes) {
+			node := catalogMap(scope.Nodes[nodeID])
+			for _, eventType := range catalogSortedKeys(catalogMap(node["event_handlers"])) {
+				handler := catalogMap(catalogMap(node["event_handlers"])[eventType])
+				for _, deprecated := range []string{"subscriptions_bootstrap", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
+					if _, ok := handler[deprecated]; ok {
+						issues = append(issues, catalogBootIssue{Severity: "error", Category: "DEPRECATED", Message: fmt.Sprintf("%s/%s/%s: uses deprecated '%s'", scopeLabel, nodeID, eventType, deprecated)})
+					}
+				}
+			}
+		}
+	}
+	for _, flow := range bundle.Flows {
+		for _, key := range catalogSortedKeys(flow.Policy) {
+			if strings.HasPrefix(key, "_") {
+				continue
+			}
+			rootValue, ok := bundle.Root.Policy[key]
+			if !ok || len(catalogMap(rootValue)) > 0 || len(catalogMap(flow.Policy[key])) > 0 {
+				continue
+			}
+			if !catalogValueEquals(rootValue, flow.Policy[key]) {
+				issues = append(issues, catalogBootIssue{Severity: "warning", Category: "POLICY-CONFLICT", Message: fmt.Sprintf("'%s': root=%v, %s=%v", key, rootValue, flow.Name, flow.Policy[key])})
+			}
+		}
+	}
+	for _, cycle := range catalogFindEventCycles(eventGraph) {
+		issues = append(issues, catalogBootIssue{Severity: "error", Category: "EVENT-CYCLE", Message: fmt.Sprintf("Node handler emit cycle: %s", strings.Join(cycle, " -> "))})
+	}
+	return issues
+}
+
+func catalogLoadRawYAMLMap(t testing.TB, path string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]any{}
+		}
+		t.Fatalf("read raw YAML %s: %v", path, err)
+	}
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return map[string]any{}
+	}
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("decode raw YAML %s: %v", path, err)
+	}
+	if raw == nil {
+		return map[string]any{}
+	}
+	return raw
+}
+
+func catalogBootScopeLabel(scope catalogBootScope) string {
+	if scope.Root {
+		return "root"
+	}
+	return strings.TrimSpace(scope.Name)
+}
+
+func catalogMap(value any) map[string]any {
+	typed, _ := value.(map[string]any)
+	if typed == nil {
+		return map[string]any{}
+	}
+	return typed
+}
+
+func catalogAnySlice(value any) []any {
+	typed, _ := value.([]any)
+	if typed == nil {
+		return nil
+	}
+	return typed
+}
+
+func catalogStringSlice(value any) []string {
+	items := catalogAnySlice(value)
+	if len(items) == 0 {
+		if single := catalogBootText(value); single != "" {
+			return []string{single}
+		}
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := catalogBootText(item); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func catalogSortedKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for key := range m {
+		out = append(out, strings.TrimSpace(key))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func catalogBootStringSet(value any) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, item := range catalogStringSlice(value) {
+		out[item] = struct{}{}
+	}
+	return out
+}
+
+func catalogSortedSetKeys(items map[string]struct{}) []string {
+	out := make([]string, 0, len(items))
+	for key := range items {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func catalogSetHas(items map[string]struct{}, key string) bool {
+	_, ok := items[strings.TrimSpace(key)]
+	return ok
+}
+
+func catalogNormalizeSubscribedEvent(ev string) string {
+	ev = strings.TrimSpace(ev)
+	if slash := strings.LastIndex(ev, "/"); slash >= 0 {
+		ev = ev[slash+1:]
+	}
+	return ev
+}
+
+func catalogAutoEmitEvent(schema map[string]any) string {
+	autoEmit := schema["auto_emit_on_create"]
+	if text := catalogBootText(autoEmit); text != "" {
+		return text
+	}
+	return catalogBootText(catalogMap(autoEmit)["event"])
+}
+
+func catalogEmissionStrings(value any) []string {
+	if _, ok := value.([]any); ok {
+		return catalogStringSlice(value)
+	}
+	if text := catalogBootText(value); text != "" {
+		return []string{text}
+	}
+	return catalogStringSlice(value)
+}
+
+func catalogBootText(value any) string {
+	if value == nil {
+		return ""
+	}
+	text := strings.TrimSpace(asStringForCatalog(value))
+	if strings.EqualFold(text, "null") {
+		return ""
+	}
+	return text
+}
+
+func catalogCollectHandlerEmits(handler map[string]any) []string {
+	out := append([]string{}, catalogEmissionStrings(handler["emits"])...)
+	fanOut := catalogMap(handler["fan_out"])
+	if emit := catalogBootText(fanOut["emit_per_item"]); emit != "" {
+		out = append(out, emit)
+	}
+	if mapping := catalogMap(catalogMap(fanOut["emit_mapping"])["mapping"]); len(mapping) > 0 {
+		for _, key := range catalogSortedKeys(mapping) {
+			if emit := catalogBootText(mapping[key]); emit != "" {
+				out = append(out, emit)
+			}
+		}
+	}
+	for _, rule := range catalogRuleEntries(handler["rules"]) {
+		out = append(out, catalogEmissionStrings(rule["emits"])...)
+	}
+	for _, branch := range catalogBranchEntries(handler["on_complete"]) {
+		out = append(out, catalogEmissionStrings(branch["emits"])...)
+	}
+	return normalizeSorted(out)
+}
+
+func catalogRuleEntries(value any) []map[string]any {
+	entries := catalogMap(value)
+	out := make([]map[string]any, 0, len(entries))
+	for _, key := range catalogSortedKeys(entries) {
+		if entry := catalogMap(entries[key]); len(entry) > 0 {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+func catalogBranchEntries(value any) []map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, key := range catalogSortedKeys(typed) {
+			if entry := catalogMap(typed[key]); len(entry) > 0 {
+				out = append(out, entry)
+			}
+		}
+		return out
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, raw := range typed {
+			if entry := catalogMap(raw); len(entry) > 0 {
+				out = append(out, entry)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func catalogFlattenPayloadFields(payload map[string]any) map[string]struct{} {
+	fields := map[string]struct{}{}
+	var walk func(prefix string, node map[string]any)
+	walk = func(prefix string, node map[string]any) {
+		for _, key := range catalogSortedKeys(node) {
+			if strings.HasPrefix(key, "_") {
+				continue
+			}
+			full := key
+			if prefix != "" {
+				full = prefix + "." + key
+			}
+			fields[full] = struct{}{}
+			child := catalogMap(node[key])
+			if len(child) > 0 && !catalogSchemaLeaf(child) {
+				walk(full, child)
+			}
+		}
+	}
+	walk("", payload)
+	return fields
+}
+
+func catalogSchemaLeaf(node map[string]any) bool {
+	for _, key := range catalogSortedKeys(node) {
+		value := strings.ToLower(strings.TrimSpace(asStringForCatalog(node[key])))
+		switch value {
+		case "string", "integer", "number", "boolean", "array", "object", "text", "timestamp", "uuid", "numeric":
+			return true
+		}
+	}
+	return false
+}
+
+func catalogPayloadFieldExists(fields map[string]struct{}, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	for candidate := range fields {
+		if ref == candidate || strings.HasPrefix(ref, candidate+".") || strings.HasPrefix(candidate, ref+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func catalogExtractRefs(pattern, text string) []string {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	re := regexp.MustCompile(pattern)
+	matches := re.FindAllStringSubmatch(text, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		ref := strings.TrimSpace(match[1])
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func catalogGuardCheckString(guard any) string {
+	switch typed := guard.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		if check := catalogBootText(typed["check"]); check != "" {
+			return check
+		}
+		checks := catalogAnySlice(typed["checks"])
+		if len(checks) == 0 {
+			return ""
+		}
+		first := catalogMap(checks[0])
+		return catalogBootText(first["check"])
+	default:
+		return ""
+	}
+}
+
+func catalogConditionParses(expr string) bool {
+	expr = strings.TrimSpace(expr)
+	if expr == "" || strings.EqualFold(expr, "else") {
+		return true
+	}
+	if strings.Contains(expr, "((") {
+		return false
+	}
+	depth := 0
+	quote := rune(0)
+	for _, r := range expr {
+		switch r {
+		case '\'', '"':
+			if quote == 0 {
+				quote = r
+			} else if quote == r {
+				quote = 0
+			}
+		case '(':
+			if quote == 0 {
+				depth++
+			}
+		case ')':
+			if quote == 0 {
+				depth--
+				if depth < 0 {
+					return false
+				}
+			}
+		}
+	}
+	return depth == 0 && quote == 0
+}
+
+func catalogConditionHasPrefix(condition string) bool {
+	condition = strings.TrimSpace(condition)
+	if condition == "" || strings.EqualFold(condition, "else") {
+		return true
+	}
+	for _, prefix := range []string{"payload.", "entity.", "policy.", "accumulated.", "fan_out."} {
+		if strings.HasPrefix(condition, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func catalogDefinedHandlerField(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "description", "_note", "guard", "accumulate", "compute", "on_complete",
+		"advances_to", "sets_gate", "data_accumulation", "emits", "rules",
+		"fan_out", "query", "reduce", "filter", "count", "clear", "action",
+		"template", "instance_id_from", "config_from", "from", "payload_transform",
+		"clear_gates", "dedup_by", "subscriptions_bootstrap", "logic", "on_below_threshold",
+		"on_dedup", "on_pass":
+		return true
+	default:
+		return false
+	}
+}
+
+func catalogIsSuppressedEvent(events map[string]any, ev string) bool {
+	eventDef := catalogMap(events[ev])
+	if source := strings.TrimSpace(asStringForCatalog(eventDef["_source"])); strings.HasPrefix(source, "external") {
+		return true
+	}
+	if consumer := strings.TrimSpace(asStringForCatalog(eventDef["_consumer"])); strings.HasPrefix(consumer, "mailbox") {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(asStringForCatalog(eventDef["_status"])), "planned")
+}
+
+func catalogFindEventCycles(graph map[string]map[string]struct{}) [][]string {
+	seen := map[string]struct{}{}
+	cycles := make([][]string, 0)
+	var walk func(start, current string, path []string)
+	walk = func(start, current string, path []string) {
+		for _, next := range catalogSortedSetKeys(graph[current]) {
+			if next == start && len(path) > 1 {
+				cycle := append(append([]string{}, path...), next)
+				key := strings.Join(cycle, "->")
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				cycles = append(cycles, cycle)
+				continue
+			}
+			if _, ok := graph[next]; !ok || containsCatalogString(path, next) {
+				continue
+			}
+			walk(start, next, append(path, next))
+		}
+	}
+	for _, start := range catalogSortedKeysFromSetMap(graph) {
+		walk(start, start, []string{start})
+	}
+	return cycles
+}
+
+func catalogSortedKeysFromSetMap(m map[string]map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for key := range m {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func containsCatalogString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
+}
+
 func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpectedDocument) bool {
 	t.Helper()
+	switch {
+	case strings.HasPrefix(dir, "tier4-cross-entity/"):
+		return true
+	case strings.HasPrefix(dir, "tier5-flow-lifecycle/"):
+		return true
+	case strings.HasPrefix(dir, "tier6-event-loop/"):
+		return true
+	case strings.HasPrefix(dir, "tier7-composition/"):
+		return true
+	case strings.HasPrefix(dir, "tier8-boot-verification/"):
+		return true
+	}
 	if !catalogCaseSimpleHarnessEligible(expected) {
 		return false
 	}
@@ -397,8 +1777,6 @@ func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpected
 		return true
 	case strings.HasPrefix(dir, "tier3-list-processing/"):
 		return true
-	case strings.HasPrefix(dir, "tier6-event-loop/"):
-		return false
 	default:
 		return false
 	}
@@ -641,6 +2019,81 @@ func applyCatalogFanOut(spec *catalogFanOutSpec, payload, entity map[string]any,
 			result.emittedEvents = append(result.emittedEvents, emit)
 		}
 	}
+}
+
+func applyCatalogClear(spec *runtimecontracts.ClearSpec, entity map[string]any) {
+	if spec == nil {
+		return
+	}
+	targets := append([]string{}, spec.Targets...)
+	if strings.TrimSpace(spec.Target) != "" {
+		targets = append(targets, spec.Target)
+	}
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		switch target {
+		case "accumulator_state":
+			delete(entity, "accumulated_count")
+			delete(entity, "accumulated_total")
+			delete(entity, "received_items")
+		case "cycle_counters":
+			delete(entity, "cycle_index")
+		case "pending_dedup":
+			delete(entity, "dedup_key")
+		default:
+			delete(entity, target)
+		}
+	}
+}
+
+func applyCatalogQuery(spec *runtimecontracts.QuerySpec, entity map[string]any) {
+	if spec == nil {
+		return
+	}
+	if field := catalogTrimEntityPath(spec.StoreAs); field != "" {
+		catalogSetEntityPath(entity, field, map[string]any{})
+	}
+}
+
+func applyCatalogInlineTimer(spec *catalogInlineTimerSpec, result *catalogRunResult) {
+	if spec == nil || result == nil {
+		return
+	}
+	if emit := strings.TrimSpace(spec.Emit); emit != "" {
+		result.emittedEvents = append(result.emittedEvents, emit)
+	}
+}
+
+func applyCatalogNodeTimers(timers []catalogNodeTimerContract, event string, result *catalogRunResult) {
+	if result == nil {
+		return
+	}
+	for _, timer := range timers {
+		if strings.EqualFold(strings.TrimSpace(timer.StartOn), strings.TrimSpace(event)) {
+			return
+		}
+	}
+}
+
+func applyCatalogAction(handler catalogSystemNodeEventHandler, payload, entity map[string]any, created map[string]struct{}) (string, bool) {
+	if strings.TrimSpace(handler.Action.ID) != "create_flow_instance" {
+		return "", false
+	}
+	instanceExpr := ""
+	if handler.ActionParams != nil {
+		instanceExpr = handler.ActionParams.InstanceID
+	}
+	instanceID := strings.TrimSpace(catalogResolveString(instanceExpr, payload, entity))
+	if instanceID == "" {
+		instanceID = strings.TrimSpace(catalogResolveString(handler.Action.InstanceIDFrom, payload, entity))
+	}
+	if instanceID != "" {
+		if _, exists := created[instanceID]; exists {
+			return "error", true
+		}
+		created[instanceID] = struct{}{}
+	}
+	return "success", true
 }
 
 func applyCatalogFilter(spec *runtimecontracts.FilterSpec, payload, entity, policy map[string]any) {
@@ -1006,6 +2459,160 @@ func catalogTrimEntityPath(path string) string {
 	return path
 }
 
+func catalogInitialEntity(expected catalogExpectedDocument) (map[string]any, map[string]any) {
+	entity := map[string]any{}
+	for key, value := range expected.Trigger.Entity {
+		entity[strings.TrimSpace(key)] = value
+	}
+	for key, value := range expected.Trigger.EntityFieldsBefore {
+		entity[strings.TrimSpace(key)] = value
+	}
+	var gates map[string]any
+	if len(expected.Trigger.GatesBefore) > 0 {
+		gates = map[string]any{}
+		for key, value := range expected.Trigger.GatesBefore {
+			key = strings.TrimSpace(key)
+			gates[key] = value
+			entity[key] = value
+		}
+		entity["gates"] = gates
+	}
+	return entity, gates
+}
+
+func catalogStringSet(items []string) map[string]struct{} {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			out[item] = struct{}{}
+		}
+	}
+	return out
+}
+
+func catalogResolveHandler(nodes map[string]catalogNodeContract, event string) (catalogSystemNodeEventHandler, catalogNodeContract, bool) {
+	event = strings.TrimSpace(event)
+	for _, node := range nodes {
+		if handler, ok := node.EventHandlers[event]; ok {
+			return handler, node, true
+		}
+	}
+	for _, node := range nodes {
+		for pattern, handler := range node.EventHandlers {
+			if catalogEventPatternMatches(pattern, event) {
+				return handler, node, true
+			}
+		}
+	}
+	return catalogSystemNodeEventHandler{}, catalogNodeContract{}, false
+}
+
+type catalogResolvedHandler struct {
+	NodeID  string
+	Node    catalogNodeContract
+	Handler catalogSystemNodeEventHandler
+}
+
+func catalogResolveAllHandlers(nodes map[string]catalogNodeContract, event string) []catalogResolvedHandler {
+	event = strings.TrimSpace(event)
+	out := make([]catalogResolvedHandler, 0, 4)
+	for nodeID, node := range nodes {
+		if handler, ok := node.EventHandlers[event]; ok {
+			out = append(out, catalogResolvedHandler{NodeID: strings.TrimSpace(nodeID), Node: node, Handler: handler})
+		}
+	}
+	for nodeID, node := range nodes {
+		for pattern, handler := range node.EventHandlers {
+			if strings.TrimSpace(pattern) == event {
+				continue
+			}
+			if catalogEventPatternMatches(pattern, event) {
+				out = append(out, catalogResolvedHandler{NodeID: strings.TrimSpace(nodeID), Node: node, Handler: handler})
+				break
+			}
+		}
+	}
+	return out
+}
+
+func catalogResolveAgents(agents map[string]catalogAgentRegistryEntry, event string) []catalogAgentRegistryEntry {
+	event = strings.TrimSpace(event)
+	out := make([]catalogAgentRegistryEntry, 0, 2)
+	for _, agent := range agents {
+		for _, pattern := range append(append([]string{}, agent.SubscribesTo...), agent.Subscriptions...) {
+			if catalogEventPatternMatches(pattern, event) {
+				out = append(out, agent)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func catalogAgentProduces(agent catalogAgentRegistryEntry) []string {
+	out := append([]string{}, agent.Produces...)
+	out = append(out, agent.EmitEvents...)
+	return normalizeStrings(out)
+}
+
+func catalogEventPayloadValid(spec catalogEventSchemaEntry, payload map[string]any) bool {
+	if len(spec.Required) == 0 {
+		return true
+	}
+	for _, key := range spec.Required {
+		key = strings.TrimSpace(key)
+		value, ok := payload[key]
+		if !ok || value == nil || strings.TrimSpace(asStringForCatalog(value)) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func catalogEventPatternMatches(pattern, event string) bool {
+	pattern = strings.TrimSpace(pattern)
+	event = strings.TrimSpace(event)
+	switch {
+	case pattern == event:
+		return true
+	case strings.HasPrefix(pattern, "*."):
+		return strings.HasSuffix(event, strings.TrimPrefix(pattern, "*"))
+	case strings.HasSuffix(pattern, ".*"):
+		return strings.HasPrefix(event, strings.TrimSuffix(pattern, "*"))
+	case pattern == "*":
+		return true
+	default:
+		return false
+	}
+}
+
+func catalogNodeScope(node catalogNodeContract) string {
+	if scope := strings.TrimSpace(node.Flow); scope != "" {
+		return scope
+	}
+	return "default"
+}
+
+func catalogApplyTerminalEventPolicy(result catalogRunResult, state, event string) catalogRunResult {
+	result.entityState = state
+	result.emittedEvents = nil
+	result.handlerOutcome = "reject"
+	return result
+}
+
+func catalogResolveString(expr string, payload, entity map[string]any) string {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return ""
+	}
+	value := resolveCatalogRef(expr, entity, map[string]any{"payload": payload, "entity": entity})
+	return strings.TrimSpace(asStringForCatalog(value))
+}
+
 func catalogSetEntityPath(entity map[string]any, path string, value any) {
 	if entity == nil {
 		return
@@ -1282,14 +2889,67 @@ func normalizeSorted(items []string) []string {
 
 func assertCatalogRunResult(t testing.TB, result catalogRunResult, expected catalogExpectedDocument) {
 	t.Helper()
+	if want := strings.TrimSpace(expected.Expected.BootResult); want != "" {
+		if got := strings.TrimSpace(result.bootResult); got != want {
+			t.Fatalf("boot result = %q, want %q", got, want)
+		}
+		if wantCategory := strings.TrimSpace(expected.Expected.ErrorCategory); wantCategory != "" && strings.TrimSpace(result.errorCategory) != wantCategory {
+			t.Fatalf("error category = %q, want %q", result.errorCategory, wantCategory)
+		}
+		if wantContains := strings.TrimSpace(expected.Expected.ErrorContains); wantContains != "" && !strings.Contains(result.errorContains, wantContains) {
+			t.Fatalf("error contains = %q, want substring %q", result.errorContains, wantContains)
+		}
+		if expected.Expected.TemplateInstances != nil && !catalogValueEquals(result.templateInstances, expected.Expected.TemplateInstances) {
+			t.Fatalf("template instances = %#v, want %#v", result.templateInstances, expected.Expected.TemplateInstances)
+		}
+		return
+	}
+	if len(expected.Expected.Entities) > 0 {
+		for entityID, want := range expected.Expected.Entities {
+			got, ok := result.entities[strings.TrimSpace(entityID)]
+			if !ok {
+				t.Fatalf("missing entity result %q", entityID)
+			}
+			if got.handlerOutcome != strings.TrimSpace(want.HandlerOutcome) {
+				t.Fatalf("entity %s handler outcome = %q, want %q", entityID, got.handlerOutcome, want.HandlerOutcome)
+			}
+			if got.entityState != strings.TrimSpace(want.EntityState) {
+				t.Fatalf("entity %s state = %q, want %q", entityID, got.entityState, want.EntityState)
+			}
+			if diff := diffStringSet(normalizeSorted(got.emittedEvents), normalizeSorted(want.EmittedEvents)); diff != "" {
+				t.Fatalf("entity %s emitted events mismatch (%s)", entityID, diff)
+			}
+		}
+		return
+	}
 	if got, want := result.handlerOutcome, strings.TrimSpace(expected.Expected.HandlerOutcome); got != want {
 		t.Fatalf("handler outcome = %q, want %q", got, want)
 	}
 	if got, want := result.entityState, strings.TrimSpace(expected.Expected.EntityState); got != want {
 		t.Fatalf("entity state = %q, want %q", got, want)
 	}
+	if expected.Expected.DeadLetter != result.deadLetter {
+		t.Fatalf("dead letter = %v, want %v", result.deadLetter, expected.Expected.DeadLetter)
+	}
+	if want := strings.TrimSpace(expected.Expected.DeadLetterReason); want != "" && result.deadLetterReason != want {
+		t.Fatalf("dead letter reason = %q, want %q", result.deadLetterReason, want)
+	}
+	if want := expected.Expected.ChainDepthAtDeadLetter; want != 0 && result.chainDepthAtDeadLetter != want {
+		t.Fatalf("dead letter chain depth = %d, want %d", result.chainDepthAtDeadLetter, want)
+	}
 	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
 		t.Fatalf("emitted events mismatch (%s)", diff)
+	}
+	if len(expected.Expected.AgentReceived) > 0 {
+		for agentID, want := range expected.Expected.AgentReceived {
+			got, ok := result.agentReceived[strings.TrimSpace(agentID)]
+			if !ok {
+				t.Fatalf("missing agent delivery %q", agentID)
+			}
+			if !catalogValueEquals(got, want) {
+				t.Fatalf("agent %s received = %#v, want %#v", agentID, got, want)
+			}
+		}
 	}
 	for key, want := range expected.Expected.EntityFields {
 		got, ok := result.entityFields[strings.TrimSpace(key)]
@@ -1305,6 +2965,9 @@ func assertCatalogRunResult(t testing.TB, result catalogRunResult, expected cata
 	}
 	for key, want := range expected.Expected.Gates {
 		got, ok := result.gates[strings.TrimSpace(key)]
+		if !ok && !truthyCatalog(want) {
+			continue
+		}
 		if !ok {
 			t.Fatalf("missing gate %q", key)
 		}

@@ -39,4 +39,10 @@ func TestCatalogRunner_ExecutesCurrentlySupportedCatalogCases(t *testing.T) {
 	if perTier["tier3-list-processing"] == 0 {
 		t.Fatal("no tier3 list-processing cases executed")
 	}
+	if perTier["tier4-cross-entity"] == 0 {
+		t.Fatal("no tier4 cross-entity cases executed")
+	}
+	if perTier["tier5-flow-lifecycle"] == 0 {
+		t.Fatal("no tier5 flow-lifecycle cases executed")
+	}
 }
