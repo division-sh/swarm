@@ -16,6 +16,13 @@ type WorkflowEventPolicy struct {
 	VisibleDownstream bool
 }
 
+type ConsumerType string
+
+const (
+	ConsumerTypeUnknown         ConsumerType = ""
+	ConsumerTypeSystemComponent ConsumerType = "system_component"
+)
+
 type WorkflowNode struct {
 	ID               string
 	Subscriptions    []events.EventType
@@ -364,13 +371,17 @@ func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (cons
 	case "projection", "stage_projection":
 		return false, true
 	}
-	consumerType := strings.TrimSpace(asString(entry.ConsumerType))
+	consumerType := normalizeConsumerType(entry.ConsumerType)
 	intercepted := truthyContractFlag(entry.Intercepted)
 	passthrough := truthyContractFlag(entry.Passthrough)
-	if consumerType == "system_component" && intercepted && !passthrough {
+	if consumerType == ConsumerTypeSystemComponent && intercepted && !passthrough {
 		return true, false
 	}
 	return false, true
+}
+
+func normalizeConsumerType(value any) ConsumerType {
+	return ConsumerType(strings.TrimSpace(asString(value)))
 }
 
 func truthyContractFlag(v any) bool {
