@@ -146,7 +146,7 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 		return fmt.Errorf("entity %s slug is required for workspace container", entityID)
 	}
 	container := m.EntityContainerName(slug)
-	volume := fmt.Sprintf("verticals_%s", slug)
+	volume := fmt.Sprintf("entities_%s", slug)
 
 	return m.EnsureContainerRunning(ctx, container, []string{
 		"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),

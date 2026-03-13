@@ -182,7 +182,7 @@ func filterPending(items []runtimetools.MailboxItem, opts ListOptions) []runtime
 
 func isReviewType(t string) bool {
 	switch strings.TrimSpace(t) {
-	case "product_spec_review", "deploy_review":
+	case "spec_review", "deployment_review":
 		return true
 	default:
 		return false

@@ -15,6 +15,7 @@ import (
 	llm "empireai/internal/runtime/llm"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // budgetExecutionScopeKey controls intra-process serialization for LLM budget
@@ -47,6 +48,14 @@ type BudgetTracker struct {
 	mu        sync.Mutex
 	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
 	scopeMu   sync.Map          // key(scope) => *sync.Mutex
+}
+
+var activeInstanceStates = []string{"approved", "building", "pre_launch", "launched", "active", "expanding"}
+
+func ActiveInstanceStates() []string {
+	out := make([]string, len(activeInstanceStates))
+	copy(out, activeInstanceStates)
+	return out
 }
 
 func NewBudgetTracker(db *sql.DB, bus *EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence) *BudgetTracker {
@@ -128,7 +137,7 @@ func (t *BudgetTracker) LockExecutionScope(verticalID string) func() {
 	}
 	scopeKey := strings.TrimSpace(verticalID)
 	if scopeKey == "" {
-		scopeKey = "__portfolio__"
+		scopeKey = "__system__"
 	}
 	muAny, _ := t.scopeMu.LoadOrStore(scopeKey, &sync.Mutex{})
 	mu, _ := muAny.(*sync.Mutex)
@@ -153,9 +162,9 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		SELECT instance_id::text
 		FROM workflow_instances
 			WHERE COALESCE(metadata->>'instance_kind', '') = 'entity'
-		  AND current_state IN ('approved', 'building', 'pre_launch', 'launched', 'active', 'expanding')
+		  AND current_state = ANY($1::text[])
 		ORDER BY created_at ASC
-	`)
+	`, pq.Array(activeInstanceStates))
 	if err != nil {
 		return
 	}

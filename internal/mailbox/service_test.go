@@ -27,7 +27,7 @@ func (fakeStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]run
 func (fakeStore) MarkMailboxItemNotified(context.Context, string) error { return nil }
 func (fakeStore) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
 	return []runtimetools.MailboxItem{
-		{ID: "m1", Priority: "critical", Type: "product_spec_review"},
+		{ID: "m1", Priority: "critical", Type: "spec_review"},
 		{ID: "m2", Priority: "normal", Type: "spend_request"},
 	}, nil
 }

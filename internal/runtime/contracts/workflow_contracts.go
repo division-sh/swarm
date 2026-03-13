@@ -2113,6 +2113,13 @@ func DefaultPlatformSpecFile(repoRoot string) string {
 	return filepath.Join(DefaultPlatformContractsDir(repoRoot), "platform-spec.yaml")
 }
 
+func defaultMASAuxFile(repoRoot, envKey string, pathParts ...string) string {
+	if env := strings.TrimSpace(os.Getenv(envKey)); env != "" {
+		return env
+	}
+	return filepath.Join(append([]string{repoRoot}, pathParts...)...)
+}
+
 func DefaultWorkflowContractsDir(repoRoot string) string {
 	if env := strings.TrimSpace(os.Getenv("MAS_CONTRACTS_DIR")); env != "" {
 		return env
@@ -2167,10 +2174,10 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		ProjectPolicyFile:     existingFile(filepath.Join(workflowDir, "policy.yaml")),
 		ProjectPromptsDir:     existingDir(filepath.Join(workflowDir, "prompts")),
 		PlatformSpecFile:      platformSpecFile,
-		VerificationGatesFile: filepath.Join(repoRoot, "docs", "specs", "mas-platform", "verification-gates.yaml"),
-		ToolingLockFile:       filepath.Join(repoRoot, "docs", "specs", "mas-platform", "tooling.lock"),
+		VerificationGatesFile: defaultMASAuxFile(repoRoot, "MAS_VERIFICATION_GATES_FILE", "docs", "specs", "mas-platform", "verification-gates.yaml"),
+		ToolingLockFile:       defaultMASAuxFile(repoRoot, "MAS_TOOLING_LOCK_FILE", "docs", "specs", "mas-platform", "tooling.lock"),
 		DDLFile:               "",
-		AgentConfigMapFile:    filepath.Join(repoRoot, "docs", "specs", "mas-platform", "agent-config-map.yaml"),
+		AgentConfigMapFile:    defaultMASAuxFile(repoRoot, "MAS_AGENT_CONFIG_MAP_FILE", "docs", "specs", "mas-platform", "agent-config-map.yaml"),
 	}
 	if paths.ProjectPackageFile != "" {
 		paths.ProjectPackages = discoverProjectPackagePaths(paths.ProjectPackageFile, workflowDir)

@@ -223,7 +223,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeMailbox(runtimetools.MailboxItem{
 		ID:         "m1",
-		Type:       "product_spec_review",
+		Type:       "spec_review",
 		Priority:   "critical",
 		Status:     "pending",
 		FromAgent:  "a",
@@ -258,7 +258,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 
 	_, _ = store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		ID:         "m2",
-		Type:       "deploy_review",
+		Type:       "deployment_review",
 		Priority:   "normal",
 		Status:     "pending",
 		FromAgent:  "a2",
@@ -269,8 +269,8 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 	if err := PrintPendingWithOptions(ctx, store, &buf, ListOptions{Limit: 10, ReviewsOnly: true}); err != nil {
 		t.Fatalf("PrintPending reviews: %v", err)
 	}
-	if !strings.Contains(buf.String(), "type=deploy_review") {
-		t.Fatalf("expected deploy_review in output, got %q", buf.String())
+	if !strings.Contains(buf.String(), "type=deployment_review") {
+		t.Fatalf("expected deployment_review in output, got %q", buf.String())
 	}
 
 	buf.Reset()
@@ -285,8 +285,8 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 func TestMailbox_FilterHelpers(t *testing.T) {
 	items := []runtimetools.MailboxItem{
 		{ID: "1", Priority: "critical", Type: "escalation"},
-		{ID: "2", Priority: "normal", Type: "product_spec_review"},
-		{ID: "3", Priority: "normal", Type: "deploy_review"},
+		{ID: "2", Priority: "normal", Type: "spec_review"},
+		{ID: "3", Priority: "normal", Type: "deployment_review"},
 	}
 	out := filterPending(items, ListOptions{CriticalOnly: true})
 	if len(out) != 1 || out[0].ID != "1" {
@@ -296,7 +296,7 @@ func TestMailbox_FilterHelpers(t *testing.T) {
 	if len(out) != 2 {
 		t.Fatalf("ReviewsOnly filter failed: %#v", out)
 	}
-	if !isReviewType("product_spec_review") || !isReviewType("deploy_review") || isReviewType("x") {
+	if !isReviewType("spec_review") || !isReviewType("deployment_review") || isReviewType("x") {
 		t.Fatalf("isReviewType unexpected behavior")
 	}
 }

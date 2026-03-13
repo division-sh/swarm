@@ -283,14 +283,8 @@ func findDirUp(start string, pathParts ...string) (string, bool) {
 func findAnyPromptDirUp(start string) (string, bool) {
 	cur := filepath.Clean(start)
 	for {
-		pattern := filepath.Join(cur, "docs", "specs", "mas-platform", "*", "contracts", "prompts")
-		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
-			sort.Strings(matches)
-			for _, match := range matches {
-				if isDir(match) {
-					return filepath.Clean(match), true
-				}
-			}
+		if dir, ok := findPromptDirUnder(filepath.Join(cur, "docs", "specs")); ok {
+			return dir, true
 		}
 		next := filepath.Dir(cur)
 		if next == cur {
@@ -298,6 +292,30 @@ func findAnyPromptDirUp(start string) (string, bool) {
 		}
 		cur = next
 	}
+}
+
+func findPromptDirUnder(specRoot string) (string, bool) {
+	if !isDir(specRoot) {
+		return "", false
+	}
+	matches := make([]string, 0, 8)
+	_ = filepath.WalkDir(specRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) == "prompts" && filepath.Base(filepath.Dir(path)) == "contracts" {
+			matches = append(matches, filepath.Clean(path))
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	sort.Strings(matches)
+	for _, match := range matches {
+		if isDir(match) {
+			return match, true
+		}
+	}
+	return "", false
 }
 
 func isDir(path string) bool {

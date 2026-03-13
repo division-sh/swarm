@@ -92,7 +92,7 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 	verticalID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO verticals (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
+		VALUES ($1::uuid,'TestCo','testco','us','approved','entity', now(), now())
 	`, verticalID); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
@@ -101,13 +101,13 @@ func TestPostgresStore_HelpersAndDigest(t *testing.T) {
 			instance_id, workflow_name, workflow_version, current_state,
 			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
+			$1::uuid, 'test', 'v1', 'active',
 			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco","name":"TestCo"}'::jsonb, now(), now()
 		)
 	`, verticalID); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
-	// Active count includes operating.
+	// Active count includes active workflow instances.
 	if n, err := pg.CountActiveInstances(ctx); err != nil || n < 1 {
 		t.Fatalf("CountActiveInstances n=%d err=%v", n, err)
 	}

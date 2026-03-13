@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"empireai/internal/runtime"
+	"github.com/lib/pq"
 )
 
 func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
@@ -12,8 +13,8 @@ func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM workflow_instances
-		WHERE current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
-	`).Scan(&n); err != nil {
+		WHERE current_state = ANY($1::text[])
+	`, pq.Array(runtime.ActiveInstanceStates())).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
 	return n, nil
@@ -33,12 +34,12 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 			0,
 			wi.updated_at
 		FROM workflow_instances wi
-		WHERE wi.current_state IN ('approved', 'building', 'pre_launch', 'launched', 'operating', 'expanding')
+		WHERE wi.current_state = ANY($2::text[])
 		ORDER BY wi.updated_at DESC, wi.created_at ASC
 		LIMIT $1
 	`
 
-	rows, err := s.DB.QueryContext(ctx, q, limit)
+	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(runtime.ActiveInstanceStates()))
 	if err != nil {
 		return nil, fmt.Errorf("list digest rows: %w", err)
 	}
