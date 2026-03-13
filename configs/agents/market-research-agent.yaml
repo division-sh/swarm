@@ -1,9 +1,0 @@
-id: market-research-agent
-role: market-research-agent
-mode: factory
-model_tier: sonnet
-subscriptions:
-  - market_research.scan_assigned
-constraints:
-  max_turns_per_task: 40
-  conversation_mode: session

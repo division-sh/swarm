@@ -1,9 +1,0 @@
-id: qa-agent
-role: qa-agent
-model_tier: haiku
-parent_role: cto-agent
-tools:
-  - sql_execute
-constraints:
-  max_turns_per_task: 20
-  conversation_mode: session

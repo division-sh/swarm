@@ -1,9 +1,0 @@
-id: trend-research-agent
-role: trend-research-agent
-mode: factory
-model_tier: sonnet
-subscriptions:
-  - trend_research.scan_assigned
-constraints:
-  max_turns_per_task: 40
-  conversation_mode: session
