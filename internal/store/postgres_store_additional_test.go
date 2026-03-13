@@ -825,7 +825,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetEventReceipt ok=%v err=%v", ok, err)
 	}
-	if strings.TrimSpace(r.Status) != "dead_letter" {
+	if strings.TrimSpace(string(r.Status)) != "dead_letter" {
 		t.Fatalf("expected dead_letter, got %q retry=%d", r.Status, r.RetryCount)
 	}
 

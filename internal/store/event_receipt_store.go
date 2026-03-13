@@ -12,12 +12,12 @@ import (
 	runtimemanager "empireai/internal/runtime/manager"
 )
 
-func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID, status, errText string) error {
+func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
 	if eventID == "" || agentID == "" {
 		return nil
 	}
 	if status == "" {
-		status = "processed"
+		status = runtimemanager.ReceiptStatusProcessed
 	}
 
 	const q = `

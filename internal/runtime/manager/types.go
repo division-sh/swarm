@@ -73,10 +73,18 @@ func (r *PersistedRoutingRule) NormalizeEntityID() {
 type EventReceipt struct {
 	EventID    string
 	AgentID    string
-	Status     string
+	Status     ReceiptStatus
 	RetryCount int
 	Error      string
 }
+
+type ReceiptStatus string
+
+const (
+	ReceiptStatusProcessed  ReceiptStatus = "processed"
+	ReceiptStatusError      ReceiptStatus = "error"
+	ReceiptStatusDeadLetter ReceiptStatus = "dead_letter"
+)
 
 type PromptOverrideRecord struct {
 	AgentID        string
@@ -118,7 +126,7 @@ type TemplatePersistence interface {
 }
 
 type ReceiptPersistence interface {
-	UpsertEventReceipt(ctx context.Context, eventID, agentID, status, errText string) error
+	UpsertEventReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, errText string) error
 }
 
 type PendingEventPersistence interface {

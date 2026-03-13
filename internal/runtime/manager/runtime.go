@@ -109,7 +109,7 @@ func (am *AgentManager) clearPoisonPanicCount(agentID, eventID string) {
 }
 
 func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID string, evt events.Event, count int, panicText string) {
-	am.writeReceipt(ctx, evt.ID, agentID, "processed", fmt.Sprintf("quarantined poison event after %d panics: %s", count, strings.TrimSpace(panicText)))
+	am.writeReceipt(ctx, evt.ID, agentID, ReceiptStatusProcessed, fmt.Sprintf("quarantined poison event after %d panics: %s", count, strings.TrimSpace(panicText)))
 	managerID := am.resolveManagerAgentID(agentID)
 	if strings.TrimSpace(managerID) == "" || managerID == agentID {
 		managerID = am.defaultManagerAgentID(runtimeactors.AgentConfig{ID: agentID})
@@ -493,7 +493,7 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						err, evtPanicked, evtPanicText := am.safeProcessEvent(loopCtx, agent, evt)
 						if evtPanicked {
 							panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID)
-							am.writeReceipt(loopCtx, evt.ID, agent.ID(), "error", "panic: "+strings.TrimSpace(evtPanicText))
+							am.writeReceipt(loopCtx, evt.ID, agent.ID(), ReceiptStatusError, "panic: "+strings.TrimSpace(evtPanicText))
 							if panicCount >= poisonPanicQuarantineAt {
 								am.quarantinePoisonEvent(loopCtx, agent.ID(), evt, panicCount, evtPanicText)
 								am.clearPoisonPanicCount(agent.ID(), evt.ID)

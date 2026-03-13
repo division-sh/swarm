@@ -26,11 +26,11 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 		return nil
 	}
 	if suppress, reason := am.shouldSuppressForBudget(agent.ID(), evt); suppress {
-		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", reason)
+		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, reason)
 		return nil
 	}
 	if am.shouldInterceptDirective(agent.ID(), evt) {
-		am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "intercepted simple directive (runtime-handled)")
+		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "intercepted simple directive (runtime-handled)")
 		return nil
 	}
 	out, err := agent.OnEvent(ctx, evt)
@@ -51,7 +51,7 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 			strings.TrimSpace(string(evt.Type)),
 		)
 		am.maybeTripAuthCircuitBreaker(agent.ID(), evt.ID, err)
-		am.writeReceipt(ctx, evt.ID, agent.ID(), "error", runtimerterr.FormatRuntimeError(agentErr))
+		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(agentErr))
 		return agentErr
 	}
 	for idx, e := range out {
@@ -73,11 +73,11 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 				strings.TrimSpace(string(e.Type)),
 				agent.ID(),
 			)
-			am.writeReceipt(ctx, evt.ID, agent.ID(), "error", runtimerterr.FormatRuntimeError(pubErr))
+			am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusError, runtimerterr.FormatRuntimeError(pubErr))
 			return pubErr
 		}
 	}
-	am.writeReceipt(ctx, evt.ID, agent.ID(), "processed", "")
+	am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "")
 	return nil
 }
 
@@ -156,8 +156,8 @@ func (am *AgentManager) shouldSkipEvent(agentID, eventID string) bool {
 	if err != nil || !found {
 		return false
 	}
-	status := strings.TrimSpace(receipt.Status)
-	return status == "processed" || status == "dead_letter"
+	status := ReceiptStatus(strings.TrimSpace(string(receipt.Status)))
+	return status == ReceiptStatusProcessed || status == ReceiptStatusDeadLetter
 }
 
 func isTransientAgentError(err error) bool {
@@ -253,7 +253,7 @@ func (am *AgentManager) isAuthBreakerTripped() bool {
 	return am.authBreakerTripped
 }
 
-func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID, status, errText string) {
+func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, errText string) {
 	if am.store == nil || eventID == "" || agentID == "" {
 		return
 	}
@@ -269,7 +269,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID, stat
 			retryErr := am.store.UpsertEventReceipt(retryCtx, eventID, agentID, status, errText)
 			cancel()
 			if retryErr == nil {
-				if status == "error" {
+				if status == ReceiptStatusError {
 					am.maybeEscalateDeadLetter(context.WithoutCancel(writeCtx), eventID, agentID)
 				}
 				return
@@ -282,7 +282,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID, stat
 
 	// Spec v2.0: dead-letter events are escalated to the agent's manager. The manager
 	// decides whether to retry, skip, or escalate further.
-	if status == "error" {
+	if status == ReceiptStatusError {
 		am.maybeEscalateDeadLetter(ctx, eventID, agentID)
 	}
 }
@@ -296,7 +296,7 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	if err != nil || !found {
 		return
 	}
-	if strings.TrimSpace(receipt.Status) != "dead_letter" {
+	if ReceiptStatus(strings.TrimSpace(string(receipt.Status))) != ReceiptStatusDeadLetter {
 		return
 	}
 
