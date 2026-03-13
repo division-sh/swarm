@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/core/identity"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -68,37 +70,51 @@ func isSupportedWorkflowHandlerActionID(id string) bool {
 }
 
 type contractGuardRegistry struct {
-	registry    contractIDRegistry
-	definitions map[string]runtimecontracts.GuardActionEntry
+	registry     contractIDRegistry
+	instructions map[string]runtimeregistry.GuardInstruction
 }
 
-func (r contractGuardRegistry) HasGuard(id string) bool { return r.registry.has(id) }
-func (r contractGuardRegistry) IsExecutable(id string) bool {
-	def, ok := r.Guard(id)
-	return ok && isExecutableWorkflowGuardEntry(def)
+func (r contractGuardRegistry) HasGuard(id identity.GuardKey) bool {
+	return r.registry.has(id.String())
+}
+func (r contractGuardRegistry) IsExecutable(id identity.GuardKey) bool {
+	instruction, ok := r.instructions[id.String()]
+	if !ok {
+		return false
+	}
+	if instruction.Kind() == runtimeregistry.InstructionCEL {
+		return true
+	}
+	return isSupportedWorkflowGuardBuiltin(firstNonEmptyString(instruction.Builtin, instruction.Key.String()))
 }
 func (r contractGuardRegistry) GuardIDs() []string { return r.registry.sortedIDs() }
-func (r contractGuardRegistry) Guard(id string) (runtimecontracts.GuardActionEntry, bool) {
-	id = strings.TrimSpace(id)
-	def, ok := r.definitions[id]
-	return def, ok
+func (r contractGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
+	instruction, ok := r.instructions[id.String()]
+	return instruction, ok
 }
 
 type contractActionRegistry struct {
-	registry    contractIDRegistry
-	definitions map[string]runtimecontracts.GuardActionEntry
+	registry     contractIDRegistry
+	instructions map[string]runtimeregistry.ActionInstruction
 }
 
-func (r contractActionRegistry) HasAction(id string) bool { return r.registry.has(id) }
-func (r contractActionRegistry) IsExecutable(id string) bool {
-	def, ok := r.Action(id)
-	return ok && isExecutableWorkflowActionEntry(def)
+func (r contractActionRegistry) HasAction(id identity.ActionKey) bool {
+	return r.registry.has(id.String())
+}
+func (r contractActionRegistry) IsExecutable(id identity.ActionKey) bool {
+	instruction, ok := r.instructions[id.String()]
+	if !ok {
+		return false
+	}
+	if instruction.Emits != "" {
+		return true
+	}
+	return isSupportedWorkflowHandlerActionID(firstNonEmptyString(instruction.Builtin, instruction.Key.String()))
 }
 func (r contractActionRegistry) ActionIDs() []string { return r.registry.sortedIDs() }
-func (r contractActionRegistry) Action(id string) (runtimecontracts.GuardActionEntry, bool) {
-	id = strings.TrimSpace(id)
-	def, ok := r.definitions[id]
-	return def, ok
+func (r contractActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
+	instruction, ok := r.instructions[id.String()]
+	return instruction, ok
 }
 
 func defaultGuardRegistry() GuardRegistry {
@@ -113,19 +129,19 @@ func NewContractGuardRegistry(source semanticview.Source) GuardRegistry {
 	if source == nil {
 		return contractGuardRegistry{}
 	}
-	entries := source.GuardEntries()
-	guards := make(map[string]struct{}, len(entries))
-	guardDefs := make(map[string]runtimecontracts.GuardActionEntry, len(entries))
-	for _, guard := range entries {
-		id := strings.TrimSpace(guard.ID)
+	instructions := source.GuardInstructions()
+	guards := make(map[string]struct{}, len(instructions))
+	guardInstructions := make(map[string]runtimeregistry.GuardInstruction, len(instructions))
+	for _, instruction := range instructions {
+		id := instruction.Key.String()
 		if id != "" {
 			guards[id] = struct{}{}
-			guardDefs[id] = guard
+			guardInstructions[id] = instruction
 		}
 	}
 	return contractGuardRegistry{
-		registry:    contractIDRegistry{ids: guards},
-		definitions: guardDefs,
+		registry:     contractIDRegistry{ids: guards},
+		instructions: guardInstructions,
 	}
 }
 
@@ -133,18 +149,18 @@ func NewContractActionRegistry(source semanticview.Source) ActionRegistry {
 	if source == nil {
 		return contractActionRegistry{}
 	}
-	entries := source.ActionEntries()
-	actions := make(map[string]struct{}, len(entries))
-	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(entries))
-	for _, action := range entries {
-		id := strings.TrimSpace(action.ID)
+	instructions := source.ActionInstructions()
+	actions := make(map[string]struct{}, len(instructions))
+	actionInstructions := make(map[string]runtimeregistry.ActionInstruction, len(instructions))
+	for _, instruction := range instructions {
+		id := instruction.Key.String()
 		if id != "" {
 			actions[id] = struct{}{}
-			actionDefs[id] = action
+			actionInstructions[id] = instruction
 		}
 	}
 	return contractActionRegistry{
-		registry:    contractIDRegistry{ids: actions},
-		definitions: actionDefs,
+		registry:     contractIDRegistry{ids: actions},
+		instructions: actionInstructions,
 	}
 }

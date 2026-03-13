@@ -266,3 +266,36 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	}
 	return exists, nil
 }
+
+func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return nil, nil
+	}
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT agent_id
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		ORDER BY agent_id ASC
+	`, eventID)
+	if err != nil {
+		return nil, fmt.Errorf("list event delivery recipients: %w", err)
+	}
+	defer rows.Close()
+
+	recipients := make([]string, 0, 8)
+	for rows.Next() {
+		var agentID string
+		if err := rows.Scan(&agentID); err != nil {
+			return nil, fmt.Errorf("scan event delivery recipient: %w", err)
+		}
+		agentID = strings.TrimSpace(agentID)
+		if agentID != "" {
+			recipients = append(recipients, agentID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read event delivery recipients: %w", err)
+	}
+	return recipients, nil
+}

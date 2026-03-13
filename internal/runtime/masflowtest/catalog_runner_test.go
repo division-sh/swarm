@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/paths"
+	"empireai/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
 

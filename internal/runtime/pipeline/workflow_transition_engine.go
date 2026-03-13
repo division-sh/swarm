@@ -12,7 +12,9 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/paths"
+	"empireai/internal/runtime/core/identity"
+	"empireai/internal/runtime/core/paths"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -892,8 +894,8 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardCheck(
 	check = strings.TrimSpace(check)
 	policyRef = strings.TrimSpace(policyRef)
 	if check != "" {
-		entry := runtimecontracts.GuardActionEntry{
-			ID:        guardID,
+		entry := runtimeregistry.GuardInstruction{
+			Key:       identity.NormalizeGuardKey(guardID),
 			Check:     check,
 			PolicyRef: policyRef,
 		}
@@ -912,7 +914,7 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardCheck(
 	return false, []string{guardID}
 }
 
-func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardEntry(triggerCtx workflowTriggerContext, entry runtimecontracts.GuardActionEntry) bool {
+func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardEntry(triggerCtx workflowTriggerContext, entry runtimeregistry.GuardInstruction) bool {
 	if check := strings.TrimSpace(entry.Check); check != "" {
 		if passed, err := pc.evaluateWorkflowExpressionBool(triggerCtx, check); err == nil {
 			return passed
@@ -928,9 +930,9 @@ func (pc *FactoryPipelineCoordinator) evaluateWorkflowGuardEntry(triggerCtx work
 func (pc *FactoryPipelineCoordinator) evaluateWorkflowPlatformBuiltinGuard(
 	triggerCtx workflowTriggerContext,
 	hookCtx WorkflowHookContext,
-	entry runtimecontracts.GuardActionEntry,
+	entry runtimeregistry.GuardInstruction,
 ) (bool, bool) {
-	key := firstNonEmptyString(entry.PlatformBuiltin, entry.ID)
+	key := firstNonEmptyString(entry.Builtin, entry.Key.String())
 	handler, ok := lookupWorkflowBuiltinGuard(key)
 	if !ok {
 		return false, false
@@ -1216,9 +1218,9 @@ func (pc *FactoryPipelineCoordinator) executeWorkflowAction(
 func (pc *FactoryPipelineCoordinator) executeWorkflowPlatformBuiltinAction(
 	ctx context.Context,
 	hookCtx WorkflowHookContext,
-	entry runtimecontracts.GuardActionEntry,
+	entry runtimeregistry.ActionInstruction,
 ) (bool, bool) {
-	handler, ok := lookupWorkflowBuiltinAction(firstNonEmptyString(entry.PlatformBuiltin, entry.ID))
+	handler, ok := lookupWorkflowBuiltinAction(firstNonEmptyString(entry.Builtin, entry.Key.String()))
 	if !ok {
 		return false, false
 	}
@@ -1300,24 +1302,26 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 	return state
 }
 
-func (pc *FactoryPipelineCoordinator) resolveWorkflowGuard(guardID string) (runtimecontracts.GuardActionEntry, bool) {
+func (pc *FactoryPipelineCoordinator) resolveWorkflowGuard(guardID string) (runtimeregistry.GuardInstruction, bool) {
 	if pc == nil || pc.GuardRegistry() == nil {
-		return runtimecontracts.GuardActionEntry{}, false
+		return runtimeregistry.GuardInstruction{}, false
 	}
-	entry, ok := pc.GuardRegistry().Guard(guardID)
-	if !ok || !pc.GuardRegistry().IsExecutable(guardID) {
-		return runtimecontracts.GuardActionEntry{}, false
+	key := identity.NormalizeGuardKey(guardID)
+	entry, ok := pc.GuardRegistry().Guard(key)
+	if !ok || !pc.GuardRegistry().IsExecutable(key) {
+		return runtimeregistry.GuardInstruction{}, false
 	}
 	return entry, true
 }
 
-func (pc *FactoryPipelineCoordinator) resolveWorkflowAction(actionID string) (runtimecontracts.GuardActionEntry, bool) {
+func (pc *FactoryPipelineCoordinator) resolveWorkflowAction(actionID string) (runtimeregistry.ActionInstruction, bool) {
 	if pc == nil || pc.ActionRegistry() == nil {
-		return runtimecontracts.GuardActionEntry{}, false
+		return runtimeregistry.ActionInstruction{}, false
 	}
-	entry, ok := pc.ActionRegistry().Action(actionID)
-	if !ok || !pc.ActionRegistry().IsExecutable(actionID) {
-		return runtimecontracts.GuardActionEntry{}, false
+	key := identity.NormalizeActionKey(actionID)
+	entry, ok := pc.ActionRegistry().Action(key)
+	if !ok || !pc.ActionRegistry().IsExecutable(key) {
+		return runtimeregistry.ActionInstruction{}, false
 	}
 	return entry, true
 }

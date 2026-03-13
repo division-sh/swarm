@@ -5,7 +5,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/paths"
+	"empireai/internal/runtime/core/paths"
+	"empireai/internal/runtime/core/values"
 )
 
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
@@ -31,10 +32,10 @@ func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
 }
 
 func TestDedupIdentifier_UsesContractConfiguredKey(t *testing.T) {
-	base := BaseContext{Payload: map[string]any{
+	base := BaseContext{Payload: values.Wrap(map[string]any{
 		"dimension": "retention_architecture",
 		"from":      "legacy-sender",
-	}}
+	})}
 	got := dedupIdentifier(base, ExecutionState{}, events.Event{ID: "evt-1"}, &runtimecontracts.AccumulateSpec{
 		DedupBy:   "payload.dimension",
 		DedupPath: paths.Parse("payload.dimension"),
@@ -54,10 +55,10 @@ func TestRewriteExpression_PrefixesWorkflowVars(t *testing.T) {
 
 func TestResolveRefAndLiteral(t *testing.T) {
 	base := BaseContext{
-		Entity:   map[string]any{"status": "ready"},
-		Metadata: map[string]any{"status": "ready"},
-		Payload:  map[string]any{"score": 7, "nested": map[string]any{"value": "x"}},
-		Policy:   map[string]any{"mode": "strict"},
+		Entity:   values.Wrap(map[string]any{"status": "ready"}),
+		Metadata: values.Wrap(map[string]any{"status": "ready"}),
+		Payload:  values.Wrap(map[string]any{"score": 7, "nested": map[string]any{"value": "x"}}),
+		Policy:   values.Wrap(map[string]any{"mode": "strict"}),
 	}
 	state := ExecutionState{
 		Accumulated: map[string]any{"count": 2},
@@ -95,8 +96,8 @@ func TestResolveRefAndLiteral(t *testing.T) {
 
 func TestSetValuePathAndPayloadTransform(t *testing.T) {
 	base := BaseContext{
-		Payload:  map[string]any{"score": 9},
-		Metadata: map[string]any{"state": "researching"},
+		Payload:  values.Wrap(map[string]any{"score": 9}),
+		Metadata: values.Wrap(map[string]any{"state": "researching"}),
 	}
 	state := ExecutionState{
 		Accumulated: map[string]any{"count": 3},
@@ -198,10 +199,10 @@ func TestNextChainDepth_EnforcesLimit(t *testing.T) {
 }
 
 func TestExpectedAccumulatorTargets(t *testing.T) {
-	base := BaseContext{Payload: map[string]any{
+	base := BaseContext{Payload: values.Wrap(map[string]any{
 		"sources": []any{"b", "a", "a"},
 		"count":   "3",
-	}}
+	})}
 	if ids, count := expectedAccumulatorTargets(base, ExecutionState{}, paths.Parse("payload.sources"), "payload.sources"); len(ids) != 2 || count != 3 {
 		t.Fatalf("expectedAccumulatorTargets sources = %v, %d", ids, count)
 	}

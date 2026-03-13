@@ -119,7 +119,7 @@ func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 		EntityID: "entity-1",
 		Event:    events.Event{Type: "scan.completed"},
 		Handler:  runtimecontracts.SystemNodeEventHandler{ClearGates: []string{"gate_a"}},
-		State:    StateSnapshot{Metadata: map[string]any{"gates": map[string]any{"gate_a": true}}},
+		State:    StateSnapshot{Gates: map[string]bool{"gate_a": true}},
 	})
 	if err != nil {
 		t.Fatalf("Handle error: %v", err)

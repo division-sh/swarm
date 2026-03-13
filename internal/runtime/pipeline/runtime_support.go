@@ -9,8 +9,9 @@ import (
 	"strings"
 
 	"empireai/internal/events"
-	"empireai/internal/runtime/semanticview"
+	runtimeengine "empireai/internal/runtime/engine"
 	runtimescanmode "empireai/internal/runtime/scanmode"
+	"empireai/internal/runtime/semanticview"
 	runtimesharedjson "empireai/internal/runtime/sharedjson"
 )
 
@@ -36,6 +37,18 @@ type Bus interface {
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry)
+	EngineOutbox() runtimeengine.OutboxWriter
+	EngineDispatcher() runtimeengine.PostCommitDispatcher
+}
+
+type noOpEngineOutbox struct{}
+
+func (noOpEngineOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error { return nil }
+
+type noOpEngineDispatcher struct{}
+
+func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
+	return nil
 }
 
 func runtimeWarn(component string, format string, args ...any) {
@@ -137,6 +150,10 @@ func sqlTxFromContext(ctx context.Context) (*sql.Tx, bool) {
 	return tx, ok && tx != nil
 }
 
+func PipelineSQLTxFromContext(ctx context.Context) (*sql.Tx, bool) {
+	return sqlTxFromContext(ctx)
+}
+
 func withoutSQLTxContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -177,6 +194,44 @@ func flushPipelinePostCommitActions(actions []func()) {
 
 func FlushPipelinePostCommitActions(actions []func()) {
 	flushPipelinePostCommitActions(actions)
+}
+
+func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {
+	if ctx == nil || len(intents) == 0 {
+		return false
+	}
+	collected := false
+	if collector, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
+		cloned := make([]runtimeengine.EmitIntent, 0, len(intents))
+		for _, intent := range intents {
+			copyIntent := intent
+			copyIntent.Event = cloneEvent(intent.Event)
+			copyIntent.Recipients = append([]string{}, intent.Recipients...)
+			cloned = append(cloned, copyIntent)
+		}
+		*collector = append(*collector, cloned...)
+		collected = true
+	}
+	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
+		for _, intent := range intents {
+			*collector = append(*collector, cloneEvent(intent.Event))
+		}
+		collected = true
+	}
+	return collected
+}
+
+func WithPipelineEmitCollectors(ctx context.Context, eventsCollector *[]events.Event, intentCollector *[]runtimeengine.EmitIntent) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if eventsCollector != nil {
+		ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, eventsCollector)
+	}
+	if intentCollector != nil {
+		ctx = context.WithValue(ctx, pipelineEmitIntentCollectorKey{}, intentCollector)
+	}
+	return ctx
 }
 
 func pipelinePostCommitActionsFromContext(ctx context.Context) (*[]func(), bool) {

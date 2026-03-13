@@ -8,8 +8,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/core/identity"
 	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/identity"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -81,6 +81,12 @@ func (previewBus) PublishDirect(context.Context, events.Event, []string) error {
 func (previewBus) ResolveSubscribedRecipients(string) []string { return nil }
 
 func (previewBus) LogRuntime(context.Context, RuntimeLogEntry) {}
+
+func (previewBus) EngineOutbox() runtimeengine.OutboxWriter { return noOpEngineOutbox{} }
+
+func (previewBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
+	return noOpEngineDispatcher{}
+}
 
 func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, nodeID string, evt events.Event, state WorkflowState, policyOverrides map[string]any) (HandlerPreview, error) {
 	if bundle == nil {

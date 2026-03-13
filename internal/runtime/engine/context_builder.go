@@ -4,18 +4,12 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/core/identity"
+	"empireai/internal/runtime/core/values"
 	"empireai/internal/runtime/semanticview"
 )
 
-type BaseContext struct {
-	Entity     map[string]any
-	Policy     map[string]any
-	Metadata   map[string]any
-	Payload    map[string]any
-	Accumulated map[string]any
-	FanOut     map[string]any
-}
+type BaseContext = values.Context
 
 type ContextOverlay struct {
 	Payload     map[string]any
@@ -32,37 +26,36 @@ type ContextBuilderInput struct {
 }
 
 func BuildBaseContext(input ContextBuilderInput) BaseContext {
+	normalizeSnapshotGates(&input.State)
 	entity := cloneStringAnyMap(input.State.Metadata)
-	base := BaseContext{
-		Entity:      entity,
-		Policy:      map[string]any{},
-		Metadata:    cloneStringAnyMap(input.State.Metadata),
-		Payload:     cloneStringAnyMap(input.Payload),
-		Accumulated: map[string]any{},
-		FanOut:      map[string]any{},
-	}
+	base := values.NewContext()
+	base.Entity = values.Wrap(entity)
+	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.Metadata))
+	base.Gates = values.Wrap(boolMapToAnyMap(input.State.Gates))
+	base.Payload = values.Wrap(cloneStringAnyMap(input.Payload))
 	if input.Source != nil {
-		base.Policy = policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID.String()))
+		base.Policy = values.Wrap(policyDocumentToMap(input.Source.ResolvedPolicyForFlow(input.FlowID.String())))
 	}
-	base.Entity["entity_id"] = input.EntityID.String()
-	base.Entity["current_state"] = strings.TrimSpace(input.State.CurrentState)
-	base.Entity["workflow_name"] = strings.TrimSpace(input.State.WorkflowName)
-	base.Entity["workflow_version"] = strings.TrimSpace(input.State.WorkflowVersion)
+	base.Entity.Set("entity_id", input.EntityID.String())
+	base.Entity.Set("current_state", strings.TrimSpace(input.State.CurrentState))
+	base.Entity.Set("workflow_name", strings.TrimSpace(input.State.WorkflowName))
+	base.Entity.Set("workflow_version", strings.TrimSpace(input.State.WorkflowVersion))
+	base.Entity.Set("gates", boolMapToAnyMap(input.State.Gates))
 	return base
 }
 
 func WithPayload(base BaseContext, payload map[string]any) BaseContext {
-	base.Payload = cloneStringAnyMap(payload)
+	base.Payload = values.Wrap(cloneStringAnyMap(payload))
 	return base
 }
 
 func WithAccumulated(base BaseContext, accumulated map[string]any) BaseContext {
-	base.Accumulated = cloneStringAnyMap(accumulated)
+	base.Accumulated = values.Wrap(cloneStringAnyMap(accumulated))
 	return base
 }
 
 func WithFanOutItem(base BaseContext, fanOut map[string]any) BaseContext {
-	base.FanOut = cloneStringAnyMap(fanOut)
+	base.FanOut = values.Wrap(cloneStringAnyMap(fanOut))
 	return base
 }
 

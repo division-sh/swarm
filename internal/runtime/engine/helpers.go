@@ -10,9 +10,9 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/identity"
-	"empireai/internal/runtime/paths"
-	"empireai/internal/runtime/values"
+	"empireai/internal/runtime/core/identity"
+	"empireai/internal/runtime/core/paths"
+	"empireai/internal/runtime/core/values"
 )
 
 const handlerAccumulatorBucketKey = "handler_accumulators"
@@ -59,7 +59,7 @@ func dedupIdentifier(base BaseContext, state ExecutionState, evt events.Event, s
 			}
 		}
 	}
-	return arrivalIdentifier(evt, base.Payload)
+	return arrivalIdentifier(evt, base.Payload.Raw())
 }
 
 func rewriteExpression(expression string) string {
@@ -77,7 +77,6 @@ func lookupPath(source map[string]any, path string) (any, bool) {
 }
 
 func lookupParsedPath(source map[string]any, path paths.Path) (any, bool) {
-	source = cloneStringAnyMap(source)
 	if source == nil || path.IsZero() {
 		return nil, false
 	}
@@ -96,24 +95,22 @@ func resolveParsedRef(base BaseContext, state ExecutionState, ref paths.Path) (a
 	if ref.IsZero() {
 		return nil, false
 	}
-	switch ref.Root {
-	case paths.RootEntity:
-		return lookupParsedPath(base.Entity, ref)
-	case paths.RootPayload:
-		return lookupParsedPath(base.Payload, ref)
-	case paths.RootPolicy:
-		return lookupParsedPath(base.Policy, ref)
-	case paths.RootMetadata:
-		return lookupParsedPath(base.Metadata, ref)
-	case paths.RootAccumulated:
-		return lookupParsedPath(state.Accumulated, ref)
-	case paths.RootFanOut:
-		return lookupParsedPath(state.FanOut, ref)
-	case paths.RootComputed:
-		return lookupParsedPath(state.Computed, ref)
-	default:
-		return nil, false
+	if ref.HasExplicitRoot() {
+		if ref.Root == paths.RootAccumulated {
+			return state.AccumulatedBucket().Lookup(ref)
+		}
+		if ref.Root == paths.RootFanOut {
+			return state.FanOutBucket().Lookup(ref)
+		}
+		if ref.Root == paths.RootComputed {
+			return state.ComputedBucket().Lookup(ref)
+		}
+		if ref.Root == paths.RootGates {
+			return base.Gates.Lookup(ref)
+		}
+		return base.Lookup(ref)
 	}
+	return nil, false
 }
 
 func resolveContractPath(base BaseContext, state ExecutionState, parsed paths.Path, raw string) (any, bool) {
@@ -135,40 +132,43 @@ func resolveRef(base BaseContext, state ExecutionState, ref string) any {
 	}
 	switch {
 	case strings.HasPrefix(ref, "entity."):
-		value, _ := lookupPath(base.Entity, strings.TrimPrefix(ref, "entity."))
+		value, _ := base.Entity.Lookup(paths.Parse(strings.TrimPrefix(ref, "entity.")))
 		return value
 	case strings.HasPrefix(ref, "payload."):
-		value, _ := lookupPath(base.Payload, strings.TrimPrefix(ref, "payload."))
+		value, _ := base.Payload.Lookup(paths.Parse(strings.TrimPrefix(ref, "payload.")))
 		return value
 	case strings.HasPrefix(ref, "policy."):
-		value, _ := lookupPath(base.Policy, strings.TrimPrefix(ref, "policy."))
+		value, _ := base.Policy.Lookup(paths.Parse(strings.TrimPrefix(ref, "policy.")))
 		return value
 	case strings.HasPrefix(ref, "metadata."):
-		value, _ := lookupPath(base.Metadata, strings.TrimPrefix(ref, "metadata."))
+		value, _ := base.Metadata.Lookup(paths.Parse(strings.TrimPrefix(ref, "metadata.")))
+		return value
+	case strings.HasPrefix(ref, "gates."):
+		value, _ := base.Gates.Lookup(paths.Parse(strings.TrimPrefix(ref, "gates.")))
 		return value
 	case strings.HasPrefix(ref, "accumulated."):
-		value, _ := lookupPath(state.Accumulated, strings.TrimPrefix(ref, "accumulated."))
+		value, _ := state.AccumulatedBucket().Lookup(paths.Parse(strings.TrimPrefix(ref, "accumulated.")))
 		return value
 	case strings.HasPrefix(ref, "fan_out."):
-		value, _ := lookupPath(state.FanOut, strings.TrimPrefix(ref, "fan_out."))
+		value, _ := state.FanOutBucket().Lookup(paths.Parse(strings.TrimPrefix(ref, "fan_out.")))
 		return value
 	case strings.HasPrefix(ref, "computed."):
-		value, _ := lookupPath(state.Computed, strings.TrimPrefix(ref, "computed."))
+		value, _ := state.ComputedBucket().Lookup(paths.Parse(strings.TrimPrefix(ref, "computed.")))
 		return value
 	default:
-		if value, ok := lookupPath(base.Payload, ref); ok {
+		if value, ok := base.Payload.Lookup(paths.Parse(ref)); ok {
 			return value
 		}
-		if value, ok := lookupPath(base.Metadata, ref); ok {
+		if value, ok := base.Metadata.Lookup(paths.Parse(ref)); ok {
 			return value
 		}
-		if value, ok := lookupPath(state.Accumulated, ref); ok {
+		if value, ok := state.AccumulatedBucket().Lookup(paths.Parse(ref)); ok {
 			return value
 		}
-		if value, ok := lookupPath(state.FanOut, ref); ok {
+		if value, ok := state.FanOutBucket().Lookup(paths.Parse(ref)); ok {
 			return value
 		}
-		if value, ok := lookupPath(state.Computed, ref); ok {
+		if value, ok := state.ComputedBucket().Lookup(paths.Parse(ref)); ok {
 			return value
 		}
 		return nil
@@ -205,23 +205,7 @@ func setValuePath(target map[string]any, path string, value any) {
 }
 
 func setParsedValuePath(target map[string]any, path paths.Path, value any) {
-	if path.IsZero() {
-		return
-	}
-	parts := path.Segments
-	current := target
-	for i, part := range parts {
-		if i == len(parts)-1 {
-			current[part] = value
-			return
-		}
-		next, _ := asObject(current[part])
-		if next == nil {
-			next = map[string]any{}
-			current[part] = next
-		}
-		current = next
-	}
+	values.Wrap(target).SetPath(path, value)
 }
 
 func normalizeStateField(field string) string {
@@ -240,16 +224,13 @@ func applyDataAccumulationToState(state *StateSnapshot, payload map[string]any, 
 	if state == nil || len(spec.Writes) == 0 {
 		return
 	}
-	if state.Metadata == nil {
-		state.Metadata = map[string]any{}
-	}
 	for _, write := range spec.Writes {
 		target := normalizeStateField(write.Target())
 		if target == "" {
 			continue
 		}
 		if write.HasLiteralValue() {
-			state.Metadata[target] = write.Value.Literal
+			state.SetMetadata(target, write.Value.Literal)
 			continue
 		}
 		source := strings.TrimSpace(write.Source())
@@ -258,18 +239,18 @@ func applyDataAccumulationToState(state *StateSnapshot, payload map[string]any, 
 		}
 		if write.SourcePath.HasExplicitRoot() && write.SourcePath.Root == paths.RootPayload {
 			if value, ok := lookupParsedPath(payload, write.SourcePath); ok {
-				state.Metadata[target] = value
+				state.SetMetadata(target, value)
 				continue
 			}
 		}
 		if value, ok := lookupPath(payload, source); ok {
-			state.Metadata[target] = value
+			state.SetMetadata(target, value)
 		} else if value, ok := payload[source]; ok {
-			state.Metadata[target] = value
+			state.SetMetadata(target, value)
 		}
 	}
 	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
-		state.Metadata["last_data_accumulation_source"] = sourceEvent
+		state.SetMetadata("last_data_accumulation_source", sourceEvent)
 	}
 }
 
@@ -277,22 +258,22 @@ func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontr
 	if spec == nil {
 		return nil
 	}
-	bindings := spec.Bindings
-	if len(bindings) == 0 {
-		bindings = spec.TransformBindings()
+	entries := spec.Entries
+	if len(entries) == 0 {
+		entries = spec.TransformEntries()
 	}
-	if len(bindings) == 0 {
+	if len(entries) == 0 {
 		return nil
 	}
 	payload := map[string]any{}
-	for _, binding := range bindings {
-		value := resolveRefOrLiteral(base, state, binding.Source)
-		if binding.SourcePath.HasExplicitRoot() {
-			if resolved, ok := resolveParsedRef(base, state, binding.SourcePath); ok {
+	for _, entry := range entries {
+		value := resolveRefOrLiteral(base, state, entry.Source)
+		if entry.SourcePath.HasExplicitRoot() {
+			if resolved, ok := resolveParsedRef(base, state, entry.SourcePath); ok {
 				value = resolved
 			}
 		}
-		setParsedValuePath(payload, binding.TargetPath, value)
+		setParsedValuePath(payload, entry.TargetPath, value)
 	}
 	return payload
 }
@@ -321,7 +302,7 @@ func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType even
 	if nodeID.IsZero() {
 		return nil, false
 	}
-	root := values.Wrap(state.StateBuckets)
+	root := state.EnsureStateBucketsBucket()
 	bucket, ok := root.Map(nodeID.String())
 	if !ok {
 		return nil, false
@@ -356,10 +337,7 @@ func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType ev
 	if state == nil || acc == nil || nodeID.IsZero() {
 		return
 	}
-	if state.StateBuckets == nil {
-		state.StateBuckets = map[string]any{}
-	}
-	root := values.Wrap(state.StateBuckets)
+	root := state.EnsureStateBucketsBucket()
 	bucket := root.EnsureMap(nodeID.String())
 	accumulators := bucket.EnsureMap(handlerAccumulatorBucketKey)
 	received := map[string]any{}

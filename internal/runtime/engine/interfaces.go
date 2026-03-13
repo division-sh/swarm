@@ -4,7 +4,8 @@ import (
 	"context"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/core/identity"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -47,23 +48,23 @@ type PostCommitDispatcher interface {
 }
 
 type GuardRegistry interface {
-	HasGuard(id string) bool
-	IsExecutable(id string) bool
-	Guard(id string) (runtimecontracts.GuardActionEntry, bool)
+	HasGuard(id identity.GuardKey) bool
+	IsExecutable(id identity.GuardKey) bool
+	Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool)
 }
 
 type GuardRunner interface {
-	EvaluateGuard(ctx context.Context, id string, entry runtimecontracts.GuardActionEntry, execCtx ExecutionContext) (bool, bool, error)
+	EvaluateGuard(ctx context.Context, id identity.GuardKey, entry runtimeregistry.GuardInstruction, execCtx ExecutionContext) (bool, bool, error)
 }
 
 type ActionRegistry interface {
-	HasAction(id string) bool
-	IsExecutable(id string) bool
-	Action(id string) (runtimecontracts.GuardActionEntry, bool)
+	HasAction(id identity.ActionKey) bool
+	IsExecutable(id identity.ActionKey) bool
+	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
 }
 
 type ActionRunner interface {
-	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimecontracts.GuardActionEntry, execCtx ExecutionContext) (bool, error)
+	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx ExecutionContext) (bool, error)
 }
 
 type PayloadShaper interface {

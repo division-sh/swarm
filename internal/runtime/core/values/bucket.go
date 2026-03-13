@@ -1,6 +1,10 @@
 package values
 
-import "strings"
+import (
+	"strings"
+
+	"empireai/internal/runtime/core/paths"
+)
 
 type Bucket struct {
 	data map[string]any
@@ -18,6 +22,17 @@ func (b Bucket) Raw() map[string]any {
 		return map[string]any{}
 	}
 	return b.data
+}
+
+func (b Bucket) Clone() Bucket {
+	if len(b.data) == 0 {
+		return Wrap(map[string]any{})
+	}
+	out := make(map[string]any, len(b.data))
+	for key, value := range b.data {
+		out[key] = value
+	}
+	return Wrap(out)
 }
 
 func (b Bucket) Map(key string) (Bucket, bool) {
@@ -74,6 +89,40 @@ func (b Bucket) Keys() []string {
 		out = append(out, strings.TrimSpace(key))
 	}
 	return out
+}
+
+func (b Bucket) Lookup(path paths.Path) (any, bool) {
+	if path.IsZero() {
+		return nil, false
+	}
+	current := any(b.Raw())
+	for _, segment := range path.Segments {
+		object, ok := asMap(current)
+		if !ok {
+			return nil, false
+		}
+		current = object[segment]
+	}
+	return current, current != nil
+}
+
+func (b Bucket) SetPath(path paths.Path, value any) {
+	if path.IsZero() {
+		return
+	}
+	current := b.Raw()
+	for i, segment := range path.Segments {
+		if i == len(path.Segments)-1 {
+			current[segment] = value
+			return
+		}
+		next, ok := asMap(current[segment])
+		if !ok || next == nil {
+			next = map[string]any{}
+			current[segment] = next
+		}
+		current = next
+	}
 }
 
 func asMap(v any) (map[string]any, bool) {

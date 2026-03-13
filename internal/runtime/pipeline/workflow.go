@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -36,15 +37,15 @@ type WorkflowState struct {
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool
 
 type WorkflowTransition struct {
-	Name             string                                   `json:"name"`
-	From             []PipelineStage                          `json:"from"`
-	To               PipelineStage                            `json:"to"`
-	Reason           string                                   `json:"reason,omitempty"`
-	Trigger          string                                   `json:"trigger,omitempty"`
-	Node             string                                   `json:"node,omitempty"`
-	GuardIDs         []string                                 `json:"guard_ids,omitempty"`
-	Guard            WorkflowGuard                            `json:"-"`
-	Actions          []WorkflowAction                         `json:"actions,omitempty"`
+	Name             string                                    `json:"name"`
+	From             []PipelineStage                           `json:"from"`
+	To               PipelineStage                             `json:"to"`
+	Reason           string                                    `json:"reason,omitempty"`
+	Trigger          string                                    `json:"trigger,omitempty"`
+	Node             string                                    `json:"node,omitempty"`
+	GuardIDs         []string                                  `json:"guard_ids,omitempty"`
+	Guard            WorkflowGuard                             `json:"-"`
+	Actions          []WorkflowAction                          `json:"actions,omitempty"`
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation `json:"data_accumulation,omitempty"`
 }
 
@@ -215,10 +216,10 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 			Terminal:    isTerminal,
 		})
 	}
-	actionEntries := source.ActionEntries()
-	actionDefs := make(map[string]runtimecontracts.GuardActionEntry, len(actionEntries))
-	for _, action := range actionEntries {
-		id := strings.TrimSpace(action.ID)
+	actionInstructions := source.ActionInstructions()
+	actionDefs := make(map[string]runtimeregistry.ActionInstruction, len(actionInstructions))
+	for _, action := range actionInstructions {
+		id := action.Key.String()
 		if id == "" {
 			continue
 		}
@@ -245,7 +246,7 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 				Description:     strings.TrimSpace(def.Description),
 				Effect:          strings.TrimSpace(def.Effect),
 				Emits:           strings.TrimSpace(def.Emits),
-				PlatformBuiltin: strings.TrimSpace(def.PlatformBuiltin),
+				PlatformBuiltin: strings.TrimSpace(def.Builtin),
 			})
 		}
 		guardIDs := make([]string, 0, len(transition.Guards))

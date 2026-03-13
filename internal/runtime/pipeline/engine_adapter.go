@@ -4,16 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
-	"time"
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/core/identity"
 	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/identity"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type pipelineEngineEvaluator struct {
@@ -25,13 +23,13 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		return false, runtimeengine.ErrNotImplemented
 	}
 	return e.evaluator.EvalBool(expression, workflowExpressionContext{
-		Entity:  cloneStringAnyMap(ctx.Entity),
-		Payload: cloneStringAnyMap(ctx.Payload),
-		Policy:  cloneStringAnyMap(ctx.Policy),
+		Entity:  cloneStringAnyMap(ctx.Entity.Raw()),
+		Payload: cloneStringAnyMap(ctx.Payload.Raw()),
+		Policy:  cloneStringAnyMap(ctx.Policy.Raw()),
 		Vars: map[string]any{
-			"metadata":    cloneStringAnyMap(ctx.Metadata),
-			"accumulated": cloneStringAnyMap(ctx.Accumulated),
-			"fan_out":     cloneStringAnyMap(ctx.FanOut),
+			"metadata":    cloneStringAnyMap(ctx.Metadata.Raw()),
+			"accumulated": cloneStringAnyMap(ctx.Accumulated.Raw()),
+			"fan_out":     cloneStringAnyMap(ctx.FanOut.Raw()),
 		},
 	})
 }
@@ -102,6 +100,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		EntityID:     entityID,
 		CurrentState: strings.TrimSpace(string(state.Stage)),
 		Metadata:     cloneStringAnyMap(state.Metadata),
+		Gates:        workflowStateGatesAsBools(state.Metadata),
 		StateBuckets: map[string]any{},
 	}
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
@@ -114,6 +113,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 			out.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 			out.CurrentState = strings.TrimSpace(instance.CurrentState)
 			out.Metadata = cloneStringAnyMap(instance.Metadata)
+			out.Gates = workflowStateGatesAsBools(instance.Metadata)
 			out.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
 			out.TimerState = make([]runtimeengine.TimerState, 0, len(instance.TimerState))
 			for _, timer := range instance.TimerState {
@@ -157,34 +157,6 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	return nil
 }
 
-type pipelineEngineOutbox struct{}
-
-func (o pipelineEngineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
-	tx, ok := sqlTxFromContext(ctx)
-	if !ok || tx == nil || len(intents) == 0 {
-		return nil
-	}
-	for _, intent := range intents {
-		evt := intent.Event
-		if strings.TrimSpace(string(evt.Type)) == "" {
-			continue
-		}
-		if strings.TrimSpace(evt.ID) == "" {
-			evt.ID = uuid.NewString()
-		}
-		if evt.CreatedAt.IsZero() {
-			evt.CreatedAt = time.Now().UTC()
-		}
-		if err := appendEventTx(ctx, tx, evt); err != nil {
-			return err
-		}
-		if err := insertEventDeliveriesTx(ctx, tx, evt.ID, intent.Recipients); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type pipelineEngineTimerApplier struct {
 	coordinator *FactoryPipelineCoordinator
 }
@@ -224,42 +196,6 @@ func (a pipelineEngineTimerApplier) ApplyTimerIntents(ctx context.Context, entit
 	return nil
 }
 
-type pipelineEngineDispatcher struct {
-	coordinator *FactoryPipelineCoordinator
-}
-
-func (d pipelineEngineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
-	if d.coordinator == nil || len(intents) == 0 {
-		return nil
-	}
-	var collected bool
-	if collector, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
-		*collector = append(*collector, cloneEmitIntents(intents)...)
-		collected = true
-	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		for _, intent := range intents {
-			*collector = append(*collector, intent.Event)
-		}
-		collected = true
-	}
-	if collected {
-		return nil
-	}
-	for _, intent := range intents {
-		if len(intent.Recipients) > 0 {
-			if err := d.coordinator.bus.PublishDirect(ctx, intent.Event, intent.Recipients); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := d.coordinator.bus.Publish(ctx, intent.Event); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func newCoordinatorEngineEvaluator(pc *FactoryPipelineCoordinator) runtimeengine.Evaluator {
 	if pc == nil {
 		return nil
@@ -275,14 +211,20 @@ func coordinatorEngineDependencies(pc *FactoryPipelineCoordinator) runtimeengine
 	if source == nil {
 		source = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	}
+	var outbox runtimeengine.OutboxWriter
+	var dispatcher runtimeengine.PostCommitDispatcher
+	if pc.bus != nil {
+		outbox = pc.bus.EngineOutbox()
+		dispatcher = pc.bus.EngineDispatcher()
+	}
 	return runtimeengine.RuntimeDependencies{
 		Source:         source,
 		StateRepo:      pipelineEngineStateRepo{coordinator: pc},
 		TxRunner:       pipelineEngineTxRunner{db: pc.db},
 		Locker:         pipelineEngineLocker{coordinator: pc},
-		Outbox:         pipelineEngineOutbox{},
+		Outbox:         outbox,
 		TimerApplier:   pipelineEngineTimerApplier{coordinator: pc},
-		Dispatcher:     pipelineEngineDispatcher{coordinator: pc},
+		Dispatcher:     dispatcher,
 		GuardRegistry:  pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
 		GuardRunner:    pipelineEngineGuardRunner{coordinator: pc},
 		ActionRegistry: pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
@@ -294,30 +236,30 @@ func coordinatorEngineDependencies(pc *FactoryPipelineCoordinator) runtimeengine
 
 type pipelineEngineGuardRegistry struct{ registry GuardRegistry }
 
-func (r pipelineEngineGuardRegistry) HasGuard(id string) bool {
+func (r pipelineEngineGuardRegistry) HasGuard(id identity.GuardKey) bool {
 	return r.registry != nil && r.registry.HasGuard(id)
 }
-func (r pipelineEngineGuardRegistry) IsExecutable(id string) bool {
+func (r pipelineEngineGuardRegistry) IsExecutable(id identity.GuardKey) bool {
 	return r.registry != nil && r.registry.IsExecutable(id)
 }
-func (r pipelineEngineGuardRegistry) Guard(id string) (runtimecontracts.GuardActionEntry, bool) {
+func (r pipelineEngineGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
 	if r.registry == nil {
-		return runtimecontracts.GuardActionEntry{}, false
+		return runtimeregistry.GuardInstruction{}, false
 	}
 	return r.registry.Guard(id)
 }
 
 type pipelineEngineActionRegistry struct{ registry ActionRegistry }
 
-func (r pipelineEngineActionRegistry) HasAction(id string) bool {
+func (r pipelineEngineActionRegistry) HasAction(id identity.ActionKey) bool {
 	return r.registry != nil && r.registry.HasAction(id)
 }
-func (r pipelineEngineActionRegistry) IsExecutable(id string) bool {
+func (r pipelineEngineActionRegistry) IsExecutable(id identity.ActionKey) bool {
 	return r.registry != nil && r.registry.IsExecutable(id)
 }
-func (r pipelineEngineActionRegistry) Action(id string) (runtimecontracts.GuardActionEntry, bool) {
+func (r pipelineEngineActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
 	if r.registry == nil {
-		return runtimecontracts.GuardActionEntry{}, false
+		return runtimeregistry.ActionInstruction{}, false
 	}
 	return r.registry.Action(id)
 }
@@ -326,12 +268,12 @@ type pipelineEngineGuardRunner struct {
 	coordinator *FactoryPipelineCoordinator
 }
 
-func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id string, entry runtimecontracts.GuardActionEntry, execCtx runtimeengine.ExecutionContext) (bool, bool, error) {
+func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identity.GuardKey, entry runtimeregistry.GuardInstruction, execCtx runtimeengine.ExecutionContext) (bool, bool, error) {
 	pc := r.coordinator
 	if pc == nil {
 		return false, false, nil
 	}
-	handler, ok := lookupWorkflowBuiltinGuard(firstNonEmptyString(entry.PlatformBuiltin, id))
+	handler, ok := lookupWorkflowBuiltinGuard(firstNonEmptyString(entry.Builtin, id.String()))
 	if !ok {
 		return false, false, nil
 	}
@@ -343,9 +285,9 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id string,
 		event:       execCtx.Request.Event,
 		payload:     parsePayloadMap(execCtx.Request.Event.Payload),
 		entityID:    execCtx.Request.EntityID.String(),
-		policy:      cloneStringAnyMap(execCtx.Base.Policy),
-		accumulated: cloneStringAnyMap(execCtx.Base.Accumulated),
-		fanOut:      cloneStringAnyMap(execCtx.Base.FanOut),
+		policy:      cloneStringAnyMap(execCtx.Base.Policy.Raw()),
+		accumulated: cloneStringAnyMap(execCtx.Base.Accumulated.Raw()),
+		fanOut:      cloneStringAnyMap(execCtx.Base.FanOut.Raw()),
 	}
 	return handler(exec, strings.TrimSpace(entry.PolicyRef))
 }
@@ -354,12 +296,12 @@ type pipelineEngineActionRunner struct {
 	coordinator *FactoryPipelineCoordinator
 }
 
-func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimecontracts.GuardActionEntry, execCtx runtimeengine.ExecutionContext) (bool, error) {
+func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
 	pc := r.coordinator
 	if pc == nil {
 		return false, nil
 	}
-	actionID := strings.TrimSpace(firstNonEmptyString(entry.PlatformBuiltin, entry.ID, action.ID))
+	actionID := strings.TrimSpace(firstNonEmptyString(entry.Builtin, entry.Key.String(), action.ID))
 	if actionID == "" {
 		return false, nil
 	}
@@ -411,6 +353,12 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance == nil {
 		return
 	}
+	if len(mutation.Gates) > 0 {
+		if mutation.Metadata == nil {
+			mutation.Metadata = cloneStringAnyMap(instance.Metadata)
+		}
+		mutation.Metadata["gates"] = workflowBoolGatesAsMap(mutation.Gates)
+	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
 		instance.CurrentState = next
 	}
@@ -449,88 +397,12 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 }
 
-func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
-	if len(intents) == 0 {
-		return nil
-	}
-	out := make([]runtimeengine.EmitIntent, 0, len(intents))
-	for _, intent := range intents {
-		cloned := intent
-		cloned.Event = cloneEvent(intent.Event)
-		cloned.Recipients = append([]string{}, intent.Recipients...)
-		out = append(out, cloned)
-	}
-	return out
-}
-
 func cloneEvent(evt events.Event) events.Event {
 	cloned := evt
 	if len(evt.Payload) > 0 {
 		cloned.Payload = append([]byte(nil), evt.Payload...)
 	}
 	return cloned
-}
-
-func appendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	if tx == nil {
-		return nil
-	}
-	const q = `
-		INSERT INTO events (id, type, source_agent, task_id, vertical_id, payload, created_at)
-		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
-		ON CONFLICT (id) DO NOTHING
-	`
-	_, err := tx.ExecContext(
-		ctx,
-		q,
-		strings.TrimSpace(evt.ID),
-		strings.TrimSpace(string(evt.Type)),
-		strings.TrimSpace(evt.SourceAgent),
-		sanitizeOptionalUUID(strings.TrimSpace(evt.TaskID)),
-		sanitizeOptionalUUID(strings.TrimSpace(evt.EntityID())),
-		evt.Payload,
-		evt.CreatedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("append event: %w", err)
-	}
-	return nil
-}
-
-func insertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, recipients []string) error {
-	if tx == nil || strings.TrimSpace(eventID) == "" {
-		return nil
-	}
-	recipients = uniqueStrings(recipients)
-	if len(recipients) == 0 {
-		return nil
-	}
-	const q = `
-		INSERT INTO event_deliveries (event_id, agent_id, created_at)
-		VALUES ($1::uuid, $2, now())
-		ON CONFLICT (event_id, agent_id) DO NOTHING
-	`
-	for _, recipient := range recipients {
-		recipient = strings.TrimSpace(recipient)
-		if recipient == "" {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, q, eventID, recipient); err != nil {
-			return fmt.Errorf("insert event delivery (agent=%s): %w", recipient, err)
-		}
-	}
-	return nil
-}
-
-func sanitizeOptionalUUID(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if _, err := uuid.Parse(raw); err != nil {
-		return ""
-	}
-	return raw
 }
 
 func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowState {
@@ -543,6 +415,32 @@ func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowStat
 		state.Metadata = map[string]any{}
 	}
 	return state
+}
+
+func workflowStateGatesAsBools(metadata map[string]any) map[string]bool {
+	raw, _ := metadata["gates"].(map[string]any)
+	out := make(map[string]bool, len(raw))
+	for key, value := range raw {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if b, ok := value.(bool); ok {
+			out[key] = b
+		}
+	}
+	return out
+}
+
+func workflowBoolGatesAsMap(gates map[string]bool) map[string]any {
+	out := make(map[string]any, len(gates))
+	for key, value := range gates {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func engineTriggerContext(req runtimeengine.ExecutionRequest) workflowTriggerContext {

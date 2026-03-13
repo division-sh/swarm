@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"empireai/internal/runtime/core/paths"
 	flowmodel "empireai/internal/runtime/flowmodel"
-	"empireai/internal/runtime/paths"
 
 	"gopkg.in/yaml.v3"
 )
@@ -309,17 +309,19 @@ type ClearSpec struct {
 }
 
 type PayloadTransformSpec struct {
-	Mappings map[string]string  `yaml:"mappings"`
-	Fields   map[string]string  `yaml:"fields"`
-	Bindings []TransformBinding `yaml:"-"`
+	Mappings map[string]string `yaml:"mappings"`
+	Fields   map[string]string `yaml:"fields"`
+	Entries  []TransformSpec   `yaml:"-"`
 }
 
-type TransformBinding struct {
+type TransformSpec struct {
 	Target     string
 	TargetPath paths.Path
 	Source     string
 	SourcePath paths.Path
 }
+
+type TransformBinding = TransformSpec
 
 func (p *PayloadTransformSpec) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
@@ -331,23 +333,23 @@ func (p *PayloadTransformSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = PayloadTransformSpec(aux)
-	p.Bindings = p.TransformBindings()
+	p.Entries = p.TransformEntries()
 	return nil
 }
 
-func (p PayloadTransformSpec) TransformBindings() []TransformBinding {
+func (p PayloadTransformSpec) TransformEntries() []TransformSpec {
 	mappings := p.Mappings
 	if len(mappings) == 0 && len(p.Fields) > 0 {
 		mappings = p.Fields
 	}
-	out := make([]TransformBinding, 0, len(mappings))
+	out := make([]TransformSpec, 0, len(mappings))
 	for target, source := range mappings {
 		cleanTarget := strings.TrimSpace(target)
 		cleanSource := strings.TrimSpace(source)
 		if cleanTarget == "" || cleanSource == "" {
 			continue
 		}
-		out = append(out, TransformBinding{
+		out = append(out, TransformSpec{
 			Target:     cleanTarget,
 			TargetPath: paths.Parse(cleanTarget),
 			Source:     cleanSource,
@@ -355,6 +357,10 @@ func (p PayloadTransformSpec) TransformBindings() []TransformBinding {
 		})
 	}
 	return out
+}
+
+func (p PayloadTransformSpec) TransformBindings() []TransformBinding {
+	return p.TransformEntries()
 }
 
 type ConfigFromSpec struct {

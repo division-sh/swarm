@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"empireai/internal/events"
+	runtimeengine "empireai/internal/runtime/engine"
 )
 
 type pipelineTestBus struct{}
@@ -22,6 +23,10 @@ func (pipelineTestBus) SubscribeAll(string) <-chan events.Event     { return mak
 func (pipelineTestBus) ResetSubscribers()                           {}
 func (pipelineTestBus) LogRuntime(context.Context, RuntimeLogEntry) {}
 func (pipelineTestBus) ResolveSubscribedRecipients(string) []string { return nil }
+func (pipelineTestBus) EngineOutbox() runtimeengine.OutboxWriter    { return noOpEngineOutbox{} }
+func (pipelineTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
+	return noOpEngineDispatcher{}
+}
 
 func TestPipelineStateStore_DefaultsAndProcessedTracking(t *testing.T) {
 	store := NewPipelineStateStore(nil, &sync.Mutex{})

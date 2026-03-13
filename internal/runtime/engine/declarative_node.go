@@ -5,7 +5,7 @@ import (
 	"reflect"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/core/identity"
 )
 
 type DeclarativeNode struct {

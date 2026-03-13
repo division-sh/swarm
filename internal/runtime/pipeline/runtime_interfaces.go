@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/core/identity"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -53,17 +54,17 @@ type TransitionEvaluator interface {
 }
 
 type GuardRegistry interface {
-	HasGuard(id string) bool
-	IsExecutable(id string) bool
+	HasGuard(id identity.GuardKey) bool
+	IsExecutable(id identity.GuardKey) bool
 	GuardIDs() []string
-	Guard(id string) (runtimecontracts.GuardActionEntry, bool)
+	Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool)
 }
 
 type ActionRegistry interface {
-	HasAction(id string) bool
-	IsExecutable(id string) bool
+	HasAction(id identity.ActionKey) bool
+	IsExecutable(id identity.ActionKey) bool
 	ActionIDs() []string
-	Action(id string) (runtimecontracts.GuardActionEntry, bool)
+	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
 }
 
 func (pc *FactoryPipelineCoordinator) SemanticSource() semanticview.Source {

@@ -5,10 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeengine "empireai/internal/runtime/engine"
-	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
@@ -19,7 +17,7 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 	mutation := runtimeengine.StateMutation{
 		Metadata: map[string]any{
 			"research_context":              map[string]any{"summary": "done"},
-			"last_data_accumulation_event": "research.completed",
+			"last_data_accumulation_event":  "research.completed",
 			"last_data_accumulation_source": "research.completed",
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
@@ -37,37 +35,6 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 	}
 	if got := instance.Metadata["last_data_accumulation_event"]; got != "research.completed" {
 		t.Fatalf("last_data_accumulation_event = %#v", got)
-	}
-}
-
-func TestPipelineEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
-	bus := &recordingPipelineBus{}
-	dispatcher := pipelineEngineDispatcher{
-		coordinator: &FactoryPipelineCoordinator{bus: bus},
-	}
-	eventCollector := make([]events.Event, 0, 1)
-	intentCollector := make([]runtimeengine.EmitIntent, 0, 1)
-	ctx := context.WithValue(context.Background(), pipelineEmitCollectorKey{}, &eventCollector)
-	ctx = context.WithValue(ctx, pipelineEmitIntentCollectorKey{}, &intentCollector)
-
-	intent := runtimeengine.EmitIntent{
-		Event:      events.Event{Type: events.EventType("custom.emitted")}.WithEntityID("ent-1"),
-		ChainDepth: 3,
-	}
-	if err := dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("DispatchPostCommit: %v", err)
-	}
-	if got := len(intentCollector); got != 1 {
-		t.Fatalf("intent collector count = %d, want 1", got)
-	}
-	if got := intentCollector[0].ChainDepth; got != 3 {
-		t.Fatalf("intent chain depth = %d, want 3", got)
-	}
-	if got := len(eventCollector); got != 1 {
-		t.Fatalf("event collector count = %d, want 1", got)
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("bus published count = %d, want 0", got)
 	}
 }
 
@@ -137,47 +104,5 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 	flushPipelinePostCommitActions(cancelActions)
 	if got := len(scheduler.tasks); got != 0 {
 		t.Fatalf("scheduler tasks after cancel flush = %d, want 0", got)
-	}
-}
-
-func TestPipelineEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	defer db.Close()
-
-	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO events").
-		WithArgs("evt-1", "custom.emitted", "", "", "", sqlmock.AnyArg(), sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("INSERT INTO event_deliveries").
-		WithArgs("evt-1", "reviewer").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
-
-	tx, err := db.Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	ctx := withSQLTxContext(context.Background(), tx)
-	outbox := pipelineEngineOutbox{}
-	intent := runtimeengine.EmitIntent{
-		Event: events.Event{
-			ID:        "evt-1",
-			Type:      events.EventType("custom.emitted"),
-			Payload:   mustJSON(map[string]any{"entity_id": "ent-1"}),
-			CreatedAt: time.Now().UTC(),
-		}.WithEntityID("ent-1"),
-		Recipients: []string{"reviewer"},
-	}
-	if err := outbox.WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("WriteOutbox: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
 	}
 }

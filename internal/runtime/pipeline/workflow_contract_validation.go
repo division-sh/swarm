@@ -69,7 +69,7 @@ func validateWorkflowContracts(source semanticview.Source) error {
 			if actionID == "" {
 				continue
 			}
-			action, ok := source.ActionEntryByID(actionID)
+			action, ok := source.ActionInstructionByID(actionID)
 			if !ok {
 				errs = append(errs, fmt.Sprintf("transition %s references unknown action %s", id, actionID))
 				continue
@@ -79,7 +79,7 @@ func validateWorkflowContracts(source semanticview.Source) error {
 					errs = append(errs, fmt.Sprintf("transition %s action %s emits missing event %s", id, actionID, emits))
 				}
 			}
-			if !isExecutableWorkflowActionEntry(action) {
+			if !action.Executable() {
 				errs = append(errs, fmt.Sprintf("transition %s action %s has no executable runtime implementation", id, actionID))
 			}
 		}
@@ -88,12 +88,12 @@ func validateWorkflowContracts(source semanticview.Source) error {
 			if guardID == "" {
 				continue
 			}
-			guard, ok := source.GuardEntryByID(guardID)
+			guard, ok := source.GuardInstructionByID(guardID)
 			if !ok {
 				errs = append(errs, fmt.Sprintf("transition %s references unknown guard %s", id, guardID))
 				continue
 			}
-			if !isExecutableWorkflowGuardEntry(guard) {
+			if !guard.Executable() {
 				errs = append(errs, fmt.Sprintf("transition %s guard %s has no executable runtime implementation", id, guardID))
 			}
 		}
@@ -377,8 +377,8 @@ func workflowHandlerActionExecutable(source semanticview.Source, actionID string
 	if isSupportedWorkflowHandlerActionID(actionID) {
 		return true
 	}
-	entry, ok := source.ActionEntryByID(actionID)
-	return ok && isExecutableWorkflowActionEntry(entry)
+	entry, ok := source.ActionInstructionByID(actionID)
+	return ok && entry.Executable()
 }
 
 func validateWorkflowGuardOnFail(onFail string) error {

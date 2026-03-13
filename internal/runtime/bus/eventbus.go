@@ -31,6 +31,7 @@ type EventBus struct {
 	store               EventStore
 	logger              LoggerHook
 	semanticSource      semanticview.Source
+	outboxSweeperActive bool
 }
 
 type EventBusOptions struct {

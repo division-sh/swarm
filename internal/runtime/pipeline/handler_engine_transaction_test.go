@@ -8,11 +8,16 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeengine "empireai/internal/runtime/engine"
 )
 
 type recordingPipelineBus struct {
 	mu        sync.Mutex
 	publishes []events.Event
+}
+
+type recordingPipelineDispatcher struct {
+	bus *recordingPipelineBus
 }
 
 func (b *recordingPipelineBus) Publish(_ context.Context, evt events.Event) error {
@@ -29,6 +34,28 @@ func (*recordingPipelineBus) Subscribe(string, ...events.EventType) <-chan event
 func (*recordingPipelineBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
 func (*recordingPipelineBus) ResolveSubscribedRecipients(string) []string                 { return nil }
 func (*recordingPipelineBus) LogRuntime(context.Context, RuntimeLogEntry)                 {}
+func (*recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter                    { return noOpEngineOutbox{} }
+func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
+	return recordingPipelineDispatcher{bus: b}
+}
+
+func (d recordingPipelineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
+	if CollectPipelineEmitIntents(ctx, intents) {
+		return nil
+	}
+	for _, intent := range intents {
+		if len(intent.Recipients) > 0 {
+			if err := d.bus.PublishDirect(ctx, intent.Event, intent.Recipients); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.bus.Publish(ctx, intent.Event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (b *recordingPipelineBus) publishedCount() int {
 	b.mu.Lock()

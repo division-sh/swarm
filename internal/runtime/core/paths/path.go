@@ -10,6 +10,7 @@ const (
 	RootEntity
 	RootPolicy
 	RootMetadata
+	RootGates
 	RootAccumulated
 	RootFanOut
 	RootComputed
@@ -25,6 +26,8 @@ func (r PathRoot) String() string {
 		return "policy"
 	case RootMetadata:
 		return "metadata"
+	case RootGates:
+		return "gates"
 	case RootAccumulated:
 		return "accumulated"
 	case RootFanOut:
@@ -76,6 +79,8 @@ func parseRoot(text string) PathRoot {
 		return RootPolicy
 	case "metadata":
 		return RootMetadata
+	case "gates":
+		return RootGates
 	case "accumulated":
 		return RootAccumulated
 	case "fan_out":

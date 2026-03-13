@@ -10,8 +10,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/identity"
-	"empireai/internal/runtime/values"
+	"empireai/internal/runtime/core/identity"
+	"empireai/internal/runtime/core/values"
 )
 
 type Step string
@@ -169,6 +169,7 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 	if state.EntityID.IsZero() {
 		state.EntityID = req.EntityID
 	}
+	normalizeSnapshotGates(&state)
 	if req.EntityID.IsZero() {
 		return state, nil
 	}
@@ -187,6 +188,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}
+	normalizeSnapshotGates(&state)
 	if state.StateBuckets == nil {
 		state.StateBuckets = map[string]any{}
 	}
@@ -278,12 +280,11 @@ func (e *Executor) stepClearGates(frame *executionFrame) error {
 	frame.result.ClearGates = normalizeStrings(e.resolveClearGates(frame))
 	frame.result.StateMutation.ClearGates = append([]string{}, frame.result.ClearGates...)
 	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
-	gates := ensureGateMetadata(frame.state.State.Metadata)
-	mutationGates := ensureGateMetadata(frame.result.StateMutation.Metadata)
 	for _, gate := range frame.result.ClearGates {
-		gates[gate] = false
-		mutationGates[gate] = false
+		frame.state.State.SetGate(gate, false)
+		frame.result.StateMutation.SetGateValue(gate, false)
 	}
+	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
 	return nil
 }
 
@@ -342,8 +343,8 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent)
 	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
 	storeAccumulator(&frame.state.State, frame.req.NodeID, frame.req.Event.Type, acc)
-	frame.result.StateMutation.StateBuckets = cloneStringAnyMap(frame.state.State.StateBuckets)
-	frame.state.Accumulated[frame.req.NodeID.String()] = accumulatorExpressionValue(acc)
+	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
+	frame.state.SetAccumulated(frame.req.NodeID.String(), accumulatorExpressionValue(acc))
 	complete, err := accumulatorComplete(acc, spec, func(expression string, extraVars map[string]any) (bool, error) {
 		ctx := e.currentContext(frame)
 		if accumulation, ok := extraVars["accumulation"].(map[string]any); ok {
@@ -378,11 +379,11 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	if field == "" {
 		field = "computed"
 	}
-	frame.state.Computed[field] = value
-	frame.result.Computed[field] = value
-	frame.state.State.Metadata[field] = value
+	frame.state.SetComputed(field, value)
+	frame.result.SetComputed(field, value)
+	frame.state.State.SetMetadata(field, value)
 	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
-	frame.result.StateMutation.Metadata[field] = value
+	frame.result.StateMutation.SetMetadata(field, value)
 	return nil
 }
 
@@ -397,10 +398,9 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	frame.result.FanOutCount = len(items)
-	frame.state.FanOut = map[string]any{
-		"target": spec.Target,
-		"count":  len(items),
-	}
+	frame.state.FanOut = map[string]any{}
+	frame.state.SetFanOut("target", spec.Target)
+	frame.state.SetFanOut("count", len(items))
 	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
 	if err != nil {
 		frame.result.FailureClass = FailureDeadLetter
@@ -480,10 +480,10 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	frame.state.State.CurrentState = next
 	frame.result.StateMutation.NextState = next
 	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted,
-		"record_state_change",
-		"update_stage",
-		"cancel_stage_timers",
-		"start_stage_timers",
+		identity.ActionRecordStateChange.String(),
+		identity.ActionUpdateState.String(),
+		identity.ActionCancelStateTimers.String(),
+		identity.ActionStartStateTimers.String(),
 	)
 	frame.result.TimerIntents = append(frame.result.TimerIntents, e.buildTimerIntents(frame)...)
 	return nil
@@ -509,10 +509,9 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 	frame.result.SetsGate = name
 	frame.result.StateMutation.SetGate = name
 	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
-	gates := ensureGateMetadata(frame.state.State.Metadata)
-	mutationGates := ensureGateMetadata(frame.result.StateMutation.Metadata)
-	gates[name] = true
-	mutationGates[name] = true
+	frame.state.State.SetGate(name, true)
+	frame.result.StateMutation.SetGateValue(name, true)
+	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
 	return nil
 }
 
@@ -522,7 +521,7 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 		return nil
 	}
 	applyDataAccumulationToState(&frame.state.State, frame.payload, spec)
-	frame.state.State.Metadata["last_data_accumulation_event"] = strings.TrimSpace(string(frame.req.Event.Type))
+	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
 	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
 	frame.result.StateMutation.DataAccumulation = spec
 	return nil
@@ -570,14 +569,14 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 }
 
 func (e *Executor) stepAction(frame *executionFrame) error {
-	actionID := strings.TrimSpace(frame.req.Handler.Action.ID)
-	if actionID == "" {
+	actionKey := identity.NormalizeActionKey(frame.req.Handler.Action.ID)
+	if actionKey.IsZero() {
 		return nil
 	}
 	if e.deps.ActionRegistry != nil {
-		entry, ok := e.deps.ActionRegistry.Action(actionID)
-		if !ok || !e.deps.ActionRegistry.IsExecutable(actionID) {
-			return fmt.Errorf("action %q is not executable", actionID)
+		entry, ok := e.deps.ActionRegistry.Action(actionKey)
+		if !ok || !e.deps.ActionRegistry.IsExecutable(actionKey) {
+			return fmt.Errorf("action %q is not executable", actionKey.String())
 		}
 		if strings.TrimSpace(entry.Emits) != "" {
 			shaped, err := e.shapeEmitPayload(frame, entry.Emits, frame.payload)
@@ -603,11 +602,11 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 				return err
 			}
 			if !handled && strings.TrimSpace(entry.Emits) == "" {
-				return fmt.Errorf("action %q is not executable", actionID)
+				return fmt.Errorf("action %q is not executable", actionKey.String())
 			}
 		}
 	}
-	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, actionID)
+	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, actionKey.String())
 	return nil
 }
 
@@ -700,12 +699,16 @@ func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
 	if len(out.Metadata) == 0 {
 		out.Metadata = cloneStringAnyMap(base.Metadata)
 	}
+	if len(out.Gates) == 0 && len(base.Gates) > 0 {
+		out.Gates = mapsClone(base.Gates)
+	}
 	if len(out.StateBuckets) == 0 {
 		out.StateBuckets = cloneStringAnyMap(base.StateBuckets)
 	}
 	if len(out.TimerState) == 0 && len(base.TimerState) > 0 {
 		out.TimerState = append([]TimerState(nil), base.TimerState...)
 	}
+	normalizeSnapshotGates(&out)
 	return out
 }
 
@@ -713,9 +716,11 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx := WithPayload(frame.base, frame.payload)
 	ctx = WithAccumulated(ctx, frame.state.Accumulated)
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
-	ctx.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
-	ctx.Entity = cloneStringAnyMap(frame.base.Entity)
-	ctx.Entity["current_state"] = strings.TrimSpace(frame.state.State.CurrentState)
+	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.Metadata))
+	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.Gates))
+	ctx.Entity = frame.base.Entity.Clone()
+	ctx.Entity.Set("current_state", strings.TrimSpace(frame.state.State.CurrentState))
+	ctx.Entity.Set("gates", boolMapToAnyMap(frame.state.State.Gates))
 	return ctx
 }
 
@@ -768,11 +773,12 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	if id == "" {
 		return true, nil, nil
 	}
+	guardKey := identity.NormalizeGuardKey(id)
 	if e.deps.GuardRegistry == nil {
 		return false, []string{id}, fmt.Errorf("guard %q requires runtime registry", id)
 	}
-	entry, ok := e.deps.GuardRegistry.Guard(id)
-	if !ok || !e.deps.GuardRegistry.IsExecutable(id) {
+	entry, ok := e.deps.GuardRegistry.Guard(guardKey)
+	if !ok || !e.deps.GuardRegistry.IsExecutable(guardKey) {
 		return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
 	}
 	if strings.TrimSpace(entry.Check) != "" {
@@ -786,7 +792,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	}
 	if e.deps.GuardRunner != nil {
 		execCtx := e.executionContext(frame, StepGuard)
-		passed, handled, err := e.deps.GuardRunner.EvaluateGuard(frame.tx.Context(), id, entry, execCtx)
+		passed, handled, err := e.deps.GuardRunner.EvaluateGuard(frame.tx.Context(), guardKey, entry, execCtx)
 		if handled || err != nil {
 			return passed, []string{id}, err
 		}
@@ -881,8 +887,10 @@ func (e *Executor) resolveClearGates(frame *executionFrame) []string {
 	if !slices.Contains(frame.req.Handler.ClearGates, "*") {
 		return frame.req.Handler.ClearGates
 	}
-	gates, _ := asObject(frame.state.State.Metadata["gates"])
-	return normalizeStrings(stringSliceFromAny(mapsKeys(gates)))
+	if len(frame.state.State.Gates) == 0 {
+		return nil
+	}
+	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.Gates))))
 }
 
 func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error {
@@ -934,13 +942,6 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 	default:
 		return fmt.Errorf("unsupported guard on_fail action %q", action)
 	}
-}
-
-func ensureGateMetadata(metadata map[string]any) map[string]any {
-	if metadata == nil {
-		return map[string]any{}
-	}
-	return values.Wrap(metadata).EnsureMap("gates").Raw()
 }
 
 func mapsKeys(values map[string]any) []any {

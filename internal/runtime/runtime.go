@@ -336,6 +336,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			}
 		}
 	}
+	if rt.Bus != nil {
+		rt.Bus.StartOutboxSweeper(ctx, runtimebus.DefaultOutboxSweeperConfig())
+	}
 	if rt.Manager != nil {
 		rt.Manager.Run(ctx)
 	}

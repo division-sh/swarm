@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"empireai/internal/events"
 )
@@ -38,6 +39,14 @@ type TransactionalEventStore interface {
 	AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error
 	InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error
 	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error
+}
+
+type PipelineReceiptSweeperStore interface {
+	ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.Event, error)
+}
+
+type EventDeliveryReader interface {
+	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
 }
 
 type InMemoryEventStore struct{}

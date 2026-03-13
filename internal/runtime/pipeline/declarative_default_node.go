@@ -9,7 +9,7 @@ import (
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/core/identity"
 )
 
 type Event = events.Event

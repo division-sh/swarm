@@ -8,7 +8,8 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/identity"
+	"empireai/internal/runtime/core/identity"
+	runtimeregistry "empireai/internal/runtime/registry"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -23,7 +24,7 @@ type stubOutbox struct{}
 type stubTimerApplier struct{}
 type stubDispatcher struct{}
 type stubActionRegistry struct {
-	entries map[string]runtimecontracts.GuardActionEntry
+	entries map[identity.ActionKey]runtimeregistry.ActionInstruction
 }
 type stubActionRunner struct {
 	called []string
@@ -33,7 +34,7 @@ type stubEvaluator struct {
 	errs  map[string]error
 }
 type stubGuardRegistry struct {
-	entries map[string]runtimecontracts.GuardActionEntry
+	entries map[identity.GuardKey]runtimeregistry.GuardInstruction
 }
 type stubPayloadShaper struct{}
 
@@ -41,11 +42,11 @@ func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapsho
 	return StateSnapshot{}, false, nil
 }
 func (stubStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error { return nil }
-func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error          { return fn(stubTx{ctx: ctx}) }
+func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error                     { return fn(stubTx{ctx: ctx}) }
 func (stubLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
 }
-func (stubOutbox) WriteOutbox(context.Context, []EmitIntent) error            { return nil }
+func (stubOutbox) WriteOutbox(context.Context, []EmitIntent) error { return nil }
 func (stubTimerApplier) ApplyTimerIntents(context.Context, identity.EntityID, []TimerIntent) error {
 	return nil
 }
@@ -57,19 +58,22 @@ func (s stubEvaluator) EvalBool(expression string, _ BaseContext) (bool, error) 
 	return s.bools[expression], nil
 }
 func (s stubEvaluator) EvalValue(string, BaseContext) (any, error) { return nil, ErrNotImplemented }
-func (r stubGuardRegistry) HasGuard(id string) bool                 { _, ok := r.entries[id]; return ok }
-func (r stubGuardRegistry) IsExecutable(id string) bool            { _, ok := r.entries[id]; return ok }
-func (r stubGuardRegistry) Guard(id string) (runtimecontracts.GuardActionEntry, bool) {
+func (r stubGuardRegistry) HasGuard(id identity.GuardKey) bool     { _, ok := r.entries[id]; return ok }
+func (r stubGuardRegistry) IsExecutable(id identity.GuardKey) bool { _, ok := r.entries[id]; return ok }
+func (r stubGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
 	entry, ok := r.entries[id]
 	return entry, ok
 }
-func (r stubActionRegistry) HasAction(id string) bool { _, ok := r.entries[id]; return ok }
-func (r stubActionRegistry) IsExecutable(id string) bool { _, ok := r.entries[id]; return ok }
-func (r stubActionRegistry) Action(id string) (runtimecontracts.GuardActionEntry, bool) {
+func (r stubActionRegistry) HasAction(id identity.ActionKey) bool { _, ok := r.entries[id]; return ok }
+func (r stubActionRegistry) IsExecutable(id identity.ActionKey) bool {
+	_, ok := r.entries[id]
+	return ok
+}
+func (r stubActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
 	entry, ok := r.entries[id]
 	return entry, ok
 }
-func (r *stubActionRunner) ExecuteAction(_ context.Context, action runtimecontracts.ActionSpec, _ runtimecontracts.GuardActionEntry, _ ExecutionContext) (bool, error) {
+func (r *stubActionRunner) ExecuteAction(_ context.Context, action runtimecontracts.ActionSpec, _ runtimeregistry.ActionInstruction, _ ExecutionContext) (bool, error) {
 	r.called = append(r.called, action.ID)
 	return true, nil
 }
@@ -85,13 +89,13 @@ func (s stubTx) Context() context.Context { return s.ctx }
 
 func TestNewExecutor_DefaultsMaxChainDepth(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
+		Source:       stubSource(),
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
 		TimerApplier: stubTimerApplier{},
-		Dispatcher: stubDispatcher{},
+		Dispatcher:   stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -122,13 +126,13 @@ func TestExecutor_ValidateRequestChecksChainDepth(t *testing.T) {
 
 func TestExecutor_StepOrderIsStable(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
+		Source:       stubSource(),
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
 		TimerApplier: stubTimerApplier{},
-		Dispatcher: stubDispatcher{},
+		Dispatcher:   stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -194,13 +198,13 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  repo,
-		TxRunner:   orderedRunner{order: &order},
-		Locker:     orderedLocker{order: &order},
-		Outbox:     orderedOutbox{order: &order},
+		Source:       stubSource(),
+		StateRepo:    repo,
+		TxRunner:     orderedRunner{order: &order},
+		Locker:       orderedLocker{order: &order},
+		Outbox:       orderedOutbox{order: &order},
 		TimerApplier: orderedTimerApplier{order: &order},
-		Dispatcher: orderedDispatcher{order: &order},
+		Dispatcher:   orderedDispatcher{order: &order},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -255,11 +259,14 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		Locker:     stubLocker{},
 		Outbox:     stubOutbox{},
 		Dispatcher: stubDispatcher{},
-		GuardRegistry: stubGuardRegistry{entries: map[string]runtimecontracts.GuardActionEntry{
-			"registry_guard": {ID: "registry_guard", Check: "metadata.allowed == true"},
+		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
+			identity.NormalizeGuardKey("registry_guard"): {
+				Key:   identity.NormalizeGuardKey("registry_guard"),
+				Check: "metadata.allowed == true",
+			},
 		}},
-	 }, stubEvaluator{bools: map[string]bool{
-		"payload.score > 5":          true,
+	}, stubEvaluator{bools: map[string]bool{
+		"payload.score > 5":             true,
 		"vars.metadata.allowed == true": true,
 	}})
 	if err != nil {
@@ -406,10 +413,8 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 			ClearGates: []string{"*"},
 		},
 		State: StateSnapshot{
-			Metadata: map[string]any{
-				"gates": map[string]any{"gate_a": true, "gate_b": true},
-				"note":  "keep",
-			},
+			Metadata: map[string]any{"note": "keep"},
+			Gates:    map[string]bool{"gate_a": true, "gate_b": true},
 		},
 	})
 	if err != nil {
@@ -417,6 +422,9 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 	}
 	if got := result.ClearGates; !reflect.DeepEqual(got, []string{"gate_a", "gate_b"}) {
 		t.Fatalf("ClearGates = %#v", got)
+	}
+	if result.StateMutation.Gates["gate_a"] != false || result.StateMutation.Gates["gate_b"] != false {
+		t.Fatalf("typed gates not cleared: %#v", result.StateMutation.Gates)
 	}
 	gates, _ := result.StateMutation.Metadata["gates"].(map[string]any)
 	if gates["gate_a"] != false || gates["gate_b"] != false {
@@ -453,7 +461,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 			},
 		},
 		State: StateSnapshot{
-			Metadata: map[string]any{"gates": map[string]any{"review": true}},
+			Gates: map[string]bool{"review": true},
 		},
 	})
 	if err != nil {
@@ -473,8 +481,11 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 		Locker:     stubLocker{},
 		Outbox:     stubOutbox{},
 		Dispatcher: stubDispatcher{},
-		ActionRegistry: stubActionRegistry{entries: map[string]runtimecontracts.GuardActionEntry{
-			"notify": {ID: "notify", Emits: "action.emitted"},
+		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
+			identity.NormalizeActionKey("notify"): {
+				Key:   identity.NormalizeActionKey("notify"),
+				Emits: "action.emitted",
+			},
 		}},
 		ActionRunner:  runner,
 		PayloadShaper: stubPayloadShaper{},

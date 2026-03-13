@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeregistry "empireai/internal/runtime/registry"
 )
 
 type bundleSource struct {
@@ -38,17 +39,35 @@ func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract 
 func (s bundleSource) WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool) {
 	return s.bundle.WorkflowTimerByID(id)
 }
-func (s bundleSource) GuardEntries() []runtimecontracts.GuardActionEntry {
-	return s.bundle.GuardEntries()
+func (s bundleSource) GuardInstructions() []runtimeregistry.GuardInstruction {
+	entries := s.bundle.GuardEntries()
+	out := make([]runtimeregistry.GuardInstruction, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, runtimeregistry.GuardFromContract(entry))
+	}
+	return out
 }
-func (s bundleSource) GuardEntryByID(id string) (runtimecontracts.GuardActionEntry, bool) {
-	return s.bundle.GuardEntryByID(id)
+func (s bundleSource) GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool) {
+	entry, ok := s.bundle.GuardEntryByID(id)
+	if !ok {
+		return runtimeregistry.GuardInstruction{}, false
+	}
+	return runtimeregistry.GuardFromContract(entry), true
 }
-func (s bundleSource) ActionEntries() []runtimecontracts.GuardActionEntry {
-	return s.bundle.ActionEntries()
+func (s bundleSource) ActionInstructions() []runtimeregistry.ActionInstruction {
+	entries := s.bundle.ActionEntries()
+	out := make([]runtimeregistry.ActionInstruction, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, runtimeregistry.ActionFromContract(entry))
+	}
+	return out
 }
-func (s bundleSource) ActionEntryByID(id string) (runtimecontracts.GuardActionEntry, bool) {
-	return s.bundle.ActionEntryByID(id)
+func (s bundleSource) ActionInstructionByID(id string) (runtimeregistry.ActionInstruction, bool) {
+	entry, ok := s.bundle.ActionEntryByID(id)
+	if !ok {
+		return runtimeregistry.ActionInstruction{}, false
+	}
+	return runtimeregistry.ActionFromContract(entry), true
 }
 func (s bundleSource) FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument {
 	if s.bundle == nil {
@@ -60,8 +79,10 @@ func (s bundleSource) FlowSchemaEntries() map[string]runtimecontracts.FlowSchema
 	}
 	return out
 }
-func (s bundleSource) FlowInitialStage(flowID string) string { return s.bundle.FlowInitialStage(flowID) }
-func (s bundleSource) FlowStates(flowID string) []string     { return s.bundle.FlowStates(flowID) }
+func (s bundleSource) FlowInitialStage(flowID string) string {
+	return s.bundle.FlowInitialStage(flowID)
+}
+func (s bundleSource) FlowStates(flowID string) []string { return s.bundle.FlowStates(flowID) }
 func (s bundleSource) FlowTerminalStages(flowID string) []string {
 	return s.bundle.FlowTerminalStages(flowID)
 }

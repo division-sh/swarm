@@ -1,6 +1,9 @@
 package semanticview
 
-import runtimecontracts "empireai/internal/runtime/contracts"
+import (
+	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimeregistry "empireai/internal/runtime/registry"
+)
 
 type Source interface {
 	WorkflowVersion() string
@@ -12,10 +15,10 @@ type Source interface {
 	WorkflowTransitions() []runtimecontracts.WorkflowTransitionContract
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool)
-	GuardEntries() []runtimecontracts.GuardActionEntry
-	GuardEntryByID(id string) (runtimecontracts.GuardActionEntry, bool)
-	ActionEntries() []runtimecontracts.GuardActionEntry
-	ActionEntryByID(id string) (runtimecontracts.GuardActionEntry, bool)
+	GuardInstructions() []runtimeregistry.GuardInstruction
+	GuardInstructionByID(id string) (runtimeregistry.GuardInstruction, bool)
+	ActionInstructions() []runtimeregistry.ActionInstruction
+	ActionInstructionByID(id string) (runtimeregistry.ActionInstruction, bool)
 	FlowSchemaEntries() map[string]runtimecontracts.FlowSchemaDocument
 	FlowInitialStage(flowID string) string
 	FlowStates(flowID string) []string

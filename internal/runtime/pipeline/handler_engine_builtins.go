@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"empireai/internal/runtime/core/identity"
 )
 
 type workflowBuiltinGuardFunc func(*handlerEngineExecution, string) (bool, bool, error)
@@ -18,11 +20,11 @@ var workflowBuiltinGuardHandlers = map[string]workflowBuiltinGuardFunc{
 }
 
 var workflowBuiltinActionHandlers = map[string]workflowBuiltinActionFunc{
-	"increment_revision_count": builtinActionIncrementRevisionCount,
-	"record_state_change":      builtinActionImplicitNoop,
-	"update_stage":             builtinActionImplicitNoop,
-	"cancel_stage_timers":      builtinActionImplicitNoop,
-	"start_stage_timers":       builtinActionImplicitNoop,
+	"increment_revision_count":                builtinActionIncrementRevisionCount,
+	identity.ActionRecordStateChange.String(): builtinActionImplicitNoop,
+	identity.ActionUpdateState.String():       builtinActionImplicitNoop,
+	identity.ActionCancelStateTimers.String(): builtinActionImplicitNoop,
+	identity.ActionStartStateTimers.String():  builtinActionImplicitNoop,
 }
 
 func lookupWorkflowBuiltinGuard(id string) (workflowBuiltinGuardFunc, bool) {
