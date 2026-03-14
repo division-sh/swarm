@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -122,16 +123,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
-	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
-		if runtimeEnvBool("MAS_EMIT_SCHEMA_STRICT", true) {
-			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
-		}
-		sample := generated
-		if len(sample) > 10 {
-			sample = sample[:10]
-		}
-		log.Printf("emit schema hardening warning: %d agent-emitted event schemas are missing explicit definitions; add explicit schemas (sample: %s)", len(generated), strings.Join(sample, ", "))
-	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -216,6 +207,20 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			return managerRef
 		},
 	}, stores.ScheduleStore)
+	runtimetools.InitEventSchemaRegistry(opts.WorkflowModule.SemanticSource())
+	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
+		if runtimeEnvBool("MAS_EMIT_SCHEMA_STRICT", true) {
+			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
+		}
+		sample := generated
+		if len(sample) > 10 {
+			sample = sample[:10]
+		}
+		slog.Warn("emit schema hardening: agent-emitted event schemas missing explicit definitions",
+			"count", len(generated),
+			"sample", strings.Join(sample, ", "),
+		)
+	}
 
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions())
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{

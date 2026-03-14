@@ -11,28 +11,47 @@ import (
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
+	"empireai/internal/runtime/semanticview"
 )
 
 var (
-	emitToolIndexOnce sync.Once
+	emitRegistryMu    sync.RWMutex
 	emitToolToEvent   map[string]string
 	activeSchemas     map[string]EmitSchema
 	generatedSchemas  map[string]struct{}
+	emitRegistryReady bool
 )
 
+func InitEventSchemaRegistry(source semanticview.Source) {
+	emitRegistryMu.Lock()
+	defer emitRegistryMu.Unlock()
+
+	var catalog map[string]runtimecontracts.EventCatalogEntry
+	if source != nil {
+		catalog = source.EventEntries()
+	}
+	activeSchemas = runtimecontracts.EventSchemaRegistryFromCatalog(catalog)
+	runtimecontracts.SetActiveEventSchemaRegistry(activeSchemas)
+	generatedSchemas = make(map[string]struct{})
+	missing := missingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
+	for _, eventType := range missing {
+		generatedSchemas[eventType] = struct{}{}
+	}
+	emitToolToEvent = make(map[string]string, len(activeSchemas))
+	for eventType := range activeSchemas {
+		emitToolToEvent[EmitToolName(eventType)] = eventType
+	}
+	emitRegistryReady = true
+}
+
 func ensureEventSchemaRegistry() {
-	emitToolIndexOnce.Do(func() {
-		activeSchemas = runtimecontracts.EventSchemaRegistry()
-		generatedSchemas = make(map[string]struct{})
-		missing := missingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
-		for _, eventType := range missing {
-			generatedSchemas[eventType] = struct{}{}
-		}
-		emitToolToEvent = make(map[string]string, len(activeSchemas))
-		for eventType := range activeSchemas {
-			emitToolToEvent[EmitToolName(eventType)] = eventType
-		}
-	})
+	emitRegistryMu.RLock()
+	ready := emitRegistryReady
+	emitRegistryMu.RUnlock()
+	if ready {
+		return
+	}
+	InitEventSchemaRegistry(nil)
 }
 
 func missingProducerEventSchemas(producerRoles func() []string, producerEvents func(string) []string, registry map[string]EmitSchema) []string {

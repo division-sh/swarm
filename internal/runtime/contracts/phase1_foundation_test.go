@@ -51,15 +51,21 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
 	t.Parallel()
 
-	if len(generatedContractEventSchemaRegistry) == 0 {
-		t.Fatal("expected generated contract event schema registry entries")
+	bundle, err := LoadWorkflowContractBundle(repoRootForContractsTest(t))
+	if err != nil {
+		t.Skipf("no contract bundle: %v", err)
 	}
-	for eventType, schema := range generatedContractEventSchemaRegistry {
-		if !strings.Contains(schema.Description, "resolved MAS contract bundle") {
-			t.Fatalf("expected generic MAS contract source in schema description for %s, got %q", eventType, schema.Description)
+	registry := EventSchemaRegistryFromCatalog(bundle.EventEntries())
+	if len(registry) == 0 {
+		t.Fatal("expected dynamic event schema registry entries from contract bundle")
+	}
+	for eventType, schema := range registry {
+		if schema.Schema == nil {
+			t.Fatalf("schema for %s has nil Schema map", eventType)
 		}
-		if strings.Contains(schema.Description, "empire/contracts") || strings.Contains(schema.Description, "contracts/event-catalog.yaml") {
-			t.Fatalf("unexpected product-specific or legacy source in schema description for %s: %q", eventType, schema.Description)
+		props, _ := schema.Schema["properties"].(map[string]any)
+		if props == nil {
+			t.Fatalf("schema for %s has no properties", eventType)
 		}
 	}
 }

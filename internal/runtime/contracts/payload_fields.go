@@ -3,22 +3,13 @@ package contracts
 import (
 	"sort"
 	"strings"
-	"sync"
-)
-
-var (
-	eventPayloadFieldsOnce sync.Once
-	eventPayloadFields     map[string][]string
 )
 
 // EventPayloadFields is derived from the generated schema registry rather than
 // maintained as a second parallel artifact. It preserves a stable copy of the
 // generated top-level payload property names for parity checks and emit schemas.
 func EventPayloadFields() map[string][]string {
-	eventPayloadFieldsOnce.Do(func() {
-		eventPayloadFields = deriveEventPayloadFields(generatedContractEventSchemaRegistry)
-	})
-	return cloneEventPayloadFields(eventPayloadFields)
+	return cloneEventPayloadFields(deriveEventPayloadFields(EventSchemaRegistry()))
 }
 
 func deriveEventPayloadFields(registry map[string]EventSchema) map[string][]string {
