@@ -519,10 +519,11 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	if len(emitTools) > 0 {
 		toolsLine = strings.Join(emitTools, ", ")
 	}
+	entityToolsLine := "\n- Available entity persistence tools: get_entity, save_entity_field, create_entity, search_entities, query_metrics"
 	strictRequirement := ""
 	strictRequirement = runtimetools.RequiredEmitToolContractText(cfg.Role, evt)
 	return fmt.Sprintf(
-		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s",
+		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s%s",
 		cfg.ID,
 		cfg.Role,
 		cfg.Mode,
@@ -533,6 +534,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 		evt.EntityID(),
 		payload,
 		toolsLine,
+		entityToolsLine,
 		strictRequirement,
 	)
 }

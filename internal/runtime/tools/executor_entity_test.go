@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -151,7 +152,40 @@ func TestEntityTools_CreateEntityDuplicate(t *testing.T) {
 	}
 }
 
+func TestEntityTools_ConstrainedAllowedToolsStillPermitEntityTools(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
+		ID:   "tester",
+		Role: "operator",
+		Config: mustJSONRaw(t, map[string]any{
+			"allowed_tools": []string{"emit_something"},
+		}),
+	})
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_type": "accounts",
+		"entity_id":   entityID,
+		"fields": map[string]any{
+			"status": "open",
+			"score":  11.0,
+			"active": true,
+		},
+	}); err != nil {
+		t.Fatalf("create_entity with constrained allowed_tools: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "get_entity", map[string]any{
+		"entity_type": "accounts",
+		"entity_id":   entityID,
+	}); err != nil {
+		t.Fatalf("get_entity with constrained allowed_tools: %v", err)
+	}
+}
+
 func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
+	t.Helper()
+	return newEntityToolTestExecutorWithActor(t, models.AgentConfig{ID: "tester", Role: "operator"})
+}
+
+func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -183,7 +217,6 @@ func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Exe
 		SQLDB:          db,
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
-	actor := models.AgentConfig{ID: "tester", Role: "operator"}
 	return runtimetools.WithActor(context.Background(), actor), exec
 }
 
@@ -194,4 +227,13 @@ func asString(v any) string {
 	default:
 		return ""
 	}
+}
+
+func mustJSONRaw(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	return raw
 }
