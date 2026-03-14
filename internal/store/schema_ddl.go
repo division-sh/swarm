@@ -1,0 +1,314 @@
+package store
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strings"
+
+	runtimecontracts "empireai/internal/runtime/contracts"
+)
+
+type SchemaTableDDL struct {
+	TableName   string
+	SchemaKind  string
+	ColumnCount int
+	Statements  []string
+}
+
+var (
+	schemaDDLIdentifierPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	schemaDDLNumericPattern    = regexp.MustCompile(`^numeric\(\s*(\d+)\s*,\s*(\d+)\s*\)$`)
+	schemaDDLCreateTableName   = regexp.MustCompile(`(?is)^create\s+table(?:\s+if\s+not\s+exists)?\s+"?([a-z_][a-z0-9_]*)"?`)
+)
+
+func SchemaFieldTypeToDDL(schemaType string) (string, error) {
+	schemaType = strings.TrimSpace(schemaType)
+	if schemaType == "" {
+		return "", fmt.Errorf("schema type is required")
+	}
+	normalized := strings.ToLower(schemaType)
+	switch normalized {
+	case "text", "string":
+		return "TEXT", nil
+	case "integer":
+		return "BIGINT", nil
+	case "boolean":
+		return "BOOLEAN", nil
+	case "jsonb":
+		return "JSONB", nil
+	case "timestamp":
+		return "TIMESTAMPTZ", nil
+	case "uuid":
+		return "UUID", nil
+	}
+	if matches := schemaDDLNumericPattern.FindStringSubmatch(normalized); len(matches) == 3 {
+		return fmt.Sprintf("NUMERIC(%s,%s)", matches[1], matches[2]), nil
+	}
+	return "", fmt.Errorf("unknown schema type %q", schemaType)
+}
+
+func GeneratePlatformTableDDLs(spec runtimecontracts.PlatformSpecDocument) ([]SchemaTableDDL, error) {
+	rawDDL := strings.TrimSpace(spec.WorkflowState.DDL)
+	if rawDDL == "" {
+		return nil, fmt.Errorf("platform spec workflow_state.ddl is required")
+	}
+	// TODO(phase4): the current platform spec exposes workflow_state.ddl but does not yet expose
+	// separate DDL blocks for the event store or schema_version helper tables.
+	statements, err := normalizePlatformDDLStatements(rawDDL)
+	if err != nil {
+		return nil, fmt.Errorf("platform spec workflow_state.ddl: %w", err)
+	}
+	tableName := "workflow_instances"
+	for _, statement := range statements {
+		if parsedTable := schemaDDLExtractTableName(statement); parsedTable != "" {
+			tableName = parsedTable
+			break
+		}
+	}
+	return []SchemaTableDDL{{
+		TableName:   tableName,
+		SchemaKind:  "platform_spec",
+		ColumnCount: schemaDDLColumnCount(statements),
+		Statements:  statements,
+	}}, nil
+}
+
+func GenerateEntityTableDDLs(schema runtimecontracts.EntitySchema) ([]SchemaTableDDL, error) {
+	if schema.Empty() {
+		return nil, nil
+	}
+	groups := append([]runtimecontracts.EntitySchemaGroup{}, schema.Groups...)
+	sort.Slice(groups, func(i, j int) bool {
+		return strings.TrimSpace(groups[i].Name) < strings.TrimSpace(groups[j].Name)
+	})
+	plans := make([]SchemaTableDDL, 0, len(groups))
+	seenTables := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		tableName, err := validateSchemaDDLIdentifier(group.Name, "entity schema group")
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seenTables[tableName]; exists {
+			return nil, fmt.Errorf("entity schema group %q declares duplicate table %q", strings.TrimSpace(group.Name), tableName)
+		}
+		seenTables[tableName] = struct{}{}
+
+		columnDefs := []string{
+			`"entity_id" UUID PRIMARY KEY`,
+			`"created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+			`"updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		}
+		seenColumns := map[string]struct{}{
+			"entity_id":  {},
+			"created_at": {},
+			"updated_at": {},
+		}
+		indexStatements := make([]string, 0, len(group.Fields))
+		for _, field := range group.Fields {
+			columnName, err := validateSchemaDDLIdentifier(field.Name, fmt.Sprintf("entity schema group %s field", tableName))
+			if err != nil {
+				return nil, err
+			}
+			if _, exists := seenColumns[columnName]; exists {
+				return nil, fmt.Errorf("entity schema group %s declares duplicate column %s", tableName, columnName)
+			}
+			seenColumns[columnName] = struct{}{}
+			columnType, err := SchemaFieldTypeToDDL(field.Type)
+			if err != nil {
+				return nil, fmt.Errorf("entity schema group %s field %s: %w", tableName, columnName, err)
+			}
+			columnDef := fmt.Sprintf("%s %s", quoteIdent(columnName), columnType)
+			if !field.Nullable || field.Primary {
+				columnDef += " NOT NULL"
+			}
+			if field.Primary {
+				columnDef += " UNIQUE"
+			}
+			columnDefs = append(columnDefs, columnDef)
+			if field.Indexed {
+				indexName := schemaDDLIndexName("idx", tableName, columnName)
+				indexStatements = append(indexStatements,
+					fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), quoteIdent(columnName)),
+				)
+			}
+		}
+		statements := []string{
+			fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n    %s\n)", quoteIdent(tableName), strings.Join(columnDefs, ",\n    ")),
+		}
+		statements = append(statements, indexStatements...)
+		plans = append(plans, SchemaTableDDL{
+			TableName:   tableName,
+			SchemaKind:  "entity_schema",
+			ColumnCount: len(columnDefs),
+			Statements:  statements,
+		})
+	}
+	return plans, nil
+}
+
+func GenerateNodeStateTableDDLs(nodes map[string]runtimecontracts.SystemNodeContract) ([]SchemaTableDDL, error) {
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	nodeIDs := make([]string, 0, len(nodes))
+	for nodeID := range nodes {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	sort.Strings(nodeIDs)
+	plans := make([]SchemaTableDDL, 0, len(nodeIDs))
+	tableOwners := map[string]string{}
+	for _, nodeID := range nodeIDs {
+		node := nodes[nodeID]
+		if strings.TrimSpace(node.StateTable) == "" {
+			continue
+		}
+		tableName, err := validateSchemaDDLIdentifier(node.StateTable, fmt.Sprintf("node %s state_table", strings.TrimSpace(nodeID)))
+		if err != nil {
+			return nil, err
+		}
+		if owner, exists := tableOwners[tableName]; exists {
+			return nil, fmt.Errorf("state table %s declared by multiple nodes: %s, %s", tableName, owner, strings.TrimSpace(nodeID))
+		}
+		tableOwners[tableName] = strings.TrimSpace(nodeID)
+
+		columnDefs := []string{
+			`"entity_id" UUID NOT NULL`,
+			`"node_id" TEXT NOT NULL`,
+			`"updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		}
+		seenColumns := map[string]struct{}{
+			"entity_id":  {},
+			"node_id":    {},
+			"updated_at": {},
+		}
+		for _, field := range node.StateSchema.Fields {
+			columnName, err := validateSchemaDDLIdentifier(field.Name, fmt.Sprintf("node %s state_schema field", strings.TrimSpace(nodeID)))
+			if err != nil {
+				return nil, err
+			}
+			if _, exists := seenColumns[columnName]; exists {
+				return nil, fmt.Errorf("node %s state table %s declares duplicate column %s", strings.TrimSpace(nodeID), tableName, columnName)
+			}
+			seenColumns[columnName] = struct{}{}
+			columnType, err := SchemaFieldTypeToDDL(field.Type)
+			if err != nil {
+				return nil, fmt.Errorf("node %s state table %s field %s: %w", strings.TrimSpace(nodeID), tableName, columnName, err)
+			}
+			columnDefs = append(columnDefs, fmt.Sprintf("%s %s", quoteIdent(columnName), columnType))
+		}
+		columnDefs = append(columnDefs, `PRIMARY KEY ("entity_id", "node_id")`)
+		plans = append(plans, SchemaTableDDL{
+			TableName:   tableName,
+			SchemaKind:  "state_schema",
+			ColumnCount: len(columnDefs) - 1,
+			Statements: []string{
+				fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (\n    %s\n)", quoteIdent(tableName), strings.Join(columnDefs, ",\n    ")),
+			},
+		})
+	}
+	return plans, nil
+}
+
+func FlattenSchemaTableDDLs(plans []SchemaTableDDL) []string {
+	if len(plans) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(plans)*2)
+	for _, plan := range plans {
+		for _, statement := range plan.Statements {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			out = append(out, statement)
+		}
+	}
+	return out
+}
+
+func validateSchemaDDLIdentifier(name, context string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("%s identifier is required", strings.TrimSpace(context))
+	}
+	if !schemaDDLIdentifierPattern.MatchString(name) {
+		return "", fmt.Errorf("%s identifier %q must match %s", strings.TrimSpace(context), name, schemaDDLIdentifierPattern.String())
+	}
+	return name, nil
+}
+
+func schemaDDLIndexName(parts ...string) string {
+	raw := strings.Join(parts, "_")
+	name := sanitizeSchemaIdent(raw)
+	if name == "" {
+		return "idx_generated"
+	}
+	return name
+}
+
+func normalizePlatformDDLStatements(rawDDL string) ([]string, error) {
+	chunks := strings.Split(rawDDL, ";")
+	statements := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		statement := strings.TrimSpace(chunk)
+		if statement == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(strings.ToUpper(statement), "CREATE TABLE "):
+			statement = schemaDDLEnsureIfNotExists(statement, "CREATE TABLE")
+		case strings.HasPrefix(strings.ToUpper(statement), "CREATE INDEX "):
+			statement = schemaDDLEnsureIfNotExists(statement, "CREATE INDEX")
+		default:
+			return nil, fmt.Errorf("unsupported platform DDL statement %q", statement)
+		}
+		statements = append(statements, statement)
+	}
+	if len(statements) == 0 {
+		return nil, fmt.Errorf("no executable platform DDL statements found")
+	}
+	return statements, nil
+}
+
+func schemaDDLEnsureIfNotExists(statement, prefix string) string {
+	statement = strings.TrimSpace(statement)
+	upper := strings.ToUpper(statement)
+	if strings.HasPrefix(upper, prefix+" IF NOT EXISTS ") {
+		return statement
+	}
+	return prefix + " IF NOT EXISTS " + strings.TrimSpace(statement[len(prefix):])
+}
+
+func schemaDDLExtractTableName(statement string) string {
+	statement = strings.TrimSpace(statement)
+	matches := schemaDDLCreateTableName.FindStringSubmatch(statement)
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
+}
+
+func schemaDDLColumnCount(statements []string) int {
+	for _, statement := range statements {
+		tableName := schemaDDLExtractTableName(statement)
+		if tableName == "" {
+			continue
+		}
+		start := strings.Index(statement, "(")
+		end := strings.LastIndex(statement, ")")
+		if start < 0 || end <= start {
+			return 0
+		}
+		count := 0
+		for _, line := range strings.Split(statement[start+1:end], "\n") {
+			line = strings.TrimSpace(strings.TrimSuffix(line, ","))
+			if line == "" || strings.HasPrefix(strings.ToUpper(line), "PRIMARY KEY") {
+				continue
+			}
+			count++
+		}
+		return count
+	}
+	return 0
+}

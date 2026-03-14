@@ -2094,6 +2094,7 @@ type PlatformSpecDocument struct {
 	} `yaml:"vocabulary"`
 	ContractFormats yaml.Node `yaml:"contract_formats"`
 	WorkflowState   struct {
+		DDL    string `yaml:"ddl"`
 		Fields map[string]struct {
 			Type string `yaml:"type"`
 		} `yaml:"fields"`

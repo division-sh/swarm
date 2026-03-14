@@ -145,3 +145,38 @@ func (s *PostgresStore) ApplyManagedMigrations(ctx context.Context, migrations [
 	}
 	return nil
 }
+
+func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTableDDL) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("postgres store is required for schema ddl")
+	}
+	if len(plans) == 0 {
+		return nil
+	}
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin schema ddl tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	for _, plan := range plans {
+		for _, statement := range plan.Statements {
+			statement = strings.TrimSpace(statement)
+			if statement == "" {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("ensure %s table %s: %w", strings.TrimSpace(plan.SchemaKind), strings.TrimSpace(plan.TableName), err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema ddl tx: %w", err)
+	}
+	committed = true
+	return nil
+}

@@ -185,7 +185,7 @@ contract_formats:
 workflow_state:
   ddl: "CREATE TABLE workflow_instances (\n    instance_id       UUID PRIMARY KEY,\n    workflow_name     TEXT NOT NULL,\n\
     \    workflow_version  TEXT NOT NULL,\n    current_state     TEXT NOT NULL,\n    entered_stage_at  TIMESTAMPTZ NOT NULL\
-    \ DEFAULT NOW(),\n    state_change_history JSONB NOT NULL DEFAULT '[]',\n    accumulator_state JSONB NOT NULL DEFAULT\
+    \ DEFAULT NOW(),\n    transition_history JSONB NOT NULL DEFAULT '[]',\n    accumulator_state JSONB NOT NULL DEFAULT\
     \ '{}',\n    timer_state       JSONB NOT NULL DEFAULT '[]',\n    metadata          JSONB NOT NULL DEFAULT '{}',\n    created_at\
     \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX\
     \ idx_wi_workflow ON workflow_instances(workflow_name, current_state);\nCREATE INDEX idx_wi_stage ON workflow_instances(current_state);\n"
@@ -217,7 +217,7 @@ workflow_state:
 
         '
       type: jsonb
-    state_change_history:
+    transition_history:
       description: 'Ordered list of state_changes fired: [{state_change_id, from, to, trigger_event_id, fired_at, guards_evaluated}]
 
         '
@@ -236,7 +236,7 @@ builtin_hooks:
   actions:
   - description: Increment metadata.revision_count
     id: increment_revision_count
-  - description: Append to state_change_history (always runs, implicit)
+  - description: Append to transition_history (always runs, implicit)
     id: record_state_change
   - description: Set current_state to state_change.to (always runs, implicit)
     id: update_stage

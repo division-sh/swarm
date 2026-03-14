@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,6 +38,7 @@ const (
 )
 
 type storeBundle struct {
+	Postgres          *store.PostgresStore
 	SQLDB             *sql.DB
 	EventStore        runtimebus.EventStore
 	SessionRegistry   sessions.Registry
@@ -98,6 +100,11 @@ func main() {
 		log.Fatalf("init stores: %v", err)
 	}
 	defer closeDB(stores.SQLDB)
+	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
+	if err != nil {
+		slog.Error("initialize state stores", "error", err)
+		os.Exit(1)
+	}
 
 	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
 		SelfCheck:      *selfCheck,
@@ -117,7 +124,7 @@ func main() {
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
-	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootWarnings)
+	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootWarnings, stateStoreSummary)
 	if err := rt.Start(ctx); err != nil {
 		log.Fatalf("start runtime: %v", err)
 	}
@@ -276,6 +283,7 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 			return storeBundle{}, err
 		}
 		return storeBundle{
+			Postgres:          pg,
 			SQLDB:             pg.DB,
 			EventStore:        pg,
 			SessionRegistry:   sessions.NewPostgresRegistry(pg.DB, cfg.LLM.Session.LockTTL),
@@ -290,6 +298,41 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 			SessionRegistry: sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
 		}, nil
 	}
+}
+
+func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
+	if stores.Postgres == nil || bundle == nil {
+		return "store wiring ready", nil
+	}
+	platformPlans, err := store.GeneratePlatformTableDDLs(bundle.Platform)
+	if err != nil {
+		return "", fmt.Errorf("platform-owned tables: %w", err)
+	}
+	entityPlans, err := store.GenerateEntityTableDDLs(bundle.WorkflowEntitySchema())
+	if err != nil {
+		return "", fmt.Errorf("entity_schema tables: %w", err)
+	}
+	statePlans, err := store.GenerateNodeStateTableDDLs(bundle.NodeEntries())
+	if err != nil {
+		return "", fmt.Errorf("state_schema tables: %w", err)
+	}
+	plans := append(platformPlans, entityPlans...)
+	plans = append(plans, statePlans...)
+	if err := stores.Postgres.EnsureSchemaTables(ctx, plans); err != nil {
+		return "", err
+	}
+	tableNames := make([]string, 0, len(plans))
+	totalColumns := 0
+	for _, plan := range plans {
+		tableNames = append(tableNames, fmt.Sprintf("%s(%d)", strings.TrimSpace(plan.TableName), plan.ColumnCount))
+		totalColumns += plan.ColumnCount
+	}
+	sort.Strings(tableNames)
+	slog.Info("mas boot state stores", "tables", len(plans), "columns", totalColumns, "detail", strings.Join(tableNames, ", "))
+	if len(tableNames) == 0 {
+		return "verified 0 generated tables", nil
+	}
+	return fmt.Sprintf("verified %d generated tables (%s)", len(plans), strings.Join(tableNames, ", ")), nil
 }
 
 type masWorkflowModule struct {
@@ -335,7 +378,7 @@ func (m *masWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 func (m *masWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return m.guardRegistry }
 func (m *masWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return m.actionRegistry }
 
-func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning) {
+func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning, stateStoreSummary string) {
 	warningCounts := make(map[string]int, len(warnings))
 	for _, warning := range warnings {
 		warningCounts[strings.TrimSpace(warning.Category)]++
@@ -356,7 +399,7 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 		{9, "validate_tools", fmt.Sprintf("validated tools and prompt coverage; warnings=%d", warningCounts["PROMPT-MISSING"]+warningCounts["PROMPT-STUB"])},
 		{10, "validate_permissions", "permission validation is outside Tranche A scope; current contract schema emitted no permission-specific findings"},
 		{11, "validate_platform_version", fmt.Sprintf("loaded platform spec version %s for workflow %s", strings.TrimSpace(source.PlatformSpec().Platform.Version), strings.TrimSpace(source.WorkflowVersion()))},
-		{12, "initialize_state_stores", fmt.Sprintf("store wiring ready (contracts=%s)", contractsRoot)},
+		{12, "initialize_state_stores", fmt.Sprintf("%s (contracts=%s)", strings.TrimSpace(stateStoreSummary), contractsRoot)},
 		{13, "start_system_nodes", "delegated to runtime.Start()"},
 		{14, "start_agents", "delegated to runtime.Start()"},
 		{15, "ready", "health server transitions to ready after runtime start"},
