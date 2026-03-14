@@ -68,6 +68,10 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			errs = append(errs, fmt.Sprintf("project package %s missing required field version", workflowProjectScopeLabel(scope)))
 		}
 		for nodeID, node := range scope.Nodes {
+			if strings.TrimSpace(nodeID) == "" {
+				errs = append(errs, fmt.Sprintf("node in scope %s missing required field id", workflowProjectScopeLabel(scope)))
+				continue
+			}
 			nodeLabel := workflowScopedObjectLabel(workflowProjectScopeLabel(scope), nodeID)
 			if strings.TrimSpace(node.ExecutionType) == "" {
 				errs = append(errs, fmt.Sprintf("node %s missing required field execution_type", nodeLabel))
@@ -83,6 +87,10 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			}
 		}
 		for agentID, agent := range scope.Agents {
+			if strings.TrimSpace(agentID) == "" {
+				errs = append(errs, fmt.Sprintf("agent in scope %s missing required field id", workflowProjectScopeLabel(scope)))
+				continue
+			}
 			agentLabel := workflowScopedObjectLabel(workflowProjectScopeLabel(scope), agentID)
 			if strings.TrimSpace(agent.ModelTier) == "" {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field model_tier", agentLabel))
@@ -110,6 +118,10 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 	for _, scope := range source.FlowScopes() {
 		scopeLabel := workflowFlowScopeLabel(scope)
 		for nodeID, node := range scope.Nodes {
+			if strings.TrimSpace(nodeID) == "" {
+				errs = append(errs, fmt.Sprintf("node in scope %s missing required field id", scopeLabel))
+				continue
+			}
 			nodeLabel := workflowScopedObjectLabel(scopeLabel, nodeID)
 			if strings.TrimSpace(node.ExecutionType) == "" {
 				errs = append(errs, fmt.Sprintf("node %s missing required field execution_type", nodeLabel))
@@ -125,6 +137,10 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			}
 		}
 		for agentID, agent := range scope.Agents {
+			if strings.TrimSpace(agentID) == "" {
+				errs = append(errs, fmt.Sprintf("agent in scope %s missing required field id", scopeLabel))
+				continue
+			}
 			agentLabel := workflowScopedObjectLabel(scopeLabel, agentID)
 			if strings.TrimSpace(agent.ModelTier) == "" {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field model_tier", agentLabel))
