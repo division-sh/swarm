@@ -59,7 +59,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		oneShotEmits:    make(map[string]struct{}),
 	}
 	exec.authorizer = NewToolAuthorizer(bus)
-	exec.validator = NewToolInputValidator(ContractDefinitions)
+	exec.validator = NewToolInputValidator(exec.contractDefinitions)
 	exec.dispatcher = NewToolDispatcher(
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 			return exec.handleEmitTool(ctx, actor, name, input)
@@ -67,6 +67,13 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		exec.buildToolHandlers(),
 	)
 	return exec
+}
+
+func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	return ContractDefinitionsForSource(source)
 }
 
 func (e *Executor) SetWorkflowSource(source semanticview.Source) {
@@ -93,7 +100,7 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 }
 
 func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
-	defs, err := ContractDefinitions()
+	defs, err := e.contractDefinitions()
 	if err != nil {
 		runtimeWarn("tool-executor", "failed to load contract tool definitions: %v", err)
 		return nil

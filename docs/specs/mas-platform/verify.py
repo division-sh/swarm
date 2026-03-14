@@ -566,6 +566,22 @@ for flow in ['root'] + FLOWS:
             if ev in elist:
                 error("DIALECT-SELF-EMIT", "%s: emits own trigger '%s'" % (loc, ev))
 
+
+# ============================================================
+# CHECK 16: Single node handler per event
+# ============================================================
+event_node_map = {}
+for flow in ['root'] + FLOWS:
+    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
+        for ev in node.get('event_handlers', {}):
+            if ev in event_node_map:
+                prev_nid, prev_flow = event_node_map[ev]
+                error("DUPLICATE-NODE-HANDLER", "'%s' handled by both %s/%s and %s/%s" % (ev, prev_flow, prev_nid, flow, nid))
+            else:
+                event_node_map[ev] = (nid, flow)
+
 # ============================================================
 # Report
 # ============================================================

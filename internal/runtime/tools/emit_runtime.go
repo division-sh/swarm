@@ -33,9 +33,24 @@ func InitEventSchemaRegistry(source semanticview.Source) {
 	activeSchemas = runtimecontracts.EventSchemaRegistryFromCatalog(catalog)
 	runtimecontracts.SetActiveEventSchemaRegistry(activeSchemas)
 	generatedSchemas = make(map[string]struct{})
-	missing := missingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
-	for _, eventType := range missing {
-		generatedSchemas[eventType] = struct{}{}
+	if source != nil {
+		for _, entry := range source.AgentEntries() {
+			for _, eventType := range entry.EmitEvents {
+				eventType = strings.TrimSpace(eventType)
+				if eventType == "" {
+					continue
+				}
+				if _, ok := activeSchemas[eventType]; ok {
+					continue
+				}
+				generatedSchemas[eventType] = struct{}{}
+			}
+		}
+	} else {
+		missing := missingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
+		for _, eventType := range missing {
+			generatedSchemas[eventType] = struct{}{}
+		}
 	}
 	emitToolToEvent = make(map[string]string, len(activeSchemas))
 	for eventType := range activeSchemas {
@@ -93,19 +108,13 @@ func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...
 
 func GeneratedEmitSchemasForAgentRoles() []string {
 	ensureEventSchemaRegistry()
-	out := make([]string, 0, 64)
-	seen := make(map[string]struct{}, 128)
-	for _, role := range commgraph.ProducerRoles() {
-		for _, eventType := range commgraph.ProducerEventsForRole(role) {
-			if _, ok := generatedSchemas[eventType]; !ok {
-				continue
-			}
-			if _, dup := seen[eventType]; dup {
-				continue
-			}
-			seen[eventType] = struct{}{}
-			out = append(out, eventType)
+	out := make([]string, 0, len(generatedSchemas))
+	for eventType := range generatedSchemas {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
 		}
+		out = append(out, eventType)
 	}
 	sort.Strings(out)
 	return out

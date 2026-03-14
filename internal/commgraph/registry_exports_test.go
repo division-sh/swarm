@@ -2,9 +2,36 @@ package commgraph
 
 import (
 	"testing"
+
+	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/semanticview"
 )
 
 func TestRegistryExportHelpers_ReturnCopies(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"reviewer": {
+				Role:       "reviewer",
+				ToolsTier2: []string{"message_domain", "human_task_decide"},
+				EmitEvents: []string{"review.completed"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"board.review_requested": {EmitterType: "board"},
+			"review.completed":       {EmitterType: "agent"},
+		},
+	})
+	SetContractSource(source)
+	SetDefaultPolicyFactory(func() Policy {
+		return NewSourcePolicy(source)
+	})
+	t.Cleanup(func() {
+		SetContractSource(nil)
+		SetDefaultPolicyFactory(func() Policy {
+			return NewGenericTestPolicy()
+		})
+	})
+
 	runtimeEvents := RuntimeEvents()
 	humanEvents := HumanEvents()
 	if len(runtimeEvents) == 0 || len(humanEvents) == 0 {

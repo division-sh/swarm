@@ -376,6 +376,6 @@ opco-support:
   workspace_class: opco
   manager_fallback: opco-head-of-product
   subscriptions:
-  - inbound.chat
+  - inbound.whatsapp_message
   - inbound.email
   - bug_fix_deployed

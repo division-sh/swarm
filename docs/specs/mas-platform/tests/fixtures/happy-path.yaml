@@ -5,14 +5,14 @@ agent_fixtures:
 
   # Discovery
   market-research-agent:
-    - on: primary.scan_assigned
+    - on: market_research.scan_assigned
       emits:
         - event: category.assessed
           payload:
             entity_id: "{{entity_id}}"
             category: "test-category"
             signals: [{ type: gap, strength: 80, description: "Strong market gap" }]
-        - event: primary.scan_complete
+        - event: market_research.scan_complete
           payload:
             entity_id: "{{entity_id}}"
             scan_id: "{{scan_id}}"

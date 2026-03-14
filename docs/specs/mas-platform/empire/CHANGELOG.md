@@ -1,68 +1,68 @@
-# EmpireAI v3.0.0
+# EmpireAI Changelog
 
-**Version:** 3.0.0
-**Previous:** 2.6.0 (monolith)
-**Platform:** >=1.0.0
-**Date:** 2026-03-09
+## v3.0.3 (2026-03-13)
 
-## Summary
+### Handler count: 62 (was 51)
+New handlers: spec.draft_ready, spec_review.passed, spec_review.issues_found (validation review chain fix), plus build-orchestrator handlers.
 
-First release on the independent MAS Platform. Major version bump from v2.x (monolith) to v3.0 (flow-based, platform-dependent).
+### Event count: 195 (was 181)
+New events: spec.draft_ready, spec_review.requested, spec_review.passed, spec_review.issues_found, budget.alert_sent, mailbox.review_requested, vertical.marginal_review_due, research.additional_requested, validation.package_ready, and others.
 
-## Breaking changes from v2.x
+### System nodes: 7 (was 6)
+build-orchestrator split from lifecycle-orchestrator for build pipeline gate enforcement.
 
-- Monolithic spec split into Platform Spec (v1.0.0) + Empire Product Spec (v3.0.0)
-- Flows are self-contained packages with package.yaml, agents, prompts, tools, policy
-- Root flow replaces "project" concept — empire/ is just another flow
-- Runtime reads from runtime/ bridge (merged flat files) until multi-file loader implemented
-- Entity renamed to "flow instance" in vocabulary
-- Stage renamed to "state"
+### Validation review chain fixed
+spec.draft_ready → spec_review.requested → [reviewer] → spec_review.passed → cto.spec_review_requested. Loop broken: spec.approved no longer routes to spec_review.requested. spec.validation_requested removed (stale).
 
-## What's in v3.0.0
+### All legacy actions removed
+36 legacy action values (set_gate, kill_vertical, finalize_validation, emit_spinup, accumulate_signal, etc.) replaced with declarative handler fields. Only platform actions remain (create_flow_instance, record_evidence).
 
-### 4 flows
-| Flow | Agents | Prompts | Handlers | Purpose |
-|------|--------|---------|----------|---------|
-| discovery | 4 | 5 | 9 | Scan, signals, verticals |
-| scoring | 1 | 1 | 4 | Multi-dimension scoring |
-| validation | 7 | 7 | 15 | Research, spec, CTO, brand |
-| operating | 13 | 4 | 15 | Build, launch, operate, grow |
+### State machine fixes
+- Validation: cto_spec_review → cto_review (name alignment)
+- Operating: expanding → growth (name alignment)
+- Both: killed added to states (was in terminal_states but not states)
 
-### Root flow (empire)
-- 3 agents (empire-coordinator, operations-analyst, holding-devops)
-- 1 system node (portfolio-node, 4 handlers)
-- 109 cross-flow events
-- 11 shared tools, 36 shared policy keys
+### Condition → payload alignment
+All guard/rule conditions verified against event payload schemas:
+- scoring rules: payload.discovery_mode → payload.mode
+- derivation guard: payload.derived_name → payload.opportunity_name
+- mailbox rules: decision == approve → payload.decision == approve
 
-### Totals
-- 52 handlers, 6 nodes, 29 agents, 179 events, 21 tools
+### system.directive structured payload
+directive_text (string) → directive: {type, parameters} (object). Matches portfolio-node rule conditions.
 
-### Platform dependency
-Requires MAS Platform >=1.0.0. Uses: flow model, execution primitives, permissions, persistence, prompt templating, handler execution order.
+### on_complete ordering
+Scoring on_complete converted from dict (unordered) to list (ordered, first-match-wins).
 
-## Migration from v2.x
+### Scoring dedup_by
+score.dimension_complete accumulator: dedup_by: payload.dimension (content-identified, not sender-identified).
 
-See `docs/CHANGELOG-v2.3.0.md` through `docs/CHANGELOG-v2.6.0.md` for the step-by-step evolution from monolith to flow-based architecture.
+### Produces lists synced
+All 7 system node produces lists verified against actual handler emits.
 
-## v3.0.1
+### Event metadata
+All events categorized: _source: external, _consumer: mailbox_system, _status: planned. 0 unresolved warnings.
 
-### All handlers declarative
-8 product hooks eliminated. Empire is now 100% YAML — zero Go code needed.
-52 handlers use platform patterns: rules, fan_out, accumulate, reduce, query, guard, clear, data_accumulation, advances_to, emits, sets_gate.
+### Anti-bias routing
+analysis-agent (primary) subscribes to scoring.requested. analysis-agent-secondary subscribes to scoring.derived_requested. Same prompt, different pool.
 
-### Handler count: 51
-Up from 48. Fan_out sub-handlers added for scan dispatch (category, trend, source).
+### spec.validation_passed gate fix
+Sets g2_spec_review (not g3_cto). Advances to cto_review.
 
-### Event count: 181
-58 root + 123 flow (events relocated to correct flows).
+### Phantom events cleaned
+scoring.contest_resolved, scoring.contested removed (YAGNI). Empty strings in pins cleaned. deploy.completed orphan removed. g_build_complete phantom gate removed.
 
-## v3.0.2
+## v3.0.2 (2026-03-10)
 
 ### Formally retired files
-The following files were intentionally removed during the platform/product split and are NOT missing:
+empire-spec.md, spec-writer-guide.md, SPEC-COMPLIANCE.md — replaced by contracts-as-spec, platform system_node_specification, and verify.py respectively.
 
-- **empire-spec.md** — Replaced by contracts-as-spec. The YAML contracts in `contracts/` ARE the authoritative specification. PRODUCT-BRIEF.md provides vision and rationale. No separate prose spec will be maintained.
-- **spec-writer-guide.md** — Replaced by the platform's `system_node_specification` section and the `TEST-CATALOG.md`. Agents editing contracts follow platform-spec.yaml as the schema definition.
-- **SPEC-COMPLIANCE.md** — Replaced by `verify.py` (reference implementation) and `boot_verification` section in platform-spec.yaml. Compliance is enforced at boot, not documented in a separate file.
+## v3.0.1 (2026-03-09)
 
-These are architectural decisions, not gaps. See PRODUCT-BRIEF.md "Evolution" section for the rationale.
+### All handlers declarative
+8 product hooks eliminated. 100% YAML.
+
+## v3.0.0 (2026-03-09)
+
+### First independent release
+Split from monolithic spec v2.6.0. 4 flows (discovery, scoring, validation, operating) + root. Platform dependency >=1.0.0.

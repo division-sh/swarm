@@ -1,17 +1,12 @@
 package commgraph
 
 import (
-	"os"
 	"path"
-	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/semanticview"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -40,8 +35,8 @@ type authorityKey struct {
 }
 
 var extraProducerEvents = map[string][]string{
-	"dashboard":       {"human_task.assigned", "runtime.reset"},
-	"actor-agent":     {"entity.routing_updated"},
+	"dashboard":   {"human_task.assigned", "runtime.reset"},
+	"actor-agent": {"entity.routing_updated"},
 }
 
 type contractProducerRegistry struct {
@@ -58,6 +53,7 @@ var (
 	messageAuthorityData  []MessageAuthority
 	humanTaskDecisionOnce sync.Once
 	humanTaskDecisionData []string
+	activeContractSource  semanticview.Source
 )
 
 var roleAliases = map[string]string{}
@@ -110,12 +106,6 @@ func CanDecideHumanTasks(role string) bool {
 		}
 	}
 	return false
-}
-
-type templateAgentNode struct {
-	Role       string `yaml:"role"`
-	ParentRole string `yaml:"parent_role"`
-	Parent     string `yaml:"parent"`
 }
 
 func CanonicalRole(role string) string {
@@ -228,10 +218,29 @@ func canonicalRole(role string) string {
 	return role
 }
 
+func SetContractSource(source semanticview.Source) {
+	activeContractSource = source
+	resetDerivedCaches()
+}
+
+func resetDerivedCaches() {
+	contractRegistryOnce = sync.Once{}
+	contractRegistryData = contractProducerRegistry{}
+	messageAuthorityOnce = sync.Once{}
+	messageAuthorityData = nil
+	humanTaskDecisionOnce = sync.Once{}
+	humanTaskDecisionData = nil
+	routingAuthorityOnce = sync.Once{}
+	routingAuthorityData = nil
+	managementAuthorityOnce = sync.Once{}
+	managementAuthorityData = nil
+	mailboxSendRoleOnce = sync.Once{}
+	mailboxSendRoleData = nil
+}
+
 func contractProducerData() contractProducerRegistry {
 	contractRegistryOnce.Do(func() {
-		registry, err := loadContractProducerRegistry()
-		if err == nil {
+		if registry, ok := loadContractProducerRegistry(activeContractSource); ok {
 			contractRegistryData = registry
 			return
 		}
@@ -240,16 +249,14 @@ func contractProducerData() contractProducerRegistry {
 	return contractRegistryData
 }
 
-func loadContractProducerRegistry() (contractProducerRegistry, error) {
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return contractProducerRegistry{}, err
+func loadContractProducerRegistry(source semanticview.Source) (contractProducerRegistry, bool) {
+	if source == nil {
+		return contractProducerRegistry{}, false
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot)
-	if err != nil {
-		return contractProducerRegistry{}, err
-	}
-	source := semanticview.Wrap(bundle)
+	return buildContractProducerRegistry(source), true
+}
+
+func buildContractProducerRegistry(source semanticview.Source) contractProducerRegistry {
 	reg := contractProducerRegistry{
 		agentEvents: make(map[string][]string),
 	}
@@ -307,7 +314,7 @@ func loadContractProducerRegistry() (contractProducerRegistry, error) {
 		reg.producerRoles = append(reg.producerRoles, role)
 	}
 	sort.Strings(reg.producerRoles)
-	return reg, nil
+	return reg
 }
 
 func fallbackProducerRegistry() contractProducerRegistry {
@@ -323,114 +330,7 @@ func fallbackProducerRegistry() contractProducerRegistry {
 }
 
 func loadMessageAuthorityRegistry() ([]MessageAuthority, error) {
-	repoRoot, err := findRepoRoot()
-	if err != nil {
-		return nil, err
-	}
-	authorities := cloneAuthorities(baseMessageAuthorities())
-	byKey := make(map[authorityKey]map[string]struct{}, len(authorities))
-	for _, rule := range authorities {
-		key := authorityKey{
-			sender: canonicalRole(rule.SenderRole),
-			scope:  strings.TrimSpace(strings.ToLower(rule.Scope)),
-		}
-		if key.sender == "" {
-			continue
-		}
-		if byKey[key] == nil {
-			byKey[key] = make(map[string]struct{}, len(rule.RecipientRoles))
-		}
-		for _, recipient := range rule.RecipientRoles {
-			if role := canonicalRole(recipient); role != "" {
-				byKey[key][role] = struct{}{}
-			}
-		}
-	}
-	glob := filepath.Join(repoRoot, "configs", "agents", "templates", "*.yaml")
-	files, err := filepath.Glob(glob)
-	if err != nil {
-		return nil, err
-	}
-	parentByRole := map[string]string{}
-	for _, file := range files {
-		if strings.EqualFold(filepath.Base(file), "routes.yaml") {
-			continue
-		}
-		content, err := os.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-		var node templateAgentNode
-		if err := yaml.Unmarshal(content, &node); err != nil {
-			return nil, err
-		}
-		role := canonicalRole(node.Role)
-		parent := canonicalRole(firstNonEmpty(node.ParentRole, node.Parent))
-		if role == "" {
-			continue
-		}
-		parentByRole[role] = parent
-	}
-	for role, parent := range parentByRole {
-		if role == "" || parent == "" || role == parent {
-			continue
-		}
-		ancestors := templateAncestors(role, parentByRole)
-		for _, ancestor := range ancestors {
-			addAuthorityRecipient(byKey, authorityKey{sender: ancestor, scope: "entity"}, role)
-			addAuthorityRecipient(byKey, authorityKey{sender: role, scope: "entity"}, ancestor)
-		}
-	}
-	authorities = authorities[:0]
-	for key, recipients := range byKey {
-		roles := sortedSet(recipients)
-		if key.sender == "" || len(roles) == 0 {
-			continue
-		}
-		authorities = append(authorities, MessageAuthority{
-			SenderRole:     key.sender,
-			RecipientRoles: roles,
-			Scope:          key.scope,
-		})
-	}
-	sort.Slice(authorities, func(i, j int) bool {
-		if authorities[i].Scope != authorities[j].Scope {
-			return authorities[i].Scope < authorities[j].Scope
-		}
-		return authorities[i].SenderRole < authorities[j].SenderRole
-	})
-	return authorities, nil
-}
-
-func templateAncestors(role string, parentByRole map[string]string) []string {
-	role = canonicalRole(role)
-	if role == "" {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := []string{}
-	for current := canonicalRole(parentByRole[role]); current != ""; current = canonicalRole(parentByRole[current]) {
-		if _, ok := seen[current]; ok {
-			break
-		}
-		seen[current] = struct{}{}
-		out = append(out, current)
-	}
-	return out
-}
-
-func addAuthorityRecipient(byKey map[authorityKey]map[string]struct{}, key authorityKey, recipient string) {
-	if key.sender == "" {
-		return
-	}
-	recipient = canonicalRole(recipient)
-	if recipient == "" {
-		return
-	}
-	if byKey[key] == nil {
-		byKey[key] = make(map[string]struct{}, 1)
-	}
-	byKey[key][recipient] = struct{}{}
+	return cloneAuthorities(baseMessageAuthorities()), nil
 }
 
 func cloneAuthorities(in []MessageAuthority) []MessageAuthority {
@@ -463,45 +363,6 @@ func cloneRoles(in []string) []string {
 	return out
 }
 
-func producerRolesForEvent(entry runtimecontracts.EventCatalogEntry) []string {
-	roles := []string{}
-	if strings.TrimSpace(strings.ToLower(entry.EmitterType)) != "agent" {
-		return roles
-	}
-	roles = append(roles, normalizeCatalogStringList(entry.Emitter)...)
-	roles = append(roles, entry.AlternateEmitters...)
-	return roles
-}
-
-func normalizeCatalogStringList(v any) []string {
-	switch typed := v.(type) {
-	case nil:
-		return nil
-	case string:
-		item := strings.TrimSpace(typed)
-		if item == "" {
-			return nil
-		}
-		return []string{item}
-	case []string:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if trimmed := strings.TrimSpace(item); trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, normalizeCatalogStringList(item)...)
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
 func appendUniqueSortedEvent(events []string, eventType string) []string {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
@@ -528,29 +389,6 @@ func sortedSet(values map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func findRepoRoot() (string, error) {
-	if _, file, _, ok := runtime.Caller(0); ok {
-		dir := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-		if runtimecontracts.RepoRootHasMASContracts(dir) {
-			return dir, nil
-		}
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for dir := wd; ; dir = filepath.Dir(dir) {
-		if runtimecontracts.RepoRootHasMASContracts(dir) {
-			return dir, nil
-		}
-		next := filepath.Dir(dir)
-		if next == dir {
-			break
-		}
-	}
-	return "", os.ErrNotExist
 }
 
 func firstNonEmpty(values ...string) string {

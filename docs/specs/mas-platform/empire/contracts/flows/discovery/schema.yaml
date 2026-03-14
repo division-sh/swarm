@@ -25,17 +25,17 @@ required_agents:
   description: Resolves dedup and synthesis conflicts
 - role: market-research-agent
   subscribes_to:
-  - primary.scan_assigned
+  - market_research.scan_assigned
   emits:
   - category.assessed
-  - primary.scan_complete
+  - market_research.scan_complete
   description: Researches market categories
 - role: trend-research-agent
   subscribes_to:
-  - secondary.scan_assigned
+  - trend_research.scan_assigned
   emits:
   - trend.identified
-  - secondary.scan_complete
+  - trend_research.scan_complete
   description: Identifies market trends
 - role: scanner-agent
   subscribes_to:

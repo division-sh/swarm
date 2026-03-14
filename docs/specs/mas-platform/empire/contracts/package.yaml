@@ -1,5 +1,5 @@
 name: empire
-version: 3.0.0
+version: 3.0.3
 platform_version: '>=1.1.0'
 author: youmew
 description: AI-powered venture studio — discovers, validates, and operates micro-SaaS businesses
@@ -48,7 +48,6 @@ entity_schema:
     generator_agent_id: text (agent that scored this entity)
   validation_phase:
     business_brief: jsonb (from research.completed)
-    research_context: jsonb (from research.completed)
     mvp_spec: jsonb (from spec.approved)
     cto_feasibility: jsonb (from cto.spec_approved)
     brand: jsonb (from brand.candidates_ready)
@@ -65,3 +64,4 @@ entity_schema:
   derivation:
     parent_id: uuid (null for non-derived)
     generation_depth: integer default 0
+platform: '>=1.1.1'

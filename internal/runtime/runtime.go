@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	"empireai/internal/events"
 	runtimeagents "empireai/internal/runtime/agents"
@@ -126,6 +127,11 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
+	source := opts.WorkflowModule.SemanticSource()
+	commgraph.SetContractSource(source)
+	commgraph.SetDefaultPolicyFactory(func() commgraph.Policy {
+		return commgraph.NewSourcePolicy(source)
+	})
 
 	rt := &Runtime{
 		Config:    cfg,
@@ -202,12 +208,12 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		Config:         cfg,
 		MailboxStore:   stores.MailboxStore,
 		SQLDB:          stores.SQLDB,
-		WorkflowSource: opts.WorkflowModule.SemanticSource(),
+		WorkflowSource: source,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
 	}, stores.ScheduleStore)
-	runtimetools.InitEventSchemaRegistry(opts.WorkflowModule.SemanticSource())
+	runtimetools.InitEventSchemaRegistry(source)
 	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
 		if runtimeEnvBool("MAS_EMIT_SCHEMA_STRICT", true) {
 			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))

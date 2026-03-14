@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	defaultContractsPath    = "docs/specs/mas-platform/tests/generic-runtime/contracts"
+	defaultContractsPath    = "docs/specs/mas-platform/tests/test-guard-pass"
 	defaultPlatformSpecPath = "docs/specs/mas-platform/platform/contracts/platform-spec.yaml"
 	defaultHealthAddr       = ":8081"
 )

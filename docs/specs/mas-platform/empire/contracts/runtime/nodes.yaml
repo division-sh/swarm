@@ -4,7 +4,7 @@ portfolio-node:
   execution_type: system_node
   description: Cross-flow monitoring. Compiles status, handles runtime reset.
   subscribes_to:
-  - timer.instance_digest
+  - timer.portfolio_digest
   - runtime.reset
   - budget.threshold_crossed
   - system.directive
@@ -20,7 +20,7 @@ portfolio-node:
   - spend.rejected
   - vertical.resumed
   event_handlers:
-    timer.instance_digest:
+    timer.portfolio_digest:
       description: Query all entities, compile status summary, emit digest
       query:
       - entities: verticals
@@ -86,12 +86,12 @@ scan-orchestrator:
   description: 'Manages scan campaigns: dispatches scan.requested to scanner agents, tracks scan completion, handles scan
     timeouts. Pre-workflow — produces events that feed into discovery aggregation.'
   subscribes_to:
-  - primary.scan_complete
+  - market_research.scan_complete
   - scan.source_dispatch
   - scan.requested
   - scanner.reviews.scan_complete
   - scanner.yelp.scan_complete
-  - secondary.scan_complete
+  - trend_research.scan_complete
   - scan.category_dispatch
   - scan.trend_dispatch
   - scanner.google_maps.scan_complete
@@ -102,14 +102,14 @@ scan-orchestrator:
   - '*.scan_complete'
   produces:
   - campaign.completed
-  - primary.scan_assigned
+  - market_research.scan_assigned
   - pipeline.dead_letter
   - scan.category_dispatch
   - scan.completed
   - scan.source_dispatch
   - scan.trend_dispatch
   - scanner.scan_assigned
-  - secondary.scan_assigned
+  - trend_research.scan_assigned
   timers:
   - scan_timeout
   - campaign_deadline
@@ -148,7 +148,7 @@ scan-orchestrator:
       fan_out:
         items_from: payload.subcategories
         target: discovery/market-research-agent
-        emit_per_item: primary.scan_assigned
+        emit_per_item: market_research.scan_assigned
       data_accumulation:
         writes:
         - scan_expected_count
@@ -158,7 +158,7 @@ scan-orchestrator:
       fan_out:
         items_from: payload.trend_topics
         target: discovery/trend-research-agent
-        emit_per_item: secondary.scan_assigned
+        emit_per_item: trend_research.scan_assigned
       data_accumulation:
         writes:
         - scan_expected_count

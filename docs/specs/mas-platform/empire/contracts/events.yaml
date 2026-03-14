@@ -172,7 +172,7 @@ inbound.email:
       items: string
   _status: planned
   _source: external (messaging gateway)
-inbound.chat:
+inbound.whatsapp_message:
   payload:
     vertical_id: string
     from: string
@@ -283,7 +283,7 @@ template.version_published:
 timer.infra_health_check:
   payload:
     check_type: string
-timer.instance_digest:
+timer.portfolio_digest:
   payload:
     trigger_reason: string
 vertical.health_warning:

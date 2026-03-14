@@ -185,7 +185,7 @@ contract_formats:
 workflow_state:
   ddl: "CREATE TABLE workflow_instances (\n    instance_id       UUID PRIMARY KEY,\n    workflow_name     TEXT NOT NULL,\n\
     \    workflow_version  TEXT NOT NULL,\n    current_state     TEXT NOT NULL,\n    entered_stage_at  TIMESTAMPTZ NOT NULL\
-    \ DEFAULT NOW(),\n    transition_history JSONB NOT NULL DEFAULT '[]',\n    accumulator_state JSONB NOT NULL DEFAULT\
+    \ DEFAULT NOW(),\n    state_change_history JSONB NOT NULL DEFAULT '[]',\n    accumulator_state JSONB NOT NULL DEFAULT\
     \ '{}',\n    timer_state       JSONB NOT NULL DEFAULT '[]',\n    metadata          JSONB NOT NULL DEFAULT '{}',\n    created_at\
     \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX\
     \ idx_wi_workflow ON workflow_instances(workflow_name, current_state);\nCREATE INDEX idx_wi_stage ON workflow_instances(current_state);\n"
@@ -217,7 +217,7 @@ workflow_state:
 
         '
       type: jsonb
-    transition_history:
+    state_change_history:
       description: 'Ordered list of state_changes fired: [{state_change_id, from, to, trigger_event_id, fired_at, guards_evaluated}]
 
         '
@@ -236,7 +236,7 @@ builtin_hooks:
   actions:
   - description: Increment metadata.revision_count
     id: increment_revision_count
-  - description: Append to transition_history (always runs, implicit)
+  - description: Append to state_change_history (always runs, implicit)
     id: record_state_change
   - description: Set current_state to state_change.to (always runs, implicit)
     id: update_stage
@@ -533,7 +533,7 @@ execution_primitives:
           mapping: {google_maps: "scanner.google_maps.scan_assigned", instagram: "scanner.instagram.scan_assigned"}}'
       side_effect: Writes fan_out.count to entity state (for accumulation tracking)
       example: "fan_out:\n  items_from: payload.subcategories\n  target: discovery/market-research-agent\n  emit_per_item:\
-        \ primary.scan_assigned"
+        \ market_research.scan_assigned"
     filter:
       description: Keep items from a list that match a condition.
       fields:
@@ -727,21 +727,30 @@ handler_execution_order:
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
-    graph: "\nguard\n  └→ accumulate\n       └→ compute\n            └→ on_complete / rules (mutually exclusive — use one\
-      \ or the other)\n                 └→ advances_to ─┐\n                    sets_gate ────┤ (independent of each other)\n\
-      \                    data_accumulation ┘\n                         └→ payload_transform\n                          \
-      \    └→ emits\n                                   └→ action\n        "
-    clear_gates: Runs before guard if present. Resets gates before the handler evaluates them.
+    graph: "\nquery (optional — pre-fetch cross-entity data into handler context)\n  └→ clear_gates (optional — reset gates\
+      \ before guard)\n       └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
+      \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
+      \         └→ count (optional — count items)\n                                └→ compute\n                          \
+      \           └→ on_complete / rules (mutually exclusive)\n                                          └→ advances_to ─┐\n\
+      \                                             sets_gate ────┤ (independent of each other)\n                        \
+      \                     data_accumulation ┘\n                                                  └→ payload_transform\n\
+      \                                                       └→ emits\n                                                 \
+      \           └→ action\n                                                                 └→ clear (optional — reset accumulator/state\
+      \ buckets)\n    "
   dependency_rules:
+  - 'query → clear_gates: cross-entity data fetched before any state evaluation'
+  - 'clear_gates → guard: gates reset before guard reads them'
   - 'guard → accumulate: guard must pass before accumulation is checked'
-  - 'accumulate → compute: accumulated data must be available for computation'
-  - 'compute → on_complete/rules: computed values (e.g., composite_score) must be written before branch conditions evaluate
-    them'
-  - 'on_complete/rules → {advances_to, sets_gate, data_accumulation}: branches may override these fields, so branching resolves
-    first'
-  - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency between them, any execution order is valid'
-  - 'payload_transform → emits: output payload must be constructed before the event is persisted'
+  - 'accumulate → filter: accumulated items available before pruning'
+  - 'filter → reduce: pruned items available before aggregation'
+  - 'reduce → count: aggregated result available before counting'
+  - 'count → compute: all list processing complete before computation'
+  - 'compute → on_complete/rules: computed values written before branch conditions evaluate'
+  - 'on_complete/rules → {advances_to, sets_gate, data_accumulation}: branches may override these fields'
+  - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
+  - 'payload_transform → emits: output payload constructed before event persisted'
   - 'emits → action: events persisted before platform actions execute'
+  - 'action → clear: state cleanup runs last, after all side effects committed'
   atomicity:
     description: ALL side effects from one handler execution commit in a single database transaction. State advance, gate
       set, data write, and event persistence happen atomically. No external observer sees intermediate state.
@@ -1026,6 +1035,20 @@ engine:
     crash_recovery:
       description: On restart, the platform replays undelivered events. Events persisted (step 3) but not marked delivered
         (step 8) are replayed. Handler idempotency ensures replayed events produce the same result.
+    single_node_handler_rule:
+      description: Each event may be handled by at most ONE system node. If two system nodes declare the same event in their
+        event_handlers, boot fails. This ensures unambiguous state authority — one event, one state transition, one owner.
+      agents: Not constrained. Multiple agents may subscribe to the same event freely.
+      enforcement: Boot validation rejects duplicate node handlers for the same event.
+    payload_shaping:
+      description: Payload construction for emitted events is part of the generic engine contract, not an adapter concern.
+      default_behavior: When a handler emits an event without payload_transform, the platform constructs the emitted event
+        payload by copying the entity_id from the triggering event. No other fields are auto-populated.
+      payload_transform_behavior: When payload_transform is present, the platform evaluates each field as a CEL expression
+        against the handler context (entity, payload, policy, accumulated, fan_out) and constructs the output payload from
+        the results. This is engine-level, not adapter-level.
+      no_implicit_forwarding: The platform does NOT auto-forward the triggering event payload to emitted events. Only entity_id
+        is carried by default. All other fields must be explicitly declared in payload_transform or come from the entity state.
   state_management:
     description: The platform tracks three kinds of state per entity instance. All state is persisted. All mutations happen
       within the handler atomic boundary.
@@ -1063,6 +1086,9 @@ engine:
       - All persisted state remains in the database
       - Entity is queryable via query_entities tool
       archival: Future concern — retention policy and cold storage are not specified in v1.1.0.
+      event_rejection: 'When an event arrives targeting an entity in a terminal state, the platform rejects it before handler
+        execution. No guard runs, no handler runs, no state changes. The event is marked as rejected with reason: terminal_entity.
+        This is unconditional — no configuration can override it. Terminal means terminal.'
   accumulation_engine:
     description: The accumulation engine is the platform subsystem that handles the accumulate primitive. It tracks multiple
       event arrivals for the same entity and fires on completion.
@@ -1152,8 +1178,8 @@ engine:
     - 6. Recurring timers restart after firing unless cancelled.
     crash_recovery: Timers are persisted. On restart, platform checks for expired timers and fires them.
     example: "timers:\n  - id: validation_gate_timeout\n    event: timer.validation_timeout\n    delay: \"{{validation_gate_timeout_hours}}h\"\
-      \n    start_on: state:researching\n    cancel_on: state:ready_for_review\n    recurring: false\n  - id: instance_digest\n\
-      \    event: timer.instance_digest\n    delay: \"{{digest_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
+      \n    start_on: state:researching\n    cancel_on: state:ready_for_review\n    recurring: false\n  - id: portfolio_digest\n\
+      \    event: timer.portfolio_digest\n    delay: \"{{digest_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
   expression_language:
     description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
@@ -1207,6 +1233,19 @@ engine:
       behavior: Each event carries a chain_depth counter (starting at 0). When a handler emits a new event, chain_depth increments.
         If chain_depth exceeds max_depth, the event is routed to pipeline.dead_letter instead of being delivered. The chain
         is broken.
+    dead_letter_schema:
+      description: Structured payload for pipeline.dead_letter events.
+      fields:
+        original_event: string — the event name that failed
+        original_payload: object — full payload of the failed event
+        entity_id: string — entity the event was targeting
+        flow_instance: string — flow instance path
+        failure_type: string — handler_error | chain_depth_exceeded | retry_exhausted
+        error_message: string — human-readable error description
+        retry_count: integer — number of retries attempted before dead-lettering
+        chain_depth: integer — current chain depth (for chain_depth_exceeded)
+        handler_node: string — which system node was handling (if handler_error)
+        timestamp: string — ISO 8601
   boot_verification:
     description: The platform runs contract verification at boot, after loading all contracts and before starting any nodes
       or agents. If any check fails, boot aborts. These checks are the authoritative integration test.
@@ -1255,6 +1294,9 @@ engine:
     - id: guard_expression_parse
       description: Every guard check, rule condition, filter condition, and on_complete condition must parse as valid CEL.
         Syntax errors abort boot.
+      severity: error
+    - id: single_node_per_event
+      description: No two system nodes may declare the same event in event_handlers. One event, one node authority.
       severity: error
     severity_behavior:
       error: Boot aborts. System does not start.
@@ -1383,6 +1425,8 @@ system_node_specification:
         count: boolean — count per group
         select: list — fields to include
         store_as: string — where to put results (in emit payload)
+      execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
+        or on_complete.
     reduce:
       field: reduce
       type: object
@@ -1392,6 +1436,8 @@ system_node_specification:
         operation: string — weighted_average | pick_or_average | sum | min | max | count
         params: object — operation-specific parameters
         store_as: string — entity field to store result
+      execution_position: After filter, before count. Aggregates filtered items into a single value (weighted_average, sum,
+        min, max, pick_or_average).
     filter:
       field: filter
       type: object
@@ -1400,6 +1446,8 @@ system_node_specification:
         items_from: string — source list
         condition: string — expression per item
         store_as: string — entity field for result
+      execution_position: After accumulate, before reduce. Prunes accumulated items based on CEL condition. Only matching
+        items pass through.
     count:
       field: count
       type: object
@@ -1408,12 +1456,16 @@ system_node_specification:
         items_from: string — source list
         condition: string — optional filter
         store_as: string — entity field for count
+      execution_position: After reduce, before compute. Counts items (optionally matching a condition). Stores result in entity
+        field.
     clear:
       field: clear
       type: object
       purpose: Bulk reset state tables.
       sub_fields:
         targets: list of state store names to clear
+      execution_position: After action. Last step. Resets accumulator state or specific entity field buckets. Distinct from
+        clear_gates which runs before guard.
     action:
       field: action
       type: string
@@ -1445,6 +1497,10 @@ system_node_specification:
       field: clear_gates
       type: boolean
       purpose: Reset all entity gates to false. Used before re-entering a validation cycle.
+      scope: 'Clears all gates on the ENTITY, not scoped to flow schema or node. An entity has one flat gate map. clear_gates:
+        true resets every key in that map to false. Rationale: gates are entity-level state. A flow that resets an entity
+        to an earlier phase (e.g., vertical.needs_more_data returning to researching) must clear all gates, not just the ones
+        its node declared.'
   deprecated_fields:
     description: Fields that may appear in legacy contracts but should be removed.
     logic: Free-text prose description. Replace with proper declarative patterns.

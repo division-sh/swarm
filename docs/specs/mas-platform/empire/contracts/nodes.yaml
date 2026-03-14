@@ -3,7 +3,7 @@ portfolio-node:
   execution_type: system_node
   description: Cross-flow monitoring. Compiles status, handles runtime reset.
   subscribes_to:
-  - timer.instance_digest
+  - timer.portfolio_digest
   - runtime.reset
   - budget.threshold_crossed
   - system.directive
@@ -19,7 +19,7 @@ portfolio-node:
   - spend.rejected
   - vertical.resumed
   event_handlers:
-    timer.instance_digest:
+    timer.portfolio_digest:
       description: Query all entities, compile status summary, emit digest
       query:
       - entities: verticals

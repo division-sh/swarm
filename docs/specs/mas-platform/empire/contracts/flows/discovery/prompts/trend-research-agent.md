@@ -82,6 +82,6 @@ Quality over quantity — 3 well-researched trend signals with
 proper structured evidence beat 20 vague ones.
 
 When you have exhausted trend research for this geography:
-→ Call emit_secondary_scan_complete with:
+→ Call emit_trend_research_scan_complete with:
   {scan_id: <from assignment>, trends_identified: N,
    geography: "..."}

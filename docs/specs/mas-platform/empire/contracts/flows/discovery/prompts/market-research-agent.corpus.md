@@ -139,6 +139,6 @@ A single batch of {{corpus_batch_size}} raw signals may produce 0-{{corpus_batch
 Be honest — NOT_VIABLE is expected for many signals.
 
 When you have processed ALL batches for this scan:
-→ Call emit_primary_scan_complete with:
+→ Call emit_market_research_scan_complete with:
   {scan_id: <from assignment>, categories_assessed: N,
    high_signal_count: N, geography: "..."}
