@@ -131,6 +131,46 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 }
 
+func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := NewAgentManager(bus, nil)
+	bundle := testFlowBundle("")
+	reviewFlow := bundle.FlowTree.ByID["review"]
+	reviewFlow.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+		"permission_bundles": {
+			Value: map[string]any{
+				"ops": map[string]any{
+					"permissions": []any{"agent_fire"},
+				},
+			},
+		},
+	}}
+	bundle.FlowTree.Root.Children[0].Policy = reviewFlow.Policy
+	entry := reviewFlow.Agents["reviewer"]
+	entry.PermissionsBundle = "ops"
+	entry.Permissions = []string{"schedule"}
+	reviewFlow.Agents["reviewer"] = entry
+	bundle.FlowTree.Root.Children[0].Agents["reviewer"] = entry
+
+	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		TemplateID:     "review",
+		InstanceID:     "inst-1",
+		EntityID:       "ent-1",
+		FlowPath:       "review/inst-1",
+	})
+	if err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	cfg, ok := am.GetAgentConfig("reviewer-inst-1")
+	if !ok {
+		t.Fatal("expected activated flow agent config")
+	}
+	if len(cfg.Permissions) != 2 || cfg.Permissions[0] != "agent_fire" || cfg.Permissions[1] != "schedule" {
+		t.Fatalf("permissions = %#v, want [agent_fire schedule]", cfg.Permissions)
+	}
+}
+
 func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := NewAgentManager(bus, nil)

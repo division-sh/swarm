@@ -13,6 +13,7 @@ import (
 	models "empireai/internal/runtime/core/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
+	runtimetools "empireai/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 
@@ -73,7 +74,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 
 	for _, key := range agentKeys {
 		entry := scope.Agents[key]
-		cfg, err := buildFlowAgentConfig(templateID, instanceID, entityID, key, entry, vars, localEvents, req.Config)
+		cfg, err := buildFlowAgentConfig(req.ContractBundle, templateID, instanceID, entityID, key, entry, vars, localEvents, req.Config)
 		if err != nil {
 			return err
 		}
@@ -163,6 +164,7 @@ func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, 
 }
 
 func buildFlowAgentConfig(
+	source semanticview.Source,
 	templateID string,
 	instanceID string,
 	entityID string,
@@ -210,12 +212,17 @@ func buildFlowAgentConfig(
 	if err != nil {
 		return models.AgentConfig{}, err
 	}
+	permissions, err := runtimetools.ResolveAgentPermissions(source, templateID, entry)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("flow agent %s permissions: %w", key, err)
+	}
 
 	return models.AgentConfig{
 		ID:            agentID,
 		Type:          strings.TrimSpace(entry.Type),
 		Role:          strings.TrimSpace(entry.Role),
 		Mode:          templateID,
+		Permissions:   permissions,
 		EntityID:      entityID,
 		Subscriptions: rendered,
 		Config:        rawConfig,

@@ -27,6 +27,7 @@ type toolAuthorizationClass string
 
 const (
 	toolAuthorizationUniversal    toolAuthorizationClass = "universal"
+	toolAuthorizationPermission   toolAuthorizationClass = "permission"
 	toolAuthorizationEmitAllowed  toolAuthorizationClass = "emit_allowed"
 	toolAuthorizationActorConfig  toolAuthorizationClass = "actor_config"
 	toolAuthorizationDefaultAllow toolAuthorizationClass = "default_allow"
@@ -89,6 +90,13 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 	if IsUniversal(toolName) {
 		decision.class = toolAuthorizationUniversal
 		decision.allowed = true
+		return decision
+	}
+	if requiredPerm, ok := toolPermissionRequirements[strings.TrimSpace(toolName)]; ok {
+		decision.class = toolAuthorizationPermission
+		if agentHasPermission(actor, requiredPerm) {
+			decision.allowed = true
+		}
 		return decision
 	}
 	if IsEmitToolAllowedForRole(actor.Role, toolName) {

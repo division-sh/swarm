@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -10,10 +9,7 @@ import (
 	models "empireai/internal/runtime/core/actors"
 )
 
-func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig, _ any) (any, error) {
-	if actor.Role != "control-plane" {
-		return nil, errors.New("nginx_reload is restricted to control-plane")
-	}
+func (e *Executor) execNginxReload(ctx context.Context, _ models.AgentConfig, _ any) (any, error) {
 	if out, err := exec.CommandContext(ctx, "nginx", "-t").CombinedOutput(); err != nil {
 		return nil, fmt.Errorf("nginx config test failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -23,10 +19,7 @@ func (e *Executor) execNginxReload(ctx context.Context, actor models.AgentConfig
 	return map[string]any{"status": "reloaded"}, nil
 }
 
-func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if actor.Role != "control-plane" {
-		return nil, errors.New("systemd_control is restricted to control-plane")
-	}
+func (e *Executor) execSystemdControl(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
 	var in struct {
 		Action  string `json:"action"`
 		Unit    string `json:"unit"`
@@ -46,7 +39,7 @@ func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentCon
 		return nil, fmt.Errorf("unsupported systemd action: %s", action)
 	}
 	if !strings.HasPrefix(unit, "mas-") {
-		return nil, errors.New("systemd unit must start with mas-")
+		return nil, fmt.Errorf("systemd unit must start with mas-")
 	}
 	if action == "status" {
 		out, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).CombinedOutput()
@@ -66,10 +59,7 @@ func (e *Executor) execSystemdControl(ctx context.Context, actor models.AgentCon
 	return map[string]any{"status": "ok", "action": action, "unit": unit}, nil
 }
 
-func (e *Executor) execCertbotExecute(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if actor.Role != "control-plane" {
-		return nil, errors.New("certbot_execute is restricted to control-plane")
-	}
+func (e *Executor) execCertbotExecute(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
 	var in struct {
 		Domain string `json:"domain"`
 		Action string `json:"action"`
@@ -79,7 +69,7 @@ func (e *Executor) execCertbotExecute(ctx context.Context, actor models.AgentCon
 	}
 	domain := strings.TrimSpace(in.Domain)
 	if domain == "" {
-		return nil, errors.New("domain is required")
+		return nil, fmt.Errorf("domain is required")
 	}
 	action := strings.TrimSpace(strings.ToLower(in.Action))
 	if action == "" {

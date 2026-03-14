@@ -1,0 +1,140 @@
+package tools
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	runtimecontracts "empireai/internal/runtime/contracts"
+	models "empireai/internal/runtime/core/actors"
+	"empireai/internal/runtime/semanticview"
+)
+
+func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
+	t.Run("agent fire allowed with permission", func(t *testing.T) {
+		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID:          "ops-1",
+			Permissions: []string{"agent_fire"},
+		}, "agent_fire")
+		if err != nil {
+			t.Fatalf("expected agent_fire to be allowed: %v", err)
+		}
+	})
+
+	t.Run("agent fire denied without permission", func(t *testing.T) {
+		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID: "ops-2",
+		}, "agent_fire")
+		if err == nil || !strings.Contains(err.Error(), "tool agent_fire is not allowed") {
+			t.Fatalf("expected denial for agent_fire without permission, got %v", err)
+		}
+	})
+
+	t.Run("system admin allows infra tools", func(t *testing.T) {
+		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID:          "ops-3",
+			Permissions: []string{systemAdminPermission},
+		}, "nginx_reload")
+		if err != nil {
+			t.Fatalf("expected nginx_reload to be allowed: %v", err)
+		}
+	})
+
+	t.Run("infra tool denied without system admin", func(t *testing.T) {
+		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID: "ops-4",
+		}, "nginx_reload")
+		if err == nil || !strings.Contains(err.Error(), "tool nginx_reload is not allowed") {
+			t.Fatalf("expected denial for nginx_reload without permission, got %v", err)
+		}
+	})
+
+	t.Run("universal tool bypasses permission tier", func(t *testing.T) {
+		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID: "ops-5",
+		}, "agent_message")
+		if err != nil {
+			t.Fatalf("expected universal tool to be allowed: %v", err)
+		}
+	})
+
+	t.Run("actor config tier still applies to non-gated tools", func(t *testing.T) {
+		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID: "ops-6",
+		}, "workflow_custom_tool")
+		if err != nil {
+			t.Fatalf("expected non-gated tool to fall through to existing tiers: %v", err)
+		}
+	})
+}
+
+func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"permission_bundles": {
+				Value: map[string]any{
+					"ops": map[string]any{
+						"permissions": []any{"agent_fire", systemAdminPermission},
+					},
+				},
+			},
+		}},
+	})
+	perms, err := ResolveAgentPermissions(source, "", runtimecontracts.AgentRegistryEntry{
+		PermissionsBundle: "ops",
+		Permissions:       []string{"agent_fire", "schedule"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveAgentPermissions: %v", err)
+	}
+	want := []string{"agent_fire", systemAdminPermission, "schedule"}
+	if len(perms) != len(want) {
+		t.Fatalf("expected %v, got %v", want, perms)
+	}
+	for i := range want {
+		if perms[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, perms)
+		}
+	}
+}
+
+func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
+	platform := runtimecontracts.PlatformSpecDocument{}
+	platform.PermissionsModel.Permissions = append([]string(nil), defaultPlatformPermissions...)
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Platform: platform,
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"permission_bundles": {
+				Value: map[string]any{
+					"ops": map[string]any{
+						"permissions": []any{"agent_fire"},
+					},
+				},
+			},
+		}},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"invalid-agent": {
+				ID:         "invalid-agent",
+				Role:       "operator",
+				ToolsTier2: []string{"agent_fire"},
+			},
+			"valid-agent": {
+				ID:                "valid-agent",
+				Role:              "operator",
+				PermissionsBundle: "ops",
+				ToolsTier2:        []string{"agent_fire"},
+			},
+		},
+	})
+
+	agentCount, errs := ValidateAgentPermissions(source)
+	if agentCount != 2 {
+		t.Fatalf("expected 2 agents, got %d", agentCount)
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly one validation error, got %d: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0].Error(), `agent invalid-agent declares tool agent_fire without required permission "agent_fire"`) {
+		t.Fatalf("unexpected validation error: %v", errs[0])
+	}
+}

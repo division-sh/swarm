@@ -12,6 +12,16 @@ func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
 	}
 }
 
+func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemasForBundle(t *testing.T) {
+	bundle, err := LoadWorkflowContractBundle(repoRoot(t))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+	}
+	if err := ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

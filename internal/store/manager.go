@@ -17,6 +17,9 @@ func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
 	if len(cfg.Subscriptions) > 0 {
 		obj["subscriptions"] = cfg.Subscriptions
 	}
+	if len(cfg.Permissions) > 0 {
+		obj["permissions"] = cfg.Permissions
+	}
 	if _, ok := obj["role"]; !ok && cfg.Role != "" {
 		obj["role"] = cfg.Role
 	}
@@ -40,6 +43,19 @@ func extractSubscriptions(raw []byte) []string {
 		return nil
 	}
 	return obj.Subscriptions
+}
+
+func extractPermissions(raw []byte) []string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	var obj struct {
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	return obj.Permissions
 }
 
 func normalizeJSONPayload(raw []byte) string {

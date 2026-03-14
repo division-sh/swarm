@@ -118,6 +118,7 @@ func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.Persis
 		rec.Config.NormalizeEntityID()
 		rec.Config.Config = cfgRaw
 		rec.Config.Subscriptions = extractSubscriptions(cfgRaw)
+		rec.Config.Permissions = extractPermissions(cfgRaw)
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {

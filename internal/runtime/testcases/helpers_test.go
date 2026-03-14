@@ -77,6 +77,7 @@ func agentConfigFromEntry(id string, entry runtimecontracts.AgentRegistryEntry) 
 		ID:            id,
 		Type:          entry.Type,
 		Role:          entry.Role,
+		Permissions:   append([]string(nil), entry.Permissions...),
 		Subscriptions: append([]string(nil), entry.Subscriptions...),
 	}
 }

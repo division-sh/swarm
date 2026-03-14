@@ -28,6 +28,7 @@ import (
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
+	runtimetools "empireai/internal/runtime/tools"
 	"empireai/internal/store"
 )
 
@@ -89,12 +90,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("load MAS contracts: %v", err)
 	}
+	if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
+		slog.Error("validate prompt schema guards", "error", err)
+		os.Exit(1)
+	}
 	source := semanticview.Wrap(bundle)
 	bootWarnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
 	if err != nil {
 		slog.Error("validate MAS contracts", "error", err)
 		os.Exit(1)
 	}
+	agentCount, permissionErrors := runtimetools.ValidateAgentPermissions(source)
+	if len(permissionErrors) > 0 {
+		slog.Error("validate agent permissions", "count", len(permissionErrors), "error", permissionErrors[0])
+		for _, validationErr := range permissionErrors[1:] {
+			slog.Error("validate agent permissions", "error", validationErr)
+		}
+		os.Exit(1)
+	}
+	permissionSummary := fmt.Sprintf("validated %d agents, all permission requirements satisfied", agentCount)
 	stores, err := buildStores(ctx, *storeMode, cfg)
 	if err != nil {
 		log.Fatalf("init stores: %v", err)
@@ -124,7 +138,7 @@ func main() {
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
-	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootWarnings, stateStoreSummary)
+	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootWarnings, permissionSummary, stateStoreSummary)
 	if err := rt.Start(ctx); err != nil {
 		log.Fatalf("start runtime: %v", err)
 	}
@@ -378,7 +392,7 @@ func (m *masWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 func (m *masWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return m.guardRegistry }
 func (m *masWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return m.actionRegistry }
 
-func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning, stateStoreSummary string) {
+func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning, permissionSummary, stateStoreSummary string) {
 	warningCounts := make(map[string]int, len(warnings))
 	for _, warning := range warnings {
 		warningCounts[strings.TrimSpace(warning.Category)]++
@@ -397,7 +411,7 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 		{7, "validate_pins", fmt.Sprintf("validated flow pins and event wiring; warnings=%d", warningCounts["EVENT-NO-SCHEMA"]+warningCounts["EVENT-NO-CONSUMER"]+warningCounts["EVENT-NO-PRODUCER"])},
 		{8, "validate_required_agents", "validated required_agents coverage and state-machine targets"},
 		{9, "validate_tools", fmt.Sprintf("validated tools and prompt coverage; warnings=%d", warningCounts["PROMPT-MISSING"]+warningCounts["PROMPT-STUB"])},
-		{10, "validate_permissions", "permission validation is outside Tranche A scope; current contract schema emitted no permission-specific findings"},
+		{10, "validate_permissions", permissionSummary},
 		{11, "validate_platform_version", fmt.Sprintf("loaded platform spec version %s for workflow %s", strings.TrimSpace(source.PlatformSpec().Platform.Version), strings.TrimSpace(source.WorkflowVersion()))},
 		{12, "initialize_state_stores", fmt.Sprintf("%s (contracts=%s)", strings.TrimSpace(stateStoreSummary), contractsRoot)},
 		{13, "start_system_nodes", "delegated to runtime.Start()"},

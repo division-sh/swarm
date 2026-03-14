@@ -160,6 +160,9 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if len(patch.Subscriptions) > 0 {
 		out.Subscriptions = patch.Subscriptions
 	}
+	if len(patch.Permissions) > 0 {
+		out.Permissions = patch.Permissions
+	}
 	if len(patch.Config) > 0 {
 		out.Config = patch.Config
 	}

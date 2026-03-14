@@ -14,6 +14,13 @@ func ValidatePromptSchemaGuards(repoRoot string) error {
 	if err != nil {
 		return err
 	}
+	return ValidatePromptSchemaGuardsForBundle(bundle)
+}
+
+func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
+	if bundle == nil {
+		return fmt.Errorf("workflow contract bundle is required")
+	}
 	schemas := EventSchemaRegistry()
 	cases := PromptSchemaGuards()
 

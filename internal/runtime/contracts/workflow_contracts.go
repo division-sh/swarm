@@ -1906,6 +1906,8 @@ type AgentRegistryEntry struct {
 	ID                     string   `yaml:"id"`
 	Type                   string   `yaml:"type"`
 	Role                   string   `yaml:"role"`
+	Permissions            []string `yaml:"permissions" json:"permissions,omitempty"`
+	PermissionsBundle      string   `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
 	WorkspaceClass         string   `yaml:"workspace_class"`
 	ManagerFallback        string   `yaml:"manager_fallback"`
 	NodeType               string   `yaml:"node_type"`
@@ -2085,6 +2087,9 @@ type PlatformSpecDocument struct {
 		Name    string `yaml:"name"`
 		Version string `yaml:"version"`
 	} `yaml:"platform"`
+	PermissionsModel struct {
+		Permissions []string `yaml:"permissions"`
+	} `yaml:"permissions_model"`
 	Vocabulary struct {
 		Participant struct {
 			Types map[string]struct {
