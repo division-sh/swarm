@@ -138,10 +138,10 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 13 {
-		t.Fatalf("step count = %d, want 13", len(steps))
+	if len(steps) != 18 {
+		t.Fatalf("step count = %d, want 18", len(steps))
 	}
-	if steps[0] != StepClearGates || steps[len(steps)-1] != StepAction {
+	if steps[0] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
 	}
 }
@@ -248,6 +248,133 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		"record",
 	}) {
 		t.Fatalf("actions executed = %#v", got)
+	}
+}
+
+func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       stubSource(),
+		StateRepo:    repo,
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	initial := StateSnapshot{
+		CurrentState: "pending",
+		Metadata: map[string]any{
+			"dedup_key": "dup-1",
+		},
+		StateBuckets: map[string]any{},
+	}
+	storeAccumulator(&initial, "node-1", "items.submitted", &Accumulator{
+		StartedAt:     "2026-03-14T00:00:00Z",
+		LastEventType: "items.submitted",
+	})
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"items":[{"score":60,"active":true},{"score":40,"active":true},{"score":60,"active":false}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Query: &runtimecontracts.QuerySpec{
+				Source:  "payload.items",
+				StoreAs: "entity.query_rows",
+			},
+			Filter: &runtimecontracts.FilterSpec{
+				ItemsFrom: "entity.query_rows",
+				Condition: "item.score > 50",
+				StoreAs:   "entity.filtered",
+			},
+			Reduce: &runtimecontracts.ReduceSpec{
+				ItemsFrom: "entity.filtered",
+				Operation: "sum",
+				StoreAs:   "entity.total",
+			},
+			Count: &runtimecontracts.CountSpec{
+				ItemsFrom: "entity.filtered",
+				Condition: "item.active == true",
+				StoreAs:   "entity.active_count",
+			},
+			Clear: &runtimecontracts.ClearSpec{
+				Targets: []string{"pending_dedup", "accumulator_state"},
+			},
+			AdvancesTo: "done",
+		},
+		State: initial,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	filtered, ok := repo.mutation.Metadata["filtered"].([]any)
+	if !ok || len(filtered) != 2 {
+		t.Fatalf("filtered = %#v", repo.mutation.Metadata["filtered"])
+	}
+	if got := repo.mutation.Metadata["total"]; got != 120 {
+		t.Fatalf("total = %#v, want 120", got)
+	}
+	if got := repo.mutation.Metadata["active_count"]; got != 1 {
+		t.Fatalf("active_count = %#v, want 1", got)
+	}
+	if _, ok := repo.mutation.Metadata["dedup_key"]; ok {
+		t.Fatalf("expected dedup_key to be cleared, metadata=%#v", repo.mutation.Metadata)
+	}
+	if nodeBucket, ok := repo.mutation.StateBuckets["node-1"].(map[string]any); ok {
+		if _, ok := nodeBucket[handlerAccumulatorBucketKey]; ok {
+			t.Fatalf("expected accumulator state to be cleared, state_buckets=%#v", repo.mutation.StateBuckets)
+		}
+	}
+	if result.NextState != "done" {
+		t.Fatalf("NextState = %q, want done", result.NextState)
+	}
+}
+
+func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       stubSource(),
+		StateRepo:    repo,
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-2", Type: "digest.requested", Payload: json.RawMessage(`{"items":[{"status":"queued"},{"status":"queued"},{"status":"done"}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Query: &runtimecontracts.QuerySpec{
+				Source:  "payload.items",
+				GroupBy: "item.status",
+				Count:   true,
+				StoreAs: "entity.grouped",
+			},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	grouped, ok := repo.mutation.Metadata["grouped"].(map[string]any)
+	if !ok {
+		t.Fatalf("grouped = %#v", repo.mutation.Metadata["grouped"])
+	}
+	if grouped["queued"] != 2 || grouped["done"] != 1 {
+		t.Fatalf("grouped counts = %#v", grouped)
 	}
 }
 

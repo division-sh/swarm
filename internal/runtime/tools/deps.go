@@ -41,4 +41,5 @@ type ExecutorOptions struct {
 	MailboxStore    MailboxPersistence
 	SQLDB           *sql.DB
 	WorkflowSource  semanticview.Source
+	FlowActivator   runtimepipeline.FlowInstanceActivator
 }

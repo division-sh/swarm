@@ -16,23 +16,24 @@ type ContractSchemaEntry struct {
 }
 
 var supportedRuntimeToolNames = map[string]struct{}{
-	"agent_message":      {},
-	"schedule":           {},
-	"configure_routing":  {},
-	"agent_hire":         {},
-	"agent_fire":         {},
-	"agent_reconfigure":  {},
-	"get_entity":         {},
-	"save_entity_field":  {},
-	"create_entity":      {},
-	"search_entities":    {},
-	"query_metrics":      {},
-	"mailbox_send":       {},
-	"human_task_request": {},
-	"human_task_decide":  {},
-	"nginx_reload":       {},
-	"systemd_control":    {},
-	"certbot_execute":    {},
+	"agent_message":        {},
+	"schedule":             {},
+	"configure_routing":    {},
+	"create_flow_instance": {},
+	"agent_hire":           {},
+	"agent_fire":           {},
+	"agent_reconfigure":    {},
+	"get_entity":           {},
+	"save_entity_field":    {},
+	"create_entity":        {},
+	"search_entities":      {},
+	"query_metrics":        {},
+	"mailbox_send":         {},
+	"human_task_request":   {},
+	"human_task_decide":    {},
+	"nginx_reload":         {},
+	"systemd_control":      {},
+	"certbot_execute":      {},
 }
 
 func LoadContractSchemasForSource(source semanticview.Source) (map[string]ContractSchemaEntry, error) {
@@ -122,6 +123,19 @@ func deepCloneJSONValue(v any) any {
 func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 	anyValueSchema := map[string]any{}
 	return map[string]ContractSchemaEntry{
+		"create_flow_instance": {
+			Category:    "workflow_control",
+			Description: "Create a new instance of a template flow at runtime.",
+			InputSchema: ObjectSchema(map[string]any{
+				"template":    map[string]any{"type": "string"},
+				"instance_id": map[string]any{"type": "string"},
+				"config": map[string]any{
+					"type":                 "object",
+					"properties":           map[string]any{},
+					"additionalProperties": true,
+				},
+			}, "template"),
+		},
 		"get_entity": {
 			Category:    "entity_persistence",
 			Description: "Read a typed entity row by entity type and entity id.",

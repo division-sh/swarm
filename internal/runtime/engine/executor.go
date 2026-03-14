@@ -11,15 +11,20 @@ import (
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/core/identity"
+	"empireai/internal/runtime/core/paths"
 	"empireai/internal/runtime/core/values"
 )
 
 type Step string
 
 const (
+	StepQuery      Step = "query"
 	StepClearGates Step = "clear_gates"
 	StepGuard      Step = "guard"
 	StepAccumulate Step = "accumulate"
+	StepFilter     Step = "filter"
+	StepReduce     Step = "reduce"
+	StepCount      Step = "count"
 	StepCompute    Step = "compute"
 	StepFanOut     Step = "fan_out"
 	StepOnComplete Step = "on_complete"
@@ -30,12 +35,17 @@ const (
 	StepTransform  Step = "transform"
 	StepEmits      Step = "emits"
 	StepAction     Step = "action"
+	StepClear      Step = "clear"
 )
 
 var OrderedSteps = []Step{
+	StepQuery,
 	StepClearGates,
 	StepGuard,
 	StepAccumulate,
+	StepFilter,
+	StepReduce,
+	StepCount,
 	StepCompute,
 	StepFanOut,
 	StepOnComplete,
@@ -46,6 +56,7 @@ var OrderedSteps = []Step{
 	StepTransform,
 	StepEmits,
 	StepAction,
+	StepClear,
 }
 
 type Executor struct {
@@ -241,12 +252,20 @@ func (e *Executor) runSteps(frame *executionFrame) error {
 
 func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 	switch step {
+	case StepQuery:
+		return false, e.stepQuery(frame)
 	case StepClearGates:
 		return false, e.stepClearGates(frame)
 	case StepGuard:
 		return e.stepGuard(frame)
 	case StepAccumulate:
 		return e.stepAccumulate(frame)
+	case StepFilter:
+		return false, e.stepFilter(frame)
+	case StepReduce:
+		return false, e.stepReduce(frame)
+	case StepCount:
+		return false, e.stepCount(frame)
 	case StepCompute:
 		return false, e.stepCompute(frame)
 	case StepFanOut:
@@ -267,9 +286,81 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepEmits(frame)
 	case StepAction:
 		return false, e.stepAction(frame)
+	case StepClear:
+		return false, e.stepClear(frame)
 	default:
 		return false, nil
 	}
+}
+
+func (e *Executor) stepQuery(frame *executionFrame) error {
+	spec := frame.req.Handler.Query
+	if spec == nil {
+		return nil
+	}
+	current := e.currentContext(frame)
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.SourcePath, spec.Source)
+	items := executionItems(sourceValue)
+	if len(items) == 0 {
+		entityValue, _ := resolveContractPath(current, frame.state, spec.EntitiesPath, spec.Entities)
+		items = executionItems(entityValue)
+	}
+	if filter := strings.TrimSpace(spec.Filter); filter != "" {
+		filtered := make([]any, 0, len(items))
+		for _, item := range items {
+			if executionEvalCondition(filter, map[string]any{
+				"item":    item,
+				"payload": frame.payload,
+				"entity":  frame.state.State.EntityContext(),
+				"policy":  current.Policy.Raw(),
+			}) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	var value any = items
+	switch {
+	case strings.TrimSpace(spec.GroupBy) != "":
+		grouped := map[string]any{}
+		for _, item := range items {
+			key := strings.TrimSpace(asString(executionResolveOperand(strings.TrimSpace(spec.GroupBy), map[string]any{
+				"item":    item,
+				"payload": frame.payload,
+				"entity":  frame.state.State.EntityContext(),
+				"policy":  current.Policy.Raw(),
+			})))
+			if key == "" {
+				key = "unknown"
+			}
+			grouped[key] = asInt(grouped[key]) + 1
+		}
+		value = grouped
+	case spec.Count:
+		value = len(items)
+	case len(spec.Select) > 0:
+		selected := make([]any, 0, len(items))
+		for _, item := range items {
+			obj, ok := asObject(item)
+			if !ok {
+				continue
+			}
+			projected := map[string]any{}
+			for _, field := range spec.Select {
+				field = strings.TrimSpace(field)
+				if field == "" {
+					continue
+				}
+				if fieldValue, ok := obj[field]; ok {
+					projected[field] = fieldValue
+				}
+			}
+			selected = append(selected, projected)
+		}
+		value = selected
+	}
+	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value)
+	return nil
 }
 
 func (e *Executor) stepClearGates(frame *executionFrame) error {
@@ -315,7 +406,11 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if !ok {
 		acc = &Accumulator{}
 	}
-	expectedIDs, expectedCount := expectedAccumulatorTargets(frame.base, frame.state, spec.ExpectedPath, spec.ExpectedFrom)
+	if strings.TrimSpace(acc.StartedAt) == "" {
+		acc.StartedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	current := e.currentContext(frame)
+	expectedIDs, expectedCount := expectedAccumulatorTargets(current, frame.state, spec.ExpectedPath, spec.ExpectedFrom)
 	if len(expectedIDs) > 0 {
 		acc.Expected = append([]string{}, expectedIDs...)
 		acc.ExpectedCount = len(expectedIDs)
@@ -325,7 +420,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if acc.Received == nil {
 		acc.Received = map[string]bool{}
 	}
-	arrivalID := dedupIdentifier(frame.base, frame.state, frame.req.Event, spec)
+	arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
 	if arrivalID != "" && !acc.Received[arrivalID] {
 		acc.Received[arrivalID] = true
 		acc.Items = append(acc.Items, map[string]any{
@@ -361,6 +456,65 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+func (e *Executor) stepFilter(frame *executionFrame) error {
+	spec := frame.req.Handler.Filter
+	if spec == nil {
+		return nil
+	}
+	current := e.currentContext(frame)
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	items := executionItems(sourceValue)
+	filtered := make([]any, 0, len(items))
+	for _, item := range items {
+		if executionEvalCondition(strings.TrimSpace(spec.Condition), map[string]any{
+			"item":    item,
+			"payload": frame.payload,
+			"entity":  frame.state.State.EntityContext(),
+			"policy":  current.Policy.Raw(),
+		}) {
+			filtered = append(filtered, item)
+		}
+	}
+	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.filter"), filtered)
+	return nil
+}
+
+func (e *Executor) stepReduce(frame *executionFrame) error {
+	spec := frame.req.Handler.Reduce
+	if spec == nil {
+		return nil
+	}
+	current := e.currentContext(frame)
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	items := executionItems(sourceValue)
+	value := executionReduceValue(items, strings.TrimSpace(spec.Operation))
+	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value)
+	return nil
+}
+
+func (e *Executor) stepCount(frame *executionFrame) error {
+	spec := frame.req.Handler.Count
+	if spec == nil {
+		return nil
+	}
+	current := e.currentContext(frame)
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	items := executionItems(sourceValue)
+	count := 0
+	for _, item := range items {
+		if strings.TrimSpace(spec.Condition) == "" || executionEvalCondition(strings.TrimSpace(spec.Condition), map[string]any{
+			"item":    item,
+			"payload": frame.payload,
+			"entity":  frame.state.State.EntityContext(),
+			"policy":  current.Policy.Raw(),
+		}) {
+			count++
+		}
+	}
+	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.count"), count)
+	return nil
 }
 
 func (e *Executor) stepCompute(frame *executionFrame) error {
@@ -614,6 +768,44 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 	return nil
 }
 
+func (e *Executor) stepClear(frame *executionFrame) error {
+	spec := frame.req.Handler.Clear
+	if spec == nil {
+		return nil
+	}
+	targets := append([]string{}, spec.Targets...)
+	if target := strings.TrimSpace(spec.Target); target != "" {
+		targets = append(targets, target)
+	}
+	for _, target := range targets {
+		target = strings.TrimSpace(target)
+		if target == "" {
+			continue
+		}
+		switch target {
+		case "accumulator_state":
+			if !frame.req.NodeID.IsZero() {
+				root := frame.state.State.EnsureStateBucketsBucket()
+				if bucket, ok := root.Map(frame.req.NodeID.String()); ok {
+					delete(bucket.Raw(), handlerAccumulatorBucketKey)
+				}
+			}
+			delete(frame.state.State.Metadata, "accumulated_count")
+			delete(frame.state.State.Metadata, "accumulated_total")
+			delete(frame.state.State.Metadata, "received_items")
+		case "cycle_counters":
+			delete(frame.state.State.Metadata, "cycle_index")
+		case "pending_dedup":
+			delete(frame.state.State.Metadata, "dedup_key")
+		default:
+			e.clearStepValue(frame, target)
+		}
+	}
+	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
+	return nil
+}
+
 func (e *Executor) buildTimerIntents(frame *executionFrame) []TimerIntent {
 	if strings.TrimSpace(frame.result.CurrentState) == "" || strings.TrimSpace(frame.result.NextState) == "" {
 		return nil
@@ -724,6 +916,61 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	return ctx
+}
+
+func (e *Executor) writeStepValue(frame *executionFrame, target string, value any) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return
+	}
+	parsed := paths.Parse(target)
+	switch parsed.Root {
+	case paths.RootComputed:
+		frame.state.SetComputed(strings.Join(parsed.Segments, "."), value)
+		frame.result.SetComputed(strings.Join(parsed.Segments, "."), value)
+	case paths.RootAccumulated:
+		frame.state.SetAccumulated(strings.Join(parsed.Segments, "."), value)
+	case paths.RootFanOut:
+		frame.state.SetFanOut(strings.Join(parsed.Segments, "."), value)
+	default:
+		if frame.state.State.Metadata == nil {
+			frame.state.State.Metadata = map[string]any{}
+		}
+		switch {
+		case parsed.Root == paths.RootEntity || parsed.Root == paths.RootMetadata:
+			setParsedValuePath(frame.state.State.Metadata, paths.Path{Segments: parsed.Segments}, value)
+		case parsed.HasExplicitRoot():
+			setParsedValuePath(frame.state.State.Metadata, paths.Path{Segments: parsed.Segments}, value)
+		default:
+			setParsedValuePath(frame.state.State.Metadata, parsed, value)
+		}
+		frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	}
+}
+
+func (e *Executor) clearStepValue(frame *executionFrame, target string) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return
+	}
+	parsed := paths.Parse(target)
+	if !parsed.HasExplicitRoot() {
+		executionDeletePath(frame.state.State.Metadata, strings.Split(target, "."))
+		return
+	}
+	switch parsed.Root {
+	case paths.RootComputed:
+		delete(frame.state.Computed, strings.Join(parsed.Segments, "."))
+		delete(frame.result.Computed, strings.Join(parsed.Segments, "."))
+	case paths.RootAccumulated:
+		delete(frame.state.Accumulated, strings.Join(parsed.Segments, "."))
+	case paths.RootFanOut:
+		delete(frame.state.FanOut, strings.Join(parsed.Segments, "."))
+	case paths.RootEntity, paths.RootMetadata:
+		executionDeletePath(frame.state.State.Metadata, parsed.Segments)
+	default:
+		delete(frame.state.State.Metadata, target)
+	}
 }
 
 func (e *Executor) executionContext(frame *executionFrame, step Step) ExecutionContext {

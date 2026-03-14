@@ -15,6 +15,7 @@ import (
 	"empireai/internal/events"
 	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -30,6 +31,7 @@ type Executor struct {
 	mailboxStore    MailboxPersistence
 	cfg             *config.Config
 	workflowSource  semanticview.Source
+	flowActivator   runtimepipeline.FlowInstanceActivator
 	authorizer      *ToolAuthorizer
 	validator       *ToolInputValidator
 	dispatcher      *ToolDispatcher
@@ -56,6 +58,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		sqlDB:           opts.SQLDB,
 		cfg:             opts.Config,
 		workflowSource:  opts.WorkflowSource,
+		flowActivator:   opts.FlowActivator,
 		oneShotEmits:    make(map[string]struct{}),
 	}
 	exec.authorizer = NewToolAuthorizer(bus)
@@ -91,6 +94,12 @@ func (e *Executor) SetManager(manager Manager) {
 	}
 	e.manager = manager
 	e.managerProvider = nil
+}
+
+func (e *Executor) SetFlowActivator(activator runtimepipeline.FlowInstanceActivator) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.flowActivator = activator
 }
 
 func (e *Executor) SetConfig(cfg *config.Config) {

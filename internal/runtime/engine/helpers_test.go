@@ -236,6 +236,14 @@ func TestAccumulatorComplete(t *testing.T) {
 	if err != nil || !complete {
 		t.Fatalf("accumulatorComplete expression = %v, %v", complete, err)
 	}
+	acc = &Accumulator{
+		StartedAt:     "2026-03-14T00:00:00Z",
+		LastEventType: "accumulate.timeout",
+	}
+	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("timeout")}, nil)
+	if err != nil || !complete {
+		t.Fatalf("accumulatorComplete timeout = %v, %v", complete, err)
+	}
 }
 
 func TestComputeValue(t *testing.T) {

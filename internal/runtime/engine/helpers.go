@@ -22,6 +22,7 @@ type Accumulator struct {
 	ExpectedCount  int              `json:"expected_count,omitempty"`
 	Received       map[string]bool  `json:"received,omitempty"`
 	Items          []map[string]any `json:"items,omitempty"`
+	StartedAt      string           `json:"started_at,omitempty"`
 	LastEventID    string           `json:"last_event_id,omitempty"`
 	LastEventType  string           `json:"last_event_type,omitempty"`
 	LastSource     string           `json:"last_source,omitempty"`
@@ -320,6 +321,7 @@ func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType even
 		ExpectedCount:  raw.Int("expected_count"),
 		Received:       map[string]bool{},
 		Items:          sliceOfMapsFromAny(raw.Raw()["items"]),
+		StartedAt:      raw.String("started_at"),
 		LastEventID:    raw.String("last_event_id"),
 		LastEventType:  raw.String("last_event_type"),
 		LastSource:     raw.String("last_source"),
@@ -358,6 +360,7 @@ func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType ev
 		"expected_count":   acc.ExpectedCount,
 		"received":         received,
 		"items":            items,
+		"started_at":       acc.StartedAt,
 		"last_event_id":    acc.LastEventID,
 		"last_event_type":  acc.LastEventType,
 		"last_source":      acc.LastSource,
@@ -432,6 +435,12 @@ func accumulatorComplete(
 		}
 	}
 	if completionSpec.Mode == runtimecontracts.AccumulateModeTimeout {
+		if strings.TrimSpace(acc.StartedAt) == "" {
+			return false, nil
+		}
+		if strings.HasSuffix(strings.TrimSpace(acc.LastEventType), ".timeout") || strings.EqualFold(strings.TrimSpace(acc.LastEventType), "accumulate.timeout") {
+			return true, nil
+		}
 		return false, nil
 	}
 	if evalBool == nil {
@@ -462,7 +471,323 @@ func accumulatorExpressionValue(acc *Accumulator) map[string]any {
 		"expected":       expected,
 		"expected_count": acc.ExpectedCount,
 		"received_count": len(acc.Received),
+		"started_at":     acc.StartedAt,
 	}
+}
+
+func executionItems(value any) []any {
+	return sliceFromAny(value)
+}
+
+func executionEvalCondition(expr string, roots map[string]any) bool {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return true
+	}
+	expr = executionTrimOuterParens(expr)
+	if parts := executionSplitTopLevel(expr, " OR "); len(parts) > 1 {
+		for _, part := range parts {
+			if executionEvalCondition(part, roots) {
+				return true
+			}
+		}
+		return false
+	}
+	if parts := executionSplitTopLevel(expr, " AND "); len(parts) > 1 {
+		for _, part := range parts {
+			if !executionEvalCondition(part, roots) {
+				return false
+			}
+		}
+		return true
+	}
+	for _, op := range []string{">=", "<=", "!=", "==", ">", "<"} {
+		if parts := executionSplitTopLevel(expr, " "+op+" "); len(parts) == 2 {
+			left := executionResolveOperand(parts[0], roots)
+			right := executionResolveOperand(parts[1], roots)
+			return executionCompareValues(left, right, op)
+		}
+	}
+	return truthy(executionResolveOperand(expr, roots))
+}
+
+func executionSplitTopLevel(expr, sep string) []string {
+	if strings.TrimSpace(expr) == "" {
+		return nil
+	}
+	depth := 0
+	quote := rune(0)
+	parts := make([]string, 0, 4)
+	start := 0
+	for i, r := range expr {
+		switch r {
+		case '\'', '"':
+			if quote == 0 {
+				quote = r
+			} else if quote == r {
+				quote = 0
+			}
+		case '(':
+			if quote == 0 {
+				depth++
+			}
+		case ')':
+			if quote == 0 {
+				depth--
+			}
+		}
+		if quote == 0 && depth == 0 && strings.HasPrefix(expr[i:], sep) {
+			parts = append(parts, strings.TrimSpace(expr[start:i]))
+			start = i + len(sep)
+			i += len(sep) - 1
+		}
+	}
+	if len(parts) == 0 {
+		return []string{expr}
+	}
+	parts = append(parts, strings.TrimSpace(expr[start:]))
+	return parts
+}
+
+func executionTrimOuterParens(expr string) string {
+	expr = strings.TrimSpace(expr)
+	for strings.HasPrefix(expr, "(") && strings.HasSuffix(expr, ")") {
+		depth := 0
+		quote := rune(0)
+		wrapped := true
+		for i, r := range expr {
+			switch r {
+			case '\'', '"':
+				if quote == 0 {
+					quote = r
+				} else if quote == r {
+					quote = 0
+				}
+			case '(':
+				if quote == 0 {
+					depth++
+				}
+			case ')':
+				if quote == 0 {
+					depth--
+					if depth == 0 && i != len(expr)-1 {
+						wrapped = false
+					}
+				}
+			}
+		}
+		if !wrapped {
+			return expr
+		}
+		expr = strings.TrimSpace(expr[1 : len(expr)-1])
+	}
+	return expr
+}
+
+func executionResolveOperand(expr string, roots map[string]any) any {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return nil
+	}
+	if strings.EqualFold(expr, "true") {
+		return true
+	}
+	if strings.EqualFold(expr, "false") {
+		return false
+	}
+	if strings.EqualFold(expr, "null") {
+		return nil
+	}
+	if (strings.HasPrefix(expr, "\"") && strings.HasSuffix(expr, "\"")) || (strings.HasPrefix(expr, "'") && strings.HasSuffix(expr, "'")) {
+		return strings.Trim(expr, "\"'")
+	}
+	if n, err := strconv.Atoi(expr); err == nil {
+		return n
+	}
+	if f, err := strconv.ParseFloat(expr, 64); err == nil {
+		return f
+	}
+	segments := strings.Split(expr, ".")
+	if len(segments) == 1 {
+		for _, rootName := range []string{"item", "payload", "entity", "policy"} {
+			if rootMap, ok := roots[rootName].(map[string]any); ok {
+				if value, ok := rootMap[segments[0]]; ok {
+					return value
+				}
+			}
+		}
+		return expr
+	}
+	current, ok := roots[strings.TrimSpace(segments[0])]
+	if !ok {
+		return nil
+	}
+	for _, segment := range segments[1:] {
+		object, ok := asObject(current)
+		if !ok {
+			return nil
+		}
+		current, ok = object[strings.TrimSpace(segment)]
+		if !ok {
+			return nil
+		}
+	}
+	return current
+}
+
+func executionCompareValues(left, right any, op string) bool {
+	lf, lok := asFloat(left)
+	rf, rok := asFloat(right)
+	if lok && rok {
+		switch op {
+		case ">=":
+			return lf >= rf
+		case "<=":
+			return lf <= rf
+		case ">":
+			return lf > rf
+		case "<":
+			return lf < rf
+		case "==":
+			return lf == rf
+		case "!=":
+			return lf != rf
+		}
+	}
+	ls := strings.TrimSpace(asString(left))
+	rs := strings.TrimSpace(asString(right))
+	switch op {
+	case "==":
+		return ls == rs
+	case "!=":
+		return ls != rs
+	default:
+		return false
+	}
+}
+
+func executionReduceValue(items []any, operation string) any {
+	switch strings.ToLower(strings.TrimSpace(operation)) {
+	case "sum":
+		total := 0.0
+		for _, item := range items {
+			if value, ok := executionNumericValue(item); ok {
+				total += value
+			}
+		}
+		return executionNormalizeNumber(total)
+	case "min":
+		var (
+			best float64
+			ok   bool
+		)
+		for _, item := range items {
+			value, has := executionNumericValue(item)
+			if !has {
+				continue
+			}
+			if !ok || value < best {
+				best = value
+				ok = true
+			}
+		}
+		return executionNormalizeNumber(best)
+	case "max":
+		var (
+			best float64
+			ok   bool
+		)
+		for _, item := range items {
+			value, has := executionNumericValue(item)
+			if !has {
+				continue
+			}
+			if !ok || value > best {
+				best = value
+				ok = true
+			}
+		}
+		return executionNormalizeNumber(best)
+	case "count":
+		return len(items)
+	case "weighted_average":
+		total := 0.0
+		weights := 0.0
+		for _, item := range items {
+			object, ok := asObject(item)
+			if !ok {
+				continue
+			}
+			score, okScore := asFloat(object["score"])
+			weight, okWeight := asFloat(object["weight"])
+			if !okScore || !okWeight || weight == 0 {
+				continue
+			}
+			total += score * weight
+			weights += weight
+		}
+		if weights == 0 {
+			return 0
+		}
+		return executionNormalizeNumber(total / weights)
+	case "pick_or_average":
+		best := 0.0
+		ok := false
+		for _, item := range items {
+			object, isObject := asObject(item)
+			if !isObject {
+				continue
+			}
+			score, has := asFloat(object["score"])
+			if !has {
+				continue
+			}
+			if !ok || score > best {
+				best = score
+				ok = true
+			}
+		}
+		return executionNormalizeNumber(best)
+	default:
+		return nil
+	}
+}
+
+func executionNumericValue(item any) (float64, bool) {
+	if value, ok := asFloat(item); ok {
+		return value, true
+	}
+	if object, ok := asObject(item); ok {
+		if value, ok := asFloat(object["value"]); ok {
+			return value, true
+		}
+		if value, ok := asFloat(object["score"]); ok {
+			return value, true
+		}
+	}
+	return 0, false
+}
+
+func executionNormalizeNumber(value float64) any {
+	if float64(int(value)) == value {
+		return int(value)
+	}
+	return value
+}
+
+func executionDeletePath(root map[string]any, segments []string) {
+	if len(root) == 0 || len(segments) == 0 {
+		return
+	}
+	current := root
+	for _, segment := range segments[:len(segments)-1] {
+		next, ok := current[strings.TrimSpace(segment)].(map[string]any)
+		if !ok {
+			return
+		}
+		current = next
+	}
+	delete(current, strings.TrimSpace(segments[len(segments)-1]))
 }
 
 func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontracts.ComputeSpec) (any, error) {
@@ -756,6 +1081,14 @@ func asInt(v any) int {
 	default:
 		return 0
 	}
+}
+
+func asFloat(v any) (float64, bool) {
+	value := firstNumeric(v)
+	if math.IsNaN(value) {
+		return 0, false
+	}
+	return value, true
 }
 
 func asObject(v any) (map[string]any, bool) {

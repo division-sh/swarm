@@ -416,6 +416,9 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			}
 		}
 	}
+	if err := detectEventCycles(source); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	warnings = append(warnings, workflowEventCatalogWarnings(source)...)
 	warnings = append(warnings, workflowPolicyConflictWarnings(projectScopes, source.FlowScopes())...)
@@ -1201,6 +1204,85 @@ func workflowEventCatalogWarnings(source semanticview.Source) []WorkflowContract
 		})
 	}
 	return warnings
+}
+
+func detectEventCycles(source semanticview.Source) error {
+	if source == nil {
+		return nil
+	}
+	graph := map[string]map[string]struct{}{}
+	for _, node := range source.NodeEntries() {
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" || strings.Contains(eventType, "*") {
+				continue
+			}
+			for _, emitted := range workflowHandlerEmits(handler) {
+				emitted = strings.TrimSpace(emitted)
+				if emitted == "" || strings.Contains(emitted, "*") {
+					continue
+				}
+				if graph[eventType] == nil {
+					graph[eventType] = map[string]struct{}{}
+				}
+				graph[eventType][emitted] = struct{}{}
+			}
+		}
+	}
+	cycles := workflowFindEventCycles(graph)
+	if len(cycles) == 0 {
+		return nil
+	}
+	return fmt.Errorf("EVENT-CYCLE: node handler emit cycle: %s", strings.Join(cycles[0], " -> "))
+}
+
+func workflowFindEventCycles(graph map[string]map[string]struct{}) [][]string {
+	seen := map[string]struct{}{}
+	cycles := make([][]string, 0)
+	var walk func(start, current string, path []string)
+	walk = func(start, current string, path []string) {
+		for _, next := range sortedWorkflowValidationSetKeys(graph[current]) {
+			if next == start && len(path) > 1 {
+				cycle := append(append([]string{}, path...), next)
+				key := strings.Join(cycle, "->")
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				cycles = append(cycles, cycle)
+				continue
+			}
+			if _, ok := graph[next]; !ok || workflowContainsString(path, next) {
+				continue
+			}
+			walk(start, next, append(path, next))
+		}
+	}
+	for _, start := range sortedWorkflowValidationSetKeysFromGraph(graph) {
+		walk(start, start, []string{start})
+	}
+	return cycles
+}
+
+func sortedWorkflowValidationSetKeysFromGraph(graph map[string]map[string]struct{}) []string {
+	keys := make([]string, 0, len(graph))
+	for key := range graph {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func workflowContainsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowPolicyConflictWarnings(projectScopes []semanticview.ProjectScope, flowScopes []semanticview.FlowScope) []WorkflowContractWarning {

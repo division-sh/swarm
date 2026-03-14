@@ -143,12 +143,13 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
+	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("MAS_STRICT_PAYLOAD_VALIDATION", false))
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	})
+	}, payloadValidator)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -213,6 +214,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		MailboxStore:   stores.MailboxStore,
 		SQLDB:          stores.SQLDB,
 		WorkflowSource: source,
+		FlowActivator:  nil,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
@@ -241,6 +243,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		DisableSpinupControl: true,
 	}, stores.ManagerStore)
 	managerRef = rt.Manager
+	if rt.ToolExecutor != nil && rt.Manager != nil {
+		rt.ToolExecutor.SetFlowActivator(rt.Manager.ActivateFlowInstance)
+	}
 	if rt.Pipeline != nil && rt.Manager != nil {
 		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
 		rt.Pipeline.SetInstanceDeactivator(func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {

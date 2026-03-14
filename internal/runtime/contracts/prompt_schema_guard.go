@@ -22,7 +22,7 @@ func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
 		return fmt.Errorf("workflow contract bundle is required")
 	}
 	schemas := EventSchemaRegistry()
-	cases := PromptSchemaGuards()
+	cases := DerivePromptSchemaGuards(bundle)
 
 	for _, tc := range cases {
 		_, raw, err := readPromptSchemaGuardFile(bundle, tc.PromptFile)
@@ -71,6 +71,15 @@ func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
 }
 
 func readPromptSchemaGuardFile(bundle *WorkflowContractBundle, promptFile string) (string, string, error) {
+	if filepath.IsAbs(promptFile) {
+		raw, err := os.ReadFile(promptFile)
+		if err == nil {
+			return promptFile, string(raw), nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return "", "", fmt.Errorf("read %s: %w", promptFile, err)
+		}
+	}
 	for _, dir := range promptBundlePromptDirs(bundle) {
 		path := filepath.Join(dir, promptFile)
 		raw, err := os.ReadFile(path)

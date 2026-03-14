@@ -29,16 +29,17 @@ var defaultPlatformPermissions = []string{
 }
 
 var toolPermissionRequirements = map[string]string{
-	"agent_fire":         "agent_fire",
-	"agent_hire":         "agent_hire",
-	"agent_reconfigure":  "agent_reconfigure",
-	"configure_routing":  "configure_routing",
-	"human_task_request": "human_task_request",
-	"human_task_decide":  "human_task_decide",
-	"schedule":           "schedule",
-	"nginx_reload":       systemAdminPermission,
-	"systemd_control":    systemAdminPermission,
-	"certbot_execute":    systemAdminPermission,
+	"agent_fire":           "agent_fire",
+	"agent_hire":           "agent_hire",
+	"agent_reconfigure":    "agent_reconfigure",
+	"configure_routing":    "configure_routing",
+	"create_flow_instance": "create_flow_instance",
+	"human_task_request":   "human_task_request",
+	"human_task_decide":    "human_task_decide",
+	"schedule":             "schedule",
+	"nginx_reload":         systemAdminPermission,
+	"systemd_control":      systemAdminPermission,
+	"certbot_execute":      systemAdminPermission,
 }
 
 func agentHasPermission(agent models.AgentConfig, perm string) bool {

@@ -19,6 +19,8 @@ type EventInterceptor interface {
 	Intercept(ctx context.Context, evt events.Event) (passthrough bool, deferred []events.Event, err error)
 }
 
+type PayloadValidator func(eventType string, payload []byte) error
+
 type EventBus struct {
 	mu                  sync.RWMutex
 	channels            map[events.EventType]map[string]chan events.Event
@@ -30,6 +32,7 @@ type EventBus struct {
 	store               EventStore
 	logger              LoggerHook
 	semanticSource      semanticview.Source
+	payloadValidator    PayloadValidator
 	outboxSweeperActive bool
 }
 
@@ -39,6 +42,7 @@ type EventBusOptions struct {
 	InterceptorProvider func() []EventInterceptor
 	ContractBundle      semanticview.Source
 	RouteTable          *RouteTable
+	PayloadValidator    PayloadValidator
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -91,6 +95,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		interceptors:        filtered,
 		interceptorProvider: opts.InterceptorProvider,
 		semanticSource:      semanticSource,
+		payloadValidator:    opts.PayloadValidator,
 	}, nil
 }
 
