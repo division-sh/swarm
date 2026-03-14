@@ -7,18 +7,22 @@ import (
 )
 
 type ProjectScope struct {
-	Key    string
-	Nodes  map[string]runtimecontracts.SystemNodeContract
-	Events map[string]runtimecontracts.EventCatalogEntry
-	Agents map[string]runtimecontracts.AgentRegistryEntry
-	Tools  map[string]runtimecontracts.ToolSchemaEntry
-	Policy runtimecontracts.PolicyDocument
+	Key        string
+	Depth      int
+	Manifest   runtimecontracts.ProjectPackageDocument
+	PromptsDir string
+	Nodes      map[string]runtimecontracts.SystemNodeContract
+	Events     map[string]runtimecontracts.EventCatalogEntry
+	Agents     map[string]runtimecontracts.AgentRegistryEntry
+	Tools      map[string]runtimecontracts.ToolSchemaEntry
+	Policy     runtimecontracts.PolicyDocument
 }
 
 type FlowScope struct {
 	ID            string
 	Path          string
 	Mode          string
+	PromptsDir    string
 	InputEvents   []string
 	OutputEvents  []string
 	AutoEmitEvent string
@@ -63,6 +67,7 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 		ID:            strings.TrimSpace(view.Paths.ID),
 		Path:          strings.Trim(strings.TrimSpace(view.Path), "/"),
 		Mode:          flowModeFromView(view),
+		PromptsDir:    strings.TrimSpace(view.Paths.PromptsDir),
 		InputEvents:   append([]string{}, view.Schema.Pins.Inputs.Events...),
 		OutputEvents:  append([]string{}, view.Schema.Pins.Outputs.Events...),
 		AutoEmitEvent: strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event),

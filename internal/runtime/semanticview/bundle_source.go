@@ -94,12 +94,15 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 	out := make([]ProjectScope, 0, len(views))
 	for _, view := range views {
 		out = append(out, ProjectScope{
-			Key:    strings.TrimSpace(view.Paths.Key),
-			Nodes:  view.Nodes,
-			Events: view.Events,
-			Agents: view.Agents,
-			Tools:  view.Tools,
-			Policy: view.Policy,
+			Key:        strings.TrimSpace(view.Paths.Key),
+			Depth:      view.Paths.Depth,
+			Manifest:   view.Manifest,
+			PromptsDir: strings.TrimSpace(view.Paths.ProjectPromptsDir),
+			Nodes:      view.Nodes,
+			Events:     view.Events,
+			Agents:     view.Agents,
+			Tools:      view.Tools,
+			Policy:     view.Policy,
 		})
 	}
 	return out

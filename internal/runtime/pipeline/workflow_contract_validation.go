@@ -2,7 +2,11 @@ package pipeline
 
 import (
 	"fmt"
+	"os"
 	"path"
+	"path/filepath"
+	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -11,30 +15,131 @@ import (
 	"empireai/internal/runtime/semanticview"
 )
 
+type WorkflowContractWarning struct {
+	Category string
+	Message  string
+}
+
 func ValidateWorkflowContracts(source semanticview.Source) error {
-	return validateWorkflowContracts(source)
+	_, err := validateWorkflowContractsDetailed(source)
+	return err
+}
+
+func ValidateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowContractWarning, error) {
+	return validateWorkflowContractsDetailed(source)
 }
 
 func ValidateDefaultWorkflowContracts() error {
-	return validateWorkflowContracts(defaultWorkflowModule().SemanticSource())
+	return ValidateWorkflowContracts(defaultWorkflowModule().SemanticSource())
 }
 
 func (pc *FactoryPipelineCoordinator) ValidateWorkflowContracts() error {
-	return validateWorkflowContracts(pc.SemanticSource())
+	return ValidateWorkflowContracts(pc.SemanticSource())
 }
 
 func validateWorkflowContracts(source semanticview.Source) error {
+	_, err := validateWorkflowContractsDetailed(source)
+	return err
+}
+
+func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowContractWarning, error) {
 	if source == nil {
-		return fmt.Errorf("workflow contract bundle is nil")
+		return nil, fmt.Errorf("workflow contract bundle is nil")
 	}
 	errs := make([]string, 0, 16)
+	warnings := make([]WorkflowContractWarning, 0, 8)
 	nodes := source.NodeEntries()
 	events := source.EventEntries()
 	usesOwningNodeModel := contractBundleUsesOwningNodeModel(source)
 	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(source)
 	entityFields := workflowEntitySchemaFields(source)
-	if source.WorkflowName() == "" {
-		errs = append(errs, "workflow.name missing")
+	addWarning := func(category, message string) {
+		warnings = append(warnings, WorkflowContractWarning{
+			Category: strings.TrimSpace(category),
+			Message:  strings.TrimSpace(message),
+		})
+	}
+	projectScopes := source.ProjectScopes()
+	for _, scope := range projectScopes {
+		if strings.TrimSpace(scope.Manifest.Name) == "" {
+			errs = append(errs, fmt.Sprintf("project package %s missing required field name", workflowProjectScopeLabel(scope)))
+		}
+		if strings.TrimSpace(scope.Manifest.Version) == "" {
+			errs = append(errs, fmt.Sprintf("project package %s missing required field version", workflowProjectScopeLabel(scope)))
+		}
+		for nodeID, node := range scope.Nodes {
+			nodeLabel := workflowScopedObjectLabel(workflowProjectScopeLabel(scope), nodeID)
+			if strings.TrimSpace(node.ExecutionType) == "" {
+				errs = append(errs, fmt.Sprintf("node %s missing required field execution_type", nodeLabel))
+			}
+			if len(node.SubscribesTo) == 0 {
+				errs = append(errs, fmt.Sprintf("node %s missing required field subscribes_to", nodeLabel))
+			}
+			if len(node.Produces) == 0 {
+				errs = append(errs, fmt.Sprintf("node %s missing required field produces", nodeLabel))
+			}
+			if len(node.EventHandlers) == 0 {
+				errs = append(errs, fmt.Sprintf("node %s missing required field event_handlers", nodeLabel))
+			}
+		}
+		for agentID, agent := range scope.Agents {
+			agentLabel := workflowScopedObjectLabel(workflowProjectScopeLabel(scope), agentID)
+			if strings.TrimSpace(agent.ModelTier) == "" {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field model_tier", agentLabel))
+			}
+			if strings.TrimSpace(agent.ConversationMode) == "" {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field conversation_mode", agentLabel))
+			}
+			if len(agent.Subscriptions) == 0 {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
+			}
+			if len(agent.EmitEvents) == 0 {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field emit_events", agentLabel))
+			}
+			workflowValidatePromptWarnings(scope.PromptsDir, workflowProjectScopeLabel(scope), agentID, addWarning)
+		}
+	}
+	for flowID, schema := range source.FlowSchemaEntries() {
+		if strings.TrimSpace(schema.Name) == "" {
+			errs = append(errs, fmt.Sprintf("flow schema %s missing required field name", strings.TrimSpace(flowID)))
+		}
+		if len(schema.States) == 0 {
+			errs = append(errs, fmt.Sprintf("flow schema %s missing required field states", strings.TrimSpace(flowID)))
+		}
+	}
+	for _, scope := range source.FlowScopes() {
+		scopeLabel := workflowFlowScopeLabel(scope)
+		for nodeID, node := range scope.Nodes {
+			nodeLabel := workflowScopedObjectLabel(scopeLabel, nodeID)
+			if strings.TrimSpace(node.ExecutionType) == "" {
+				errs = append(errs, fmt.Sprintf("node %s missing required field execution_type", nodeLabel))
+			}
+			if len(node.SubscribesTo) == 0 {
+				errs = append(errs, fmt.Sprintf("node %s missing required field subscribes_to", nodeLabel))
+			}
+			if len(node.Produces) == 0 {
+				errs = append(errs, fmt.Sprintf("node %s missing required field produces", nodeLabel))
+			}
+			if len(node.EventHandlers) == 0 {
+				errs = append(errs, fmt.Sprintf("node %s missing required field event_handlers", nodeLabel))
+			}
+		}
+		for agentID, agent := range scope.Agents {
+			agentLabel := workflowScopedObjectLabel(scopeLabel, agentID)
+			if strings.TrimSpace(agent.ModelTier) == "" {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field model_tier", agentLabel))
+			}
+			if strings.TrimSpace(agent.ConversationMode) == "" {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field conversation_mode", agentLabel))
+			}
+			if len(agent.Subscriptions) == 0 {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
+			}
+			if len(agent.EmitEvents) == 0 {
+				errs = append(errs, fmt.Sprintf("agent %s missing required field emit_events", agentLabel))
+			}
+			workflowValidatePromptWarnings(scope.PromptsDir, scopeLabel, agentID, addWarning)
+		}
 	}
 	if strings.TrimSpace(source.PlatformSpec().Platform.Name) == "" {
 		errs = append(errs, "platform.name missing")
@@ -105,13 +210,46 @@ func validateWorkflowContracts(source semanticview.Source) error {
 		if nodeID == "" {
 			continue
 		}
+		nodeFlowID := workflowNodeFlowID(source, nodeID)
+		declaredStates := normalizeStringSet(source.FlowStates(nodeFlowID))
 		for eventType, handler := range node.EventHandlers {
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
 				errs = append(errs, fmt.Sprintf("node %s handler %s declares both on_complete and rules", nodeID, strings.TrimSpace(eventType)))
 			}
+			if strings.TrimSpace(handler.Condition) != "" {
+				errs = append(errs, fmt.Sprintf("node %s handler %s uses deprecated handler-level condition", nodeID, strings.TrimSpace(eventType)))
+			}
+			if strings.TrimSpace(handler.Logic) != "" {
+				errs = append(errs, fmt.Sprintf("node %s handler %s uses deprecated logic field", nodeID, strings.TrimSpace(eventType)))
+			}
 			if onFail := handlerGuardOnFail(handler.Guard); onFail != "" {
 				if err := validateWorkflowGuardOnFail(onFail); err != nil {
 					errs = append(errs, fmt.Sprintf("node %s handler %s guard %v", nodeID, strings.TrimSpace(eventType), err))
+				}
+			}
+			for _, expr := range workflowHandlerConditions(handler) {
+				if err := validateWorkflowConditionCEL(expr); err != nil {
+					errs = append(errs, fmt.Sprintf("node %s handler %s CEL parse failed for %q: %v", nodeID, strings.TrimSpace(eventType), expr, err))
+				}
+			}
+			payloadFields := workflowEventPayloadFields(source, eventType)
+			for _, expr := range workflowHandlerConditions(handler) {
+				for _, ref := range workflowPayloadReferences(expr) {
+					if len(payloadFields) > 0 && !workflowPayloadFieldExists(payloadFields, ref) {
+						errs = append(errs, fmt.Sprintf("node %s handler %s references payload.%s outside event payload schema", nodeID, strings.TrimSpace(eventType), ref))
+					}
+				}
+			}
+			for _, emitted := range workflowHandlerEmits(handler) {
+				if strings.TrimSpace(emitted) == strings.TrimSpace(eventType) {
+					errs = append(errs, fmt.Sprintf("node %s handler %s emits its own trigger event", nodeID, strings.TrimSpace(eventType)))
+				}
+			}
+			if len(declaredStates) > 0 {
+				for _, target := range workflowHandlerAdvanceTargets(handler) {
+					if _, ok := declaredStates[strings.TrimSpace(target)]; !ok {
+						errs = append(errs, fmt.Sprintf("node %s handler %s advances_to %s outside flow %s states", nodeID, strings.TrimSpace(eventType), strings.TrimSpace(target), nodeFlowID))
+					}
 				}
 			}
 			if actionID := strings.TrimSpace(handler.Action.ID); actionID != "" {
@@ -245,6 +383,26 @@ func validateWorkflowContracts(source semanticview.Source) error {
 			}
 		}
 	}
+	// TODO(phase4): root-level schema.yaml required_agents are not exposed on semanticview.Source today;
+	// this validation currently covers flow-scoped schemas surfaced through FlowSchemaEntries.
+
+	for agentID, agent := range source.AgentEntries() {
+		if len(agent.SubscriptionsBootstrap) > 0 {
+			errs = append(errs, fmt.Sprintf("agent %s uses deprecated subscriptions_bootstrap", strings.TrimSpace(agentID)))
+		}
+		for _, toolID := range agent.ToolsTier2 {
+			toolID = strings.TrimSpace(toolID)
+			if toolID == "" {
+				continue
+			}
+			if _, ok := source.ToolEntries()[toolID]; !ok {
+				errs = append(errs, fmt.Sprintf("agent %s references missing tool %s", strings.TrimSpace(agentID), toolID))
+			}
+		}
+	}
+
+	warnings = append(warnings, workflowEventCatalogWarnings(source)...)
+	warnings = append(warnings, workflowPolicyConflictWarnings(projectScopes, source.FlowScopes())...)
 
 	for _, transition := range source.DerivedHandlerTransitions() {
 		if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
@@ -279,9 +437,15 @@ func validateWorkflowContracts(source semanticview.Source) error {
 
 	if len(errs) > 0 {
 		sort.Strings(errs)
-		return fmt.Errorf("workflow contract validation failed:\n- %s", strings.Join(errs, "\n- "))
+		return warnings, fmt.Errorf("workflow contract validation failed:\n- %s", strings.Join(errs, "\n- "))
 	}
-	return nil
+	sort.Slice(warnings, func(i, j int) bool {
+		if warnings[i].Category == warnings[j].Category {
+			return warnings[i].Message < warnings[j].Message
+		}
+		return warnings[i].Category < warnings[j].Category
+	})
+	return warnings, nil
 }
 
 func workflowHandlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
@@ -752,4 +916,371 @@ func guardActionEntryByID(entries []runtimecontracts.GuardActionEntry, id string
 		}
 	}
 	return runtimecontracts.GuardActionEntry{}, false
+}
+
+var workflowPayloadReferencePattern = regexp.MustCompile(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+
+func workflowNodeFlowID(source semanticview.Source, nodeID string) string {
+	if source == nil {
+		return ""
+	}
+	contractSource, ok := source.NodeContractSource(nodeID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(contractSource.FlowID)
+}
+
+func workflowHandlerConditions(handler runtimecontracts.SystemNodeEventHandler) []string {
+	out := make([]string, 0, 8)
+	if handler.Guard != nil {
+		if check := strings.TrimSpace(handler.Guard.Check); check != "" {
+			out = append(out, check)
+		}
+		for _, item := range handler.Guard.Checks {
+			if check := strings.TrimSpace(item.Check); check != "" {
+				out = append(out, check)
+			}
+		}
+	}
+	for _, rule := range handler.Rules {
+		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
+			out = append(out, condition)
+		}
+	}
+	for _, rule := range workflowHandlerOnCompleteRules(handler) {
+		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
+			out = append(out, condition)
+		}
+	}
+	if handler.Filter != nil {
+		if condition := strings.TrimSpace(handler.Filter.Condition); condition != "" {
+			out = append(out, condition)
+		}
+	}
+	return out
+}
+
+func workflowHandlerOnCompleteRules(handler runtimecontracts.SystemNodeEventHandler) []runtimecontracts.HandlerRuleEntry {
+	out := append([]runtimecontracts.HandlerRuleEntry{}, handler.OnComplete...)
+	if handler.Accumulate != nil {
+		out = append(out, handler.Accumulate.OnComplete...)
+	}
+	return out
+}
+
+func validateWorkflowConditionCEL(expression string) error {
+	expression = strings.TrimSpace(expression)
+	if expression == "" || strings.EqualFold(expression, "else") {
+		return nil
+	}
+	evaluator := newWorkflowExpressionEvaluator()
+	if evaluator == nil {
+		return fmt.Errorf("workflow expression evaluator is not initialized")
+	}
+	normalized, _ := normalizeWorkflowExpression(expression, workflowExpressionContext{})
+	if normalized == "" {
+		return fmt.Errorf("workflow expression is empty")
+	}
+	_, err := evaluator.program(normalized)
+	return err
+}
+
+func workflowPayloadReferences(expression string) []string {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return nil
+	}
+	matches := workflowPayloadReferencePattern.FindAllStringSubmatch(expression, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		ref := strings.TrimSpace(match[1])
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func workflowEventPayloadFields(source semanticview.Source, eventType string) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	entry, ok := source.EventEntry(strings.TrimSpace(eventType))
+	if !ok {
+		return nil
+	}
+	out := map[string]struct{}{}
+	collectWorkflowPayloadFields("", entry.Payload.Properties, out)
+	return out
+}
+
+func collectWorkflowPayloadFields(prefix string, fields map[string]runtimecontracts.EventFieldSpec, out map[string]struct{}) {
+	for name, field := range fields {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		full := name
+		if prefix != "" {
+			full = prefix + "." + name
+		}
+		out[full] = struct{}{}
+		_ = field
+	}
+}
+
+func workflowPayloadFieldExists(fields map[string]struct{}, ref string) bool {
+	ref = strings.TrimSpace(ref)
+	for field := range fields {
+		if ref == field || strings.HasPrefix(ref, field+".") || strings.HasPrefix(field, ref+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowHandlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
+	out := append([]string{}, handler.Emits.Values()...)
+	for _, rule := range handler.Rules {
+		out = append(out, rule.Emits.Values()...)
+	}
+	for _, rule := range workflowHandlerOnCompleteRules(handler) {
+		out = append(out, rule.Emits.Values()...)
+	}
+	if handler.FanOut != nil {
+		if emit := strings.TrimSpace(handler.FanOut.EmitPerItem); emit != "" {
+			out = append(out, emit)
+		}
+		for _, emitted := range handler.FanOut.EmitMapping {
+			if emit := strings.TrimSpace(emitted); emit != "" {
+				out = append(out, emit)
+			}
+		}
+	}
+	return normalizeWorkflowValidationStrings(out)
+}
+
+func workflowHandlerAdvanceTargets(handler runtimecontracts.SystemNodeEventHandler) []string {
+	out := make([]string, 0, 8)
+	if target := strings.TrimSpace(handler.AdvancesTo); target != "" {
+		out = append(out, target)
+	}
+	for _, rule := range workflowHandlerOnCompleteRules(handler) {
+		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
+			out = append(out, target)
+		}
+	}
+	return normalizeWorkflowValidationStrings(out)
+}
+
+func workflowValidatePromptWarnings(promptsDir, scopeLabel, agentID string, addWarning func(category, message string)) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" || addWarning == nil {
+		return
+	}
+	if strings.TrimSpace(promptsDir) == "" {
+		addWarning("PROMPT-MISSING", fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID))
+		return
+	}
+	path := filepath.Join(strings.TrimSpace(promptsDir), agentID+".md")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			addWarning("PROMPT-MISSING", fmt.Sprintf("%s/%s: no prompt file", strings.TrimSpace(scopeLabel), agentID))
+		}
+		return
+	}
+	text := string(content)
+	if strings.Contains(text, "<!-- TODO") && !strings.Contains(text, "<!-- DEFERRED") {
+		addWarning("PROMPT-STUB", fmt.Sprintf("%s/%s: prompt contains TODO", strings.TrimSpace(scopeLabel), agentID))
+	}
+}
+
+func workflowEventCatalogWarnings(source semanticview.Source) []WorkflowContractWarning {
+	if source == nil {
+		return nil
+	}
+	eventsEmitted := map[string]struct{}{}
+	eventsSubscribed := map[string]struct{}{}
+	for _, scope := range source.FlowScopes() {
+		if eventType := strings.TrimSpace(scope.AutoEmitEvent); eventType != "" {
+			eventsEmitted[eventType] = struct{}{}
+		}
+	}
+	for _, node := range source.NodeEntries() {
+		for _, eventType := range node.SubscribesTo {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" && !strings.Contains(eventType, "*") {
+				eventsSubscribed[eventType] = struct{}{}
+			}
+		}
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" && !strings.Contains(eventType, "*") {
+				eventsSubscribed[eventType] = struct{}{}
+			}
+			for _, emitted := range workflowHandlerEmits(handler) {
+				if emitted != "" {
+					eventsEmitted[emitted] = struct{}{}
+				}
+			}
+		}
+	}
+	for _, agent := range source.AgentEntries() {
+		for _, eventType := range agent.EmitEvents {
+			if eventType = strings.TrimSpace(eventType); eventType != "" {
+				eventsEmitted[eventType] = struct{}{}
+			}
+		}
+		for _, eventType := range append(append([]string{}, agent.Subscriptions...), agent.SubscribesTo...) {
+			if eventType = strings.TrimSpace(eventType); eventType != "" && !strings.Contains(eventType, "*") {
+				eventsSubscribed[eventType] = struct{}{}
+			}
+		}
+	}
+	warnings := make([]WorkflowContractWarning, 0, 8)
+	for _, eventType := range sortedWorkflowValidationSetKeys(eventsEmitted) {
+		entry, ok := source.EventEntry(eventType)
+		if !ok {
+			if strings.HasPrefix(eventType, "timer.") || eventType == "pipeline.dead_letter" {
+				continue
+			}
+			warnings = append(warnings, WorkflowContractWarning{
+				Category: "EVENT-NO-SCHEMA",
+				Message:  fmt.Sprintf("'%s' emitted but no schema in events.yaml", eventType),
+			})
+			continue
+		}
+		if _, ok := eventsSubscribed[eventType]; !ok && !strings.EqualFold(strings.TrimSpace(entry.Source), "external") {
+			warnings = append(warnings, WorkflowContractWarning{
+				Category: "EVENT-NO-CONSUMER",
+				Message:  fmt.Sprintf("'%s' emitted but nobody subscribes", eventType),
+			})
+		}
+	}
+	for _, eventType := range sortedWorkflowValidationSetKeys(eventsSubscribed) {
+		entry, ok := source.EventEntry(eventType)
+		if !ok {
+			continue
+		}
+		if _, ok := eventsEmitted[eventType]; ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(entry.Source), "external") || strings.EqualFold(strings.TrimSpace(entry.Status), "planned") {
+			continue
+		}
+		warnings = append(warnings, WorkflowContractWarning{
+			Category: "EVENT-NO-PRODUCER",
+			Message:  fmt.Sprintf("'%s' subscribed but nobody emits", eventType),
+		})
+	}
+	return warnings
+}
+
+func workflowPolicyConflictWarnings(projectScopes []semanticview.ProjectScope, flowScopes []semanticview.FlowScope) []WorkflowContractWarning {
+	rootPolicy := workflowRootPolicyScope(projectScopes)
+	if len(rootPolicy.Policy.Values) == 0 {
+		return nil
+	}
+	// TODO(phase4): policy-only child directories without loadable flow schemas are not represented as
+	// FlowScopes; this warning currently applies to child flows that are part of the loaded semantic tree.
+	warnings := make([]WorkflowContractWarning, 0, 4)
+	for _, flow := range flowScopes {
+		for key, value := range flow.Policy.Values {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			rootValue, ok := rootPolicy.Policy.Values[key]
+			if !ok {
+				continue
+			}
+			if !reflect.DeepEqual(rootValue.Value, value.Value) {
+				warnings = append(warnings, WorkflowContractWarning{
+					Category: "POLICY-CONFLICT",
+					Message:  fmt.Sprintf("'%s': root=%v, %s=%v", key, rootValue.Value, workflowFlowScopeLabel(flow), value.Value),
+				})
+			}
+		}
+	}
+	return warnings
+}
+
+func workflowRootPolicyScope(scopes []semanticview.ProjectScope) semanticview.ProjectScope {
+	if len(scopes) == 0 {
+		return semanticview.ProjectScope{}
+	}
+	root := scopes[0]
+	for _, scope := range scopes[1:] {
+		if scope.Depth < root.Depth {
+			root = scope
+		}
+	}
+	return root
+}
+
+func workflowProjectScopeLabel(scope semanticview.ProjectScope) string {
+	if key := strings.TrimSpace(scope.Key); key != "" {
+		return key
+	}
+	if name := strings.TrimSpace(scope.Manifest.Name); name != "" {
+		return name
+	}
+	return "root"
+}
+
+func workflowFlowScopeLabel(scope semanticview.FlowScope) string {
+	if id := strings.TrimSpace(scope.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(scope.Path)
+}
+
+func workflowScopedObjectLabel(scopeLabel, objectID string) string {
+	scopeLabel = strings.TrimSpace(scopeLabel)
+	objectID = strings.TrimSpace(objectID)
+	if scopeLabel == "" {
+		return objectID
+	}
+	if objectID == "" {
+		return scopeLabel
+	}
+	return scopeLabel + "/" + objectID
+}
+
+func normalizeWorkflowValidationStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedWorkflowValidationSetKeys(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for key := range values {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
 }

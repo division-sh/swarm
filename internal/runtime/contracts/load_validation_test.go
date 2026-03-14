@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -74,4 +75,29 @@ func firstLoadedWorkflowHandler(bundle *WorkflowContractBundle) (string, string,
 		}
 	}
 	return "", "", SystemNodeEventHandler{}, false
+}
+
+func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	cases := []struct {
+		name     string
+		fixture  string
+		contains string
+	}{
+		{name: "advances_to list", fixture: "test-boot-advances-to-list", contains: "DIALECT-ADV-LIST"},
+		{name: "guard scalar", fixture: "test-boot-dialect-guard", contains: "DIALECT-GUARD"},
+		{name: "on_complete dict", fixture: "test-boot-on-complete-dict", contains: "DIALECT-OC-ORDER"},
+		{name: "undefined handler field", fixture: "test-boot-handler-field-undefined", contains: "UNDEFINED-FIELD"},
+		{name: "deprecated handler field", fixture: "test-boot-deprecated-field", contains: "DEPRECATED"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", tc.fixture)
+			_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+			if err == nil || !strings.Contains(err.Error(), tc.contains) {
+				t.Fatalf("expected load error containing %q, got %v", tc.contains, err)
+			}
+		})
+	}
 }

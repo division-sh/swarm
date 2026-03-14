@@ -1891,6 +1891,8 @@ type EventCatalogEntry struct {
 	AlternateEmitters []string         `yaml:"alternate_emitters"`
 	Consumer          []string         `yaml:"consumer"`
 	ConsumerType      []string         `yaml:"consumer_type"`
+	Source            string           `yaml:"_source"`
+	Status            string           `yaml:"_status"`
 	Intercepted       bool             `yaml:"intercepted"`
 	Passthrough       bool             `yaml:"passthrough"`
 	RuntimeHandling   string           `yaml:"runtime_handling"`
@@ -1928,12 +1930,15 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	if h == nil {
 		return nil
 	}
+	if err := validateHandlerFieldNodes(node); err != nil {
+		return err
+	}
 	var aux struct {
 		Action           yaml.Node                `yaml:"action"`
 		Description      string                   `yaml:"description"`
 		Emits            EventEmission            `yaml:"emits"`
 		Guard            yaml.Node                `yaml:"guard"`
-		AdvancesTo       string                   `yaml:"advances_to"`
+		AdvancesTo       yaml.Node                `yaml:"advances_to"`
 		SetsGate         yaml.Node                `yaml:"sets_gate"`
 		ClearGates       yaml.Node                `yaml:"clear_gates"`
 		DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
@@ -1960,7 +1965,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	*h = SystemNodeEventHandler{
 		Description:      strings.TrimSpace(aux.Description),
 		Emits:            aux.Emits,
-		AdvancesTo:       strings.TrimSpace(aux.AdvancesTo),
 		DataAccumulation: aux.DataAccumulation,
 		Condition:        strings.TrimSpace(aux.Condition),
 		CompletionRule:   strings.TrimSpace(aux.CompletionRule),
@@ -1979,6 +1983,9 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	if h.Guard, err = decodeGuardSpecNode(&aux.Guard); err != nil {
+		return err
+	}
+	if h.AdvancesTo, err = decodeAdvancesToNode(&aux.AdvancesTo); err != nil {
 		return err
 	}
 	if h.SetsGate, err = decodeGateSpecNode(&aux.SetsGate); err != nil {
@@ -2015,6 +2022,8 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 		AlternateEmitters []string  `yaml:"alternate_emitters"`
 		Consumer          yaml.Node `yaml:"consumer"`
 		ConsumerType      yaml.Node `yaml:"consumer_type"`
+		Source            string    `yaml:"_source"`
+		Status            string    `yaml:"_status"`
 		Intercepted       yaml.Node `yaml:"intercepted"`
 		Passthrough       yaml.Node `yaml:"passthrough"`
 		RuntimeHandling   string    `yaml:"runtime_handling"`
@@ -2059,6 +2068,8 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	e.AlternateEmitters = mergeStringLists(aux.AlternateEmitters, alternates)
 	e.Consumer = consumer
 	e.ConsumerType = consumerType
+	e.Source = strings.TrimSpace(aux.Source)
+	e.Status = strings.TrimSpace(aux.Status)
 	e.Intercepted = intercepted
 	e.Passthrough = passthrough
 	e.RuntimeHandling = strings.TrimSpace(aux.RuntimeHandling)
@@ -3498,6 +3509,9 @@ func decodeGuardSpecNode(node *yaml.Node) (*GuardSpec, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
+	if node.Kind == yaml.ScalarNode && !strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") && strings.TrimSpace(node.Value) != "" {
+		return nil, fmt.Errorf("DIALECT-GUARD: guard is string, must be {id, check}")
+	}
 	var spec GuardSpec
 	if err := node.Decode(&spec); err != nil {
 		return nil, err
@@ -3506,6 +3520,77 @@ func decodeGuardSpecNode(node *yaml.Node) (*GuardSpec, error) {
 		return nil, nil
 	}
 	return &spec, nil
+}
+
+func decodeAdvancesToNode(node *yaml.Node) (string, error) {
+	if node == nil || node.Kind == 0 {
+		return "", nil
+	}
+	if node.Kind == yaml.SequenceNode {
+		return "", fmt.Errorf("DIALECT-ADV-LIST: advances_to is list, must be string")
+	}
+	return decodeScalarStringNode(node)
+}
+
+func validateHandlerFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"action":            {},
+		"description":       {},
+		"_note":             {},
+		"emits":             {},
+		"guard":             {},
+		"advances_to":       {},
+		"sets_gate":         {},
+		"clear_gates":       {},
+		"data_accumulation": {},
+		"condition":         {},
+		"completion_rule":   {},
+		"logic":             {},
+		"policy_ref":        {},
+		"on_complete":       {},
+		"rules":             {},
+		"accumulate":        {},
+		"compute":           {},
+		"query":             {},
+		"fan_out":           {},
+		"filter":            {},
+		"reduce":            {},
+		"count":             {},
+		"clear":             {},
+		"template":          {},
+		"instance_id_from":  {},
+		"config_from":       {},
+		"from":              {},
+		"payload_transform": {},
+		"branch":            {},
+		"dedup_by":          {},
+	}
+	deprecated := map[string]struct{}{
+		"condition":          {},
+		"logic":              {},
+		"on_below_threshold": {},
+		"on_dedup":           {},
+		"on_pass":            {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := deprecated[key]; ok {
+			return fmt.Errorf("DEPRECATED: handler uses deprecated field %q", key)
+		}
+		if key == "on_complete" && node.Content[i+1].Kind == yaml.MappingNode {
+			return fmt.Errorf("DIALECT-OC-ORDER: on_complete is dict, must be ordered list")
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: handler field %q not in platform spec", key)
+		}
+	}
+	return nil
 }
 
 func decodeGateSpecNode(node *yaml.Node) (*GateSpec, error) {

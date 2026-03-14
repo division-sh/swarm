@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -87,6 +88,11 @@ func main() {
 		log.Fatalf("load MAS contracts: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
+	bootWarnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
+	if err != nil {
+		slog.Error("validate MAS contracts", "error", err)
+		os.Exit(1)
+	}
 	stores, err := buildStores(ctx, *storeMode, cfg)
 	if err != nil {
 		log.Fatalf("init stores: %v", err)
@@ -111,7 +117,7 @@ func main() {
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
-	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath)
+	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootWarnings)
 	if err := rt.Start(ctx); err != nil {
 		log.Fatalf("start runtime: %v", err)
 	}
@@ -329,7 +335,11 @@ func (m *masWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 func (m *masWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return m.guardRegistry }
 func (m *masWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return m.actionRegistry }
 
-func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string) {
+func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning) {
+	warningCounts := make(map[string]int, len(warnings))
+	for _, warning := range warnings {
+		warningCounts[strings.TrimSpace(warning.Category)]++
+	}
 	steps := []struct {
 		index int
 		name  string
@@ -341,18 +351,21 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 		{4, "register_templates", fmt.Sprintf("registered %d template flow(s)", templateFlowCount(source))},
 		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(source.ToolEntries()))},
 		{6, "resolve_subscriptions", "subscription resolution skeleton in place; full validation lands in CP4"},
-		{7, "validate_pins", "placeholder only; boot validation deferred to CP4"},
-		{8, "validate_required_agents", "placeholder only; boot validation deferred to CP4"},
-		{9, "validate_tools", "placeholder only; boot validation deferred to CP4"},
-		{10, "validate_permissions", "placeholder only; boot validation deferred to CP4"},
-		{11, "validate_platform_version", "placeholder only; boot validation deferred to CP4"},
+		{7, "validate_pins", fmt.Sprintf("validated flow pins and event wiring; warnings=%d", warningCounts["EVENT-NO-SCHEMA"]+warningCounts["EVENT-NO-CONSUMER"]+warningCounts["EVENT-NO-PRODUCER"])},
+		{8, "validate_required_agents", "validated required_agents coverage and state-machine targets"},
+		{9, "validate_tools", fmt.Sprintf("validated tools and prompt coverage; warnings=%d", warningCounts["PROMPT-MISSING"]+warningCounts["PROMPT-STUB"])},
+		{10, "validate_permissions", "permission validation is outside Tranche A scope; current contract schema emitted no permission-specific findings"},
+		{11, "validate_platform_version", fmt.Sprintf("loaded platform spec version %s for workflow %s", strings.TrimSpace(source.PlatformSpec().Platform.Version), strings.TrimSpace(source.WorkflowVersion()))},
 		{12, "initialize_state_stores", fmt.Sprintf("store wiring ready (contracts=%s)", contractsRoot)},
 		{13, "start_system_nodes", "delegated to runtime.Start()"},
 		{14, "start_agents", "delegated to runtime.Start()"},
 		{15, "ready", "health server transitions to ready after runtime start"},
 	}
 	for _, step := range steps {
-		log.Printf("mas boot step=%02d name=%s detail=%s", step.index, step.name, step.note)
+		slog.Info("mas boot", "step", fmt.Sprintf("%02d", step.index), "name", step.name, "detail", step.note)
+	}
+	for _, warning := range warnings {
+		slog.Warn("mas boot validation warning", "category", warning.Category, "detail", warning.Message)
 	}
 }
 
