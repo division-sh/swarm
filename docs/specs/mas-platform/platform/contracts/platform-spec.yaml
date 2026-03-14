@@ -188,7 +188,10 @@ workflow_state:
     \ DEFAULT NOW(),\n    state_change_history JSONB NOT NULL DEFAULT '[]',\n    accumulator_state JSONB NOT NULL DEFAULT\
     \ '{}',\n    timer_state       JSONB NOT NULL DEFAULT '[]',\n    metadata          JSONB NOT NULL DEFAULT '{}',\n    created_at\
     \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX\
-    \ idx_wi_workflow ON workflow_instances(workflow_name, current_state);\nCREATE INDEX idx_wi_stage ON workflow_instances(current_state);\n"
+    \ idx_wi_workflow ON workflow_instances(workflow_name, current_state);\nCREATE INDEX idx_wi_stage ON workflow_instances(current_state);\nCREATE\
+    \ TABLE flow_instance_routes (\n    template_id   TEXT NOT NULL,\n    instance_id   TEXT NOT NULL,\n    instance_path TEXT\
+    \ NOT NULL,\n    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    PRIMARY KEY (template_id, instance_id)\n);\nCREATE\
+    \ UNIQUE INDEX idx_fir_path ON flow_instance_routes(instance_path);\n"
   description: 'Every workflow instance (e.g. one entity, one ticket) has persistent state managed by the platform. This is
     the schema.
 

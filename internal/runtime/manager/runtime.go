@@ -12,6 +12,7 @@ import (
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeactors "empireai/internal/runtime/core/actors"
 	runtimemcp "empireai/internal/runtime/mcp"
 	runtimepipeline "empireai/internal/runtime/pipeline"
@@ -281,6 +282,9 @@ func (am *AgentManager) Recover(ctx context.Context) error {
 			return fmt.Errorf("hydrate agent %s: %w", rec.Config.ID, err)
 		}
 	}
+	if err := am.restoreFlowInstanceRoutes(ctx); err != nil {
+		return err
+	}
 
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {
 		return fmt.Errorf("recover pipeline receipts: %w", err)
@@ -288,6 +292,30 @@ func (am *AgentManager) Recover(ctx context.Context) error {
 
 	if err := am.replayPendingEvents(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
+	if am == nil || am.bus == nil {
+		return nil
+	}
+	installer, ok := am.bus.(flowInstanceRouteInstaller)
+	if !ok || installer == nil {
+		return nil
+	}
+	routeStore, ok := am.bus.Store().(runtimebus.FlowInstanceRoutePersistence)
+	if !ok || routeStore == nil {
+		return nil
+	}
+	routes, err := routeStore.ListFlowInstanceRoutes(ctx)
+	if err != nil {
+		return fmt.Errorf("list persisted flow instance routes: %w", err)
+	}
+	for _, route := range routes {
+		if err := installer.AddFlowInstance(runtimecontracts.SystemNodeContract{}, route.InstancePath); err != nil {
+			return fmt.Errorf("restore flow instance route %s/%s: %w", route.TemplateID, route.InstanceID, err)
+		}
 	}
 	return nil
 }
@@ -430,7 +458,9 @@ func (am *AgentManager) ResetRuntimeState() error {
 		}
 	}
 	if am.bus != nil {
-		am.bus.ResetInMemoryState()
+		if err := am.bus.ResetInMemoryState(); err != nil {
+			return fmt.Errorf("reset event bus state: %w", err)
+		}
 	}
 
 	entities := map[string]struct{}{}

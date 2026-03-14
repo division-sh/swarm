@@ -55,11 +55,11 @@ type eventDeliveryPlan struct {
 	CycleEscalation     *events.Event
 }
 
-func NewEventBus(store EventStore) *EventBus {
+func NewEventBus(store EventStore) (*EventBus, error) {
 	return NewEventBusWithOptions(store, EventBusOptions{})
 }
 
-func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
+func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
 	if store == nil {
 		store = InMemoryEventStore{}
 	}
@@ -77,7 +77,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 	if routeTable == nil {
 		derived, err := DeriveRouteTable(semanticSource)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		routeTable = derived
 	}
@@ -91,7 +91,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) *EventBus {
 		interceptors:        filtered,
 		interceptorProvider: opts.InterceptorProvider,
 		semanticSource:      semanticSource,
-	}
+	}, nil
 }
 
 func (eb *EventBus) Store() EventStore {
@@ -120,7 +120,24 @@ func (eb *EventBus) AddFlowInstance(template runtimecontracts.SystemNodeContract
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	return table.AddFlowInstance(template, instancePath)
+	if err := table.AddFlowInstance(template, instancePath); err != nil {
+		return err
+	}
+	persister, ok := eb.store.(FlowInstanceRoutePersistence)
+	if !ok {
+		return nil
+	}
+	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	route := FlowInstanceRouteRecord{
+		TemplateID:   routeFirstPathSegment(instancePath),
+		InstanceID:   routeLastPathSegment(instancePath),
+		InstancePath: instancePath,
+	}
+	if err := persister.UpsertFlowInstanceRoute(context.Background(), route); err != nil {
+		table.RemoveFlowInstance(route.TemplateID, route.InstanceID)
+		return err
+	}
+	return nil
 }
 
 func (eb *EventBus) RemoveFlowInstance(templateID, instanceID string) error {
@@ -132,6 +149,11 @@ func (eb *EventBus) RemoveFlowInstance(templateID, instanceID string) error {
 	eb.mu.RUnlock()
 	if table == nil {
 		return errors.New("route table is not initialized")
+	}
+	if persister, ok := eb.store.(FlowInstanceRoutePersistence); ok {
+		if err := persister.DeleteFlowInstanceRoute(context.Background(), templateID, instanceID); err != nil {
+			return err
+		}
 	}
 	table.RemoveFlowInstance(templateID, instanceID)
 	return nil
@@ -162,9 +184,9 @@ func (eb *EventBus) SetInterceptors(interceptors ...EventInterceptor) {
 	eb.mu.Unlock()
 }
 
-func (eb *EventBus) ResetInMemoryState() {
+func (eb *EventBus) ResetInMemoryState() error {
 	if eb == nil {
-		return
+		return nil
 	}
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
@@ -174,7 +196,12 @@ func (eb *EventBus) ResetInMemoryState() {
 	eb.channels = make(map[events.EventType]map[string]chan events.Event)
 	eb.agentChans = make(map[string]chan events.Event)
 	eb.subscriptions = make(map[string][]events.EventType)
-	eb.routeTable = eb.deriveBootRouteTableLocked()
+	routeTable, err := eb.deriveBootRouteTableLocked()
+	if err != nil {
+		return err
+	}
+	eb.routeTable = routeTable
+	return nil
 }
 
 func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {
@@ -219,10 +246,10 @@ func (eb *EventBus) Unsubscribe(agentID string) {
 	}
 }
 
-func (eb *EventBus) deriveBootRouteTableLocked() *RouteTable {
+func (eb *EventBus) deriveBootRouteTableLocked() (*RouteTable, error) {
 	derived, err := DeriveRouteTable(eb.semanticSource)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return derived
+	return derived, nil
 }

@@ -30,7 +30,7 @@ func (*flowActivationTestBus) Subscribe(string, ...events.EventType) <-chan even
 }
 func (*flowActivationTestBus) Unsubscribe(string)                                          {}
 func (*flowActivationTestBus) Store() runtimebus.EventStore                                { return nil }
-func (*flowActivationTestBus) ResetInMemoryState()                                         {}
+func (*flowActivationTestBus) ResetInMemoryState() error                                   { return nil }
 func (*flowActivationTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) {}
 
 func (b *flowActivationTestBus) AddFlowInstance(_ runtimecontracts.SystemNodeContract, instancePath string) error {

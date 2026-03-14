@@ -143,12 +143,16 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
-	rt.Bus = newRuntimeEventBus(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
 	})
+	if err != nil {
+		return nil, fmt.Errorf("build event bus: %w", err)
+	}
+	rt.Bus = bus
 	if stores.SQLDB != nil {
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
 			Module: opts.WorkflowModule,

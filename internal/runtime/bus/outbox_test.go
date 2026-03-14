@@ -14,7 +14,10 @@ import (
 )
 
 func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
-	eb := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
 	eventCollector := make([]events.Event, 0, 1)
 	intentCollector := make([]runtimeengine.EmitIntent, 0, 1)
 	ctx := runtimepipeline.WithPipelineEmitCollectors(context.Background(), &eventCollector, &intentCollector)
@@ -57,7 +60,10 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	eb := runtimebus.NewEventBus(&store.PostgresStore{DB: db})
+	eb, err := runtimebus.NewEventBus(&store.PostgresStore{DB: db})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
 	intent := runtimeengine.EmitIntent{
 		Event: events.Event{

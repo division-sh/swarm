@@ -33,7 +33,7 @@ type Bus interface {
 	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
 	Unsubscribe(agentID string)
 	Store() runtimebus.EventStore
-	ResetInMemoryState()
+	ResetInMemoryState() error
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
 }
 

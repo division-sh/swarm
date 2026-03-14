@@ -42,7 +42,7 @@ func TestSchemaFieldTypeToDDLError(t *testing.T) {
 
 func TestGeneratePlatformTableDDLs(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
-	spec.WorkflowState.DDL = "CREATE TABLE workflow_instances (\n    instance_id UUID PRIMARY KEY,\n    workflow_name TEXT NOT NULL,\n    transition_history JSONB NOT NULL DEFAULT '[]'\n);\nCREATE INDEX idx_wi_workflow ON workflow_instances(workflow_name);\n"
+	spec.WorkflowState.DDL = "CREATE TABLE workflow_instances (\n    instance_id UUID PRIMARY KEY,\n    workflow_name TEXT NOT NULL,\n    transition_history JSONB NOT NULL DEFAULT '[]'\n);\nCREATE INDEX idx_wi_workflow ON workflow_instances(workflow_name);\nCREATE TABLE flow_instance_routes (\n    template_id TEXT NOT NULL,\n    instance_id TEXT NOT NULL,\n    instance_path TEXT NOT NULL,\n    PRIMARY KEY (template_id, instance_id)\n);\n"
 
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
@@ -62,6 +62,9 @@ func TestGeneratePlatformTableDDLs(t *testing.T) {
 	}
 	if got := plans[0].Statements[1]; !strings.Contains(got, "CREATE INDEX IF NOT EXISTS idx_wi_workflow") {
 		t.Fatalf("expected idempotent create index, got %q", got)
+	}
+	if got := plans[0].Statements[2]; !strings.Contains(got, "CREATE TABLE IF NOT EXISTS flow_instance_routes") {
+		t.Fatalf("expected flow_instance_routes table ddl, got %q", got)
 	}
 }
 

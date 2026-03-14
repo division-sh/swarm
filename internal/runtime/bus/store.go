@@ -13,6 +13,18 @@ type EventStore interface {
 	InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error
 }
 
+type FlowInstanceRouteRecord struct {
+	TemplateID   string
+	InstanceID   string
+	InstancePath string
+}
+
+type FlowInstanceRoutePersistence interface {
+	UpsertFlowInstanceRoute(ctx context.Context, route FlowInstanceRouteRecord) error
+	DeleteFlowInstanceRoute(ctx context.Context, templateID, instanceID string) error
+	ListFlowInstanceRoutes(ctx context.Context) ([]FlowInstanceRouteRecord, error)
+}
+
 // ActiveAgentLister is an optional capability for broadcast-style events.
 // PostgresStore implements this; InMemoryEventStore does not.
 type ActiveAgentLister interface {

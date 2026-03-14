@@ -7,7 +7,7 @@ import (
 	runtimebus "empireai/internal/runtime/bus"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, interceptorProvider func() []runtimebus.EventInterceptor) *runtimebus.EventBus {
+func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, interceptorProvider func() []runtimebus.EventInterceptor) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}

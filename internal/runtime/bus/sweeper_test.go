@@ -50,7 +50,10 @@ func TestSweepUndispatchedUsesPersistedDeliveryRecipients(t *testing.T) {
 		},
 		deliveries: map[string][]string{"evt-1": {"agent-a"}},
 	}
-	eb := runtimebus.NewEventBus(store)
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
 	ch := eb.Subscribe("agent-a")
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
@@ -85,7 +88,10 @@ func TestSweepUndispatchedFallsBackToSubscribedRouting(t *testing.T) {
 		},
 		deliveries: map[string][]string{},
 	}
-	eb := runtimebus.NewEventBus(store)
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
 	ch := eb.Subscribe("agent-b", events.EventType("custom.routed"))
 
 	count, err := eb.SweepUndispatched(context.Background(), time.Hour, 10)
