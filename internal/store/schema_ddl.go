@@ -247,6 +247,10 @@ func schemaDDLIndexName(parts ...string) string {
 	return name
 }
 
+func QuoteIdent(v string) string {
+	return quoteIdent(v)
+}
+
 func normalizePlatformDDLStatements(rawDDL string) ([]string, error) {
 	chunks := strings.Split(rawDDL, ";")
 	statements := make([]string, 0, len(chunks))

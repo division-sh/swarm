@@ -27,18 +27,23 @@ var (
 )
 
 var supportedRuntimeToolNames = map[string]struct{}{
-	"agent_message":     {},
-	"schedule":          {},
-	"configure_routing": {},
-	"agent_hire":        {},
-	"agent_fire":        {},
-	"agent_reconfigure": {},
-	"mailbox_send":      {},
+	"agent_message":      {},
+	"schedule":           {},
+	"configure_routing":  {},
+	"agent_hire":         {},
+	"agent_fire":         {},
+	"agent_reconfigure":  {},
+	"get_entity":         {},
+	"save_entity_field":  {},
+	"create_entity":      {},
+	"search_entities":    {},
+	"query_metrics":      {},
+	"mailbox_send":       {},
 	"human_task_request": {},
 	"human_task_decide":  {},
-	"nginx_reload":      {},
-	"systemd_control":   {},
-	"certbot_execute":   {},
+	"nginx_reload":       {},
+	"systemd_control":    {},
+	"certbot_execute":    {},
 }
 
 func LoadContractSchemas() (map[string]ContractSchemaEntry, error) {
@@ -83,6 +88,9 @@ func ContractDefinitions() ([]llm.ToolDefinition, error) {
 	entries, err := LoadContractSchemas()
 	if err != nil {
 		return nil, err
+	}
+	for name, entry := range builtinRuntimeContractSchemas() {
+		entries[name] = entry
 	}
 	names := make([]string, 0, len(entries))
 	for name := range entries {
@@ -139,4 +147,68 @@ func deepCloneJSONValue(v any) any {
 		return v
 	}
 	return out
+}
+
+func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
+	anyValueSchema := map[string]any{}
+	return map[string]ContractSchemaEntry{
+		"get_entity": {
+			Category:    "entity_persistence",
+			Description: "Read a typed entity row by entity type and entity id.",
+			InputSchema: ObjectSchema(map[string]any{
+				"entity_type": map[string]any{"type": "string"},
+				"entity_id":   map[string]any{"type": "string"},
+			}, "entity_type", "entity_id"),
+		},
+		"save_entity_field": {
+			Category:    "entity_persistence",
+			Description: "Write a single validated field on a typed entity row.",
+			InputSchema: ObjectSchema(map[string]any{
+				"entity_type": map[string]any{"type": "string"},
+				"entity_id":   map[string]any{"type": "string"},
+				"field":       map[string]any{"type": "string"},
+				"value":       anyValueSchema,
+			}, "entity_type", "entity_id", "field", "value"),
+		},
+		"create_entity": {
+			Category:    "entity_persistence",
+			Description: "Create a new typed entity row with validated fields.",
+			InputSchema: ObjectSchema(map[string]any{
+				"entity_type": map[string]any{"type": "string"},
+				"entity_id":   map[string]any{"type": "string"},
+				"fields": map[string]any{
+					"type":                 "object",
+					"properties":           map[string]any{},
+					"additionalProperties": true,
+				},
+			}, "entity_type", "entity_id"),
+		},
+		"search_entities": {
+			Category:    "entity_persistence",
+			Description: "Query typed entity rows using simple field filters.",
+			InputSchema: ObjectSchema(map[string]any{
+				"entity_type": map[string]any{"type": "string"},
+				"filter":      map[string]any{"type": "string"},
+				"select": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
+			}, "entity_type"),
+		},
+		"query_metrics": {
+			Category:    "entity_persistence",
+			Description: "Aggregate metrics across typed entity rows.",
+			InputSchema: ObjectSchema(map[string]any{
+				"entity_type": map[string]any{"type": "string"},
+				"metric": map[string]any{
+					"type": "string",
+					"enum": []any{"count", "sum", "avg", "min", "max"},
+				},
+				"field":    map[string]any{"type": "string"},
+				"group_by": map[string]any{"type": "string"},
+				"filter":   map[string]any{"type": "string"},
+			}, "entity_type", "metric"),
+		},
+	}
 }

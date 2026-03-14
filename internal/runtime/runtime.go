@@ -208,9 +208,10 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 
 	var managerRef *runtimemanager.AgentManager
 	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
-		Config:       cfg,
-		MailboxStore: stores.MailboxStore,
-		SQLDB:        stores.SQLDB,
+		Config:         cfg,
+		MailboxStore:   stores.MailboxStore,
+		SQLDB:          stores.SQLDB,
+		WorkflowSource: opts.WorkflowModule.SemanticSource(),
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},

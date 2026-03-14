@@ -8,6 +8,7 @@ import (
 	"empireai/internal/events"
 	models "empireai/internal/runtime/core/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
 
 type Schedule = runtimepipeline.Schedule
@@ -39,4 +40,5 @@ type ExecutorOptions struct {
 	Config          *config.Config
 	MailboxStore    MailboxPersistence
 	SQLDB           *sql.DB
+	WorkflowSource  semanticview.Source
 }

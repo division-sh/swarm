@@ -9,6 +9,7 @@ import (
 func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 	handlers := map[string]ToolHandler{}
 	e.registerAgentHandlers(handlers)
+	e.registerEntityHandlers(handlers)
 	e.registerMailboxHandlers(handlers)
 	e.registerHumanTaskHandlers(handlers)
 	e.registerInfraHandlers(handlers)
@@ -32,6 +33,14 @@ func (e *Executor) registerAgentHandlers(handlers map[string]ToolHandler) {
 
 func (e *Executor) registerMailboxHandlers(handlers map[string]ToolHandler) {
 	handlers["mailbox_send"] = e.execMailboxSend
+}
+
+func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
+	handlers["get_entity"] = e.execGetEntity
+	handlers["save_entity_field"] = e.execSaveEntityField
+	handlers["create_entity"] = e.execCreateEntity
+	handlers["search_entities"] = e.execSearchEntities
+	handlers["query_metrics"] = e.execQueryMetrics
 }
 
 func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {
