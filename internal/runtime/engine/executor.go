@@ -474,6 +474,12 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	if next == "" || next == frame.result.CurrentState {
 		return nil
 	}
+	if e.deps.TransitionValidator != nil {
+		if err := e.deps.TransitionValidator.ValidateTransition(frame.result.CurrentState, next); err != nil {
+			frame.result.Status = OutcomeRejected
+			return err
+		}
+	}
 	frame.result.NextState = next
 	frame.state.State.CurrentState = next
 	frame.result.StateMutation.NextState = next

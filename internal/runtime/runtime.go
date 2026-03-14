@@ -228,6 +228,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	managerRef = rt.Manager
 	if rt.Pipeline != nil && rt.Manager != nil {
 		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
+		rt.Pipeline.SetInstanceDeactivator(func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
+			return rt.Manager.DeactivateFlowInstance(ctx, req.TemplateID, req.InstanceID, req.EntityID)
+		})
 	}
 	if rt.Pipeline != nil {
 		rt.Pipeline.SetTimerScheduling(rt.Scheduler, stores.ScheduleStore)

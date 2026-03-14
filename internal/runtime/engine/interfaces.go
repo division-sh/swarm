@@ -66,18 +66,23 @@ type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
 
+type TransitionValidator interface {
+	ValidateTransition(currentState, nextState string) error
+}
+
 type RuntimeDependencies struct {
-	Source         semanticview.Source
-	StateRepo      StateRepository
-	TxRunner       TransactionRunner
-	Locker         EntityLocker
-	Outbox         OutboxWriter
-	TimerApplier   TimerApplier
-	Dispatcher     PostCommitDispatcher
-	GuardRegistry  GuardRegistry
-	GuardRunner    GuardRunner
-	ActionRegistry ActionRegistry
-	ActionRunner   ActionRunner
-	PayloadShaper  PayloadShaper
-	MaxChainDepth  int
+	Source              semanticview.Source
+	StateRepo           StateRepository
+	TxRunner            TransactionRunner
+	Locker              EntityLocker
+	Outbox              OutboxWriter
+	TimerApplier        TimerApplier
+	Dispatcher          PostCommitDispatcher
+	GuardRegistry       GuardRegistry
+	GuardRunner         GuardRunner
+	ActionRegistry      ActionRegistry
+	ActionRunner        ActionRunner
+	PayloadShaper       PayloadShaper
+	TransitionValidator TransitionValidator
+	MaxChainDepth       int
 }

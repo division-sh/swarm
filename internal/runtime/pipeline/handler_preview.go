@@ -113,7 +113,9 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}
-	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
+	deps := coordinatorEngineDependencies(pc)
+	deps.TransitionValidator = nil
+	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
 	if err != nil {
 		return HandlerPreview{}, err
 	}

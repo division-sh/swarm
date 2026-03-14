@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"path"
 	"strings"
 
 	"empireai/internal/events"
@@ -150,6 +152,9 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
 		r.coordinator.updateEntityState(ctx, entityID.String(), next, "")
+		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), next); err != nil {
+			return err
+		}
 	}
 	if len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
 		r.coordinator.applyWorkflowGateMutation(ctx, entityID.String(), "", strings.TrimSpace(mutation.SetGate), len(mutation.ClearGates) > 0)
@@ -218,20 +223,42 @@ func coordinatorEngineDependencies(pc *FactoryPipelineCoordinator) runtimeengine
 		dispatcher = pc.bus.EngineDispatcher()
 	}
 	return runtimeengine.RuntimeDependencies{
-		Source:         source,
-		StateRepo:      pipelineEngineStateRepo{coordinator: pc},
-		TxRunner:       pipelineEngineTxRunner{db: pc.db},
-		Locker:         pipelineEngineLocker{coordinator: pc},
-		Outbox:         outbox,
-		TimerApplier:   pipelineEngineTimerApplier{coordinator: pc},
-		Dispatcher:     dispatcher,
-		GuardRegistry:  pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
-		GuardRunner:    pipelineEngineGuardRunner{coordinator: pc},
-		ActionRegistry: pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
-		ActionRunner:   pipelineEngineActionRunner{coordinator: pc},
-		PayloadShaper:  pipelineEnginePayloadShaper{coordinator: pc},
-		MaxChainDepth:  runtimeengine.DefaultMaxChainDepth,
+		Source:              source,
+		StateRepo:           pipelineEngineStateRepo{coordinator: pc},
+		TxRunner:            pipelineEngineTxRunner{db: pc.db},
+		Locker:              pipelineEngineLocker{coordinator: pc},
+		Outbox:              outbox,
+		TimerApplier:        pipelineEngineTimerApplier{coordinator: pc},
+		Dispatcher:          dispatcher,
+		GuardRegistry:       pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
+		GuardRunner:         pipelineEngineGuardRunner{coordinator: pc},
+		ActionRegistry:      pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
+		ActionRunner:        pipelineEngineActionRunner{coordinator: pc},
+		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
+		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
+		MaxChainDepth:       runtimeengine.DefaultMaxChainDepth,
 	}
+}
+
+type pipelineEngineTransitionValidator struct {
+	coordinator *FactoryPipelineCoordinator
+}
+
+func (v pipelineEngineTransitionValidator) ValidateTransition(currentState, nextState string) error {
+	pc := v.coordinator
+	if pc == nil {
+		return nil
+	}
+	workflow := pc.WorkflowDefinition()
+	if workflow == nil {
+		return nil
+	}
+	current := NormalizeWorkflowStateID(currentState)
+	next := NormalizeWorkflowStateID(nextState)
+	if workflow.CanTransition(WorkflowState{Stage: current}, next) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s -> %s", runtimeengine.ErrInvalidTransition, strings.TrimSpace(string(current)), strings.TrimSpace(string(next)))
 }
 
 type pipelineEngineGuardRegistry struct{ registry GuardRegistry }
@@ -470,6 +497,68 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if len(entityProjection) > 0 {
 		workflowSetStateBucket(instance, workflowStateBucketEntityProjection, entityProjection)
 	}
+}
+
+func (pc *FactoryPipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, entityID, nextState string) error {
+	if pc == nil || pc.instanceDeactivator == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil
+	}
+	nextState = strings.TrimSpace(nextState)
+	entityID = strings.TrimSpace(entityID)
+	if nextState == "" || entityID == "" {
+		return nil
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+	if err != nil || !ok {
+		return err
+	}
+	templateID := strings.TrimSpace(instance.WorkflowName)
+	if templateID == "" || !pc.isTerminalFlowState(templateID, nextState) {
+		return nil
+	}
+	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
+	if instanceID == "" && flowPath != "" {
+		instanceID = strings.TrimSpace(path.Base(flowPath))
+	}
+	if instanceID == "" {
+		return nil
+	}
+	if flowPath == "" {
+		flowPath = DeriveFlowInstancePath(pc.SemanticSource(), templateID, instanceID)
+	}
+	return pc.instanceDeactivator(ctx, FlowInstanceDeactivationRequest{
+		ContractBundle: pc.SemanticSource(),
+		TemplateID:     templateID,
+		InstanceID:     instanceID,
+		EntityID:       entityID,
+		FlowPath:       flowPath,
+		FinalState:     nextState,
+	})
+}
+
+func (pc *FactoryPipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
+	if pc == nil {
+		return false
+	}
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return false
+	}
+	source := pc.SemanticSource()
+	if source != nil {
+		for _, terminal := range source.FlowTerminalStages(flowID) {
+			if strings.EqualFold(strings.TrimSpace(terminal), state) {
+				return true
+			}
+		}
+	}
+	workflow := pc.WorkflowDefinition()
+	if workflow == nil {
+		return false
+	}
+	stage, ok := workflow.Stage(NormalizeWorkflowStateID(state))
+	return ok && stage.Terminal
 }
 
 func cloneEvent(evt events.Event) events.Event {

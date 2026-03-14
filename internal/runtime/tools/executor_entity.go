@@ -59,30 +59,25 @@ func (e *Executor) execSaveEntityField(ctx context.Context, _ models.AgentConfig
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", false, err, "validate value")
 	}
 	query := fmt.Sprintf(
-		"UPDATE %s SET %s = $1, %s = NOW() WHERE %s = $2",
+		"WITH updated AS (UPDATE %s SET %s = $2, %s = NOW() WHERE %s = $1 RETURNING 1) "+
+			"INSERT INTO %s (%s, %s, %s) "+
+			"SELECT $1, $2, NOW() WHERE NOT EXISTS (SELECT 1 FROM updated) "+
+			"ON CONFLICT (%s) DO UPDATE SET %s = EXCLUDED.%s, %s = NOW()",
 		entityQuoteIdent(schema.EntityType),
 		entityQuoteIdent(strings.TrimSpace(field.Name)),
 		entityQuoteIdent("updated_at"),
 		entityQuoteIdent("entity_id"),
+		entityQuoteIdent(schema.EntityType),
+		entityQuoteIdent("entity_id"),
+		entityQuoteIdent(strings.TrimSpace(field.Name)),
+		entityQuoteIdent("updated_at"),
+		entityQuoteIdent("entity_id"),
+		entityQuoteIdent(strings.TrimSpace(field.Name)),
+		entityQuoteIdent(strings.TrimSpace(field.Name)),
+		entityQuoteIdent("updated_at"),
 	)
-	result, err := db.ExecContext(ctx, query, value, entityID)
-	if err != nil {
-		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.update", true, err, "save entity field %s.%s", schema.EntityType, field.Name)
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.rows_affected", true, err, "inspect save result %s.%s", schema.EntityType, field.Name)
-	}
-	if rowsAffected == 0 {
-		insertQuery := fmt.Sprintf(
-			"INSERT INTO %s (%s, %s) VALUES ($1, $2)",
-			entityQuoteIdent(schema.EntityType),
-			entityQuoteIdent("entity_id"),
-			entityQuoteIdent(strings.TrimSpace(field.Name)),
-		)
-		if _, err := db.ExecContext(ctx, insertQuery, entityID, value); err != nil {
-			return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.insert", true, err, "insert entity field %s.%s", schema.EntityType, field.Name)
-		}
+	if _, err := db.ExecContext(ctx, query, entityID, value); err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.upsert", true, err, "save entity field %s.%s", schema.EntityType, field.Name)
 	}
 	return map[string]any{"success": true}, nil
 }

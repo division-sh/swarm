@@ -42,21 +42,23 @@ type FactoryPipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module             WorkflowModule
-	workflowStore      *WorkflowInstanceStore
-	expressionEval     *workflowExpressionEvaluator
-	instanceActivator  FlowInstanceActivator
-	timerScheduler     *Scheduler
-	timerScheduleStore SchedulePersistence
+	module              WorkflowModule
+	workflowStore       *WorkflowInstanceStore
+	expressionEval      *workflowExpressionEvaluator
+	instanceActivator   FlowInstanceActivator
+	instanceDeactivator FlowInstanceDeactivator
+	timerScheduler      *Scheduler
+	timerScheduleStore  SchedulePersistence
 
 	testSubscribeHook   func()
 	testEntityStateHook func(entityID, state string)
 }
 
 type FactoryPipelineCoordinatorOptions struct {
-	ShardPlanner      any
-	Module            WorkflowModule
-	InstanceActivator FlowInstanceActivator
+	ShardPlanner        any
+	Module              WorkflowModule
+	InstanceActivator   FlowInstanceActivator
+	InstanceDeactivator FlowInstanceDeactivator
 }
 
 type PipelineCoordinator = FactoryPipelineCoordinator
@@ -71,13 +73,14 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 		module = defaultWorkflowModule()
 	}
 	return &FactoryPipelineCoordinator{
-		bus:               bus,
-		db:                db,
-		module:            module,
-		workflowStore:     NewWorkflowInstanceStore(db),
-		expressionEval:    newWorkflowExpressionEvaluator(),
-		instanceActivator: opts.InstanceActivator,
-		entityLocks:       make(map[string]*sync.Mutex),
+		bus:                 bus,
+		db:                  db,
+		module:              module,
+		workflowStore:       NewWorkflowInstanceStore(db),
+		expressionEval:      newWorkflowExpressionEvaluator(),
+		instanceActivator:   opts.InstanceActivator,
+		instanceDeactivator: opts.InstanceDeactivator,
+		entityLocks:         make(map[string]*sync.Mutex),
 	}
 }
 
@@ -117,6 +120,15 @@ func (pc *FactoryPipelineCoordinator) SetInstanceActivator(activator FlowInstanc
 	}
 	pc.mu.Lock()
 	pc.instanceActivator = activator
+	pc.mu.Unlock()
+}
+
+func (pc *FactoryPipelineCoordinator) SetInstanceDeactivator(deactivator FlowInstanceDeactivator) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	pc.instanceDeactivator = deactivator
 	pc.mu.Unlock()
 }
 

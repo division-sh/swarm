@@ -123,6 +123,20 @@ func (eb *EventBus) AddFlowInstance(template runtimecontracts.SystemNodeContract
 	return table.AddFlowInstance(template, instancePath)
 }
 
+func (eb *EventBus) RemoveFlowInstance(templateID, instanceID string) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return errors.New("route table is not initialized")
+	}
+	table.RemoveFlowInstance(templateID, instanceID)
+	return nil
+}
+
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {
 	if eb == nil {
 		return

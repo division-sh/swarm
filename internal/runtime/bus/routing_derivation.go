@@ -17,17 +17,19 @@ type Subscriber struct {
 }
 
 type RouteTable struct {
-	mu        sync.RWMutex
-	routes    map[string][]Subscriber
-	patterns  []routePattern
-	eventPath map[string]struct{}
-	templates map[string]routeFlowTemplate
-	instances map[string]struct{}
+	mu                sync.RWMutex
+	routes            map[string][]Subscriber
+	patterns          []routePattern
+	eventPath         map[string]struct{}
+	templates         map[string]routeFlowTemplate
+	instances         map[string]struct{}
+	instanceEventPath map[string][]string
 }
 
 type routePattern struct {
 	EventPattern string
 	Subscriber   Subscriber
+	InstancePath string
 }
 
 type routeFlowTemplate struct {
@@ -106,7 +108,7 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 	templateID := routeFirstPathSegment(instancePath)
 	if templateDef, ok := rt.templates[templateID]; ok {
 		rt.instances[instancePath] = struct{}{}
-		rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
+		rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, templateDef.LocalEvents)
 		instanceID := routeLastPathSegment(instancePath)
 		vars := map[string]string{
 			"flow_instance_path": instancePath,
@@ -127,6 +129,7 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 				rt.patterns = append(rt.patterns, routePattern{
 					EventPattern: pattern,
 					Subscriber:   subscriber,
+					InstancePath: instancePath,
 				})
 			}
 		}
@@ -140,7 +143,7 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 	}
 	localEvents := routeNodeLocalEventSet(template)
 	rt.instances[instancePath] = struct{}{}
-	rt.addEventPathsLocked(instancePath, localEvents)
+	rt.instanceEventPath[instancePath] = rt.addEventPathsLocked(instancePath, localEvents)
 	subscriber := Subscriber{
 		ID:   routeRenderTemplate(template.ID, map[string]string{"instance_id": routeLastPathSegment(instancePath)}),
 		Type: "node",
@@ -154,29 +157,63 @@ func (rt *RouteTable) AddFlowInstance(template runtimecontracts.SystemNodeContra
 		rt.patterns = append(rt.patterns, routePattern{
 			EventPattern: pattern,
 			Subscriber:   subscriber,
+			InstancePath: instancePath,
 		})
 	}
 	rt.rebuildLocked()
 	return nil
 }
 
+func (rt *RouteTable) RemoveFlowInstance(templateID, instanceID string) {
+	if rt == nil {
+		return
+	}
+	instancePath := routeFlowInstancePath(templateID, instanceID)
+	if instancePath == "" {
+		return
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if _, exists := rt.instances[instancePath]; !exists {
+		return
+	}
+	delete(rt.instances, instancePath)
+	for _, eventType := range rt.instanceEventPath[instancePath] {
+		delete(rt.eventPath, eventType)
+	}
+	delete(rt.instanceEventPath, instancePath)
+	filtered := rt.patterns[:0]
+	for _, pattern := range rt.patterns {
+		if pattern.InstancePath == instancePath {
+			continue
+		}
+		filtered = append(filtered, pattern)
+	}
+	rt.patterns = filtered
+	rt.rebuildLocked()
+}
+
 func newRouteTable() *RouteTable {
 	return &RouteTable{
-		routes:    make(map[string][]Subscriber),
-		eventPath: make(map[string]struct{}),
-		templates: make(map[string]routeFlowTemplate),
-		instances: make(map[string]struct{}),
+		routes:            make(map[string][]Subscriber),
+		eventPath:         make(map[string]struct{}),
+		templates:         make(map[string]routeFlowTemplate),
+		instances:         make(map[string]struct{}),
+		instanceEventPath: make(map[string][]string),
 	}
 }
 
-func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) {
+func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
+	added := make([]string, 0, len(localEvents))
 	for _, eventType := range sortedStringKeys(localEvents) {
 		absolute := routeResolvePattern(basePath, localEvents, eventType)
 		if absolute == "" || strings.Contains(absolute, "*") {
 			continue
 		}
 		rt.eventPath[absolute] = struct{}{}
+		added = append(added, absolute)
 	}
+	return added
 }
 
 func (rt *RouteTable) addAgentPatternsLocked(basePath string, localEvents map[string]struct{}, agents map[string]runtimecontracts.AgentRegistryEntry) {
@@ -397,6 +434,19 @@ func routeLastPathSegment(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[len(parts)-1])
+}
+
+func routeFlowInstancePath(templateID, instanceID string) string {
+	templateID = strings.Trim(strings.TrimSpace(templateID), "/")
+	instanceID = strings.Trim(strings.TrimSpace(instanceID), "/")
+	switch {
+	case templateID == "":
+		return instanceID
+	case instanceID == "":
+		return templateID
+	default:
+		return templateID + "/" + instanceID
+	}
 }
 
 func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {

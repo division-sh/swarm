@@ -6,15 +6,22 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	models "empireai/internal/runtime/core/actors"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 type flowInstanceRouteInstaller interface {
 	AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error
+}
+
+type flowInstanceRouteRemover interface {
+	RemoveFlowInstance(templateID, instanceID string) error
 }
 
 func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -37,6 +44,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
 	if !ok {
 		return fmt.Errorf("flow schema not found: %s", templateID)
+	}
+	flowPath := strings.Trim(strings.TrimSpace(req.FlowPath), "/")
+	if flowPath == "" {
+		flowPath = runtimepipeline.DeriveFlowInstancePath(req.ContractBundle, templateID, instanceID)
 	}
 	if am.workspaces != nil {
 		if err := am.workspaces.EnsureEntityWorkspace(ctx, entityID); err != nil {
@@ -77,12 +88,78 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
-		if err := installer.AddFlowInstance(runtimecontracts.SystemNodeContract{}, req.FlowPath); err != nil {
+		if err := installer.AddFlowInstance(runtimecontracts.SystemNodeContract{}, flowPath); err != nil {
 			return err
 		}
-		return nil
+	} else {
+		return fmt.Errorf("event bus does not support derived flow-instance routing for %s", flowPath)
 	}
-	return fmt.Errorf("event bus does not support derived flow-instance routing for %s", req.FlowPath)
+	if autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event); autoEmit != "" {
+		eventType := autoEmit
+		if !strings.Contains(eventType, "/") {
+			eventType = strings.Trim(flowPath+"/"+eventType, "/")
+		}
+		payload := map[string]any{
+			"entity_id":   entityID,
+			"instance_id": instanceID,
+			"template_id": templateID,
+			"flow_path":   flowPath,
+		}
+		for key, value := range req.Config {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			if _, exists := payload[key]; !exists {
+				payload[key] = value
+			}
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
+		}
+		if err := am.bus.Publish(ctx, (events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType(eventType),
+			SourceAgent: "flow-instance-activator",
+			Payload:     encoded,
+			CreatedAt:   time.Now().UTC(),
+		}).WithEntityID(entityID)); err != nil {
+			return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+		}
+	}
+	return nil
+}
+
+func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, entityID string) error {
+	if am == nil {
+		return fmt.Errorf("agent manager is required")
+	}
+	templateID = strings.TrimSpace(templateID)
+	instanceID = strings.TrimSpace(instanceID)
+	entityID = strings.TrimSpace(entityID)
+	if templateID == "" || instanceID == "" || entityID == "" {
+		return fmt.Errorf("template_id, instance_id, and entity_id are required")
+	}
+	am.mu.RLock()
+	agentIDs := make([]string, 0, len(am.agentCfg))
+	for agentID, cfg := range am.agentCfg {
+		if strings.TrimSpace(cfg.Mode) != templateID || strings.TrimSpace(cfg.EntityID) != entityID {
+			continue
+		}
+		agentIDs = append(agentIDs, agentID)
+	}
+	am.mu.RUnlock()
+	sort.Strings(agentIDs)
+	for _, agentID := range agentIDs {
+		if err := am.TeardownAgent(agentID); err != nil && !strings.Contains(err.Error(), "not found") {
+			return err
+		}
+	}
+	if remover, ok := am.bus.(flowInstanceRouteRemover); ok && remover != nil {
+		return remover.RemoveFlowInstance(templateID, instanceID)
+	}
+	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s/%s", templateID, instanceID)
 }
 
 func buildFlowAgentConfig(
