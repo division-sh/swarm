@@ -4,3 +4,9 @@ pipeline.start:
 pipeline.complete:
   payload:
     entity_id: string
+child/step.begin:
+  payload:
+    entity_id: string
+child/step.result:
+  payload:
+    entity_id: string

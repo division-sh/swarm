@@ -37,15 +37,14 @@ var tier1PrimitiveFixtures = []string{
 	"test-payload-transform-multi-source",
 	"test-record-evidence",
 	"test-rules-advances-to",
+	"test-rules-data-accumulation",
 	"test-rules-else",
 	"test-rules-match",
 	"test-rules-no-match",
+	"test-sets-gate",
 }
 
-var tier1ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-rules-data-accumulation":   {kind: "fixture-issue", reason: "fixture still omits required produces, so the real validator rejects it before runtime execution"},
-	"test-sets-gate":                 {kind: "fixture-issue", reason: "fixture uses the unsupported sets_gate shorthand map form; the real loader only accepts scalar gate names or explicit {name,value} objects"},
-}
+var tier1ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier1PrimitiveCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

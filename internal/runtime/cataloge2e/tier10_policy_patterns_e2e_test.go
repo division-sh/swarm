@@ -10,14 +10,14 @@ import (
 )
 
 var tier10PolicyPatternFixtures = []string{
+	"test-policy-counter-escalate",
+	"test-policy-multi-guard-partial",
 	"test-policy-timeout-elapsed",
 }
 
 var tier10ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-policy-capacity-query":      {kind: "validation-gap", reason: "real boot path does not expose query_entities to CEL guard parsing for this fixture shape"},
-	"test-policy-counter-escalate":    {kind: "fixture-issue", reason: "fixture places on_fail as a sibling handler field; the real loader only accepts on_fail nested under guard"},
 	"test-policy-hard-gate-override":  {kind: "runtime-gap", reason: "real runtime leaves the entity in scoring and does not apply the expected on_complete branch transition"},
-	"test-policy-multi-guard-partial": {kind: "fixture-issue", reason: "fixture places on_fail as a sibling handler field; the real loader only accepts on_fail nested under guard"},
 	"test-policy-threshold-three-way": {kind: "runtime-gap", reason: "real runtime leaves the entity in evaluating and does not apply the expected on_complete threshold branch"},
 }
 

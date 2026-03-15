@@ -1,20 +1,63 @@
-ping-node:
-  id: ping-node
+node-1:
+  id: node-1
   execution_type: system_node
-  subscribes_to: [chain.start, chain.pong]
-  produces: [chain.ping]
+  subscribes_to: [chain.start]
+  produces: [chain.e1]
   event_handlers:
     chain.start:
       advances_to: processing
-      emits: chain.ping
-    chain.pong:
-      emits: chain.ping
+      emits: chain.e1
 
-pong-node:
-  id: pong-node
+node-2:
+  id: node-2
   execution_type: system_node
-  subscribes_to: [chain.ping]
-  produces: [chain.pong]
+  subscribes_to: [chain.e1]
+  produces: [chain.e2]
   event_handlers:
-    chain.ping:
-      emits: chain.pong
+    chain.e1:
+      emits: chain.e2
+
+node-3:
+  id: node-3
+  execution_type: system_node
+  subscribes_to: [chain.e2]
+  produces: [chain.e3]
+  event_handlers:
+    chain.e2:
+      emits: chain.e3
+
+node-4:
+  id: node-4
+  execution_type: system_node
+  subscribes_to: [chain.e3]
+  produces: [chain.e4]
+  event_handlers:
+    chain.e3:
+      emits: chain.e4
+
+node-5:
+  id: node-5
+  execution_type: system_node
+  subscribes_to: [chain.e4]
+  produces: [chain.e5]
+  event_handlers:
+    chain.e4:
+      emits: chain.e5
+
+node-6:
+  id: node-6
+  execution_type: system_node
+  subscribes_to: [chain.e5]
+  produces: [chain.e6]
+  event_handlers:
+    chain.e5:
+      emits: chain.e6
+
+node-7:
+  id: node-7
+  execution_type: system_node
+  subscribes_to: [chain.e6]
+  produces: [chain.e7]
+  event_handlers:
+    chain.e6:
+      emits: chain.e7

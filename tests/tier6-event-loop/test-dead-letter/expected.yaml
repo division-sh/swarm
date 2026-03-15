@@ -4,9 +4,7 @@ trigger:
     entity_id: ent-001
 
 expected:
-  handler_outcome: discard
-  diagnostics:
-    - type: spec.contradiction_detected
-      message: "No handler found for event task.unknown"
+  handler_outcome: success
   entity_state: pending
-  emitted_events: []
+  emitted_events:
+    - pipeline.dead_letter

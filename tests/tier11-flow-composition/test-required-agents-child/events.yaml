@@ -4,3 +4,9 @@ request.start:
 request.complete:
   payload:
     entity_id: string
+analyzer-flow/analysis.requested:
+  payload:
+    entity_id: string
+analyzer-flow/analysis.done:
+  payload:
+    entity_id: string

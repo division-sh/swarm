@@ -4,3 +4,9 @@ task.requested:
 task.done:
   payload:
     entity_id: string
+child/child.start:
+  payload:
+    entity_id: string
+child/child.done:
+  payload:
+    entity_id: string

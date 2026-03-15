@@ -12,13 +12,12 @@ import (
 var tier4CrossEntityFixtures = []string{
 	"test-clear-multiple-targets",
 	"test-clear-state",
+	"test-create-entity",
 	"test-query-filter",
 	"test-query-group-by",
 }
 
-var tier4ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-create-entity": {kind: "fixture-issue", reason: "fixture references create_flow_instance template child-flow, but the bundle does not include a child-flow schema/contract"},
-}
+var tier4ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier4CrossEntityCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

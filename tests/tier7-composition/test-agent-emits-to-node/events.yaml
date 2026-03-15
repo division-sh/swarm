@@ -7,3 +7,5 @@ task.completed:
 task.finalized:
   payload:
     entity_id: string
+task.assign_ack:
+  description: "Acknowledgment event produced by assign-node after task assignment"

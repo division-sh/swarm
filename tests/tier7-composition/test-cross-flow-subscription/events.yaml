@@ -1,1 +1,2 @@
-{}
+flow-b/order.completed:
+  description: "Cross-flow event from flow-b indicating an order has been completed"

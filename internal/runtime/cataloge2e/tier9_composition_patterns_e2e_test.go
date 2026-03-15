@@ -12,17 +12,17 @@ import (
 var tier9CompositionPatternFixtures = []string{
 	"test-compose-accumulate-compute-branch",
 	"test-compose-clear-gates-reenter",
+	"test-compose-create-instance-config",
+	"test-compose-guard-counter-escalate",
 	"test-compose-lifecycle-seven-states",
+	"test-compose-multi-emit-cross-flow",
 }
 
 var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-compose-create-instance-config": {kind: "fixture-issue", reason: "fixture child template flow schema is missing required field name, so boot fails before create_flow_instance behavior is exercised"},
-	"test-compose-gate-chain-three":       {kind: "runtime-gap", reason: "real runtime does not persist/apply the sequential gate chain correctly; entity remains at stage_a instead of reaching released"},
+	"test-compose-gate-chain-three":       {kind: "runtime-gap", reason: "real runtime still only persists the final gate in the sequence; g_a and g_b are missing when the fixture expects all three gates"},
 	"test-compose-gate-data-advance-emit": {kind: "runtime-gap", reason: "real runtime applies the state transition and emits, but does not persist the shorthand data_accumulation fields expected by the fixture"},
-	"test-compose-guard-counter-escalate": {kind: "fixture-issue", reason: "fixture places on_fail as a sibling handler field; the real loader only accepts on_fail nested under guard"},
-	"test-compose-guard-multi-source":     {kind: "fixture-issue", reason: "fixture places on_fail as a sibling handler field; the real loader only accepts on_fail nested under guard"},
+	"test-compose-guard-multi-source":     {kind: "validation-gap", reason: "real boot path still does not expose query_entities to CEL guard parsing for this multi-source guard fixture"},
 	"test-compose-guard-query-capacity":   {kind: "validation-gap", reason: "real boot path does not expose query_entities to CEL guard parsing for this fixture shape"},
-	"test-compose-multi-emit-cross-flow":  {kind: "fixture-issue", reason: "child flow schema is missing required field name and the child recorder node also omits required produces"},
 	"test-compose-rules-fanout-data":      {kind: "runtime-gap", reason: "real runtime selects the rule and transitions, but does not persist the expected per-rule dispatch_count field"},
 	"test-compose-rules-per-rule-data":    {kind: "runtime-gap", reason: "real runtime selects the winning rule and transitions, but does not persist the expected per-rule data_accumulation fields"},
 }

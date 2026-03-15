@@ -6,3 +6,9 @@ job.start:
 job.complete:
   payload:
     entity_id: string
+processor/process.run:
+  payload:
+    entity_id: string
+processor/process.done:
+  payload:
+    entity_id: string

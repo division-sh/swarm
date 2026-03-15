@@ -8,3 +8,6 @@ work.requested:
 job.done:
   payload:
     entity_id: string
+child/work.completed:
+  payload:
+    entity_id: string

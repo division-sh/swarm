@@ -1,7 +1,8 @@
 initial_state: idle
 terminal_states: [done]
 states: [idle, started, done]
-auto_emit_on_create: auto.started
+auto_emit_on_create:
+  event: auto.started
 pins:
   inputs:
     events: [flow.created]

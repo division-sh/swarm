@@ -4,3 +4,9 @@ work.begin:
 work.finished:
   payload:
     entity_id: string
+grandchild/task.start:
+  payload:
+    entity_id: string
+grandchild/task.done:
+  payload:
+    entity_id: string

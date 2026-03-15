@@ -12,6 +12,8 @@ reopen-node:
   id: reopen-node
   execution_type: system_node
   subscribes_to: [task.reopen_requested]
+  produces: [state.reopened]
   event_handlers:
     task.reopen_requested:
       advances_to: processing
+      emits: state.reopened

@@ -4,3 +4,7 @@ task.requested:
 task.completed:
   payload:
     entity_id: string
+child/task.assigned:
+  description: "Cross-flow event dispatching a task assignment to the child flow"
+child/task.result:
+  description: "Cross-flow event returning a task result from the child flow"

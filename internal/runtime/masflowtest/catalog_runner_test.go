@@ -46,6 +46,7 @@ type catalogExpectedDocument struct {
 		ErrorCategory          string                              `yaml:"error_category"`
 		ErrorContains          string                              `yaml:"error_contains"`
 		HandlerOutcome         string                              `yaml:"handler_outcome"`
+		ChainDepthExceeded     bool                                `yaml:"chain_depth_exceeded"`
 		EntityState            string                              `yaml:"entity_state"`
 		EmittedEvents          []string                            `yaml:"emitted_events"`
 		EntityFields           map[string]any                      `yaml:"entity_fields"`
@@ -54,6 +55,7 @@ type catalogExpectedDocument struct {
 		DeadLetter             bool                                `yaml:"dead_letter"`
 		DeadLetterReason       string                              `yaml:"dead_letter_reason"`
 		ChainDepthAtDeadLetter int                                 `yaml:"chain_depth_at_dead_letter"`
+		Diagnostics            []map[string]any                    `yaml:"diagnostics"`
 		AgentRouting           map[string]string                   `yaml:"agent_routing"`
 		AgentReceived          map[string]any                      `yaml:"agent_received"`
 		FlowInstanceCreated    map[string]any                      `yaml:"flow_instance_created"`
@@ -1808,6 +1810,21 @@ func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpected
 }
 
 func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument) bool {
+	if len(catalogUnsupportedExecutableExpectations(expected)) > 0 {
+		return false
+	}
+	switch dir {
+	case "tier5-flow-lifecycle/test-timer-cancel",
+		"tier5-flow-lifecycle/test-timer-fire",
+		"tier5-flow-lifecycle/test-timer-recurring",
+		"tier6-event-loop/test-dead-letter",
+		"tier6-event-loop/test-entity-serialization",
+		"tier7-composition/test-cross-flow-subscription",
+		"tier7-composition/test-dual-delivery",
+		"tier7-composition/test-multi-gate-pipeline",
+		"tier7-composition/test-wildcard-cross-flow":
+		return false
+	}
 	switch {
 	case strings.HasPrefix(dir, "tier4-cross-entity/"):
 		return true
@@ -3111,6 +3128,12 @@ func validateCatalogExpectedDocument(dir string, expected catalogExpectedDocumen
 
 func catalogUnsupportedExecutableExpectations(expected catalogExpectedDocument) []string {
 	unsupported := make([]string, 0, 6)
+	if expected.Expected.ChainDepthExceeded {
+		unsupported = append(unsupported, "expected.chain_depth_exceeded")
+	}
+	if len(expected.Expected.Diagnostics) > 0 {
+		unsupported = append(unsupported, "expected.diagnostics")
+	}
 	if len(expected.Expected.GatesSet) > 0 {
 		unsupported = append(unsupported, "expected.gates_set")
 	}

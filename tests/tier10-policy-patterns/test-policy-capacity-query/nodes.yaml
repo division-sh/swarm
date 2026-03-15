@@ -6,7 +6,9 @@ admitter:
   event_handlers:
     slot.requested:
       guard:
-        id: has_capacity
-        check: "query_entities(current_state == 'active').count < policy.max_capacity"
+        checks:
+          - id: has_capacity
+            check: "query_entities(current_state == 'active').count < policy.max_capacity"
+        on_fail: discard
       advances_to: active
       emits: slot.granted

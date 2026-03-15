@@ -19,6 +19,8 @@ cancel-node:
   id: cancel-node
   execution_type: system_node
   subscribes_to: [timer.cancel_requested]
+  produces: [timer.cancelled]
   event_handlers:
     timer.cancel_requested:
       advances_to: cancelled
+      emits: timer.cancelled

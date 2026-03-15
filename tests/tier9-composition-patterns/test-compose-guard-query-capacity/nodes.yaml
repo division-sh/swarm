@@ -6,7 +6,9 @@ gatekeeper:
   event_handlers:
     admission.requested:
       guard:
-        id: capacity_check
-        check: "query_entities(current_state == 'admitted').count < policy.max_capacity"
+        checks:
+          - id: capacity_check
+            check: "query_entities(current_state == 'admitted').count < policy.max_capacity"
+        on_fail: discard
       advances_to: admitted
       emits: admission.granted

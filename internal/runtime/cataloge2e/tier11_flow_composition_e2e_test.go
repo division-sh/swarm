@@ -10,25 +10,25 @@ import (
 )
 
 var tier11FlowCompositionFixtures = []string{
+	"test-dynamic-flow-instance",
 }
 
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-child-flow-absolute-path":     {kind: "fixture-issue", reason: "child flow schema is missing required field name, and the parent fixture also references prefixed child events that are not declared in the real event catalog"},
-	"test-child-flow-loads":             {kind: "fixture-issue", reason: "child flow schema is missing required field name, so boot fails before child-flow loading is exercised"},
+	"test-child-flow-absolute-path":     {kind: "fixture-issue", reason: "prefixed child event child/task.done is still not declared in the parent-visible event catalog"},
+	"test-child-flow-loads":             {kind: "fixture-issue", reason: "fixture now boots, but it still expects a clean success while the real runtime emits producer/consumer warnings for the unwired parent and child events"},
 	"test-child-flow-local-events":      {kind: "harness-gap", reason: "fixture expects parent_state assertion, which cataloge2e does not support yet"},
-	"test-child-flow-pin-wiring":        {kind: "fixture-issue", reason: "child flow schema is missing required field name, and the prefixed child output event is not declared in the parent-visible event catalog"},
-	"test-child-flow-policy-inherit":    {kind: "fixture-issue", reason: "child flow schema is missing required field name, so boot fails before policy inheritance behavior is exercised"},
+	"test-child-flow-pin-wiring":        {kind: "fixture-issue", reason: "prefixed child output event child/work.completed is still not declared in the parent-visible event catalog"},
+	"test-child-flow-policy-inherit":    {kind: "runtime-gap", reason: "fixture now boots, but the real runtime still leaves the child entity in pending instead of reaching approved"},
 	"test-child-flow-sibling-isolation": {kind: "harness-gap", reason: "fixture expects flow_b_state assertion, which cataloge2e does not support yet"},
-	"test-child-flow-tool-inherit":      {kind: "fixture-issue", reason: "child flow schema is missing required field name, so boot fails before tool inheritance is exercised"},
-	"test-data-pin-wiring":              {kind: "fixture-issue", reason: "child flow schema is missing required field name, and the prefixed child output event is not declared in the parent-visible event catalog"},
-	"test-data-pin-write-conflict":      {kind: "fixture-issue", reason: "both child flow schemas are missing required field name, so boot fails before the intended DATA-PIN-CONFLICT validation"},
-	"test-dynamic-flow-instance":        {kind: "fixture-issue", reason: "template child flow schema is missing required field name, so boot fails before dynamic instance creation is exercised"},
-	"test-gates-in-child-flow":          {kind: "fixture-issue", reason: "child flow fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
-	"test-multi-level-policy-inherit":   {kind: "fixture-issue", reason: "child and grandchild flow schemas are missing required field name, so boot fails before multi-level policy inheritance is exercised"},
-	"test-nested-three-levels":          {kind: "fixture-issue", reason: "child and grandchild flow schemas are missing required field name, and prefixed nested events are not declared in the parent-visible event catalog"},
-	"test-required-agents-child":        {kind: "harness-gap", reason: "fixture requires scripted child-agent behavior, but cataloge2e does not yet provide agent fixtures for this case"},
-	"test-tool-override":                {kind: "harness-gap", reason: "fixture expects tool_resolution assertions, which cataloge2e does not support yet"},
-	"test-wildcard-deep-subscription":   {kind: "fixture-issue", reason: "child and grandchild flow schemas are missing required field name, and the deep prefixed wildcard events are not declared in the real event catalog"},
+	"test-child-flow-tool-inherit":      {kind: "fixture-issue", reason: "fixture now boots, but it still expects clean success while the real runtime emits producer/consumer and prompt warnings"},
+	"test-data-pin-wiring":              {kind: "fixture-issue", reason: "prefixed child output event processor/process.done is still not declared in the parent-visible event catalog"},
+	"test-data-pin-write-conflict":      {kind: "validation-gap", reason: "fixture now boots cleanly enough that the real validator should catch DATA-PIN-CONFLICT, but it currently does not"},
+	"test-gates-in-child-flow":          {kind: "fixture-issue", reason: "prefixed child event child/validation.done is still not declared in the parent-visible event catalog"},
+	"test-multi-level-policy-inherit":   {kind: "runtime-gap", reason: "fixture now boots, but the real runtime still leaves the nested child flow in pending instead of reaching approved"},
+	"test-nested-three-levels":          {kind: "fixture-issue", reason: "prefixed nested events grandchild/micro.done and child/step.result are still not declared in the parent-visible event catalog"},
+	"test-required-agents-child":        {kind: "fixture-issue", reason: "prefixed child event analyzer-flow/analysis.done is still not declared in the parent-visible event catalog"},
+	"test-tool-override":                {kind: "fixture-issue", reason: "fixture still references missing tool lookup_data and does not declare child/child.done in the parent-visible event catalog"},
+	"test-wildcard-deep-subscription":   {kind: "fixture-issue", reason: "deep wildcard and prefixed grandchild events are still not declared in the real event catalog"},
 }
 
 func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {

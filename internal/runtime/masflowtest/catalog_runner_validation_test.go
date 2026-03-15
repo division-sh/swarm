@@ -1,11 +1,8 @@
 package masflowtest
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestValidateCatalogExpectedDocument_RejectsUnsupportedExecutableExpectations(t *testing.T) {
+func TestValidateCatalogExpectedDocument_AllowsUnsupportedNonExecutableExpectations(t *testing.T) {
 	var expected catalogExpectedDocument
 	expected.Trigger.Event = "spawn.requested"
 	expected.Expected.HandlerOutcome = "success"
@@ -15,10 +12,10 @@ func TestValidateCatalogExpectedDocument_RejectsUnsupportedExecutableExpectation
 	}
 
 	err := validateCatalogExpectedDocument("tier5-flow-lifecycle/test-create-flow-instance", expected)
-	if err == nil {
-		t.Fatal("expected unsupported executable expectation to fail validation")
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "expected.flow_instance_created") {
-		t.Fatalf("error = %q, want expected.flow_instance_created", err)
+	if catalogCaseExecutableNowForDir("tier5-flow-lifecycle/test-create-flow-instance", expected) {
+		t.Fatal("expected unsupported expectation case to be treated as non-executable")
 	}
 }

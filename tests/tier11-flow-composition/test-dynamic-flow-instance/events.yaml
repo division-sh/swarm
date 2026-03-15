@@ -5,3 +5,12 @@ spawn.requested:
 spawn.confirmed:
   payload:
     entity_id: string
+worker/worker.ready:
+  payload:
+    entity_id: string
+worker/work.assign:
+  payload:
+    entity_id: string
+worker/work.done:
+  payload:
+    entity_id: string

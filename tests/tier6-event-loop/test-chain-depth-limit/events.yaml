@@ -1,9 +1,24 @@
 chain.start:
   payload:
     entity_id: string
-chain.ping:
+chain.e1:
   payload:
     entity_id: string
-chain.pong:
+chain.e2:
+  payload:
+    entity_id: string
+chain.e3:
+  payload:
+    entity_id: string
+chain.e4:
+  payload:
+    entity_id: string
+chain.e5:
+  payload:
+    entity_id: string
+chain.e6:
+  payload:
+    entity_id: string
+chain.e7:
   payload:
     entity_id: string

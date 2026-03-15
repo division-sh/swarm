@@ -9,6 +9,6 @@ reviewer:
       advances_to: approved
       emits: review.approved
     review.insufficient:
-      clear_gates: [g_reviewed]
+      clear_gates: true
       advances_to: reviewing
       emits: review.restarted

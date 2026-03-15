@@ -10,16 +10,16 @@ import (
 )
 
 var tier7CompositionFixtures = []string{
+	"test-full-lifecycle",
 	"test-two-node-chain",
 }
 
 var tier7ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-agent-emits-to-node":     {kind: "fixture-issue", reason: "fixture agents.yaml omits required model_tier, conversation_mode, subscriptions, and emit_events fields for the real loader"},
-	"test-cross-flow-subscription": {kind: "fixture-issue", reason: "fixture uses a flat multi-flow package shape without flow-level workflow semantics, so real module construction fails with workflow.name missing"},
-	"test-dual-delivery":           {kind: "fixture-issue", reason: "fixture agents.yaml omits required model_tier, conversation_mode, subscriptions, and emit_events fields for the real loader"},
-	"test-full-lifecycle":          {kind: "fixture-issue", reason: "fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
-	"test-multi-gate-pipeline":     {kind: "fixture-issue", reason: "fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
-	"test-wildcard-cross-flow":     {kind: "fixture-issue", reason: "fixture uses a flat multi-flow package shape without flow-level workflow semantics, so real module construction fails with workflow.name missing"},
+	"test-agent-emits-to-node":     {kind: "harness-gap", reason: "fixture now boots, but cataloge2e still needs scripted agent responses for the agent emit path to drive the node transition"},
+	"test-cross-flow-subscription": {kind: "fixture-issue", reason: "prefixed cross-flow events like flow-b/order.completed are still not declared in the real event catalog"},
+	"test-dual-delivery":           {kind: "fixture-issue", reason: "real boot now reaches emit-schema enforcement, and the fixture is still missing an explicit schema entry for the agent-emitted audit event"},
+	"test-multi-gate-pipeline":     {kind: "fixture-issue", reason: "gate-setter nodes still omit required produces entries, so real boot validation rejects the package"},
+	"test-wildcard-cross-flow":     {kind: "fixture-issue", reason: "prefixed wildcard triggers like */job.* are still not declared in the real event catalog"},
 }
 
 func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {

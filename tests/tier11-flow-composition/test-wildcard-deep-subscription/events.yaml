@@ -4,3 +4,6 @@ pipeline.start:
 pipeline.complete:
   payload:
     entity_id: string
+child/work.begin:
+  payload:
+    entity_id: string
