@@ -2,6 +2,7 @@ package masflowtest
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -56,6 +57,28 @@ expected:
 	}
 	if got, want := result.entityState, expected.Expected.EntityState; got != want {
 		t.Fatalf("entity state = %q, want %q", got, want)
+	}
+	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
+		t.Fatalf("emitted events mismatch (%s)", diff)
+	}
+}
+
+func TestCatalogRunner_TimerEventRequiresActiveNodeTimer(t *testing.T) {
+	nodes := map[string]catalogNodeContract{
+		"task-node": {
+			Timers: []catalogNodeTimerContract{{
+				ID:      "task_timer",
+				StartOn: "task.started",
+				Emits:   "timer.task_timeout",
+			}},
+		},
+	}
+	err := catalogValidateTimerEventActivation(nodes, map[string]catalogNodeTimerContract{}, "timer.task_timeout")
+	if err == nil {
+		t.Fatal("expected inactive timer event to fail")
+	}
+	if !strings.Contains(err.Error(), "timer.task_timeout") {
+		t.Fatalf("error = %q, want timer event name", err)
 	}
 }
 

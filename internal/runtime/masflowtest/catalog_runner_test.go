@@ -2,6 +2,7 @@ package masflowtest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -215,6 +216,7 @@ type catalogInlineTimerSpec struct {
 type catalogNodeTimerContract struct {
 	ID        string `yaml:"id"`
 	StartOn   string `yaml:"start_on"`
+	CancelOn  string `yaml:"cancel_on"`
 	Duration  string `yaml:"duration"`
 	Emits     string `yaml:"emits"`
 	Recurring bool   `yaml:"recurring"`
@@ -395,7 +397,7 @@ func TestCatalogRunner_ValidatesCurrentCatalogPackages(t *testing.T) {
 			root := filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir))
 			var expected catalogExpectedDocument
 			loadExpectedYAMLForCatalogTest(t, filepath.Join(root, "expected.yaml"), &expected)
-			if err := validateCatalogExpectedDocument(expected); err != nil {
+			if err := validateCatalogExpectedDocument(dir, expected); err != nil {
 				t.Fatalf("validate expected.yaml: %v", err)
 			}
 		})
@@ -651,10 +653,11 @@ func runAdvancedCatalogCase(
 		}}
 	}
 	createdFlowInstances := map[string]struct{}{}
+	activeTimers := map[string]catalogNodeTimerContract{}
 	terminal := catalogStringSet(schema.TerminalStates)
 	for _, step := range steps {
 		if strings.EqualFold(strings.TrimSpace(step.Event), "flow.created") && strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" {
-			handler, _, ok := catalogResolveHandler(nodes, schema.AutoEmitOnCreate.Event)
+			handler, _, _, ok := catalogResolveHandler(nodes, schema.AutoEmitOnCreate.Event)
 			if !ok {
 				t.Fatalf("no handler found for auto_emit_on_create event %q in %s", schema.AutoEmitOnCreate.Event, dir)
 			}
@@ -670,13 +673,16 @@ func runAdvancedCatalogCase(
 			state = result.entityState
 			continue
 		}
-		handler, node, ok := catalogResolveHandler(nodes, step.Event)
+		handler, nodeID, node, ok := catalogResolveHandler(nodes, step.Event)
 		if !ok {
 			t.Fatalf("no handler found for event %q in %s", step.Event, dir)
 		}
 		if _, isTerminal := terminal[strings.TrimSpace(state)]; isTerminal {
 			result = catalogApplyTerminalEventPolicy(result, state, step.Event)
 			continue
+		}
+		if err := catalogValidateTimerEventActivation(nodes, activeTimers, step.Event); err != nil {
+			t.Fatal(err)
 		}
 		stepResult := executeCatalogHandlerStep(t, handler, step, entity, policy, catalogRunResult{
 			entityState: state,
@@ -696,7 +702,7 @@ func runAdvancedCatalogCase(
 			}
 		}
 		applyCatalogInlineTimer(handler.Timer, &stepResult)
-		applyCatalogNodeTimers(node.Timers, step.Event, &stepResult)
+		applyCatalogNodeTimers(nodeID, node, step.Event, activeTimers)
 		stepResult.entityFields = cloneStringAnyMapCatalog(entity)
 		stepResult.gates = cloneStringAnyMapCatalog(asMapForCatalog(entity["gates"]))
 		result = stepResult
@@ -1755,6 +1761,10 @@ func containsCatalogString(items []string, target string) bool {
 
 func catalogCaseExecutableNow(t testing.TB, dir string, expected catalogExpectedDocument) bool {
 	t.Helper()
+	return catalogCaseExecutableNowForDir(dir, expected)
+}
+
+func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument) bool {
 	switch {
 	case strings.HasPrefix(dir, "tier4-cross-entity/"):
 		return true
@@ -2063,15 +2073,71 @@ func applyCatalogInlineTimer(spec *catalogInlineTimerSpec, result *catalogRunRes
 	}
 }
 
-func applyCatalogNodeTimers(timers []catalogNodeTimerContract, event string, result *catalogRunResult) {
-	if result == nil {
+func applyCatalogNodeTimers(nodeID string, node catalogNodeContract, event string, activeTimers map[string]catalogNodeTimerContract) {
+	event = strings.TrimSpace(event)
+	if activeTimers == nil || event == "" {
 		return
 	}
-	for _, timer := range timers {
-		if strings.EqualFold(strings.TrimSpace(timer.StartOn), strings.TrimSpace(event)) {
-			return
+	for _, timer := range node.Timers {
+		if strings.EqualFold(strings.TrimSpace(timer.StartOn), event) {
+			activeTimers[catalogNodeTimerKey(nodeID, timer)] = timer
+		}
+		if strings.EqualFold(strings.TrimSpace(timer.CancelOn), event) {
+			delete(activeTimers, catalogNodeTimerKey(nodeID, timer))
 		}
 	}
+}
+
+func catalogValidateTimerEventActivation(nodes map[string]catalogNodeContract, activeTimers map[string]catalogNodeTimerContract, event string) error {
+	event = strings.TrimSpace(event)
+	if !strings.HasPrefix(event, "timer.") {
+		return nil
+	}
+	matchingKeys := make([]string, 0, 1)
+	for _, nodeID := range sortedCatalogNodeIDs(nodes) {
+		node := nodes[nodeID]
+		for _, timer := range node.Timers {
+			if !strings.EqualFold(strings.TrimSpace(timer.Emits), event) {
+				continue
+			}
+			matchingKeys = append(matchingKeys, catalogNodeTimerKey(nodeID, timer))
+		}
+	}
+	if len(matchingKeys) == 0 {
+		return nil
+	}
+	activeKeys := make([]string, 0, len(matchingKeys))
+	for _, key := range matchingKeys {
+		timer, ok := activeTimers[key]
+		if !ok {
+			continue
+		}
+		activeKeys = append(activeKeys, key)
+		if !timer.Recurring {
+			delete(activeTimers, key)
+		}
+	}
+	if len(activeKeys) > 0 {
+		return nil
+	}
+	return errors.New("timer event " + event + " fired but timer is not active")
+}
+
+func catalogNodeTimerKey(nodeID string, timer catalogNodeTimerContract) string {
+	timerID := strings.TrimSpace(timer.ID)
+	if timerID == "" {
+		timerID = strings.TrimSpace(timer.Emits)
+	}
+	return strings.TrimSpace(nodeID) + ":" + timerID
+}
+
+func sortedCatalogNodeIDs(nodes map[string]catalogNodeContract) []string {
+	ids := make([]string, 0, len(nodes))
+	for nodeID := range nodes {
+		ids = append(ids, nodeID)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func applyCatalogAction(handler catalogSystemNodeEventHandler, payload, entity map[string]any, created map[string]struct{}) (string, bool) {
@@ -2493,21 +2559,21 @@ func catalogStringSet(items []string) map[string]struct{} {
 	return out
 }
 
-func catalogResolveHandler(nodes map[string]catalogNodeContract, event string) (catalogSystemNodeEventHandler, catalogNodeContract, bool) {
+func catalogResolveHandler(nodes map[string]catalogNodeContract, event string) (catalogSystemNodeEventHandler, string, catalogNodeContract, bool) {
 	event = strings.TrimSpace(event)
-	for _, node := range nodes {
+	for nodeID, node := range nodes {
 		if handler, ok := node.EventHandlers[event]; ok {
-			return handler, node, true
+			return handler, strings.TrimSpace(nodeID), node, true
 		}
 	}
-	for _, node := range nodes {
+	for nodeID, node := range nodes {
 		for pattern, handler := range node.EventHandlers {
 			if catalogEventPatternMatches(pattern, event) {
-				return handler, node, true
+				return handler, strings.TrimSpace(nodeID), node, true
 			}
 		}
 	}
-	return catalogSystemNodeEventHandler{}, catalogNodeContract{}, false
+	return catalogSystemNodeEventHandler{}, "", catalogNodeContract{}, false
 }
 
 type catalogResolvedHandler struct {
@@ -2976,23 +3042,51 @@ func assertCatalogRunResult(t testing.TB, result catalogRunResult, expected cata
 	}
 }
 
-func validateCatalogExpectedDocument(expected catalogExpectedDocument) error {
+func validateCatalogExpectedDocument(dir string, expected catalogExpectedDocument) error {
 	if expected.Trigger.Boot {
 		if strings.TrimSpace(expected.Expected.BootResult) == "" {
 			return fmt.Errorf("boot trigger requires expected.boot_result")
 		}
-		return nil
+	} else {
+		if strings.TrimSpace(expected.Trigger.Event) == "" && len(expected.Trigger.Sequence) == 0 && len(expected.Trigger.Concurrent) == 0 {
+			return fmt.Errorf("runtime trigger requires event, sequence, or concurrent")
+		}
+		if len(expected.Trigger.Concurrent) > 0 && len(expected.Expected.Entities) == 0 {
+			return fmt.Errorf("concurrent trigger requires expected.entities")
+		}
+		if len(expected.Trigger.Concurrent) == 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) == "" && !expected.Expected.DeadLetter {
+			return fmt.Errorf("runtime case requires expected.handler_outcome")
+		}
 	}
-	if strings.TrimSpace(expected.Trigger.Event) == "" && len(expected.Trigger.Sequence) == 0 && len(expected.Trigger.Concurrent) == 0 {
-		return fmt.Errorf("runtime trigger requires event, sequence, or concurrent")
-	}
-	if len(expected.Trigger.Concurrent) > 0 && len(expected.Expected.Entities) == 0 {
-		return fmt.Errorf("concurrent trigger requires expected.entities")
-	}
-	if len(expected.Trigger.Concurrent) == 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) == "" && !expected.Expected.DeadLetter {
-		return fmt.Errorf("runtime case requires expected.handler_outcome")
+	if catalogCaseExecutableNowForDir(dir, expected) {
+		if unsupported := catalogUnsupportedExecutableExpectations(expected); len(unsupported) > 0 {
+			return fmt.Errorf("currently executable catalog case uses unsupported expectations: %s", strings.Join(unsupported, ", "))
+		}
 	}
 	return nil
+}
+
+func catalogUnsupportedExecutableExpectations(expected catalogExpectedDocument) []string {
+	unsupported := make([]string, 0, 6)
+	if len(expected.Expected.GatesSet) > 0 {
+		unsupported = append(unsupported, "expected.gates_set")
+	}
+	if len(expected.Expected.AgentRouting) > 0 {
+		unsupported = append(unsupported, "expected.agent_routing")
+	}
+	if len(expected.Expected.FlowInstanceCreated) > 0 {
+		unsupported = append(unsupported, "expected.flow_instance_created")
+	}
+	if len(expected.Expected.ToolResolution) > 0 {
+		unsupported = append(unsupported, "expected.tool_resolution")
+	}
+	if strings.TrimSpace(expected.Expected.ParentState) != "" {
+		unsupported = append(unsupported, "expected.parent_state")
+	}
+	if strings.TrimSpace(expected.Expected.FlowBState) != "" {
+		unsupported = append(unsupported, "expected.flow_b_state")
+	}
+	return unsupported
 }
 
 func catalogCaseSimpleHarnessEligible(expected catalogExpectedDocument) bool {

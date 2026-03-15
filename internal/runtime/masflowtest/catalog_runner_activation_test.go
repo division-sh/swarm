@@ -45,4 +45,13 @@ func TestCatalogRunner_ExecutesCurrentlySupportedCatalogCases(t *testing.T) {
 	if perTier["tier5-flow-lifecycle"] == 0 {
 		t.Fatal("no tier5 flow-lifecycle cases executed")
 	}
+	if perTier["tier6-event-loop"] == 0 {
+		t.Fatal("no tier6 event-loop cases executed")
+	}
+	if perTier["tier7-composition"] == 0 {
+		t.Fatal("no tier7 composition cases executed")
+	}
+	if perTier["tier8-boot-verification"] == 0 {
+		t.Fatal("no tier8 boot-verification cases executed")
+	}
 }
