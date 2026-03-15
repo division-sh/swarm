@@ -25,34 +25,27 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	// EnsureEntitySchema: invalid/missing slug.
 	vid := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ('entity-no-slug', 'test', 'static', '{}'::jsonb, 'active', now())
+	`); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			entity_id, flow_instance, entity_type, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{}'::jsonb, now(), now()
+			$1::uuid, 'entity-no-slug', 'default', 'operating',
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
 	`, vid); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
+		t.Fatalf("seed entity state: %v", err)
 	}
 	if err := pg.EnsureEntitySchema(ctx, vid); err == nil {
 		t.Fatal("expected EnsureEntitySchema to fail for empty slug")
 	}
 	if err := pg.EnsureEntitySchema(ctx, ""); err == nil {
 		t.Fatal("expected EnsureEntitySchema to require entity_id")
-	}
-
-	// LoadLatestOrgTemplate: no rows should error.
-	if _, err := pg.LoadLatestOrgTemplate(ctx); err == nil {
-		t.Fatal("expected LoadLatestOrgTemplate to error without templates")
-	}
-
-	// SetEntityTemplateVersion: validation.
-	if err := pg.SetEntityTemplateVersion(ctx, "", "v1"); err == nil {
-		t.Fatal("expected SetEntityTemplateVersion to require entity_id")
-	}
-	if err := pg.SetEntityTemplateVersion(ctx, vid, ""); err == nil {
-		t.Fatal("expected SetEntityTemplateVersion to require version")
 	}
 
 	// MarkAgentTerminated: validation.

@@ -58,6 +58,21 @@ func TestValidateWorkflowContractsDetailed_RejectsMissingRequiredAgentRole(t *te
 	}
 }
 
+func TestValidateWorkflowContractsDetailed_RejectsMissingRootRequiredAgentRole(t *testing.T) {
+	bundle := newRequiredAgentValidationBundle()
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
+		Name: "root",
+		RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
+			Role:  "missing-root-agent",
+			Emits: []string{"task.completed"},
+		}},
+	}
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err == nil || !strings.Contains(err.Error(), "missing-root-agent") {
+		t.Fatalf("expected missing root required agent error, got %v", err)
+	}
+}
+
 func TestWorkflowPolicyConflictWarnings(t *testing.T) {
 	projectScopes := []semanticview.ProjectScope{{
 		Key: "root",

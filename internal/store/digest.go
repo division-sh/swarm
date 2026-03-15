@@ -10,11 +10,12 @@ import (
 
 func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 	var n int
-	if err := s.DB.QueryRowContext(ctx, `
+	err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM workflow_instances
+		FROM entity_state
 		WHERE current_state = ANY($1::text[])
-	`, pq.Array(runtime.ActiveInstanceStates())).Scan(&n); err != nil {
+	`, pq.Array(runtime.ActiveInstanceStates())).Scan(&n)
+	if err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
 	return n, nil
@@ -26,16 +27,16 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 	}
 	const q = `
 		SELECT
-			wi.instance_id::text,
-			COALESCE(NULLIF(wi.metadata->>'name', ''), NULLIF(wi.metadata->>'entity_name', ''), wi.instance_id::text),
-			wi.current_state,
+			es.entity_id::text,
+			COALESCE(NULLIF(es.name, ''), NULLIF(es.fields->>'name', ''), es.entity_id::text),
+			es.current_state,
 			0,
 			0,
 			0,
-			wi.updated_at
-		FROM workflow_instances wi
-		WHERE wi.current_state = ANY($2::text[])
-		ORDER BY wi.updated_at DESC, wi.created_at ASC
+			es.updated_at
+		FROM entity_state es
+		WHERE es.current_state = ANY($2::text[])
+		ORDER BY es.updated_at DESC, es.created_at ASC
 		LIMIT $1
 	`
 

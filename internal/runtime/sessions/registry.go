@@ -23,16 +23,18 @@ type Resetter interface {
 }
 
 type Lease struct {
-	SessionID   string
-	AgentID     string
-	RuntimeMode string
-	LockOwner   string
-	ScopeKey    string
-	ExpiresAt   time.Time
+	SessionID         string
+	ProviderSessionID string
+	AgentID           string
+	RuntimeMode       string
+	LockOwner         string
+	ScopeKey          string
+	ExpiresAt         time.Time
 }
 
 type Record struct {
 	SessionID         string
+	ProviderSessionID string
 	AgentID           string
 	RuntimeMode       string
 	ScopeKey          string
@@ -102,12 +104,13 @@ func (sr *InMemoryRegistry) Acquire(_ context.Context, agentID, runtimeMode, loc
 	rec.LastUsedAt = now
 
 	return &Lease{
-		SessionID:   rec.SessionID,
-		AgentID:     rec.AgentID,
-		RuntimeMode: rec.RuntimeMode,
-		LockOwner:   rec.LockOwner,
-		ScopeKey:    rec.ScopeKey,
-		ExpiresAt:   rec.LockExpiresAt,
+		SessionID:         rec.SessionID,
+		ProviderSessionID: rec.ProviderSessionID,
+		AgentID:           rec.AgentID,
+		RuntimeMode:       rec.RuntimeMode,
+		LockOwner:         rec.LockOwner,
+		ScopeKey:          rec.ScopeKey,
+		ExpiresAt:         rec.LockExpiresAt,
 	}, nil
 }
 
@@ -153,6 +156,7 @@ func (sr *InMemoryRegistry) Rotate(_ context.Context, agentID, runtimeMode, lock
 	rec.Status = "rotating"
 	rec.CheckpointSummary = summary
 	rec.SessionID = uuid.NewString()
+	rec.ProviderSessionID = ""
 	rec.Status = "active"
 	rec.TurnCount = 0
 	rec.LockOwner = lockOwner
@@ -160,12 +164,13 @@ func (sr *InMemoryRegistry) Rotate(_ context.Context, agentID, runtimeMode, lock
 	rec.LastUsedAt = now
 
 	return &Lease{
-		SessionID:   rec.SessionID,
-		AgentID:     rec.AgentID,
-		RuntimeMode: rec.RuntimeMode,
-		LockOwner:   rec.LockOwner,
-		ScopeKey:    rec.ScopeKey,
-		ExpiresAt:   rec.LockExpiresAt,
+		SessionID:         rec.SessionID,
+		ProviderSessionID: rec.ProviderSessionID,
+		AgentID:           rec.AgentID,
+		RuntimeMode:       rec.RuntimeMode,
+		LockOwner:         rec.LockOwner,
+		ScopeKey:          rec.ScopeKey,
+		ExpiresAt:         rec.LockExpiresAt,
 	}, nil
 }
 
@@ -228,7 +233,7 @@ func (sr *InMemoryRegistry) AdoptSessionID(_ context.Context, agentID, runtimeMo
 	if rec.LockOwner != "" && rec.LockOwner != lockOwner && rec.LockExpiresAt.After(now) {
 		return fmt.Errorf("cannot adopt session id: leased by %s", rec.LockOwner)
 	}
-	rec.SessionID = newSessionID
+	rec.ProviderSessionID = newSessionID
 	rec.LockOwner = lockOwner
 	rec.LockExpiresAt = now.Add(sr.lockTTL)
 	rec.LastUsedAt = now

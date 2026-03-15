@@ -53,7 +53,10 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 	}
 	mode := strings.TrimSpace(s.ConversationMode)
 	if mode == "" {
-		mode = "session"
+		mode = sessions.RuntimeModeSession
+	}
+	if !shouldPersistConversationMode(mode) {
+		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
 		AgentID:   s.AgentID,
@@ -70,30 +73,45 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 	scope := sessions.ScopeFromContext(ctx)
 	mode := strings.TrimSpace(scope.ConversationMode)
 	if mode == "" {
-		mode = "session"
+		mode = sessions.RuntimeModeSession
 	}
-	scopeKey := strings.TrimSpace(scope.ScopeKey)
+	resolved := resolvedSessionScope(mode, scope.ScopeKey)
 
-	lease, err := r.sessions.Acquire(ctx, agentID, "api", r.lockOwner, scopeKey)
-	if err != nil {
-		return nil, err
-	}
-	if err := r.sessions.Release(ctx, lease); err != nil {
-		return nil, err
+	var lease *sessions.Lease
+	if !resolved.Stateless {
+		var err error
+		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.sessions.Release(ctx, lease); err != nil {
+			return nil, err
+		}
 	}
 
 	s := &Session{
-		ID:               lease.SessionID,
+		ID: ensurePlatformSessionID(func() string {
+			if lease != nil {
+				return lease.SessionID
+			}
+			return ""
+		}()),
 		AgentID:          agentID,
-		RuntimeMode:      "api",
+		RuntimeMode:      resolved.RuntimeMode,
 		ConversationMode: mode,
-		ScopeKey:         scopeKey,
-		SystemPrompt:     systemPrompt,
-		Tools:            tools,
-		Messages:         nil,
+		ScopeKey:         resolved.ScopeKey,
+		ProviderSessionID: func() string {
+			if lease != nil {
+				return lease.ProviderSessionID
+			}
+			return ""
+		}(),
+		SystemPrompt: systemPrompt,
+		Tools:        tools,
+		Messages:     nil,
 	}
-	if r.conversations != nil {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, scopeKey); err == nil && ok {
+	if r.conversations != nil && !resolved.Stateless {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -120,17 +138,22 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		}
 	}
 
-	lease, err := r.sessions.Acquire(ctx, s.AgentID, "api", r.lockOwner, strings.TrimSpace(s.ScopeKey))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = r.sessions.Release(ctx, lease) }()
-	stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, "api")
-	defer stopLeaseHeartbeat()
+	resolved := resolvedSessionScope(s.ConversationMode, s.ScopeKey)
+	var lease *sessions.Lease
+	var err error
+	if !resolved.Stateless {
+		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = r.sessions.Release(ctx, lease) }()
+		stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, resolved.RuntimeMode)
+		defer stopLeaseHeartbeat()
 
-	if lease.SessionID != s.ID {
-		LogSessionAdopted(s.AgentID, "api", s.ID, lease.SessionID, strings.TrimSpace(s.ScopeKey))
-		s.ID = lease.SessionID
+		if lease.SessionID != s.ID {
+			LogSessionAdopted(s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
+			s.ID = lease.SessionID
+		}
 	}
 
 	if strings.TrimSpace(r.apiKey) == "" {
@@ -186,7 +209,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		s.ParseFailures++
 		r.persistTurn(ctx, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    "api",
+			RuntimeMode:    resolved.RuntimeMode,
 			SessionID:      s.ID,
 			RequestPayload: reqJSON,
 			ResponseRaw:    rawResp,
@@ -195,8 +218,10 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			RetryCount:     retryCount,
 			Error:          lastErr.Error(),
 		})
-		if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, "api", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
-			lease = rotated
+		if !resolved.Stateless {
+			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
+				lease = rotated
+			}
 		}
 		return nil, lastErr
 	}
@@ -207,13 +232,15 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	s.Messages = append(s.Messages, message, resp.Message)
 	s.TurnCount++
 	s.ParseFailures = 0
-	if err := r.sessions.IncrementTurn(ctx, s.AgentID, "api", s.ID, strings.TrimSpace(s.ScopeKey)); err != nil {
-		return nil, err
+	if !resolved.Stateless {
+		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, s.ID, resolved.ScopeKey); err != nil {
+			return nil, err
+		}
 	}
 
 	r.persistTurn(ctx, AgentTurnRecord{
 		AgentID:        s.AgentID,
-		RuntimeMode:    "api",
+		RuntimeMode:    resolved.RuntimeMode,
 		SessionID:      s.ID,
 		RequestPayload: reqJSON,
 		ResponseRaw:    rawResp,
@@ -221,7 +248,9 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		Latency:        latency,
 		RetryCount:     retryCount,
 	})
-	r.persistConversation(ctx, s)
+	if !resolved.Stateless {
+		r.persistConversation(ctx, s)
+	}
 
 	// Spend ledger: exact usage for API runtime when usage fields are present.
 	if r.budget != nil {
@@ -234,8 +263,10 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		}
 	}
 
-	if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, "api", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
-		lease = rotated
+	if !resolved.Stateless {
+		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
+			lease = rotated
+		}
 	}
 
 	return &resp, nil
@@ -247,7 +278,10 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 	}
 	mode := strings.TrimSpace(s.ConversationMode)
 	if mode == "" {
-		mode = "session"
+		mode = sessions.RuntimeModeSession
+	}
+	if !shouldPersistConversationMode(mode) {
+		return
 	}
 	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
 		AgentID:   s.AgentID,
@@ -264,6 +298,9 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 
 func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord) {
 	if r.turns == nil {
+		return
+	}
+	if strings.TrimSpace(turn.RuntimeMode) == sessions.RuntimeModeTask {
 		return
 	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {

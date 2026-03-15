@@ -206,9 +206,10 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 
 	if m.db != nil {
 		rows, err := m.db.QueryContext(ctx, `
-			SELECT DISTINCT COALESCE(NULLIF(metadata->>'slug', ''), '')
-			FROM workflow_instances
-			WHERE COALESCE(metadata->>'instance_kind', '') = 'entity'
+			SELECT DISTINCT COALESCE(NULLIF(es.slug, ''), '')
+			FROM entity_state es
+			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+			WHERE COALESCE(fi.config->>'instance_kind', '') = 'entity'
 		`)
 		if err != nil {
 			return nil, fmt.Errorf("list instance slugs: %w", err)
@@ -460,9 +461,9 @@ func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (
 	}
 	var slug string
 	if err := m.db.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(metadata->>'slug', ''), '')
-		FROM workflow_instances
-		WHERE instance_id = $1::uuid
+		SELECT COALESCE(NULLIF(slug, ''), '')
+		FROM entity_state
+		WHERE entity_id = $1::uuid
 	`, trimmedID).Scan(&slug); err != nil {
 		return "", fmt.Errorf("lookup instance slug: %w", err)
 	}

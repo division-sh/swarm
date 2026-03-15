@@ -86,43 +86,14 @@ const (
 	ReceiptStatusDeadLetter ReceiptStatus = "dead_letter"
 )
 
-type PromptOverrideRecord struct {
-	AgentID        string
-	Prompt         string
-	PreviousPrompt string
-	Source         string
-	Notes          string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
-type PromptOverridePersistence interface {
-	GetPromptOverride(ctx context.Context, agentID string) (PromptOverrideRecord, bool, error)
-	UpsertPromptOverride(ctx context.Context, rec PromptOverrideRecord) error
-	DeletePromptOverride(ctx context.Context, agentID string) error
-}
-
-type OrgTemplateRecord struct {
-	Version         string
-	Agents          []byte
-	BootstrapRoutes []byte
-	SeededRoutes    []byte
-	CreatedBy       string
-	Description     string
-	CreatedAt       time.Time
-}
-
 type AgentPersistence interface {
 	UpsertAgent(ctx context.Context, rec PersistedAgent) error
 	LoadAgents(ctx context.Context) ([]PersistedAgent, error)
 	MarkAgentTerminated(ctx context.Context, agentID string) error
 }
 
-type TemplatePersistence interface {
+type EntitySchemaPersistence interface {
 	EnsureEntitySchema(ctx context.Context, entityID string) error
-	LoadLatestOrgTemplate(ctx context.Context) (OrgTemplateRecord, error)
-	LoadOrgTemplate(ctx context.Context, version string) (OrgTemplateRecord, error)
-	SetEntityTemplateVersion(ctx context.Context, entityID, version string) error
 }
 
 type ReceiptPersistence interface {
@@ -136,7 +107,7 @@ type PendingEventPersistence interface {
 
 type ManagerPersistence interface {
 	AgentPersistence
-	TemplatePersistence
+	EntitySchemaPersistence
 	ReceiptPersistence
 	PendingEventPersistence
 }
@@ -155,6 +126,7 @@ type AgentManagerOptions struct {
 	Sessions                  sessions.Registry
 	RuntimeMode               string
 	Budget                    BudgetGuard
+	ThrottleSuppressPrefixes  []string
 	DisableSpinupControl      bool
 	EnableLegacySpinupControl bool
 }

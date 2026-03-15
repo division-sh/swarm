@@ -96,6 +96,9 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	if got := policy.Values["shared"].Value; got != "child" {
 		t.Fatalf("expected child flow override %q, got %#v", "child", got)
 	}
+	if got := bundle.RootRequiredAgents(); len(got) != 1 || strings.TrimSpace(got[0].Role) != "root-agent" {
+		t.Fatalf("expected root required agent role root-agent, got %#v", got)
+	}
 }
 
 func repoRootForContractsTest(t *testing.T) string {
@@ -111,13 +114,18 @@ func writeLayer3FlowTreeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: root-platform
 version: "1.0.0"
 flows:
   - id: parent
     flow: parent
     mode: static
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: root-platform
+required_agents:
+  - role: root-agent
 `)
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), `
 root_policy:

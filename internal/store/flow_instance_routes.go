@@ -18,12 +18,60 @@ func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runti
 	if route.TemplateID == "" || route.InstanceID == "" || route.InstancePath == "" {
 		return fmt.Errorf("template_id, instance_id, and instance_path are required")
 	}
+	var materializedFrom any
+	if strings.TrimSpace(route.EventPattern) != "" && strings.TrimSpace(route.SubscriberType) != "" && strings.TrimSpace(route.SubscriberID) != "" {
+		_ = s.DB.QueryRowContext(ctx, `
+			SELECT rule_id
+			FROM routing_rules
+			WHERE event_pattern = $1
+			  AND subscriber_type = $2
+			  AND subscriber_id = $3
+			  AND COALESCE(source_flow, '') = $4
+			  AND is_wildcard = true
+			  AND is_materialized = false
+			  AND status = 'active'
+			ORDER BY created_at ASC
+			LIMIT 1
+		`, route.EventPattern, route.SubscriberType, route.SubscriberID, strings.TrimSpace(route.SourceFlow)).Scan(&materializedFrom)
+	}
 	_, err := s.DB.ExecContext(ctx, `
-		INSERT INTO flow_instance_routes (template_id, instance_id, instance_path, created_at)
-		VALUES ($1, $2, $3, now())
-		ON CONFLICT (template_id, instance_id)
-		DO UPDATE SET instance_path = EXCLUDED.instance_path
-	`, route.TemplateID, route.InstanceID, route.InstancePath)
+		WITH updated AS (
+			UPDATE routing_rules
+			SET source_flow = NULLIF($5,''),
+			    materialized_from = $6,
+			    status = 'active'
+			WHERE event_pattern = $1
+			  AND subscriber_type = $2
+			  AND subscriber_id = $3
+			  AND flow_instance IS NOT DISTINCT FROM NULLIF($4,'')
+			  AND is_materialized = true
+			RETURNING rule_id
+		)
+		INSERT INTO routing_rules (
+			event_pattern,
+			subscriber_type,
+			subscriber_id,
+			flow_instance,
+			source_flow,
+			is_wildcard,
+			is_materialized,
+			materialized_from,
+			status,
+			created_at
+		)
+		SELECT
+			$1,
+			$2,
+			$3,
+			NULLIF($4,''),
+			NULLIF($5,''),
+			false,
+			true,
+			$6,
+			'active',
+			now()
+		WHERE NOT EXISTS (SELECT 1 FROM updated)
+	`, route.EventPattern, route.SubscriberType, route.SubscriberID, route.InstancePath, route.SourceFlow, materializedFrom)
 	if err != nil {
 		return fmt.Errorf("upsert flow instance route %s/%s: %w", route.TemplateID, route.InstanceID, err)
 	}
@@ -39,10 +87,20 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, templateID,
 	if templateID == "" || instanceID == "" {
 		return fmt.Errorf("template_id and instance_id are required")
 	}
+	instancePath := strings.Trim(strings.TrimSpace(templateID), "/")
+	if trimmedInstanceID := strings.Trim(strings.TrimSpace(instanceID), "/"); trimmedInstanceID != "" {
+		if instancePath != "" {
+			instancePath += "/"
+		}
+		instancePath += trimmedInstanceID
+	}
 	if _, err := s.DB.ExecContext(ctx, `
-		DELETE FROM flow_instance_routes
-		WHERE template_id = $1 AND instance_id = $2
-	`, templateID, instanceID); err != nil {
+		UPDATE routing_rules
+		SET status = 'inactive'
+		WHERE flow_instance = $1
+		  AND is_materialized = true
+		  AND status = 'active'
+	`, instancePath); err != nil {
 		return fmt.Errorf("delete flow instance route %s/%s: %w", templateID, instanceID, err)
 	}
 	return nil
@@ -53,9 +111,16 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimebu
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT template_id, instance_id, instance_path
-		FROM flow_instance_routes
-		ORDER BY created_at ASC, template_id ASC, instance_id ASC
+		SELECT
+			COALESCE(NULLIF(source_flow, ''), split_part(flow_instance, '/', 1)),
+			split_part(flow_instance, '/', array_length(string_to_array(flow_instance, '/'), 1)),
+			flow_instance
+		FROM routing_rules
+		WHERE is_materialized = true
+		  AND status = 'active'
+		  AND flow_instance IS NOT NULL
+		GROUP BY flow_instance, source_flow
+		ORDER BY flow_instance ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list flow instance routes: %w", err)

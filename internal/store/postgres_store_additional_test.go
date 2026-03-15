@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeactors "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimellm "empireai/internal/runtime/llm"
@@ -12,11 +14,90 @@ import (
 	"empireai/internal/testutil"
 	"encoding/json"
 	"github.com/google/uuid"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *PostgresStore) {
+	t.Helper()
+	if _, err := pg.DB.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop legacy agent_sessions: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agent_sessions): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agent_sessions): %v", err)
+	}
+}
+
+func seedSpecEntityState(t *testing.T, ctx context.Context, db execer, entityID, flowInstance, slug, name, state string) {
+	t.Helper()
+	if strings.TrimSpace(flowInstance) == "" {
+		flowInstance = strings.TrimSpace(slug)
+	}
+	if flowInstance == "" {
+		flowInstance = "entity-" + entityID
+	}
+	if state == "" {
+		state = "operating"
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+		ON CONFLICT (instance_id) DO NOTHING
+	`, flowInstance); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2, 'default', NULLIF($3,''), NULLIF($4,''), $5,
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+		)
+		ON CONFLICT (entity_id) DO NOTHING
+	`, entityID, flowInstance, slug, name, state); err != nil {
+		t.Fatalf("seed entity state: %v", err)
+	}
+}
+
+func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID string, entityID string, subscriptions ...string) {
+	t.Helper()
+	cfg := runtimeactors.AgentConfig{
+		ID:            agentID,
+		Role:          agentID,
+		Mode:          "global",
+		Type:          "stub",
+		EntityID:      strings.TrimSpace(entityID),
+		Subscriptions: subscriptions,
+		Config:        []byte(`{"system_prompt":"x"}`),
+	}
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config:    cfg,
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed agent %s: %v", agentID, err)
+	}
+}
+
+type execer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
 
 func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -38,9 +119,9 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 
 	var gotTaskID, gotEntityID string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(task_id::text, ''), COALESCE(entity_id::text, '')
+		SELECT COALESCE(payload->>'task_id', ''), COALESCE(entity_id::text, '')
 		FROM events
-		WHERE id = $1::uuid
+		WHERE event_id = $1::uuid
 	`, eventID).Scan(&gotTaskID, &gotEntityID); err != nil {
 		t.Fatalf("query event row: %v", err)
 	}
@@ -56,16 +137,6 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
-
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS pipeline_receipts (
-			event_id UUID PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
-			result TEXT NOT NULL DEFAULT 'processed',
-			processed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		)
-	`); err != nil {
-		t.Fatalf("create pipeline_receipts: %v", err)
-	}
 
 	eventProcessed := events.Event{
 		ID:          uuid.NewString(),
@@ -108,15 +179,6 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	for _, id := range []string{"control-plane", "reviewer"} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-			VALUES ($1, 'stub', $1, 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
-		`, id); err != nil {
-			t.Fatalf("seed agent %s: %v", id, err)
-		}
-	}
-
 	tx, err := pg.BeginEventTx(ctx)
 	if err != nil {
 		t.Fatalf("BeginEventTx: %v", err)
@@ -143,7 +205,7 @@ func TestPostgresStore_BeginEventTx_AppendAndDeliveriesTx(t *testing.T) {
 	}
 
 	var nEvents, nDeliveries int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&nDeliveries); err != nil {
@@ -159,13 +221,6 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('control-plane', 'stub', 'control-plane', 'global', 'active', '{"system_prompt":"x"}'::jsonb, now(), now())
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-
 	eventID := uuid.NewString()
 	if err := pg.PersistEventWithDeliveries(ctx, events.Event{
 		ID:          eventID,
@@ -178,7 +233,7 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	}
 
 	var nEvents, nDeliveries int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, eventID).Scan(&nEvents); err != nil {
 		t.Fatalf("count events success: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid`, eventID).Scan(&nDeliveries); err != nil {
@@ -196,37 +251,17 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 		Payload:     []byte(`{"directive":"fail path"}`),
 		CreatedAt:   time.Now().UTC(),
 	}, []string{"missing-agent"})
-	if err == nil {
-		t.Fatal("expected error for unknown delivery agent")
+	if err != nil {
+		t.Fatalf("PersistEventWithDeliveries unknown subscriber should still persist: %v", err)
 	}
-	if !strings.Contains(strings.ToLower(err.Error()), "insert event delivery") {
-		t.Fatalf("unexpected error: %v", err)
+	var persistedCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, failedEventID).Scan(&persistedCount); err != nil {
+		t.Fatalf("count persisted event: %v", err)
 	}
-
-	var rolledBackCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE id = $1::uuid`, failedEventID).Scan(&rolledBackCount); err != nil {
-		t.Fatalf("count rolled back event: %v", err)
-	}
-	if rolledBackCount != 0 {
-		t.Fatalf("expected failed tx to roll back event row, count=%d", rolledBackCount)
+	if persistedCount != 1 {
+		t.Fatalf("expected persisted event row, count=%d", persistedCount)
 	}
 }
-
-func TestIsMissingPipelineReceiptsTable(t *testing.T) {
-	if isMissingPipelineReceiptsTable(nil) {
-		t.Fatal("nil error should not be treated as missing table")
-	}
-	if !isMissingPipelineReceiptsTable(assertErr("pq: relation \"pipeline_receipts\" does not exist")) {
-		t.Fatal("expected missing table error to match")
-	}
-	if isMissingPipelineReceiptsTable(assertErr("some other db error")) {
-		t.Fatal("unexpected positive match on unrelated error")
-	}
-}
-
-type assertErr string
-
-func (e assertErr) Error() string { return string(e) }
 
 func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -242,112 +277,6 @@ func TestPostgresStore_Inbound_ValidationAndNotFound(t *testing.T) {
 	if _, err := s.RecordInboundEvent(ctx, "e", "v", ""); err == nil {
 		t.Fatal("expected provider required")
 	}
-
-	if _, err := s.ResolveInboundTarget(ctx, "", "p"); err == nil {
-		t.Fatal("expected entity key required")
-	}
-	if _, err := s.ResolveInboundTarget(ctx, "k", ""); err == nil {
-		t.Fatal("expected provider required")
-	}
-	if _, err := s.ResolveInboundTarget(ctx, "missing", "chat"); err == nil || !strings.Contains(err.Error(), "entity not found") {
-		t.Fatalf("expected not found, got %v", err)
-	}
-}
-
-func TestPostgresStore_Inbound_SecretsLegacyFlatAndDecrypt(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	s := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	key := "k"
-	os.Setenv("MAS_CREDENTIALS_KEY", key)
-	defer os.Unsetenv("MAS_CREDENTIALS_KEY")
-
-	var enc string
-	if err := db.QueryRowContext(ctx, `SELECT encode(pgp_sym_encrypt('senc', $1::text), 'base64')`, key).Scan(&enc); err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-
-	entityID1 := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'legacy', 'credentials', $2::jsonb), now(), now()
-		)
-	`, entityID1, `{"chat": {"token":"legacy"}}`); err != nil {
-		t.Fatalf("seed workflow instance legacy: %v", err)
-	}
-	target, err := s.ResolveInboundTarget(ctx, "legacy", "chat")
-	if err != nil {
-		t.Fatalf("resolve legacy: %v", err)
-	}
-	if target.WebhookSecret != "legacy" {
-		t.Fatalf("expected legacy token, got %q", target.WebhookSecret)
-	}
-
-	entityID2 := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'flat', 'credentials', $2::jsonb), now(), now()
-		)
-	`, entityID2, `{"chat_webhook_secret":" flat "}`); err != nil {
-		t.Fatalf("seed workflow instance flat: %v", err)
-	}
-	target2, err := s.ResolveInboundTarget(ctx, "flat", "chat")
-	if err != nil {
-		t.Fatalf("resolve flat: %v", err)
-	}
-	if target2.WebhookSecret != "flat" {
-		t.Fatalf("expected flat secret, got %q", target2.WebhookSecret)
-	}
-
-	entityID3 := uuid.NewString()
-	b, _ := json.Marshal(map[string]any{
-		"webhooks": map[string]any{
-			"chat": map[string]any{
-				"secret": "enc::" + enc,
-			},
-		},
-	})
-	credsEnc := string(b)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'enc', 'credentials', $2::jsonb), now(), now()
-		)
-	`, entityID3, credsEnc); err != nil {
-		t.Fatalf("seed workflow instance enc: %v", err)
-	}
-	target3, err := s.ResolveInboundTarget(ctx, "enc", "chat")
-	if err != nil {
-		t.Fatalf("resolve enc: %v", err)
-	}
-	if target3.WebhookSecret != "senc" {
-		t.Fatalf("expected decrypted secret, got %q", target3.WebhookSecret)
-	}
-
-	if got := s.extractWebhookSecret(ctx, []byte("{"), "chat"); got != "" {
-		t.Fatalf("expected empty secret for invalid json, got %q", got)
-	}
-
-	os.Unsetenv("MAS_CREDENTIALS_KEY")
-	if got := s.decryptCredentialValue(ctx, "enc::AAAA"); got != "enc::AAAA" {
-		t.Fatalf("expected passthrough without key, got %#v", got)
-	}
-	os.Setenv("MAS_CREDENTIALS_KEY", key)
-	if got := s.decryptCredentialValue(ctx, "enc::"); got != "" {
-		t.Fatalf("expected empty encoded to return empty string, got %#v", got)
-	}
 }
 
 func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
@@ -356,28 +285,16 @@ func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'Purge','purge','us','operating','operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed compatibility entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"purge","credentials":{}}'::jsonb, now(), now()
-		)
-	`, entityID); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
 	if ok, err := s.RecordInboundEvent(ctx, "evt-old", entityID, "chat"); err != nil || !ok {
 		t.Fatalf("record old ok=%v err=%v", ok, err)
 	}
 
-	if _, err := db.ExecContext(ctx, `UPDATE inbound_events SET received_at = now() - interval '2 days' WHERE provider_event_id = 'evt-old'`); err != nil {
+	if _, err := db.ExecContext(ctx, `
+		UPDATE events
+		SET created_at = now() - interval '2 days'
+		WHERE event_name = 'platform.inbound_recorded'
+		  AND payload->>'provider_event_id' = 'evt-old'
+	`); err != nil {
 		t.Fatalf("age event: %v", err)
 	}
 
@@ -390,45 +307,12 @@ func TestPostgresStore_Inbound_PurgeDeletes(t *testing.T) {
 	}
 }
 
-func TestPostgresStore_Inbound_RecordResolveAndSecrets(t *testing.T) {
+func TestPostgresStore_Inbound_RecordAndPurge(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed compatibility entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, jsonb_build_object('slug', 'testco', 'credentials', $2::jsonb), now(), now()
-		)
-	`, entityID, `{
-		"webhooks": { "chat": { "secret": "s1" } },
-		"chat": { "token": "legacy" },
-		"chat_webhook_secret": "flat"
-	}`); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-
-	target, err := s.ResolveInboundTarget(ctx, "testco", "chat")
-	if err != nil {
-		t.Fatalf("resolve inbound: %v", err)
-	}
-	if target.EntityID != entityID || target.EntitySlug != "testco" {
-		t.Fatalf("unexpected target: %+v", target)
-	}
-	if target.WebhookSecret != "s1" {
-		t.Fatalf("expected preferred webhook secret, got %q", target.WebhookSecret)
-	}
-
 	ok, err := s.RecordInboundEvent(ctx, "evt-1", entityID, "chat")
 	if err != nil || !ok {
 		t.Fatalf("record inbound ok=%v err=%v", ok, err)
@@ -449,12 +333,6 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
 
 	id, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EntityID:  entityID,
@@ -629,14 +507,6 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'control-plane', 'global', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-
 	once := runtimepipeline.Schedule{
 		AgentID:   "a1",
 		EventType: "system.directive",
@@ -692,20 +562,6 @@ func TestSchedules_ExactIdentityUsesTaskID(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	entityID := uuid.NewString()
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'V', 'v', 'us', 'approved', 'factory', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('validation-orchestrator', 'stub', 'validation-orchestrator', 'global', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
 
 	first := runtimepipeline.Schedule{
 		AgentID:   "validation-orchestrator",
@@ -780,31 +636,18 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'V', 'v', 'us', 'discovered', 'factory', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, entity_id, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'control-plane', 'global', NULL, 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (id, type, source_agent, entity_id, payload, created_at)
-		VALUES ($1::uuid, 'inbound.test', 'inbound', $2::uuid, '{}'::jsonb, now())
-	`, eventID, entityID); err != nil {
+	if err := pg.AppendEvent(ctx, (events.Event{
+		ID:          eventID,
+		Type:        "inbound.test",
+		SourceAgent: "inbound",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}).WithEntityID(entityID)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (event_id, agent_id, created_at)
-		VALUES ($1::uuid, 'a1', now())
-		ON CONFLICT DO NOTHING
-	`, eventID); err != nil {
+	if err := pg.InsertEventDeliveries(ctx, eventID, []string{"a1"}); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 
@@ -854,34 +697,26 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES
-			('a1', 'stub', 'worker', 'factory', 'active', '{}'::jsonb, now(), now()),
-			('a2', 'stub', 'worker', 'factory', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agents: %v", err)
-	}
-
 	broadcastID := uuid.NewString()
 	directOtherID := uuid.NewString()
 	directSelfID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (id, type, source_agent, payload, created_at)
-		VALUES
-			($1::uuid, 'inbound.alert', 'runtime', '{}'::jsonb, now() - interval '3 minute'),
-			($2::uuid, 'inbound.alert', 'runtime', '{}'::jsonb, now() - interval '2 minute'),
-			($3::uuid, 'inbound.alert', 'runtime', '{}'::jsonb, now() - interval '1 minute')
-	`, broadcastID, directOtherID, directSelfID); err != nil {
-		t.Fatalf("seed events: %v", err)
+	for idx, id := range []string{broadcastID, directOtherID, directSelfID} {
+		if err := pg.AppendEvent(ctx, events.Event{
+			ID:          id,
+			Type:        "inbound.alert",
+			SourceAgent: "runtime",
+			Payload:     []byte(`{}`),
+			CreatedAt:   time.Now().Add(time.Duration(-3+idx) * time.Minute),
+		}); err != nil {
+			t.Fatalf("seed events: %v", err)
+		}
 	}
 
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (event_id, agent_id, created_at)
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, created_at)
 		VALUES
-			($1::uuid, 'a2', now()),
-			($2::uuid, 'a1', now())
+			($1::uuid, 'agent', 'a2', now()),
+			($2::uuid, 'agent', 'a1', now())
 	`, directOtherID, directSelfID); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
@@ -917,24 +752,15 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'V', 'v', 'us', 'discovered', 'factory', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'a1', 'global', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	seedSpecAgent(t, ctx, pg, "a1", "", "*")
 	eventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (id, type, source_agent, entity_id, payload, created_at)
-		VALUES ($1::uuid, 'system.started', 'runtime', $2::uuid, '{}'::jsonb, now())
-	`, eventID, entityID); err != nil {
+	if err := pg.AppendEvent(ctx, (events.Event{
+		ID:          eventID,
+		Type:        "system.started",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now(),
+	}).WithEntityID(entityID)); err != nil {
 		t.Fatalf("seed event: %v", err)
 	}
 
@@ -968,20 +794,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'V', 'v', 'us', 'operating', 'operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('sub', 'stub', 'sub', 'global', 'active', '{}'::jsonb, now(), now()),
-		       ('inst', 'stub', 'inst', 'global', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agents: %v", err)
-	}
+	seedSpecEntityState(t, ctx, db, entityID, "v-flow", "v", "V", "operating")
 
 	if err := pg.UpsertRoutingRule(ctx, runtimemanager.PersistedRoutingRule{
 		EntityID:     entityID,
@@ -1018,70 +831,23 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("expected agent_id required")
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO schedules (id, agent_id, event_type, mode, next_fire_at, created_at)
-		VALUES ($1::uuid, 'sub', 'timer.recurring_digest', 'cron', now(), now())
-	`, uuid.NewString()); err != nil {
-		t.Fatalf("seed schedule: %v", err)
-	}
 	if err := pg.CancelSchedule(ctx, "sub", "timer.recurring_digest"); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
 	}
 	_ = time.Second
 }
 
-func TestManagerStore_EnsureEntitySchema_AndTemplates(t *testing.T) {
+func TestManagerStore_EnsureEntitySchema(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed compatibility entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"vslug"}'::jsonb, now(), now()
-		)
-	`, entityID); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
+	seedSpecEntityState(t, ctx, db, entityID, "entity-schema-flow", "vslug", "TestCo", "operating")
 	if err := pg.EnsureEntitySchema(ctx, entityID); err != nil {
 		t.Fatalf("EnsureEntitySchema: %v", err)
 	}
 
-	if _, err := pg.LoadOrgTemplate(ctx, ""); err == nil {
-		t.Fatalf("expected template version required")
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO org_templates (version, agents, bootstrap_routes, seeded_routes, created_by, created_at)
-		VALUES ('t1','[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'test', now())
-	`); err != nil {
-		t.Fatalf("seed template: %v", err)
-	}
-	if rec, err := pg.LoadLatestOrgTemplate(ctx); err != nil || rec.Version != "t1" {
-		t.Fatalf("LoadLatestOrgTemplate err=%v rec=%+v", err, rec)
-	}
-	if rec, err := pg.LoadOrgTemplate(ctx, "t1"); err != nil || rec.Version != "t1" {
-		t.Fatalf("LoadOrgTemplate err=%v rec=%+v", err, rec)
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bootstrap_versions (version, routes, proposed_by, approved_by, evidence, created_at)
-		VALUES (3, '[]'::jsonb, 'initial', 'factory-cto', 'test', now())
-	`); err != nil {
-		t.Fatalf("seed bootstrap_versions: %v", err)
-	}
-	if v, err := pg.ResolveBootstrapVersion(ctx, "t1"); err != nil || v != 3 {
-		t.Fatalf("ResolveBootstrapVersion err=%v v=%d", err, v)
-	}
 }
 
 func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
@@ -1090,21 +856,7 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 	ctx := context.Background()
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'V', 'vslug', 'us', 'operating', 'operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed entity: %v", err)
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('sub', 'stub', 'sub', 'operating', 'active', '{}'::jsonb, now(), now()),
-		       ('inst', 'stub', 'inst', 'operating', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agents: %v", err)
-	}
+	seedSpecEntityState(t, ctx, db, entityID, "vslug-flow", "vslug", "V", "operating")
 
 	r := runtimemanager.PersistedRoutingRule{
 		EntityID:         entityID,
@@ -1120,20 +872,20 @@ func TestManagerStore_RoutingRules_DeactivateAndBootstrapVersion(t *testing.T) {
 		t.Fatalf("UpsertRoutingRule: %v", err)
 	}
 
-	r.Status = "deactivated"
+	r.Status = "inactive"
 	if err := pg.UpsertRoutingRule(ctx, r); err != nil {
 		t.Fatalf("UpsertRoutingRule deactivate: %v", err)
 	}
-	var deact *time.Time
+	var status string
 	if err := db.QueryRowContext(ctx, `
-		SELECT deactivated_at
+		SELECT status
 		FROM routing_rules
-		WHERE entity_id=$1::uuid AND event_pattern='inbound.*' AND subscriber_id='sub'
-	`, entityID).Scan(&deact); err != nil {
-		t.Fatalf("load deactivated_at: %v", err)
+		WHERE event_pattern='inbound.*' AND subscriber_id='sub'
+	`).Scan(&status); err != nil {
+		t.Fatalf("load routing rule status: %v", err)
 	}
-	if deact == nil {
-		t.Fatalf("expected deactivated_at set")
+	if status != "inactive" {
+		t.Fatalf("expected inactive status, got %q", status)
 	}
 
 	if err := pg.DeactivateRoutingRulesByEntity(ctx, entityID); err != nil {
@@ -1145,14 +897,8 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, status, config, started_at, last_active_at)
-		VALUES ('a1', 'stub', 'a1', 'global', 'active', '{}'::jsonb, now(), now())
-		ON CONFLICT (id) DO NOTHING
-	`); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		AgentID: "a1",
@@ -1174,22 +920,23 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 		t.Fatalf("expected redacted email, got %#v", rec.Messages)
 	}
 
-	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{AgentID: "a1", RuntimeMode: "cli_test", SessionID: "s1"}); err == nil {
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{AgentID: "a1", RuntimeMode: "session", SessionID: uuid.NewString()}); err == nil {
 		t.Fatalf("expected missing session row error")
 	}
-	var sessionRowID string
+	var sessionID string
 	if err := db.QueryRowContext(ctx, `
-		INSERT INTO agent_sessions (agent_id, runtime_mode, provider, session_id, status, turn_count, created_at)
-		VALUES ('a1', 'cli_test', 'cli', 's1', 'active', 0, now())
-		RETURNING id::text
-	`).Scan(&sessionRowID); err != nil {
-		t.Fatalf("seed agent_sessions: %v", err)
+		SELECT session_id::text
+		FROM agent_sessions
+		WHERE agent_id = 'a1' AND scope_key = 'global'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&sessionID); err != nil {
+		t.Fatalf("load seeded agent_session: %v", err)
 	}
-	_ = sessionRowID
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
-		RuntimeMode:    "cli_test",
-		SessionID:      "s1",
+		RuntimeMode:    "session",
+		SessionID:      sessionID,
 		TaskID:         uuid.NewString(),
 		RequestPayload: []byte(`{"x":1}`),
 		ResponseRaw:    []byte(`{"y":2}`),
@@ -1250,48 +997,12 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
-
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO org_templates (version, agents, bootstrap_routes, seeded_routes, created_by, description, created_at)
-		VALUES
-			('v1','[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'test','v1', now() - interval '2 hour'),
-			('v2','[]'::jsonb,'[]'::jsonb,'[]'::jsonb,'test','v2', now())
-	`); err != nil {
-		t.Fatalf("seed templates: %v", err)
-	}
-	if rec, err := pg.LoadLatestOrgTemplate(ctx); err != nil || rec.Version != "v2" {
-		t.Fatalf("LoadLatestOrgTemplate rec=%+v err=%v", rec, err)
-	}
-	if _, err := pg.LoadOrgTemplate(ctx, ""); err == nil {
-		t.Fatal("expected LoadOrgTemplate error for empty version")
-	}
-	if rec, err := pg.LoadOrgTemplate(ctx, "v1"); err != nil || rec.Version != "v1" {
-		t.Fatalf("LoadOrgTemplate rec=%+v err=%v", rec, err)
-	}
+	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	entityID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid,'TestCo','testco','us','operating','operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed compatibility entity: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
-		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco","template_version":"v1"}'::jsonb, now(), now()
-		)
-	`, entityID); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
+	seedSpecEntityState(t, ctx, db, entityID, "testco", "testco", "TestCo", "operating")
 	if err := pg.EnsureEntitySchema(ctx, entityID); err != nil {
 		t.Fatalf("EnsureEntitySchema: %v", err)
-	}
-	if err := pg.SetEntityTemplateVersion(ctx, entityID, "v2"); err != nil {
-		t.Fatalf("SetEntityTemplateVersion: %v", err)
 	}
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
@@ -1402,16 +1113,17 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("GetEventReceipt ok=%v err=%v rec=%+v", ok, err, rec)
 	}
 
+	sessionID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (agent_id, runtime_mode, provider, session_id, status, turn_count, created_at, last_used_at)
-		VALUES ($1, 'cli_test', 'anthropic_cli', 's1', 'active', 0, now(), now())
-	`, ceoID); err != nil {
+		INSERT INTO agent_sessions (session_id, agent_id, scope_key, scope, conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at)
+		VALUES ($1::uuid, $2, 'global', 'global', '[]'::jsonb, 0, 'session', '{}'::jsonb, 'active', now(), now())
+	`, sessionID, ceoID); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
 		AgentID:        ceoID,
-		RuntimeMode:    "cli_test",
-		SessionID:      "s1",
+		RuntimeMode:    "session",
+		SessionID:      sessionID,
 		TaskID:         "",
 		RequestPayload: []byte(`{"in":1}`),
 		ResponseRaw:    []byte(`{"out":1}`),
@@ -1463,6 +1175,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
@@ -1482,33 +1195,26 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 		t.Fatalf("upsert agent: %v", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO conversations (agent_id, mode, messages, summary, turn_count, status, created_at, updated_at)
-		VALUES ($1, 'session', '[{"role":"user","content":"hello"}]'::jsonb, 'x', 1, 'active', now(), now())
-	`, "agent-cleanup-1"); err != nil {
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		AgentID:   "agent-cleanup-1",
+		Mode:      "session",
+		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
+		Summary:   "x",
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
 		t.Fatalf("seed conversation: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_sessions (agent_id, runtime_mode, provider, session_id, status, turn_count, created_at, last_used_at)
-		VALUES ($1, 'cli_test', 'anthropic_cli', 'sess-cleanup-1', 'active', 2, now(), now())
-	`, "agent-cleanup-1"); err != nil {
-		t.Fatalf("seed session: %v", err)
-	}
-
 	if err := pg.MarkAgentTerminated(ctx, "agent-cleanup-1"); err != nil {
 		t.Fatalf("MarkAgentTerminated: %v", err)
 	}
 
 	var (
 		agentStatus string
-		convStatus  string
 		sessStatus  string
 	)
-	if err := db.QueryRowContext(ctx, `SELECT status FROM agents WHERE id = $1`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT status FROM agents WHERE agent_id = $1`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
 		t.Fatalf("read agent status: %v", err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM conversations WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`, "agent-cleanup-1").Scan(&convStatus); err != nil {
-		t.Fatalf("read conversation status: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT status FROM agent_sessions WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`, "agent-cleanup-1").Scan(&sessStatus); err != nil {
 		t.Fatalf("read session status: %v", err)
@@ -1516,11 +1222,8 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	if agentStatus != "terminated" {
 		t.Fatalf("expected terminated agent status, got %q", agentStatus)
 	}
-	if convStatus != "terminated" {
-		t.Fatalf("expected terminated conversation status, got %q", convStatus)
-	}
-	if sessStatus != "rotated" {
-		t.Fatalf("expected rotated session status, got %q", sessStatus)
+	if sessStatus != "terminated" {
+		t.Fatalf("expected terminated session status, got %q", sessStatus)
 	}
 }
 

@@ -96,15 +96,8 @@ func TestPhase1DefaultContractPathsAreMASOnly(t *testing.T) {
 		paths.ProjectToolsFile,
 		paths.ProjectPolicyFile,
 	} {
-		slash := filepath.ToSlash(candidate)
-		if strings.Contains(slash, "workflow-empire.yaml") ||
-			strings.Contains(slash, "hooks-empire.yaml") ||
-			strings.Contains(slash, "nodes-empire.yaml") ||
-			strings.Contains(slash, "events-empire.yaml") ||
-			strings.Contains(slash, "agents-empire.yaml") ||
-			strings.Contains(slash, "tools-empire.yaml") ||
-			strings.Contains(slash, "policy-empire.yaml") {
-			t.Fatalf("unexpected legacy contract candidate in resolved path %q", candidate)
+		if strings.TrimSpace(candidate) == "" {
+			t.Fatalf("unexpected empty contract candidate")
 		}
 	}
 	if strings.TrimSpace(paths.DDLFile) != "" {

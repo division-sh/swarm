@@ -5,16 +5,31 @@ import (
 	"strings"
 )
 
+const (
+	RuntimeModeTask             = "task"
+	RuntimeModeSession          = "session"
+	RuntimeModeSessionPerEntity = "session_per_entity"
+)
+
 type ScopeContext struct {
 	ConversationMode string
 	ScopeKey         string
+}
+
+type ResolvedScope struct {
+	RuntimeMode  string
+	ScopeKey     string
+	Scope        string
+	EntityID     string
+	FlowInstance string
+	Stateless    bool
 }
 
 type scopeContextKey struct{}
 
 func WithScope(ctx context.Context, mode, scopeKey string) context.Context {
 	payload := ScopeContext{
-		ConversationMode: strings.TrimSpace(mode),
+		ConversationMode: NormalizeConversationRuntimeMode(mode),
 		ScopeKey:         strings.TrimSpace(scopeKey),
 	}
 	return context.WithValue(ctx, scopeContextKey{}, payload)
@@ -22,17 +37,53 @@ func WithScope(ctx context.Context, mode, scopeKey string) context.Context {
 
 func ScopeFromContext(ctx context.Context) ScopeContext {
 	if ctx == nil {
-		return ScopeContext{ConversationMode: "session"}
+		return ScopeContext{ConversationMode: RuntimeModeSession}
 	}
 	v := ctx.Value(scopeContextKey{})
 	payload, ok := v.(ScopeContext)
 	if !ok {
-		return ScopeContext{ConversationMode: "session"}
+		return ScopeContext{ConversationMode: RuntimeModeSession}
 	}
-	payload.ConversationMode = strings.TrimSpace(strings.ToLower(payload.ConversationMode))
-	if payload.ConversationMode == "" {
-		payload.ConversationMode = "session"
-	}
+	payload.ConversationMode = NormalizeConversationRuntimeMode(payload.ConversationMode)
 	payload.ScopeKey = strings.TrimSpace(payload.ScopeKey)
 	return payload
+}
+
+func NormalizeConversationRuntimeMode(raw string) string {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case RuntimeModeTask:
+		return RuntimeModeTask
+	case RuntimeModeSessionPerEntity:
+		return RuntimeModeSessionPerEntity
+	default:
+		return RuntimeModeSession
+	}
+}
+
+func ResolveScope(runtimeMode, scopeKey string) ResolvedScope {
+	mode := NormalizeConversationRuntimeMode(runtimeMode)
+	scopeKey = strings.TrimSpace(scopeKey)
+
+	out := ResolvedScope{
+		RuntimeMode: mode,
+		ScopeKey:    scopeKey,
+	}
+
+	switch mode {
+	case RuntimeModeTask:
+		out.Stateless = true
+	case RuntimeModeSessionPerEntity:
+		out.Scope = "entity"
+		out.EntityID = scopeKey
+	default:
+		if scopeKey == "" {
+			out.Scope = "global"
+			out.ScopeKey = "global"
+			break
+		}
+		out.Scope = "flow"
+		out.FlowInstance = scopeKey
+	}
+
+	return out
 }

@@ -133,14 +133,16 @@ func (eb *EventBus) AddFlowInstance(template runtimecontracts.SystemNodeContract
 		return nil
 	}
 	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	route := FlowInstanceRouteRecord{
-		TemplateID:   routeFirstPathSegment(instancePath),
-		InstanceID:   routeLastPathSegment(instancePath),
-		InstancePath: instancePath,
+	routes := table.MaterializedRoutes(instancePath)
+	if len(routes) == 0 {
+		return nil
 	}
-	if err := persister.UpsertFlowInstanceRoute(context.Background(), route); err != nil {
-		table.RemoveFlowInstance(route.TemplateID, route.InstanceID)
-		return err
+	for _, route := range routes {
+		if err := persister.UpsertFlowInstanceRoute(context.Background(), route); err != nil {
+			_ = persister.DeleteFlowInstanceRoute(context.Background(), route.TemplateID, route.InstanceID)
+			table.RemoveFlowInstance(route.TemplateID, route.InstanceID)
+			return err
+		}
 	}
 	return nil
 }

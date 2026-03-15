@@ -129,16 +129,13 @@ func (eb *EventBus) publishTransactional(
 	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	receiptTableExists := txTableExists(txctx, tx, "pipeline_receipts")
 	if passthrough && len(inboundPlan.PersistedRecipients) > 0 {
 		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
-	if receiptTableExists {
-		if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "processed", ""); err != nil {
-			return fmt.Errorf("persist pipeline receipt: %w", err)
-		}
+	if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "processed", ""); err != nil {
+		return fmt.Errorf("persist pipeline receipt: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -163,9 +160,6 @@ func (eb *EventBus) publishTransactional(
 		if strings.TrimSpace(inboundPlan.ContradictionReason) != "" {
 			_ = eb.emitContradiction(ctx, evt, inboundPlan.ContradictionReason)
 		}
-	}
-	if !receiptTableExists {
-		eb.markPipelineReceipt(ctx, evt.ID, "processed", "")
 	}
 	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
 

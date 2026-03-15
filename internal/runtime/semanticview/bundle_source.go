@@ -140,6 +140,9 @@ func (s bundleSource) FlowOutputEvents(flowID string) []string {
 	return s.bundle.FlowOutputEvents(flowID)
 }
 func (s bundleSource) FlowWritePins(flowID string) []string { return s.bundle.FlowWritePins(flowID) }
+func (s bundleSource) RequiredAgents() []runtimecontracts.FlowRequiredAgent {
+	return s.bundle.RootRequiredAgents()
+}
 func (s bundleSource) FlowRequiredAgents(flowID string) []runtimecontracts.FlowRequiredAgent {
 	return s.bundle.FlowRequiredAgents(flowID)
 }

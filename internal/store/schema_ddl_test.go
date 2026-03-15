@@ -42,29 +42,42 @@ func TestSchemaFieldTypeToDDLError(t *testing.T) {
 
 func TestGeneratePlatformTableDDLs(t *testing.T) {
 	var spec runtimecontracts.PlatformSpecDocument
-	spec.WorkflowState.DDL = "CREATE TABLE workflow_instances (\n    instance_id UUID PRIMARY KEY,\n    workflow_name TEXT NOT NULL,\n    transition_history JSONB NOT NULL DEFAULT '[]'\n);\nCREATE INDEX idx_wi_workflow ON workflow_instances(workflow_name);\nCREATE TABLE flow_instance_routes (\n    template_id TEXT NOT NULL,\n    instance_id TEXT NOT NULL,\n    instance_path TEXT NOT NULL,\n    PRIMARY KEY (template_id, instance_id)\n);\n"
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"events": {
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY,\n    entity_id UUID NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_entity (entity_id, created_at)\n);",
+		},
+		"flow_instances": {
+			DDL: "CREATE TABLE flow_instances (\n    instance_id TEXT PRIMARY KEY,\n    flow_template TEXT NOT NULL\n);",
+		},
+	}
 
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(plans) != 1 {
-		t.Fatalf("expected 1 platform DDL plan, got %d", len(plans))
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 platform DDL plans, got %d", len(plans))
 	}
-	if plans[0].TableName != "workflow_instances" {
-		t.Fatalf("unexpected platform table %q", plans[0].TableName)
+	if plans[0].TableName != "events" {
+		t.Fatalf("unexpected first platform table %q", plans[0].TableName)
 	}
 	if plans[0].ColumnCount != 3 {
 		t.Fatalf("unexpected platform column count %d", plans[0].ColumnCount)
 	}
-	if got := plans[0].Statements[0]; !strings.Contains(got, "CREATE TABLE IF NOT EXISTS workflow_instances") {
+	if got := plans[0].Statements[0]; !strings.Contains(got, "CREATE TABLE IF NOT EXISTS events") {
 		t.Fatalf("expected idempotent create table, got %q", got)
 	}
-	if got := plans[0].Statements[1]; !strings.Contains(got, "CREATE INDEX IF NOT EXISTS idx_wi_workflow") {
+	if strings.Contains(plans[0].Statements[0], "INDEX idx_events_entity") {
+		t.Fatalf("expected inline index to be extracted from table ddl, got %q", plans[0].Statements[0])
+	}
+	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE INDEX IF NOT EXISTS "idx_events_entity" ON "events"(entity_id, created_at)`) {
 		t.Fatalf("expected idempotent create index, got %q", got)
 	}
-	if got := plans[0].Statements[2]; !strings.Contains(got, "CREATE TABLE IF NOT EXISTS flow_instance_routes") {
-		t.Fatalf("expected flow_instance_routes table ddl, got %q", got)
+	if plans[1].TableName != "flow_instances" {
+		t.Fatalf("unexpected second platform table %q", plans[1].TableName)
 	}
 }
 

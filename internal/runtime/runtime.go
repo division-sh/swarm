@@ -110,6 +110,36 @@ func DefaultControlPlaneRecipient() string {
 	return "control-plane"
 }
 
+func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	value, ok := semanticview.PolicyValueForFlow(source, "", "throttle_suppress_prefixes")
+	if !ok {
+		return nil
+	}
+	switch typed := value.Value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if item = strings.TrimSpace(item); item != "" {
+				out = append(out, item)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(asString(item)); text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	if opts.WorkflowModule == nil {
 		return fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
@@ -236,11 +266,12 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions())
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
-		Workspaces:           rt.Workspace,
-		Sessions:             stores.SessionRegistry,
-		RuntimeMode:          cfg.LLM.RuntimeMode,
-		Budget:               rt.Budget,
-		DisableSpinupControl: true,
+		Workspaces:               rt.Workspace,
+		Sessions:                 stores.SessionRegistry,
+		RuntimeMode:              cfg.LLM.RuntimeMode,
+		Budget:                   rt.Budget,
+		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
+		DisableSpinupControl:     true,
 	}, stores.ManagerStore)
 	managerRef = rt.Manager
 	if rt.ToolExecutor != nil && rt.Manager != nil {

@@ -2,20 +2,16 @@ package store_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
 	"time"
 
 	"empireai/internal/events"
+	runtimeactors "empireai/internal/runtime/core/actors"
+	runtimemanager "empireai/internal/runtime/manager"
 	"empireai/internal/store"
+	"empireai/internal/testutil"
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
 )
 
 func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
@@ -34,9 +30,11 @@ func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
 		var status string
 		var retryCount int
 		if err := pg.DB.QueryRowContext(ctx, `
-			SELECT status, retry_count
+			SELECT COALESCE(side_effects->>'manager_status', ''), COALESCE((side_effects->>'retry_count')::int, 0)
 			FROM event_receipts
-			WHERE event_id = $1::uuid AND agent_id = $2
+			WHERE event_id = $1::uuid
+			  AND subscriber_type = 'agent'
+			  AND subscriber_id = $2
 		`, evt.ID, agentID).Scan(&status, &retryCount); err != nil {
 			t.Fatalf("query receipt after #%d: %v", i, err)
 		}
@@ -199,83 +197,56 @@ func insertOrUpdateReceipt(t *testing.T, ctx context.Context, pg *store.Postgres
 	// Upsert-style helper for tests; the production upsert also mutates retry_count which isn't what we want
 	// for time-window filtering tests.
 	const q = `
-		INSERT INTO event_receipts (event_id, agent_id, processed_at, status, retry_count, error)
-		VALUES ($1::uuid, $2, $3, $4, $5, 'boom')
-		ON CONFLICT (event_id, agent_id) DO UPDATE SET
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'agent', $2, e.entity_id, e.flow_instance, $3, $4::jsonb, $5
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
 			processed_at = EXCLUDED.processed_at,
-			status = EXCLUDED.status,
-			retry_count = EXCLUDED.retry_count,
-			error = EXCLUDED.error
+			outcome = EXCLUDED.outcome,
+			side_effects = EXCLUDED.side_effects
 	`
-	if _, err := pg.DB.ExecContext(ctx, q, eventID, agentID, processedAt, status, retryCount); err != nil {
+	sideEffects, err := json.Marshal(map[string]any{
+		"manager_status": status,
+		"retry_count":    retryCount,
+		"error":          "boom",
+	})
+	if err != nil {
+		t.Fatalf("marshal side effects: %v", err)
+	}
+	outcome := "success"
+	switch status {
+	case "error", "dead_letter":
+		outcome = status
+	}
+	if outcome == "error" {
+		outcome = "dead_letter"
+	}
+	if _, err := pg.DB.ExecContext(ctx, q, eventID, agentID, outcome, string(sideEffects), processedAt); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
 }
 
 func newTestPostgresStore(t *testing.T) (*store.PostgresStore, func()) {
 	t.Helper()
-
-	adminDSN := os.Getenv("MAS_PG_ADMIN_DSN")
-	if strings.TrimSpace(adminDSN) == "" {
-		t.Skip("set MAS_PG_ADMIN_DSN to run postgres store retry policy tests")
-	}
-
-	ctx := context.Background()
-	admin, err := sql.Open("postgres", adminDSN)
-	if err != nil {
-		t.Fatalf("open admin dsn: %v", err)
-	}
-	if err := admin.PingContext(ctx); err != nil {
-		_ = admin.Close()
-		t.Skipf("postgres not reachable from MAS_PG_ADMIN_DSN: %v", err)
-	}
-
-	var owner string
-	if err := admin.QueryRowContext(ctx, `SELECT current_user`).Scan(&owner); err != nil {
-		_ = admin.Close()
-		t.Fatalf("resolve current_user: %v", err)
-	}
-
-	dbName := fmt.Sprintf("empireai_store_test_%d", time.Now().UnixNano())
-	if _, err := admin.ExecContext(ctx, fmt.Sprintf(`CREATE DATABASE "%s" OWNER "%s"`, dbName, owner)); err != nil {
-		_ = admin.Close()
-		t.Fatalf("create test db: %v", err)
-	}
-
-	appDSN := withDBName(adminDSN, dbName)
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	appDSN := dsn
 	pg, err := store.NewPostgresStore(appDSN)
 	if err != nil {
-		_, _ = admin.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, dbName))
-		_ = admin.Close()
 		t.Fatalf("new postgres store: %v", err)
 	}
-	if err := pg.Ping(ctx); err != nil {
+	if err := pg.Ping(context.Background()); err != nil {
 		_ = pg.DB.Close()
-		_, _ = admin.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, dbName))
-		_ = admin.Close()
 		t.Fatalf("ping app db: %v", err)
 	}
-
-	if err := pg.ApplyMigrationFile(ctx, migrationPath(t)); err != nil {
+	return pg, func() {
 		_ = pg.DB.Close()
-		_, _ = admin.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, dbName))
-		_ = admin.Close()
-		t.Fatalf("apply migration: %v", err)
+		cleanup()
 	}
-
-	cleanup := func() {
-		_ = pg.DB.Close()
-		_, _ = admin.ExecContext(ctx, `
-			SELECT pg_terminate_backend(pid)
-			FROM pg_stat_activity
-			WHERE datname = $1
-			  AND pid <> pg_backend_pid()
-		`, dbName)
-		_, _ = admin.ExecContext(ctx, fmt.Sprintf(`DROP DATABASE IF EXISTS "%s"`, dbName))
-		_ = admin.Close()
-	}
-
-	return pg, cleanup
 }
 
 func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore) (entityID, agentID string) {
@@ -283,17 +254,36 @@ func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresSto
 
 	entityID = uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO entities (id, name, geography, stage, mode)
-		VALUES ($1::uuid, 'Store Retry Policy Test', 'US', 'approved', 'factory')
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ('retry-policy-entity', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+	`); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		)
+		VALUES ($1::uuid, 'retry-policy-entity', 'default', 'retry-policy', 'Store Retry Policy Test', 'approved',
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
 	`, entityID); err != nil {
 		t.Fatalf("seed entity: %v", err)
 	}
 
 	agentID = "agent-" + uuid.NewString()
-	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO agents (id, type, role, mode, entity_id, config)
-		VALUES ($1, 'test', 'test', 'factory', $2::uuid, '{}'::jsonb)
-	`, agentID, entityID); err != nil {
+	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:       agentID,
+			Type:     "test",
+			Role:     "test",
+			Mode:     "factory",
+			EntityID: entityID,
+			Config:   []byte(`{"system_prompt":"x"}`),
+		},
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
+	}); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
 
@@ -315,31 +305,4 @@ func seedEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, entit
 		t.Fatalf("append event: %v", err)
 	}
 	return evt
-}
-
-func withDBName(dsn, dbName string) string {
-	fields := strings.Fields(dsn)
-	out := make([]string, 0, len(fields)+1)
-	replaced := false
-	for _, f := range fields {
-		if strings.HasPrefix(f, "dbname=") {
-			out = append(out, "dbname="+dbName)
-			replaced = true
-			continue
-		}
-		out = append(out, f)
-	}
-	if !replaced {
-		out = append(out, "dbname="+dbName)
-	}
-	return strings.Join(out, " ")
-}
-
-func migrationPath(t *testing.T) string {
-	t.Helper()
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot resolve caller")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", "migrations", "001_initial.sql"))
 }

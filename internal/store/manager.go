@@ -26,6 +26,12 @@ func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {
 	if _, ok := obj["mode"]; !ok && cfg.Mode != "" {
 		obj["mode"] = cfg.Mode
 	}
+	if _, ok := obj["type"]; !ok && cfg.Type != "" {
+		obj["type"] = cfg.Type
+	}
+	if _, ok := obj["llm_backend"]; !ok && cfg.LLMBackend != "" {
+		obj["llm_backend"] = cfg.LLMBackend
+	}
 	if len(obj) == 0 {
 		obj = map[string]any{}
 	}
@@ -56,6 +62,42 @@ func extractPermissions(raw []byte) []string {
 		return nil
 	}
 	return obj.Permissions
+}
+
+func extractStringField(raw []byte, key string) string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return ""
+	}
+	val, _ := obj[strings.TrimSpace(key)].(string)
+	return strings.TrimSpace(val)
+}
+
+func extractStringListField(raw []byte, key string) []string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	list, _ := obj[strings.TrimSpace(key)].([]any)
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if v, ok := item.(string); ok {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
 }
 
 func normalizeJSONPayload(raw []byte) string {

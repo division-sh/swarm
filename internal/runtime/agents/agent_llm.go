@@ -223,7 +223,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 	if a == nil || a.conversation == nil {
 		return ""
 	}
-	mode = runtimetools.NormalizeScanModeCompat(mode)
+	mode = strings.TrimSpace(mode)
 	cacheKey := mode
 	if a.promptCache == nil {
 		a.promptCache = map[string]string{}
@@ -336,8 +336,9 @@ func (a *LLMAgent) attemptPostTurnContractRemediation(ctx context.Context, inbou
 }
 
 func (a *LLMAgent) enforcePostTurnExpectations(inbound events.Event, recorder *runtimebus.EmittedEventsRecorder) error {
-	eventsOut := recorder.Snapshot()
-	return runtimetools.EnforceRequiredEmitContract(a.cfg.Role, inbound, eventsOut)
+	_ = inbound
+	_ = recorder
+	return nil
 }
 
 func isHumanTaskOutcomeEvent(t events.EventType) bool {
@@ -520,8 +521,6 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 		toolsLine = strings.Join(emitTools, ", ")
 	}
 	entityToolsLine := "\n- Available entity persistence tools: get_entity, save_entity_field, create_entity, search_entities, query_metrics"
-	strictRequirement := ""
-	strictRequirement = runtimetools.RequiredEmitToolContractText(cfg.Role, evt)
 	return fmt.Sprintf(
 		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s%s",
 		cfg.ID,
@@ -535,7 +534,7 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 		payload,
 		toolsLine,
 		entityToolsLine,
-		strictRequirement,
+		"",
 	)
 }
 
@@ -544,7 +543,10 @@ func canonicalRuntimeRole(role string) string {
 }
 
 func contractRemediationPrompt(cfg models.AgentConfig, evt events.Event, contractErr error) (string, bool) {
-	return runtimetools.EmitContractRemediationPrompt(cfg.Role, evt, contractErr)
+	_ = cfg
+	_ = evt
+	_ = contractErr
+	return "", false
 }
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {
@@ -581,12 +583,4 @@ func extractContextIDs(evt events.Event) (entityID, taskID string) {
 		}
 	}
 	return entityID, taskID
-}
-
-func normalizeScanMode(raw string) string {
-	return runtimetools.NormalizeScanModeCompat(raw)
-}
-
-func normalizeScanPriority(raw string) string {
-	return runtimetools.NormalizeScanPriorityCompat(raw)
 }

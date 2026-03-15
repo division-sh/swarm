@@ -20,6 +20,7 @@ var (
 	schemaDDLIdentifierPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 	schemaDDLNumericPattern    = regexp.MustCompile(`^numeric\(\s*(\d+)\s*,\s*(\d+)\s*\)$`)
 	schemaDDLCreateTableName   = regexp.MustCompile(`(?is)^create\s+table(?:\s+if\s+not\s+exists)?\s+"?([a-z_][a-z0-9_]*)"?`)
+	schemaDDLInlineIndexLine   = regexp.MustCompile(`(?i)^index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
 )
 
 func SchemaFieldTypeToDDL(schemaType string) (string, error) {
@@ -49,29 +50,47 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 }
 
 func GeneratePlatformTableDDLs(spec runtimecontracts.PlatformSpecDocument) ([]SchemaTableDDL, error) {
-	rawDDL := strings.TrimSpace(spec.WorkflowState.DDL)
-	if rawDDL == "" {
-		return nil, fmt.Errorf("platform spec workflow_state.ddl is required")
+	if len(spec.PlatformTables.Tables) == 0 {
+		return nil, fmt.Errorf("platform spec platform_tables.tables.*.ddl is required")
 	}
-	// TODO(phase4): the current platform spec exposes workflow_state.ddl but does not yet expose
-	// separate DDL blocks for the event store or schema_version helper tables.
-	statements, err := normalizePlatformDDLStatements(rawDDL)
-	if err != nil {
-		return nil, fmt.Errorf("platform spec workflow_state.ddl: %w", err)
+	tableNames := make([]string, 0, len(spec.PlatformTables.Tables))
+	for tableName := range spec.PlatformTables.Tables {
+		tableNames = append(tableNames, strings.TrimSpace(tableName))
 	}
-	tableName := "workflow_instances"
-	for _, statement := range statements {
-		if parsedTable := schemaDDLExtractTableName(statement); parsedTable != "" {
-			tableName = parsedTable
-			break
+	sort.Slice(tableNames, func(i, j int) bool {
+		left := platformTableOrder(tableNames[i])
+		right := platformTableOrder(tableNames[j])
+		if left != right {
+			return left < right
 		}
+		return tableNames[i] < tableNames[j]
+	})
+	plans := make([]SchemaTableDDL, 0, len(tableNames))
+	for _, declaredName := range tableNames {
+		tableSpec := spec.PlatformTables.Tables[declaredName]
+		rawDDL := strings.TrimSpace(tableSpec.DDL)
+		if rawDDL == "" {
+			return nil, fmt.Errorf("platform spec table %s ddl is required", declaredName)
+		}
+		statements, err := normalizePlatformDDLStatements(rawDDL)
+		if err != nil {
+			return nil, fmt.Errorf("platform spec table %s: %w", declaredName, err)
+		}
+		tableName := declaredName
+		for _, statement := range statements {
+			if parsedTable := schemaDDLExtractTableName(statement); parsedTable != "" {
+				tableName = parsedTable
+				break
+			}
+		}
+		plans = append(plans, SchemaTableDDL{
+			TableName:   tableName,
+			SchemaKind:  "platform_spec",
+			ColumnCount: schemaDDLColumnCount(statements),
+			Statements:  statements,
+		})
 	}
-	return []SchemaTableDDL{{
-		TableName:   tableName,
-		SchemaKind:  "platform_spec",
-		ColumnCount: schemaDDLColumnCount(statements),
-		Statements:  statements,
-	}}, nil
+	return plans, nil
 }
 
 func GenerateEntityTableDDLs(schema runtimecontracts.EntitySchema) ([]SchemaTableDDL, error) {
@@ -247,6 +266,39 @@ func schemaDDLIndexName(parts ...string) string {
 	return name
 }
 
+func platformTableOrder(name string) int {
+	switch strings.TrimSpace(name) {
+	case "schema_version":
+		return 0
+	case "events":
+		return 10
+	case "dead_letters":
+		return 20
+	case "agents":
+		return 30
+	case "flow_instances":
+		return 40
+	case "entity_state":
+		return 50
+	case "agent_sessions":
+		return 60
+	case "routing_rules":
+		return 70
+	case "event_deliveries":
+		return 80
+	case "event_receipts":
+		return 90
+	case "mailbox":
+		return 100
+	case "spend_ledger":
+		return 110
+	case "timers":
+		return 120
+	default:
+		return 1000
+	}
+}
+
 func QuoteIdent(v string) string {
 	return quoteIdent(v)
 }
@@ -261,7 +313,13 @@ func normalizePlatformDDLStatements(rawDDL string) ([]string, error) {
 		}
 		switch {
 		case strings.HasPrefix(strings.ToUpper(statement), "CREATE TABLE "):
-			statement = schemaDDLEnsureIfNotExists(statement, "CREATE TABLE")
+			tableStatement, indexStatements, err := schemaDDLNormalizeCreateTable(statement)
+			if err != nil {
+				return nil, err
+			}
+			statements = append(statements, tableStatement)
+			statements = append(statements, indexStatements...)
+			continue
 		case strings.HasPrefix(strings.ToUpper(statement), "CREATE INDEX "):
 			statement = schemaDDLEnsureIfNotExists(statement, "CREATE INDEX")
 		default:
@@ -273,6 +331,46 @@ func normalizePlatformDDLStatements(rawDDL string) ([]string, error) {
 		return nil, fmt.Errorf("no executable platform DDL statements found")
 	}
 	return statements, nil
+}
+
+func schemaDDLNormalizeCreateTable(statement string) (string, []string, error) {
+	statement = schemaDDLEnsureIfNotExists(statement, "CREATE TABLE")
+	tableName := schemaDDLExtractTableName(statement)
+	if tableName == "" {
+		return "", nil, fmt.Errorf("unable to extract table name from %q", statement)
+	}
+	start := strings.Index(statement, "(")
+	end := strings.LastIndex(statement, ")")
+	if start < 0 || end <= start {
+		return statement, nil, nil
+	}
+	body := statement[start+1 : end]
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	indexStatements := make([]string, 0, 2)
+	for _, rawLine := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(rawLine, ","))
+		if trimmed == "" {
+			continue
+		}
+		if matches := schemaDDLInlineIndexLine.FindStringSubmatch(trimmed); len(matches) >= 3 {
+			indexName := strings.TrimSpace(matches[1])
+			indexCols := strings.TrimSpace(matches[2])
+			whereClause := ""
+			if len(matches) >= 4 {
+				whereClause = strings.TrimSpace(matches[3])
+			}
+			statement := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
+			if whereClause != "" {
+				statement += " " + whereClause
+			}
+			indexStatements = append(indexStatements, statement)
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	normalizedTable := fmt.Sprintf("%s (\n    %s\n)", statement[:start], strings.Join(kept, ",\n    "))
+	return normalizedTable, indexStatements, nil
 }
 
 func schemaDDLEnsureIfNotExists(statement, prefix string) string {

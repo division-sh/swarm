@@ -2,6 +2,92 @@
 
 ## v1.1.1 (2026-03-13)
 
+### Platform tables DDL (12 tables)
+New `platform_tables` section in platform-spec.yaml declares the full DDL for all platform-owned infrastructure tables:
+- events (append-only event store)
+- event_deliveries (per-subscriber delivery tracking)
+- event_receipts (handler completion acknowledgement, idempotency)
+- entity_state (replaces workflow_instances — current state per entity)
+- agents (runtime agent registry)
+- agent_sessions (per-entity agent sessions)
+- routing_rules (materialized subscription table, built at boot)
+- mailbox (human-in-the-loop task queue)
+- spend_ledger (LLM token and API cost tracking)
+- flow_instances (static and dynamic instance registry)
+- timers (durable timer store)
+- dead_letters (failed events after retry exhaustion)
+
+Legacy `workflow_state` section removed (superseded by `entity_state` table).
+
+### Phase 8 final decisions (6)
+
+**workflow_instances replacement** — split across entity_state (current state, gates, fields, accumulator), flow_instances (template, config, version), timers (timer state), events (transition history). state_change_history deleted (reconstructible from event store). credentials deleted from platform (product-owned secret).
+
+**No entity registry table** — entity_state IS the registry. Added slug, name, entity_type as top-level columns for fast lookup. Generic store reads query entity_state directly.
+
+**entity_metrics deleted** — metrics are entity fields in entity_state.fields JSONB. Spend aggregated from spend_ledger. Canonical fields documented.
+
+**prompt_overrides deleted from platform** — delete PromptOverridePersistence and tests. Product-owned concern.
+
+**schema_version kept** — new platform table. Tracks applied DDL version. ApplyMigrationFile deleted (no file-based migrations). Boot compares version, generates diff, applies.
+
+**Test bootstrap** — platform_tables from spec only. No ddl-canonical.sql. No migrations/. Generic tests use platform tables. Product tests load contracts.
+
+### event_receipts widened, mailbox finalized, diagnostics encoding defined
+
+**event_receipts** — `entity_id` nullable, `handler_node` replaced by generic `subscriber_type` + `subscriber_id`. Added `duration_ms`, `idempotency_key`. UNIQUE on (event_id, subscriber_id). Replaces both pipeline_receipts and system_node_ledger.
+
+**mailbox** — payload-centric model confirmed. All human_tasks become `item_type='human_task'`. Added `from_agent`, `summary`, `decision_notes`, `notified`, `source_event_id`. Old columns (context, timeout_at, priority) replaced by payload, expires_at, severity.
+
+**diagnostics** — no dedicated table. runtime_log encoded as `events` with `event_name='platform.runtime_log'`, scope=global. pipeline_transitions encoded in `event_receipts` (state_before/after, side_effects, duration_ms, outcome).
+
+### Task mode stateless, provider session ID policy
+Task conversation mode is truly stateless — no agent_sessions row, no persistence. Provider session IDs stored in `agent_sessions.runtime_state.provider_session_id`, not in session_id PK.
+
+### LLM backend separated from session mode
+`agents.llm_backend` (api/cli_test/mock/local) tracks the invocation backend. `agent_sessions.runtime_mode` (task/session/session_per_entity) tracks conversation scope. These are orthogonal — same session scope can use different backends.
+
+### routing_rules absorbs flow_instance_routes
+`routing_rules` expanded to handle both contract patterns and materialized instance routes. No separate `flow_instance_routes` table needed. Added `is_materialized`, `materialized_from`, `source_flow`, `status`. Full lifecycle documented: boot → create_flow_instance → terminate → dispatch.
+
+### Events, mailbox, agents tables extended for global scope + runtime descriptors
+
+**events** — `entity_id` and `flow_instance` now nullable. Added `scope` column (entity/flow/global). Global events: system bootstrap, runtime recovery, admin commands.
+
+**mailbox** — `entity_id` and `flow_instance` now nullable. Added `scope` and `severity` (normal/urgent/critical). Global mailbox items: recovery-failure alerts, system operational decisions.
+
+**agents** — expanded to full runtime descriptor. Added `role`, `parent_agent_id`, `config` (JSONB), `subscriptions`, `emit_events`, `tools`, `permissions` (all JSONB, materialized from contracts at boot). `flow_instance` and `entity_id` now nullable for root-level and unscoped agents.
+
+Consistent scoping model across all platform tables: entity_id/flow_instance nullable with explicit scope column. Unblocks remaining G-24 store migrations.
+
+### Agent sessions relaxed for global/flow scope
+`entity_id` and `flow_instance` now nullable. Added `scope_key` (runtime lookup key) and `runtime_mode`. Three session scopes:
+- **entity**: scope_key = entity_id. One session per agent × entity.
+- **flow**: scope_key = flow_instance. One session per agent × flow.
+- **global**: scope_key = "global". One session per agent system-wide.
+
+UNIQUE constraint changed from (agent_id, entity_id) to (agent_id, scope_key). Matches live runtime's (agentID, runtimeMode, scopeKey) acquisition pattern. Unblocks G-24 session store migration.
+
+### Timers table relaxed for global schedules
+`entity_id`, `flow_instance`, and `owner_node` are now nullable. Three timer scopes:
+- **entity-scoped**: entity_id + flow_instance set. Cancelled on terminal state.
+- **flow-scoped**: flow_instance set, entity_id NULL. Cancelled on flow termination.
+- **global**: both NULL. Platform-level recurring work (scans, health checks, digests).
+
+Added `owner_agent` (agents can own timers), `recurrence_cron` (cron expressions), `global_recurring` task_type. Unblocks G-24 schedule_store migration.
+
+### Platform tables extended (3 tables)
+Runtime semantics added to agent_sessions, timers, and events tables:
+
+**agent_sessions** — added lease_holder/lease_expires_at (distributed locking), runtime_state (ephemeral agent data), scope (entity/flow/global session sharing), status, flow_instance.
+
+**timers** — added fire_payload (context delivered when timer fires, replaces schedules table), owner_node, task_type (timer/scheduled_task/deadline), fired_at, expired status.
+
+**events** — added idempotency_key (deduplication for external ingestion), source_event_id (causal chain for flight recorder), produced_by_type (node/agent/platform/external).
+
+These extensions resolve the 3 schema mismatches blocking G-24 legacy SQL deletion.
+
+
 ### Dependency graph — 5 primitives positioned
 `query`, `filter`, `reduce`, `count`, `clear` were defined as handler fields but missing from the dependency graph. Now specified with `execution_position` in the spec:
 

@@ -18,6 +18,7 @@ import (
 type ContractPaths struct {
 	ContractsRoot         string
 	WorkflowDir           string
+	RootSchemaFile        string
 	ProjectPackageFile    string
 	ProjectPackages       []ProjectPackagePaths
 	ProjectNodesFile      string
@@ -62,6 +63,7 @@ type WorkflowContractBundle struct {
 	Tools                 map[string]ToolSchemaEntry
 	Policy                PolicyDocument
 	Platform              PlatformSpecDocument
+	RootSchema            *FlowSchemaDocument
 	FlowSchemas           map[string]FlowSchemaDocument
 	FlowTree              FlowTree
 	URIRegistry           ContractURIRegistry
@@ -1054,6 +1056,15 @@ func (b *WorkflowContractBundle) FlowRequiredAgents(flowID string) []FlowRequire
 	agents := b.Semantics.FlowAgents[strings.TrimSpace(flowID)]
 	out := make([]FlowRequiredAgent, len(agents))
 	copy(out, agents)
+	return out
+}
+
+func (b *WorkflowContractBundle) RootRequiredAgents() []FlowRequiredAgent {
+	if b == nil || b.RootSchema == nil {
+		return nil
+	}
+	out := make([]FlowRequiredAgent, len(b.RootSchema.RequiredAgents))
+	copy(out, b.RootSchema.RequiredAgents)
 	return out
 }
 
@@ -2104,6 +2115,12 @@ type PlatformSpecDocument struct {
 			Type string `yaml:"type"`
 		} `yaml:"fields"`
 	} `yaml:"workflow_state"`
+	PlatformTables struct {
+		Tables map[string]struct {
+			Description string `yaml:"description"`
+			DDL         string `yaml:"ddl"`
+		} `yaml:"tables"`
+	} `yaml:"platform_tables"`
 	BuiltinHooks struct {
 		Guards []struct {
 			ID string `yaml:"id"`
@@ -2183,6 +2200,7 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 	paths := ContractPaths{
 		ContractsRoot:         workflowDir,
 		WorkflowDir:           workflowDir,
+		RootSchemaFile:        existingFile(filepath.Join(workflowDir, "schema.yaml")),
 		ProjectPackageFile:    existingFile(filepath.Join(workflowDir, "package.yaml")),
 		ProjectNodesFile:      existingFile(filepath.Join(workflowDir, "nodes.yaml")),
 		ProjectEventsFile:     existingFile(filepath.Join(workflowDir, "events.yaml")),
@@ -2250,6 +2268,13 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths) (*WorkflowContractB
 	}
 	flowViewsByID := map[string]FlowContractView{}
 	if paths.ProjectPackageFile != "" {
+		if strings.TrimSpace(paths.RootSchemaFile) != "" {
+			var rootSchema FlowSchemaDocument
+			if err := loadYAMLFile(paths.RootSchemaFile, &rootSchema); err != nil {
+				return nil, err
+			}
+			bundle.RootSchema = &rootSchema
+		}
 		for i, pkgPaths := range paths.ProjectPackages {
 			var manifest ProjectPackageDocument
 			if err := loadYAMLFile(pkgPaths.PackageFile, &manifest); err != nil {
@@ -4143,6 +4168,7 @@ func ContractFilesExist(repoRoot string) []string {
 		paths.VerificationGatesFile,
 		paths.ToolingLockFile,
 		paths.DDLFile,
+		paths.RootSchemaFile,
 	}
 	if paths.ProjectPackageFile != "" {
 		files = append(files,

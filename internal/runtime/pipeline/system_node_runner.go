@@ -3,7 +3,8 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	"log"
+	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -84,7 +85,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if eventID == "" {
 		return
 	}
-	if n.isProcessed(ctx, eventID) {
+	if n.isProcessed(ctx, evt) {
 		return
 	}
 	var lastErr error
@@ -98,7 +99,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	}
 	for attempt := 1; attempt <= retryLimit; attempt++ {
 		if err := n.handle(ctx, evt); err == nil {
-			n.markProcessed(ctx, eventID)
+			n.markProcessed(ctx, evt)
 			return
 		} else {
 			lastErr = err
@@ -113,7 +114,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		}
 	}
 	n.emitDeadLetter(ctx, evt, lastErr)
-	n.markProcessed(ctx, eventID)
+	n.markProcessed(ctx, evt)
 }
 
 func (n *systemNodeRunner) SetRetryPolicyForTest(limit int, backoff func(int) time.Duration) {
@@ -187,43 +188,76 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(workflowEventEntityID(evt))); err != nil {
-		log.Printf("%s: emit dead letter failed event=%s err=%v", n.nodeID, strings.TrimSpace(evt.ID), err)
+		slog.Warn("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
 	}
 }
 
-func (n *systemNodeRunner) isProcessed(ctx context.Context, eventID string) bool {
-	if n == nil || n.db == nil || strings.TrimSpace(eventID) == "" {
+func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bool {
+	eventID := strings.TrimSpace(evt.ID)
+	if n == nil || n.db == nil || eventID == "" {
 		return false
 	}
 	if !n.ledgerAvailable(ctx) {
 		return false
 	}
 	var ok bool
+	if eventReceiptsAvailable(ctx, n.db) {
+		err := n.db.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1
+				FROM event_receipts
+				WHERE subscriber_type = 'node'
+				  AND subscriber_id = $1
+				  AND idempotency_key = $2
+			)
+		`, n.nodeID, systemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
+		if err == nil {
+			return ok
+		}
+	}
 	err := n.db.QueryRowContext(ctx, `
 		SELECT EXISTS(
 			SELECT 1 FROM system_node_ledger
 			WHERE event_id = $1::uuid AND node_id = $2
 		)
-	`, strings.TrimSpace(eventID), n.nodeID).Scan(&ok)
-	if err != nil {
-		return false
-	}
-	return ok
+	`, eventID, n.nodeID).Scan(&ok)
+	return err == nil && ok
 }
 
-func (n *systemNodeRunner) markProcessed(ctx context.Context, eventID string) {
-	if n == nil || n.db == nil || strings.TrimSpace(eventID) == "" {
+func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) {
+	eventID := strings.TrimSpace(evt.ID)
+	if n == nil || n.db == nil || eventID == "" {
 		return
 	}
 	if !n.ledgerAvailable(ctx) {
 		return
 	}
+	if eventReceiptsAvailable(ctx, n.db) {
+		sideEffects, _ := json.Marshal(map[string]any{
+			"idempotency_key": systemNodeReceiptIdempotencyKey(n.nodeID, eventID),
+		})
+		_, err := n.db.ExecContext(ctx, `
+			INSERT INTO event_receipts (
+				event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+				outcome, side_effects, idempotency_key, processed_at
+			)
+			SELECT
+				e.event_id, 'node', $2, e.entity_id, e.flow_instance,
+				'no_op', $3::jsonb, $4, now()
+			FROM events e
+			WHERE e.event_id = $1::uuid
+			ON CONFLICT (event_id, subscriber_id) DO NOTHING
+		`, eventID, n.nodeID, string(sideEffects), systemNodeReceiptIdempotencyKey(n.nodeID, eventID))
+		if err == nil {
+			return
+		}
+	}
 	if _, err := n.db.ExecContext(ctx, `
 		INSERT INTO system_node_ledger (event_id, node_id, processed_at)
 		VALUES ($1::uuid, $2, now())
 		ON CONFLICT (event_id, node_id) DO NOTHING
-	`, strings.TrimSpace(eventID), n.nodeID); err != nil {
-		log.Printf("%s: mark processed failed event=%s err=%v", n.nodeID, strings.TrimSpace(eventID), err)
+	`, eventID, n.nodeID); err != nil {
+		slog.Warn("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 	}
 }
 
@@ -237,7 +271,12 @@ func (n *systemNodeRunner) ledgerAvailable(ctx context.Context) bool {
 		return n.ledgerEnabled
 	}
 	var exists bool
-	if err := n.db.QueryRowContext(ctx, `SELECT to_regclass('public.system_node_ledger') IS NOT NULL`).Scan(&exists); err != nil {
+	if err := n.db.QueryRowContext(ctx, `
+		SELECT (
+			to_regclass('public.event_receipts') IS NOT NULL
+			OR to_regclass('public.system_node_ledger') IS NOT NULL
+		)
+	`).Scan(&exists); err != nil {
 		exists = false
 	}
 	n.ledgerChecked = true
@@ -261,4 +300,27 @@ func defaultSystemNodeBackoff(attempt int) time.Duration {
 		return 2 * time.Second
 	}
 	return d
+}
+
+func eventReceiptsAvailable(ctx context.Context, db *sql.DB) bool {
+	if db == nil {
+		return false
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'event_receipts'
+			  AND column_name = 'subscriber_id'
+		)
+	`).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
+
+func systemNodeReceiptIdempotencyKey(nodeID, eventID string) string {
+	return strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(eventID)
 }

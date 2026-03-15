@@ -54,15 +54,6 @@ func (s *recoveryTestStore) LoadAgents(context.Context) ([]PersistedAgent, error
 }
 func (s *recoveryTestStore) MarkAgentTerminated(context.Context, string) error { return nil }
 func (s *recoveryTestStore) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (s *recoveryTestStore) LoadLatestOrgTemplate(context.Context) (OrgTemplateRecord, error) {
-	return OrgTemplateRecord{}, nil
-}
-func (s *recoveryTestStore) LoadOrgTemplate(context.Context, string) (OrgTemplateRecord, error) {
-	return OrgTemplateRecord{}, nil
-}
-func (s *recoveryTestStore) SetEntityTemplateVersion(context.Context, string, string) error {
-	return nil
-}
 func (s *recoveryTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
 	return nil
 }

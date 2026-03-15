@@ -67,151 +67,18 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if instanceID == "" || s == nil || s.db == nil {
 		return WorkflowInstance{}, false, nil
 	}
-	var (
-		out               WorkflowInstance
-		transitionHistory []byte
-		accumulatorState  []byte
-		timerState        []byte
-		metadata          []byte
-	)
 	keys := workflowInstanceLookupKeys(instanceID)
 	if len(keys) == 0 {
 		return WorkflowInstance{}, false, nil
 	}
-	err := dbQueryRowContext(ctx, s.db, `
-		SELECT
-			instance_id::text,
-			workflow_name,
-			workflow_version,
-			current_state,
-			entered_stage_at,
-			COALESCE(transition_history, '[]'::jsonb),
-			COALESCE(accumulator_state, '{}'::jsonb),
-			COALESCE(timer_state, '[]'::jsonb),
-			COALESCE(metadata, '{}'::jsonb),
-			created_at,
-			updated_at
-		FROM workflow_instances
-		WHERE instance_id = ANY($1::uuid[])
-		ORDER BY created_at DESC, instance_id DESC
-		LIMIT 1
-	`, pqStringArray(keys)).Scan(
-		&out.InstanceID,
-		&out.WorkflowName,
-		&out.WorkflowVersion,
-		&out.CurrentState,
-		&out.EnteredStageAt,
-		&transitionHistory,
-		&accumulatorState,
-		&timerState,
-		&metadata,
-		&out.CreatedAt,
-		&out.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return WorkflowInstance{}, false, nil
-	}
-	if err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	if err := json.Unmarshal(transitionHistory, &out.TransitionHistory); err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	if err := json.Unmarshal(accumulatorState, &out.StateBuckets); err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	if err := json.Unmarshal(timerState, &out.TimerState); err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	if err := json.Unmarshal(metadata, &out.Metadata); err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	if out.StateBuckets == nil {
-		out.StateBuckets = map[string]any{}
-	}
-	if out.Metadata == nil {
-		out.Metadata = map[string]any{}
-	}
-	out.StorageRef = workflowInstanceStorageRef(out)
-	out.InstanceID = workflowInstanceLogicalID(out.InstanceID, out.Metadata)
-	return out, true, nil
+	return s.loadSpec(ctx, keys)
 }
 
 func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
-	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT
-			instance_id::text,
-			workflow_name,
-			workflow_version,
-			current_state,
-			entered_stage_at,
-			COALESCE(transition_history, '[]'::jsonb),
-			COALESCE(accumulator_state, '{}'::jsonb),
-			COALESCE(timer_state, '[]'::jsonb),
-			COALESCE(metadata, '{}'::jsonb),
-			created_at,
-			updated_at
-		FROM workflow_instances
-		ORDER BY created_at ASC
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := make([]WorkflowInstance, 0, 32)
-	for rows.Next() {
-		var (
-			item              WorkflowInstance
-			transitionHistory []byte
-			accumulatorState  []byte
-			timerState        []byte
-			metadata          []byte
-		)
-		if err := rows.Scan(
-			&item.InstanceID,
-			&item.WorkflowName,
-			&item.WorkflowVersion,
-			&item.CurrentState,
-			&item.EnteredStageAt,
-			&transitionHistory,
-			&accumulatorState,
-			&timerState,
-			&metadata,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(transitionHistory, &item.TransitionHistory); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(accumulatorState, &item.StateBuckets); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(timerState, &item.TimerState); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal(metadata, &item.Metadata); err != nil {
-			return nil, err
-		}
-		if item.StateBuckets == nil {
-			item.StateBuckets = map[string]any{}
-		}
-		if item.Metadata == nil {
-			item.Metadata = map[string]any{}
-		}
-		item.StorageRef = workflowInstanceStorageRef(item)
-		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return s.listSpec(ctx)
 }
 
 func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowInstance) error {
@@ -250,71 +117,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 		instance.Metadata["instance_id"] = instance.InstanceID
 	}
 	instance.Metadata["storage_ref"] = storageRef
-	transitionHistory, err := json.Marshal(instance.TransitionHistory)
-	if err != nil {
-		return err
-	}
-	accumulatorState, err := json.Marshal(instance.StateBuckets)
-	if err != nil {
-		return err
-	}
-	timerState, err := json.Marshal(instance.TimerState)
-	if err != nil {
-		return err
-	}
-	metadata, err := json.Marshal(instance.Metadata)
-	if err != nil {
-		return err
-	}
-	_, err = dbExecContext(ctx, s.db, `
-		INSERT INTO workflow_instances (
-			instance_id,
-			workflow_name,
-			workflow_version,
-			current_state,
-			entered_stage_at,
-			transition_history,
-			accumulator_state,
-			timer_state,
-			metadata,
-			created_at,
-			updated_at
-		)
-		VALUES (
-			$1::uuid,
-			$2,
-			$3,
-			$4,
-			$5,
-			$6::jsonb,
-			$7::jsonb,
-			$8::jsonb,
-			$9::jsonb,
-			now(),
-			now()
-		)
-		ON CONFLICT (instance_id) DO UPDATE SET
-			workflow_name = EXCLUDED.workflow_name,
-			workflow_version = EXCLUDED.workflow_version,
-			current_state = EXCLUDED.current_state,
-			entered_stage_at = EXCLUDED.entered_stage_at,
-			transition_history = EXCLUDED.transition_history,
-			accumulator_state = EXCLUDED.accumulator_state,
-			timer_state = EXCLUDED.timer_state,
-			metadata = EXCLUDED.metadata,
-			updated_at = now()
-	`,
-		rowID,
-		instance.WorkflowName,
-		instance.WorkflowVersion,
-		instance.CurrentState,
-		instance.EnteredStageAt,
-		jsonOrDefault(transitionHistory, "[]"),
-		jsonOrDefault(accumulatorState, "{}"),
-		jsonOrDefault(timerState, "[]"),
-		jsonOrDefault(metadata, "{}"),
-	)
-	return err
+	return s.upsertSpec(ctx, rowID, storageRef, instance)
 }
 
 func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
@@ -342,8 +145,509 @@ func (s *WorkflowInstanceStore) Delete(ctx context.Context, instanceID string) e
 	if len(keys) == 0 {
 		return nil
 	}
-	_, err := dbExecContext(ctx, s.db, `DELETE FROM workflow_instances WHERE instance_id = ANY($1::uuid[])`, pqStringArray(keys))
-	return err
+	return s.deleteSpec(ctx, keys)
+}
+
+func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (WorkflowInstance, bool, error) {
+	var (
+		item         WorkflowInstance
+		gatesRaw     []byte
+		fieldsRaw    []byte
+		configRaw    []byte
+		accRaw       []byte
+		flowInstance string
+		entityType   string
+		slug         sql.NullString
+		name         sql.NullString
+	)
+	err := dbQueryRowContext(ctx, s.db, `
+		SELECT
+			es.entity_id::text,
+			COALESCE(fi.flow_template, ''),
+			COALESCE(fi.config->>'workflow_version', ''),
+			es.current_state,
+			es.entered_state_at,
+			COALESCE(es.gates, '{}'::jsonb),
+			COALESCE(es.fields, '{}'::jsonb),
+			COALESCE(es.accumulator, '{}'::jsonb),
+			COALESCE(fi.config, '{}'::jsonb),
+			COALESCE(es.flow_instance, ''),
+			COALESCE(es.entity_type, ''),
+			es.slug,
+			es.name,
+			es.created_at,
+			es.updated_at
+		FROM entity_state es
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.entity_id = ANY($1::uuid[])
+		ORDER BY es.created_at DESC, es.entity_id DESC
+		LIMIT 1
+	`, pqStringArray(keys)).Scan(
+		&item.InstanceID,
+		&item.WorkflowName,
+		&item.WorkflowVersion,
+		&item.CurrentState,
+		&item.EnteredStageAt,
+		&gatesRaw,
+		&fieldsRaw,
+		&accRaw,
+		&configRaw,
+		&flowInstance,
+		&entityType,
+		&slug,
+		&name,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return WorkflowInstance{}, false, nil
+	}
+	if err != nil {
+		return WorkflowInstance{}, false, err
+	}
+	if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
+		return WorkflowInstance{}, false, err
+	}
+	item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance)
+	item.StorageRef = strings.TrimSpace(flowInstance)
+	item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
+	timers, err := s.loadWorkflowTimersSpec(ctx, keys[0])
+	if err != nil {
+		return WorkflowInstance{}, false, err
+	}
+	item.TimerState = timers
+	item.TransitionHistory = workflowInstanceTransitionHistory(item.Metadata)
+	if item.StateBuckets == nil {
+		item.StateBuckets = map[string]any{}
+	}
+	if item.Metadata == nil {
+		item.Metadata = map[string]any{}
+	}
+	return item, true, nil
+}
+
+func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstance, error) {
+	rows, err := dbQueryContext(ctx, s.db, `
+		SELECT
+			es.entity_id::text,
+			COALESCE(fi.flow_template, ''),
+			COALESCE(fi.config->>'workflow_version', ''),
+			es.current_state,
+			es.entered_state_at,
+			COALESCE(es.gates, '{}'::jsonb),
+			COALESCE(es.fields, '{}'::jsonb),
+			COALESCE(es.accumulator, '{}'::jsonb),
+			COALESCE(fi.config, '{}'::jsonb),
+			COALESCE(es.flow_instance, ''),
+			COALESCE(es.entity_type, ''),
+			es.slug,
+			es.name,
+			es.created_at,
+			es.updated_at
+		FROM entity_state es
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		ORDER BY es.created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]WorkflowInstance, 0, 32)
+	for rows.Next() {
+		var (
+			item         WorkflowInstance
+			gatesRaw     []byte
+			fieldsRaw    []byte
+			configRaw    []byte
+			accRaw       []byte
+			flowInstance string
+			entityType   string
+			slug         sql.NullString
+			name         sql.NullString
+		)
+		if err := rows.Scan(
+			&item.InstanceID,
+			&item.WorkflowName,
+			&item.WorkflowVersion,
+			&item.CurrentState,
+			&item.EnteredStageAt,
+			&gatesRaw,
+			&fieldsRaw,
+			&accRaw,
+			&configRaw,
+			&flowInstance,
+			&entityType,
+			&slug,
+			&name,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
+			return nil, err
+		}
+		item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance)
+		item.StorageRef = strings.TrimSpace(flowInstance)
+		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
+		item.TransitionHistory = workflowInstanceTransitionHistory(item.Metadata)
+		timers, err := s.loadWorkflowTimersSpec(ctx, workflowInstanceRowID(item.StorageRef))
+		if err != nil {
+			return nil, err
+		}
+		item.TimerState = timers
+		if item.StateBuckets == nil {
+			item.StateBuckets = map[string]any{}
+		}
+		if item.Metadata == nil {
+			item.Metadata = map[string]any{}
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	metadata := cloneStringAnyMap(instance.Metadata)
+	config := workflowInstanceConfigPayload(instance, storageRef)
+	fields, gates, slug, name, entityType := workflowInstanceEntityProjection(metadata)
+	fieldsJSON, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	gatesJSON, err := json.Marshal(gates)
+	if err != nil {
+		return err
+	}
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	accumulatorState, err := json.Marshal(instance.StateBuckets)
+	if err != nil {
+		return err
+	}
+	mode := workflowInstanceMode(storageRef)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instances (
+			instance_id, flow_template, mode, config, status, created_at
+		)
+		VALUES (
+			$1, $2, $3, $4::jsonb, 'active', now()
+		)
+		ON CONFLICT (instance_id) DO UPDATE SET
+			flow_template = EXCLUDED.flow_template,
+			mode = EXCLUDED.mode,
+			config = EXCLUDED.config,
+			status = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.status ELSE 'active' END
+	`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}")); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			entity_id, flow_instance, entity_type, slug, name,
+			current_state, gates, fields, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		)
+		VALUES (
+			$1::uuid, $2, $3, NULLIF($4,''), NULLIF($5,''),
+			$6, $7::jsonb, $8::jsonb, $9::jsonb, 1,
+			$10, now(), now()
+		)
+		ON CONFLICT (entity_id) DO UPDATE SET
+			flow_instance = EXCLUDED.flow_instance,
+			entity_type = EXCLUDED.entity_type,
+			slug = EXCLUDED.slug,
+			name = EXCLUDED.name,
+			current_state = EXCLUDED.current_state,
+			gates = EXCLUDED.gates,
+			fields = EXCLUDED.fields,
+			accumulator = EXCLUDED.accumulator,
+			revision = entity_state.revision + 1,
+			entered_state_at = EXCLUDED.entered_state_at,
+			updated_at = now()
+	`, rowID, storageRef, entityType, slug, name, instance.CurrentState,
+		jsonOrDefault(gatesJSON, "{}"),
+		jsonOrDefault(fieldsJSON, "{}"),
+		jsonOrDefault(accumulatorState, "{}"),
+		instance.EnteredStageAt,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE entity_id = $1::uuid AND flow_instance = $2`, rowID, storageRef); err != nil {
+		return err
+	}
+	for _, timer := range instance.TimerState {
+		payloadJSON, err := json.Marshal(map[string]any{
+			"started_by": strings.TrimSpace(timer.StartedBy),
+			"timer_id":   strings.TrimSpace(timer.TimerID),
+		})
+		if err != nil {
+			return err
+		}
+		status := "active"
+		if timer.Cancelled {
+			status = "cancelled"
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO timers (
+				timer_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				fire_at, recurring, owner_node, task_type, status, created_at
+			)
+			VALUES (
+				$1::uuid, $2, $3::uuid, $4, $5, $6::jsonb,
+				$7, $8, NULL, $9, $10, $11
+			)
+		`, workflowInstanceTimerRowID(strings.TrimSpace(timer.TimerID), rowID), strings.TrimSpace(timer.TimerID), rowID, storageRef,
+			strings.TrimSpace(timer.EventType), jsonOrDefault(payloadJSON, "{}"), timer.FiresAt, timer.Recurring,
+			workflowInstanceTimerTaskType(timer), status, workflowTimeOrNow(timer.CreatedAt),
+		); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (s *WorkflowInstanceStore) deleteSpec(ctx context.Context, keys []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys))
+	if err != nil {
+		return err
+	}
+	flowInstances := make([]string, 0, len(keys))
+	for rows.Next() {
+		var flowInstance string
+		if err := rows.Scan(&flowInstance); err != nil {
+			rows.Close()
+			return err
+		}
+		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
+			flowInstances = append(flowInstances, flowInstance)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys)); err != nil {
+		return err
+	}
+	if len(flowInstances) > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM flow_instances WHERE instance_id = ANY($1::text[])`, pq.Array(flowInstances)); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {
+	rows, err := dbQueryContext(ctx, s.db, `
+		SELECT
+			timer_name,
+			fire_event,
+			created_at,
+			fire_at,
+			COALESCE(fire_payload->>'started_by', ''),
+			recurring,
+			status = 'cancelled'
+		FROM timers
+		WHERE entity_id = $1::uuid
+		ORDER BY created_at ASC, timer_name ASC
+	`, entityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]WorkflowTimerState, 0, 4)
+	for rows.Next() {
+		var timer WorkflowTimerState
+		if err := rows.Scan(
+			&timer.TimerID,
+			&timer.EventType,
+			&timer.CreatedAt,
+			&timer.FiresAt,
+			&timer.StartedBy,
+			&timer.Recurring,
+			&timer.Cancelled,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, timer)
+	}
+	return out, rows.Err()
+}
+
+func workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw []byte, slug, name, entityType, flowInstance string) map[string]any {
+	metadata := map[string]any{}
+	var fields map[string]any
+	if len(fieldsRaw) > 0 {
+		_ = json.Unmarshal(fieldsRaw, &fields)
+	}
+	for key, value := range fields {
+		metadata[key] = value
+	}
+	if strings.TrimSpace(slug) != "" {
+		metadata["slug"] = strings.TrimSpace(slug)
+	}
+	if strings.TrimSpace(name) != "" {
+		metadata["name"] = strings.TrimSpace(name)
+	}
+	if strings.TrimSpace(entityType) != "" {
+		metadata["entity_type"] = strings.TrimSpace(entityType)
+	}
+	if strings.TrimSpace(flowInstance) != "" {
+		metadata["storage_ref"] = strings.TrimSpace(flowInstance)
+	}
+	var gates map[string]any
+	if len(gatesRaw) > 0 && json.Unmarshal(gatesRaw, &gates) == nil && len(gates) > 0 {
+		metadata["gates"] = gates
+	}
+	var config map[string]any
+	if len(configRaw) > 0 && json.Unmarshal(configRaw, &config) == nil {
+		for _, key := range []string{"instance_id", "flow_path", "storage_ref", "instance_kind", "template_version", "last_source_event", "status"} {
+			if value, ok := config[key]; ok {
+				metadata[key] = value
+			}
+		}
+		if value, ok := config["transition_history"]; ok {
+			metadata["transition_history"] = value
+		}
+	}
+	return metadata
+}
+
+func workflowInstanceTransitionHistory(metadata map[string]any) []WorkflowTransitionRecord {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["transition_history"]
+	if !ok {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var out []WorkflowTransitionRecord
+	if err := json.Unmarshal(encoded, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func workflowInstanceConfigPayload(instance WorkflowInstance, storageRef string) map[string]any {
+	config := map[string]any{
+		"workflow_version": strings.TrimSpace(instance.WorkflowVersion),
+		"instance_id":      strings.TrimSpace(instance.InstanceID),
+		"storage_ref":      strings.TrimSpace(storageRef),
+	}
+	metadata := cloneStringAnyMap(instance.Metadata)
+	for _, key := range []string{"flow_path", "instance_kind", "template_version", "status", "last_source_event"} {
+		if value, ok := metadata[key]; ok {
+			config[key] = value
+		}
+	}
+	if len(instance.TransitionHistory) > 0 {
+		config["transition_history"] = instance.TransitionHistory
+	}
+	return config
+}
+
+func workflowInstanceEntityProjection(metadata map[string]any) (map[string]any, map[string]any, string, string, string) {
+	metadata = cloneStringAnyMap(metadata)
+	gates := payloadMap(metadata["gates"])
+	delete(metadata, "gates")
+	slug := strings.TrimSpace(asString(metadata["slug"]))
+	name := strings.TrimSpace(asString(metadata["name"]))
+	entityType := strings.TrimSpace(asString(metadata["entity_type"]))
+	for _, key := range []string{"slug", "name", "entity_type", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "workflow_version", "transition_history"} {
+		delete(metadata, key)
+	}
+	if entityType == "" {
+		entityType = "default"
+	}
+	return metadata, gates, slug, name, entityType
+}
+
+func workflowInstanceMode(storageRef string) string {
+	if strings.Contains(strings.TrimSpace(storageRef), "/") {
+		return "template"
+	}
+	return "static"
+}
+
+func workflowInstanceTimerRowID(timerID, entityID string) string {
+	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(strings.TrimSpace(entityID)+":"+strings.TrimSpace(timerID))).String()
+}
+
+func workflowInstanceTimerTaskType(timer WorkflowTimerState) string {
+	if timer.Recurring {
+		return "scheduled_task"
+	}
+	return "timer"
+}
+
+func workflowTimeOrNow(v time.Time) time.Time {
+	if v.IsZero() {
+		return time.Now().UTC()
+	}
+	return v.UTC()
+}
+
+func shouldFallbackLegacyWorkflowInstanceSchema(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, token := range []string{
+		`relation "entity_state" does not exist`,
+		`relation "flow_instances" does not exist`,
+		`relation "timers" does not exist`,
+		`column "flow_instance" does not exist`,
+		`column "entered_state_at" does not exist`,
+		`column "accumulator" does not exist`,
+		`column "config" does not exist`,
+	} {
+		if strings.Contains(msg, token) {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowInstanceStorageRef(instance WorkflowInstance) string {

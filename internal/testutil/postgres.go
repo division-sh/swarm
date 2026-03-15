@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	_ "github.com/lib/pq"
+	"gopkg.in/yaml.v3"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -210,13 +214,21 @@ func (s *sharedPostgresState) nextDatabaseName() string {
 }
 
 func initializeDatabase(db *sql.DB) error {
-	migrationPath, err := canonicalMigrationPath()
+	specPath, err := platformSpecPath()
 	if err != nil {
 		return err
 	}
-	b, err := os.ReadFile(migrationPath)
+	b, err := os.ReadFile(specPath)
 	if err != nil {
-		return fmt.Errorf("read migrations: %w", err)
+		return fmt.Errorf("read platform spec: %w", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	if err := yaml.Unmarshal(b, &spec); err != nil {
+		return fmt.Errorf("unmarshal platform spec: %w", err)
+	}
+	statements, err := bootstrapPlatformTableStatements(spec)
+	if err != nil {
+		return fmt.Errorf("generate platform tables ddl: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -233,14 +245,16 @@ func initializeDatabase(db *sql.DB) error {
 			return fmt.Errorf("init stmt %q: %w", stmt, err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, string(b)); err != nil {
-		return fmt.Errorf("apply migrations: %w", err)
+	if err := execBootstrapStatements(ctx, db, statements); err != nil {
+		return fmt.Errorf("bootstrap platform tables: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO schema_version (version, name, applied_at)
-		VALUES (1, 'ddl-canonical', now())
-		ON CONFLICT (version) DO NOTHING
-	`); err != nil {
+		INSERT INTO schema_version (id, platform_version, applied_at)
+		VALUES (1, $1, now())
+		ON CONFLICT (id) DO UPDATE SET
+			platform_version = EXCLUDED.platform_version,
+			applied_at = EXCLUDED.applied_at
+	`, spec.Platform.Version); err != nil {
 		return fmt.Errorf("seed schema_version: %w", err)
 	}
 	return nil
@@ -287,18 +301,174 @@ func quoteIdent(v string) string {
 	return `"` + strings.ReplaceAll(v, `"`, `""`) + `"`
 }
 
-func canonicalMigrationPath() (string, error) {
+func platformSpecPath() (string, error) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-	migrationPath := filepath.Join(repoRoot, "contracts", "ddl-canonical.sql")
-	if _, statErr := os.Stat(migrationPath); statErr == nil {
-		return migrationPath, nil
+	specPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	if _, statErr := os.Stat(specPath); statErr != nil {
+		return "", fmt.Errorf("platform spec not found: %w", statErr)
 	}
-	migrationPath = filepath.Join(repoRoot, "migrations", "001_initial.sql")
-	if _, statErr := os.Stat(migrationPath); statErr != nil {
-		return "", fmt.Errorf("migration file not found: %w", statErr)
+	return specPath, nil
+}
+
+var (
+	testutilCreateTableName = regexp.MustCompile(`(?is)^create\s+table(?:\s+if\s+not\s+exists)?\s+"?([a-z_][a-z0-9_]*)"?`)
+	testutilInlineIndexLine = regexp.MustCompile(`(?i)^index\s+([a-z_][a-z0-9_]*)\s*\((.+?)\)\s*(where\s+.+)?$`)
+)
+
+func bootstrapPlatformTableStatements(spec runtimecontracts.PlatformSpecDocument) ([]string, error) {
+	tableNames := make([]string, 0, len(spec.PlatformTables.Tables))
+	for tableName := range spec.PlatformTables.Tables {
+		tableNames = append(tableNames, strings.TrimSpace(tableName))
 	}
-	return migrationPath, nil
+	sort.Slice(tableNames, func(i, j int) bool {
+		left := bootstrapPlatformTableOrder(tableNames[i])
+		right := bootstrapPlatformTableOrder(tableNames[j])
+		if left != right {
+			return left < right
+		}
+		return tableNames[i] < tableNames[j]
+	})
+	statements := make([]string, 0, len(tableNames)*2)
+	for _, tableName := range tableNames {
+		normalized, err := bootstrapNormalizePlatformDDL(spec.PlatformTables.Tables[tableName].DDL)
+		if err != nil {
+			return nil, fmt.Errorf("platform table %s: %w", tableName, err)
+		}
+		statements = append(statements, normalized...)
+	}
+	return statements, nil
+}
+
+func execBootstrapStatements(ctx context.Context, db *sql.DB, statements []string) error {
+	for _, statement := range statements {
+		statement = strings.TrimSpace(statement)
+		if statement == "" {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func bootstrapNormalizePlatformDDL(rawDDL string) ([]string, error) {
+	chunks := strings.Split(rawDDL, ";")
+	statements := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		statement := strings.TrimSpace(chunk)
+		if statement == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(strings.ToUpper(statement), "CREATE TABLE "):
+			tableStmt, indexStatements, err := bootstrapNormalizeCreateTable(statement)
+			if err != nil {
+				return nil, err
+			}
+			statements = append(statements, tableStmt)
+			statements = append(statements, indexStatements...)
+		case strings.HasPrefix(strings.ToUpper(statement), "CREATE INDEX "):
+			statements = append(statements, bootstrapEnsureIfNotExists(statement, "CREATE INDEX"))
+		default:
+			return nil, fmt.Errorf("unsupported platform ddl statement %q", statement)
+		}
+	}
+	if len(statements) == 0 {
+		return nil, fmt.Errorf("no executable platform ddl statements found")
+	}
+	return statements, nil
+}
+
+func bootstrapNormalizeCreateTable(statement string) (string, []string, error) {
+	statement = bootstrapEnsureIfNotExists(statement, "CREATE TABLE")
+	tableName := bootstrapExtractTableName(statement)
+	if tableName == "" {
+		return "", nil, fmt.Errorf("unable to extract table name from %q", statement)
+	}
+	start := strings.Index(statement, "(")
+	end := strings.LastIndex(statement, ")")
+	if start < 0 || end <= start {
+		return statement, nil, nil
+	}
+	body := statement[start+1 : end]
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	indexStatements := make([]string, 0, 2)
+	for _, rawLine := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(rawLine, ","))
+		if trimmed == "" {
+			continue
+		}
+		if matches := testutilInlineIndexLine.FindStringSubmatch(trimmed); len(matches) >= 3 {
+			indexName := strings.TrimSpace(matches[1])
+			indexCols := strings.TrimSpace(matches[2])
+			whereClause := ""
+			if len(matches) >= 4 {
+				whereClause = strings.TrimSpace(matches[3])
+			}
+			indexStmt := fmt.Sprintf("CREATE INDEX IF NOT EXISTS %s ON %s(%s)", quoteIdent(indexName), quoteIdent(tableName), indexCols)
+			if whereClause != "" {
+				indexStmt += " " + whereClause
+			}
+			indexStatements = append(indexStatements, indexStmt)
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	return fmt.Sprintf("%s (\n    %s\n)", statement[:start], strings.Join(kept, ",\n    ")), indexStatements, nil
+}
+
+func bootstrapEnsureIfNotExists(statement, prefix string) string {
+	statement = strings.TrimSpace(statement)
+	upper := strings.ToUpper(statement)
+	if strings.HasPrefix(upper, prefix+" IF NOT EXISTS ") {
+		return statement
+	}
+	return prefix + " IF NOT EXISTS " + strings.TrimSpace(statement[len(prefix):])
+}
+
+func bootstrapExtractTableName(statement string) string {
+	statement = strings.TrimSpace(statement)
+	matches := testutilCreateTableName.FindStringSubmatch(statement)
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
+}
+
+func bootstrapPlatformTableOrder(name string) int {
+	switch strings.TrimSpace(name) {
+	case "schema_version":
+		return 0
+	case "events":
+		return 10
+	case "dead_letters":
+		return 20
+	case "agents":
+		return 30
+	case "flow_instances":
+		return 40
+	case "entity_state":
+		return 50
+	case "agent_sessions":
+		return 60
+	case "routing_rules":
+		return 70
+	case "event_deliveries":
+		return 80
+	case "event_receipts":
+		return 90
+	case "mailbox":
+		return 100
+	case "spend_ledger":
+		return 110
+	case "timers":
+		return 120
+	default:
+		return 1000
+	}
 }
 
 func startContainerWatcher(dockerBin, containerName string) error {

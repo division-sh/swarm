@@ -31,6 +31,7 @@ type Source interface {
 	FlowInputEvents(flowID string) []string
 	FlowOutputEvents(flowID string) []string
 	FlowWritePins(flowID string) []string
+	RequiredAgents() []runtimecontracts.FlowRequiredAgent
 	FlowRequiredAgents(flowID string) []runtimecontracts.FlowRequiredAgent
 	ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument
 	ResolvedPolicyForNode(nodeID string) runtimecontracts.PolicyDocument

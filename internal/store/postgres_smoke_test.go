@@ -19,45 +19,29 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
-	// Seed geography (required by some flows).
-	geoID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `INSERT INTO geographies (id, name, country, region, created_at) VALUES ($1::uuid,'United States','US','', now())`, geoID); err != nil {
-		t.Fatalf("seed geography: %v", err)
-	}
-
 	// Seed entity.
 	entityID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entities (id, name, slug, geography, stage, mode, created_at, updated_at)
-		VALUES ($1::uuid, 'TestCo', 'testco', 'us', 'operating', 'operating', now(), now())
-	`, entityID); err != nil {
-		t.Fatalf("seed compatibility entity: %v", err)
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ('testco', 'test', 'static', '{"instance_kind":"entity","workflow_version":"v1"}'::jsonb, 'active', now())
+	`); err != nil {
+		t.Fatalf("seed flow instance: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO workflow_instances (
-			instance_id, workflow_name, workflow_version, current_state,
-			entered_stage_at, accumulator_state, transition_history, timer_state, metadata, created_at, updated_at
+		INSERT INTO entity_state (
+			entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, 'test', 'v1', 'operating',
-			now(), '{}'::jsonb, '[]'::jsonb, '[]'::jsonb, '{"slug":"testco"}'::jsonb, now(), now()
+			$1::uuid, 'testco', 'default', 'testco', 'TestCo', 'operating',
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
 	`, entityID); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
+		t.Fatalf("seed entity state: %v", err)
 	}
 
 	// Ensure entity schema.
 	if err := pg.EnsureEntitySchema(ctx, entityID); err != nil {
 		t.Fatalf("ensure schema: %v", err)
-	}
-
-	// Publish a minimal org template for template loader paths.
-	agents := []byte(`[{"role":"operator","type":"llm","system_prompt":"x","tools":[],"subscriptions":["review.requested"]}]`)
-	routes := []byte(`[{"event_pattern":"review.*","subscriber_role":"operator","reason":"tests"}]`)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO org_templates (version, agents, bootstrap_routes, seeded_routes, created_by, description, created_at)
-		VALUES ('2.0.1', $1::jsonb, $2::jsonb, '[]'::jsonb, 'test', 'test', now())
-	`, string(agents), string(routes)); err != nil {
-		t.Fatalf("seed template: %v", err)
 	}
 
 	// Upsert agent + load agents.
@@ -70,10 +54,9 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			// Runtime-only JSON config; keep minimal but valid for prompt enforcement.
 			Config: json.RawMessage(`{"system_prompt":"You are the control plane.","tools":[],"subscriptions":["system.started"]}`),
 		},
-		Status:          "active",
-		HiredBy:         "test",
-		StartedAt:       time.Now().UTC(),
-		TemplateVersion: "2.0.1",
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("upsert agent: %v", err)
 	}
@@ -92,10 +75,9 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			EntityID: entityID,
 			Config:   json.RawMessage(`{"system_prompt":"You are an operator.","tools":[],"subscriptions":["review.*"]}`),
 		},
-		Status:          "active",
-		HiredBy:         "test",
-		StartedAt:       time.Now().UTC(),
-		TemplateVersion: "2.0.1",
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("upsert ceo agent: %v", err)
 	}
@@ -164,19 +146,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("decide mailbox: %v", err)
 	}
 
-	// Inbound: accept unsigned email, reject unsigned chat.
-	_, err = db.ExecContext(ctx, `
-		UPDATE workflow_instances
-		SET metadata = COALESCE(metadata, '{}'::jsonb) || '{"credentials":{"webhooks":{"chat":{"secret":"s3cr3t"}}}}'::jsonb
-		WHERE instance_id = $1::uuid
-	`, entityID)
-	if err != nil {
-		t.Fatalf("seed credentials: %v", err)
-	}
-	target, err := pg.ResolveInboundTarget(ctx, "testco", "chat")
-	if err != nil || target.EntityID != entityID || target.WebhookSecret == "" {
-		t.Fatalf("resolve inbound target err=%v target=%+v", err, target)
-	}
+	// Inbound dedupe record.
 	if ok, err := pg.RecordInboundEvent(ctx, "evt-1", entityID, "chat"); err != nil || !ok {
 		t.Fatalf("record inbound err=%v ok=%v", err, ok)
 	}

@@ -2,10 +2,8 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -22,17 +20,7 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 	if strings.TrimSpace(provider) == "" {
 		return false, fmt.Errorf("provider is required")
 	}
-	const q = `
-		INSERT INTO inbound_events (provider_event_id, entity_id, provider, received_at)
-		VALUES ($1, $2::uuid, $3, now())
-		ON CONFLICT (provider_event_id, entity_id) DO NOTHING
-	`
-	res, err := s.DB.ExecContext(ctx, q, providerEventID, entityID, provider)
-	if err != nil {
-		return false, fmt.Errorf("record inbound event: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	return n > 0, nil
+	return s.recordInboundEventSpec(ctx, providerEventID, entityID, provider)
 }
 
 func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
@@ -46,20 +34,18 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 	}
 
 	var target runtime.InboundTarget
-	var credentialsRaw []byte
 	const q = `
 		SELECT
-			instance_id::text,
-			COALESCE(NULLIF(metadata->>'slug', ''), ''),
-			COALESCE(metadata->'credentials', '{}'::jsonb)
-		FROM workflow_instances
-		WHERE metadata->>'slug' = $1
-		   OR instance_id::text = $1
-		ORDER BY CASE WHEN metadata->>'slug' = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
+			entity_id::text,
+			COALESCE(NULLIF(slug, ''), '')
+		FROM entity_state
+		WHERE slug = $1
+		   OR entity_id::text = $1
+		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
 		LIMIT 1
 	`
-	if err := s.DB.QueryRowContext(ctx, q, entityKey).Scan(&target.EntityID, &target.EntitySlug, &credentialsRaw); err != nil {
-		if err == sql.ErrNoRows {
+	if err := s.DB.QueryRowContext(ctx, q, entityKey).Scan(&target.EntityID, &target.EntitySlug); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no rows") {
 			return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
 		}
 		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
@@ -67,7 +53,6 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 	if target.EntitySlug == "" {
 		target.EntitySlug = entityKey
 	}
-	target.WebhookSecret = s.extractWebhookSecret(ctx, credentialsRaw, provider)
 	return target, nil
 }
 
@@ -75,107 +60,114 @@ func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before tim
 	if limit <= 0 {
 		limit = 1000
 	}
-	const q = `
+	return s.purgeInboundEventsSpec(ctx, before, limit)
+}
+
+func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin inbound event tx: %w", err)
+	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		_ = tx.Rollback()
+	}()
+
+	idempotencyKey := inboundEventIdempotencyKey(providerEventID, entityID, provider)
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, idempotencyKey); err != nil {
+		return false, fmt.Errorf("lock inbound event key: %w", err)
+	}
+
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM events
+			WHERE idempotency_key = $1
+			  AND event_name = 'platform.inbound_recorded'
+			  AND entity_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
+		)
+	`, idempotencyKey, entityID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check inbound event dedupe: %w", err)
+	}
+	if exists {
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("commit inbound event dedupe tx: %w", err)
+		}
+		committed = true
+		return false, nil
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"provider":          provider,
+		"provider_event_id": providerEventID,
+		"entity_id":         entityID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("marshal inbound event payload: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO events (
+			event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by, produced_by_type, idempotency_key, created_at
+		)
+		VALUES (
+			'platform.inbound_recorded', $1::uuid, NULL, 'entity', $2::jsonb,
+			0, $3, 'external', $4, now()
+		)
+	`, entityID, string(payload), provider, idempotencyKey); err != nil {
+		return false, fmt.Errorf("record inbound event in events: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit inbound event tx: %w", err)
+	}
+	committed = true
+	return true, nil
+}
+
+func (s *PostgresStore) purgeInboundEventsSpec(ctx context.Context, before time.Time, limit int) (int, error) {
+	res, err := s.DB.ExecContext(ctx, `
 		WITH doomed AS (
-			SELECT provider_event_id, entity_id
-			FROM inbound_events
-			WHERE received_at < $1
-			ORDER BY received_at ASC
+			SELECT event_id
+			FROM events
+			WHERE event_name = 'platform.inbound_recorded'
+			  AND produced_by_type = 'external'
+			  AND created_at < $1
+			ORDER BY created_at ASC
 			LIMIT $2
 		)
-		DELETE FROM inbound_events i
+		DELETE FROM events e
 		USING doomed d
-		WHERE i.provider_event_id = d.provider_event_id
-		  AND i.entity_id = d.entity_id
-	`
-	res, err := s.DB.ExecContext(ctx, q, before, limit)
+		WHERE e.event_id = d.event_id
+	`, before, limit)
 	if err != nil {
-		return 0, fmt.Errorf("purge inbound events: %w", err)
+		return 0, fmt.Errorf("purge inbound events from events: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
 }
 
-func (s *PostgresStore) extractWebhookSecret(ctx context.Context, credentialsRaw []byte, provider string) string {
-	if len(credentialsRaw) == 0 || !json.Valid(credentialsRaw) {
-		return ""
-	}
-	var creds map[string]any
-	if err := json.Unmarshal(credentialsRaw, &creds); err != nil {
-		return ""
-	}
-	creds = s.decryptCredentialMap(ctx, creds)
-	// Preferred: credentials.webhooks.<provider>.secret
-	if webhooks, ok := creds["webhooks"].(map[string]any); ok {
-		if p, ok := webhooks[provider].(map[string]any); ok {
-			if v := pickSecretKeys(p, "secret", "webhook_secret", "token"); v != "" {
-				return v
-			}
-		}
-	}
-	// Legacy: credentials.<provider>.secret
-	if p, ok := creds[provider].(map[string]any); ok {
-		if v := pickSecretKeys(p, "secret", "webhook_secret", "token"); v != "" {
-			return v
-		}
-	}
-	// Flat fallback: credentials.<provider>_webhook_secret
-	if v, ok := creds[provider+"_webhook_secret"].(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
+func inboundEventIdempotencyKey(providerEventID, entityID, provider string) string {
+	return strings.Join([]string{
+		"platform.inbound_recorded",
+		strings.TrimSpace(strings.ToLower(provider)),
+		strings.TrimSpace(entityID),
+		strings.TrimSpace(providerEventID),
+	}, ":")
 }
 
-func (s *PostgresStore) decryptCredentialMap(ctx context.Context, in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = s.decryptCredentialValue(ctx, v)
+func shouldFallbackLegacyInboundSchema(err error) bool {
+	if err == nil {
+		return false
 	}
-	return out
-}
-
-func (s *PostgresStore) decryptCredentialValue(ctx context.Context, v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		return s.decryptCredentialMap(ctx, t)
-	case []any:
-		arr := make([]any, len(t))
-		for i := range t {
-			arr[i] = s.decryptCredentialValue(ctx, t[i])
-		}
-		return arr
-	case string:
-		const prefix = "enc::"
-		if !strings.HasPrefix(t, prefix) {
-			return t
-		}
-		key := strings.TrimSpace(os.Getenv("MAS_CREDENTIALS_KEY"))
-		if key == "" {
-			return t
-		}
-		encoded := strings.TrimSpace(strings.TrimPrefix(t, prefix))
-		if encoded == "" {
-			return ""
-		}
-		var plain string
-		if err := s.DB.QueryRowContext(ctx, `
-			SELECT pgp_sym_decrypt(decode($1, 'base64'), $2::text)
-		`, encoded, key).Scan(&plain); err != nil {
-			return t
-		}
-		return plain
-	default:
-		return v
-	}
-}
-
-func pickSecretKeys(m map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if v, ok := m[k].(string); ok {
-			if vv := strings.TrimSpace(v); vv != "" {
-				return vv
-			}
-		}
-	}
-	return ""
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, `column "event_name"`) ||
+		strings.Contains(msg, `column "idempotency_key"`) ||
+		strings.Contains(msg, `column "produced_by_type"`) ||
+		strings.Contains(msg, `column "event_id"`) ||
+		strings.Contains(msg, `relation "entity_state" does not exist`) ||
+		strings.Contains(msg, `column "slug"`)
 }

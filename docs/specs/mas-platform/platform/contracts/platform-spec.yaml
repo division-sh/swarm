@@ -182,55 +182,6 @@ contract_formats:
   required_fields:
   - name
   - version
-workflow_state:
-  ddl: "CREATE TABLE workflow_instances (\n    instance_id       UUID PRIMARY KEY,\n    workflow_name     TEXT NOT NULL,\n\
-    \    workflow_version  TEXT NOT NULL,\n    current_state     TEXT NOT NULL,\n    entered_stage_at  TIMESTAMPTZ NOT NULL\
-    \ DEFAULT NOW(),\n    state_change_history JSONB NOT NULL DEFAULT '[]',\n    accumulator_state JSONB NOT NULL DEFAULT\
-    \ '{}',\n    timer_state       JSONB NOT NULL DEFAULT '[]',\n    metadata          JSONB NOT NULL DEFAULT '{}',\n    created_at\
-    \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCREATE INDEX\
-    \ idx_wi_workflow ON workflow_instances(workflow_name, current_state);\nCREATE INDEX idx_wi_stage ON workflow_instances(current_state);\nCREATE\
-    \ TABLE flow_instance_routes (\n    template_id   TEXT NOT NULL,\n    instance_id   TEXT NOT NULL,\n    instance_path TEXT\
-    \ NOT NULL,\n    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    PRIMARY KEY (template_id, instance_id)\n);\nCREATE\
-    \ UNIQUE INDEX idx_fir_path ON flow_instance_routes(instance_path);\n"
-  description: 'Every workflow instance (e.g. one entity, one ticket) has persistent state managed by the platform. This is
-    the schema.
-
-    '
-  fields:
-    accumulator_state:
-      description: 'Per-node state buckets. Each system node can store structured state here (e.g. scoring accumulator, gate
-        flags). Keyed by node_id.
-
-        '
-      type: jsonb
-    current_state:
-      description: Current stage ID
-      type: string
-    entered_stage_at:
-      description: When the current stage was entered
-      type: timestamp
-    instance_id:
-      description: Primary key — the entity being tracked
-      type: uuid
-    metadata:
-      description: Workflow-specific metadata (revision counts, etc.)
-      type: jsonb
-    timer_state:
-      description: 'Active timers: [{timer_id, created_at, fires_at, cancelled}]
-
-        '
-      type: jsonb
-    state_change_history:
-      description: 'Ordered list of state_changes fired: [{state_change_id, from, to, trigger_event_id, fired_at, guards_evaluated}]
-
-        '
-      type: jsonb_array
-    workflow_name:
-      description: Which workflow this instance belongs to
-      type: string
-    workflow_version:
-      description: Version of the workflow definition at creation
-      type: string
 builtin_hooks:
   action_aliases:
     increment_revision_count:
@@ -1160,6 +1111,12 @@ engine:
         the payload, attaches sender context, and publishes the event.
       universal_tools: 'Some tools are auto-granted to all agents without explicit tools_tier2 listing: agent_message, mailbox_send.
         These are "universal" tools.'
+    task_mode_stateless: 'Agents in task conversation_mode do NOT get an agent_sessions row. Each event invocation is independent.
+      No conversation history persisted. Debugging traces for task invocations: spend_ledger (cost per invocation) + events
+      (what the agent emitted). Provider session IDs for task invocations are ephemeral and not stored.'
+    provider_session_ids: External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in agent_sessions.runtime_state.provider_session_id,
+      NOT in session_id. session_id is the platform-owned UUID primary key. The provider ID is an implementation detail that
+      may change if the provider is swapped.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Timers are declared in nodes.yaml.
@@ -1522,3 +1479,291 @@ entity_schema_format:
     annotations: Parenthetical notes after the type are human-readable, not machine-parsed.
   example: "entity_schema:\n  identity:\n    vertical_id: uuid (primary key)\n    name: text\n  scoring_phase:\n    composite_score:\
     \ numeric(5,2)\n    discovery_mode: text"
+platform_tables:
+  description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
+    NOT entity tables (those are contract-driven from entity_schema). The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
+  tables:
+    events:
+      description: 'Append-only event store. Every event persisted before delivery. Three scopes: entity (entity_id + flow_instance
+        set), flow (flow_instance set, entity_id NULL), global (both NULL — system bootstrap, runtime recovery, admin commands).
+        idempotency_key for external dedup. source_event_id for causal chain tracing.'
+      ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_name     \
+        \   TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    scope             TEXT NOT NULL\
+        \ DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n    payload           JSONB NOT NULL DEFAULT '{}',\n\
+        \    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    produced_by       TEXT,\n    produced_by_type  TEXT CHECK\
+        \ (produced_by_type IN ('node', 'agent', 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key\
+        \   TEXT,\n    source_event_id   UUID,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_entity\
+        \ (entity_id, created_at) WHERE entity_id IS NOT NULL,\n    INDEX idx_events_flow (flow_instance, event_name) WHERE\
+        \ flow_instance IS NOT NULL,\n    INDEX idx_events_global (event_name, created_at) WHERE scope = 'global',\n    INDEX\
+        \ idx_events_idempotency (idempotency_key) WHERE idempotency_key IS NOT NULL,\n    INDEX idx_events_source (source_event_id)\
+        \ WHERE source_event_id IS NOT NULL\n);"
+    event_deliveries:
+      description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber.
+      ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id\
+        \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
+        \ IN ('node', 'agent')),\n    subscriber_id     TEXT NOT NULL,\n    status            TEXT NOT NULL DEFAULT 'pending'\
+        \ CHECK (status IN ('pending', 'delivered', 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT\
+        \ 0,\n    last_error        TEXT,\n    delivered_at      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL\
+        \ DEFAULT NOW(),\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event (event_id)\n\
+        );"
+    event_receipts:
+      description: Handler completion acknowledgement. One receipt per event × subscriber. Replaces both pipeline_receipts
+        and system_node_ledger. entity_id nullable for global events. subscriber_type + subscriber_id identify the handler
+        generically (node, agent, or platform subsystem). idempotency_key used by system_node_runner for replay dedup — if
+        a receipt exists for this key, the handler skips re-execution. duration_ms tracks handler execution time for observability.
+        side_effects records emitted events and state changes for flight recorder.
+      ddl: "CREATE TABLE event_receipts (\n    receipt_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id\
+        \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
+        \ IN ('node', 'agent', 'platform')),\n    subscriber_id     TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
+        \     TEXT,\n    outcome           TEXT NOT NULL CHECK (outcome IN ('success', 'reject', 'discard', 'kill', 'escalate',\
+        \ 'dead_letter', 'no_op')),\n    state_before      TEXT,\n    state_after       TEXT,\n    side_effects      JSONB\
+        \ NOT NULL DEFAULT '{}',\n    duration_ms       INTEGER,\n    idempotency_key   TEXT,\n    processed_at      TIMESTAMPTZ\
+        \ NOT NULL DEFAULT NOW(),\n    UNIQUE (event_id, subscriber_id),\n    INDEX idx_receipts_entity (entity_id) WHERE\
+        \ entity_id IS NOT NULL,\n    INDEX idx_receipts_subscriber (subscriber_id, processed_at),\n    INDEX idx_receipts_idempotency\
+        \ (idempotency_key) WHERE idempotency_key IS NOT NULL\n);"
+    entity_state:
+      description: Current state of every entity. This IS the entity registry — no separate registry table. slug and name
+        are top-level columns for fast lookup/display without JSONB queries. entity_type distinguishes entity kinds within
+        a flow (e.g., vertical, opco, ticket). fields JSONB holds all contract-driven entity fields. Generic store reads use
+        entity_state for listing, filtering, and lookup.
+      ddl: "CREATE TABLE entity_state (\n    entity_id         UUID PRIMARY KEY,\n    flow_instance     TEXT NOT NULL,\n \
+        \   entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n    name              TEXT,\n\
+        \    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n    fields            JSONB\
+        \ NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision          INTEGER NOT NULL\
+        \ DEFAULT 0,\n    entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    created_at        TIMESTAMPTZ NOT NULL\
+        \ DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_entity_flow (flow_instance,\
+        \ current_state),\n    INDEX idx_entity_state (current_state),\n    INDEX idx_entity_type (entity_type),\n    INDEX\
+        \ idx_entity_slug (slug) WHERE slug IS NOT NULL\n);"
+    agents:
+      description: 'Runtime agent registry. One row per agent instance. Carries the full runtime descriptor: role (from agents.yaml),
+        parent_agent_id (managerial hierarchy), config (agent-specific configuration from contracts), subscriptions/emit_events/tools/permissions
+        (materialized from contracts at boot for fast runtime lookup). flow_instance nullable for root-level agents not scoped
+        to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml
+        is the source of truth. This table is the runtime materialization. llm_backend specifies the LLM invocation backend
+        — api (production), cli_test (test harness), mock (fixture replay), local (local model). This is a deployment/agent
+        property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.'
+      ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
+        \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK\
+        \ (llm_backend IN ('api', 'cli_test', 'mock', 'local')),\n    conversation_mode TEXT NOT NULL CHECK (conversation_mode\
+        \ IN ('task', 'session', 'session_per_entity')),\n    parent_agent_id   TEXT,\n    entity_id         UUID,\n    config\
+        \            JSONB NOT NULL DEFAULT '{}',\n    subscriptions     JSONB NOT NULL DEFAULT '[]',\n    emit_events   \
+        \    JSONB NOT NULL DEFAULT '[]',\n    tools             JSONB NOT NULL DEFAULT '[]',\n    permissions       JSONB\
+        \ NOT NULL DEFAULT '[]',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused',\
+        \ 'terminated')),\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    last_active_at    TIMESTAMPTZ,\n    created_at\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_agents_flow (flow_instance) WHERE flow_instance IS NOT\
+        \ NULL,\n    INDEX idx_agents_role (role),\n    INDEX idx_agents_status (status),\n    INDEX idx_agents_parent (parent_agent_id)\
+        \ WHERE parent_agent_id IS NOT NULL\n);"
+    agent_sessions:
+      description: 'Agent conversation sessions. Supports three scopes: entity (one session per agent × entity), flow (one
+        session per agent × flow instance), global (one session per agent, shared across all entities). scope_key is the lookup
+        key used by the runtime: for entity scope it is the entity_id, for flow scope it is the flow_instance path, for global
+        scope it is the literal "global". This replaces both the legacy conversations and agent_turns tables. runtime_mode
+        matches the agent conversation_mode from contracts. lease_holder/lease_expires_at for distributed session locking.'
+      ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id\
+        \          TEXT NOT NULL REFERENCES agents(agent_id),\n    entity_id         UUID,\n    flow_instance     TEXT,\n\
+        \    scope_key         TEXT NOT NULL,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
+        \ 'flow', 'global')),\n    conversation      JSONB NOT NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL\
+        \ DEFAULT 0,\n    runtime_mode      TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
+        \    runtime_state     JSONB NOT NULL DEFAULT '{}',\n    lease_holder      TEXT,\n    lease_expires_at  TIMESTAMPTZ,\n\
+        \    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n \
+        \   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \    UNIQUE (agent_id, scope_key),\n    INDEX idx_sessions_agent (agent_id, status),\n    INDEX idx_sessions_entity\
+        \ (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_sessions_scope (scope, status),\n    INDEX idx_sessions_lease\
+        \ (lease_expires_at) WHERE lease_holder IS NOT NULL\n);"
+      scope_rules:
+        entity: entity_id NOT NULL, flow_instance NOT NULL, scope_key = entity_id. One session per agent per entity.
+        flow: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
+        global: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
+      lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key). The scope_key is derived from runtime_mode: task
+        → no session (stateless), session_per_entity → scope_key = entity_id, session → scope_key = flow_instance or "global"
+        depending on agent declaration.'
+    routing_rules:
+      description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
+        need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
+        may be true). On create_flow_instance: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from
+        = parent rule_id). On flow instance termination: materialized rows set to inactive. Event dispatch: match concrete
+        routes first (is_materialized = true, exact match), fall back to wildcard patterns.'
+      ddl: "CREATE TABLE routing_rules (\n    rule_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_pattern\
+        \     TEXT NOT NULL,\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id\
+        \     TEXT NOT NULL,\n    flow_instance     TEXT,\n    source_flow       TEXT,\n    is_wildcard       BOOLEAN NOT\
+        \ NULL DEFAULT FALSE,\n    is_materialized   BOOLEAN NOT NULL DEFAULT FALSE,\n    materialized_from UUID,\n    status\
+        \            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),\n    created_at        TIMESTAMPTZ\
+        \ NOT NULL DEFAULT NOW(),\n    INDEX idx_routing_event (event_pattern, status),\n    INDEX idx_routing_subscriber\
+        \ (subscriber_id),\n    INDEX idx_routing_flow (flow_instance) WHERE flow_instance IS NOT NULL,\n    INDEX idx_routing_materialized\
+        \ (materialized_from) WHERE materialized_from IS NOT NULL\n);"
+      lifecycle:
+        boot: Load contract subscriptions → INSERT pattern rows. Clear stale materialized rows from previous boot.
+        create_flow_instance: For each wildcard pattern matching the new instance path → INSERT materialized row with concrete
+          flow_instance.
+        terminate_flow_instance: UPDATE materialized rows for this flow_instance → status = inactive.
+        event_dispatch: SELECT WHERE event_pattern matches AND status = active. Concrete rows (is_materialized) take priority
+          over wildcards.
+    mailbox:
+      description: 'Human-in-the-loop task queue. Payload-centric model — all task-specific data in payload JSONB. item_type
+        distinguishes task kinds: human_task, review_request, approval, alert, operational_decision. human_tasks are represented
+        as mailbox items with item_type = "human_task". from_agent identifies the requesting agent. summary provides a human-readable
+        description. decision_notes captures the human rationale. notified tracks whether the human was alerted. source_event_id
+        links back to the triggering event for traceability. Old legacy columns (context, timeout_at, priority, event_id)
+        are replaced by payload (JSONB), expires_at, severity, source_event_id respectively.'
+      ddl: "CREATE TABLE mailbox (\n    item_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id     \
+        \    UUID,\n    flow_instance     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
+        \ 'flow', 'global')),\n    item_type         TEXT NOT NULL,\n    source_event_id   UUID,\n    from_agent        TEXT,\n\
+        \    severity          TEXT NOT NULL DEFAULT 'normal' CHECK (severity IN ('normal', 'urgent', 'critical')),\n    summary\
+        \           TEXT,\n    payload           JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT\
+        \ 'pending' CHECK (status IN ('pending', 'decided', 'expired', 'cancelled')),\n    decision          TEXT,\n    decision_notes\
+        \    TEXT,\n    decided_by        TEXT,\n    decided_at        TIMESTAMPTZ,\n    notified          BOOLEAN NOT NULL\
+        \ DEFAULT FALSE,\n    expires_at        TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \    INDEX idx_mailbox_status (status, severity, created_at),\n    INDEX idx_mailbox_entity (entity_id) WHERE entity_id\
+        \ IS NOT NULL,\n    INDEX idx_mailbox_type (item_type, status),\n    INDEX idx_mailbox_global (scope, status) WHERE\
+        \ scope = 'global'\n);"
+    spend_ledger:
+      description: LLM token and API cost tracking. One row per agent invocation.
+      ddl: "CREATE TABLE spend_ledger (\n    ledger_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id\
+        \         UUID,\n    flow_instance     TEXT NOT NULL,\n    agent_id          TEXT NOT NULL,\n    model           \
+        \  TEXT NOT NULL,\n    input_tokens      INTEGER NOT NULL DEFAULT 0,\n    output_tokens     INTEGER NOT NULL DEFAULT\
+        \ 0,\n    cost_usd          NUMERIC(10,6) NOT NULL DEFAULT 0,\n    invocation_type   TEXT NOT NULL,\n    created_at\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_spend_flow (flow_instance, created_at),\n    INDEX idx_spend_agent\
+        \ (agent_id, created_at)\n);"
+    flow_instances:
+      description: Registry of all flow instances (static and dynamic). One row per instance.
+      ddl: "CREATE TABLE flow_instances (\n    instance_id       TEXT PRIMARY KEY,\n    flow_template     TEXT NOT NULL,\n\
+        \    mode              TEXT NOT NULL CHECK (mode IN ('static', 'template')),\n    parent_instance   TEXT,\n    config\
+        \            JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active',\
+        \ 'draining', 'terminated')),\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    terminated_at     TIMESTAMPTZ\n\
+        );"
+    timers:
+      description: 'Durable timer and scheduled task store. Persisted across restarts. Entity-scoped timers: entity_id and
+        flow_instance set, tied to a specific entity lifecycle. Global timers: entity_id and flow_instance NULL, used for
+        recurring platform-level work (periodic scans, health checks, digest compilation). fire_payload carries context when
+        the timer fires. owner_node OR owner_agent identifies who declared the timer (mutually exclusive). recurrence_cron
+        supports cron expressions for global recurring schedules. recurrence_interval supports duration strings (e.g., "24h")
+        for entity-scoped recurring timers. task_type: timer (one-shot entity), scheduled_task (recurring entity), deadline
+        (hard cutoff), global_recurring (platform-level periodic work).'
+      ddl: "CREATE TABLE timers (\n    timer_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    timer_name     \
+        \   TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    fire_event        TEXT NOT NULL,\n\
+        \    fire_payload      JSONB NOT NULL DEFAULT '{}',\n    fire_at           TIMESTAMPTZ NOT NULL,\n    recurring  \
+        \       BOOLEAN NOT NULL DEFAULT FALSE,\n    recurrence_cron   TEXT,\n    recurrence_interval TEXT,\n    owner_node\
+        \        TEXT,\n    owner_agent       TEXT,\n    task_type         TEXT NOT NULL DEFAULT 'timer' CHECK (task_type\
+        \ IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')),\n    status            TEXT NOT NULL DEFAULT 'active'\
+        \ CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),\n    fired_at          TIMESTAMPTZ,\n    created_at\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_timers_fire (status, fire_at),\n    INDEX idx_timers_entity\
+        \ (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_timers_flow (flow_instance) WHERE flow_instance IS NOT NULL,\n\
+        \    INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL\n);"
+      scope_rules:
+        entity_scoped: entity_id NOT NULL, flow_instance NOT NULL. Tied to entity lifecycle. Cancelled when entity reaches
+          terminal state.
+        global: entity_id NULL, flow_instance NULL. Platform-level. Not tied to any entity. Survives entity lifecycle.
+        flow_scoped: entity_id NULL, flow_instance NOT NULL. Tied to flow instance. Cancelled when flow instance terminates.
+    dead_letters:
+      description: Failed events after retry exhaustion or chain depth overflow.
+      ddl: "CREATE TABLE dead_letters (\n    dead_letter_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    original_event_id\
+        \ UUID REFERENCES events(event_id),\n    original_event    TEXT NOT NULL,\n    original_payload  JSONB NOT NULL DEFAULT\
+        \ '{}',\n    entity_id         UUID,\n    flow_instance     TEXT NOT NULL,\n    failure_type      TEXT NOT NULL CHECK\
+        \ (failure_type IN ('handler_error', 'chain_depth_exceeded', 'retry_exhausted')),\n    error_message     TEXT,\n \
+        \   retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
+        \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_dead_letters_flow (flow_instance,\
+        \ created_at),\n    INDEX idx_dead_letters_type (failure_type)\n);"
+    schema_version:
+      description: 'Platform schema versioning. Tracks which version of the platform DDL has been applied. The platform checks
+        this at boot: if the stored version < current platform version, it applies migrations. Products never read or write
+        this table.'
+      ddl: "CREATE TABLE schema_version (\n    id                INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),\n    platform_version\
+        \  TEXT NOT NULL,\n    applied_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    migration_log     JSONB NOT NULL\
+        \ DEFAULT '[]'\n);"
+  notes:
+    product_tables: Product-specific tables (entity fields, custom state) are generated from entity_schema in package.yaml.
+      Those are contract-driven, not listed here.
+    migrations: Platform table schema is versioned with the platform version. The platform generates DDL at boot and applies
+      migrations if the schema version changed. Products never modify platform tables directly.
+    index_syntax: INDEX declarations are logical — the implementer may use CREATE INDEX statements or database-specific syntax.
+      The spec declares intent, not SQL dialect.
+  diagnostics_encoding:
+    description: Runtime diagnostics (formerly runtime_log + pipeline_transitions) are encoded into existing platform tables.
+      No dedicated diagnostics table.
+    runtime_log_encoding:
+      table: events
+      event_name: platform.runtime_log
+      scope: global (entity_id NULL, flow_instance NULL)
+      produced_by_type: platform
+      payload_fields:
+        log_level: string (debug, info, warn, error, fatal)
+        component: string (boot, event_loop, timer_engine, agent_manager, etc.)
+        message: string
+        details: object (structured context)
+        stack_trace: string (for errors only)
+      note: 'Queryable via: SELECT * FROM events WHERE event_name = "platform.runtime_log" AND payload->>log_level = "error"'
+    pipeline_transition_encoding:
+      table: event_receipts
+      mapping:
+        state_before: event_receipts.state_before
+        state_after: event_receipts.state_after
+        events_emitted: event_receipts.side_effects.emitted_events (JSONB array)
+        drop_reason: event_receipts.outcome (reject/discard/kill) + side_effects.drop_reason
+        duration: event_receipts.duration_ms
+      note: Every handler execution already produces an event_receipt. The receipt captures state_before, state_after, outcome,
+        duration, and side_effects. This IS the pipeline transition record. No separate table needed.
+  workflow_instances_migration:
+    description: Canonical mapping from legacy workflow_instances to spec tables.
+    mapping:
+      instance_id: entity_state.entity_id
+      workflow_name: flow_instances.flow_template
+      workflow_version: flow_instances.config.workflow_version (JSONB field — version is config, not state)
+      current_state: entity_state.current_state
+      entered_stage_at: entity_state.entered_state_at
+      state_change_history: DELETED — reconstructible from events table (SELECT event_name, created_at FROM events WHERE entity_id
+        = X ORDER BY created_at)
+      accumulator_state: entity_state.accumulator
+      timer_state: 'DELETED — timers table owns all timer state. Query: SELECT * FROM timers WHERE entity_id = X'
+      metadata: 'Split across tables:'
+      metadata.slug: entity_state.fields.slug (entity field, contract-driven)
+      metadata.credentials: DELETED from platform tables. Product-owned secret. Store in product config or external vault,
+        never in entity_state.
+      metadata.instance_kind: flow_instances.config.instance_kind (JSONB field)
+      created_at: entity_state.created_at
+  entity_registry_policy: There is no separate entity registry table. entity_state IS the registry. Generic reads (list entities,
+    find by slug, count by state) query entity_state directly. Contract-driven entity tables are optional optimizations —
+    they materialize fields JSONB into typed columns for query performance. Not required for correctness.
+  entity_metrics_convention:
+    description: Metrics are entity fields in entity_state.fields JSONB. No separate table.
+    canonical_fields:
+      name: entity_state.name (top-level column)
+      stage: entity_state.current_state (top-level column)
+      users_total: entity_state.fields->>'users_total' (JSONB)
+      mrr: entity_state.fields->>'mrr' (JSONB, numeric)
+      spend: 'Aggregate from spend_ledger: SELECT SUM(cost_usd) FROM spend_ledger WHERE entity_id = X'
+    digest_queries: Digest/reporting code should query entity_state for current metrics and spend_ledger for cost aggregates.
+      No entity_metrics table.
+  removed_from_platform:
+    prompt_overrides: DELETED from platform. prompt_overrides is product-owned. Delete generic PromptOverridePersistence and
+      prompt_overrides_test.go. If Empire needs prompt overrides, it manages them in its own product config, not through the
+      platform store layer.
+  migration_policy: 'schema_version is a platform table. It survives the legacy SQL deletion. MigrationSpec and ApplyManagedMigrations
+    remain as platform APIs — they apply DDL diffs between platform versions. ApplyMigrationFile is DELETED (no more file-based
+    migrations). The boot sequence: read schema_version → compare to current platform version → generate DDL diff → apply
+    → update schema_version.'
+  test_bootstrap:
+    description: After legacy SQL deletion, test bootstrap creates tables from two sources only.
+    sources:
+      platform_tables: All tables from platform_tables.tables in platform-spec.yaml. Always created.
+      entity_tables: Generated from entity_schema in the flow contracts loaded for the test. Optional — only if the test uses
+        entity fields beyond the JSONB.
+    generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
+      entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No ddl-canonical.sql.
+      No migrations/ directory.
+    product_integration_tests: Tests that need Empire-specific entity tables load Empire contracts and generate DDL from entity_schema.
+      These tests are product tests, not platform tests.
+    bootstrap_function: BootstrapPlatformTables(spec PlatformSpec) — reads platform_tables.tables, generates DDL, executes.
+      Called by both production boot and test setup. Single code path.
+  credentials_policy:
+    description: Webhook secrets, API keys, and other credentials are NOT stored in platform tables. The platform provides
+      a config surface; products choose their storage strategy.
+    options:
+      flow_instance_config: 'For per-instance secrets (webhook signing keys, API tokens): store in flow_instances.config JSONB
+        under a "secrets" key. The platform does not encrypt this field — the product layer or infrastructure (encrypted-at-rest
+        DB, vault sidecar) handles encryption.'
+      external_vault: 'For production deployments: use an external secrets manager (HashiCorp Vault, AWS Secrets Manager,
+        etc.). flow_instances.config stores a vault reference, not the secret itself.'
+    migration_from_legacy: Code that reads workflow_instances.metadata.credentials should be rewritten to read from flow_instances.config.secrets.
+      This is a product-level migration — inbound.go is product code, not platform code. Move it out of generic runtime.
+    platform_guarantee: The platform never reads, writes, logs, or indexes credential fields. It treats flow_instances.config
+      as opaque JSONB. Products own their secrets.

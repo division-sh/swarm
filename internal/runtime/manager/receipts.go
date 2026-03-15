@@ -107,8 +107,10 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 		return true, "suppressed by budget emergency guardrail"
 	}
 	if tracker.IsEntityThrottle(entityID) {
-		if strings.HasPrefix(eventType, "scan.") {
-			return true, "suppressed by budget throttle: scan work paused"
+		for _, prefix := range am.throttleSuppressPrefixes {
+			if strings.HasPrefix(eventType, prefix) {
+				return true, "suppressed by budget throttle"
+			}
 		}
 	}
 	return false, ""

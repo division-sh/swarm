@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,6 +20,11 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 	if status == "" {
 		status = runtimemanager.ReceiptStatusProcessed
 	}
+	if err := s.upsertAgentReceiptSpec(ctx, eventID, agentID, status, errText); err == nil {
+		return nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return err
+	}
 
 	const q = `
 		INSERT INTO event_receipts (event_id, agent_id, processed_at, status, retry_count, error)
@@ -26,8 +32,6 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 		ON CONFLICT (event_id, agent_id) DO UPDATE SET
 			processed_at = now(),
 			status = CASE
-				-- v2.0: allow 3 retries (1m, 5m, 30m) after the initial attempt.
-				-- We store retry_count as the number of failures seen so far; dead-letter after the 4th failure.
 				WHEN EXCLUDED.status = 'error' AND event_receipts.retry_count + 1 >= 4 THEN 'dead_letter'
 				ELSE EXCLUDED.status
 			END,
@@ -52,6 +56,11 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 	}
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
+	}
+	if out, err := s.listPendingEventsForAgentSpec(ctx, agentID, since, limit); err == nil {
+		return out, nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return nil, err
 	}
 
 	const q = `
@@ -89,29 +98,7 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
 	}
 	defer rows.Close()
-
-	out := make([]events.Event, 0)
-	for rows.Next() {
-		var evt events.Event
-		var legacyEntityID string
-		if err := rows.Scan(
-			&evt.ID,
-			&evt.Type,
-			&evt.SourceAgent,
-			&evt.TaskID,
-			&legacyEntityID,
-			&evt.Payload,
-			&evt.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan pending event: %w", err)
-		}
-		evt = evt.WithEntityID(legacyEntityID)
-		out = append(out, evt)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pending events rows: %w", err)
-	}
-	return out, nil
+	return scanLegacyPendingEvents(rows)
 }
 
 func (s *PostgresStore) ListPendingSubscribedEvents(
@@ -129,6 +116,12 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	}
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
+	}
+
+	if out, err := s.listPendingSubscribedEventsSpec(ctx, agentID, subscriptions, since, limit); err == nil {
+		return out, nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return nil, err
 	}
 
 	const q = `
@@ -178,30 +171,17 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	}
 	defer rows.Close()
 
-	out := make([]events.Event, 0)
-	for rows.Next() {
-		var evt events.Event
-		var legacyEntityID string
-		if err := rows.Scan(
-			&evt.ID,
-			&evt.Type,
-			&evt.SourceAgent,
-			&evt.TaskID,
-			&legacyEntityID,
-			&evt.Payload,
-			&evt.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan pending subscribed event: %w", err)
-		}
-		evt = evt.WithEntityID(legacyEntityID)
+	out, err := scanLegacyPendingEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]events.Event, 0, len(out))
+	for _, evt := range out {
 		if matchesAnySubscription(string(evt.Type), subscriptions) {
-			out = append(out, evt)
+			filtered = append(filtered, evt)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pending subscribed events rows: %w", err)
-	}
-	return out, nil
+	return filtered, nil
 }
 
 func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
@@ -210,6 +190,12 @@ func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID st
 	if eventID == "" || agentID == "" {
 		return runtimemanager.EventReceipt{}, false, fmt.Errorf("event_id and agent_id are required")
 	}
+	if receipt, ok, err := s.getEventReceiptSpec(ctx, eventID, agentID); err == nil {
+		return receipt, ok, nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return runtimemanager.EventReceipt{}, false, err
+	}
+
 	var r runtimemanager.EventReceipt
 	r.EventID = eventID
 	r.AgentID = agentID
@@ -224,4 +210,256 @@ func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID st
 		return runtimemanager.EventReceipt{}, false, fmt.Errorf("get event receipt: %w", err)
 	}
 	return r, true, nil
+}
+
+func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+	var retryCount int
+	_ = s.DB.QueryRowContext(ctx, `
+		SELECT COALESCE((side_effects->>'retry_count')::int, 0)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, eventID, agentID).Scan(&retryCount)
+	if status == runtimemanager.ReceiptStatusError {
+		retryCount++
+	}
+	finalStatus := status
+	if status == runtimemanager.ReceiptStatusError && retryCount >= 4 {
+		finalStatus = runtimemanager.ReceiptStatusDeadLetter
+	}
+	sideEffects, err := json.Marshal(map[string]any{
+		"manager_status": finalStatus,
+		"retry_count":    retryCount,
+		"error":          strings.TrimSpace(errText),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal event receipt side effects: %w", err)
+	}
+	outcome := mapManagerReceiptStatusToOutcome(finalStatus)
+	const q = `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'agent', $2, e.entity_id, e.flow_instance,
+			$3, $4::jsonb, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+			entity_id = EXCLUDED.entity_id,
+			flow_instance = EXCLUDED.flow_instance,
+			outcome = EXCLUDED.outcome,
+			side_effects = EXCLUDED.side_effects,
+			processed_at = now()
+	`
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, outcome, string(sideEffects)); err != nil {
+		return fmt.Errorf("upsert event receipt: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
+			COALESCE(e.entity_id::text, ''), e.payload, e.created_at
+		FROM event_deliveries d
+		INNER JOIN events e ON e.event_id = d.event_id
+		LEFT JOIN event_receipts r
+			ON r.event_id = d.event_id
+			AND r.subscriber_type = 'agent'
+			AND r.subscriber_id = d.subscriber_id
+		WHERE d.subscriber_type = 'agent'
+		  AND d.subscriber_id = $1
+		  AND e.created_at >= $2
+		  AND (
+				r.event_id IS NULL
+				OR (
+					COALESCE(r.side_effects->>'manager_status', '') = 'error'
+					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 3
+					AND (
+						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 1 AND r.processed_at <= now() - interval '1 minute')
+						OR
+						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 2 AND r.processed_at <= now() - interval '5 minute')
+						OR
+						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 3 AND r.processed_at <= now() - interval '30 minute')
+					)
+				)
+			)
+		ORDER BY e.created_at ASC
+		LIMIT $3
+	`, agentID, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
+	}
+	defer rows.Close()
+	return scanSpecPendingEvents(rows)
+}
+
+func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
+			COALESCE(e.entity_id::text, ''), e.payload, e.created_at
+		FROM events e
+		LEFT JOIN event_receipts r
+			ON r.event_id = e.event_id
+			AND r.subscriber_type = 'agent'
+			AND r.subscriber_id = $1
+		WHERE e.created_at >= $2
+		  AND (
+				NOT EXISTS (
+					SELECT 1
+					FROM event_deliveries d_any
+					WHERE d_any.event_id = e.event_id
+				)
+				OR EXISTS (
+					SELECT 1
+					FROM event_deliveries d_me
+					WHERE d_me.event_id = e.event_id
+					  AND d_me.subscriber_type = 'agent'
+					  AND d_me.subscriber_id = $1
+				)
+			)
+		  AND (
+				r.event_id IS NULL
+				OR (
+					COALESCE(r.side_effects->>'manager_status', '') = 'error'
+					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 3
+					AND (
+						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 1 AND r.processed_at <= now() - interval '1 minute')
+						OR
+						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 2 AND r.processed_at <= now() - interval '5 minute')
+						OR
+						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 3 AND r.processed_at <= now() - interval '30 minute')
+					)
+				)
+			)
+		ORDER BY e.created_at ASC
+		LIMIT $3
+	`, agentID, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query pending subscribed events for %s: %w", agentID, err)
+	}
+	defer rows.Close()
+	out, err := scanSpecPendingEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]events.Event, 0, len(out))
+	for _, evt := range out {
+		if matchesAnySubscription(string(evt.Type), subscriptions) {
+			filtered = append(filtered, evt)
+		}
+	}
+	return filtered, nil
+}
+
+func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
+	var (
+		outcome     string
+		sideEffects []byte
+	)
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(side_effects, '{}'::jsonb)
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`, eventID, agentID).Scan(&outcome, &sideEffects); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return runtimemanager.EventReceipt{}, false, nil
+		}
+		return runtimemanager.EventReceipt{}, false, fmt.Errorf("get event receipt: %w", err)
+	}
+	receipt := runtimemanager.EventReceipt{
+		EventID: eventID,
+		AgentID: agentID,
+		Status:  mapOutcomeToManagerReceiptStatus(outcome),
+	}
+	if len(sideEffects) > 0 {
+		var payload map[string]any
+		if json.Unmarshal(sideEffects, &payload) == nil {
+			if raw, ok := payload["manager_status"].(string); ok && strings.TrimSpace(raw) != "" {
+				receipt.Status = runtimemanager.ReceiptStatus(strings.TrimSpace(raw))
+			}
+			switch raw := payload["retry_count"].(type) {
+			case float64:
+				receipt.RetryCount = int(raw)
+			}
+			if raw, ok := payload["error"].(string); ok {
+				receipt.Error = strings.TrimSpace(raw)
+			}
+		}
+	}
+	return receipt, true, nil
+}
+
+func scanLegacyPendingEvents(rows *sql.Rows) ([]events.Event, error) {
+	out := make([]events.Event, 0)
+	for rows.Next() {
+		var evt events.Event
+		var legacyEntityID string
+		if err := rows.Scan(
+			&evt.ID,
+			&evt.Type,
+			&evt.SourceAgent,
+			&evt.TaskID,
+			&legacyEntityID,
+			&evt.Payload,
+			&evt.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending event: %w", err)
+		}
+		evt = evt.WithEntityID(legacyEntityID)
+		out = append(out, evt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read pending events rows: %w", err)
+	}
+	return out, nil
+}
+
+func scanSpecPendingEvents(rows *sql.Rows) ([]events.Event, error) {
+	out := make([]events.Event, 0)
+	for rows.Next() {
+		var evt events.Event
+		var entityID string
+		if err := rows.Scan(
+			&evt.ID,
+			&evt.Type,
+			&evt.SourceAgent,
+			&entityID,
+			&evt.Payload,
+			&evt.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan pending event: %w", err)
+		}
+		evt = evt.WithEntityID(entityID)
+		out = append(out, evt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read pending events rows: %w", err)
+	}
+	return out, nil
+}
+
+func mapManagerReceiptStatusToOutcome(status runtimemanager.ReceiptStatus) string {
+	switch status {
+	case runtimemanager.ReceiptStatusError, runtimemanager.ReceiptStatusDeadLetter:
+		return "dead_letter"
+	default:
+		return "success"
+	}
+}
+
+func mapOutcomeToManagerReceiptStatus(outcome string) runtimemanager.ReceiptStatus {
+	switch strings.TrimSpace(strings.ToLower(outcome)) {
+	case "dead_letter":
+		return runtimemanager.ReceiptStatusDeadLetter
+	default:
+		return runtimemanager.ReceiptStatusProcessed
+	}
 }

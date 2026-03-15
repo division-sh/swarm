@@ -151,6 +151,9 @@ func MergeAgentConfig(base, patch runtimeactors.AgentConfig) runtimeactors.Agent
 	if patch.Mode != "" {
 		out.Mode = patch.Mode
 	}
+	if patch.LLMBackend != "" {
+		out.LLMBackend = patch.LLMBackend
+	}
 	if patch.EntityID != "" {
 		out.EntityID = patch.EntityID
 	}

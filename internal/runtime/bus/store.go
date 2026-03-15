@@ -14,9 +14,13 @@ type EventStore interface {
 }
 
 type FlowInstanceRouteRecord struct {
-	TemplateID   string
-	InstanceID   string
-	InstancePath string
+	TemplateID     string
+	InstanceID     string
+	InstancePath   string
+	EventPattern   string
+	SubscriberType string
+	SubscriberID   string
+	SourceFlow     string
 }
 
 type FlowInstanceRoutePersistence interface {

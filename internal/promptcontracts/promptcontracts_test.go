@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontracts "empireai/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -132,7 +133,10 @@ func TestPromptVariablesComplete(t *testing.T) {
 		t.Fatal("resolve caller path")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-	contractsDir := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts")
+	contractsDir := runtimecontracts.DefaultWorkflowContractsDir(repoRoot)
+	if strings.TrimSpace(contractsDir) == "" {
+		t.Skip("no default workflow contracts dir")
+	}
 
 	var files []string
 	if err := filepath.WalkDir(contractsDir, func(path string, d fs.DirEntry, err error) error {

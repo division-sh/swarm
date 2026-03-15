@@ -13,9 +13,19 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS routing_rules`); err != nil {
+		t.Fatalf("drop legacy routing_rules: %v", err)
+	}
 
 	var spec runtimecontracts.PlatformSpecDocument
-	spec.WorkflowState.DDL = "CREATE TABLE workflow_instances (\n    instance_id UUID PRIMARY KEY,\n    workflow_name TEXT NOT NULL,\n    transition_history JSONB NOT NULL DEFAULT '[]'\n);\nCREATE TABLE flow_instance_routes (\n    template_id TEXT NOT NULL,\n    instance_id TEXT NOT NULL,\n    instance_path TEXT NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    PRIMARY KEY (template_id, instance_id)\n);\n"
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"routing_rules": {
+			DDL: "CREATE TABLE routing_rules (\n    rule_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_pattern TEXT NOT NULL,\n    subscriber_type TEXT NOT NULL,\n    subscriber_id TEXT NOT NULL,\n    flow_instance TEXT,\n    source_flow TEXT,\n    is_wildcard BOOLEAN NOT NULL DEFAULT FALSE,\n    is_materialized BOOLEAN NOT NULL DEFAULT FALSE,\n    materialized_from UUID,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
 	plans, err := GeneratePlatformTableDDLs(spec)
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
@@ -25,9 +35,13 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	}
 
 	route := runtimebus.FlowInstanceRouteRecord{
-		TemplateID:   "review",
-		InstanceID:   "inst-1",
-		InstancePath: "review/inst-1",
+		TemplateID:     "review",
+		InstanceID:     "inst-1",
+		InstancePath:   "review/inst-1",
+		EventPattern:   "review/inst-1/task.started",
+		SubscriberType: "node",
+		SubscriberID:   "reviewer-inst-1",
+		SourceFlow:     "review",
 	}
 	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
@@ -36,8 +50,13 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListFlowInstanceRoutes: %v", err)
 	}
-	if len(routes) != 1 || routes[0] != route {
-		t.Fatalf("listed routes = %#v, want %#v", routes, route)
+	want := runtimebus.FlowInstanceRouteRecord{
+		TemplateID:   route.TemplateID,
+		InstanceID:   route.InstanceID,
+		InstancePath: route.InstancePath,
+	}
+	if len(routes) != 1 || routes[0] != want {
+		t.Fatalf("listed routes = %#v, want %#v", routes, want)
 	}
 	if err := pg.DeleteFlowInstanceRoute(ctx, route.TemplateID, route.InstanceID); err != nil {
 		t.Fatalf("DeleteFlowInstanceRoute: %v", err)

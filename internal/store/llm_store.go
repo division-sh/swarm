@@ -10,52 +10,16 @@ import (
 	"time"
 
 	runtimellm "empireai/internal/runtime/llm"
+	runtimesessions "empireai/internal/runtime/sessions"
 )
 
 func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
 	if rec.AgentID == "" || rec.RuntimeMode == "" || rec.SessionID == "" {
 		return fmt.Errorf("agent_id, runtime_mode, and session_id are required")
 	}
-
-	const q = `
-		WITH s AS (
-			SELECT id, turn_count
-			FROM agent_sessions
-			WHERE agent_id = $1
-			  AND runtime_mode = $2
-			  AND session_id = $3
-			  AND status = 'active'
-			ORDER BY created_at DESC
-			LIMIT 1
-		)
-		INSERT INTO agent_turns (
-			agent_id, session_row_id, turn_index, task_id,
-			request_payload, response_payload, parse_ok, latency_ms,
-			retry_count, error, created_at
-		)
-		SELECT
-			$1,
-			s.id,
-			s.turn_count,
-			NULLIF($4,'')::uuid,
-			CASE WHEN $5 = '' THEN NULL ELSE $5::jsonb END,
-			CASE WHEN $6 = '' THEN NULL ELSE $6::jsonb END,
-			$7,
-			$8,
-			$9,
-			NULLIF($10,''),
-			now()
-		FROM s
-		ON CONFLICT (session_row_id, turn_index) DO UPDATE SET
-			task_id = EXCLUDED.task_id,
-			request_payload = EXCLUDED.request_payload,
-			response_payload = EXCLUDED.response_payload,
-			parse_ok = EXCLUDED.parse_ok,
-			latency_ms = EXCLUDED.latency_ms,
-			retry_count = EXCLUDED.retry_count,
-			error = EXCLUDED.error,
-			created_at = now()
-	`
+	if runtimesessions.ResolveScope(rec.RuntimeMode, "").Stateless {
+		return nil
+	}
 
 	reqPayload := normalizeJSONPayload(rec.RequestPayload)
 	respPayload := normalizeJSONPayload(rec.ResponseRaw)
@@ -64,9 +28,30 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		latencyMS = 0
 	}
 
+	const q = `
+		UPDATE agent_sessions
+		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object(
+				'last_turn',
+				jsonb_build_object(
+					'task_id', to_jsonb(NULLIF($4, '')::text),
+					'request_payload', CASE WHEN $5 = '' THEN NULL ELSE $5::jsonb END,
+					'response_payload', CASE WHEN $6 = '' THEN NULL ELSE $6::jsonb END,
+					'parse_ok', to_jsonb($7::boolean),
+					'latency_ms', to_jsonb($8::integer),
+					'retry_count', to_jsonb($9::integer),
+					'error', to_jsonb(NULLIF($10, '')::text),
+					'updated_at', to_jsonb(now())
+				)
+			),
+		    updated_at = now()
+		WHERE agent_id = $1
+		  AND runtime_mode = $2
+		  AND session_id = $3::uuid
+		  AND status = 'active'
+	`
 	res, err := s.DB.ExecContext(ctx, q,
 		rec.AgentID,
-		rec.RuntimeMode,
+		runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
 		rec.SessionID,
 		rec.TaskID,
 		reqPayload,
@@ -90,15 +75,17 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	if strings.TrimSpace(rec.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	mode := strings.TrimSpace(strings.ToLower(rec.Mode))
-	if mode == "" {
-		mode = "session"
+	mode := runtimesessions.NormalizeConversationRuntimeMode(rec.Mode)
+	resolved := runtimesessions.ResolveScope(mode, rec.ScopeKey)
+	if resolved.Stateless {
+		return nil
 	}
+
 	status := strings.TrimSpace(strings.ToLower(rec.Status))
 	if status == "" {
 		status = "active"
 	}
-	scopeKey := strings.TrimSpace(rec.ScopeKey)
+
 	msgs := make([]runtimellm.Message, 0, len(rec.Messages))
 	for _, m := range rec.Messages {
 		msgs = append(msgs, runtimellm.Message{
@@ -111,126 +98,53 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		return fmt.Errorf("marshal conversation messages: %w", err)
 	}
 	summary := strings.ToValidUTF8(rec.Summary, "\uFFFD")
-	const upsertQuery = `
-		INSERT INTO conversations (
-			agent_id, task_id, scope_key, mode, messages, summary, turn_count, status, created_at, updated_at
+
+	const q = `
+		INSERT INTO agent_sessions (
+			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			$1, NULLIF($3,'')::uuid, NULLIF($4,''), $2, $5::jsonb, NULLIF($6,''), $7, $8, now(), now()
+			gen_random_uuid(),
+			$1,
+			NULLIF($2,'')::uuid,
+			NULLIF($3,''),
+			$4,
+			$5,
+			$6::jsonb,
+			$7,
+			$8,
+			jsonb_build_object('summary', NULLIF($9,'')),
+			$10,
+			now(),
+			now()
 		)
-		ON CONFLICT (agent_id, mode, (COALESCE(scope_key, '')))
-		WHERE status = 'active'
-		DO UPDATE SET
-			task_id = EXCLUDED.task_id,
-			scope_key = EXCLUDED.scope_key,
-			messages = EXCLUDED.messages,
-			summary = EXCLUDED.summary,
+		ON CONFLICT (agent_id, scope_key) DO UPDATE SET
+			entity_id = EXCLUDED.entity_id,
+			flow_instance = EXCLUDED.flow_instance,
+			scope = EXCLUDED.scope,
+			conversation = EXCLUDED.conversation,
 			turn_count = EXCLUDED.turn_count,
+			runtime_mode = EXCLUDED.runtime_mode,
+			runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($9,'')),
 			status = EXCLUDED.status,
 			updated_at = now()
 	`
-	if _, err := s.DB.ExecContext(ctx, upsertQuery,
+	if _, err := s.DB.ExecContext(ctx, q,
 		rec.AgentID,
-		mode,
-		rec.TaskID,
-		scopeKey,
+		resolved.EntityID,
+		resolved.FlowInstance,
+		resolved.ScopeKey,
+		resolved.Scope,
 		string(msgJSON),
-		summary,
 		rec.TurnCount,
+		mode,
+		summary,
 		status,
 	); err != nil {
-		if shouldFallbackConversationScope(err) {
-			const legacyNoScopeQuery = `
-				WITH updated AS (
-					UPDATE conversations
-					SET task_id = NULLIF($3,'')::uuid,
-						messages = $4::jsonb,
-						summary = NULLIF($5,''),
-						turn_count = $6,
-						status = $7,
-						updated_at = now()
-					WHERE agent_id = $1
-						AND mode = $2
-						AND status = 'active'
-					RETURNING id
-				)
-				INSERT INTO conversations (
-					agent_id, task_id, mode, messages, summary, turn_count, status, created_at, updated_at
-				)
-				SELECT
-					$1, NULLIF($3,'')::uuid, $2, $4::jsonb, NULLIF($5,''), $6, $7, now(), now()
-				WHERE NOT EXISTS (SELECT 1 FROM updated)
-			`
-			if _, legacyErr := s.DB.ExecContext(ctx, legacyNoScopeQuery,
-				rec.AgentID,
-				mode,
-				rec.TaskID,
-				string(msgJSON),
-				summary,
-				rec.TurnCount,
-				status,
-			); legacyErr != nil {
-				return fmt.Errorf("upsert conversation legacy scope fallback: %w", legacyErr)
-			}
-			return nil
-		}
-		if !shouldFallbackConversationUpsert(err) {
-			return fmt.Errorf("upsert conversation: %w", err)
-		}
-		// Backward compatibility for databases not yet migrated to the unique active index.
-		const legacyQuery = `
-			WITH updated AS (
-				UPDATE conversations
-				SET task_id = NULLIF($3,'')::uuid,
-					scope_key = NULLIF($4,''),
-					messages = $5::jsonb,
-					summary = NULLIF($6,''),
-					turn_count = $7,
-					status = $8,
-					updated_at = now()
-				WHERE agent_id = $1
-					AND mode = $2
-					AND COALESCE(scope_key, '') = COALESCE(NULLIF($4,''), '')
-					AND status = 'active'
-				RETURNING id
-			)
-			INSERT INTO conversations (
-				agent_id, task_id, scope_key, mode, messages, summary, turn_count, status, created_at, updated_at
-			)
-			SELECT
-				$1, NULLIF($3,'')::uuid, NULLIF($4,''), $2, $5::jsonb, NULLIF($6,''), $7, $8, now(), now()
-			WHERE NOT EXISTS (SELECT 1 FROM updated)
-		`
-		if _, legacyErr := s.DB.ExecContext(ctx, legacyQuery,
-			rec.AgentID,
-			mode,
-			rec.TaskID,
-			scopeKey,
-			string(msgJSON),
-			summary,
-			rec.TurnCount,
-			status,
-		); legacyErr != nil {
-			return fmt.Errorf("upsert conversation fallback: %w", legacyErr)
-		}
+		return fmt.Errorf("upsert conversation: %w", err)
 	}
 	return nil
-}
-
-func shouldFallbackConversationUpsert(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "there is no unique or exclusion constraint matching")
-}
-
-func shouldFallbackConversationScope(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "scope_key") && strings.Contains(msg, "does not exist")
 }
 
 func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
@@ -238,64 +152,41 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	if agentID == "" {
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
 	}
-	mode = strings.TrimSpace(strings.ToLower(mode))
-	if mode == "" {
-		mode = "session"
+
+	mode = runtimesessions.NormalizeConversationRuntimeMode(mode)
+	resolved := runtimesessions.ResolveScope(mode, scopeKey)
+	if resolved.Stateless {
+		return runtimellm.ConversationRecord{}, false, nil
 	}
-	scopeKey = strings.TrimSpace(scopeKey)
+
 	const q = `
 		SELECT
-			COALESCE(task_id::text, ''),
-			COALESCE(scope_key, ''),
-			COALESCE(messages, '[]'::jsonb),
-			COALESCE(summary, ''),
+			scope_key,
+			COALESCE(conversation, '[]'::jsonb),
+			COALESCE(runtime_state->>'summary', ''),
 			COALESCE(turn_count, 0),
 			COALESCE(status, 'active')
-		FROM conversations
+		FROM agent_sessions
 		WHERE agent_id = $1
-		  AND mode = $2
-		  AND COALESCE(scope_key, '') = $3
+		  AND runtime_mode = $2
+		  AND scope_key = $3
 		  AND status = 'active'
 		ORDER BY updated_at DESC
 		LIMIT 1
 	`
+
 	var rec runtimellm.ConversationRecord
 	rec.AgentID = agentID
 	rec.Mode = mode
 
 	var rawMessages []byte
-	err := s.DB.QueryRowContext(ctx, q, agentID, mode, scopeKey).Scan(
-		&rec.TaskID,
+	err := s.DB.QueryRowContext(ctx, q, agentID, mode, resolved.ScopeKey).Scan(
 		&rec.ScopeKey,
 		&rawMessages,
 		&rec.Summary,
 		&rec.TurnCount,
 		&rec.Status,
 	)
-	if shouldFallbackConversationScope(err) {
-		const legacyQ = `
-			SELECT
-				COALESCE(task_id::text, ''),
-				COALESCE(messages, '[]'::jsonb),
-				COALESCE(summary, ''),
-				COALESCE(turn_count, 0),
-				COALESCE(status, 'active')
-			FROM conversations
-			WHERE agent_id = $1
-			  AND mode = $2
-			  AND status = 'active'
-			ORDER BY updated_at DESC
-			LIMIT 1
-		`
-		err = s.DB.QueryRowContext(ctx, legacyQ, agentID, mode).Scan(
-			&rec.TaskID,
-			&rawMessages,
-			&rec.Summary,
-			&rec.TurnCount,
-			&rec.Status,
-		)
-		rec.ScopeKey = ""
-	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimellm.ConversationRecord{}, false, nil

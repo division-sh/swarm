@@ -12,11 +12,19 @@ func (s *PostgresStore) ListActiveAgentIDs(ctx context.Context) ([]string, error
 		return nil, fmt.Errorf("db unavailable")
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT id
+		SELECT agent_id
 		FROM agents
 		WHERE COALESCE(status, '') <> 'terminated'
-		ORDER BY id ASC
+		ORDER BY agent_id ASC
 	`)
+	if err != nil && shouldFallbackLegacyAgentsSchema(err) {
+		rows, err = s.DB.QueryContext(ctx, `
+			SELECT id
+			FROM agents
+			WHERE COALESCE(status, '') <> 'terminated'
+			ORDER BY id ASC
+		`)
+	}
 	if err != nil {
 		return nil, err
 	}

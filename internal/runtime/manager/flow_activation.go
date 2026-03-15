@@ -208,6 +208,12 @@ func buildFlowAgentConfig(
 	if managerFallback := strings.TrimSpace(entry.ManagerFallback); managerFallback != "" {
 		cfgPayload["manager_fallback"] = managerFallback
 	}
+	if modelTier := strings.TrimSpace(entry.ModelTier); modelTier != "" {
+		cfgPayload["model_tier"] = modelTier
+	}
+	if conversationMode := strings.TrimSpace(entry.ConversationMode); conversationMode != "" {
+		cfgPayload["conversation_mode"] = conversationMode
+	}
 	rawConfig, err := json.Marshal(cfgPayload)
 	if err != nil {
 		return models.AgentConfig{}, err
@@ -222,6 +228,7 @@ func buildFlowAgentConfig(
 		Type:          strings.TrimSpace(entry.Type),
 		Role:          strings.TrimSpace(entry.Role),
 		Mode:          templateID,
+		LLMBackend:    "",
 		Permissions:   permissions,
 		EntityID:      entityID,
 		Subscriptions: rendered,

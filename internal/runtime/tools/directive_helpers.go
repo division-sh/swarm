@@ -11,9 +11,9 @@ import (
 func transitionContextKey(primary events.Event, fallback events.Event) string {
 	entityID, taskID := extractContextIDs(primary)
 	if strings.TrimSpace(entityID) == "" || strings.TrimSpace(taskID) == "" {
-		fallbackVertical, fallbackTask := extractContextIDs(fallback)
+		fallbackEntity, fallbackTask := extractContextIDs(fallback)
 		if strings.TrimSpace(entityID) == "" {
-			entityID = fallbackVertical
+			entityID = fallbackEntity
 		}
 		if strings.TrimSpace(taskID) == "" {
 			taskID = fallbackTask

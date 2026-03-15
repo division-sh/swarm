@@ -14,6 +14,7 @@ type AgentConfig struct {
 	Type           string          `json:"type"`
 	Role           string          `json:"role"`
 	Mode           string          `json:"mode"`
+	LLMBackend     string          `json:"llm_backend,omitempty"`
 	Subscriptions  []string        `json:"subscriptions,omitempty"`
 	Permissions    []string        `json:"permissions,omitempty"`
 	EntityID       string          `json:"entity_id,omitempty"`

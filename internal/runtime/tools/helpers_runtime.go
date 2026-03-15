@@ -28,19 +28,6 @@ func mustJSON(v any) []byte {
 	return runtimesharedjson.MustJSON(v)
 }
 
-func normalizeScanPriority(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "low", "normal", "high", "critical":
-		return strings.ToLower(strings.TrimSpace(raw))
-	case "med", "medium", "default":
-		return "normal"
-	case "urgent":
-		return "critical"
-	default:
-		return ""
-	}
-}
-
 func asInt(v any) int {
 	switch t := v.(type) {
 	case int:

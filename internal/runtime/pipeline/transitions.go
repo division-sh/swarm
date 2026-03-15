@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 type DeferredPipelineTransition struct {
@@ -67,29 +66,13 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 		durationUS = 0
 	}
 	var eventExists bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id = $1::uuid)`, eventID).Scan(&eventExists); err != nil {
-		if isMissingDiagnosticsTable(err) {
-			return nil
-		}
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`, eventID).Scan(&eventExists); err != nil {
 		return err
 	}
 	if !eventExists {
 		return nil
 	}
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO pipeline_transitions (
-			event_id, event_type, handler, pipeline_type, pipeline_id, action,
-			state_before, state_after, events_emitted, drop_reason, error, duration_us
-		)
-		VALUES (
-			$1::uuid, $2, $3, $4, $5::uuid, $6,
-			$7::jsonb, $8::jsonb, $9, NULLIF($10,''), NULLIF($11,''), NULLIF($12,0)
-		)
-	`, eventID, strings.TrimSpace(in.EventType), handler, pipelineType, pipelineID, action, maybeJSONString(before), maybeJSONString(after), pq.Array(eventsEmitted), strings.TrimSpace(in.DropReason), strings.TrimSpace(in.Error), durationUS)
-	if err != nil && isMissingDiagnosticsTable(err) {
-		return nil
-	}
-	return err
+	return recordPipelineTransitionReceipt(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Error)
 }
 
 func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition) context.Context {
@@ -159,5 +142,46 @@ func isMissingDiagnosticsTable(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "does not exist") && (strings.Contains(msg, "runtime_log") || strings.Contains(msg, "pipeline_transitions"))
+	return strings.Contains(msg, "subscriber_id") ||
+		strings.Contains(msg, "side_effects") ||
+		strings.Contains(msg, "duration_ms")
+}
+
+func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
+	sideEffects, err := json.Marshal(map[string]any{
+		"pipeline_type":  pipelineType,
+		"pipeline_id":    pipelineID,
+		"action":         action,
+		"events_emitted": eventsEmitted,
+		"drop_reason":    strings.TrimSpace(dropReason),
+		"error":          strings.TrimSpace(errText),
+	})
+	if err != nil {
+		return err
+	}
+	outcome := "success"
+	if strings.TrimSpace(errText) != "" {
+		outcome = "dead_letter"
+	} else if strings.TrimSpace(dropReason) != "" {
+		outcome = "discard"
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, state_before, state_after, side_effects, duration_ms, processed_at
+		)
+		SELECT
+			e.event_id, 'platform', $2, e.entity_id, e.flow_instance,
+			$3, NULLIF($4,''), NULLIF($5,''), $6::jsonb, NULLIF($7,0), now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+			outcome = EXCLUDED.outcome,
+			state_before = EXCLUDED.state_before,
+			state_after = EXCLUDED.state_after,
+			side_effects = EXCLUDED.side_effects,
+			duration_ms = EXCLUDED.duration_ms,
+			processed_at = now()
+	`, eventID, "pipeline:"+pipelineID, outcome, string(before), string(after), string(sideEffects), durationMS)
+	return err
 }

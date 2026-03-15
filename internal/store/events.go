@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,10 @@ import (
 	"empireai/internal/events"
 	"github.com/google/uuid"
 )
+
+type rowQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
 
 func (s *PostgresStore) AppendEvent(ctx context.Context, evt events.Event) error {
 	return s.AppendEventTx(ctx, nil, evt)
@@ -20,6 +25,14 @@ func (s *PostgresStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
 }
 
 func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	if eventSchemaAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
+		if err := s.appendEventSpec(ctx, tx, evt); err == nil {
+			return nil
+		} else if !shouldFallbackLegacyEventsSchema(err) {
+			return err
+		}
+	}
+
 	id := evt.ID
 	if id == "" {
 		id = uuid.NewString()
@@ -40,14 +53,19 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	_, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt)
-	if err != nil {
+	if _, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt); err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
+	if err := s.persistEventWithDeliveriesSpec(ctx, evt, agentIDs); err == nil {
+		return nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return err
+	}
+
 	id := evt.ID
 	if id == "" {
 		id = uuid.NewString()
@@ -114,6 +132,14 @@ func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx,
 	if len(agentIDs) == 0 {
 		return nil
 	}
+	if eventDeliveriesSpecAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
+		if err := s.insertEventDeliveriesSpec(ctx, tx, eventID, agentIDs); err == nil {
+			return nil
+		} else if !shouldFallbackLegacyEventsSchema(err) {
+			return err
+		}
+	}
+
 	const q = `
 		INSERT INTO event_deliveries (event_id, agent_id, created_at)
 		VALUES ($1::uuid, $2, now())
@@ -147,39 +173,7 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	if strings.TrimSpace(errText) != "" && status == "processed" {
 		status = "error"
 	}
-	const q = `
-		INSERT INTO pipeline_receipts (event_id, status, error, processed_at)
-		VALUES ($1::uuid, $2, NULLIF($3,''), now())
-		ON CONFLICT (event_id) DO UPDATE SET
-			status = EXCLUDED.status,
-			error = EXCLUDED.error,
-			processed_at = now()
-	`
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	if _, err := execFn(ctx, q, eventID, status, strings.TrimSpace(errText)); err != nil {
-		if isMissingPipelineReceiptsTable(err) {
-			return nil
-		}
-		// Backward-compatible fallback for legacy schema versions that still
-		// use pipeline_receipts.result instead of status/error.
-		if isLegacyPipelineReceiptsColumns(err) {
-			const legacyQ = `
-				INSERT INTO pipeline_receipts (event_id, result, processed_at)
-				VALUES ($1::uuid, $2, now())
-				ON CONFLICT (event_id) DO UPDATE SET
-					result = EXCLUDED.result,
-					processed_at = now()
-			`
-			if _, legacyErr := execFn(ctx, legacyQ, eventID, status); legacyErr == nil {
-				return nil
-			}
-		}
-		return fmt.Errorf("upsert pipeline receipt: %w", err)
-	}
-	return nil
+	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, errText)
 }
 
 func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.Event, error) {
@@ -189,68 +183,8 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			e.id::text, e.type, e.source_agent,
-			COALESCE(e.task_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			e.payload, e.created_at
-		FROM events e
-		LEFT JOIN pipeline_receipts pr ON pr.event_id = e.id
-		WHERE pr.event_id IS NULL
-		  AND e.created_at >= $1
-		ORDER BY e.created_at ASC
-		LIMIT $2
-	`, since, limit)
-	if err != nil {
-		if isMissingPipelineReceiptsTable(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list events missing pipeline receipt: %w", err)
-	}
-	defer rows.Close()
 
-	out := make([]events.Event, 0, limit)
-	for rows.Next() {
-		var evt events.Event
-		var legacyEntityID string
-		if err := rows.Scan(
-			&evt.ID,
-			&evt.Type,
-			&evt.SourceAgent,
-			&evt.TaskID,
-			&legacyEntityID,
-			&evt.Payload,
-			&evt.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
-		}
-		evt = evt.WithEntityID(legacyEntityID)
-		out = append(out, evt)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read missing pipeline receipt events: %w", err)
-	}
-	return out, nil
-}
-
-func isMissingPipelineReceiptsTable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "does not exist") && strings.Contains(msg, "pipeline_receipts")
-}
-
-func isLegacyPipelineReceiptsColumns(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	if !strings.Contains(msg, "pipeline_receipts") {
-		return false
-	}
-	return strings.Contains(msg, "column") && (strings.Contains(msg, "status") || strings.Contains(msg, "error"))
+	return s.listEventsMissingPipelineReceiptSpec(ctx, since, limit)
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -259,6 +193,13 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 		return false, nil
 	}
 	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)
+	`, eventID).Scan(&exists); err == nil {
+		return exists, nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return false, fmt.Errorf("event exists lookup: %w", err)
+	}
 	if err := s.DB.QueryRowContext(ctx, `
 		SELECT EXISTS(SELECT 1 FROM events WHERE id = $1::uuid)
 	`, eventID).Scan(&exists); err != nil {
@@ -273,13 +214,25 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 		return nil, nil
 	}
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT agent_id
+		SELECT subscriber_id
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
-		ORDER BY agent_id ASC
+		  AND subscriber_type = 'agent'
+		ORDER BY subscriber_id ASC
 	`, eventID)
 	if err != nil {
-		return nil, fmt.Errorf("list event delivery recipients: %w", err)
+		if !shouldFallbackLegacyEventsSchema(err) {
+			return nil, fmt.Errorf("list event delivery recipients: %w", err)
+		}
+		rows, err = s.DB.QueryContext(ctx, `
+			SELECT agent_id
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			ORDER BY agent_id ASC
+		`, eventID)
+		if err != nil {
+			return nil, fmt.Errorf("list event delivery recipients: %w", err)
+		}
 	}
 	defer rows.Close()
 
@@ -298,4 +251,279 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 		return nil, fmt.Errorf("read event delivery recipients: %w", err)
 	}
 	return recipients, nil
+}
+
+func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	id, name, entityID, flowInstance, scope, payload, producedBy, producedByType, createdAt := eventStorageEnvelope(evt)
+	const q = `
+		INSERT INTO events (
+			event_id, event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
+			0, NULLIF($7,''), $8, $9
+		)
+		ON CONFLICT (event_id) DO NOTHING
+	`
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	if _, err := execFn(ctx, q, id, name, entityID, flowInstance, scope, string(payload), producedBy, producedByType, createdAt); err != nil {
+		return fmt.Errorf("append event: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, evt events.Event, agentIDs []string) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin event tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.appendEventSpec(ctx, tx, evt); err != nil {
+		return err
+	}
+	if err := s.insertEventDeliveriesSpec(ctx, tx, evt.ID, agentIDs); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit event tx: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
+	const q = `
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, created_at)
+		VALUES ($1::uuid, 'agent', $2, now())
+		ON CONFLICT DO NOTHING
+	`
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	seen := make(map[string]struct{}, len(agentIDs))
+	for _, agentID := range agentIDs {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		if _, ok := seen[agentID]; ok {
+			continue
+		}
+		seen[agentID] = struct{}{}
+		if _, err := execFn(ctx, q, eventID, agentID); err != nil {
+			return fmt.Errorf("insert event delivery (agent=%s): %w", agentID, err)
+		}
+	}
+	return nil
+}
+
+func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+	sideEffects, err := json.Marshal(map[string]any{
+		"manager_status": strings.TrimSpace(status),
+		"error":          strings.TrimSpace(errText),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal pipeline receipt side effects: %w", err)
+	}
+	outcome := mapPipelineStatusToOutcome(status)
+	const q = `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance,
+			$2, $3::jsonb, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+			outcome = EXCLUDED.outcome,
+			side_effects = EXCLUDED.side_effects,
+			processed_at = now()
+	`
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	if _, err := execFn(ctx, q, eventID, outcome, string(sideEffects)); err != nil {
+		return fmt.Errorf("upsert pipeline receipt: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.Event, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
+			COALESCE(e.entity_id::text, ''), e.payload, e.created_at
+		FROM events e
+		LEFT JOIN event_receipts r
+			ON r.event_id = e.event_id
+			AND r.subscriber_type = 'platform'
+			AND r.subscriber_id = 'pipeline'
+		WHERE r.event_id IS NULL
+		  AND e.created_at >= $1
+		ORDER BY e.created_at ASC
+		LIMIT $2
+	`, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list events missing pipeline receipt: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]events.Event, 0, limit)
+	for rows.Next() {
+		var evt events.Event
+		var entityID string
+		if err := rows.Scan(
+			&evt.ID,
+			&evt.Type,
+			&evt.SourceAgent,
+			&entityID,
+			&evt.Payload,
+			&evt.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan missing pipeline receipt event: %w", err)
+		}
+		evt = evt.WithEntityID(entityID)
+		out = append(out, evt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read missing pipeline receipt events: %w", err)
+	}
+	return out, nil
+}
+
+func shouldFallbackLegacyEventsSchema(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(msg, `event_id`) ||
+		strings.Contains(msg, `event_name`) ||
+		strings.Contains(msg, `produced_by`) ||
+		strings.Contains(msg, `produced_by_type`) ||
+		strings.Contains(msg, `subscriber_type`) ||
+		strings.Contains(msg, `subscriber_id`) ||
+		strings.Contains(msg, `scope`) ||
+		strings.Contains(msg, `flow_instance`) ||
+		strings.Contains(msg, `outcome`) ||
+		strings.Contains(msg, `side_effects`) ||
+		strings.Contains(msg, `duration_ms`) ||
+		strings.Contains(msg, `relation "event_receipts" does not exist`) ||
+		strings.Contains(msg, `relation "event_deliveries" does not exist`)
+}
+
+func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
+	if tx != nil {
+		return tx
+	}
+	return db
+}
+
+func eventSchemaAvailable(ctx context.Context, q rowQueryer) bool {
+	return columnExists(ctx, q, "events", "event_id")
+}
+
+func eventDeliveriesSpecAvailable(ctx context.Context, q rowQueryer) bool {
+	return columnExists(ctx, q, "event_deliveries", "subscriber_id")
+}
+
+func eventReceiptsSpecAvailable(ctx context.Context, q rowQueryer) bool {
+	return columnExists(ctx, q, "event_receipts", "subscriber_id")
+}
+
+func columnExists(ctx context.Context, q rowQueryer, tableName, columnName string) bool {
+	if q == nil {
+		return false
+	}
+	var exists bool
+	if err := q.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = $1
+			  AND column_name = $2
+		)
+	`, tableName, columnName).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
+
+func eventStorageEnvelope(evt events.Event) (id string, eventName string, entityID string, flowInstance string, scope string, payload []byte, producedBy string, producedByType string, createdAt time.Time) {
+	id = strings.TrimSpace(evt.ID)
+	if id == "" {
+		id = uuid.NewString()
+	}
+	eventName = strings.TrimSpace(string(evt.Type))
+	payload = eventPayloadForStorage(evt)
+	entityID = sanitizeOptionalUUID(evt.EntityID())
+	flowInstance = eventPayloadString(payload, "flow_instance")
+	scope = "global"
+	if entityID != "" {
+		scope = "entity"
+	} else if flowInstance != "" {
+		scope = "flow"
+	}
+	producedBy = strings.TrimSpace(evt.SourceAgent)
+	producedByType = "agent"
+	if producedBy == "" || producedBy == "runtime" {
+		producedByType = "platform"
+	}
+	createdAt = evt.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	return
+}
+
+func eventPayloadForStorage(evt events.Event) []byte {
+	taskID := sanitizeOptionalUUID(evt.TaskID)
+	if taskID == "" {
+		if len(evt.Payload) == 0 {
+			return []byte("{}")
+		}
+		return evt.Payload
+	}
+	payload := map[string]any{}
+	if len(evt.Payload) > 0 {
+		if err := json.Unmarshal(evt.Payload, &payload); err != nil || payload == nil {
+			return evt.Payload
+		}
+	}
+	if _, exists := payload["task_id"]; !exists {
+		payload["task_id"] = taskID
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return evt.Payload
+	}
+	return encoded
+}
+
+func eventPayloadString(raw []byte, key string) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
+		return ""
+	}
+	value, _ := payload[strings.TrimSpace(key)].(string)
+	return strings.TrimSpace(value)
+}
+
+func mapPipelineStatusToOutcome(status string) string {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "error", "dead_letter":
+		return "dead_letter"
+	default:
+		return "success"
+	}
 }

@@ -160,10 +160,9 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 
 	// Evaluate each active entity with any spend/metrics.
 	rows, err := t.db.QueryContext(ctx, `
-		SELECT instance_id::text
-		FROM workflow_instances
-			WHERE COALESCE(metadata->>'instance_kind', '') = 'entity'
-		  AND current_state = ANY($1::text[])
+		SELECT entity_id::text
+		FROM entity_state
+		WHERE current_state = ANY($1::text[])
 		ORDER BY created_at ASC
 	`, pq.Array(activeInstanceStates))
 	if err != nil {

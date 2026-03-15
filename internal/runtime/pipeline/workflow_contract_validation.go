@@ -399,8 +399,21 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			}
 		}
 	}
-	// TODO(phase4): root-level schema.yaml required_agents are not exposed on semanticview.Source today;
-	// this validation currently covers flow-scoped schemas surfaced through FlowSchemaEntries.
+	for _, required := range source.RequiredAgents() {
+		role := strings.TrimSpace(required.Role)
+		if role == "" {
+			errs = append(errs, "root schema required_agents entry missing role")
+			continue
+		}
+		agentID, agent, ok := workflowRequiredAgentProvider(source, role)
+		if !ok {
+			errs = append(errs, fmt.Sprintf("root schema required agent role %s missing from merged agents", role))
+			continue
+		}
+		if diff := diffMissingStrings(required.Emits, agent.EmitEvents); diff != "" {
+			errs = append(errs, fmt.Sprintf("root required agent %s emits mismatch (%s)", agentID, diff))
+		}
+	}
 
 	for agentID, agent := range source.AgentEntries() {
 		if len(agent.SubscriptionsBootstrap) > 0 {

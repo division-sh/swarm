@@ -59,7 +59,10 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 	}
 	mode := strings.TrimSpace(s.ConversationMode)
 	if mode == "" {
-		mode = "session"
+		mode = sessions.RuntimeModeSession
+	}
+	if !shouldPersistConversationMode(mode) {
+		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
 		AgentID:   s.AgentID,
@@ -84,29 +87,45 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 	scope := sessions.ScopeFromContext(ctx)
 	mode := strings.TrimSpace(scope.ConversationMode)
 	if mode == "" {
-		mode = "session"
+		mode = sessions.RuntimeModeSession
 	}
-	scopeKey := strings.TrimSpace(scope.ScopeKey)
-	lease, err := r.sessions.Acquire(ctx, agentID, "cli_test", r.lockOwner, scopeKey)
-	if err != nil {
-		return nil, err
-	}
-	if err := r.sessions.Release(ctx, lease); err != nil {
-		return nil, err
+	resolved := resolvedSessionScope(mode, scope.ScopeKey)
+
+	var lease *sessions.Lease
+	if !resolved.Stateless {
+		var err error
+		lease, err = r.sessions.Acquire(ctx, agentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.sessions.Release(ctx, lease); err != nil {
+			return nil, err
+		}
 	}
 
 	s := &Session{
-		ID:               lease.SessionID,
+		ID: ensurePlatformSessionID(func() string {
+			if lease != nil {
+				return lease.SessionID
+			}
+			return ""
+		}()),
+		ProviderSessionID: func() string {
+			if lease != nil {
+				return lease.ProviderSessionID
+			}
+			return ""
+		}(),
 		AgentID:          agentID,
-		RuntimeMode:      "cli_test",
+		RuntimeMode:      resolved.RuntimeMode,
 		ConversationMode: mode,
-		ScopeKey:         scopeKey,
+		ScopeKey:         resolved.ScopeKey,
 		SystemPrompt:     systemPrompt,
 		Tools:            tools,
 		Messages:         nil,
 	}
-	if r.conversations != nil {
-		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, scopeKey); err == nil && ok {
+	if r.conversations != nil && !resolved.Stateless {
+		if rec, ok, err := r.conversations.LoadActiveConversation(ctx, agentID, mode, resolved.ScopeKey); err == nil && ok {
 			s.Messages = rec.Messages
 			s.TurnCount = rec.TurnCount
 		}
@@ -133,17 +152,25 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	lease, err := r.sessions.Acquire(ctx, s.AgentID, "cli_test", r.lockOwner, strings.TrimSpace(s.ScopeKey))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = r.sessions.Release(ctx, lease) }()
-	stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, "cli_test")
-	defer stopLeaseHeartbeat()
+	resolved := resolvedSessionScope(s.ConversationMode, s.ScopeKey)
+	var lease *sessions.Lease
+	var err error
+	if !resolved.Stateless {
+		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, resolved.ScopeKey)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = r.sessions.Release(ctx, lease) }()
+		stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, resolved.RuntimeMode)
+		defer stopLeaseHeartbeat()
 
-	if lease.SessionID != s.ID {
-		LogSessionAdopted(s.AgentID, "cli_test", s.ID, lease.SessionID, strings.TrimSpace(s.ScopeKey))
-		s.ID = lease.SessionID
+		if lease.SessionID != s.ID {
+			LogSessionAdopted(s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
+			s.ID = lease.SessionID
+		}
+		if sid := strings.TrimSpace(lease.ProviderSessionID); sid != "" {
+			s.ProviderSessionID = sid
+		}
 	}
 	target, err := r.resolveWorkspace(ctx)
 	if err != nil {
@@ -156,7 +183,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		s.ParseFailures++
 		r.persistTurn(ctx, AgentTurnRecord{
 			AgentID:        s.AgentID,
-			RuntimeMode:    "cli_test",
+			RuntimeMode:    resolved.RuntimeMode,
 			SessionID:      s.ID,
 			RequestPayload: jsonBytes(map[string]any{"message": message}),
 			ParseOK:        false,
@@ -175,7 +202,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if s.TurnCount == 0 {
 		args = []string{
 			"-p",
-			"--session-id", s.ID,
+			"--session-id", sessionToken(s),
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
 		if shouldIncludePartialMessages(r.cfg) {
@@ -193,7 +220,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	} else {
 		args = []string{
 			"-p",
-			"-r", s.ID,
+			"-r", sessionToken(s),
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
 		if shouldIncludePartialMessages(r.cfg) {
@@ -209,7 +236,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	monitorMeta := MonitorTurnMeta{
 		AgentID:   s.AgentID,
 		Runtime:   "cli_test",
-		SessionID: s.ID,
+		SessionID: sessionToken(s),
 		ScopeKey:  s.ScopeKey,
 		InputRole: message.Role,
 		InputText: prompt,
@@ -226,7 +253,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if err != nil && s.TurnCount == 0 && isUnsupportedCLIFlagError(err) {
 		args = []string{
 			"-p",
-			"--session-id", s.ID,
+			"--session-id", sessionToken(s),
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
 		if shouldIncludePartialMessages(r.cfg) {
@@ -246,60 +273,63 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		oldTurnCount := s.TurnCount
 		oldParseFailures := s.ParseFailures
 		checkpoint := BuildRotationCheckpoint(rotateReason, s)
-		rotated, rotateErr := r.sessions.Rotate(ctx, s.AgentID, "cli_test", r.lockOwner, checkpoint, strings.TrimSpace(s.ScopeKey))
-		if rotateErr == nil && rotated != nil {
-			s.ID = rotated.SessionID
-			s.TurnCount = 0
-			if len(s.Messages) > 0 {
-				s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
-			}
-			LogSessionRotated(
-				s.AgentID,
-				"cli_test",
-				oldSessionID,
-				rotated.SessionID,
-				strings.TrimSpace(s.ScopeKey),
-				rotateReason,
-				oldTurnCount,
-				oldParseFailures,
-			)
-			args = []string{
-				"-p",
-				"--session-id", s.ID,
-				"--output-format", configuredCLIOutputFormat(r.cfg),
-			}
-			if shouldIncludePartialMessages(r.cfg) {
-				args = append(args, "--include-partial-messages")
-			}
-			args = append(args, permissionModeArgs()...)
-			if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
-				args = append(args, "--system-prompt", sys)
-			}
-			if mcpEnabled {
-				args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-			} else if tools := claudeToolsArg(s.Tools); tools != "" {
-				args = append(args, "--tools", tools)
-			}
-			monitorMeta.SessionID = s.ID
-			resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
-			transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
-			transportFallback.Used = transportFallback.Used || fallback.Used
-			if err != nil && isUnsupportedCLIFlagError(err) {
+		if !resolved.Stateless {
+			rotated, rotateErr := r.sessions.Rotate(ctx, s.AgentID, resolved.RuntimeMode, r.lockOwner, checkpoint, resolved.ScopeKey)
+			if rotateErr == nil && rotated != nil {
+				s.ID = rotated.SessionID
+				s.ProviderSessionID = rotated.ProviderSessionID
+				s.TurnCount = 0
+				if len(s.Messages) > 0 {
+					s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
+				}
+				LogSessionRotated(
+					s.AgentID,
+					resolved.RuntimeMode,
+					oldSessionID,
+					rotated.SessionID,
+					resolved.ScopeKey,
+					rotateReason,
+					oldTurnCount,
+					oldParseFailures,
+				)
 				args = []string{
 					"-p",
-					"--session-id", s.ID,
+					"--session-id", sessionToken(s),
 					"--output-format", configuredCLIOutputFormat(r.cfg),
 				}
 				if shouldIncludePartialMessages(r.cfg) {
 					args = append(args, "--include-partial-messages")
 				}
 				args = append(args, permissionModeArgs()...)
+				if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
+					args = append(args, "--system-prompt", sys)
+				}
 				if mcpEnabled {
 					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
+				} else if tools := claudeToolsArg(s.Tools); tools != "" {
+					args = append(args, "--tools", tools)
 				}
-				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content), monitorMeta)
+				monitorMeta.SessionID = sessionToken(s)
+				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
 				transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 				transportFallback.Used = transportFallback.Used || fallback.Used
+				if err != nil && isUnsupportedCLIFlagError(err) {
+					args = []string{
+						"-p",
+						"--session-id", sessionToken(s),
+						"--output-format", configuredCLIOutputFormat(r.cfg),
+					}
+					if shouldIncludePartialMessages(r.cfg) {
+						args = append(args, "--include-partial-messages")
+					}
+					args = append(args, permissionModeArgs()...)
+					if mcpEnabled {
+						args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
+					}
+					resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content), monitorMeta)
+					transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
+					transportFallback.Used = transportFallback.Used || fallback.Used
+				}
 			}
 		}
 	}
@@ -308,11 +338,12 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		s.ParseFailures++
 		r.persistTurn(ctx, AgentTurnRecord{
 			AgentID:     s.AgentID,
-			RuntimeMode: "cli_test",
+			RuntimeMode: resolved.RuntimeMode,
 			SessionID:   s.ID,
 			RequestPayload: jsonBytes(map[string]any{
 				"args":                          args,
 				"message":                       message,
+				"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
 				"prompt_arg_fallback_attempted": transportFallback.Attempted,
 				"prompt_arg_fallback_used":      transportFallback.Used,
 			}),
@@ -320,37 +351,45 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			Latency: latency,
 			Error:   err.Error(),
 		})
-		if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, "cli_test", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
-			lease = rotated
+		if !resolved.Stateless {
+			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
+				lease = rotated
+			}
 		}
 		return nil, err
 	}
 
 	s.Messages = append(s.Messages, message, resp.Message)
-	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ID {
-		oldSessionID := s.ID
-		if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, "cli_test", lease.LockOwner, sid, strings.TrimSpace(s.ScopeKey)); err != nil {
-			log.Printf("failed to adopt claude session id: agent=%s old=%s new=%s err=%v", s.AgentID, s.ID, sid, err)
+	if sid := strings.TrimSpace(resp.SessionID); sid != "" && sid != s.ProviderSessionID {
+		oldSessionID := strings.TrimSpace(s.ProviderSessionID)
+		if !resolved.Stateless {
+			if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, lease.LockOwner, sid, resolved.ScopeKey); err != nil {
+				log.Printf("failed to adopt claude session id: agent=%s old=%s new=%s err=%v", s.AgentID, oldSessionID, sid, err)
+			} else {
+				s.ProviderSessionID = sid
+				LogSessionAdopted(s.AgentID, resolved.RuntimeMode, oldSessionID, sid, resolved.ScopeKey)
+			}
 		} else {
-			s.ID = sid
-			lease.SessionID = sid
-			LogSessionAdopted(s.AgentID, "cli_test", oldSessionID, sid, strings.TrimSpace(s.ScopeKey))
+			s.ProviderSessionID = sid
 		}
 	}
 	s.TurnCount++
 	s.ParseFailures = 0
 
-	if err := r.sessions.IncrementTurn(ctx, s.AgentID, "cli_test", s.ID, strings.TrimSpace(s.ScopeKey)); err != nil {
-		return nil, err
+	if !resolved.Stateless {
+		if err := r.sessions.IncrementTurn(ctx, s.AgentID, resolved.RuntimeMode, s.ID, resolved.ScopeKey); err != nil {
+			return nil, err
+		}
 	}
 
 	r.persistTurn(ctx, AgentTurnRecord{
 		AgentID:     s.AgentID,
-		RuntimeMode: "cli_test",
+		RuntimeMode: resolved.RuntimeMode,
 		SessionID:   s.ID,
 		RequestPayload: jsonBytes(map[string]any{
 			"args":                          args,
 			"message":                       message,
+			"provider_session_id":           strings.TrimSpace(s.ProviderSessionID),
 			"prompt_arg_fallback_attempted": transportFallback.Attempted,
 			"prompt_arg_fallback_used":      transportFallback.Used,
 		}),
@@ -358,7 +397,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		ParseOK:     true,
 		Latency:     latency,
 	})
-	r.persistConversation(ctx, s)
+	if !resolved.Stateless {
+		r.persistConversation(ctx, s)
+	}
 
 	// Spend ledger: CLI runtime does not expose exact usage; estimate from payload sizes.
 	if r.budget != nil {
@@ -370,8 +411,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, "cli_test", r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
-		lease = rotated
+	if !resolved.Stateless {
+		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
+			lease = rotated
+		}
 	}
 	return resp, nil
 }

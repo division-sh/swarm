@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).
@@ -90,39 +89,9 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 		action = "unknown"
 	}
 	e.NormalizeEntityID()
-	entityID := e.EffectiveEntityID()
 
 	detail := marshalJSONOrEmpty(e.Detail)
-	_, err := l.db.ExecContext(withoutSQLTxContext(ctx), `
-		INSERT INTO runtime_log (
-			level, component, action,
-			event_id, event_type, agent_id, entity_id, campaign_id, scan_id, session_id,
-			detail, error, duration_us
-		)
-		VALUES (
-			$1, $2, $3,
-			$4::uuid, NULLIF($5,''), NULLIF($6,''), $7::uuid, $8::uuid, $9::uuid, $10::uuid,
-			$11::jsonb, NULLIF($12,''), NULLIF($13,0)
-		)
-	`,
-		level,
-		component,
-		action,
-		nullableUUID(e.EventID),
-		strings.TrimSpace(e.EventType),
-		strings.TrimSpace(e.AgentID),
-		nullableUUID(entityID),
-		nullableUUID(e.CampaignID),
-		nullableUUID(e.ScanID),
-		nullableUUID(e.SessionID),
-		string(detail),
-		strings.TrimSpace(e.Error),
-		e.DurationUS,
-	)
-	if err != nil && !isMissingDiagnosticsTable(err) {
-		// Best-effort logging only.
-		return
-	}
+	_ = logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, level, component, action, e, detail)
 }
 
 type PipelineTransitionInput struct {
@@ -176,10 +145,7 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 	}
 
 	var eventExists bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE id = $1::uuid)`, eventID).Scan(&eventExists); err != nil {
-		if isMissingDiagnosticsTable(err) {
-			return nil
-		}
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`, eventID).Scan(&eventExists); err != nil {
 		return err
 	}
 	if !eventExists {
@@ -187,33 +153,7 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 		return nil
 	}
 
-	_, err := db.ExecContext(ctx, `
-		INSERT INTO pipeline_transitions (
-			event_id, event_type, handler, pipeline_type, pipeline_id, action,
-			state_before, state_after, events_emitted, drop_reason, error, duration_us
-		)
-		VALUES (
-			$1::uuid, $2, $3, $4, $5::uuid, $6,
-			$7::jsonb, $8::jsonb, $9, NULLIF($10,''), NULLIF($11,''), NULLIF($12,0)
-		)
-	`,
-		eventID,
-		strings.TrimSpace(in.EventType),
-		handler,
-		pipelineType,
-		pipelineID,
-		action,
-		maybeJSONString(before),
-		maybeJSONString(after),
-		pq.Array(eventsEmitted),
-		strings.TrimSpace(in.DropReason),
-		strings.TrimSpace(in.Error),
-		durationUS,
-	)
-	if err != nil && isMissingDiagnosticsTable(err) {
-		return nil
-	}
-	return err
+	return recordPipelineTransitionSpec(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Error)
 }
 
 func withPipelineTransitionCollector(ctx context.Context, collector *[]deferredPipelineTransition) context.Context {
@@ -312,6 +252,86 @@ func isMissingDiagnosticsTable(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "does not exist") &&
-		(strings.Contains(msg, "runtime_log") || strings.Contains(msg, "pipeline_transitions"))
+	return strings.Contains(msg, "event_name") ||
+		strings.Contains(msg, "subscriber_id") ||
+		strings.Contains(msg, "side_effects") ||
+		strings.Contains(msg, "duration_ms")
+}
+
+func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, action string, e RuntimeLogEntry, detail []byte) error {
+	if db == nil {
+		return nil
+	}
+	payload := map[string]any{
+		"level":       level,
+		"component":   component,
+		"action":      action,
+		"event_id":    strings.TrimSpace(e.EventID),
+		"event_type":  strings.TrimSpace(e.EventType),
+		"agent_id":    strings.TrimSpace(e.AgentID),
+		"entity_id":   strings.TrimSpace(e.EffectiveEntityID()),
+		"campaign_id": strings.TrimSpace(e.CampaignID),
+		"scan_id":     strings.TrimSpace(e.ScanID),
+		"session_id":  strings.TrimSpace(e.SessionID),
+		"detail":      json.RawMessage(detail),
+		"error":       strings.TrimSpace(e.Error),
+		"duration_us": e.DurationUS,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, event_name, entity_id, flow_instance, scope, payload,
+			chain_depth, produced_by, produced_by_type, created_at
+		)
+		VALUES (
+			gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $1::jsonb,
+			0, 'runtime', 'platform', now()
+		)
+	`, string(encoded))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
+	sideEffects, err := json.Marshal(map[string]any{
+		"pipeline_type":  pipelineType,
+		"pipeline_id":    pipelineID,
+		"action":         action,
+		"events_emitted": eventsEmitted,
+		"drop_reason":    strings.TrimSpace(dropReason),
+		"error":          strings.TrimSpace(errText),
+	})
+	if err != nil {
+		return err
+	}
+	outcome := "success"
+	if strings.TrimSpace(errText) != "" {
+		outcome = "dead_letter"
+	} else if strings.TrimSpace(dropReason) != "" {
+		outcome = "discard"
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, state_before, state_after, side_effects, duration_ms, processed_at
+		)
+		SELECT
+			e.event_id, 'platform', $2, e.entity_id, e.flow_instance,
+			$3, NULLIF($4,''), NULLIF($5,''), $6::jsonb, NULLIF($7,0), now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+			outcome = EXCLUDED.outcome,
+			state_before = EXCLUDED.state_before,
+			state_after = EXCLUDED.state_after,
+			side_effects = EXCLUDED.side_effects,
+			duration_ms = EXCLUDED.duration_ms,
+			processed_at = now()
+	`, eventID, "pipeline:"+pipelineID, outcome, string(before), string(after), string(sideEffects), durationMS)
+	return err
 }

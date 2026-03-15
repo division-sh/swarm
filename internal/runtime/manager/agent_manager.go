@@ -19,19 +19,20 @@ import (
 )
 
 type AgentManager struct {
-	mu          sync.RWMutex
-	agents      map[string]Agent
-	agentCfg    map[string]models.AgentConfig
-	agentUpAt   map[string]time.Time
-	workspaces  workspace.Lifecycle
-	bus         Bus
-	factory     AgentFactory
-	store       ManagerPersistence
-	sessions    sessions.Registry
-	budget      BudgetGuard
-	runtimeMode string
-	inFlightMu  sync.Mutex
-	inFlight    map[string]struct{}
+	mu                       sync.RWMutex
+	agents                   map[string]Agent
+	agentCfg                 map[string]models.AgentConfig
+	agentUpAt                map[string]time.Time
+	workspaces               workspace.Lifecycle
+	bus                      Bus
+	factory                  AgentFactory
+	store                    ManagerPersistence
+	sessions                 sessions.Registry
+	budget                   BudgetGuard
+	runtimeMode              string
+	throttleSuppressPrefixes []string
+	inFlightMu               sync.Mutex
+	inFlight                 map[string]struct{}
 
 	runMu              sync.Mutex
 	running            bool
@@ -61,20 +62,28 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 	if len(stores) > 0 {
 		store = stores[0]
 	}
+	throttleSuppressPrefixes := make([]string, 0, len(opts.ThrottleSuppressPrefixes))
+	for _, prefix := range opts.ThrottleSuppressPrefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix != "" {
+			throttleSuppressPrefixes = append(throttleSuppressPrefixes, prefix)
+		}
+	}
 	return &AgentManager{
-		agents:            make(map[string]Agent),
-		agentCfg:          make(map[string]models.AgentConfig),
-		agentUpAt:         make(map[string]time.Time),
-		bus:               bus,
-		factory:           factory,
-		store:             store,
-		workspaces:        opts.Workspaces,
-		sessions:          opts.Sessions,
-		runtimeMode:       strings.TrimSpace(opts.RuntimeMode),
-		budget:            opts.Budget,
-		inFlight:          make(map[string]struct{}),
-		loopCancel:        make(map[string]context.CancelFunc),
-		poisonPanicCounts: make(map[string]int),
+		agents:                   make(map[string]Agent),
+		agentCfg:                 make(map[string]models.AgentConfig),
+		agentUpAt:                make(map[string]time.Time),
+		bus:                      bus,
+		factory:                  factory,
+		store:                    store,
+		workspaces:               opts.Workspaces,
+		sessions:                 opts.Sessions,
+		runtimeMode:              strings.TrimSpace(opts.RuntimeMode),
+		budget:                   opts.Budget,
+		throttleSuppressPrefixes: throttleSuppressPrefixes,
+		inFlight:                 make(map[string]struct{}),
+		loopCancel:               make(map[string]context.CancelFunc),
+		poisonPanicCounts:        make(map[string]int),
 	}
 }
 
@@ -171,6 +180,9 @@ func (am *AgentManager) SpawnEphemeralClone(baseAgentID, cloneAgentID string) er
 }
 
 func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAgent, persist bool) error {
+	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
+		rec.Config.LLMBackend = strings.TrimSpace(am.runtimeMode)
+	}
 	a, err := am.buildAgent(rec.Config)
 	if err != nil {
 		return err
@@ -233,7 +245,6 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
 	cfg = am.applyContractPrompt(cfg)
-	cfg = am.applyPromptOverride(am.runtimeContext(), cfg)
 	if am.factory != nil {
 		return am.factory(cfg)
 	}
@@ -262,125 +273,6 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) models.Agent
 	prompt = ExpandConfigPromptTemplate(prompt, cfg.Config)
 	cfg.Config = withSystemPrompt(cfg.Config, prompt)
 	return cfg
-}
-
-func (am *AgentManager) applyPromptOverride(ctx context.Context, cfg models.AgentConfig) models.AgentConfig {
-	if am == nil || am.store == nil {
-		return cfg
-	}
-	store, ok := am.store.(PromptOverridePersistence)
-	if !ok || store == nil {
-		return cfg
-	}
-	agentID := strings.TrimSpace(cfg.ID)
-	if agentID == "" {
-		return cfg
-	}
-	override, found, err := store.GetPromptOverride(ctx, agentID)
-	if err != nil || !found {
-		return cfg
-	}
-	overridePrompt := strings.TrimSpace(override.Prompt)
-	if overridePrompt == "" {
-		return cfg
-	}
-	cfg.Config = withSystemPrompt(cfg.Config, overridePrompt)
-	return cfg
-}
-
-type AgentPromptState struct {
-	AgentID         string
-	Role            string
-	Mode            string
-	TemplatePrompt  string
-	EffectivePrompt string
-	Override        *PromptOverrideRecord
-}
-
-func (am *AgentManager) GetAgentPromptState(ctx context.Context, agentID string) (AgentPromptState, error) {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return AgentPromptState{}, errors.New("agentID is required")
-	}
-	am.mu.RLock()
-	cfg, ok := am.agentCfg[agentID]
-	am.mu.RUnlock()
-	if !ok {
-		return AgentPromptState{}, fmt.Errorf("agent not found: %s", agentID)
-	}
-	state := AgentPromptState{
-		AgentID:         agentID,
-		Role:            strings.TrimSpace(cfg.Role),
-		Mode:            strings.TrimSpace(cfg.Mode),
-		TemplatePrompt:  extractSystemPromptFromConfig(cfg.Config),
-		EffectivePrompt: extractSystemPromptFromConfig(cfg.Config),
-	}
-	if am.store == nil {
-		return state, nil
-	}
-	store, ok := am.store.(PromptOverridePersistence)
-	if !ok || store == nil {
-		return state, nil
-	}
-	override, found, err := store.GetPromptOverride(ctx, agentID)
-	if err != nil {
-		return AgentPromptState{}, err
-	}
-	if found {
-		state.Override = &override
-		state.EffectivePrompt = strings.TrimSpace(override.Prompt)
-	}
-	return state, nil
-}
-
-func (am *AgentManager) SetAgentPromptOverride(ctx context.Context, agentID, prompt, source, notes string) error {
-	agentID = strings.TrimSpace(agentID)
-	prompt = strings.TrimSpace(prompt)
-	if agentID == "" {
-		return errors.New("agentID is required")
-	}
-	if prompt == "" {
-		return errors.New("prompt is required")
-	}
-	if am.store == nil {
-		return errors.New("prompt overrides require persistent store")
-	}
-	store, ok := am.store.(PromptOverridePersistence)
-	if !ok || store == nil {
-		return errors.New("prompt overrides are unsupported by current store")
-	}
-	current, err := am.GetAgentPromptState(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if err := store.UpsertPromptOverride(ctx, PromptOverrideRecord{
-		AgentID:        agentID,
-		Prompt:         prompt,
-		PreviousPrompt: strings.TrimSpace(current.EffectivePrompt),
-		Source:         strings.TrimSpace(source),
-		Notes:          strings.TrimSpace(notes),
-	}); err != nil {
-		return err
-	}
-	return am.ReconfigureAgent(agentID, models.AgentConfig{})
-}
-
-func (am *AgentManager) RevertAgentPromptOverride(ctx context.Context, agentID string) error {
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
-		return errors.New("agentID is required")
-	}
-	if am.store == nil {
-		return errors.New("prompt overrides require persistent store")
-	}
-	store, ok := am.store.(PromptOverridePersistence)
-	if !ok || store == nil {
-		return errors.New("prompt overrides are unsupported by current store")
-	}
-	if err := store.DeletePromptOverride(ctx, agentID); err != nil {
-		return err
-	}
-	return am.ReconfigureAgent(agentID, models.AgentConfig{})
 }
 
 func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {

@@ -193,6 +193,58 @@ func (rt *RouteTable) RemoveFlowInstance(templateID, instanceID string) {
 	rt.rebuildLocked()
 }
 
+func (rt *RouteTable) MaterializedRoutes(instancePath string) []FlowInstanceRouteRecord {
+	if rt == nil {
+		return nil
+	}
+	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	if instancePath == "" {
+		return nil
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+
+	templateID := routeFirstPathSegment(instancePath)
+	instanceID := routeLastPathSegment(instancePath)
+	seen := make(map[string]struct{})
+	out := make([]FlowInstanceRouteRecord, 0, 8)
+	for _, pattern := range rt.patterns {
+		if strings.Trim(strings.TrimSpace(pattern.InstancePath), "/") != instancePath {
+			continue
+		}
+		record := FlowInstanceRouteRecord{
+			TemplateID:     templateID,
+			InstanceID:     instanceID,
+			InstancePath:   instancePath,
+			EventPattern:   strings.TrimSpace(pattern.EventPattern),
+			SubscriberType: strings.TrimSpace(pattern.Subscriber.Type),
+			SubscriberID:   strings.TrimSpace(pattern.Subscriber.ID),
+			SourceFlow:     templateID,
+		}
+		key := strings.Join([]string{
+			record.InstancePath,
+			record.EventPattern,
+			record.SubscriberType,
+			record.SubscriberID,
+		}, "|")
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, record)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].EventPattern != out[j].EventPattern {
+			return out[i].EventPattern < out[j].EventPattern
+		}
+		if out[i].SubscriberType != out[j].SubscriberType {
+			return out[i].SubscriberType < out[j].SubscriberType
+		}
+		return out[i].SubscriberID < out[j].SubscriberID
+	})
+	return out
+}
+
 func newRouteTable() *RouteTable {
 	return &RouteTable{
 		routes:            make(map[string][]Subscriber),
