@@ -12,10 +12,10 @@ func TestGenericBundle_BudgetSuppressionPatterns(t *testing.T) {
 		"entity_id": "item-123",
 		"score":     70.0,
 	}, runtimepipeline.WorkflowState{
-		EntityID:   "item-123",
-		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
-		Status:     "ready",
-		Metadata:   map[string]any{},
+		EntityID: "item-123",
+		Stage:    runtimepipeline.NormalizeWorkflowStateID("ready"),
+		Status:   "ready",
+		Metadata: map[string]any{},
 	}, map[string]any{"delivery_enabled": true})
 	if allowed.Status == runtimepipeline.HandlerOutcomeBlocked {
 		t.Fatalf("expected review guard to pass when delivery is enabled, got %+v", allowed)
@@ -25,10 +25,10 @@ func TestGenericBundle_BudgetSuppressionPatterns(t *testing.T) {
 		"entity_id": "item-456",
 		"score":     70.0,
 	}, runtimepipeline.WorkflowState{
-		EntityID:   "item-456",
-		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
-		Status:     "ready",
-		Metadata:   map[string]any{},
+		EntityID: "item-456",
+		Stage:    runtimepipeline.NormalizeWorkflowStateID("ready"),
+		Status:   "ready",
+		Metadata: map[string]any{},
 	}, map[string]any{"delivery_enabled": false})
 	if blocked.Status != runtimepipeline.HandlerOutcomeBlocked {
 		t.Fatalf("expected review guard to block when delivery is disabled, got %+v", blocked)

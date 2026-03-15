@@ -43,7 +43,7 @@ func TestValidateWorkflowContractsDetailed_Tier8SemanticFixtures(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected validation error for %s", tc.wantCategory)
 			}
-			if !strings.Contains(err.Error(), tc.wantContains) {
+			if !workflowValidationErrorContains(err, tc.wantContains) {
 				t.Fatalf("expected validation error containing %q, got %v", tc.wantContains, err)
 			}
 		})
@@ -53,7 +53,7 @@ func TestValidateWorkflowContractsDetailed_Tier8SemanticFixtures(t *testing.T) {
 func TestValidateWorkflowContractsDetailed_RejectsMissingRequiredAgentRole(t *testing.T) {
 	bundle := newRequiredAgentValidationBundle()
 	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
-	if err == nil || !strings.Contains(err.Error(), "missing-agent") {
+	if err == nil || !workflowValidationErrorContains(err, "missing-agent") {
 		t.Fatalf("expected missing required agent error, got %v", err)
 	}
 }
@@ -68,7 +68,7 @@ func TestValidateWorkflowContractsDetailed_RejectsMissingRootRequiredAgentRole(t
 		}},
 	}
 	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
-	if err == nil || !strings.Contains(err.Error(), "missing-root-agent") {
+	if err == nil || !workflowValidationErrorContains(err, "missing-root-agent") {
 		t.Fatalf("expected missing root required agent error, got %v", err)
 	}
 }

@@ -11,14 +11,14 @@ import (
 )
 
 type Schedule struct {
-	AgentID    string
-	EventType  string
-	Mode       string // once | cron
-	Cron       string // supports "@every <duration>" and plain duration string
-	At         time.Time
-	EntityID   string
-	TaskID     string
-	Payload    []byte
+	AgentID   string
+	EventType string
+	Mode      string // once | cron
+	Cron      string // supports "@every <duration>" and plain duration string
+	At        time.Time
+	EntityID  string
+	TaskID    string
+	Payload   []byte
 }
 
 func (s Schedule) EffectiveEntityID() string {

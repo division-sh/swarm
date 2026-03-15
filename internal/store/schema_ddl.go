@@ -46,7 +46,7 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 	if matches := schemaDDLNumericPattern.FindStringSubmatch(normalized); len(matches) == 3 {
 		return fmt.Sprintf("NUMERIC(%s,%s)", matches[1], matches[2]), nil
 	}
-	return "", fmt.Errorf("unknown schema type %q", schemaType)
+	return "", fmt.Errorf("%w %q", ErrUnknownSchemaType, schemaType)
 }
 
 func GeneratePlatformTableDDLs(spec runtimecontracts.PlatformSpecDocument) ([]SchemaTableDDL, error) {

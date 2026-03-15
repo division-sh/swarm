@@ -19,4 +19,3 @@ func TestStartPostgres_Smoke(t *testing.T) {
 		t.Fatalf("expected 1, got %d", one)
 	}
 }
-

@@ -15,10 +15,10 @@ type ContextOverlay struct {
 }
 
 type ContextBuilderInput struct {
-	Source   semanticview.Source
-	FlowID   string
-	State    StateSnapshot
-	Payload  map[string]any
+	Source  semanticview.Source
+	FlowID  string
+	State   StateSnapshot
+	Payload map[string]any
 }
 
 func BuildBaseContext(input ContextBuilderInput) BaseContext {

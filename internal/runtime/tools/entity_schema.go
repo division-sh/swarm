@@ -61,7 +61,7 @@ func entityToolSchemaFromSource(source semanticview.Source, entityType string) (
 			Columns:    columns,
 		}, nil
 	}
-	return entityToolSchema{}, fmt.Errorf("unknown entity_type %q", entityType)
+	return entityToolSchema{}, fmt.Errorf("%w: %q", ErrUnknownEntityType, entityType)
 }
 
 func (s entityToolSchema) field(name string) (runtimecontracts.EntitySchemaField, error) {
@@ -71,7 +71,7 @@ func (s entityToolSchema) field(name string) (runtimecontracts.EntitySchemaField
 	}
 	field, ok := s.Fields[name]
 	if !ok {
-		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("entity_type %s does not define field %s", s.EntityType, name)
+		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("%w: entity_type %s does not define field %s", ErrUnknownEntityField, s.EntityType, name)
 	}
 	return field, nil
 }

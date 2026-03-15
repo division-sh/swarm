@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-2",
 		}, "agent_fire")
-		if err == nil || !strings.Contains(err.Error(), "tool agent_fire is not allowed") {
+		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
 			t.Fatalf("expected denial for agent_fire without permission, got %v", err)
 		}
 	})
@@ -44,7 +45,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-4",
 		}, "nginx_reload")
-		if err == nil || !strings.Contains(err.Error(), "tool nginx_reload is not allowed") {
+		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
 			t.Fatalf("expected denial for nginx_reload without permission, got %v", err)
 		}
 	})

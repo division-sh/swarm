@@ -1,0 +1,559 @@
+package contracts
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
+	if bundle == nil {
+		return
+	}
+	name := strings.TrimSpace(bundle.Package.Name)
+	version := strings.TrimSpace(bundle.Package.Version)
+	entitySchema := bundle.Package.EntitySchema
+	semantics := WorkflowSemanticView{
+		Name:                   name,
+		Version:                version,
+		InitialStage:           "",
+		EntitySchema:           entitySchema,
+		Stages:                 deriveWorkflowStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas),
+		TerminalStages:         deriveWorkflowTerminalStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas),
+		Transitions:            nil,
+		Timers:                 deriveWorkflowSemanticTimers(bundle),
+		Guards:                 deriveWorkflowGuardEntries(bundle),
+		Actions:                deriveWorkflowActionEntries(bundle),
+		GuardByID:              map[string]GuardActionEntry{},
+		ActionByID:             map[string]GuardActionEntry{},
+		FlowInitial:            map[string]string{},
+		FlowStates:             map[string][]string{},
+		FlowTerminal:           map[string][]string{},
+		FlowNamespace:          map[string]string{},
+		FlowPrefix:             map[string]string{},
+		FlowRules:              map[string]string{},
+		FlowInputs:             map[string][]string{},
+		FlowOutputs:            map[string][]string{},
+		FlowReads:              map[string][]string{},
+		FlowWrites:             map[string][]string{},
+		FlowAgents:             map[string][]FlowRequiredAgent{},
+		WritePinOwners:         map[string][]string{},
+		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
+		EventOwners:            map[string][]string{},
+		HandlerTransitionIndex: map[string]map[string]HandlerTransitionSemantic{},
+	}
+	semantics.Guards = appendPlatformBuiltinGuardEntries(semantics.Guards, bundle.Platform.BuiltinHooks.Guards)
+	semantics.Actions = appendPlatformBuiltinActionEntries(semantics.Actions, bundle.Platform.BuiltinHooks.Actions)
+	for _, entry := range semantics.Guards {
+		if id := strings.TrimSpace(entry.ID); id != "" {
+			semantics.GuardByID[id] = entry
+		}
+	}
+	for _, entry := range semantics.Actions {
+		if id := strings.TrimSpace(entry.ID); id != "" {
+			semantics.ActionByID[id] = entry
+		}
+	}
+	for flowID, schema := range bundle.FlowSchemas {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		semantics.FlowInitial[flowID] = strings.TrimSpace(schema.InitialState)
+		semantics.FlowStates[flowID] = append([]string{}, schema.States...)
+		semantics.FlowTerminal[flowID] = append([]string{}, schema.TerminalStates...)
+		assignedNamespace := strings.TrimSpace(flowAssignedNamespace(bundle.Paths.Flows, flowID))
+		if assignedNamespace == "" {
+			assignedNamespace = strings.TrimSpace(schema.NamespacePrefix)
+		}
+		semantics.FlowNamespace[flowID] = assignedNamespace
+		semantics.FlowPrefix[flowID] = strings.TrimSpace(schema.NamespacePrefix)
+		semantics.FlowRules[flowID] = strings.TrimSpace(schema.NamespaceRule)
+		semantics.FlowInputs[flowID] = append([]string{}, schema.Pins.Inputs.Events...)
+		semantics.FlowOutputs[flowID] = append([]string{}, schema.Pins.Outputs.Events...)
+		semantics.FlowReads[flowID] = append([]string{}, schema.Pins.Inputs.Reads...)
+		semantics.FlowWrites[flowID] = append([]string{}, schema.Pins.Outputs.Writes...)
+		semantics.FlowAgents[flowID] = append([]FlowRequiredAgent{}, schema.RequiredAgents...)
+		for _, writePin := range schema.Pins.Outputs.Writes {
+			writePin = strings.TrimSpace(writePin)
+			if writePin == "" {
+				continue
+			}
+			semantics.WritePinOwners[writePin] = appendIfMissingString(semantics.WritePinOwners[writePin], flowID)
+		}
+	}
+	for nodeID, node := range bundle.Nodes {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID == "" || len(node.EventHandlers) == 0 {
+			continue
+		}
+		handlers := make(map[string]SystemNodeEventHandler, len(node.EventHandlers))
+		source, _ := bundle.NodeContractSource(nodeID)
+		for eventType, handler := range node.EventHandlers {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			handlers[eventType] = handler
+			semantics.EventOwners[eventType] = appendIfMissingString(semantics.EventOwners[eventType], nodeID)
+			transition := HandlerTransitionSemantic{
+				ID:               fmt.Sprintf("%s:%s", nodeID, eventType),
+				NodeID:           nodeID,
+				FlowID:           strings.TrimSpace(source.FlowID),
+				EventType:        eventType,
+				Action:           handler.Action,
+				Guard:            handler.Guard,
+				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
+				SetsGate:         handler.SetsGate,
+				ClearGates:       handler.ClearGates,
+				DataAccumulation: handler.DataAccumulation,
+				Emits:            handler.Emits,
+				Condition:        strings.TrimSpace(handler.Condition),
+				CompletionRule:   strings.TrimSpace(handler.CompletionRule),
+				OnComplete:       handler.OnComplete,
+				Rules:            handler.Rules,
+				Accumulate:       handler.Accumulate,
+				Compute:          handler.Compute,
+				Query:            handler.Query,
+				FanOut:           handler.FanOut,
+				Filter:           handler.Filter,
+				Reduce:           handler.Reduce,
+				Count:            handler.Count,
+				Clear:            handler.Clear,
+				PayloadTransform: handler.PayloadTransform,
+				Branch:           append([]BranchSpec{}, handler.Branch...),
+			}
+			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
+			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
+				semantics.Transitions = append(semantics.Transitions, derivedTransition)
+			}
+			if semantics.HandlerTransitionIndex[nodeID] == nil {
+				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
+			}
+			semantics.HandlerTransitionIndex[nodeID][eventType] = transition
+		}
+		semantics.NodeHandlers[nodeID] = handlers
+	}
+	bundle.Semantics = semantics
+}
+func deriveWorkflowGuardEntries(bundle *WorkflowContractBundle) []GuardActionEntry {
+	if bundle == nil {
+		return nil
+	}
+	seen := map[string]GuardActionEntry{}
+	for _, nodeID := range sortedContractKeys(bundle.Nodes) {
+		node := bundle.Nodes[nodeID]
+		for _, eventType := range sortedContractKeys(node.EventHandlers) {
+			handler := node.EventHandlers[eventType]
+			if handler.Guard == nil {
+				continue
+			}
+			id := strings.TrimSpace(handler.Guard.ID)
+			if id == "" {
+				continue
+			}
+			seen[id] = GuardActionEntry{
+				ID:        id,
+				Check:     strings.TrimSpace(handler.Guard.Check),
+				PolicyRef: strings.TrimSpace(handler.Guard.PolicyRef),
+			}
+		}
+	}
+	return sortedGuardActionEntries(seen)
+}
+func deriveWorkflowActionEntries(bundle *WorkflowContractBundle) []GuardActionEntry {
+	if bundle == nil {
+		return nil
+	}
+	seen := map[string]GuardActionEntry{}
+	for _, nodeID := range sortedContractKeys(bundle.Nodes) {
+		node := bundle.Nodes[nodeID]
+		for _, eventType := range sortedContractKeys(node.EventHandlers) {
+			handler := node.EventHandlers[eventType]
+			id := strings.TrimSpace(handler.Action.ID)
+			if id == "" {
+				continue
+			}
+			seen[id] = GuardActionEntry{ID: id}
+		}
+	}
+	return sortedGuardActionEntries(seen)
+}
+func sortedGuardActionEntries(entries map[string]GuardActionEntry) []GuardActionEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]GuardActionEntry, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, entries[id])
+	}
+	return out
+}
+func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
+	to := strings.TrimSpace(transition.AdvancesTo)
+	if to == "" {
+		return WorkflowTransitionContract{}, false
+	}
+	out := WorkflowTransitionContract{
+		ID:               strings.TrimSpace(transition.ID),
+		From:             []string{"*"},
+		To:               to,
+		Trigger:          strings.TrimSpace(transition.EventType),
+		Node:             strings.TrimSpace(transition.NodeID),
+		DataAccumulation: transition.DataAccumulation,
+	}
+	if guardID := strings.TrimSpace(firstTransitionGuardID(transition.Guard)); guardID != "" {
+		out.Guards = []string{guardID}
+	}
+	if actionID := strings.TrimSpace(transition.Action.ID); actionID != "" {
+		out.Actions = []string{actionID}
+	}
+	return out, strings.TrimSpace(out.ID) != "" && strings.TrimSpace(out.Trigger) != ""
+}
+func firstTransitionGuardID(guard *GuardSpec) string {
+	if guard == nil {
+		return ""
+	}
+	return strings.TrimSpace(guard.ID)
+}
+func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
+	if bundle == nil {
+		return nil
+	}
+	out := make([]WorkflowTimerContract, 0, 8)
+	indexByID := map[string]int{}
+	addTimer := func(timer WorkflowTimerContract) {
+		timer = normalizeWorkflowSemanticTimer(bundle, timer)
+		id := strings.TrimSpace(timer.ID)
+		if id == "" {
+			return
+		}
+		if idx, ok := indexByID[id]; ok {
+			out[idx] = mergeWorkflowSemanticTimer(out[idx], timer)
+			return
+		}
+		indexByID[id] = len(out)
+		out = append(out, timer)
+	}
+	for _, timer := range deriveNodeWorkflowTimers(bundle) {
+		addTimer(timer)
+	}
+	return out
+}
+func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
+	if bundle == nil {
+		return nil
+	}
+	type scopedNodeEntry struct {
+		Key    string
+		NodeID string
+		Node   SystemNodeContract
+		Source ContractItemSource
+	}
+	scopedNodes := make([]scopedNodeEntry, 0, len(bundle.scopedNodes))
+	for scopedKey, node := range bundle.scopedNodes {
+		source := bundle.scopedNodeSources[scopedKey]
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" {
+			parts := strings.Split(scopedKey, "::")
+			if len(parts) > 0 {
+				nodeID = strings.TrimSpace(parts[len(parts)-1])
+			}
+		}
+		scopedNodes = append(scopedNodes, scopedNodeEntry{
+			Key:    scopedKey,
+			NodeID: nodeID,
+			Node:   node,
+			Source: source,
+		})
+	}
+	if len(scopedNodes) == 0 {
+		for nodeID, node := range bundle.Nodes {
+			scopedNodes = append(scopedNodes, scopedNodeEntry{
+				Key:    nodeID,
+				NodeID: strings.TrimSpace(nodeID),
+				Node:   node,
+				Source: bundle.nodeSources[nodeID],
+			})
+		}
+	}
+	if len(scopedNodes) == 0 && len(bundle.Nodes) > 0 {
+		for nodeID, node := range bundle.Nodes {
+			scopedNodes = append(scopedNodes, scopedNodeEntry{
+				Key:    nodeID,
+				NodeID: strings.TrimSpace(nodeID),
+				Node:   node,
+			})
+		}
+	}
+	if len(scopedNodes) == 0 {
+		return nil
+	}
+	out := make([]WorkflowTimerContract, 0, 8)
+	sort.Slice(scopedNodes, func(i, j int) bool {
+		return strings.Compare(scopedNodes[i].Key, scopedNodes[j].Key) < 0
+	})
+	for _, item := range scopedNodes {
+		nodeID := strings.TrimSpace(item.NodeID)
+		node := item.Node
+		if len(node.Timers) == 0 {
+			continue
+		}
+		flowID := strings.TrimSpace(item.Source.FlowID)
+		for _, timer := range node.Timers {
+			timer.NodeID = nodeID
+			timer.FlowID = flowID
+			if strings.TrimSpace(timer.Owner) == "" {
+				timer.Owner = nodeID
+			}
+			if strings.TrimSpace(timer.Event) == "" {
+				timer.Event = inferWorkflowTimerEvent(bundle, node, timer)
+			}
+			out = append(out, timer)
+		}
+	}
+	return out
+}
+func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer WorkflowTimerContract) WorkflowTimerContract {
+	timer.ID = strings.TrimSpace(timer.ID)
+	timer.Stage = strings.TrimSpace(timer.Stage)
+	timer.Event = strings.TrimSpace(timer.Event)
+	timer.Owner = strings.TrimSpace(timer.Owner)
+	timer.FlowID = strings.TrimSpace(timer.FlowID)
+	timer.NodeID = strings.TrimSpace(timer.NodeID)
+	timer.Action = strings.TrimSpace(timer.Action)
+	timer.Cancellation = strings.TrimSpace(timer.Cancellation)
+	timer.Delay = strings.TrimSpace(timer.Delay)
+	timer.StartOn = strings.TrimSpace(timer.StartOn)
+	timer.CancelOn = strings.TrimSpace(timer.CancelOn)
+	if timer.Event == "" && timer.NodeID != "" {
+		node := bundle.Nodes[timer.NodeID]
+		timer.Event = inferWorkflowTimerEvent(bundle, node, timer)
+	}
+	return timer
+}
+func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) WorkflowTimerContract {
+	if strings.TrimSpace(existing.ID) == "" {
+		return incoming
+	}
+	if strings.TrimSpace(existing.Stage) == "" {
+		existing.Stage = incoming.Stage
+	}
+	if strings.TrimSpace(existing.Event) == "" {
+		existing.Event = incoming.Event
+	}
+	if strings.TrimSpace(existing.Owner) == "" {
+		existing.Owner = incoming.Owner
+	}
+	if strings.TrimSpace(existing.FlowID) == "" {
+		existing.FlowID = incoming.FlowID
+	}
+	if strings.TrimSpace(existing.NodeID) == "" {
+		existing.NodeID = incoming.NodeID
+	}
+	if strings.TrimSpace(existing.Action) == "" {
+		existing.Action = incoming.Action
+	}
+	if strings.TrimSpace(existing.Cancellation) == "" {
+		existing.Cancellation = incoming.Cancellation
+	}
+	if strings.TrimSpace(existing.Delay) == "" {
+		existing.Delay = incoming.Delay
+	}
+	if strings.TrimSpace(existing.StartOn) == "" {
+		existing.StartOn = incoming.StartOn
+	}
+	if strings.TrimSpace(existing.CancelOn) == "" {
+		existing.CancelOn = incoming.CancelOn
+	}
+	if existing.DelaySeconds == 0 {
+		existing.DelaySeconds = incoming.DelaySeconds
+	}
+	if existing.DelayMinutes == 0 {
+		existing.DelayMinutes = incoming.DelayMinutes
+	}
+	if existing.DelayHours == 0 {
+		existing.DelayHours = incoming.DelayHours
+	}
+	if existing.DelayDays == 0 {
+		existing.DelayDays = incoming.DelayDays
+	}
+	existing.Recurring = existing.Recurring || incoming.Recurring
+	return existing
+}
+func inferWorkflowTimerEvent(bundle *WorkflowContractBundle, node SystemNodeContract, timer WorkflowTimerContract) string {
+	if eventType := strings.TrimSpace(timer.Event); eventType != "" {
+		return eventType
+	}
+	timerID := strings.TrimSpace(timer.ID)
+	if timerID == "" {
+		return ""
+	}
+	candidates := []string{timerID}
+	if !strings.HasPrefix(timerID, "timer.") {
+		candidates = append([]string{"timer." + timerID}, candidates...)
+	}
+	for _, candidate := range candidates {
+		if _, ok := node.EventHandlers[candidate]; ok {
+			return candidate
+		}
+	}
+	for _, candidate := range candidates {
+		if workflowTimerEventDefined(bundle, candidate) {
+			return candidate
+		}
+	}
+	for _, subscribed := range node.SubscribesTo {
+		subscribed = strings.TrimSpace(subscribed)
+		if subscribed == "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			if subscribed == candidate {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+func workflowTimerEventDefined(bundle *WorkflowContractBundle, eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	if bundle == nil || eventType == "" {
+		return false
+	}
+	for scopedKey := range bundle.scopedEvents {
+		if strings.HasSuffix(scopedKey, "::"+eventType) {
+			return true
+		}
+	}
+	if _, ok := bundle.Events[eventType]; ok {
+		return true
+	}
+	return false
+}
+func appendPlatformBuiltinGuardEntries(existing []GuardActionEntry, builtins []struct {
+	ID string `yaml:"id"`
+}) []GuardActionEntry {
+	out := append([]GuardActionEntry{}, existing...)
+	seen := make(map[string]struct{}, len(out))
+	for _, entry := range out {
+		if id := strings.TrimSpace(entry.ID); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, builtin := range builtins {
+		id := strings.TrimSpace(builtin.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, GuardActionEntry{
+			ID:              id,
+			Category:        "platform",
+			PlatformBuiltin: id,
+		})
+	}
+	return out
+}
+func appendPlatformBuiltinActionEntries(existing []GuardActionEntry, builtins []struct {
+	ID string `yaml:"id"`
+}) []GuardActionEntry {
+	out := append([]GuardActionEntry{}, existing...)
+	seen := make(map[string]struct{}, len(out))
+	for _, entry := range out {
+		if id := strings.TrimSpace(entry.ID); id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, builtin := range builtins {
+		id := strings.TrimSpace(builtin.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, GuardActionEntry{
+			ID:              id,
+			Category:        "platform",
+			PlatformBuiltin: id,
+		})
+	}
+	return out
+}
+func deriveWorkflowStagesFromFlows(paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
+	if len(paths) == 0 || len(schemas) == 0 {
+		return nil
+	}
+	out := make([]WorkflowStageContract, 0)
+	seen := make(map[string]struct{})
+	for _, flow := range paths {
+		flowID := strings.TrimSpace(flow.ID)
+		schema, ok := schemas[flowID]
+		if !ok {
+			continue
+		}
+		for _, state := range schema.States {
+			state = strings.TrimSpace(state)
+			if state == "" {
+				continue
+			}
+			if _, exists := seen[state]; exists {
+				continue
+			}
+			seen[state] = struct{}{}
+			out = append(out, WorkflowStageContract{
+				ID:    state,
+				Phase: flowID,
+			})
+		}
+	}
+	return out
+}
+func deriveWorkflowTerminalStagesFromFlows(paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []string {
+	if len(paths) == 0 || len(schemas) == 0 {
+		return nil
+	}
+	out := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, flow := range paths {
+		flowID := strings.TrimSpace(flow.ID)
+		schema, ok := schemas[flowID]
+		if !ok {
+			continue
+		}
+		for _, state := range schema.TerminalStates {
+			state = strings.TrimSpace(state)
+			if state == "" {
+				continue
+			}
+			if _, exists := seen[state]; exists {
+				continue
+			}
+			seen[state] = struct{}{}
+			out = append(out, state)
+		}
+	}
+	return out
+}
+func flowAssignedNamespace(paths []FlowContractPaths, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return ""
+	}
+	for _, flow := range paths {
+		if strings.TrimSpace(flow.ID) == flowID {
+			return strings.TrimSpace(flow.Namespace)
+		}
+	}
+	return ""
+}

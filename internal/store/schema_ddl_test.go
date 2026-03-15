@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestSchemaFieldTypeToDDL(t *testing.T) {
 }
 
 func TestSchemaFieldTypeToDDLError(t *testing.T) {
-	if _, err := SchemaFieldTypeToDDL("object"); err == nil || !strings.Contains(err.Error(), `unknown schema type "object"`) {
+	if _, err := SchemaFieldTypeToDDL("object"); err == nil || !errors.Is(err, ErrUnknownSchemaType) {
 		t.Fatalf("expected unknown schema type error, got %v", err)
 	}
 }

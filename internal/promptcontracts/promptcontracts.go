@@ -82,7 +82,7 @@ func renderPromptTemplateForDir(promptsDir, promptText string) (string, error) {
 	}
 	rendered := renderPromptTemplate(promptText, vars)
 	if unresolved := unresolvedPromptTokens(rendered); len(unresolved) > 0 {
-		return "", fmt.Errorf("unresolved prompt variables: %s", strings.Join(unresolved, ", "))
+		return "", &UnresolvedPromptVariablesError{Variables: unresolved}
 	}
 	return rendered, nil
 }

@@ -27,7 +27,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
-			return fmt.Errorf("payload validation for %s: %w", strings.TrimSpace(string(evt.Type)), err)
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
 		}
 	}
 	if evt.ID == "" {

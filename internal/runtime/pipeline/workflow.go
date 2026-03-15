@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeregistry "empireai/internal/runtime/core/registry"
@@ -17,6 +18,8 @@ type WorkflowStage struct {
 	Description string          `json:"description,omitempty"`
 	Terminal    bool            `json:"terminal,omitempty"`
 }
+
+type WorkflowStateID string
 
 type WorkflowAction struct {
 	Name            string `json:"name"`
@@ -32,6 +35,28 @@ type WorkflowState struct {
 	Stage    WorkflowStateID `json:"stage"`
 	Status   string          `json:"status,omitempty"`
 	Metadata map[string]any  `json:"metadata,omitempty"`
+}
+
+const workflowStateBucketEntityProjection = "entity_projection"
+
+func NormalizeWorkflowStateID(raw string) WorkflowStateID {
+	return WorkflowStateID(strings.TrimSpace(raw))
+}
+
+func CanTransitionWorkflowState(from, to WorkflowStateID) bool {
+	workflow := DefaultPipelineWorkflow()
+	if workflow == nil {
+		return from == to
+	}
+	return workflow.CanTransition(WorkflowState{Stage: NormalizeWorkflowStateID(string(from))}, NormalizeWorkflowStateID(string(to)))
+}
+
+func WorkflowStateTransition(from, to WorkflowStateID) (WorkflowTransition, bool) {
+	workflow := DefaultPipelineWorkflow()
+	if workflow == nil {
+		return WorkflowTransition{}, false
+	}
+	return workflow.Transition(WorkflowState{Stage: NormalizeWorkflowStateID(string(from))}, NormalizeWorkflowStateID(string(to)))
 }
 
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool
@@ -181,13 +206,97 @@ func containsWorkflowStateID(stages []WorkflowStateID, want WorkflowStateID) boo
 	return false
 }
 
+func workflowStateBucketObject(instance WorkflowInstance, key string) (map[string]any, bool) {
+	if instance.StateBuckets == nil {
+		return nil, false
+	}
+	bucket, ok := instance.StateBuckets[strings.TrimSpace(key)]
+	if !ok {
+		return nil, false
+	}
+	out, ok := bucket.(map[string]any)
+	return out, ok
+}
+
+func workflowMutableStateBucket(instance *WorkflowInstance, key string) map[string]any {
+	if instance == nil {
+		return map[string]any{}
+	}
+	if instance.StateBuckets == nil {
+		instance.StateBuckets = map[string]any{}
+	}
+	key = strings.TrimSpace(key)
+	bucket, _ := instance.StateBuckets[key].(map[string]any)
+	if bucket == nil {
+		bucket = map[string]any{}
+		instance.StateBuckets[key] = bucket
+	}
+	return bucket
+}
+
+func workflowSetStateBucket(instance *WorkflowInstance, key string, value map[string]any) {
+	if instance == nil {
+		return
+	}
+	if instance.StateBuckets == nil {
+		instance.StateBuckets = map[string]any{}
+	}
+	instance.StateBuckets[strings.TrimSpace(key)] = cloneMap(value)
+}
+
+func workflowDeleteStateBucket(instance *WorkflowInstance, key string) {
+	if instance == nil || instance.StateBuckets == nil {
+		return
+	}
+	delete(instance.StateBuckets, strings.TrimSpace(key))
+}
+
+func workflowMutableMetadata(instance *WorkflowInstance) map[string]any {
+	if instance == nil {
+		return map[string]any{}
+	}
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
+	}
+	return instance.Metadata
+}
+
+func truthyMetadataFlag(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		switch strings.ToLower(strings.TrimSpace(t)) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+	}
+	return asInt(v) > 0
+}
+
+func parseWorkflowTime(v any) time.Time {
+	raw := strings.TrimSpace(asString(v))
+	if raw == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
+}
+
+func workflowMetadataSnapshot(instance WorkflowInstance) map[string]any {
+	return cloneStringAnyMap(instance.Metadata)
+}
+
 func DefaultPipelineWorkflow() *WorkflowDefinition {
 	return defaultWorkflowModule().WorkflowDefinition()
 }
 
 func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, error) {
 	if source == nil {
-		return nil, fmt.Errorf("workflow contract bundle is nil")
+		return nil, ErrContractBundleNil
 	}
 	name := source.WorkflowName()
 	if name == "" {

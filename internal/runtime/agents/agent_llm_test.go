@@ -72,7 +72,7 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 			}),
 		},
 		conversation: llm.NewConversation("cos-entity-1", "", "", nil, llm.SessionScoped, 10, nil),
-		promptCache:   map[string]string{},
+		promptCache:  map[string]string{},
 	}
 
 	got := agent.resolvePromptForMode("")

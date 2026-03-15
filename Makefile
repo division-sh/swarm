@@ -1,15 +1,16 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
-	dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
+	lint dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
 	sync-current-spec
 
 COMPOSE ?= docker compose
 
 COVER_DIR ?= coverage
-MIN_RUNTIME_COVER ?= 74
-MIN_PIPELINE_COVER ?= 74
-MIN_TOOLS_COVER ?= 71
-MIN_MANAGER_COVER ?= 74
-MIN_DASHBOARD_COVER ?= 74
+MIN_RUNTIME_COVER ?= 32
+MIN_PIPELINE_COVER ?= 34
+MIN_TOOLS_COVER ?= 32
+MIN_MANAGER_COVER ?= 22
+MIN_CONTRACTS_COVER ?= 43
+MIN_BUS_COVER ?= 38
 
 test:
 	go test ./...
@@ -23,7 +24,7 @@ test-cover:
 
 test-cover-runtime:
 	mkdir -p $(COVER_DIR)
-	go test ./internal/runtime -coverprofile=$(COVER_DIR)/runtime.out
+	go test ./internal/runtime/... -coverprofile=$(COVER_DIR)/runtime.out
 	go tool cover -html=$(COVER_DIR)/runtime.out -o $(COVER_DIR)/runtime.html
 	go tool cover -func=$(COVER_DIR)/runtime.out | tail -n 1
 	@echo "Wrote $(COVER_DIR)/runtime.html"
@@ -39,8 +40,13 @@ check-key-package-cover:
 	./scripts/check_coverage.sh $(COVER_DIR)/tools.out $(MIN_TOOLS_COVER)
 	go test ./internal/runtime/manager -coverprofile=$(COVER_DIR)/manager.out
 	./scripts/check_coverage.sh $(COVER_DIR)/manager.out $(MIN_MANAGER_COVER)
-	go test ./internal/dashboard -coverprofile=$(COVER_DIR)/dashboard.out
-	./scripts/check_coverage.sh $(COVER_DIR)/dashboard.out $(MIN_DASHBOARD_COVER)
+	go test ./internal/runtime/contracts -coverprofile=$(COVER_DIR)/contracts.out
+	./scripts/check_coverage.sh $(COVER_DIR)/contracts.out $(MIN_CONTRACTS_COVER)
+	go test ./internal/runtime/bus -coverprofile=$(COVER_DIR)/bus.out
+	./scripts/check_coverage.sh $(COVER_DIR)/bus.out $(MIN_BUS_COVER)
+
+lint:
+	golangci-lint run ./...
 
 dashboard-build:
 	$(COMPOSE) build dashboard

@@ -3,13 +3,13 @@ package sharding
 import "time"
 
 type Config struct {
-	MaxShardsPerScan        int          `yaml:"max_shards_per_scan"`
-	MaxConcurrentShards     int          `yaml:"max_concurrent_shards"`
-	PerShardTimeout         time.Duration `yaml:"per_shard_timeout"`
-	StartupGracePeriod      time.Duration `yaml:"startup_grace_period"`
-	PerShardBudgetCents     int          `yaml:"per_shard_budget_cents"`
-	MaxRetriesPerShard      int          `yaml:"max_retries_per_shard"`
-	CircuitBreakerThreshold float64      `yaml:"circuit_breaker_threshold"`
+	MaxShardsPerScan        int                    `yaml:"max_shards_per_scan"`
+	MaxConcurrentShards     int                    `yaml:"max_concurrent_shards"`
+	PerShardTimeout         time.Duration          `yaml:"per_shard_timeout"`
+	StartupGracePeriod      time.Duration          `yaml:"startup_grace_period"`
+	PerShardBudgetCents     int                    `yaml:"per_shard_budget_cents"`
+	MaxRetriesPerShard      int                    `yaml:"max_retries_per_shard"`
+	CircuitBreakerThreshold float64                `yaml:"circuit_breaker_threshold"`
 	Stages                  map[string]StageConfig `yaml:"stages"`
 }
 

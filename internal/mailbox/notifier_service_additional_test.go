@@ -222,14 +222,14 @@ func TestMailbox_NormalizeDecisionAction(t *testing.T) {
 func TestMailbox_DecideAndPrints(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeMailbox(runtimetools.MailboxItem{
-		ID:         "m1",
-		Type:       "spec_review",
-		Priority:   "critical",
-		Status:     "pending",
-		FromAgent:  "a",
-		EntityID:   "v",
-		Summary:    strings.Repeat("x", 200),
-		TimeoutAt:  time.Now().Add(10 * time.Minute),
+		ID:        "m1",
+		Type:      "spec_review",
+		Priority:  "critical",
+		Status:    "pending",
+		FromAgent: "a",
+		EntityID:  "v",
+		Summary:   strings.Repeat("x", 200),
+		TimeoutAt: time.Now().Add(10 * time.Minute),
 	})
 
 	out, err := Decide(ctx, store, "m1", "approve", "ok")
@@ -257,13 +257,13 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 	}
 
 	_, _ = store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		ID:         "m2",
-		Type:       "deployment_review",
-		Priority:   "normal",
-		Status:     "pending",
-		FromAgent:  "a2",
-		EntityID:   "v2",
-		Summary:    "hello",
+		ID:        "m2",
+		Type:      "deployment_review",
+		Priority:  "normal",
+		Status:    "pending",
+		FromAgent: "a2",
+		EntityID:  "v2",
+		Summary:   "hello",
 	})
 	buf.Reset()
 	if err := PrintPendingWithOptions(ctx, store, &buf, ListOptions{Limit: 10, ReviewsOnly: true}); err != nil {

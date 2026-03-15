@@ -2,12 +2,19 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 
 	"empireai/internal/events"
 	"empireai/internal/runtime/core/identity"
 	runtimeregistry "empireai/internal/runtime/core/registry"
 	"empireai/internal/runtime/semanticview"
 )
+
+const runtimeWorkflowID = "workflow-runtime"
+
+func isRuntimeWorkflowSource(source string) bool {
+	return strings.TrimSpace(source) == runtimeWorkflowID
+}
 
 type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source

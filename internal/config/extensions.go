@@ -7,7 +7,7 @@ import (
 )
 
 type ExtensionsConfig struct {
-	Budget   BudgetConfig         `yaml:"budget"`
+	Budget   BudgetConfig           `yaml:"budget"`
 	Sharding runtimesharding.Config `yaml:"sharding"`
 }
 

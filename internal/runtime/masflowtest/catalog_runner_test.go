@@ -1930,7 +1930,6 @@ func catalogGuardPasses(spec any, payload, entity, policy map[string]any) bool {
 	default:
 		return true
 	}
-	return true
 }
 
 func guardFailOutcome(spec any) string {

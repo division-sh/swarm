@@ -27,10 +27,10 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 		"items":     []map[string]any{{"id": "a"}, {"id": "b"}, {"id": "c"}},
 		"entity_id": "item-123",
 	}, runtimepipeline.WorkflowState{
-		EntityID:   "item-123",
-		Stage:      runtimepipeline.NormalizeWorkflowStateID("queued"),
-		Status:     "queued",
-		Metadata:   map[string]any{},
+		EntityID: "item-123",
+		Stage:    runtimepipeline.NormalizeWorkflowStateID("queued"),
+		Status:   "queued",
+		Metadata: map[string]any{},
 	}, nil)
 	if fannedOut.Status != runtimepipeline.HandlerOutcomeFannedOut {
 		t.Fatalf("expected fan-out execution, got %+v", fannedOut)
@@ -50,9 +50,9 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 		"source":           "worker-a",
 		"received_count":   1,
 	}, runtimepipeline.WorkflowState{
-		EntityID:   "item-123",
-		Stage:      runtimepipeline.NormalizeWorkflowStateID("collecting"),
-		Status:     "collecting",
+		EntityID: "item-123",
+		Stage:    runtimepipeline.NormalizeWorkflowStateID("collecting"),
+		Status:   "collecting",
 		Metadata: map[string]any{
 			"received_count": 1,
 		},

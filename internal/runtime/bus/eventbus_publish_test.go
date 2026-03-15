@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -45,7 +46,7 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 		Type:    "task.completed",
 		Payload: []byte(`{}`),
 	})
-	if err == nil || !strings.Contains(err.Error(), "payload validation for task.completed") {
+	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package promptcontracts
 
 import (
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -122,7 +123,7 @@ func TestLoadFromDir_FailsOnUnresolvedPromptVariable(t *testing.T) {
 
 	if _, _, err := LoadFromDir(dir, "analysis-agent", ""); err == nil {
 		t.Fatal("expected unresolved prompt variable error")
-	} else if !strings.Contains(err.Error(), "unknown_value") {
+	} else if !errors.Is(err, ErrUnresolvedPromptVariables) {
 		t.Fatalf("expected unresolved variable name in error, got %v", err)
 	}
 }

@@ -50,7 +50,7 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 	if decision.allowed {
 		return nil
 	}
-	err := fmt.Errorf("tool %s is not allowed for agent %s", toolName, actor.ID)
+	err := fmt.Errorf("%w: tool %s is not allowed for agent %s", ErrToolNotAllowed, toolName, actor.ID)
 	if a.bus != nil {
 		entityID := actor.EffectiveEntityID()
 		payload, marshalErr := json.Marshal(map[string]any{

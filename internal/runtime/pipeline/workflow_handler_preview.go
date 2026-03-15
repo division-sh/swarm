@@ -82,7 +82,7 @@ func (previewBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 
 func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, nodeID string, evt events.Event, state WorkflowState, policyOverrides map[string]any) (HandlerPreview, error) {
 	if bundle == nil {
-		return HandlerPreview{}, fmt.Errorf("workflow contract bundle is nil")
+		return HandlerPreview{}, ErrContractBundleNil
 	}
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {

@@ -16,10 +16,10 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 		"risk":         80.0,
 		"priority":     "urgent",
 	}, runtimepipeline.WorkflowState{
-		EntityID:   "item-123",
-		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
-		Status:     "ready",
-		Metadata:   map[string]any{},
+		EntityID: "item-123",
+		Stage:    runtimepipeline.NormalizeWorkflowStateID("ready"),
+		Status:   "ready",
+		Metadata: map[string]any{},
 	}, nil)
 	if approved.RuleID != "approve" || approved.Stage != runtimepipeline.NormalizeWorkflowStateID("approved") {
 		t.Fatalf("expected approve rule execution, got %+v", approved)
@@ -38,10 +38,10 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 		"completeness": 55.0,
 		"risk":         40.0,
 	}, runtimepipeline.WorkflowState{
-		EntityID:   "item-456",
-		Stage:      runtimepipeline.NormalizeWorkflowStateID("ready"),
-		Status:     "ready",
-		Metadata:   map[string]any{},
+		EntityID: "item-456",
+		Stage:    runtimepipeline.NormalizeWorkflowStateID("ready"),
+		Status:   "ready",
+		Metadata: map[string]any{},
 	}, nil)
 	if rejected.RuleID != "reject" || rejected.Stage != runtimepipeline.NormalizeWorkflowStateID("rejected") {
 		t.Fatalf("expected reject rule execution, got %+v", rejected)

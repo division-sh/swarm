@@ -147,8 +147,8 @@ Test gate manifest. Per gate:
   name: "Wiring verifier passes cleanly"
   priority: must_pass              # must_pass | should_pass | informational
   category: wiring                 # ddl | wiring | events | agents | integration
-  command: "go test ./internal/runtime/ -run TestSpecRuntimeWiringVerification -v"
-  pass_criteria: "fail=0, warn=0"
+  command: "go test ./... -count=1"
+  pass_criteria: "all packages pass"
   introduced: "2.0.36"
 ```
 

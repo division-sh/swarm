@@ -3,6 +3,7 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -103,7 +104,7 @@ func TestEntityTools_InvalidEntityType(t *testing.T) {
 		"entity_type": "missing",
 		"entity_id":   uuid.NewString(),
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown entity_type "missing"`) {
+	if err == nil || !errors.Is(err, runtimetools.ErrUnknownEntityType) {
 		t.Fatalf("expected invalid entity_type error, got %v", err)
 	}
 }
@@ -116,7 +117,7 @@ func TestEntityTools_InvalidField(t *testing.T) {
 		"field":       "unknown_field",
 		"value":       "x",
 	})
-	if err == nil || !strings.Contains(err.Error(), "does not define field unknown_field") {
+	if err == nil || !errors.Is(err, runtimetools.ErrUnknownEntityField) {
 		t.Fatalf("expected invalid field error, got %v", err)
 	}
 }
@@ -127,7 +128,8 @@ func TestEntityTools_GetEntityNotFound(t *testing.T) {
 		"entity_type": "accounts",
 		"entity_id":   uuid.NewString(),
 	})
-	if err == nil || !strings.Contains(err.Error(), "not found") {
+	re, ok := runtimetools.AsRuntimeError(err)
+	if err == nil || !ok || re.Code != "not_found" {
 		t.Fatalf("expected not found error, got %v", err)
 	}
 }

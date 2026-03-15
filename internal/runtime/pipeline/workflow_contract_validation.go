@@ -44,7 +44,7 @@ func validateWorkflowContracts(source semanticview.Source) error {
 
 func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowContractWarning, error) {
 	if source == nil {
-		return nil, fmt.Errorf("workflow contract bundle is nil")
+		return nil, ErrContractBundleNil
 	}
 	errs := make([]string, 0, 16)
 	warnings := make([]WorkflowContractWarning, 0, 8)

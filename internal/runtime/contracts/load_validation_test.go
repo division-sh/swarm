@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsOnCompleteAndRules(
 	bundle.Nodes[nodeID] = node
 
 	err = validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !strings.Contains(err.Error(), "declares both on_complete and rules") {
+	if err == nil || !errors.Is(err, ErrConflictingCompletion) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -44,7 +45,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsDeprecatedGuardFall
 	bundle.Nodes[nodeID] = node
 
 	err = validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !strings.Contains(err.Error(), "deprecated id-only guard") {
+	if err == nil || !errors.Is(err, ErrDeprecatedGuardFallback) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -58,7 +59,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMultipleAuthoritati
 	bundle.Semantics.EventOwners["task.completed"] = []string{"node-a", "node-b"}
 
 	err = validateWorkflowContractBundleLoadConstraints(bundle)
-	if err == nil || !strings.Contains(err.Error(), "multiple authoritative system node owners") {
+	if err == nil || !errors.Is(err, ErrMultipleAuthoritativeOwners) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -95,9 +96,25 @@ func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", tc.fixture)
 			_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-			if err == nil || !strings.Contains(err.Error(), tc.contains) {
+			if err == nil || !contractErrorContains(err, tc.contains) {
 				t.Fatalf("expected load error containing %q, got %v", tc.contains, err)
 			}
 		})
 	}
+}
+
+func contractErrorContains(err error, substr string) bool {
+	if err == nil || strings.TrimSpace(substr) == "" {
+		return false
+	}
+	var verr *LoadValidationError
+	if errors.As(err, &verr) {
+		for _, item := range verr.Items {
+			if item != nil && strings.Contains(item.Error(), substr) {
+				return true
+			}
+		}
+	}
+	text := err.Error()
+	return strings.Contains(text, substr)
 }
