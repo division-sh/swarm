@@ -31,12 +31,15 @@ type Accumulator struct {
 
 func arrivalIdentifier(evt events.Event, payload map[string]any) string {
 	candidates := []string{
-		strings.TrimSpace(evt.SourceAgent),
+		strings.TrimSpace(evt.ID),
+		strings.TrimSpace(asString(payload["event_id"])),
+		strings.TrimSpace(asString(payload["id"])),
+		strings.TrimSpace(asString(payload["item_id"])),
 		strings.TrimSpace(asString(payload["source"])),
 		strings.TrimSpace(asString(payload["from"])),
 		strings.TrimSpace(asString(payload["agent_id"])),
 		strings.TrimSpace(asString(payload["node_id"])),
-		strings.TrimSpace(evt.ID),
+		strings.TrimSpace(evt.SourceAgent),
 	}
 	for _, candidate := range candidates {
 		if candidate != "" {
@@ -368,6 +371,66 @@ func storeAccumulator(state *StateSnapshot, nodeID identity.NodeID, eventType ev
 	})
 }
 
+func isAccumulationTimeoutEvent(eventType events.EventType) bool {
+	eventName := strings.TrimSpace(string(eventType))
+	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
+}
+
+func loadNodeAccumulatorForTimeout(state StateSnapshot, nodeID identity.NodeID) (*Accumulator, events.EventType, bool) {
+	if nodeID.IsZero() {
+		return nil, "", false
+	}
+	root := state.EnsureStateBucketsBucket()
+	bucket, ok := root.Map(nodeID.String())
+	if !ok {
+		return nil, "", false
+	}
+	rawAccumulators, ok := bucket.Map(handlerAccumulatorBucketKey)
+	if !ok {
+		return nil, "", false
+	}
+	var (
+		bestAcc     *Accumulator
+		bestEvent   events.EventType
+		bestSortKey string
+	)
+	for _, bucketID := range rawAccumulators.Keys() {
+		raw, ok := rawAccumulators.Map(bucketID)
+		if !ok {
+			continue
+		}
+		acc := &Accumulator{
+			Expected:       normalizeStrings(stringSliceFromAny(raw.Raw()["expected"])),
+			ExpectedCount:  raw.Int("expected_count"),
+			Received:       map[string]bool{},
+			Items:          sliceOfMapsFromAny(raw.Raw()["items"]),
+			StartedAt:      raw.String("started_at"),
+			LastEventID:    raw.String("last_event_id"),
+			LastEventType:  raw.String("last_event_type"),
+			LastSource:     raw.String("last_source"),
+			LastReceivedAt: raw.String("last_received_at"),
+		}
+		if received, ok := raw.Map("received"); ok {
+			for _, key := range received.Keys() {
+				acc.Received[strings.TrimSpace(key)] = received.Bool(key)
+			}
+		}
+		sortKey := strings.TrimSpace(firstNonEmpty(acc.LastReceivedAt, acc.StartedAt, bucketID))
+		if bestAcc == nil || sortKey > bestSortKey {
+			bestAcc = acc
+			bestSortKey = sortKey
+			bestEvent = events.EventType(strings.TrimSpace(raw.String("last_event_type")))
+			if bestEvent == "" {
+				bestEvent = events.EventType(strings.TrimSpace(strings.TrimPrefix(bucketID, nodeID.String()+":")))
+			}
+		}
+	}
+	if bestAcc == nil {
+		return nil, "", false
+	}
+	return bestAcc, bestEvent, true
+}
+
 func expectedAccumulatorTargets(base BaseContext, state ExecutionState, parsed paths.Path, raw string) ([]string, int) {
 	value, ok := resolveContractPath(base, state, parsed, raw)
 	if !ok {
@@ -421,6 +484,8 @@ func accumulatorComplete(
 		completionSpec.Mode == runtimecontracts.AccumulateModeAll ||
 		completionSpec.Mode == runtimecontracts.AccumulateModeThreshold {
 		switch {
+		case completionSpec.Mode == runtimecontracts.AccumulateModeThreshold && spec != nil && spec.Threshold > 0:
+			return receivedCount >= spec.Threshold, nil
 		case len(acc.Expected) > 0:
 			for _, expected := range acc.Expected {
 				if !acc.Received[strings.TrimSpace(expected)] {

@@ -127,6 +127,10 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {
 				semantics.Transitions = append(semantics.Transitions, derivedTransition)
 			}
+			semantics.Transitions = append(semantics.Transitions, deriveRuleTransitions(transition)...)
+			if timeoutTransition, ok := deriveAccumulateTimeoutTransition(transition); ok {
+				semantics.Transitions = append(semantics.Transitions, timeoutTransition)
+			}
 			if semantics.HandlerTransitionIndex[nodeID] == nil {
 				semantics.HandlerTransitionIndex[nodeID] = map[string]HandlerTransitionSemantic{}
 			}
@@ -215,6 +219,54 @@ func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (Wor
 	}
 	return out, strings.TrimSpace(out.ID) != "" && strings.TrimSpace(out.Trigger) != ""
 }
+
+func deriveAccumulateTimeoutTransition(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
+	if transition.Accumulate == nil || transition.Accumulate.OnTimeout == nil {
+		return WorkflowTransitionContract{}, false
+	}
+	to := strings.TrimSpace(transition.Accumulate.OnTimeout.AdvancesTo)
+	if to == "" {
+		return WorkflowTransitionContract{}, false
+	}
+	return WorkflowTransitionContract{
+		ID:      strings.TrimSpace(transition.ID) + ":on_timeout",
+		From:    []string{"*"},
+		To:      to,
+		Trigger: "accumulate.timeout",
+		Node:    strings.TrimSpace(transition.NodeID),
+	}, true
+}
+
+func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
+	rules := transition.OnComplete
+	if len(rules) == 0 && transition.Accumulate != nil {
+		rules = transition.Accumulate.OnComplete
+	}
+	rules = append(append([]HandlerRuleEntry{}, rules...), transition.Rules...)
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]WorkflowTransitionContract, 0, len(rules))
+	for idx, rule := range rules {
+		to := strings.TrimSpace(rule.AdvancesTo)
+		if to == "" {
+			continue
+		}
+		id := strings.TrimSpace(rule.ID)
+		if id == "" {
+			id = fmt.Sprintf("%s:rule:%d", strings.TrimSpace(transition.ID), idx)
+		}
+		out = append(out, WorkflowTransitionContract{
+			ID:      id,
+			From:    []string{"*"},
+			To:      to,
+			Trigger: strings.TrimSpace(transition.EventType),
+			Node:    strings.TrimSpace(transition.NodeID),
+		})
+	}
+	return out
+}
+
 func firstTransitionGuardID(guard *GuardSpec) string {
 	if guard == nil {
 		return ""

@@ -402,7 +402,11 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if spec == nil {
 		return false, nil
 	}
-	acc, ok := loadAccumulator(frame.state.State, frame.req.NodeID, frame.req.Event.Type)
+	bucketEventType := frame.req.Event.Type
+	acc, ok := loadAccumulator(frame.state.State, frame.req.NodeID, bucketEventType)
+	if !ok && isAccumulationTimeoutEvent(frame.req.Event.Type) {
+		acc, bucketEventType, ok = loadNodeAccumulatorForTimeout(frame.state.State, frame.req.NodeID)
+	}
 	if !ok {
 		acc = &Accumulator{}
 	}
@@ -420,24 +424,31 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if acc.Received == nil {
 		acc.Received = map[string]bool{}
 	}
-	arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
-	if arrivalID != "" && !acc.Received[arrivalID] {
-		acc.Received[arrivalID] = true
-		acc.Items = append(acc.Items, map[string]any{
-			"event_id":    strings.TrimSpace(frame.req.Event.ID),
-			"event_type":  strings.TrimSpace(string(frame.req.Event.Type)),
-			"source":      strings.TrimSpace(frame.req.Event.SourceAgent),
-			"payload":     cloneStringAnyMap(frame.payload),
-			"received_at": frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
+	if !isAccumulationTimeoutEvent(frame.req.Event.Type) {
+		arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
+		if arrivalID != "" && !acc.Received[arrivalID] {
+			acc.Received[arrivalID] = true
+			acc.Items = append(acc.Items, map[string]any{
+				"event_id":    strings.TrimSpace(frame.req.Event.ID),
+				"event_type":  strings.TrimSpace(string(frame.req.Event.Type)),
+				"source":      strings.TrimSpace(frame.req.Event.SourceAgent),
+				"payload":     cloneStringAnyMap(frame.payload),
+				"received_at": frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano),
+			})
+		}
 	}
 	acc.LastEventID = strings.TrimSpace(frame.req.Event.ID)
 	acc.LastEventType = strings.TrimSpace(string(frame.req.Event.Type))
 	acc.LastSource = strings.TrimSpace(frame.req.Event.SourceAgent)
 	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
-	storeAccumulator(&frame.state.State, frame.req.NodeID, frame.req.Event.Type, acc)
+	storeAccumulator(&frame.state.State, frame.req.NodeID, bucketEventType, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
 	frame.state.SetAccumulated(frame.req.NodeID.String(), accumulatorExpressionValue(acc))
+	if isAccumulationTimeoutEvent(frame.req.Event.Type) && spec.OnTimeout != nil {
+		frame.rule = spec.OnTimeout
+		e.applyRule(frame, spec.OnTimeout)
+		return false, nil
+	}
 	complete, err := accumulatorComplete(acc, spec, func(expression string, extraVars map[string]any) (bool, error) {
 		ctx := e.currentContext(frame)
 		if accumulation, ok := extraVars["accumulation"].(map[string]any); ok {

@@ -142,7 +142,21 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	if n == nil {
 		return nil, nil
 	}
-	handler, ok := n.contract.EventHandlers[strings.TrimSpace(string(evt.Type))]
+	eventType := strings.TrimSpace(string(evt.Type))
+	handler, ok := n.contract.EventHandlers[eventType]
+	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsString(n.contract.SubscribesTo, eventType) {
+		for _, candidate := range n.contract.EventHandlers {
+			if candidate.Accumulate == nil {
+				continue
+			}
+			if candidate.Accumulate.Completion.Mode != runtimecontracts.AccumulateModeTimeout && candidate.Accumulate.OnTimeout == nil {
+				continue
+			}
+			handler = candidate
+			ok = true
+			break
+		}
+	}
 	if !ok {
 		return nil, nil
 	}

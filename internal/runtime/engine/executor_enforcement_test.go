@@ -237,6 +237,72 @@ func TestExecutor_CELGuardEvaluatesAgainstEntityState(t *testing.T) {
 	}
 }
 
+func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
+	repo := &persistentStateRepo{
+		found: true,
+		snapshot: StateSnapshot{
+			EntityID:     "entity-1",
+			CurrentState: "collecting",
+			Metadata:     map[string]any{},
+			StateBuckets: map[string]any{},
+		},
+	}
+	acc := &Accumulator{
+		ExpectedCount: 3,
+		Received: map[string]bool{
+			"evt-a": true,
+			"evt-b": true,
+		},
+		Items: []map[string]any{
+			{"event_id": "evt-a"},
+			{"event_id": "evt-b"},
+		},
+		StartedAt: "2026-03-15T00:00:00Z",
+	}
+	storeAccumulator(&repo.snapshot, "node-1", events.EventType("item.arrived"), acc)
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		Event: events.Event{
+			ID:   "timeout-1",
+			Type: events.EventType("accumulate.timeout"),
+		},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Accumulate: &runtimecontracts.AccumulateSpec{
+				Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+				OnTimeout: &runtimecontracts.HandlerRuleEntry{
+					AdvancesTo: "partial",
+					Emits:      runtimecontracts.EventEmission{Single: "collection.partial"},
+				},
+			},
+		},
+		State: repo.snapshot,
+	})
+	if err != nil {
+		t.Fatalf("Execute timeout accumulate: %v", err)
+	}
+	if result.NextState != "partial" {
+		t.Fatalf("NextState = %q", result.NextState)
+	}
+	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type) != "collection.partial" {
+		t.Fatalf("EmitIntents = %#v", result.EmitIntents)
+	}
+	if repo.snapshot.CurrentState != "partial" {
+		t.Fatalf("persisted CurrentState = %q", repo.snapshot.CurrentState)
+	}
+}
+
 func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 	repo := &persistentStateRepo{
 		found: true,

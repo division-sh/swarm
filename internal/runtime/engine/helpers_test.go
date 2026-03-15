@@ -12,18 +12,28 @@ import (
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {
 	evt := events.Event{ID: "evt-1", SourceAgent: "agent-source"}
 	payload := map[string]any{
+		"id":       "payload-id",
+		"event_id": "payload-event",
+		"item_id":  "payload-item",
 		"source":   "payload-source",
 		"from":     "payload-from",
 		"agent_id": "payload-agent",
 		"node_id":  "payload-node",
 	}
-	if got := arrivalIdentifier(evt, payload); got != "agent-source" {
+	if got := arrivalIdentifier(evt, payload); got != "evt-1" {
 		t.Fatalf("arrivalIdentifier = %q", got)
 	}
 
-	evt.SourceAgent = ""
-	if got := arrivalIdentifier(evt, payload); got != "payload-source" {
-		t.Fatalf("arrivalIdentifier fallback = %q", got)
+	if got := arrivalIdentifier(events.Event{}, payload); got != "payload-event" {
+		t.Fatalf("arrivalIdentifier payload event fallback = %q", got)
+	}
+	delete(payload, "event_id")
+	if got := arrivalIdentifier(events.Event{}, payload); got != "payload-id" {
+		t.Fatalf("arrivalIdentifier payload id fallback = %q", got)
+	}
+	delete(payload, "id")
+	if got := arrivalIdentifier(events.Event{}, payload); got != "payload-item" {
+		t.Fatalf("arrivalIdentifier item fallback = %q", got)
 	}
 
 	if got := arrivalIdentifier(events.Event{ID: "evt-2"}, map[string]any{"dimension": "not-identity"}); got != "evt-2" {
@@ -42,6 +52,17 @@ func TestDedupIdentifier_UsesContractConfiguredKey(t *testing.T) {
 	})
 	if got != "retention_architecture" {
 		t.Fatalf("dedupIdentifier = %q", got)
+	}
+}
+
+func TestDedupIdentifier_DefaultsToEventIdentityBeforeSource(t *testing.T) {
+	base := BaseContext{Payload: values.Wrap(map[string]any{
+		"item_id": "payload-item",
+		"source":  "legacy-source",
+	})}
+	got := dedupIdentifier(base, ExecutionState{}, events.Event{ID: "evt-1", SourceAgent: "agent-source"}, nil)
+	if got != "evt-1" {
+		t.Fatalf("dedupIdentifier default = %q", got)
 	}
 }
 
@@ -222,7 +243,10 @@ func TestAccumulatorComplete(t *testing.T) {
 		t.Fatalf("accumulatorComplete all = %v, %v", complete, err)
 	}
 	acc.Received["b"] = true
-	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{Completion: runtimecontracts.ParseAccumulateCompletion("threshold")}, nil)
+	complete, err = accumulatorComplete(acc, &runtimecontracts.AccumulateSpec{
+		Completion: runtimecontracts.ParseAccumulateCompletion("threshold"),
+		Threshold:  2,
+	}, nil)
 	if err != nil || !complete {
 		t.Fatalf("accumulatorComplete threshold = %v, %v", complete, err)
 	}

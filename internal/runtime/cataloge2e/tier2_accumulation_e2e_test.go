@@ -10,19 +10,19 @@ import (
 )
 
 var tier2AccumulationFixtures = []string{
+	"test-accumulate-all",
+	"test-accumulate-crash-recovery",
+	"test-accumulate-expected-from-entity",
+	"test-accumulate-from-filter",
 	"test-accumulate-idempotent",
+	"test-accumulate-on-timeout",
 	"test-accumulate-partial",
+	"test-accumulate-threshold",
+	"test-accumulate-timeout",
 }
 
 var tier2ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-accumulate-all":                  {kind: "validation-gap", reason: "real runtime currently leaves the instance in collecting for this all-complete fixture shape"},
-	"test-accumulate-crash-recovery":       {kind: "validation-gap", reason: "real runtime leaves the instance in collecting instead of advancing to complete for this crash-recovery accumulation fixture"},
-	"test-accumulate-expected-from-entity": {kind: "validation-gap", reason: "real runtime leaves the instance in collecting instead of advancing to complete for this expected-from-entity accumulation fixture"},
-	"test-accumulate-from-filter":          {kind: "validation-gap", reason: "real runtime leaves the instance in collecting instead of advancing to complete for this accumulate-from-filter fixture"},
-	"test-accumulate-on-timeout":           {kind: "validation-gap", reason: "real runtime leaves the instance in collecting instead of advancing to partial for this accumulate-on-timeout fixture"},
-	"test-accumulate-threshold":            {kind: "validation-gap", reason: "real runtime leaves the instance in collecting instead of advancing to complete for this threshold accumulation fixture"},
-	"test-accumulate-timeout":              {kind: "validation-gap", reason: "real runtime leaves the instance in collecting instead of advancing to complete for this timeout accumulation fixture"},
-	"test-accumulate-with-compute":         {kind: "validation-gap", reason: "real runtime currently leaves the instance in collecting for this accumulate-with-compute fixture shape"},
+	"test-accumulate-with-compute": {kind: "validation-gap", reason: "real runtime reaches complete but does not apply on_complete compute output for this accumulation fixture"},
 }
 
 func TestTier2AccumulationCatalogFixtures_RealRuntime(t *testing.T) {

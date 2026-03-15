@@ -140,6 +140,8 @@ type AccumulateSpec struct {
 	ExpectedPath paths.Path           `yaml:"-"`
 	DedupBy      string               `yaml:"dedup_by"`
 	DedupPath    paths.Path           `yaml:"-"`
+	Threshold    int                  `yaml:"threshold"`
+	TimeoutMS    int                  `yaml:"timeout_ms"`
 	Completion   AccumulateCompletion `yaml:"completion"`
 	OnComplete   []HandlerRuleEntry   `yaml:"on_complete"`
 	OnTimeout    *HandlerRuleEntry    `yaml:"on_timeout"`

@@ -56,7 +56,7 @@ func (pc *FactoryPipelineCoordinator) executeAuthoritativeNodeHandler(ctx contex
 		return contractHandlerExecutionResult{}, nil
 	}
 	owners := source.RuntimeEventOwners(trigger)
-	if len(owners) == 0 {
+	if len(owners) == 0 && !isAccumulationTimeoutEvent(events.EventType(trigger)) {
 		return contractHandlerExecutionResult{}, nil
 	}
 	var (
@@ -76,10 +76,62 @@ func (pc *FactoryPipelineCoordinator) executeAuthoritativeNodeHandler(ctx contex
 		handler = candidate
 		matched = true
 	}
+	if !matched && isAccumulationTimeoutEvent(events.EventType(trigger)) {
+		timeoutNodeID, timeoutHandler, ok := findAccumulationTimeoutHandler(source, trigger)
+		if ok {
+			nodeID = timeoutNodeID
+			handler = timeoutHandler
+			matched = true
+		}
+	}
 	if !matched {
 		return contractHandlerExecutionResult{}, nil
 	}
 	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
+}
+
+func isAccumulationTimeoutEvent(eventType events.EventType) bool {
+	eventName := strings.TrimSpace(string(eventType))
+	return strings.HasSuffix(eventName, ".timeout") || strings.EqualFold(eventName, "accumulate.timeout")
+}
+
+func findAccumulationTimeoutHandler(source interface {
+	NodeEntries() map[string]runtimecontracts.SystemNodeContract
+	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
+}, trigger string) (string, runtimecontracts.SystemNodeEventHandler, bool) {
+	trigger = strings.TrimSpace(trigger)
+	if source == nil || trigger == "" {
+		return "", runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	var (
+		nodeID  string
+		handler runtimecontracts.SystemNodeEventHandler
+		matched bool
+	)
+	for candidateNodeID, node := range source.NodeEntries() {
+		if !containsString(node.SubscribesTo, trigger) {
+			continue
+		}
+		for _, candidate := range source.NodeEventHandlers(candidateNodeID) {
+			if candidate.Accumulate == nil {
+				continue
+			}
+			if candidate.Accumulate.Completion.Mode != runtimecontracts.AccumulateModeTimeout && candidate.Accumulate.OnTimeout == nil {
+				continue
+			}
+			if matched {
+				return "", runtimecontracts.SystemNodeEventHandler{}, false
+			}
+			nodeID = strings.TrimSpace(candidateNodeID)
+			handler = candidate
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return "", runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	return nodeID, handler, true
 }
 
 func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(

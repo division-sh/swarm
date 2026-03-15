@@ -140,6 +140,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			return token
 		}
 	})
+	normalized = normalizeWorkflowExpressionStringLiterals(normalized)
 	normalizedCtx := workflowExpressionContext{
 		Entity:  cloneStringAnyMap(ctx.Entity),
 		Payload: cloneStringAnyMap(ctx.Payload),
@@ -163,6 +164,36 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	normalized = workflowExpressionCountGEPattern.ReplaceAllString(normalized, "count_ge($1, $2)")
 	normalized = rewriteWorkflowExpressionIdentifiers(normalized, normalizedCtx.Vars)
 	return normalized, normalizedCtx
+}
+
+func normalizeWorkflowExpressionStringLiterals(expression string) string {
+	if expression == "" || !strings.ContainsRune(expression, '\'') {
+		return expression
+	}
+	var out strings.Builder
+	inSingle := false
+	inDouble := false
+	for i := 0; i < len(expression); i++ {
+		ch := expression[i]
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			out.WriteByte(ch)
+			continue
+		}
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			out.WriteByte('"')
+			continue
+		}
+		if ch == '\\' && i+1 < len(expression) {
+			out.WriteByte(ch)
+			i++
+			out.WriteByte(expression[i])
+			continue
+		}
+		out.WriteByte(ch)
+	}
+	return out.String()
 }
 
 func workflowExpressionCountGE(args ...ref.Val) ref.Val {
@@ -335,8 +366,34 @@ func rewriteWorkflowExpressionIdentifiers(expression string, vars map[string]any
 		return expression
 	}
 	var out strings.Builder
+	inSingle := false
+	inDouble := false
 	for idx := 0; idx < len(expression); {
 		ch := rune(expression[idx])
+		if ch == '"' && !inSingle {
+			inDouble = !inDouble
+			out.WriteByte(expression[idx])
+			idx++
+			continue
+		}
+		if ch == '\'' && !inDouble {
+			inSingle = !inSingle
+			out.WriteByte(expression[idx])
+			idx++
+			continue
+		}
+		if ch == '\\' && idx+1 < len(expression) {
+			out.WriteByte(expression[idx])
+			idx++
+			out.WriteByte(expression[idx])
+			idx++
+			continue
+		}
+		if inSingle || inDouble {
+			out.WriteByte(expression[idx])
+			idx++
+			continue
+		}
 		if !workflowExpressionIdentStart(ch) {
 			out.WriteByte(expression[idx])
 			idx++

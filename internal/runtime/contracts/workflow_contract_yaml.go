@@ -51,6 +51,8 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 	var aux struct {
 		ExpectedFrom string    `yaml:"expected_from"`
 		DedupBy      string    `yaml:"dedup_by"`
+		Threshold    int       `yaml:"threshold"`
+		TimeoutMS    int       `yaml:"timeout_ms"`
 		Completion   string    `yaml:"completion"`
 		OnComplete   yaml.Node `yaml:"on_complete"`
 		OnTimeout    yaml.Node `yaml:"on_timeout"`
@@ -63,6 +65,8 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		ExpectedPath: paths.Parse(aux.ExpectedFrom),
 		DedupBy:      strings.TrimSpace(aux.DedupBy),
 		DedupPath:    paths.Parse(aux.DedupBy),
+		Threshold:    aux.Threshold,
+		TimeoutMS:    aux.TimeoutMS,
 		Completion:   ParseAccumulateCompletion(aux.Completion),
 	}
 	var err error
