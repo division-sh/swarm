@@ -1,0 +1,6 @@
+trigger.alpha:
+  payload:
+    entity_id: string
+job.alpha_done:
+  payload:
+    entity_id: string

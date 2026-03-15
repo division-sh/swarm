@@ -9,8 +9,7 @@ validation-node:
         id: amount_check
         check: "payload.amount >= policy.min_amount"
       advances_to: validated
-      sets_gates:
-        validation_passed: true
+      sets_gate: validation_passed
       emits: order.validated
 
 completion-node:

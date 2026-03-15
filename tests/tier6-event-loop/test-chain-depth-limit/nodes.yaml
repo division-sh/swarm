@@ -1,11 +1,20 @@
-chain-node:
-  id: chain-node
+ping-node:
+  id: ping-node
   execution_type: system_node
-  subscribes_to: [chain.start, chain.continue]
-  produces: [chain.continue]
+  subscribes_to: [chain.start, chain.pong]
+  produces: [chain.ping]
   event_handlers:
     chain.start:
       advances_to: processing
-      emits: chain.continue
-    chain.continue:
-      emits: chain.continue
+      emits: chain.ping
+    chain.pong:
+      emits: chain.ping
+
+pong-node:
+  id: pong-node
+  execution_type: system_node
+  subscribes_to: [chain.ping]
+  produces: [chain.pong]
+  event_handlers:
+    chain.ping:
+      emits: chain.pong

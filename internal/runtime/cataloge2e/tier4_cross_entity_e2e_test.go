@@ -17,7 +17,7 @@ var tier4CrossEntityFixtures = []string{
 }
 
 var tier4ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-create-entity": {kind: "validation-gap", reason: "real validator rejects action create_flow_instance because the runtime has no executable implementation for it in this path"},
+	"test-create-entity": {kind: "fixture-issue", reason: "fixture references create_flow_instance template child-flow, but the bundle does not include a child-flow schema/contract"},
 }
 
 func TestTier4CrossEntityCatalogFixtures_RealRuntime(t *testing.T) {

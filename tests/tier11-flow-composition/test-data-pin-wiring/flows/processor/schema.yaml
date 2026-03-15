@@ -1,3 +1,4 @@
+name: processor
 initial_state: waiting
 terminal_states: [finished]
 states: [waiting, finished]

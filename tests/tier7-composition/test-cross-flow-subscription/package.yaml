@@ -3,5 +3,9 @@ version: 1.0.0
 description: Node in flow A subscribes to an event originating from flow B.
 platform_version: ">=1.1.0"
 flows:
-  - flow-a
-  - flow-b
+  - id: flow-a
+    flow: flow-a
+    mode: static
+  - id: flow-b
+    flow: flow-b
+    mode: static

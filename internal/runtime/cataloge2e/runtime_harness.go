@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,9 +31,13 @@ type catalogExpectedDocument struct {
 	Trigger struct {
 		Boot                          bool                 `yaml:"boot"`
 		Event                         string               `yaml:"event"`
+		Concurrent                    []catalogTriggerStep `yaml:"concurrent"`
 		Payload                       map[string]any       `yaml:"payload"`
 		Sequence                      []catalogTriggerStep `yaml:"sequence"`
+		Entity                        map[string]any       `yaml:"entity"`
+		EntityStateBefore             string               `yaml:"entity_state_before"`
 		EntityFieldsBefore            map[string]any       `yaml:"entity_fields_before"`
+		GatesBefore                   map[string]bool      `yaml:"gates_before"`
 		AssertPersistedBeforeDelivery bool                 `yaml:"assert_persisted_before_delivery"`
 	} `yaml:"trigger"`
 	Expected struct {
@@ -40,14 +45,29 @@ type catalogExpectedDocument struct {
 		HandlerOutcome      string         `yaml:"handler_outcome"`
 		EntityState         string         `yaml:"entity_state"`
 		EntityFields        map[string]any `yaml:"entity_fields"`
+		Gates               map[string]bool `yaml:"gates"`
 		EmittedEvents       []string       `yaml:"emitted_events"`
+		AgentReceived       map[string][]string `yaml:"agent_received"`
 		DeadLetter          bool           `yaml:"dead_letter"`
 		TemplateInstances   *int           `yaml:"template_instances"`
 		FlowInstanceCreated map[string]any `yaml:"flow_instance_created"`
+		Entities            map[string]catalogEntityExpected `yaml:"entities"`
 	} `yaml:"expected"`
 }
 
+type catalogEntityExpected struct {
+	HandlerOutcome string         `yaml:"handler_outcome"`
+	EntityState    string         `yaml:"entity_state"`
+	EntityFields   map[string]any `yaml:"entity_fields"`
+	Gates          map[string]bool `yaml:"gates"`
+	EmittedEvents  []string       `yaml:"emitted_events"`
+	DeadLetter     bool           `yaml:"dead_letter"`
+}
+
 func (d catalogExpectedDocument) triggerSequence() []catalogTriggerStep {
+	if len(d.Trigger.Concurrent) > 0 {
+		return nil
+	}
 	if len(d.Trigger.Sequence) > 0 {
 		return append([]catalogTriggerStep(nil), d.Trigger.Sequence...)
 	}
@@ -74,6 +94,9 @@ type runtimeHarness struct {
 	initialState string
 	startedAt    time.Time
 	publishedIDs map[string]struct{}
+	eventEntityIDs map[string]string
+	previews     map[string]runtimepipeline.HandlerPreview
+	mu           sync.Mutex
 }
 
 type agentFixtureDoc struct {
@@ -151,6 +174,8 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		initialState: strings.TrimSpace(rootSchema.InitialState),
 		startedAt:    time.Now().UTC(),
 		publishedIDs: map[string]struct{}{},
+		eventEntityIDs: map[string]string{},
+		previews:     map[string]runtimepipeline.HandlerPreview{},
 	}
 }
 
@@ -202,7 +227,17 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		evt = evt.WithEntityID(entityID)
 	}
+	if preview, ok := h.previewHandlerOutcome(evt); ok {
+		h.mu.Lock()
+		h.previews[evt.ID] = preview
+		h.mu.Unlock()
+	}
+	h.mu.Lock()
 	h.publishedIDs[evt.ID] = struct{}{}
+	if entityID := triggerPayloadEntityID(payload); entityID != "" {
+		h.eventEntityIDs[evt.ID] = entityID
+	}
+	h.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
@@ -212,6 +247,196 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
 		h.t.Fatalf("WaitForQuiescence(%s): %v", strings.TrimSpace(step.Event), err)
 	}
+}
+
+func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, timeout time.Duration) {
+	h.t.Helper()
+	if len(steps) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, timeout)
+	defer cancel()
+
+	type publishItem struct {
+		step catalogTriggerStep
+		evt  events.Event
+	}
+	items := make([]publishItem, 0, len(steps))
+	for _, step := range steps {
+		payload := cloneStringAnyMap(step.Payload)
+		if entityID := triggerPayloadEntityID(payload); entityID != "" {
+			h.seedInitialState(entityID)
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			h.t.Fatalf("marshal concurrent trigger payload: %v", err)
+		}
+		evt := events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType(strings.TrimSpace(step.Event)),
+			SourceAgent: "cataloge2e",
+			Payload:     raw,
+			CreatedAt:   time.Now().UTC(),
+		}
+		if entityID := triggerPayloadEntityID(payload); entityID != "" {
+			evt = evt.WithEntityID(entityID)
+		}
+		if preview, ok := h.previewHandlerOutcome(evt); ok {
+			h.mu.Lock()
+			h.previews[evt.ID] = preview
+			h.mu.Unlock()
+		}
+		h.mu.Lock()
+		h.publishedIDs[evt.ID] = struct{}{}
+		if entityID := triggerPayloadEntityID(payload); entityID != "" {
+			h.eventEntityIDs[evt.ID] = entityID
+		}
+		h.mu.Unlock()
+		items = append(items, publishItem{step: step, evt: evt})
+	}
+
+	errCh := make(chan error, len(items))
+	var wg sync.WaitGroup
+	for _, item := range items {
+		wg.Add(1)
+		go func(item publishItem) {
+			defer wg.Done()
+			if err := h.rt.Bus.Publish(ctx, item.evt); err != nil {
+				errCh <- err
+			}
+		}(item)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			h.t.Fatalf("concurrent publish failed: %v", err)
+		}
+	}
+	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
+		h.t.Fatalf("WaitForQuiescence(concurrent): %v", err)
+	}
+}
+
+func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDocument, timeout time.Duration) {
+	h.t.Helper()
+	entityID := ""
+	if len(expected.Trigger.Sequence) > 0 {
+		for _, step := range expected.Trigger.Sequence {
+			if entityID = triggerPayloadEntityID(step.Payload); entityID != "" {
+				break
+			}
+		}
+	}
+	if entityID == "" {
+		entityID = triggerPayloadEntityID(expected.Trigger.Payload)
+	}
+	if entityID == "" || len(expected.Expected.EmittedEvents) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if h.hasExpectedEmittedEvents(ctx, entityID, expected.Expected.EmittedEvents) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			h.t.Fatalf("wait for expected emitted events %v for entity %s: %v", expected.Expected.EmittedEvents, entityID, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID string, want []string) bool {
+	h.t.Helper()
+	rows, err := h.db.QueryContext(ctx, `
+		SELECT event_id::text, event_name, COALESCE(payload->>'entity_id', '')
+		FROM events
+		WHERE created_at >= $1
+		ORDER BY created_at ASC, event_id ASC
+	`, h.startedAt)
+	if err != nil {
+		h.t.Fatalf("query emitted events for wait: %v", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int, len(want))
+	for _, name := range want {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			counts[name]++
+		}
+	}
+	for rows.Next() {
+		var eventID, eventName, payloadEntityID string
+		if err := rows.Scan(&eventID, &eventName, &payloadEntityID); err != nil {
+			h.t.Fatalf("scan emitted events for wait: %v", err)
+		}
+		if _, skip := h.publishedIDs[strings.TrimSpace(eventID)]; skip {
+			continue
+		}
+		if strings.TrimSpace(payloadEntityID) != strings.TrimSpace(entityID) {
+			continue
+		}
+		eventName = strings.TrimSpace(eventName)
+		if eventName == "" || shouldIgnoreCatalogE2EEvent(eventName) {
+			continue
+		}
+		if _, ok := counts[eventName]; !ok {
+			continue
+		}
+		counts[eventName]--
+	}
+	if err := rows.Err(); err != nil {
+		h.t.Fatalf("iterate emitted events for wait: %v", err)
+	}
+	for name, remaining := range counts {
+		if remaining > 0 {
+			_ = name
+			return false
+		}
+	}
+	return true
+}
+
+func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipeline.HandlerPreview, bool) {
+	if h == nil || h.bundle == nil {
+		return runtimepipeline.HandlerPreview{}, false
+	}
+	nodeID := firstMatchingNodeHandler(h.bundle, strings.TrimSpace(string(evt.Type)))
+	if nodeID == "" {
+		return runtimepipeline.HandlerPreview{}, false
+	}
+	entityID := strings.TrimSpace(evt.EntityID())
+	state := runtimepipeline.WorkflowState{
+		EntityID: entityID,
+	}
+	if strings.TrimSpace(entityID) != "" && h.workflow != nil {
+		if instance, ok, err := h.workflow.Load(h.ctx, entityID); err == nil && ok {
+			state.Stage = runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState)
+			state.Metadata = cloneStringAnyMap(instance.Metadata)
+		}
+	}
+	preview, err := runtimepipeline.PreviewContractHandlerExecution(h.ctx, h.bundle, nodeID, evt, state, nil)
+	if err != nil {
+		return runtimepipeline.HandlerPreview{}, false
+	}
+	return preview, true
+}
+
+func firstMatchingNodeHandler(bundle *runtimecontracts.WorkflowContractBundle, eventType string) string {
+	if bundle == nil || strings.TrimSpace(eventType) == "" {
+		return ""
+	}
+	for nodeID := range bundle.Nodes {
+		if _, ok := bundle.NodeEventHandler(nodeID, eventType); ok {
+			return strings.TrimSpace(nodeID)
+		}
+	}
+	return ""
 }
 
 func (h *runtimeHarness) seedInitialState(entityID string) {
@@ -245,7 +470,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if h == nil || h.workflow == nil {
 		return
 	}
-	if len(expected.Trigger.EntityFieldsBefore) == 0 {
+	if len(expected.Trigger.EntityFieldsBefore) == 0 && len(expected.Trigger.Entity) == 0 && len(expected.Trigger.GatesBefore) == 0 && strings.TrimSpace(expected.Trigger.EntityStateBefore) == "" {
 		return
 	}
 	entityID := ""
@@ -256,7 +481,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	}
 	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
-		h.t.Fatal("trigger.entity_fields_before requires a trigger payload entity_id")
+		h.t.Fatal("trigger entity seeding requires a trigger payload entity_id")
 	}
 	h.seedInitialState(entityID)
 	instance, ok, err := h.workflow.Load(h.ctx, entityID)
@@ -283,8 +508,18 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if strings.TrimSpace(instance.CurrentState) == "" {
 		instance.CurrentState = h.initialState
 	}
+	if seededState := strings.TrimSpace(expected.Trigger.EntityStateBefore); seededState != "" {
+		instance.CurrentState = seededState
+	}
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
+	}
+	for key, value := range expected.Trigger.Entity {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		instance.Metadata[key] = value
 	}
 	for key, value := range expected.Trigger.EntityFieldsBefore {
 		key = strings.TrimSpace(key)
@@ -292,6 +527,20 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 			continue
 		}
 		instance.Metadata[key] = value
+	}
+	if len(expected.Trigger.GatesBefore) > 0 {
+		gates, _ := instance.Metadata["gates"].(map[string]any)
+		if gates == nil {
+			gates = map[string]any{}
+		}
+		for key, value := range expected.Trigger.GatesBefore {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			gates[key] = value
+		}
+		instance.Metadata["gates"] = gates
 	}
 	if err := h.workflow.Upsert(h.ctx, instance); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
@@ -324,5 +573,21 @@ func asString(v any) string {
 		return string(typed)
 	default:
 		return ""
+	}
+}
+
+func boolFromAny(v any) bool {
+	switch typed := v.(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
 	}
 }

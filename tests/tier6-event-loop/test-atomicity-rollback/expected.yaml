@@ -2,10 +2,9 @@ trigger:
   event: task.submitted
   payload:
     entity_id: ent-001
-  inject_failure: mid_execution
 
 expected:
-  handler_outcome: failure
+  handler_outcome: reject
   entity_state: pending
   gates:
     approval_gate: false

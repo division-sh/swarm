@@ -1,5 +1,5 @@
 trigger:
-  event: trigger.alpha
+  event: flow-alpha/trigger.alpha
   payload:
     entity_id: ent-001
 
@@ -7,5 +7,5 @@ expected:
   handler_outcome: success
   entity_state: done
   emitted_events:
-    - job.alpha_done
+    - flow-alpha/job.alpha_done
     - audit.logged

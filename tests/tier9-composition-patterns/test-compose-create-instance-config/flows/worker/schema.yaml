@@ -1,3 +1,4 @@
+name: worker
 initial_state: ready
 terminal_states: [done]
 states: [ready, done]

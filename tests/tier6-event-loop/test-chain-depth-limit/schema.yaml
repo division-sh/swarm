@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [pending, processing, done]
 pins:
   inputs:
-    events: [chain.start]
+    events: [chain.start, chain.pong]
   outputs:
-    events: [chain.continue]
+    events: [chain.ping]

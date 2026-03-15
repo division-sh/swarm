@@ -1,3 +1,4 @@
+name: child
 initial_state: waiting
 terminal_states: [completed]
 states: [waiting, completed]

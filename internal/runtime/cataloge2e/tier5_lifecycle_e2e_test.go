@@ -16,6 +16,7 @@ type catalogExcludedFixture struct {
 
 var tier5LifecycleFixtures = []string{
 	"test-template-no-boot-instance",
+	"test-wildcard-subscription",
 }
 
 var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
@@ -26,10 +27,9 @@ var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-terminal-state-preserves":       {kind: "fixture-issue", reason: "fixture update-node uses produces: [] which real boot validation rejects"},
 	"test-terminal-state-rejects":         {kind: "fixture-issue", reason: "fixture reopen-node uses produces: [] which real boot validation rejects"},
 	"test-timer-cancel":                   {kind: "fixture-issue", reason: "fixture cancel-node uses produces: [] which real boot validation rejects"},
-	"test-timer-fire":                     {kind: "validation-gap", reason: "real runtime schedules timer fire asynchronously instead of emitting within the same immediate quiescence window"},
-	"test-timer-recurring":                {kind: "validation-gap", reason: "real runtime recurring timers are scheduler-driven and not asserted by the initial immediate E2E harness"},
+	"test-timer-fire":                     {kind: "fixture-issue", reason: "fixture uses legacy handler.timer syntax that the real loader rejects as UNDEFINED-FIELD"},
+	"test-timer-recurring":                {kind: "fixture-issue", reason: "fixture uses legacy handler.timer syntax that the real loader rejects as UNDEFINED-FIELD"},
 	"test-timer-start-on":                 {kind: "fixture-issue", reason: "fixture timer contract does not boot under the real loader because the timer fire event is incomplete"},
-	"test-wildcard-subscription":          {kind: "validation-gap", reason: "real runtime does not currently execute wildcard handler matching the way the catalog fixture expects"},
 }
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
@@ -49,6 +49,7 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 			for _, step := range expected.triggerSequence() {
 				h.publishAndWait(step, 2*time.Second)
 			}
+			h.waitForExpectedEmittedEvents(expected, 2*time.Second)
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})
 	}

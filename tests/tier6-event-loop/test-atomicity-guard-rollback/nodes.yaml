@@ -10,7 +10,6 @@ processor:
         check: "entity.status == 'ready'"
       data_accumulation:
         counter: "entity.counter + 1"
-      sets_gates:
-        g_processed: true
+      sets_gate: g_processed
       advances_to: processed
       emits: process.done

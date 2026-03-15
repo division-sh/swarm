@@ -35,8 +35,8 @@ func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
 	if got := intentCollector[0].ChainDepth; got != 3 {
 		t.Fatalf("intent chain depth = %d, want 3", got)
 	}
-	if got := len(eventCollector); got != 1 {
-		t.Fatalf("event collector count = %d, want 1", got)
+	if got := len(eventCollector); got != 0 {
+		t.Fatalf("event collector count = %d, want 0", got)
 	}
 }
 

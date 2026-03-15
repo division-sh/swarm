@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [order.completed]
+    events: []
   outputs:
-    events: [invoice.created]
+    events: []

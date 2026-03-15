@@ -303,6 +303,75 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 	}
 }
 
+func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
+	repo := &persistentStateRepo{
+		found: true,
+		snapshot: StateSnapshot{
+			CurrentState: "pending",
+			Metadata:     map[string]any{},
+			StateBuckets: map[string]any{},
+		},
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       stubSource(),
+		StateRepo:    repo,
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{
+		"payload.score >= 70": true,
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "ent-1",
+		NodeID:   "node-1",
+		Event: events.Event{
+			ID:        "evt-1",
+			Type:      "item.evaluated",
+			Payload:   json.RawMessage(`{"entity_id":"ent-1","score":80}`),
+			CreatedAt: time.Now().UTC(),
+		},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				Condition:  "payload.score >= 70",
+				AdvancesTo: "passed",
+				Compute: &runtimecontracts.ComputeSpec{
+					Operation:   runtimecontracts.ComputeOpWeightedAverage,
+					StoreAs:     "entity.composite",
+					ValueField:  "score",
+					WeightField: "weight",
+				},
+			}},
+		},
+		State: StateSnapshot{
+			EntityID:     "ent-1",
+			CurrentState: "pending",
+			StateBuckets: map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.NextState != "passed" {
+		t.Fatalf("NextState = %q", result.NextState)
+	}
+	state, ok, err := repo.LoadState(context.Background(), "ent-1")
+	if err != nil || !ok {
+		t.Fatalf("LoadState = %v, ok=%v", err, ok)
+	}
+	got, ok := state.Metadata["composite"].(float64)
+	if !ok {
+		t.Fatalf("composite type = %T, want float64", state.Metadata["composite"])
+	}
+	if got != 0 {
+		t.Fatalf("composite = %v, want 0 for empty accumulator compute", got)
+	}
+}
+
 func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 	repo := &persistentStateRepo{
 		found: true,

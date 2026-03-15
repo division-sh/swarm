@@ -8,7 +8,7 @@ retrier:
       guard:
         id: under_limit
         check: "entity.retry_count < policy.max_retries"
-      on_fail: "escalate:limit.reached"
+        on_fail: "escalate:limit.reached"
       data_accumulation:
         retry_count: "entity.retry_count + 1"
       emits: retry.dispatched

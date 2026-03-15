@@ -5,15 +5,13 @@ pipeline:
   produces: [stage.two_start, stage.complete]
   event_handlers:
     stage.one_done:
-      sets_gate:
-        g_stage_one: true
+      sets_gate: g_stage_one
       data_accumulation:
         stage_one_result: payload.result
       advances_to: stage_two
       emits: stage.two_start
     stage.two_done:
-      sets_gate:
-        g_stage_two: true
+      sets_gate: g_stage_two
       data_accumulation:
         stage_two_result: payload.result
       advances_to: complete

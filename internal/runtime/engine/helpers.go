@@ -861,7 +861,7 @@ func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontrac
 	}
 	switch spec.Operation {
 	case runtimecontracts.ComputeOpWeightedAverage:
-		return computeWeightedAverage(acc, spec.Tiers, spec.Keys), nil
+		return computeWeightedAverage(acc, spec), nil
 	case runtimecontracts.ComputeOpWeightedSum:
 		return computeWeightedPayload(payload, spec.Tiers), nil
 	case runtimecontracts.ComputeOpSum:
@@ -889,9 +889,14 @@ func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontrac
 	}
 }
 
-func computeWeightedAverage(acc *Accumulator, tiers []runtimecontracts.ComputeTier, keys runtimecontracts.ComputeKeyConfig) float64 {
-	if acc == nil || len(acc.Items) == 0 || len(tiers) == 0 {
+func computeWeightedAverage(acc *Accumulator, spec *runtimecontracts.ComputeSpec) float64 {
+	if acc == nil || len(acc.Items) == 0 || spec == nil {
 		return 0
+	}
+	tiers := spec.Tiers
+	keys := spec.Keys
+	if len(tiers) == 0 {
+		return computeWeightedAverageFromItems(acc, spec)
 	}
 	dimensionKey := strings.TrimSpace(keys.DimensionKey)
 	if dimensionKey == "" {
@@ -942,6 +947,33 @@ func computeWeightedAverage(acc *Accumulator, tiers []runtimecontracts.ComputeTi
 		return 0
 	}
 	return total / totalWeight
+}
+
+func computeWeightedAverageFromItems(acc *Accumulator, spec *runtimecontracts.ComputeSpec) float64 {
+	if acc == nil || spec == nil || len(acc.Items) == 0 {
+		return 0
+	}
+	valueField := strings.TrimSpace(spec.ValueField)
+	weightField := strings.TrimSpace(spec.WeightField)
+	if valueField == "" || weightField == "" {
+		return 0
+	}
+	total := 0.0
+	weightSum := 0.0
+	for _, item := range acc.Items {
+		payload, _ := asObject(item["payload"])
+		score, okScore := asFloat(payload[valueField])
+		weight, okWeight := asFloat(payload[weightField])
+		if !okScore || !okWeight || weight == 0 {
+			continue
+		}
+		total += score * weight
+		weightSum += weight
+	}
+	if weightSum == 0 {
+		return 0
+	}
+	return total / weightSum
 }
 
 func computeWeightedPayload(payload map[string]any, tiers []runtimecontracts.ComputeTier) float64 {

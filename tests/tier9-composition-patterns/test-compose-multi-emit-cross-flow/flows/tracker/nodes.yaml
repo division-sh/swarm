@@ -2,7 +2,7 @@ recorder:
   id: recorder
   execution_type: system_node
   subscribes_to: [task.record]
-  produces: []
+  produces: [task.recorded]
   event_handlers:
     task.record:
       advances_to: recorded

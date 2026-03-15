@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [waiting, cancelled, done]
 pins:
   inputs:
-    events: [timer.scheduled, timer.cancel_requested]
+    events: [timer.scheduled, timer.cancel_requested, timer.check]
   outputs:
     events: [timer.check]

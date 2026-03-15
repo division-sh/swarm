@@ -1,4 +1,8 @@
 audit-agent:
   id: audit-agent
-  subscribes_to: [task.completed]
-  produces: []
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - task.completed
+  emit_events:
+    - task.audited

@@ -1,3 +1,4 @@
+name: analyzer-flow
 initial_state: idle
 terminal_states: [analyzed]
 states: [idle, analyzed]

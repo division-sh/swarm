@@ -6,16 +6,17 @@ gatekeeper:
   event_handlers:
     candidate.submitted:
       guard:
-        - id: depth_check
-          check: "entity.depth <= policy.max_depth"
-        - id: count_check
-          check: "entity.child_count < 2"
-        - id: score_floor
-          check: "payload.score >= policy.min_score"
-        - id: no_flags
-          check: "entity.flag_count == 0"
-        - id: name_unique
-          check: "query_entities(name == payload.name).count == 0"
-      on_fail: discard
+        checks:
+          - id: depth_check
+            check: "entity.depth <= policy.max_depth"
+          - id: count_check
+            check: "entity.child_count < 2"
+          - id: score_floor
+            check: "payload.score >= policy.min_score"
+          - id: no_flags
+            check: "entity.flag_count == 0"
+          - id: name_unique
+            check: "query_entities(name == payload.name).count == 0"
+        on_fail: discard
       advances_to: accepted
       emits: candidate.accepted

@@ -96,6 +96,14 @@ func workflowNodeEventPolicy(nodeID, eventType string) (WorkflowEventPolicy, boo
 		if policy, ok := node.Policies[eventType]; ok {
 			return policy, true
 		}
+		for pattern, policy := range node.Policies {
+			if strings.TrimSpace(pattern) == eventType {
+				continue
+			}
+			if runtimecontractsHandlerPatternMatches(pattern, eventType) {
+				return policy, true
+			}
+		}
 	}
 	return WorkflowEventPolicy{}, false
 }

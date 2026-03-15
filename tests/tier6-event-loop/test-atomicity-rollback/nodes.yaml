@@ -5,8 +5,10 @@ test-node:
   produces: [task.accepted]
   event_handlers:
     task.submitted:
+      guard:
+        id: always_fail
+        check: "false"
+        on_fail: reject
       advances_to: done
-      sets_gates:
-        approval_gate: true
+      sets_gate: approval_gate
       emits: task.accepted
-      simulate_failure: true

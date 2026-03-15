@@ -15,11 +15,11 @@ var tier7CompositionFixtures = []string{
 
 var tier7ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-agent-emits-to-node":     {kind: "fixture-issue", reason: "fixture agents.yaml omits required model_tier, conversation_mode, subscriptions, and emit_events fields for the real loader"},
-	"test-cross-flow-subscription": {kind: "harness-gap", reason: "not yet triaged in the initial Tier 7 started-runtime slice"},
-	"test-dual-delivery":           {kind: "harness-gap", reason: "requires agent_received assertions in addition to started-runtime agent execution"},
-	"test-full-lifecycle":          {kind: "harness-gap", reason: "not yet triaged in the initial Tier 7 started-runtime slice"},
-	"test-multi-gate-pipeline":     {kind: "harness-gap", reason: "requires gates assertions in addition to started-runtime agent execution"},
-	"test-wildcard-cross-flow":     {kind: "harness-gap", reason: "not yet triaged in the initial Tier 7 started-runtime slice"},
+	"test-cross-flow-subscription": {kind: "fixture-issue", reason: "fixture uses a flat multi-flow package shape without flow-level workflow semantics, so real module construction fails with workflow.name missing"},
+	"test-dual-delivery":           {kind: "fixture-issue", reason: "fixture agents.yaml omits required model_tier, conversation_mode, subscriptions, and emit_events fields for the real loader"},
+	"test-full-lifecycle":          {kind: "fixture-issue", reason: "fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
+	"test-multi-gate-pipeline":     {kind: "fixture-issue", reason: "fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
+	"test-wildcard-cross-flow":     {kind: "fixture-issue", reason: "fixture uses a flat multi-flow package shape without flow-level workflow semantics, so real module construction fails with workflow.name missing"},
 }
 
 func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {

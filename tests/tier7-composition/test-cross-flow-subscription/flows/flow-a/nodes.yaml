@@ -1,0 +1,9 @@
+flow-a-node:
+  id: flow-a-node
+  execution_type: system_node
+  subscribes_to: [flow-b/order.completed]
+  produces: [invoice.created]
+  event_handlers:
+    flow-b/order.completed:
+      advances_to: done
+      emits: invoice.created

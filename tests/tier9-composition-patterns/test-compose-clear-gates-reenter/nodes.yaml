@@ -5,8 +5,7 @@ reviewer:
   produces: [review.approved, review.restarted]
   event_handlers:
     review.done:
-      sets_gate:
-        g_reviewed: true
+      sets_gate: g_reviewed
       advances_to: approved
       emits: review.approved
     review.insufficient:

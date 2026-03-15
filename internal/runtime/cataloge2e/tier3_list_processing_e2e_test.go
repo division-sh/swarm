@@ -10,24 +10,23 @@ import (
 )
 
 var tier3ListProcessingFixtures = []string{
+	"test-fan-out-basic",
+	"test-fan-out-count",
+	"test-fan-out-emit-mapping",
+	"test-fan-out-empty",
 	"test-filter-basic",
 	"test-filter-empty",
+	"test-group-by-standalone",
 	"test-reduce-count",
 	"test-reduce-max",
 	"test-reduce-min",
 	"test-reduce-operation-count",
+	"test-reduce-pick-or-average",
+	"test-reduce-sum",
+	"test-reduce-weighted-average",
 }
 
-var tier3ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-fan-out-basic":           {kind: "validation-gap", reason: "real runtime currently keeps the instance in pending for this fan-out fixture shape"},
-	"test-fan-out-count":           {kind: "validation-gap", reason: "real runtime currently keeps the instance in pending instead of advancing to processing for this fan-out fixture"},
-	"test-fan-out-emit-mapping":    {kind: "fixture-issue", reason: "nodes.yaml still uses an emit_mapping shape the real loader cannot unmarshal"},
-	"test-fan-out-empty":           {kind: "validation-gap", reason: "real runtime does not persist fan_out_count for this empty fan-out fixture"},
-	"test-group-by-standalone":     {kind: "validation-gap", reason: "runtime handler field allowlist does not include group_by"},
-	"test-reduce-pick-or-average":  {kind: "validation-gap", reason: "real runtime leaves entity field result at 0 instead of computing the expected value for this reduce fixture"},
-	"test-reduce-sum":              {kind: "validation-gap", reason: "real runtime currently leaves the reduced entity field at its zero value for this fixture shape"},
-	"test-reduce-weighted-average": {kind: "validation-gap", reason: "real runtime leaves entity field composite at 0 instead of computing the expected weighted average"},
-}
+var tier3ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier3ListProcessingCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

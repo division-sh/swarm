@@ -8,7 +8,7 @@ processor:
       guard:
         id: below_limit
         check: "entity.attempt_count < policy.max_attempts"
-      on_fail: "escalate:attempt.limit_hit"
+        on_fail: "escalate:attempt.limit_hit"
       data_accumulation:
         attempt_count: "entity.attempt_count + 1"
       emits: attempt.processed

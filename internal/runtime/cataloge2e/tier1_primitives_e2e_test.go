@@ -14,6 +14,7 @@ var tier1PrimitiveFixtures = []string{
 	"test-advances-to-terminal",
 	"test-clear-gates",
 	"test-compute-standalone",
+	"test-data-accumulation-literal",
 	"test-data-accumulation-direct",
 	"test-data-accumulation-mapped",
 	"test-emits-multiple",
@@ -21,10 +22,15 @@ var tier1PrimitiveFixtures = []string{
 	"test-emits-single",
 	"test-from-filter",
 	"test-guard-compound-condition",
+	"test-guard-discard",
+	"test-guard-escalate",
 	"test-guard-entity-ref",
+	"test-guard-kill",
+	"test-guard-multi-fail",
 	"test-guard-multi",
 	"test-guard-pass",
 	"test-guard-policy-ref",
+	"test-guard-reject",
 	"test-on-complete-first-match",
 	"test-on-complete-second-match",
 	"test-on-complete-with-state",
@@ -34,17 +40,11 @@ var tier1PrimitiveFixtures = []string{
 	"test-rules-else",
 	"test-rules-match",
 	"test-rules-no-match",
-	"test-sets-gate",
 }
 
 var tier1ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-data-accumulation-literal": {kind: "validation-gap", reason: "real runtime records data_accumulation bookkeeping but does not persist entity field category for this literal-write fixture"},
-	"test-guard-discard":             {kind: "validation-gap", reason: "real runtime records handler_outcome success instead of discard for this guard on_fail fixture"},
-	"test-guard-escalate":            {kind: "harness-gap", reason: "cataloge2e does not yet assert handler_outcome=escalate"},
-	"test-guard-kill":                {kind: "validation-gap", reason: "real runtime records handler_outcome success instead of dead_letter for this guard on_fail kill fixture"},
-	"test-guard-multi-fail":          {kind: "harness-gap", reason: "cataloge2e does not yet assert handler_outcome=reject"},
-	"test-guard-reject":              {kind: "harness-gap", reason: "cataloge2e does not yet assert handler_outcome=reject"},
 	"test-rules-data-accumulation":   {kind: "fixture-issue", reason: "fixture still omits required produces, so the real validator rejects it before runtime execution"},
+	"test-sets-gate":                 {kind: "fixture-issue", reason: "fixture uses the unsupported sets_gate shorthand map form; the real loader only accepts scalar gate names or explicit {name,value} objects"},
 }
 
 func TestTier1PrimitiveCatalogFixtures_RealRuntime(t *testing.T) {

@@ -16,10 +16,10 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	semantics := WorkflowSemanticView{
 		Name:                   name,
 		Version:                version,
-		InitialStage:           "",
+		InitialStage:           rootSchemaInitialStage(bundle.RootSchema),
 		EntitySchema:           entitySchema,
-		Stages:                 deriveWorkflowStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas),
-		TerminalStages:         deriveWorkflowTerminalStagesFromFlows(bundle.Paths.Flows, bundle.FlowSchemas),
+		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
+		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
 		Transitions:            nil,
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Guards:                 deriveWorkflowGuardEntries(bundle),
@@ -116,6 +116,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Compute:          handler.Compute,
 				Query:            handler.Query,
 				FanOut:           handler.FanOut,
+				GroupBy:          handler.GroupBy,
 				Filter:           handler.Filter,
 				Reduce:           handler.Reduce,
 				Count:            handler.Count,
@@ -542,12 +543,29 @@ func appendPlatformBuiltinActionEntries(existing []GuardActionEntry, builtins []
 	}
 	return out
 }
-func deriveWorkflowStagesFromFlows(paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
-	if len(paths) == 0 || len(schemas) == 0 {
-		return nil
+func rootSchemaInitialStage(root *FlowSchemaDocument) string {
+	if root == nil {
+		return ""
 	}
+	return strings.TrimSpace(root.InitialState)
+}
+
+func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
 	out := make([]WorkflowStageContract, 0)
 	seen := make(map[string]struct{})
+	if root != nil {
+		for _, state := range root.States {
+			state = strings.TrimSpace(state)
+			if state == "" {
+				continue
+			}
+			if _, exists := seen[state]; exists {
+				continue
+			}
+			seen[state] = struct{}{}
+			out = append(out, WorkflowStageContract{ID: state})
+		}
+	}
 	for _, flow := range paths {
 		flowID := strings.TrimSpace(flow.ID)
 		schema, ok := schemas[flowID]
@@ -571,12 +589,23 @@ func deriveWorkflowStagesFromFlows(paths []FlowContractPaths, schemas map[string
 	}
 	return out
 }
-func deriveWorkflowTerminalStagesFromFlows(paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []string {
-	if len(paths) == 0 || len(schemas) == 0 {
-		return nil
-	}
+
+func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []string {
 	out := make([]string, 0)
 	seen := make(map[string]struct{})
+	if root != nil {
+		for _, state := range root.TerminalStates {
+			state = strings.TrimSpace(state)
+			if state == "" {
+				continue
+			}
+			if _, exists := seen[state]; exists {
+				continue
+			}
+			seen[state] = struct{}{}
+			out = append(out, state)
+		}
+	}
 	for _, flow := range paths {
 		flowID := strings.TrimSpace(flow.ID)
 		schema, ok := schemas[flowID]

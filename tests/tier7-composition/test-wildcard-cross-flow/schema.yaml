@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [job.*]
+    events: ["*/job.*"]
   outputs:
     events: [audit.logged]

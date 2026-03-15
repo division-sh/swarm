@@ -4,8 +4,11 @@ import (
 	"empireai/internal/runtime/core/paths"
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"regexp"
 	"strings"
 )
+
+var legacyComputeExpressionPattern = regexp.MustCompile(`^\s*weighted_average\s*\(\s*accumulated\.([a-zA-Z0-9_]+)\s*,\s*accumulated\.([a-zA-Z0-9_]+)\s*\)\s*$`)
 
 func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind == yaml.ScalarNode {
@@ -19,6 +22,78 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*r = HandlerRuleEntry(aux)
 	return nil
+}
+
+func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	var aux struct {
+		Operation   ComputeOperation `yaml:"operation"`
+		Tiers       []ComputeTier    `yaml:"tiers"`
+		Keys        ComputeKeyConfig `yaml:"keys"`
+		StoreAs     string           `yaml:"store_as"`
+		ItemsFrom   string           `yaml:"items_from"`
+		ValueField  string           `yaml:"value_field"`
+		WeightField string           `yaml:"weight_field"`
+		OutputField string           `yaml:"output_field"`
+		Expression  string           `yaml:"expression"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = ComputeSpec{
+		Operation:   aux.Operation,
+		Tiers:       aux.Tiers,
+		Keys:        aux.Keys,
+		StoreAs:     strings.TrimSpace(aux.StoreAs),
+		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
+		ValueField:  strings.TrimSpace(aux.ValueField),
+		WeightField: strings.TrimSpace(aux.WeightField),
+	}
+	if s.StoreAs == "" {
+		if outputField := strings.TrimSpace(aux.OutputField); outputField != "" {
+			if strings.HasPrefix(outputField, "entity.") || strings.HasPrefix(outputField, "metadata.") {
+				s.StoreAs = outputField
+			} else {
+				s.StoreAs = "entity." + outputField
+			}
+		}
+	}
+	if s.Operation == ComputeOpUnknown {
+		if valueField, weightField, ok := parseLegacyComputeExpression(strings.TrimSpace(aux.Expression)); ok {
+			s.Operation = ComputeOpWeightedAverage
+			if s.ItemsFrom == "" {
+				s.ItemsFrom = "accumulated.items"
+			}
+			if s.ValueField == "" {
+				s.ValueField = valueField
+			}
+			if s.WeightField == "" {
+				s.WeightField = weightField
+			}
+		}
+	}
+	return nil
+}
+
+func parseLegacyComputeExpression(expression string) (string, string, bool) {
+	match := legacyComputeExpressionPattern.FindStringSubmatch(expression)
+	if len(match) != 3 {
+		return "", "", false
+	}
+	return singularizeLegacyComputeField(match[1]), singularizeLegacyComputeField(match[2]), true
+}
+
+func singularizeLegacyComputeField(name string) string {
+	name = strings.TrimSpace(name)
+	// Legacy fixtures only use simple plural payload field names like
+	// values/weights in weighted_average(accumulated.values, accumulated.weights).
+	// This is a narrow compatibility shim, not a general singularization rule.
+	if len(name) > 1 && strings.HasSuffix(name, "s") {
+		return strings.TrimSpace(strings.TrimSuffix(name, "s"))
+	}
+	return name
 }
 func (g *GuardSpec) UnmarshalYAML(node *yaml.Node) error {
 	if g == nil {
@@ -82,16 +157,69 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	if f == nil {
 		return nil
 	}
-	type alias FanOutSpec
-	var aux alias
+	var aux struct {
+		ItemsFrom   string    `yaml:"items_from"`
+		Target      string    `yaml:"target"`
+		EmitPerItem string    `yaml:"emit_per_item"`
+		EmitMapping yaml.Node `yaml:"emit_mapping"`
+	}
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	*f = FanOutSpec(aux)
+	*f = FanOutSpec{
+		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
+		Target:      strings.TrimSpace(aux.Target),
+		EmitPerItem: strings.TrimSpace(aux.EmitPerItem),
+	}
 	f.ItemsFrom = strings.TrimSpace(f.ItemsFrom)
 	f.ItemsPath = paths.Parse(f.ItemsFrom)
 	f.Target = strings.TrimSpace(f.Target)
 	f.EmitPerItem = strings.TrimSpace(f.EmitPerItem)
+	if aux.EmitMapping.Kind != 0 {
+		mapping, keyField, err := decodeFanOutEmitMappingNode(&aux.EmitMapping)
+		if err != nil {
+			return err
+		}
+		f.EmitMapping = mapping
+		f.EmitMappingKey = keyField
+	}
+	return nil
+}
+
+func decodeFanOutEmitMappingNode(node *yaml.Node) (map[string]string, string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, "", nil
+	}
+	var plain map[string]string
+	if err := node.Decode(&plain); err == nil && len(plain) > 0 {
+		return plain, "", nil
+	}
+	var structured struct {
+		KeyField string            `yaml:"key_field"`
+		Mapping  map[string]string `yaml:"mapping"`
+	}
+	if err := node.Decode(&structured); err != nil {
+		return nil, "", err
+	}
+	return structured.Mapping, strings.TrimSpace(structured.KeyField), nil
+}
+
+func (g *GroupBySpec) UnmarshalYAML(node *yaml.Node) error {
+	if g == nil {
+		return nil
+	}
+	type alias GroupBySpec
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*g = GroupBySpec(aux)
+	g.ItemsFrom = strings.TrimSpace(g.ItemsFrom)
+	g.ItemsPath = paths.Parse(g.ItemsFrom)
+	g.Key = strings.TrimSpace(g.Key)
+	g.KeyPath = paths.Parse(g.Key)
+	g.StoreAs = strings.TrimSpace(g.StoreAs)
+	g.StorePath = paths.Parse(g.StoreAs)
 	return nil
 }
 func (p *PayloadTransformSpec) UnmarshalYAML(node *yaml.Node) error {
@@ -130,6 +258,58 @@ func (g *GateSpec) UnmarshalYAML(node *yaml.Node) error {
 	default:
 		return fmt.Errorf("unsupported gate yaml node kind %d", node.Kind)
 	}
+}
+func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
+	if w == nil {
+		return nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			*w = WorkflowDataWrite{}
+			return nil
+		}
+		w.Field = strings.TrimSpace(node.Value)
+		w.SourcePath = paths.Parse(w.Field)
+		w.TargetPath = paths.Parse(w.Field)
+		return nil
+	case yaml.MappingNode:
+	default:
+		return fmt.Errorf("unsupported workflow data write yaml node kind %d", node.Kind)
+	}
+	var aux struct {
+		Field       string    `yaml:"field"`
+		SourceField string    `yaml:"source_field"`
+		TargetField string    `yaml:"target_field"`
+		Value       yaml.Node `yaml:"value"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*w = WorkflowDataWrite{
+		Field:       strings.TrimSpace(aux.Field),
+		SourceField: strings.TrimSpace(aux.SourceField),
+		TargetField: strings.TrimSpace(aux.TargetField),
+	}
+	switch aux.Value.Kind {
+	case 0:
+		// no-op
+	case yaml.MappingNode:
+		var expr ExpressionValue
+		if err := aux.Value.Decode(&expr); err != nil {
+			return err
+		}
+		w.Value = expr
+	default:
+		var literal any
+		if err := aux.Value.Decode(&literal); err != nil {
+			return err
+		}
+		w.Value = ExpressionValue{Literal: literal}
+	}
+	w.SourcePath = paths.Parse(w.Source())
+	w.TargetPath = paths.Parse(w.Target())
+	return nil
 }
 func (s *FilterSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
@@ -249,37 +429,6 @@ func (t *WorkflowTransitionContract) UnmarshalYAML(node *yaml.Node) error {
 	}
 	t.From = from
 	return nil
-}
-func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
-	if w == nil {
-		return nil
-	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-			*w = WorkflowDataWrite{}
-			return nil
-		}
-		w.Field = strings.TrimSpace(node.Value)
-		w.SourcePath = paths.Parse(w.Field)
-		w.TargetPath = paths.Parse(w.Field)
-		return nil
-	case yaml.MappingNode:
-		type alias WorkflowDataWrite
-		var aux alias
-		if err := node.Decode(&aux); err != nil {
-			return err
-		}
-		*w = WorkflowDataWrite(aux)
-		w.Field = strings.TrimSpace(w.Field)
-		w.SourceField = strings.TrimSpace(w.SourceField)
-		w.TargetField = strings.TrimSpace(w.TargetField)
-		w.SourcePath = paths.Parse(w.Source())
-		w.TargetPath = paths.Parse(w.Target())
-		return nil
-	default:
-		return fmt.Errorf("unsupported workflow data write yaml node kind %d", node.Kind)
-	}
 }
 func (e *ExpressionValue) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
@@ -577,6 +726,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Compute          *ComputeSpec             `yaml:"compute"`
 		Query            yaml.Node                `yaml:"query"`
 		FanOut           *FanOutSpec              `yaml:"fan_out"`
+		GroupBy          *GroupBySpec             `yaml:"group_by"`
 		Filter           *FilterSpec              `yaml:"filter"`
 		Reduce           *ReduceSpec              `yaml:"reduce"`
 		Count            *CountSpec               `yaml:"count"`
@@ -598,6 +748,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Accumulate:       aux.Accumulate,
 		Compute:          aux.Compute,
 		FanOut:           aux.FanOut,
+		GroupBy:          aux.GroupBy,
 		Filter:           aux.Filter,
 		Reduce:           aux.Reduce,
 		Count:            aux.Count,
@@ -818,6 +969,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"compute":           {},
 		"query":             {},
 		"fan_out":           {},
+		"group_by":          {},
 		"filter":            {},
 		"reduce":            {},
 		"count":             {},
@@ -898,7 +1050,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node) (*HandlerRuleEntry, error) {
 	if err := node.Decode(&rule); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.DataAccumulation.Value.IsZero() {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.DataAccumulation.Value.IsZero() && rule.Compute == nil {
 		return nil, nil
 	}
 	return &rule, nil
@@ -915,7 +1067,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
 		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emits", "data_accumulation") {
+		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emits", "data_accumulation", "compute") {
 			rule, err := decodeHandlerRuleEntryNode(node)
 			if err != nil || rule == nil {
 				return nil, err

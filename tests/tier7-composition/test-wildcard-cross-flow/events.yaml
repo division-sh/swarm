@@ -1,15 +1,3 @@
-trigger.alpha:
-  payload:
-    entity_id: string
-trigger.beta:
-  payload:
-    entity_id: string
-job.alpha_done:
-  payload:
-    entity_id: string
-job.beta_done:
-  payload:
-    entity_id: string
 audit.logged:
   payload:
     entity_id: string

@@ -1,11 +1,16 @@
 test-node:
   id: test-node
   execution_type: system_node
-  subscribes_to: [monitor.started]
+  subscribes_to: [monitor.started, timer.tick]
   produces: [timer.tick]
+  timers:
+    - id: tick_timer
+      event: timer.tick
+      delay: 1s
+      start_on: monitor.started
+      recurring: true
   event_handlers:
     monitor.started:
-      timer:
-        delay_ms: 1000
-        emit: timer.tick
-        recurring: true
+      advances_to: monitoring
+    timer.tick:
+      advances_to: monitoring

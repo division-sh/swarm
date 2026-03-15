@@ -1,0 +1,6 @@
+order.submitted:
+  payload:
+    entity_id: string
+order.completed:
+  payload:
+    entity_id: string

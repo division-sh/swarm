@@ -2,7 +2,7 @@ assign-node:
   id: assign-node
   execution_type: system_node
   subscribes_to: [task.assigned]
-  produces: []
+  produces: [task.assign_ack]
   event_handlers:
     task.assigned:
       advances_to: assigned

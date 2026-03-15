@@ -5,7 +5,6 @@ validator:
   produces: [validation.done]
   event_handlers:
     validate.start:
-      sets_gates:
-        g_validated: true
+      sets_gate: g_validated
       advances_to: done
       emits: validation.done

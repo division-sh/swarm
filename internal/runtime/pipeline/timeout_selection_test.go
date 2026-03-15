@@ -65,3 +65,62 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 		t.Fatal("expected execution engine to be called")
 	}
 }
+
+func TestDeclarativeNodeHandleEvent_MatchesWildcardHandler(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-wildcard-subscription")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	entry := bundle.NodeEntries()["test-node"]
+	engine := &recordingExecutionEngine{}
+	node := NewNode(entry, engine, nil)
+	handled := node.Handle(context.Background(), events.Event{Type: "task.completed"}.WithEntityID("ent-1"))
+	if !handled {
+		t.Fatal("expected wildcard event to be handled")
+	}
+	if !engine.called {
+		t.Fatal("expected execution engine to be called")
+	}
+}
+
+func TestWorkflowNodeEventPolicy_MatchesWildcardSubscription(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-wildcard-subscription")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	previous := defaultWorkflowModuleFactory
+	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
+	defer SetDefaultWorkflowModuleFactory(previous)
+
+	policy, ok := workflowNodeEventPolicy("test-node", "task.completed")
+	if !ok {
+		t.Fatal("expected wildcard subscription policy to match")
+	}
+	if !policy.RequireEntity {
+		t.Fatalf("policy = %#v, want require_entity=true", policy)
+	}
+}
+
+func TestWorkflowMaxChainDepthPolicy_UsesFixturePolicy(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier6-event-loop", "test-chain-depth-limit")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	got := workflowMaxChainDepthPolicy(semanticview.Wrap(bundle))
+	if got != 5 {
+		t.Fatalf("workflowMaxChainDepthPolicy = %d, want 5", got)
+	}
+}

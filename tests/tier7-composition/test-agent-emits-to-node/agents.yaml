@@ -1,4 +1,8 @@
 test-agent:
   id: test-agent
-  subscribes_to: [task.assigned]
-  produces: [task.completed]
+  model_tier: tier2
+  conversation_mode: stateless
+  subscriptions:
+    - task.assigned
+  emit_events:
+    - task.completed

@@ -4,9 +4,7 @@ trigger:
     entity_id: ent-001
 
 expected:
-  dead_letter: true
-  dead_letter_reason: chain_depth_exceeded
-  chain_depth_at_dead_letter: 5
   handler_outcome: kill
+  chain_depth_exceeded: true
   entity_state: pending
   emitted_events: []

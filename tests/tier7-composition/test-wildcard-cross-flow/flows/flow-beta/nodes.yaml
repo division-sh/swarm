@@ -1,0 +1,9 @@
+beta-node:
+  id: beta-node
+  execution_type: system_node
+  subscribes_to: [trigger.beta]
+  produces: [job.beta_done]
+  event_handlers:
+    trigger.beta:
+      advances_to: done
+      emits: job.beta_done

@@ -1,0 +1,9 @@
+alpha-node:
+  id: alpha-node
+  execution_type: system_node
+  subscribes_to: [trigger.alpha]
+  produces: [job.alpha_done]
+  event_handlers:
+    trigger.alpha:
+      advances_to: done
+      emits: job.alpha_done

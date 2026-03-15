@@ -109,6 +109,7 @@ type HandlerTransitionSemantic struct {
 	Compute          *ComputeSpec
 	Query            *QuerySpec
 	FanOut           *FanOutSpec
+	GroupBy          *GroupBySpec
 	Filter           *FilterSpec
 	Reduce           *ReduceSpec
 	Count            *CountSpec
@@ -123,6 +124,7 @@ type HandlerRuleEntry struct {
 	AdvancesTo       string                   `yaml:"advances_to"`
 	Emits            EventEmission            `yaml:"emits"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
+	Compute          *ComputeSpec             `yaml:"compute"`
 }
 type GuardSpec struct {
 	ID        string       `yaml:"id"`
@@ -147,10 +149,13 @@ type AccumulateSpec struct {
 	OnTimeout    *HandlerRuleEntry    `yaml:"on_timeout"`
 }
 type ComputeSpec struct {
-	Operation ComputeOperation `yaml:"operation"`
-	Tiers     []ComputeTier    `yaml:"tiers"`
-	Keys      ComputeKeyConfig `yaml:"keys"`
-	StoreAs   string           `yaml:"store_as"`
+	Operation   ComputeOperation `yaml:"operation"`
+	Tiers       []ComputeTier    `yaml:"tiers"`
+	Keys        ComputeKeyConfig `yaml:"keys"`
+	StoreAs     string           `yaml:"store_as"`
+	ItemsFrom   string           `yaml:"items_from"`
+	ValueField  string           `yaml:"value_field"`
+	WeightField string           `yaml:"weight_field"`
 }
 type ComputeTier struct {
 	Dimensions []string `yaml:"dimensions"`
@@ -162,11 +167,20 @@ type ComputeKeyConfig struct {
 	NumericKeys  []string `yaml:"numeric_keys"`
 }
 type FanOutSpec struct {
-	ItemsFrom   string            `yaml:"items_from"`
-	ItemsPath   paths.Path        `yaml:"-"`
-	Target      string            `yaml:"target"`
-	EmitPerItem string            `yaml:"emit_per_item"`
-	EmitMapping map[string]string `yaml:"emit_mapping"`
+	ItemsFrom      string            `yaml:"items_from"`
+	ItemsPath      paths.Path        `yaml:"-"`
+	Target         string            `yaml:"target"`
+	EmitPerItem    string            `yaml:"emit_per_item"`
+	EmitMapping    map[string]string `yaml:"emit_mapping"`
+	EmitMappingKey string            `yaml:"-"`
+}
+type GroupBySpec struct {
+	ItemsFrom string     `yaml:"items_from"`
+	ItemsPath paths.Path `yaml:"-"`
+	Key       string     `yaml:"key"`
+	KeyPath   paths.Path `yaml:"-"`
+	StoreAs   string     `yaml:"store_as"`
+	StorePath paths.Path `yaml:"-"`
 }
 type FilterSpec struct {
 	Predicate  string     `yaml:"predicate"`
@@ -676,6 +690,7 @@ type SystemNodeEventHandler struct {
 	Compute          *ComputeSpec             `yaml:"compute"`
 	Query            *QuerySpec               `yaml:"query"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
+	GroupBy          *GroupBySpec             `yaml:"group_by"`
 	Filter           *FilterSpec              `yaml:"filter"`
 	Reduce           *ReduceSpec              `yaml:"reduce"`
 	Count            *CountSpec               `yaml:"count"`

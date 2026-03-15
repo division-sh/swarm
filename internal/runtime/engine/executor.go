@@ -23,6 +23,7 @@ const (
 	StepGuard      Step = "guard"
 	StepAccumulate Step = "accumulate"
 	StepFilter     Step = "filter"
+	StepGroupBy    Step = "group_by"
 	StepReduce     Step = "reduce"
 	StepCount      Step = "count"
 	StepCompute    Step = "compute"
@@ -44,6 +45,7 @@ var OrderedSteps = []Step{
 	StepGuard,
 	StepAccumulate,
 	StepFilter,
+	StepGroupBy,
 	StepReduce,
 	StepCount,
 	StepCompute,
@@ -262,6 +264,8 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return e.stepAccumulate(frame)
 	case StepFilter:
 		return false, e.stepFilter(frame)
+	case StepGroupBy:
+		return false, e.stepGroupBy(frame)
 	case StepReduce:
 		return false, e.stepReduce(frame)
 	case StepCount:
@@ -557,13 +561,14 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	}
 	itemsValue, _ := resolveContractPath(frame.base, frame.state, spec.ItemsPath, spec.ItemsFrom)
 	items := sliceFromAny(itemsValue)
-	if len(items) == 0 {
-		return false, nil
-	}
 	frame.result.FanOutCount = len(items)
 	frame.state.FanOut = map[string]any{}
 	frame.state.SetFanOut("target", spec.Target)
 	frame.state.SetFanOut("count", len(items))
+	e.writeStepValue(frame, "entity.fan_out_count", len(items))
+	if len(items) == 0 {
+		return false, nil
+	}
 	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
 	if err != nil {
 		frame.result.FailureClass = FailureDeadLetter
@@ -596,8 +601,37 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	frame.result.ChainDepth = nextDepth
+	if err := e.stepAdvancesTo(frame); err != nil {
+		return false, err
+	}
 	frame.result.Status = OutcomeFannedOut
 	return true, nil
+}
+
+func (e *Executor) stepGroupBy(frame *executionFrame) error {
+	spec := frame.req.Handler.GroupBy
+	if spec == nil {
+		return nil
+	}
+	itemsValue, _ := resolveContractPath(frame.base, frame.state, spec.ItemsPath, spec.ItemsFrom)
+	items := sliceFromAny(itemsValue)
+	current := e.currentContext(frame)
+	grouped := make(map[string]any)
+	for _, item := range items {
+		key := strings.TrimSpace(asString(executionResolveOperand(strings.TrimSpace(spec.Key), map[string]any{
+			"item":    item,
+			"payload": frame.payload,
+			"entity":  frame.state.State.EntityContext(),
+			"policy":  current.Policy.Raw(),
+		})))
+		if key == "" {
+			key = "unknown"
+		}
+		existing, _ := grouped[key].([]any)
+		grouped[key] = append(existing, item)
+	}
+	e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped)
+	return nil
 }
 
 func (e *Executor) stepOnComplete(frame *executionFrame) error {
@@ -612,6 +646,9 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	if rule != nil {
 		frame.rule = rule
 		e.applyRule(frame, rule)
+		if rule.Compute != nil {
+			return e.stepCompute(frame)
+		}
 	}
 	return nil
 }
@@ -627,6 +664,9 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 	if rule != nil {
 		frame.rule = rule
 		e.applyRule(frame, rule)
+		if rule.Compute != nil {
+			return e.stepCompute(frame)
+		}
 	}
 	return nil
 }
@@ -707,7 +747,7 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 
 func (e *Executor) stepEmits(frame *executionFrame) error {
 	eventTypes := frame.req.Handler.Emits.Values()
-	if frame.rule != nil {
+	if frame.rule != nil && !frame.rule.Emits.Empty() {
 		eventTypes = frame.rule.Emits.Values()
 	}
 	if len(eventTypes) == 0 {
@@ -1097,6 +1137,9 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if rule.DataAccumulation.HasWrites() || strings.TrimSpace(rule.DataAccumulation.SourceEvent) != "" {
 		frame.req.Handler.DataAccumulation = rule.DataAccumulation
 	}
+	if rule.Compute != nil {
+		frame.req.Handler.Compute = rule.Compute
+	}
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
@@ -1112,10 +1155,18 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 	if err != nil {
 		return EmitIntent{}, err
 	}
+	createdAt := time.Now().UTC()
+	if n := len(frame.result.EmitIntents); n > 0 {
+		last := frame.result.EmitIntents[n-1].Event.CreatedAt
+		if !last.IsZero() && !createdAt.After(last) {
+			createdAt = last.Add(time.Nanosecond)
+		}
+	}
 	return EmitIntent{
 		Event: events.Event{
-			Type:    events.EventType(strings.TrimSpace(eventType)),
-			Payload: encoded,
+			Type:      events.EventType(strings.TrimSpace(eventType)),
+			Payload:   encoded,
+			CreatedAt: createdAt,
 		}.WithEntityID(frame.req.EntityID.String()),
 		ChainDepth:    chainDepth,
 		ParentEventID: strings.TrimSpace(frame.req.Event.ID),
@@ -1127,6 +1178,13 @@ func fanOutEventType(spec *runtimecontracts.FanOutSpec, item any) string {
 		return ""
 	}
 	if len(spec.EmitMapping) > 0 {
+		if keyField := strings.TrimSpace(spec.EmitMappingKey); keyField != "" {
+			if value, ok := fanOutMappingValue(item, keyField); ok {
+				if eventType, ok := spec.EmitMapping[strings.TrimSpace(asString(value))]; ok {
+					return strings.TrimSpace(eventType)
+				}
+			}
+		}
 		for key, eventType := range spec.EmitMapping {
 			if strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(asString(item))) {
 				return strings.TrimSpace(eventType)
@@ -1141,6 +1199,34 @@ func fanOutEventType(spec *runtimecontracts.FanOutSpec, item any) string {
 		}
 	}
 	return strings.TrimSpace(spec.EmitPerItem)
+}
+
+func fanOutMappingValue(item any, keyField string) (any, bool) {
+	keyField = strings.TrimSpace(strings.TrimPrefix(keyField, "item."))
+	if keyField == "" {
+		return nil, false
+	}
+	obj, ok := asObject(item)
+	if !ok {
+		return nil, false
+	}
+	current := any(obj)
+	for _, segment := range strings.Split(keyField, ".") {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return nil, false
+		}
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		value, ok := m[segment]
+		if !ok {
+			return nil, false
+		}
+		current = value
+	}
+	return current, true
 }
 
 func (e *Executor) resolveClearGates(frame *executionFrame) []string {
@@ -1178,6 +1264,11 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 	case GuardFailureKill:
 		frame.result.Status = OutcomeKilled
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "kill")
+		if killedState := e.killStateTarget(); killedState != "" {
+			frame.result.NextState = killedState
+			frame.state.State.CurrentState = killedState
+			frame.result.StateMutation.NextState = killedState
+		}
 		return nil
 	case GuardFailureEscalate:
 		eventType := parsed.EventType
@@ -1202,6 +1293,23 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 	default:
 		return fmt.Errorf("unsupported guard on_fail action %q", action)
 	}
+}
+
+func (e *Executor) killStateTarget() string {
+	if e == nil || e.deps.Source == nil {
+		return ""
+	}
+	for _, stage := range e.deps.Source.WorkflowTerminalStages() {
+		if strings.EqualFold(strings.TrimSpace(stage), "killed") {
+			return strings.TrimSpace(stage)
+		}
+	}
+	for _, stage := range e.deps.Source.WorkflowStages() {
+		if strings.EqualFold(strings.TrimSpace(stage.ID), "killed") {
+			return strings.TrimSpace(stage.ID)
+		}
+	}
+	return ""
 }
 
 func mapsKeys(values map[string]any) []any {

@@ -5,9 +5,9 @@ task-node:
   produces: [task.timed_out]
   timers:
     - id: task_timer
+      event: timer.task_timeout
+      delay: 1h
       start_on: task.started
-      duration: 1h
-      emits: timer.task_timeout
   event_handlers:
     task.started:
       advances_to: active

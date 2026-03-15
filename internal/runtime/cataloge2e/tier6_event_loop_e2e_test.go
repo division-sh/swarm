@@ -10,19 +10,19 @@ import (
 )
 
 var tier6EventLoopFixtures = []string{
+	"test-cross-entity-concurrent",
 	"test-event-persisted-before-delivery",
+	"test-guards-pre-handler-state",
 }
 
 var tier6ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-atomicity-commit":         {kind: "validation-gap", reason: "initial E2E harness does not yet assert atomic commit semantics against the real runtime receipts/state tables"},
-	"test-atomicity-guard-rollback": {kind: "validation-gap", reason: "initial E2E harness does not yet assert guard rollback semantics against the real runtime receipts/state tables"},
-	"test-atomicity-rollback":       {kind: "validation-gap", reason: "initial E2E harness does not yet assert rollback semantics against the real runtime receipts/state tables"},
-	"test-chain-depth-limit":        {kind: "validation-gap", reason: "real runtime does not currently surface the expected chain-depth dead-letter outcome for this fixture"},
-	"test-cross-entity-concurrent":  {kind: "validation-gap", reason: "initial E2E harness does not yet assert cross-entity concurrency behavior"},
-	"test-dead-letter":              {kind: "validation-gap", reason: "real runtime emits contradiction diagnostics instead of the catalog dead_letter outcome for this fixture shape"},
-	"test-entity-serialization":     {kind: "validation-gap", reason: "initial E2E harness does not yet assert entity serialization guarantees"},
-	"test-event-validation":         {kind: "validation-gap", reason: "real runtime does not currently produce the catalog reject-plus-dead-letter outcome for this invalid event fixture"},
-	"test-guards-pre-handler-state": {kind: "validation-gap", reason: "initial E2E harness does not yet assert pre-handler guard state ordering"},
+	"test-atomicity-commit":         {kind: "fixture-issue", reason: "fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
+	"test-atomicity-guard-rollback": {kind: "fixture-issue", reason: "fixture still uses sets_gates, which the real loader rejects; it must use the live sets_gate dialect"},
+	"test-atomicity-rollback":       {kind: "fixture-issue", reason: "fixture uses unsupported sets_gates and simulate_failure handler fields, so it does not boot under the real loader"},
+	"test-chain-depth-limit":        {kind: "fixture-issue", reason: "fixture self-emits chain.continue from the chain.continue handler, so real boot validation rejects it before any chain-depth runtime behavior"},
+	"test-dead-letter":              {kind: "fixture-issue", reason: "live runtime treats unroutable contract events as spec.contradiction_detected diagnostics, not event-loop dead_letter receipts"},
+	"test-entity-serialization":     {kind: "fixture-issue", reason: "fixture guard uses stale entity.state dialect; live runtime expression context exposes entity.current_state"},
+	"test-event-validation":         {kind: "fixture-issue", reason: "default runtime payload validation is warning-only unless strict mode is enabled, so this fixture's reject-plus-dead-letter expectation does not match live runtime mode"},
 }
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
@@ -35,8 +35,12 @@ func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 
 			h := newRuntimeHarness(t, fixtureRoot, false)
 			h.seedEntityFields(expected)
-			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, 2*time.Second)
+			if len(expected.Trigger.Concurrent) > 0 {
+				h.publishConcurrentAndWait(expected.Trigger.Concurrent, 2*time.Second)
+			} else {
+				for _, step := range expected.triggerSequence() {
+					h.publishAndWait(step, 2*time.Second)
+				}
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})

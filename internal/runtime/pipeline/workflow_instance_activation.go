@@ -153,7 +153,16 @@ func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID s
 
 func (pc *FactoryPipelineCoordinator) handlerEmitPayload(_ context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
-	out := cloneMap(payload)
+	// Only carry contract-visible entity fields into emitted payloads; internal
+	// workflow metadata such as gates, evidence, and runtime bookkeeping should
+	// not leak onto the bus.
+	out := workflowEntityMetadataPayload(pc.SemanticSource(), triggerCtx.State.Metadata)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range payload {
+		out[key] = value
+	}
 	entityID := workflowEventEntityIDWithPayload(triggerCtx.Event, payload)
 	if entityID != "" {
 		out["entity_id"] = entityID
@@ -163,6 +172,31 @@ func (pc *FactoryPipelineCoordinator) handlerEmitPayload(_ context.Context, trig
 	}
 	if state := strings.TrimSpace(string(triggerCtx.State.Stage)); state != "" {
 		out["current_state"] = state
+	}
+	return out
+}
+
+func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return nil
+	}
+	allowed := workflowEntitySchemaFields(source)
+	if len(allowed) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(allowed))
+	for key, value := range metadata {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

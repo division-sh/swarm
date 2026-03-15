@@ -144,6 +144,18 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	}
 	eventType := strings.TrimSpace(string(evt.Type))
 	handler, ok := n.contract.EventHandlers[eventType]
+	if !ok {
+		for pattern, candidate := range n.contract.EventHandlers {
+			if strings.TrimSpace(pattern) == eventType {
+				continue
+			}
+			if runtimecontractsHandlerPatternMatches(pattern, eventType) {
+				handler = candidate
+				ok = true
+				break
+			}
+		}
+	}
 	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsString(n.contract.SubscribesTo, eventType) {
 		for _, candidate := range n.contract.EventHandlers {
 			if candidate.Accumulate == nil {
@@ -241,7 +253,25 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	entityID := workflowEventEntityID(evt)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
-	result, err := e.node.Handle(ctx, runtimeengine.ExecutionRequest{
+	exec := e.executor
+	node := e.node
+	var (
+		parentEventCollector *[]events.Event
+		collectedIntents     *[]runtimeengine.EmitIntent
+		collectLocally       bool
+	)
+	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
+	if collectLocally {
+		deps := coordinatorEngineDependencies(e.coordinator)
+		deps.Outbox = noOpEngineOutbox{}
+		tmpExec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(e.coordinator))
+		if err != nil {
+			return nil, err
+		}
+		exec = tmpExec
+		node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(e.nodeID), exec)
+	}
+	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID(entityID),
 		NodeID:   identity.NormalizeNodeID(e.nodeID),
 		Event:    evt,
@@ -256,6 +286,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
+	flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return &HandlerOutcome{Handled: false}, nil
 	}

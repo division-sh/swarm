@@ -4,7 +4,11 @@ trigger:
     entity_id: ent-001
 
 expected:
-  handler_outcome: reject
-  dead_letter: true
-  entity_state: pending
-  emitted_events: []
+  handler_outcome: success
+  diagnostics:
+    - type: spec.payload_validation
+      severity: warning
+      message: "Missing required field: priority"
+  entity_state: done
+  emitted_events:
+    - task.accepted

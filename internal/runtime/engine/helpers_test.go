@@ -302,4 +302,24 @@ func TestComputeValue(t *testing.T) {
 	if err != nil || value.(int) != 3 {
 		t.Fatalf("computeValue count = %#v, %v", value, err)
 	}
+
+	acc = &Accumulator{
+		Items: []map[string]any{
+			{"payload": map[string]any{"score": 80.0, "weight": 0.5}},
+			{"payload": map[string]any{"score": 90.0, "weight": 0.3}},
+			{"payload": map[string]any{"score": 70.0, "weight": 0.2}},
+		},
+	}
+	value, err = computeValue(acc, nil, &runtimecontracts.ComputeSpec{
+		Operation:   runtimecontracts.ComputeOpWeightedAverage,
+		StoreAs:     "entity.composite",
+		ValueField:  "score",
+		WeightField: "weight",
+	})
+	if err != nil {
+		t.Fatalf("computeValue legacy weighted_average error = %v", err)
+	}
+	if got := value.(float64); got != 81 {
+		t.Fatalf("computeValue legacy weighted_average = %v, want 81", got)
+	}
 }

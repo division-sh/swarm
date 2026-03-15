@@ -17,6 +17,18 @@ func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 }
 
+func sourceWithKilledState() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Stages: []runtimecontracts.WorkflowStageContract{
+				{ID: "pending"},
+				{ID: "killed"},
+			},
+			TerminalStages: []string{"killed"},
+		},
+	})
+}
+
 type stubStateRepo struct{}
 type stubRunner struct{}
 type stubLocker struct{}
@@ -138,11 +150,14 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 18 {
-		t.Fatalf("step count = %d, want 18", len(steps))
+	if len(steps) != 19 {
+		t.Fatalf("step count = %d, want 19", len(steps))
 	}
 	if steps[0] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
+	}
+	if steps[5] != StepGroupBy {
+		t.Fatalf("expected group_by at index 5, got order %v", steps)
 	}
 }
 
@@ -491,7 +506,8 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 				EmitPerItem: "item.process",
 				Target:      "agent-x",
 			},
-			Action: runtimecontracts.ActionSpec{ID: "should_not_run"},
+			AdvancesTo: "processing",
+			Action:     runtimecontracts.ActionSpec{ID: "should_not_run"},
 		},
 		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
 	})
@@ -501,14 +517,20 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	if result.Status != OutcomeFannedOut {
 		t.Fatalf("Status = %q", result.Status)
 	}
+	if result.NextState != "processing" {
+		t.Fatalf("NextState = %q", result.NextState)
+	}
 	if result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
 		t.Fatalf("fan_out results wrong: count=%d intents=%d", result.FanOutCount, len(result.EmitIntents))
+	}
+	if got := result.StateMutation.Metadata["fan_out_count"]; got != 2 {
+		t.Fatalf("fan_out_count metadata = %#v", got)
 	}
 	if result.ChainDepth != 2 {
 		t.Fatalf("ChainDepth = %d", result.ChainDepth)
 	}
-	if got := result.ActionsExecuted; len(got) != 0 {
-		t.Fatalf("ActionsExecuted should be empty after fan_out stop: %#v", got)
+	if got := result.ActionsExecuted; len(got) != 4 {
+		t.Fatalf("ActionsExecuted = %#v", got)
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &payload); err != nil {
@@ -516,6 +538,180 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	}
 	if payload["shaped_for"] != "item.process" {
 		t.Fatalf("shaped payload missing marker: %#v", payload)
+	}
+}
+
+func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"items":[]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			FanOut: &runtimecontracts.FanOutSpec{
+				ItemsFrom:   "payload.items",
+				EmitPerItem: "item.process",
+			},
+			AdvancesTo: "scanning",
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Status != OutcomeCompleted {
+		t.Fatalf("Status = %q", result.Status)
+	}
+	if result.NextState != "scanning" {
+		t.Fatalf("NextState = %q", result.NextState)
+	}
+	if got := result.StateMutation.Metadata["fan_out_count"]; got != 0 {
+		t.Fatalf("fan_out_count metadata = %#v", got)
+	}
+}
+
+func TestExecutor_FanOutStructuredEmitMappingSelectsEventByKeyField(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      events.Event{ID: "evt-1", Type: "batch.submitted", Payload: json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			FanOut: &runtimecontracts.FanOutSpec{
+				ItemsFrom:      "payload.items",
+				EmitMappingKey: "item.kind",
+				EmitMapping: map[string]string{
+					"a": "routed.a",
+					"b": "routed.b",
+				},
+			},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 2 {
+		t.Fatalf("EmitIntents count = %d", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type); got != "routed.a" {
+		t.Fatalf("first emit type = %q", got)
+	}
+	if got := string(result.EmitIntents[1].Event.Type); got != "routed.b" {
+		t.Fatalf("second emit type = %q", got)
+	}
+	if !result.EmitIntents[1].Event.CreatedAt.After(result.EmitIntents[0].Event.CreatedAt) {
+		t.Fatalf("emit CreatedAt ordering = [%s, %s]", result.EmitIntents[0].Event.CreatedAt, result.EmitIntents[1].Event.CreatedAt)
+	}
+}
+
+func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     sourceWithKilledState(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{"payload.score >= policy.threshold": false}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "check.requested", Payload: json.RawMessage(`{"score":50}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Guard: &runtimecontracts.GuardSpec{
+				Check:  "payload.score >= policy.threshold",
+				OnFail: "kill",
+			},
+			AdvancesTo: "done",
+			Emits:      runtimecontracts.EventEmission{Single: "check.passed"},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.Status; got != OutcomeKilled {
+		t.Fatalf("Status = %q", got)
+	}
+	if got := result.NextState; got != "killed" {
+		t.Fatalf("NextState = %q", got)
+	}
+	if got := result.StateMutation.NextState; got != "killed" {
+		t.Fatalf("StateMutation.NextState = %q", got)
+	}
+}
+
+func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "items.submitted", Payload: json.RawMessage(`{"items":[{"name":"a","category":"x"},{"name":"b","category":"y"},{"name":"c","category":"x"}]}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			GroupBy: &runtimecontracts.GroupBySpec{
+				ItemsFrom: "payload.items",
+				Key:       "category",
+				StoreAs:   "entity.grouped",
+			},
+			AdvancesTo: "done",
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	grouped, ok := result.StateMutation.Metadata["grouped"].(map[string]any)
+	if !ok {
+		t.Fatalf("grouped metadata = %#v", result.StateMutation.Metadata["grouped"])
+	}
+	xItems, _ := grouped["x"].([]any)
+	yItems, _ := grouped["y"].([]any)
+	if len(xItems) != 2 || len(yItems) != 1 {
+		t.Fatalf("grouped metadata = %#v", grouped)
+	}
+	if result.NextState != "done" {
+		t.Fatalf("NextState = %q", result.NextState)
 	}
 }
 

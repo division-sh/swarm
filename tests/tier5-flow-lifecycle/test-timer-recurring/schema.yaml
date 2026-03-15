@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [monitoring, done]
 pins:
   inputs:
-    events: [monitor.started]
+    events: [monitor.started, timer.tick]
   outputs:
     events: [timer.tick]

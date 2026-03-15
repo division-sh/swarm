@@ -149,7 +149,17 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 		workflowEventEntityID(triggerCtx.Event),
 		triggerCtx.State.EntityID,
 	))
-	exec, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), newCoordinatorEngineEvaluator(pc))
+	var (
+		parentEventCollector *[]events.Event
+		collectLocally       bool
+		collectedIntents     *[]runtimeengine.EmitIntent
+	)
+	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
+	deps := coordinatorEngineDependencies(pc)
+	if collectLocally {
+		deps.Outbox = noOpEngineOutbox{}
+	}
+	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
 	}
@@ -168,6 +178,9 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 	})
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
+	}
+	if collectLocally {
+		flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
 	}
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{Handled: false}, nil

@@ -1,11 +1,15 @@
 test-node:
   id: test-node
   execution_type: system_node
-  subscribes_to: [timer.scheduled]
+  subscribes_to: [timer.scheduled, timer.check]
   produces: [timer.check]
+  timers:
+    - id: check_timer
+      event: timer.check
+      delay: 1s
+      start_on: timer.scheduled
   event_handlers:
     timer.scheduled:
-      timer:
-        delay_ms: 1000
-        emit: timer.check
+      advances_to: waiting
+    timer.check:
       advances_to: checked

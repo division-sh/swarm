@@ -14,8 +14,12 @@ import (
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
 	t.Helper()
+	if len(expected.Expected.Entities) > 0 {
+		assertCatalogRuntimeEntities(t, h, expected.Expected.Entities)
+		return
+	}
 	if len(h.publishedIDs) > 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) != "" {
-		assertHandlerOutcome(t, h.db, h.publishedIDs, expected.Expected.HandlerOutcome)
+		assertHandlerOutcome(t, h, expected.Expected.HandlerOutcome)
 	}
 	entityID := ""
 	for _, step := range expected.triggerSequence() {
@@ -28,14 +32,70 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 	}
 	if entityID != "" {
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
+		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents)
 		assertDeadLetter(t, h.db, h.startedAt, entityID, expected.Expected.DeadLetter)
 	}
+	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
 	if len(expected.Expected.FlowInstanceCreated) > 0 {
 		assertFlowInstanceCreated(t, h.db, h.startedAt)
 	}
 	if expected.Expected.TemplateInstances != nil {
 		assertFlowInstanceCount(t, h.db, h.startedAt, *expected.Expected.TemplateInstances)
+	}
+}
+
+func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[string]catalogEntityExpected) {
+	t.Helper()
+	for entityID, want := range expected {
+		entityID = strings.TrimSpace(entityID)
+		if entityID == "" {
+			continue
+		}
+		if strings.TrimSpace(want.HandlerOutcome) != "" {
+			assertHandlerOutcomeForEntity(t, h, want.HandlerOutcome, entityID)
+		}
+		if strings.TrimSpace(want.EntityState) != "" {
+			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
+		}
+		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
+		assertGates(t, h.workflow, entityID, want.Gates)
+		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents)
+		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
+	}
+}
+
+func assertGates(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID string, want map[string]bool) {
+	t.Helper()
+	if len(want) == 0 {
+		return
+	}
+	if workflow == nil {
+		t.Fatal("workflow instance store is required for gates assertions")
+	}
+	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	if err != nil {
+		t.Fatalf("load workflow instance %s for gates: %v", entityID, err)
+	}
+	if !ok {
+		t.Fatalf("workflow instance %s not found for gates assertion", entityID)
+	}
+	raw, _ := instance.Metadata["gates"].(map[string]any)
+	for key, wantValue := range want {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		gotValue, ok := raw[key]
+		if !ok {
+			if !wantValue {
+				continue
+			}
+			t.Fatalf("gate %q missing from metadata.gates; have keys=%v", key, metadataKeys(raw))
+		}
+		if boolFromAny(gotValue) != wantValue {
+			t.Fatalf("gate %q = %v, want %v", key, boolFromAny(gotValue), wantValue)
+		}
 	}
 }
 
@@ -206,6 +266,47 @@ func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string
 	}
 }
 
+func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[string][]string) {
+	t.Helper()
+	if len(want) == 0 {
+		return
+	}
+	for agentID, expectedEvents := range want {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		rows, err := db.QueryContext(context.Background(), `
+			SELECT e.event_name
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			WHERE d.created_at >= $1
+			  AND d.subscriber_id = $2
+			ORDER BY d.created_at ASC, e.event_id ASC
+		`, since, agentID)
+		if err != nil {
+			t.Fatalf("query agent_received for %s: %v", agentID, err)
+		}
+		got := make([]string, 0, len(expectedEvents))
+		for rows.Next() {
+			var eventName string
+			if err := rows.Scan(&eventName); err != nil {
+				_ = rows.Close()
+				t.Fatalf("scan agent_received for %s: %v", agentID, err)
+			}
+			got = append(got, strings.TrimSpace(eventName))
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatalf("read agent_received for %s: %v", agentID, err)
+		}
+		_ = rows.Close()
+		if fmt.Sprintf("%q", got) != fmt.Sprintf("%q", expectedEvents) {
+			t.Fatalf("agent_received[%s] = %v, want %v", agentID, got, expectedEvents)
+		}
+	}
+}
+
 func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time) {
 	t.Helper()
 	var count int
@@ -236,18 +337,41 @@ func assertFlowInstanceCount(t testing.TB, db *sql.DB, since time.Time, want int
 	}
 }
 
-func assertHandlerOutcome(t testing.TB, db *sql.DB, publishedIDs map[string]struct{}, want string) {
+func assertHandlerOutcome(t testing.TB, h *runtimeHarness, want string) {
 	t.Helper()
-	if db == nil {
+	assertHandlerOutcomeForEntity(t, h, want, "")
+}
+
+func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entityID string) {
+	t.Helper()
+	if h == nil || h.db == nil {
 		t.Fatal("database is required for handler_outcome assertions")
 	}
 	want = strings.TrimSpace(strings.ToLower(want))
+	entityID = strings.TrimSpace(entityID)
 	if want == "" {
 		return
 	}
-	for eventID := range publishedIDs {
+	if want != "success" && len(h.previews) > 0 {
+		for eventID := range h.publishedIDs {
+			if entityID != "" && strings.TrimSpace(h.eventEntityIDs[eventID]) != entityID {
+				continue
+			}
+			if preview, ok := h.previews[eventID]; ok {
+				got := strings.TrimSpace(strings.ToLower(string(preview.Status)))
+				if got != want {
+					t.Fatalf("handler_outcome = %q, want %q", got, want)
+				}
+				return
+			}
+		}
+	}
+	for eventID := range h.publishedIDs {
+		if entityID != "" && strings.TrimSpace(h.eventEntityIDs[eventID]) != entityID {
+			continue
+		}
 		var outcome string
-		err := db.QueryRowContext(context.Background(), `
+		err := h.db.QueryRowContext(context.Background(), `
 			SELECT outcome
 			FROM event_receipts
 			WHERE event_id = $1::uuid
@@ -269,6 +393,14 @@ func assertHandlerOutcome(t testing.TB, db *sql.DB, publishedIDs map[string]stru
 		switch want {
 		case "success":
 			if got != "success" {
+				t.Fatalf("handler_outcome = %q, want %q", got, want)
+			}
+		case "reject":
+			if got != "reject" {
+				t.Fatalf("handler_outcome = %q, want %q", got, want)
+			}
+		case "escalate":
+			if got != "escalate" {
 				t.Fatalf("handler_outcome = %q, want %q", got, want)
 			}
 		case "discard":

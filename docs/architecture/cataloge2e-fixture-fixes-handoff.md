@@ -1,89 +1,565 @@
-# Catalog E2E — Fixture Fixes (Spec Writer)
+# Catalog E2E Fixture Fixes Handoff
 
-## Context
+## Purpose
 
-The E2E catalog has 118 fixtures across Tiers 1–8. 47 are supported and green. Of the 71 excluded, **15 are fixture-issues** — the YAML is structurally wrong and the runtime correctly rejects it. These need spec writer fixes.
+This handoff is for the test writer to fix the remaining `fixture-issue` exclusions in `cataloge2e`.
 
-The remaining 56 exclusions are validation-gaps (runtime behavior doesn't match expected) — those are a separate implementer track.
+Scope:
+- Fixture-only fixes
+- No runtime changes
+- No spec changes
 
-## Fixture-issue inventory
+Current state:
+- `go test ./... -count=1` is green
+- `cataloge2e` has broad Tier 1-8 coverage
+- The remaining non-Tier-8 exclusions are mostly fixture dialect drift against the live loader/runtime
 
-Fixtures fail at two validation stages:
-- **Bundle load** (YAML parsing / platform spec field validation)
-- **NewRuntime contract validation** (deeper semantic checks like produces completeness, payload schema references, entity_schema field declarations)
+This document covers all current `fixture-issue` entries from:
+- `internal/runtime/cataloge2e/tier1_primitives_e2e_test.go`
+- `internal/runtime/cataloge2e/tier4_cross_entity_e2e_test.go`
+- `internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go`
+- `internal/runtime/cataloge2e/tier6_event_loop_e2e_test.go`
+- `internal/runtime/cataloge2e/tier7_composition_e2e_test.go`
+- `internal/runtime/cataloge2e/tier8_boot_e2e_test.go`
 
-### Category 1: Missing `produces` declaration (4 fixtures)
+## Quick Count
 
-The node declares `produces: []` but the handler has `emits: check.passed`. The runtime's contract validator rejects this: "node ./test-node missing required field produces."
+There are 29 fixture issues to clean up:
+- Tier 1: 2
+- Tier 4: 1
+- Tier 5: 10
+- Tier 6: 7
+- Tier 7: 6
+- Tier 8: 3
 
-**Fix**: Add the emitted event to the `produces` list.
+## Global Migration Rules
 
-| Fixture | File | Current | Fix |
-|---------|------|---------|-----|
-| `tier1-primitives/test-guard-discard` | nodes.yaml:5 | `produces: []` | `produces: [check.passed]` |
-| `tier1-primitives/test-guard-kill` | nodes.yaml:5 | `produces: []` | `produces: [check.passed]` |
-| `tier1-primitives/test-guard-multi-fail` | nodes.yaml:5 | `produces: []` | `produces: [check.passed]` |
-| `tier1-primitives/test-guard-reject` | nodes.yaml:5 | `produces: []` | `produces: [check.passed]` |
+Apply these rules consistently before doing one-off tweaks.
 
-### Category 2: `data_accumulation` fields missing from workflow `entity_schema` (3 fixtures)
+### 1. `produces: []` is not accepted by the real loader
 
-The node-level `state_schema` declares the fields, but the runtime validates against the workflow-level `entity_schema` in schema.yaml. Error: "data_accumulation field name missing from workflow entity_schema."
+Do not leave empty `produces` lists on nodes or agents.
 
-**Fix**: Add the referenced fields to `schema.yaml` under an `entity_schema` section (or however the workflow declares entity-level fields).
+Use one of:
+- remove `produces` entirely if the fixture actor emits nothing
+- replace with a non-empty list of actual events if the fixture really produces events
 
-| Fixture | Missing fields | Where to add |
-|---------|---------------|--------------|
-| `tier1-primitives/test-data-accumulation-direct` | `name` (string), `score` (integer) | schema.yaml |
-| `tier1-primitives/test-data-accumulation-literal` | `category` (string) | schema.yaml |
-| `tier1-primitives/test-data-accumulation-mapped` | `name` (string) | schema.yaml |
+Affected fixtures:
+- `tests/tier1-primitives/test-rules-data-accumulation/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-auto-emit-on-create/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-terminal-state-preserves/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-terminal-state-rejects/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-timer-cancel/nodes.yaml`
+- `tests/tier7-composition/test-agent-emits-to-node/nodes.yaml`
+- `tests/tier7-composition/test-dual-delivery/agents.yaml`
+- `tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml`
+- `tests/tier8-boot-verification/test-boot-event-no-producer/nodes.yaml`
 
-Check the existing working fixtures (e.g. `test-accumulate-idempotent`) for the correct `entity_schema` format.
+### 2. `sets_gates` is obsolete; use live `sets_gate`
 
-### Category 3: Handler references `payload.type` outside declared event payload schema (4 fixtures)
+The real loader rejects `sets_gates`.
 
-The event payload in events.yaml declares `type: string`, and the handler condition uses `payload.type`. The runtime's contract validator rejects this: "references payload.type outside event payload schema."
+Replace:
+```yaml
+sets_gates:
+  gate_name: true
+```
 
-This is likely a validator bug or a schema format issue — `type` might be a reserved YAML keyword that gets interpreted as a type specifier rather than a field name. Check if quoting the field name (`"type": string`) or renaming it (`item_type: string`) resolves the validation.
+With either:
+```yaml
+sets_gate: gate_name
+```
 
-| Fixture | Handler condition | Event field |
-|---------|------------------|-------------|
-| `tier1-primitives/test-rules-else` | `payload.type == a` | `type: string` |
-| `tier1-primitives/test-rules-match` | `payload.type == ...` | `type: string` |
-| `tier1-primitives/test-rules-no-match` | `payload.type == ...` | `type: string` |
-| `tier1-primitives/test-rules-data-accumulation` | `payload.type == ...` | `type: string` |
+Or:
+```yaml
+sets_gate:
+  name: gate_name
+  value: true
+```
 
-### Category 4: Unsupported handler fields (4 fixtures)
+Important:
+- the shorthand map form under `sets_gate` is also not supported
+- this is why `test-sets-gate` is still excluded even after `sets_gates` was renamed
 
-These use handler fields that the platform spec doesn't define. The loader rejects them with "UNDEFINED-FIELD: handler field X not in platform spec."
+Affected fixtures:
+- `tests/tier1-primitives/test-sets-gate/nodes.yaml`
+- `tests/tier6-event-loop/test-atomicity-commit/nodes.yaml`
+- `tests/tier6-event-loop/test-atomicity-guard-rollback/nodes.yaml`
+- `tests/tier6-event-loop/test-atomicity-rollback/nodes.yaml`
+- `tests/tier7-composition/test-full-lifecycle/nodes.yaml`
+- `tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml`
 
-| Fixture | Rejected field | Error |
-|---------|---------------|-------|
-| `tier1-primitives/test-sets-gate` | `sets_gates` | UNDEFINED-FIELD |
-| `tier3-list-processing/test-fan-out-emit-mapping` | malformed `emit_mapping` | YAML unmarshal error (map into string) |
-| `tier3-list-processing/test-group-by-standalone` | `group_by` | UNDEFINED-FIELD |
-| `tier4-cross-entity/test-create-entity` | `action_params` | UNDEFINED-FIELD |
+### 3. Legacy `handler.timer` syntax must be rewritten to node-level `timers:`
 
-**Decision needed**: Are these features the platform spec should support? If yes, add them to `platform-spec.yaml` handler field definitions. If no, these fixtures test features that don't exist yet — remove them from the catalog or mark them as future/planned.
+The real loader rejects handler-local `timer:` blocks like:
+```yaml
+event_handlers:
+  some.event:
+    timer:
+      delay_ms: 1000
+      emit: timer.some_timeout
+```
+
+Use the live node-level dialect instead:
+```yaml
+timers:
+  - id: some_timeout
+    event: timer.some_timeout
+    delay: 1s
+    start_on: some.event
+```
+
+Then keep the timeout event as a normal handler:
+```yaml
+event_handlers:
+  timer.some_timeout:
+    advances_to: timed_out
+```
+
+Reference example:
+- `internal/runtime/testdata/generic-mas-bundle/flows/delivery/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-timer-start-on/nodes.yaml`
+
+Affected fixtures:
+- `tests/tier5-flow-lifecycle/test-timer-fire/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-timer-recurring/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-timer-cancel/nodes.yaml`
+
+### 4. Legacy `action_params` must be rewritten to structured `action`
+
+The real loader rejects:
+```yaml
+action: create_flow_instance
+action_params:
+  template: worker-flow
+  instance_id: "payload.instance_id"
+```
+
+Use the live dialect:
+```yaml
+action:
+  type: create_flow_instance
+  flow_template: worker-flow
+  instance_id: "{{payload.instance_id}}"
+```
+
+Reference example:
+- `tests/tier11-flow-composition/test-dynamic-flow-instance/nodes.yaml`
+
+Affected fixtures:
+- `tests/tier5-flow-lifecycle/test-create-flow-instance/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-create-flow-instance-config/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/nodes.yaml`
+
+### 5. Use `entity.current_state`, not `entity.state`
+
+The live expression context exposes `entity.current_state`.
+
+Affected fixture:
+- `tests/tier6-event-loop/test-entity-serialization/nodes.yaml`
+
+### 6. `simulate_failure` is not part of the live loader dialect
+
+Affected fixture:
+- `tests/tier6-event-loop/test-atomicity-rollback/nodes.yaml`
+
+If this case must remain a real-runtime E2E fixture, re-express it through supported behavior instead of synthetic handler failure injection.
+
+### 7. Cross-flow fixtures must use real nested flow package shape
+
+Flat top-level `flows: [flow-a, flow-b]` without actual nested flow packages does not build as a real workflow module.
+
+Use nested flow directories:
+- `flows/flow-a/...`
+- `flows/flow-b/...`
+
+Reference examples:
+- `tests/tier11-flow-composition/test-data-pin-write-conflict/flows/flow-a/package.yaml`
+- `tests/tier11-flow-composition/test-data-pin-write-conflict/flows/flow-b/package.yaml`
+
+Affected fixtures:
+- `tests/tier7-composition/test-cross-flow-subscription/*`
+- `tests/tier7-composition/test-wildcard-cross-flow/*`
+
+## Per-Fixture Fix List
+
+### Tier 1
+
+#### `tests/tier1-primitives/test-rules-data-accumulation`
+
+Files to edit:
+- `tests/tier1-primitives/test-rules-data-accumulation/nodes.yaml`
+
+Fix:
+- remove `produces: []` or replace it with a real non-empty produced event list
+
+Why:
+- the real validator rejects the node before runtime execution
+
+#### `tests/tier1-primitives/test-sets-gate`
+
+Files to edit:
+- `tests/tier1-primitives/test-sets-gate/nodes.yaml`
+
+Current invalid shape:
+```yaml
+sets_gate:
+  g1_check: true
+```
+
+Replace with one of:
+```yaml
+sets_gate: g1_check
+```
+
+Or:
+```yaml
+sets_gate:
+  name: g1_check
+  value: true
+```
+
+Why:
+- `sets_gate` is supported
+- only the shorthand map form is unsupported
+
+### Tier 4
+
+#### `tests/tier4-cross-entity/test-create-entity`
+
+Files to edit:
+- `tests/tier4-cross-entity/test-create-entity/nodes.yaml`
+- likely add a nested child flow under `tests/tier4-cross-entity/test-create-entity/flows/child-flow/...`
+
+Fix:
+- the fixture references `create_flow_instance` template `child-flow`
+- the bundle does not actually contain a `child-flow` contract
+- either:
+  - add a real nested `flows/child-flow/` package, or
+  - change the action to reference an existing template that is present in the fixture bundle
+
+Also rewrite the action to the live structured `action` dialect if it still uses legacy `action_params`.
+
+### Tier 5
+
+#### `tests/tier5-flow-lifecycle/test-auto-emit-on-create`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-auto-emit-on-create/nodes.yaml`
+
+Fix:
+- remove `produces: []` or replace it with a real non-empty produced-event list
+
+#### `tests/tier5-flow-lifecycle/test-create-flow-instance`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-create-flow-instance/nodes.yaml`
+
+Fix:
+- replace legacy `action: create_flow_instance` + `action_params` with structured `action`
+
+#### `tests/tier5-flow-lifecycle/test-create-flow-instance-config`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-create-flow-instance-config/nodes.yaml`
+
+Fix:
+- same structured `action` rewrite as above
+
+#### `tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate/nodes.yaml`
+
+Fix:
+- same structured `action` rewrite as above
+
+#### `tests/tier5-flow-lifecycle/test-terminal-state-preserves`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-terminal-state-preserves/nodes.yaml`
+
+Fix:
+- remove or replace the invalid `produces: []` on `update-node`
+
+#### `tests/tier5-flow-lifecycle/test-terminal-state-rejects`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-terminal-state-rejects/nodes.yaml`
+
+Fix:
+- remove or replace the invalid `produces: []` on `reopen-node`
+
+#### `tests/tier5-flow-lifecycle/test-timer-cancel`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-timer-cancel/nodes.yaml`
+
+Fixes:
+- rewrite legacy handler-local `timer:` into node-level `timers:`
+- remove or replace invalid `produces: []` on `cancel-node`
+
+#### `tests/tier5-flow-lifecycle/test-timer-fire`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-timer-fire/nodes.yaml`
+
+Fix:
+- rewrite legacy handler-local `timer:` into node-level `timers:`
+
+#### `tests/tier5-flow-lifecycle/test-timer-recurring`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-timer-recurring/nodes.yaml`
+
+Fix:
+- rewrite legacy handler-local `timer:` into node-level `timers:`
+- keep recurring behavior on the timer definition, not inside handler-local `timer:`
+
+#### `tests/tier5-flow-lifecycle/test-timer-start-on`
+
+Files to edit:
+- `tests/tier5-flow-lifecycle/test-timer-start-on/nodes.yaml`
+- `tests/tier5-flow-lifecycle/test-timer-start-on/events.yaml`
+- possibly `tests/tier5-flow-lifecycle/test-timer-start-on/schema.yaml`
+
+Fix:
+- keep the node-level `timers:` shape
+- fix the timer contract so the real loader considers the timer fire event fully declared
+- this fixture is already close to the live dialect; the failure is not the old `handler.timer` syntax
+
+Practical target:
+- mirror the live node-level timer fields used in `internal/runtime/testdata/generic-mas-bundle/flows/delivery/nodes.yaml`
+- make sure the timer event and produced event are fully declared and consistent across:
+  - `nodes.yaml`
+  - `events.yaml`
+  - `schema.yaml` pins
+
+### Tier 6
+
+#### `tests/tier6-event-loop/test-atomicity-commit`
+
+Files to edit:
+- `tests/tier6-event-loop/test-atomicity-commit/nodes.yaml`
+
+Fix:
+- replace `sets_gates` with supported `sets_gate`
+
+#### `tests/tier6-event-loop/test-atomicity-guard-rollback`
+
+Files to edit:
+- `tests/tier6-event-loop/test-atomicity-guard-rollback/nodes.yaml`
+
+Fix:
+- replace `sets_gates` with supported `sets_gate`
+
+#### `tests/tier6-event-loop/test-atomicity-rollback`
+
+Files to edit:
+- `tests/tier6-event-loop/test-atomicity-rollback/nodes.yaml`
+
+Fixes:
+- replace `sets_gates` with supported `sets_gate`
+- remove `simulate_failure`
+- if rollback behavior is still required, redesign the fixture to use a supported failure path instead of synthetic loader-only failure injection
+
+#### `tests/tier6-event-loop/test-chain-depth-limit`
+
+Files to edit:
+- `tests/tier6-event-loop/test-chain-depth-limit/nodes.yaml`
+- possibly `expected.yaml`
+
+Current problem:
+- the fixture self-emits `chain.continue` from the `chain.continue` handler
+- real boot validation rejects it before runtime chain-depth behavior is exercised
+
+Fix:
+- rewrite the case so it still creates a chain-depth scenario without violating self-emit boot rules
+- likely requires at least two events or two handlers/nodes instead of direct self-emit
+
+#### `tests/tier6-event-loop/test-dead-letter`
+
+Files to edit:
+- `tests/tier6-event-loop/test-dead-letter/expected.yaml`
+- possibly fixture structure if you want a different failure mechanism
+
+Current mismatch:
+- live runtime does not model this case as `dead_letter`
+- it records `spec.contradiction_detected` diagnostics for unroutable contract events
+
+Fix options:
+- easiest: update the fixture to assert the live diagnostic behavior instead of `dead_letter`
+- or redesign the fixture to exercise a real dead-letter path that exists in the runtime
+
+#### `tests/tier6-event-loop/test-entity-serialization`
+
+Files to edit:
+- `tests/tier6-event-loop/test-entity-serialization/nodes.yaml`
+
+Fix:
+- replace `entity.state` with `entity.current_state`
+
+#### `tests/tier6-event-loop/test-event-validation`
+
+Files to edit:
+- `tests/tier6-event-loop/test-event-validation/expected.yaml`
+- optionally move or redesign the fixture
+
+Current mismatch:
+- default runtime payload validation is warning-only
+- the fixture expects reject + dead-letter under default mode
+
+Fix options:
+- easiest: update the expectation to match warning-only default runtime behavior
+- or move this case out of default real-runtime E2E and into a strict-validation-specific suite
+
+### Tier 7
+
+#### `tests/tier7-composition/test-agent-emits-to-node`
+
+Files to edit:
+- `tests/tier7-composition/test-agent-emits-to-node/agents.yaml`
+- possibly `nodes.yaml`
+
+Fix:
+- add required agent fields:
+  - `model_tier`
+  - `conversation_mode`
+  - `subscriptions`
+  - `emit_events`
+
+Reference example:
+- `docs/specs/mas-platform/empire/contracts/flows/operating/agents.yaml`
+
+#### `tests/tier7-composition/test-cross-flow-subscription`
+
+Files to edit:
+- whole fixture structure
+
+Fix:
+- convert from flat multi-flow shape to nested flow package shape:
+  - `flows/flow-a/...`
+  - `flows/flow-b/...`
+
+Current problem:
+- real module construction fails with `workflow.name missing`
+
+#### `tests/tier7-composition/test-dual-delivery`
+
+Files to edit:
+- `tests/tier7-composition/test-dual-delivery/agents.yaml`
+
+Fix:
+- add required agent fields:
+  - `model_tier`
+  - `conversation_mode`
+  - `subscriptions`
+  - `emit_events`
+- remove `produces: []` if present and invalid
+
+#### `tests/tier7-composition/test-full-lifecycle`
+
+Files to edit:
+- `tests/tier7-composition/test-full-lifecycle/nodes.yaml`
+
+Fix:
+- replace `sets_gates` with supported `sets_gate`
+
+#### `tests/tier7-composition/test-multi-gate-pipeline`
+
+Files to edit:
+- `tests/tier7-composition/test-multi-gate-pipeline/nodes.yaml`
+
+Fixes:
+- replace all `sets_gates` with supported `sets_gate`
+- remove or replace any invalid `produces: []`
+
+#### `tests/tier7-composition/test-wildcard-cross-flow`
+
+Files to edit:
+- whole fixture structure
+
+Fix:
+- convert from flat multi-flow shape to nested flow package shape
+
+### Tier 8
+
+#### `tests/tier8-boot-verification/test-boot-event-no-producer`
+
+Files to edit:
+- `tests/tier8-boot-verification/test-boot-event-no-producer/nodes.yaml`
+
+Fix:
+- remove the unrelated fixture error so the intended warning can surface
+- specifically, fix the node-level contract issue that currently causes an earlier failure than `EVENT-NO-PRODUCER`
+
+Goal:
+- after cleanup, the fixture should fail only for the intended `ghost.event` producer gap
+
+#### `tests/tier8-boot-verification/test-boot-missing-pin`
+
+Files to edit:
+- `tests/tier8-boot-verification/test-boot-missing-pin/flows/child/*`
+- especially `flows/child/package.yaml`, `flows/child/schema.yaml`, `flows/child/nodes.yaml`
+
+Fix:
+- complete the child flow so it boots cleanly enough for the intended missing-producer warning to surface
+- right now the child flow fails earlier than the target warning
+
+#### `tests/tier8-boot-verification/test-boot-permission-tool-mismatch`
+
+Files to edit:
+- `tests/tier8-boot-verification/test-boot-permission-tool-mismatch/agents.yaml`
+- `tests/tier8-boot-verification/test-boot-permission-tool-mismatch/tools.yaml`
+- possibly `expected.yaml`
+
+Fix:
+- make sure the fixture references a real tool that successfully loads before permission validation runs
+- right now it fails earlier as a missing-tool problem instead of reaching `PERMISSION-MISMATCH`
+
+Practical target:
+- use a live permission-gated tool and make the fixture invalid only on missing permission, not on missing tool definition
+
+## Recommended Order
+
+Fix in this order:
+
+1. Bulk dialect rewrites
+- `produces: []`
+- `sets_gates`
+- `sets_gate` shorthand maps
+- `handler.timer`
+- `entity.state`
+
+2. Structured action rewrites
+- all `create_flow_instance` fixtures
+
+3. Cross-flow package rewrites
+- Tier 7 cross-flow fixtures
+
+4. Expectation-only rewrites
+- `test-dead-letter`
+- `test-event-validation`
+
+5. Tier 8 cleanup
+- isolate intended warning/error category by removing earlier unrelated fixture failures
 
 ## Verification
 
-After fixing each fixture, verify it loads and runs:
+After each batch:
 
 ```bash
-# Check bundle loads
-go test ./internal/runtime/cataloge2e/... -run "TestTierN.*fixture-name" -count=1 -v
-
-# If it loads but still fails at runtime, reclassify as validation-gap
+go test ./internal/runtime/cataloge2e -count=1
+go test ./... -count=1
 ```
 
-Once fixed, tell the implementer to move the fixture from the excluded map to the supported list.
+When a fixture is fixed:
+- move it from the tier’s `fixture-issue` map into the supported list in the corresponding `cataloge2e` test file
+- do not reclassify it blindly; rerun the targeted tier test and confirm it passes under the real runtime
 
-## Summary
+## Expected Outcome
 
-| Category | Count | Effort |
-|----------|-------|--------|
-| Missing produces | 4 | Trivial — add event to produces list |
-| Missing entity_schema fields | 3 | Small — add fields to schema.yaml |
-| payload.type reference | 4 | Investigation — likely YAML reserved word |
-| Unsupported handler fields | 4 | Decision — spec feature or remove fixture |
-| **Total** | **15** | |
+After this fixture pass:
+- Tiers 1-7 should be mostly limited by real runtime gaps or intended exclusions, not fixture dialect drift
+- Tier 8 should isolate true validation coverage gaps cleanly
+- `cataloge2e` classifications should stop carrying avoidable `fixture-issue` noise

@@ -1,0 +1,9 @@
+flow-b-node:
+  id: flow-b-node
+  execution_type: system_node
+  subscribes_to: [order.submitted]
+  produces: [order.completed]
+  event_handlers:
+    order.submitted:
+      advances_to: done
+      emits: order.completed

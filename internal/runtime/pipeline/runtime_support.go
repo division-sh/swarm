@@ -63,6 +63,29 @@ func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.
 	return nil
 }
 
+func pipelineCollectorExecutionContext(ctx context.Context) (context.Context, *[]events.Event, *[]runtimeengine.EmitIntent, bool) {
+	if ctx == nil {
+		return ctx, nil, nil, false
+	}
+	parentCollector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event)
+	if !ok || parentCollector == nil {
+		return ctx, nil, nil, false
+	}
+	if _, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok {
+		return ctx, parentCollector, nil, false
+	}
+	collected := []runtimeengine.EmitIntent{}
+	ctx = WithPipelineEmitCollectors(ctx, nil, &collected)
+	return ctx, parentCollector, &collected, true
+}
+
+func flushCollectedPipelineEmitIntents(parentCollector *[]events.Event, collected *[]runtimeengine.EmitIntent) {
+	if parentCollector == nil || collected == nil || len(*collected) == 0 {
+		return
+	}
+	appendEmitIntentsAsEvents(parentCollector, *collected)
+}
+
 const DefaultSystemNodeRetryLimit = 5
 
 func mustJSON(v any) []byte {
@@ -329,23 +352,33 @@ func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.Emi
 	}
 	collected := false
 	if collector, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
-		cloned := make([]runtimeengine.EmitIntent, 0, len(intents))
-		for _, intent := range intents {
-			copyIntent := intent
-			copyIntent.Event = cloneEvent(intent.Event)
-			copyIntent.Recipients = append([]string{}, intent.Recipients...)
-			cloned = append(cloned, copyIntent)
-		}
-		*collector = append(*collector, cloned...)
-		collected = true
-	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		for _, intent := range intents {
-			*collector = append(*collector, cloneEvent(intent.Event))
-		}
+		*collector = append(*collector, cloneEmitIntents(intents)...)
 		collected = true
 	}
 	return collected
+}
+
+func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
+	if len(intents) == 0 {
+		return nil
+	}
+	cloned := make([]runtimeengine.EmitIntent, 0, len(intents))
+	for _, intent := range intents {
+		copyIntent := intent
+		copyIntent.Event = cloneEvent(intent.Event)
+		copyIntent.Recipients = append([]string{}, intent.Recipients...)
+		cloned = append(cloned, copyIntent)
+	}
+	return cloned
+}
+
+func appendEmitIntentsAsEvents(collector *[]events.Event, intents []runtimeengine.EmitIntent) {
+	if collector == nil || len(intents) == 0 {
+		return
+	}
+	for _, intent := range intents {
+		*collector = append(*collector, cloneEvent(intent.Event))
+	}
 }
 
 func WithPipelineEmitCollectors(ctx context.Context, eventsCollector *[]events.Event, intentCollector *[]runtimeengine.EmitIntent) context.Context {

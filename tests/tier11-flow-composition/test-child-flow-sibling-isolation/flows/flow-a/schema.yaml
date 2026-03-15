@@ -1,3 +1,4 @@
+name: flow-a
 initial_state: waiting
 terminal_states: [processed]
 states: [waiting, working, processed]

@@ -1,0 +1,9 @@
+name: flow-alpha
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [trigger.alpha]
+  outputs:
+    events: [job.alpha_done]

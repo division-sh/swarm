@@ -236,8 +236,20 @@ func coordinatorEngineDependencies(pc *FactoryPipelineCoordinator) runtimeengine
 		ActionRunner:        pipelineEngineActionRunner{coordinator: pc},
 		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
 		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},
-		MaxChainDepth:       runtimeengine.DefaultMaxChainDepth,
+		MaxChainDepth:       workflowMaxChainDepthPolicy(source),
 	}
+}
+
+func workflowMaxChainDepthPolicy(source semanticview.Source) int {
+	if source == nil {
+		return runtimeengine.DefaultMaxChainDepth
+	}
+	if value, ok := semanticview.PolicyValueForFlow(source, "", "max_chain_depth"); ok {
+		if parsed := asInt(value.Value); parsed > 0 {
+			return parsed
+		}
+	}
+	return runtimeengine.DefaultMaxChainDepth
 }
 
 type pipelineEngineTransitionValidator struct {
