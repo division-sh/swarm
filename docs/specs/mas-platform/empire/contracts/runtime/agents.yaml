@@ -476,6 +476,14 @@ opco-ceo:
   - human_task_request
   workspace_class: opco
   manager_fallback: empire-coordinator
+  prompt_inputs:
+  - vertical_name
+  - vertical_description
+  - mandate_document
+  - geography
+  - org_roster
+  - founder_directives
+  - monthly_api_cap
 opco-chief-of-staff:
   id: cos-{vertical_id}
   type: operating
@@ -512,6 +520,8 @@ opco-chief-of-staff:
   - configure_routing
   workspace_class: opco
   manager_fallback: opco-ceo
+  prompt_inputs:
+  - vertical_name
 opco-head-of-product:
   id: vp-product-{vertical_id}
   type: operating
@@ -552,6 +562,9 @@ opco-head-of-product:
   - human_task_request
   workspace_class: opco
   manager_fallback: opco-ceo
+  prompt_inputs:
+  - vertical_name
+  - product_budget
 opco-head-of-growth:
   id: vp-growth-{vertical_id}
   type: operating
@@ -582,6 +595,9 @@ opco-head-of-growth:
   permissions: *id007
   workspace_class: opco
   manager_fallback: opco-ceo
+  prompt_inputs:
+  - vertical_name
+  - growth_budget
 opco-pm:
   id: pm-{vertical_id}
   type: operating

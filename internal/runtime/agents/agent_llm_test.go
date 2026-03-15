@@ -62,6 +62,28 @@ func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 	}
 }
 
+func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
+	agent := &LLMAgent{
+		cfg: models.AgentConfig{
+			ID:   "cos-entity-1",
+			Role: "chief_of_staff",
+			Config: mustAgentConfigJSON(t, map[string]any{
+				"vertical_name": "Acme Ops",
+			}),
+		},
+		conversation: llm.NewConversation("cos-entity-1", "", "", nil, llm.SessionScoped, 10, nil),
+		promptCache:   map[string]string{},
+	}
+
+	got := agent.resolvePromptForMode("")
+	if !strings.Contains(got, "Acme Ops") {
+		t.Fatalf("expected resolved prompt to include config-expanded vertical name, got %q", got)
+	}
+	if strings.Contains(got, "{{vertical_name}}") {
+		t.Fatalf("expected resolved prompt to expand vertical_name token, got %q", got)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == strings.TrimSpace(target) {

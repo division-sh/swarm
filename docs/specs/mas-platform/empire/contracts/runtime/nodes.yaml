@@ -77,6 +77,10 @@ portfolio-node:
         brand_name: payload.brand
         geography: payload.geography
         tech_stack: payload.tech_stack
+        vertical_description: payload.vertical_description
+        monthly_api_cap: policy.monthly_api_cap
+        growth_budget: policy.growth_budget
+        product_budget: policy.product_budget
   permissions:
   - create_flow_instance
   _produces_note: Some produces are emitted via system.directive rules handler (indirect path).

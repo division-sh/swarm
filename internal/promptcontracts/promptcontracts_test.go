@@ -194,21 +194,11 @@ func TestPromptVariablesComplete(t *testing.T) {
 		if hasAllowedRuntimePromptTokens(t, p) {
 			continue
 		}
-		promptsDir := filepath.Dir(p)
-		base := strings.TrimSuffix(filepath.Base(p), ".md")
-		parts := strings.Split(base, ".")
-		agentID := strings.TrimSpace(parts[0])
-		mode := ""
-		if len(parts) > 1 {
-			mode = strings.TrimSpace(parts[1])
-		}
-		rendered, found, err := LoadFromDir(promptsDir, agentID, mode)
+		raw, err := os.ReadFile(p)
 		if err != nil {
-			t.Fatalf("render prompt %s (agent=%s mode=%s): %v", filepath.Base(p), agentID, mode, err)
+			t.Fatalf("read %s: %v", p, err)
 		}
-		if !found {
-			t.Fatalf("prompt not found for %s (agent=%s mode=%s)", filepath.Base(p), agentID, mode)
-		}
+		rendered := renderPromptTemplate(string(raw), loadPromptVarsForTest(t, filepath.Dir(p)))
 		if unresolved := unresolvedPromptTokens(rendered); len(unresolved) > 0 {
 			t.Fatalf("rendered prompt %s still has unresolved variables: %v", filepath.Base(p), unresolved)
 		}
@@ -232,7 +222,83 @@ func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
 			vars[key] = value
 		}
 	}
+	for _, candidate := range promptSchemaSources(promptsDir) {
+		raw, err := os.ReadFile(candidate)
+		if err != nil {
+			t.Fatalf("read %s: %v", candidate, err)
+		}
+		var loaded struct {
+			InstanceVariables struct {
+				Variables map[string]any `yaml:"variables"`
+			} `yaml:"instance_variables"`
+		}
+		if err := yaml.Unmarshal(raw, &loaded); err != nil {
+			t.Fatalf("parse %s: %v", candidate, err)
+		}
+		for key := range loaded.InstanceVariables.Variables {
+			vars[key] = true
+		}
+	}
+	for _, candidate := range promptAgentInputSources(promptsDir) {
+		raw, err := os.ReadFile(candidate)
+		if err != nil {
+			t.Fatalf("read %s: %v", candidate, err)
+		}
+		loaded := map[string]struct {
+			PromptInputs []string `yaml:"prompt_inputs"`
+		}{}
+		if err := yaml.Unmarshal(raw, &loaded); err != nil {
+			t.Fatalf("parse %s: %v", candidate, err)
+		}
+		for _, entry := range loaded {
+			for _, key := range entry.PromptInputs {
+				key = strings.TrimSpace(key)
+				if key == "" {
+					continue
+				}
+				vars[key] = true
+			}
+		}
+	}
 	return vars
+}
+
+func promptContractAncestorDirs(promptsDir string) []string {
+	base := filepath.Clean(filepath.Dir(promptsDir))
+	dirs := make([]string, 0, 8)
+	for dir := base; ; dir = filepath.Dir(dir) {
+		dirs = append(dirs, dir)
+		if filepath.Base(dir) == "contracts" {
+			break
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+	}
+	return dirs
+}
+
+func promptSchemaSources(promptsDir string) []string {
+	var out []string
+	for _, dir := range promptContractAncestorDirs(promptsDir) {
+		candidate := filepath.Join(dir, "schema.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
+func promptAgentInputSources(promptsDir string) []string {
+	var out []string
+	for _, dir := range promptContractAncestorDirs(promptsDir) {
+		candidate := filepath.Join(dir, "agents.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func hasAllowedRuntimePromptTokens(t *testing.T, path string) bool {

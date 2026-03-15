@@ -382,6 +382,25 @@ prompt_templating:
     prompt_path: prompts/{agent-id}.md
     variable_syntax: '{{variable_name}}'
     variable_source: policy.yaml
+  variable_resolution:
+    description: Prompt variables ({{token}}) are resolved from multiple sources in priority order. All sources must be scanned
+      by compliance tests.
+    resolution_order:
+    - source: instance_variables (schema.yaml)
+      description: Variables declared in the flow schema. Populated at flow instance creation via config_from.
+      example: vertical_name, mandate_document, geography
+    - source: policy (policy.yaml)
+      description: Policy values from flow and root policy files.
+      example: monthly_api_cap, growth_budget, max_escalations
+    - source: entity_state fields
+      description: Entity fields written by data_accumulation. Available at render time from entity context.
+      example: composite_score, business_brief
+    - source: runtime tokens
+      description: Platform-injected tokens not declared in contracts. Hardcoded allowlist.
+      example: current_date, agent_id, flow_instance_path
+    compliance_test_sources: 'TestPromptVariablesComplete must scan ALL of these for each prompt directory: schema.yaml (instance_variables.variables),
+      policy.yaml (all keys), agents.yaml (prompt_inputs), and the runtime-token allowlist. A variable is valid if it appears
+      in ANY of these sources.'
 flow_model:
   description: A Flow is the universal building block. Every level of the system is a flow — from the root project down to
     the smallest sub-flow. A flow can contain child flows. The root flow is what others call "the project." There is no separate

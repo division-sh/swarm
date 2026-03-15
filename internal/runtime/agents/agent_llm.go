@@ -243,7 +243,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 		)
 	}
 	if found && strings.TrimSpace(prompt) != "" {
-		prompt = strings.TrimSpace(prompt)
+		prompt = strings.TrimSpace(expandConfigPromptTemplate(prompt, a.cfg.Config))
 		a.promptCache[cacheKey] = prompt
 		if cacheKey == "" {
 			a.promptCache[""] = prompt
@@ -270,6 +270,49 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 		}
 	}
 	return base
+}
+
+func expandConfigPromptTemplate(prompt string, raw json.RawMessage) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" || len(raw) == 0 {
+		return prompt
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
+		return prompt
+	}
+	replacer := make([]string, 0, len(obj)*2)
+	for key, value := range obj {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		rendered := stringifyPromptTemplateValue(value)
+		replacer = append(replacer,
+			"{{"+key+"}}", rendered,
+			"{"+key+"}", rendered,
+		)
+	}
+	if len(replacer) == 0 {
+		return prompt
+	}
+	return strings.NewReplacer(replacer...).Replace(prompt)
+}
+
+func stringifyPromptTemplateValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case json.RawMessage:
+		return strings.TrimSpace(string(typed))
+	default:
+		if raw, err := json.MarshalIndent(value, "", "  "); err == nil {
+			return strings.TrimSpace(string(raw))
+		}
+		return strings.TrimSpace(fmt.Sprintf("%v", value))
+	}
 }
 
 func promptModeFromEvent(evt events.Event) string {

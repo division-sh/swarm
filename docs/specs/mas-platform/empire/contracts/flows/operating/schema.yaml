@@ -105,6 +105,12 @@ instance_variables:
     brand_name: Selected brand identity
     geography: Target geography
     tech_stack: Recommended technology stack from CTO review
+    vertical_description: Short description of the vertical opportunity
+    org_roster: Current agent roster and roles (populated at runtime by CEO, updated dynamically)
+    founder_directives: Human founder instructions and priorities (populated from mailbox/directive events)
+    monthly_api_cap: Monthly API spend cap in USD (from policy)
+    growth_budget: Monthly growth/marketing budget in USD (from policy)
+    product_budget: Monthly product development budget in USD (from policy)
 auto_emit_on_create:
   event: opco.ceo_ready
   description: Platform automatically emits this event when a new operating flow instance is created. Kicks off the OpCo lifecycle.

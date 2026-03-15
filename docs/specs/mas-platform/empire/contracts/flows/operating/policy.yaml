@@ -13,3 +13,6 @@ steady_state_criteria:
   min_revenue_usd: 100
   max_churn_pct: 20
   min_uptime_pct: 99
+monthly_api_cap: 500
+growth_budget: 200
+product_budget: 300
