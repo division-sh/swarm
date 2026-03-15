@@ -1,0 +1,27 @@
+scorer:
+  id: scorer
+  execution_type: system_node
+  subscribes_to: [score.submitted]
+  produces: [result.high, result.mid, result.low]
+  event_handlers:
+    score.submitted:
+      accumulate:
+        completion_mode: all
+        dedup_by: payload.dimension
+        expected_count: 3
+      compute:
+        operation: weighted_average
+        items_from: accumulated.items
+        value_field: value
+        weight_field: weight
+        store_as: entity.composite
+      on_complete:
+        - condition: "entity.composite >= 75"
+          advances_to: high
+          emits: result.high
+        - condition: "entity.composite >= 50"
+          advances_to: mid
+          emits: result.mid
+        - condition: "else"
+          advances_to: low
+          emits: result.low

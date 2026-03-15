@@ -1,0 +1,7 @@
+name: test-compose-gate-data-advance-emit
+version: 1.0.0
+description: >
+  Composition: single handler combines sets_gate, data_accumulation,
+  advances_to, and emits — the four-field validation stage pattern.
+platform_version: ">=1.1.0"
+flows: []

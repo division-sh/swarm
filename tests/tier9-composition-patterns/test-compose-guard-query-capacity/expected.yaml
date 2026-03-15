@@ -1,0 +1,8 @@
+trigger:
+  event: admission.requested
+  payload:
+    entity_id: ent-001
+expected:
+  handler_outcome: success
+  entity_state: admitted
+  emitted_events: [admission.granted]

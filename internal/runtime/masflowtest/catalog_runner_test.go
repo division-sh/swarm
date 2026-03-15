@@ -148,6 +148,49 @@ type catalogSystemNodeEventHandler struct {
 	SimulateFailure  bool                                      `yaml:"simulate_failure"`
 }
 
+func (h *catalogSystemNodeEventHandler) UnmarshalYAML(value *yaml.Node) error {
+	type alias catalogSystemNodeEventHandler
+	var typed alias
+	if err := value.Decode(&typed); err != nil {
+		return err
+	}
+	*h = catalogSystemNodeEventHandler(typed)
+	if value == nil || value.Kind != yaml.MappingNode {
+		return nil
+	}
+	if h.SetsGate != nil && strings.TrimSpace(h.SetsGate.Name) != "" {
+		return nil
+	}
+	var setsGateNode *yaml.Node
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if strings.TrimSpace(value.Content[i].Value) == "sets_gate" {
+			setsGateNode = value.Content[i+1]
+			break
+		}
+	}
+	if setsGateNode == nil || setsGateNode.Kind != yaml.MappingNode {
+		return nil
+	}
+	var explicit runtimecontracts.GateSpec
+	if err := setsGateNode.Decode(&explicit); err == nil && strings.TrimSpace(explicit.Name) != "" {
+		h.SetsGate = &explicit
+		return nil
+	}
+	if len(setsGateNode.Content) != 2 {
+		return nil
+	}
+	name := strings.TrimSpace(setsGateNode.Content[0].Value)
+	if name == "" {
+		return nil
+	}
+	var gateValue any
+	if err := setsGateNode.Content[1].Decode(&gateValue); err != nil {
+		return err
+	}
+	h.SetsGate = &runtimecontracts.GateSpec{Name: name, Value: gateValue}
+	return nil
+}
+
 type catalogClearGates []string
 
 type catalogRule struct {

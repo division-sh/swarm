@@ -1,0 +1,9 @@
+attempt.requested:
+  payload:
+    entity_id: string
+attempt.processed:
+  payload:
+    entity_id: string
+attempt.limit_hit:
+  payload:
+    entity_id: string

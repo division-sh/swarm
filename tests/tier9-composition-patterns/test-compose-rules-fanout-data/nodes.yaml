@@ -1,0 +1,29 @@
+dispatcher:
+  id: dispatcher
+  execution_type: system_node
+  subscribes_to: [batch.requested]
+  produces: [batch.dispatched]
+  event_handlers:
+    batch.requested:
+      rules:
+        - name: parallel
+          condition: "payload.mode == 'parallel'"
+          fan_out:
+            items_from: payload.items
+          data_accumulation:
+            dispatch_count:
+              source: fan_out.count
+          advances_to: dispatched
+          emits: batch.dispatched
+        - name: sequential
+          condition: "payload.mode == 'sequential'"
+          data_accumulation:
+            dispatch_count: 1
+          advances_to: dispatched
+          emits: batch.dispatched
+        - name: fallback
+          condition: "else"
+          data_accumulation:
+            dispatch_count: 0
+          advances_to: dispatched
+          emits: batch.dispatched

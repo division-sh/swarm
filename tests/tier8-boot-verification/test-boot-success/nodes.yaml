@@ -1,0 +1,9 @@
+complete-task:
+  id: complete-task
+  execution_type: system_node
+  subscribes_to: [task.requested]
+  produces: [task.completed]
+  event_handlers:
+    task.requested:
+      advances_to: done
+      emits: task.completed

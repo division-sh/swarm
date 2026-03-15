@@ -12,7 +12,7 @@ ghost-listener:
   id: ghost-listener
   execution_type: system_node
   subscribes_to: [ghost.event]
-  produces: []
+  produces: [ghost.ack]
   event_handlers:
     ghost.event:
       advances_to: done

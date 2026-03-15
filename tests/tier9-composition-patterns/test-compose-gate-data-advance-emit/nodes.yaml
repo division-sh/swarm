@@ -1,0 +1,20 @@
+pipeline:
+  id: pipeline
+  execution_type: system_node
+  subscribes_to: [stage.one_done, stage.two_done]
+  produces: [stage.two_start, stage.complete]
+  event_handlers:
+    stage.one_done:
+      sets_gate:
+        g_stage_one: true
+      data_accumulation:
+        stage_one_result: payload.result
+      advances_to: stage_two
+      emits: stage.two_start
+    stage.two_done:
+      sets_gate:
+        g_stage_two: true
+      data_accumulation:
+        stage_two_result: payload.result
+      advances_to: complete
+      emits: stage.complete

@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [released]
+states: [pending, stage_a, stage_b, released]
+pins:
+  inputs:
+    events: [step.a_done, step.b_done, step.c_done]
+  outputs:
+    events: [release.ready]

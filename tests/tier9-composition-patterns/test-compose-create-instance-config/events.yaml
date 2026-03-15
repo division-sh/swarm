@@ -1,0 +1,10 @@
+spawn.requested:
+  payload:
+    entity_id: string
+    instance_id: string
+    name: string
+    priority: integer
+    owner: string
+spawn.done:
+  payload:
+    entity_id: string

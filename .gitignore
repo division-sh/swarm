@@ -19,3 +19,4 @@ internal/dashboard/ui/node_modules
 internal/dashboard/ui/dist
 /empire
 /empire.exe
+*.test

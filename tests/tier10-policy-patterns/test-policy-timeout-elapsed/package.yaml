@@ -1,0 +1,7 @@
+name: test-policy-timeout-elapsed
+version: 1.0.0
+description: >
+  Policy: timer fires and guard checks entity.elapsed_hours against
+  policy.timeout_hours to determine if timeout escalation is needed.
+platform_version: ">=1.1.0"
+flows: []

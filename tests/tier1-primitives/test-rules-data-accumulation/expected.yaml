@@ -2,7 +2,7 @@ trigger:
   event: item.received
   payload:
     entity_id: ent-001
-    type: a
+    kind: a
     value: 42
 
 expected:

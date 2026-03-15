@@ -1,0 +1,21 @@
+validator:
+  id: validator
+  execution_type: system_node
+  subscribes_to: [check.requested]
+  produces: [check.passed]
+  event_handlers:
+    check.requested:
+      guard:
+        - id: score_min
+          check: "payload.score >= policy.min_score"
+        - id: confidence_min
+          check: "payload.confidence >= policy.min_confidence"
+        - id: depth_ok
+          check: "entity.depth <= policy.max_depth"
+        - id: no_flags
+          check: "entity.flag_count == 0"
+        - id: under_cap
+          check: "entity.item_count < policy.max_items"
+      on_fail: discard
+      advances_to: accepted
+      emits: check.passed

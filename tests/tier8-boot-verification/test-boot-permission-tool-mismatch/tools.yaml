@@ -1,0 +1,3 @@
+create_flow_instance:
+  description: Creates a new flow instance from a template
+  type: platform

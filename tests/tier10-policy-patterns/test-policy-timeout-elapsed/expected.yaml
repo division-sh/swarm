@@ -1,0 +1,9 @@
+trigger:
+  event: timer.check
+  payload:
+    entity_id: ent-001
+    elapsed_hours: 80
+expected:
+  handler_outcome: success
+  entity_state: timed_out
+  emitted_events: [task.timed_out]

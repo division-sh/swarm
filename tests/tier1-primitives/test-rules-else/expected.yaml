@@ -2,7 +2,7 @@ trigger:
   event: item.received
   payload:
     entity_id: ent-001
-    type: z
+    kind: z
 
 expected:
   handler_outcome: success

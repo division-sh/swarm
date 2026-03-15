@@ -1,0 +1,30 @@
+resolver:
+  id: resolver
+  execution_type: system_node
+  subscribes_to: [conflict.submitted]
+  produces: [conflict.resolved]
+  event_handlers:
+    conflict.submitted:
+      rules:
+        - name: keep_first
+          condition: "payload.strategy == 'keep_first'"
+          data_accumulation:
+            resolved_value: payload.value_a
+            resolution_method: "first"
+          advances_to: resolved
+          emits: conflict.resolved
+        - name: keep_best
+          condition: "payload.strategy == 'keep_best'"
+          data_accumulation:
+            resolved_value: payload.value_b
+            resolution_method: "best"
+          advances_to: resolved
+          emits: conflict.resolved
+        - name: merge
+          condition: "payload.strategy == 'merge'"
+          data_accumulation:
+            resolved_value_a: payload.value_a
+            resolved_value_b: payload.value_b
+            resolution_method: "merged"
+          advances_to: resolved
+          emits: conflict.resolved

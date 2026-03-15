@@ -1,0 +1,6 @@
+admission.requested:
+  payload:
+    entity_id: string
+admission.granted:
+  payload:
+    entity_id: string

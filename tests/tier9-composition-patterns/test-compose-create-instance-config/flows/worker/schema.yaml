@@ -1,0 +1,12 @@
+initial_state: ready
+terminal_states: [done]
+states: [ready, done]
+instance_variables:
+  name: Worker name
+  priority: Priority level
+  owner: Owner
+pins:
+  inputs:
+    events: [task.assign]
+  outputs:
+    events: [task.done]

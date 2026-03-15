@@ -7,3 +7,6 @@ task.completed:
 ghost.event:
   payload:
     entity_id: string
+ghost.ack:
+  payload:
+    entity_id: string

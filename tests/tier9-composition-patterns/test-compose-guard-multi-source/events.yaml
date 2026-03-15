@@ -1,0 +1,8 @@
+candidate.submitted:
+  payload:
+    entity_id: string
+    name: string
+    score: integer
+candidate.accepted:
+  payload:
+    entity_id: string

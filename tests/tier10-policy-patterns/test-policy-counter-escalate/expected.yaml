@@ -1,0 +1,11 @@
+trigger:
+  event: attempt.requested
+  payload:
+    entity_id: ent-001
+  entity_state_before: retrying
+  entity_fields_before:
+    attempt_count: 3
+expected:
+  handler_outcome: escalate
+  entity_state: retrying
+  emitted_events: [attempt.limit_hit]

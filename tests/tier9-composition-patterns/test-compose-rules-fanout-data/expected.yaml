@@ -1,0 +1,15 @@
+trigger:
+  event: batch.requested
+  payload:
+    entity_id: ent-001
+    mode: parallel
+    items:
+      - id: a
+      - id: b
+      - id: c
+expected:
+  handler_outcome: success
+  entity_state: dispatched
+  emitted_events: [batch.dispatched]
+  entity_fields:
+    dispatch_count: 3

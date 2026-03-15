@@ -1,0 +1,8 @@
+initial_state: idle
+terminal_states: [spawned]
+states: [idle, spawned]
+pins:
+  inputs:
+    events: [spawn.requested]
+  outputs:
+    events: [spawn.done]

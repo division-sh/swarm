@@ -1,0 +1,9 @@
+sub-node:
+  id: sub-node
+  execution_type: system_node
+  subscribes_to: [sub.requested]
+  produces: [sub.completed]
+  event_handlers:
+    sub.requested:
+      advances_to: done
+      emits: sub.completed

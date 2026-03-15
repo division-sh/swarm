@@ -1,0 +1,8 @@
+initial_state: waiting
+terminal_states: [done, timed_out]
+states: [waiting, done, timed_out]
+pins:
+  inputs:
+    events: [task.done, timer.check]
+  outputs:
+    events: [task.completed, task.timed_out]

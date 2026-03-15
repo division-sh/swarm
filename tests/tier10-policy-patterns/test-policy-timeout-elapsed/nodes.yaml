@@ -1,0 +1,15 @@
+monitor:
+  id: monitor
+  execution_type: system_node
+  subscribes_to: [task.done, timer.check]
+  produces: [task.completed, task.timed_out]
+  event_handlers:
+    task.done:
+      advances_to: done
+      emits: task.completed
+    timer.check:
+      guard:
+        id: past_deadline
+        check: "payload.elapsed_hours >= policy.timeout_hours"
+      advances_to: timed_out
+      emits: task.timed_out

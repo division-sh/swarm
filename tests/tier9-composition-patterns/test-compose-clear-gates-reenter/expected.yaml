@@ -1,0 +1,12 @@
+trigger:
+  sequence:
+    - event: review.done
+      payload: { entity_id: ent-001 }
+    - event: review.insufficient
+      payload: { entity_id: ent-001 }
+expected:
+  handler_outcome: success
+  entity_state: reviewing
+  emitted_events: [review.approved, review.restarted]
+  gates:
+    g_reviewed: false

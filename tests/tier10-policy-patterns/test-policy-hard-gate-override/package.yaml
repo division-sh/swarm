@@ -1,0 +1,7 @@
+name: test-policy-hard-gate-override
+version: 1.0.0
+description: >
+  Policy: main score passes policy.high_mark but a secondary field
+  fails policy.hard_floor — hard gate overrides the main threshold.
+platform_version: ">=1.1.0"
+flows: []

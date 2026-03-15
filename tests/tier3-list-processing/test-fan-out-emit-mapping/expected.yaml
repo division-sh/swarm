@@ -3,9 +3,9 @@ trigger:
   payload:
     entity_id: ent-001
     items:
-      - type: a
+      - kind: a
         id: item-1
-      - type: b
+      - kind: b
         id: item-2
 
 expected:

@@ -5,6 +5,6 @@ test-node:
   produces: [gate.set]
   event_handlers:
     gate.requested:
-      sets_gates:
+      sets_gate:
         g1_check: true
       emits: gate.set

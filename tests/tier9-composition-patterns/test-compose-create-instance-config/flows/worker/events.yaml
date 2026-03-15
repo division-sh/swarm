@@ -1,0 +1,6 @@
+task.assign:
+  payload:
+    entity_id: string
+task.done:
+  payload:
+    entity_id: string

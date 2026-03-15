@@ -1,0 +1,25 @@
+pipeline:
+  id: pipeline
+  execution_type: system_node
+  subscribes_to: [step.a_done, step.b_done, step.c_done]
+  produces: [release.ready]
+  event_handlers:
+    step.a_done:
+      sets_gate:
+        g_a: true
+      advances_to: stage_a
+    step.b_done:
+      guard:
+        id: requires_a
+        check: "gates.g_a == true"
+      sets_gate:
+        g_b: true
+      advances_to: stage_b
+    step.c_done:
+      guard:
+        id: requires_b
+        check: "gates.g_b == true"
+      sets_gate:
+        g_c: true
+      advances_to: released
+      emits: release.ready

@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [resolved]
+states: [pending, resolved]
+pins:
+  inputs:
+    events: [conflict.submitted]
+  outputs:
+    events: [conflict.resolved]

@@ -1,0 +1,15 @@
+score.submitted:
+  payload:
+    entity_id: string
+    dimension: string
+    value: number
+    weight: number
+result.high:
+  payload:
+    entity_id: string
+result.mid:
+  payload:
+    entity_id: string
+result.low:
+  payload:
+    entity_id: string

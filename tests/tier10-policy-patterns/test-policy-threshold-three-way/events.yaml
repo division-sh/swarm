@@ -1,0 +1,13 @@
+eval.submitted:
+  payload:
+    entity_id: string
+    score: number
+eval.tier_a:
+  payload:
+    entity_id: string
+eval.tier_b:
+  payload:
+    entity_id: string
+eval.tier_c:
+  payload:
+    entity_id: string

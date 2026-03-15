@@ -1,0 +1,9 @@
+task-runner:
+  id: task-runner
+  execution_type: system_node
+  subscribes_to: [task.assign]
+  produces: [task.done]
+  event_handlers:
+    task.assign:
+      advances_to: done
+      emits: task.done

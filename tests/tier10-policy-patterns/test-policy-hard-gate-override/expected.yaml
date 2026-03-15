@@ -1,0 +1,13 @@
+trigger:
+  event: score.final
+  payload:
+    entity_id: ent-001
+    main_score: 80
+    secondary_score: 40
+expected:
+  handler_outcome: success
+  entity_state: demoted
+  emitted_events: [result.demoted]
+  entity_fields:
+    main_score: 80
+    secondary_score: 40

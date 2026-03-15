@@ -1,0 +1,7 @@
+name: test-compose-guard-multi-source
+version: 1.0.0
+description: >
+  Composition: guard with 5 checks pulling from policy, entity fields,
+  and query_entities. All must pass or handler discards silently.
+platform_version: ">=1.1.0"
+flows: []

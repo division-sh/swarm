@@ -1,0 +1,16 @@
+trigger:
+  sequence:
+    - event: stage.one_done
+      payload: { entity_id: ent-001, result: pass }
+    - event: stage.two_done
+      payload: { entity_id: ent-001, result: verified }
+expected:
+  handler_outcome: success
+  entity_state: complete
+  emitted_events: [stage.two_start, stage.complete]
+  gates:
+    g_stage_one: true
+    g_stage_two: true
+  entity_fields:
+    stage_one_result: pass
+    stage_two_result: verified

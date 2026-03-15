@@ -1,0 +1,8 @@
+initial_state: created
+terminal_states: [closed]
+states: [created, setup, active, running, stable, winding_down, closed]
+pins:
+  inputs:
+    events: [phase.init, phase.activate, phase.start, phase.stabilize, phase.wind_down, phase.close]
+  outputs:
+    events: [lifecycle.complete]

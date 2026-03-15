@@ -1,0 +1,8 @@
+initial_state: active
+terminal_states: [done, escalated]
+states: [active, done, escalated]
+pins:
+  inputs:
+    events: [retry.requested]
+  outputs:
+    events: [retry.dispatched, limit.reached]

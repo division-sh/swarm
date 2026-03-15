@@ -1,0 +1,16 @@
+trigger:
+  sequence:
+    - event: step.a_done
+      payload: { entity_id: ent-001 }
+    - event: step.b_done
+      payload: { entity_id: ent-001 }
+    - event: step.c_done
+      payload: { entity_id: ent-001 }
+expected:
+  handler_outcome: success
+  entity_state: released
+  emitted_events: [release.ready]
+  gates:
+    g_a: true
+    g_b: true
+    g_c: true

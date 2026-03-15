@@ -1,0 +1,7 @@
+name: test-compose-lifecycle-seven-states
+version: 1.0.0
+description: >
+  Composition: 7-state lifecycle machine with multiple handlers
+  advancing through states, some guarded. Tests complex state progression.
+platform_version: ">=1.1.0"
+flows: []

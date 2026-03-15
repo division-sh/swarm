@@ -1,0 +1,12 @@
+review.done:
+  payload:
+    entity_id: string
+review.insufficient:
+  payload:
+    entity_id: string
+review.approved:
+  payload:
+    entity_id: string
+review.restarted:
+  payload:
+    entity_id: string

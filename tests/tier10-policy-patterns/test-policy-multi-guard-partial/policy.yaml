@@ -1,0 +1,4 @@
+min_score: 40
+min_confidence: 60
+max_depth: 5
+max_items: 100

@@ -7,8 +7,8 @@ test-node:
     item.received:
       rules:
         type_a:
-          condition: "payload.type == a"
+          condition: "payload.kind == a"
           emits: routed.a
         type_b:
-          condition: "payload.type == b"
+          condition: "payload.kind == b"
           emits: routed.b

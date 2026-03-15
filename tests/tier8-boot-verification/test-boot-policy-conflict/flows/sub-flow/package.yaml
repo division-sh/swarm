@@ -1,0 +1,5 @@
+name: sub-flow
+version: 1.0.0
+description: Child flow with conflicting policy values
+platform_version: ">=1.1.0"
+flows: []

@@ -1,0 +1,7 @@
+task.completed:
+  payload:
+    entity_id: string
+    status: string
+task.logged:
+  payload:
+    entity_id: string

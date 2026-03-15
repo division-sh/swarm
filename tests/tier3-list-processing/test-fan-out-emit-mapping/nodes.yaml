@@ -8,7 +8,7 @@ routing-node:
       fan_out:
         items_from: payload.items
         emit_mapping:
-          key_field: "item.type"
+          key_field: "item.kind"
           mapping:
             a: "routed.a"
             b: "routed.b"

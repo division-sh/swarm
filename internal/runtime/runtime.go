@@ -47,6 +47,7 @@ type RuntimeOptions struct {
 	EnableToolGateway  bool
 	ToolGatewayToken   string
 	WorkflowModule     runtimepipeline.WorkflowModule
+	LLMRuntime         llm.Runtime
 }
 
 type Runtime struct {
@@ -225,16 +226,19 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore)
 	}
 
-	modelRuntime, err := llm.RuntimeFactory{
-		Cfg:           cfg,
-		Sessions:      stores.SessionRegistry,
-		Turns:         stores.TurnStore,
-		Conversations: stores.ConversationStore,
-		Budget:        rt.Budget,
-		Workspaces:    rt.Workspace,
-	}.Build()
-	if err != nil {
-		return nil, fmt.Errorf("build runtime: %w", err)
+	modelRuntime := opts.LLMRuntime
+	if modelRuntime == nil {
+		modelRuntime, err = llm.RuntimeFactory{
+			Cfg:           cfg,
+			Sessions:      stores.SessionRegistry,
+			Turns:         stores.TurnStore,
+			Conversations: stores.ConversationStore,
+			Budget:        rt.Budget,
+			Workspaces:    rt.Workspace,
+		}.Build()
+		if err != nil {
+			return nil, fmt.Errorf("build runtime: %w", err)
+		}
 	}
 	rt.LLM = modelRuntime
 

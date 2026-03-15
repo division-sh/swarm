@@ -1,0 +1,8 @@
+initial_state: collecting
+terminal_states: [high, mid, low]
+states: [collecting, high, mid, low]
+pins:
+  inputs:
+    events: [score.submitted]
+  outputs:
+    events: [result.high, result.mid, result.low]

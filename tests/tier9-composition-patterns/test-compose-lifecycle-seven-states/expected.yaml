@@ -1,0 +1,18 @@
+trigger:
+  sequence:
+    - event: phase.init
+      payload: { entity_id: ent-001 }
+    - event: phase.activate
+      payload: { entity_id: ent-001 }
+    - event: phase.start
+      payload: { entity_id: ent-001 }
+    - event: phase.stabilize
+      payload: { entity_id: ent-001 }
+    - event: phase.wind_down
+      payload: { entity_id: ent-001 }
+    - event: phase.close
+      payload: { entity_id: ent-001 }
+expected:
+  handler_outcome: success
+  entity_state: closed
+  emitted_events: [lifecycle.complete]

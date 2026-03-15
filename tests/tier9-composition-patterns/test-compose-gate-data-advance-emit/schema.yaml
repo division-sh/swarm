@@ -1,0 +1,8 @@
+initial_state: stage_one
+terminal_states: [complete]
+states: [stage_one, stage_two, complete]
+pins:
+  inputs:
+    events: [stage.one_done, stage.two_done]
+  outputs:
+    events: [stage.two_start, stage.complete]

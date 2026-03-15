@@ -1,0 +1,8 @@
+initial_state: evaluating
+terminal_states: [tier_a, tier_b, tier_c]
+states: [evaluating, tier_a, tier_b, tier_c]
+pins:
+  inputs:
+    events: [eval.submitted]
+  outputs:
+    events: [eval.tier_a, eval.tier_b, eval.tier_c]

@@ -1,0 +1,14 @@
+retrier:
+  id: retrier
+  execution_type: system_node
+  subscribes_to: [retry.requested]
+  produces: [retry.dispatched, limit.reached]
+  event_handlers:
+    retry.requested:
+      guard:
+        id: under_limit
+        check: "entity.retry_count < policy.max_retries"
+      on_fail: "escalate:limit.reached"
+      data_accumulation:
+        retry_count: "entity.retry_count + 1"
+      emits: retry.dispatched

@@ -1,0 +1,25 @@
+lifecycle:
+  id: lifecycle
+  execution_type: system_node
+  subscribes_to: [phase.init, phase.activate, phase.start, phase.stabilize, phase.wind_down, phase.close]
+  produces: [lifecycle.complete]
+  event_handlers:
+    phase.init:
+      advances_to: setup
+    phase.activate:
+      guard:
+        id: must_be_setup
+        check: "entity.current_state == 'setup'"
+      advances_to: active
+    phase.start:
+      advances_to: running
+    phase.stabilize:
+      advances_to: stable
+    phase.wind_down:
+      advances_to: winding_down
+    phase.close:
+      guard:
+        id: must_be_winding
+        check: "entity.current_state == 'winding_down'"
+      advances_to: closed
+      emits: lifecycle.complete

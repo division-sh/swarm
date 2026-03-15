@@ -1,0 +1,19 @@
+trigger:
+  event: spawn.requested
+  payload:
+    entity_id: ent-001
+    instance_id: w-001
+    name: alpha
+    priority: 1
+    owner: team-a
+expected:
+  handler_outcome: success
+  entity_state: spawned
+  emitted_events: [spawn.done]
+  flow_instance_created:
+    template: worker
+    instance_id: w-001
+    config:
+      name: alpha
+      priority: 1
+      owner: team-a

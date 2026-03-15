@@ -1,0 +1,10 @@
+name: test-compose-multi-emit-cross-flow
+version: 1.0.0
+description: >
+  Composition: handler emits two events — one local, one routed
+  to a child flow via cross-flow addressing.
+platform_version: ">=1.1.0"
+flows:
+  - id: tracker
+    flow: tracker
+    mode: static

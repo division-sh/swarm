@@ -1,0 +1,8 @@
+trigger:
+  event: slot.requested
+  payload:
+    entity_id: ent-001
+expected:
+  handler_outcome: success
+  entity_state: active
+  emitted_events: [slot.granted]

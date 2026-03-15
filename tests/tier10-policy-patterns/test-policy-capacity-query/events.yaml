@@ -1,0 +1,6 @@
+slot.requested:
+  payload:
+    entity_id: string
+slot.granted:
+  payload:
+    entity_id: string

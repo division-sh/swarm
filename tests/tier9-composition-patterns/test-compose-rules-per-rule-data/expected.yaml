@@ -1,0 +1,14 @@
+trigger:
+  event: conflict.submitted
+  payload:
+    entity_id: ent-001
+    strategy: keep_best
+    value_a: low
+    value_b: high
+expected:
+  handler_outcome: success
+  entity_state: resolved
+  emitted_events: [conflict.resolved]
+  entity_fields:
+    resolved_value: high
+    resolution_method: best

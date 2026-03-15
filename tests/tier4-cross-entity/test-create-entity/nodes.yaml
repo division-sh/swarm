@@ -6,8 +6,7 @@ test-node:
   event_handlers:
     entity.create_requested:
       action: create_flow_instance
-      action_params:
-        template: child-flow
-        instance_id: "payload.child_id"
+      template: child-flow
+      instance_id_from: payload.child_id
       emits: entity.created
       advances_to: creating

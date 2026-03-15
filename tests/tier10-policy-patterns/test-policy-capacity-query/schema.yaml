@@ -1,0 +1,8 @@
+initial_state: queued
+terminal_states: [active]
+states: [queued, active]
+pins:
+  inputs:
+    events: [slot.requested]
+  outputs:
+    events: [slot.granted]

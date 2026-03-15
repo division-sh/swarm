@@ -1,0 +1,15 @@
+reviewer:
+  id: reviewer
+  execution_type: system_node
+  subscribes_to: [review.done, review.insufficient]
+  produces: [review.approved, review.restarted]
+  event_handlers:
+    review.done:
+      sets_gate:
+        g_reviewed: true
+      advances_to: approved
+      emits: review.approved
+    review.insufficient:
+      clear_gates: [g_reviewed]
+      advances_to: reviewing
+      emits: review.restarted

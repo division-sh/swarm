@@ -18,6 +18,8 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	eb.inFlightPublishes.Add(1)
+	defer eb.inFlightPublishes.Add(-1)
 	start := time.Now()
 	if evt.Type == "" {
 		return errors.New("event type is required")
@@ -225,6 +227,8 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	eb.inFlightPublishes.Add(1)
+	defer eb.inFlightPublishes.Add(-1)
 	if evt.Type == "" {
 		return errors.New("deferred event type is required")
 	}
@@ -282,6 +286,8 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	eb.inFlightPublishes.Add(1)
+	defer eb.inFlightPublishes.Add(-1)
 	if evt.Type == "" {
 		return errors.New("deferred event type is required")
 	}

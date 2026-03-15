@@ -1,0 +1,14 @@
+processor:
+  id: processor
+  execution_type: system_node
+  subscribes_to: [attempt.requested]
+  produces: [attempt.processed, attempt.limit_hit]
+  event_handlers:
+    attempt.requested:
+      guard:
+        id: below_limit
+        check: "entity.attempt_count < policy.max_attempts"
+      on_fail: "escalate:attempt.limit_hit"
+      data_accumulation:
+        attempt_count: "entity.attempt_count + 1"
+      emits: attempt.processed

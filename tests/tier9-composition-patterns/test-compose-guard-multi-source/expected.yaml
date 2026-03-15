@@ -1,0 +1,14 @@
+trigger:
+  event: candidate.submitted
+  payload:
+    entity_id: ent-001
+    name: unique-item
+    score: 55
+  entity_fields_before:
+    depth: 2
+    child_count: 1
+    flag_count: 0
+expected:
+  handler_outcome: success
+  entity_state: accepted
+  emitted_events: [candidate.accepted]

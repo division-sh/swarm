@@ -1,0 +1,16 @@
+trigger:
+  sequence:
+    - event: score.submitted
+      payload: { entity_id: ent-001, dimension: alpha, value: 80, weight: 0.5 }
+    - event: score.submitted
+      payload: { entity_id: ent-001, dimension: beta, value: 90, weight: 0.3 }
+    - event: score.submitted
+      payload: { entity_id: ent-001, dimension: gamma, value: 70, weight: 0.2 }
+  entity_fields_before:
+    expected_count: 3
+expected:
+  handler_outcome: success
+  entity_state: high
+  emitted_events: [result.high]
+  entity_fields:
+    composite: 81.0

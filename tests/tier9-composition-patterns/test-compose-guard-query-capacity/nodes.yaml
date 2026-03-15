@@ -1,0 +1,12 @@
+gatekeeper:
+  id: gatekeeper
+  execution_type: system_node
+  subscribes_to: [admission.requested]
+  produces: [admission.granted]
+  event_handlers:
+    admission.requested:
+      guard:
+        id: capacity_check
+        check: "query_entities(current_state == 'admitted').count < policy.max_capacity"
+      advances_to: admitted
+      emits: admission.granted

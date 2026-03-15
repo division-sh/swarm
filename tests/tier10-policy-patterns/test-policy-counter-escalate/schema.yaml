@@ -1,0 +1,8 @@
+initial_state: retrying
+terminal_states: [done, escalated]
+states: [retrying, done, escalated]
+pins:
+  inputs:
+    events: [attempt.requested]
+  outputs:
+    events: [attempt.processed, attempt.limit_hit]

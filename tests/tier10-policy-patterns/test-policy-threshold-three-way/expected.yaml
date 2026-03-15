@@ -1,0 +1,11 @@
+trigger:
+  event: eval.submitted
+  payload:
+    entity_id: ent-001
+    score: 60
+expected:
+  handler_outcome: success
+  entity_state: tier_b
+  emitted_events: [eval.tier_b]
+  entity_fields:
+    score: 60

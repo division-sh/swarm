@@ -1,0 +1,7 @@
+name: test-compose-clear-gates-reenter
+version: 1.0.0
+description: >
+  Composition: clear_gates resets all gates, advances_to re-enters
+  an earlier state, and emits a restart event. The reset-and-retry pattern.
+platform_version: ">=1.1.0"
+flows: []

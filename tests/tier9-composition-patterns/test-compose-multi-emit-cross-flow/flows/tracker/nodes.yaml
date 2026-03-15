@@ -1,0 +1,8 @@
+recorder:
+  id: recorder
+  execution_type: system_node
+  subscribes_to: [task.record]
+  produces: []
+  event_handlers:
+    task.record:
+      advances_to: recorded

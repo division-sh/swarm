@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"empireai/internal/events"
@@ -34,6 +35,7 @@ type EventBus struct {
 	semanticSource      semanticview.Source
 	payloadValidator    PayloadValidator
 	outboxSweeperActive bool
+	inFlightPublishes   atomic.Int64
 }
 
 type EventBusOptions struct {
@@ -208,7 +210,26 @@ func (eb *EventBus) ResetInMemoryState() error {
 		return err
 	}
 	eb.routeTable = routeTable
+	eb.inFlightPublishes.Store(0)
 	return nil
+}
+
+func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
+	if eb == nil {
+		return nil
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if eb.inFlightPublishes.Load() == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {

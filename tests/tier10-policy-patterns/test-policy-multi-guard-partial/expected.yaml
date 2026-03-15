@@ -1,0 +1,13 @@
+trigger:
+  event: check.requested
+  payload:
+    entity_id: ent-001
+    score: 55
+    confidence: 50
+  entity_fields_before:
+    depth: 3
+    flag_count: 0
+    item_count: 10
+expected:
+  handler_outcome: discard
+  entity_state: pending

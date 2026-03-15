@@ -1,0 +1,14 @@
+score.final:
+  payload:
+    entity_id: string
+    main_score: number
+    secondary_score: number
+result.promoted:
+  payload:
+    entity_id: string
+result.demoted:
+  payload:
+    entity_id: string
+result.rejected:
+  payload:
+    entity_id: string

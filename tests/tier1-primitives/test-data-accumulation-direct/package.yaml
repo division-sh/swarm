@@ -3,3 +3,7 @@ version: 1.0.0
 description: data_accumulation writes payload fields directly to entity with matching field names.
 platform_version: ">=1.1.0"
 flows: []
+entity_schema:
+  core:
+    name: text
+    score: integer

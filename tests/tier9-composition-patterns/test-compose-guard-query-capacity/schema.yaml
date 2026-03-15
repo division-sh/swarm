@@ -1,0 +1,8 @@
+initial_state: waiting
+terminal_states: [admitted]
+states: [waiting, admitted]
+pins:
+  inputs:
+    events: [admission.requested]
+  outputs:
+    events: [admission.granted]
