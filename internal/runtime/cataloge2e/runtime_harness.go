@@ -42,29 +42,30 @@ type catalogExpectedDocument struct {
 		AssertPersistedBeforeDelivery bool                 `yaml:"assert_persisted_before_delivery"`
 	} `yaml:"trigger"`
 	Expected struct {
-		BootResult          string         `yaml:"boot_result"`
-		HandlerOutcome      string         `yaml:"handler_outcome"`
-		EntityState         string         `yaml:"entity_state"`
-		ParentState         string         `yaml:"parent_state"`
-		FlowBState          string         `yaml:"flow_b_state"`
-		EntityFields        map[string]any `yaml:"entity_fields"`
-		Gates               map[string]bool `yaml:"gates"`
-		EmittedEvents       []string       `yaml:"emitted_events"`
-		AgentReceived       map[string][]string `yaml:"agent_received"`
-		DeadLetter          bool           `yaml:"dead_letter"`
-		TemplateInstances   *int           `yaml:"template_instances"`
-		FlowInstanceCreated map[string]any `yaml:"flow_instance_created"`
+		BootResult          string                           `yaml:"boot_result"`
+		HandlerOutcome      string                           `yaml:"handler_outcome"`
+		EntityState         string                           `yaml:"entity_state"`
+		ParentState         string                           `yaml:"parent_state"`
+		FlowBState          string                           `yaml:"flow_b_state"`
+		EntityFields        map[string]any                   `yaml:"entity_fields"`
+		Gates               map[string]bool                  `yaml:"gates"`
+		EmittedEvents       []string                         `yaml:"emitted_events"`
+		AgentReceived       map[string][]string              `yaml:"agent_received"`
+		DeadLetter          bool                             `yaml:"dead_letter"`
+		ChainDepthExceeded  bool                             `yaml:"chain_depth_exceeded"`
+		TemplateInstances   *int                             `yaml:"template_instances"`
+		FlowInstanceCreated map[string]any                   `yaml:"flow_instance_created"`
 		Entities            map[string]catalogEntityExpected `yaml:"entities"`
 	} `yaml:"expected"`
 }
 
 type catalogEntityExpected struct {
-	HandlerOutcome string         `yaml:"handler_outcome"`
-	EntityState    string         `yaml:"entity_state"`
-	EntityFields   map[string]any `yaml:"entity_fields"`
+	HandlerOutcome string          `yaml:"handler_outcome"`
+	EntityState    string          `yaml:"entity_state"`
+	EntityFields   map[string]any  `yaml:"entity_fields"`
 	Gates          map[string]bool `yaml:"gates"`
-	EmittedEvents  []string       `yaml:"emitted_events"`
-	DeadLetter     bool           `yaml:"dead_letter"`
+	EmittedEvents  []string        `yaml:"emitted_events"`
+	DeadLetter     bool            `yaml:"dead_letter"`
 }
 
 func (d catalogExpectedDocument) triggerSequence() []catalogTriggerStep {
@@ -100,22 +101,22 @@ func (d catalogExpectedDocument) triggerFlowPrefix() string {
 }
 
 type runtimeHarness struct {
-	t            *testing.T
-	ctx          context.Context
-	cancel       context.CancelFunc
-	db           *sql.DB
-	pg           *store.PostgresStore
-	rt           *runtime.Runtime
-	workflow     *runtimepipeline.WorkflowInstanceStore
-	llm          *scriptedLLMRuntime
-	bundle       *runtimecontracts.WorkflowContractBundle
-	initialState string
-	startedAt    time.Time
-	publishedIDs map[string]struct{}
+	t              *testing.T
+	ctx            context.Context
+	cancel         context.CancelFunc
+	db             *sql.DB
+	pg             *store.PostgresStore
+	rt             *runtime.Runtime
+	workflow       *runtimepipeline.WorkflowInstanceStore
+	llm            *scriptedLLMRuntime
+	bundle         *runtimecontracts.WorkflowContractBundle
+	initialState   string
+	startedAt      time.Time
+	publishedIDs   map[string]struct{}
 	publishedOrder []string
 	eventEntityIDs map[string]string
-	previews     map[string]runtimepipeline.HandlerPreview
-	mu           sync.Mutex
+	previews       map[string]runtimepipeline.HandlerPreview
+	mu             sync.Mutex
 }
 
 type agentFixtureDoc struct {
@@ -181,21 +182,21 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	t.Cleanup(func() { _ = rt.Shutdown() })
 
 	return &runtimeHarness{
-		t:            t,
-		ctx:          ctx,
-		cancel:       cancel,
-		db:           db,
-		pg:           pg,
-		rt:           rt,
-		workflow:     runtimepipeline.NewWorkflowInstanceStore(db),
-		llm:          llmRuntime,
-		bundle:       bundle,
-		initialState: strings.TrimSpace(rootSchema.InitialState),
-		startedAt:    time.Now().UTC(),
-		publishedIDs: map[string]struct{}{},
+		t:              t,
+		ctx:            ctx,
+		cancel:         cancel,
+		db:             db,
+		pg:             pg,
+		rt:             rt,
+		workflow:       runtimepipeline.NewWorkflowInstanceStore(db),
+		llm:            llmRuntime,
+		bundle:         bundle,
+		initialState:   strings.TrimSpace(rootSchema.InitialState),
+		startedAt:      time.Now().UTC(),
+		publishedIDs:   map[string]struct{}{},
 		publishedOrder: []string{},
 		eventEntityIDs: map[string]string{},
-		previews:     map[string]runtimepipeline.HandlerPreview{},
+		previews:       map[string]runtimepipeline.HandlerPreview{},
 	}
 }
 

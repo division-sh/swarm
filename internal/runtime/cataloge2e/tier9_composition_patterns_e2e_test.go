@@ -12,6 +12,7 @@ import (
 var tier9CompositionPatternFixtures = []string{
 	"test-compose-accumulate-compute-branch",
 	"test-compose-clear-gates-reenter",
+	"test-compose-create-instance-config",
 	"test-compose-gate-chain-three",
 	"test-compose-gate-data-advance-emit",
 	"test-compose-guard-multi-source",
@@ -23,8 +24,7 @@ var tier9CompositionPatternFixtures = []string{
 }
 
 var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-compose-create-instance-config": {kind: "runtime-gap", reason: "the fixture now reaches validation, but the live runtime still reports create_flow_instance as having no executable runtime implementation on this composition path"},
-	"test-compose-multi-emit-cross-flow":  {kind: "fixture-issue", reason: "the fixture now declares tracker/task.record, but expected.emitted_events still wants it even though the live runtime path for this package shape only emits task.logged"},
+	"test-compose-multi-emit-cross-flow": {kind: "fixture-issue", reason: "the fixture now declares tracker/task.record, but expected.emitted_events still wants it even though the live runtime path for this package shape only emits task.logged"},
 }
 
 func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {

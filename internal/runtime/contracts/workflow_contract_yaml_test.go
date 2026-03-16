@@ -175,3 +175,35 @@ data_accumulation:
 		t.Fatalf("DataAccumulation source = %q", got)
 	}
 }
+
+func TestSystemNodeEventHandlerDecode_MergesScalarActionWithCreateFlowFields(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+action: create_flow_instance
+template: worker
+instance_id_from: payload.worker_id
+config_from:
+  name: payload.name
+  priority: payload.priority
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := handler.Action.ID; got != "create_flow_instance" {
+		t.Fatalf("Action.ID = %q", got)
+	}
+	if got := handler.Action.Template; got != "worker" {
+		t.Fatalf("Action.Template = %q", got)
+	}
+	if got := handler.Action.InstanceIDFrom; got != "payload.worker_id" {
+		t.Fatalf("Action.InstanceIDFrom = %q", got)
+	}
+	if handler.Action.ConfigFrom == nil {
+		t.Fatal("expected Action.ConfigFrom")
+	}
+	if got := handler.Action.ConfigFrom.Bindings["name"]; got != "payload.name" {
+		t.Fatalf("ConfigFrom.Bindings[name] = %q", got)
+	}
+	if got := handler.Action.ConfigFrom.Bindings["priority"]; got != "payload.priority" {
+		t.Fatalf("ConfigFrom.Bindings[priority] = %q", got)
+	}
+}

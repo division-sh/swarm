@@ -735,9 +735,11 @@ type AgentRegistryEntry struct {
 	Implementation         string   `yaml:"implementation"`
 }
 type ToolSchemaEntry struct {
-	Category    string          `yaml:"category"`
-	Description string          `yaml:"description"`
-	InputSchema ToolInputSchema `yaml:"input_schema"`
+	Category           string          `yaml:"category"`
+	Description        string          `yaml:"description"`
+	Permission         string          `yaml:"permission"`
+	RequiredPermission string          `yaml:"required_permission"`
+	InputSchema        ToolInputSchema `yaml:"input_schema"`
 }
 type PlatformSpecDocument struct {
 	Platform struct {

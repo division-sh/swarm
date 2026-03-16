@@ -274,11 +274,12 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(e.nodeID), exec)
 	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID: identity.NormalizeEntityID(entityID),
-		NodeID:   identity.NormalizeNodeID(e.nodeID),
-		FlowID:   identity.NormalizeFlowID(flowID),
-		Event:    evt,
-		Handler:  handler,
+		EntityID:   identity.NormalizeEntityID(entityID),
+		NodeID:     identity.NormalizeNodeID(e.nodeID),
+		FlowID:     identity.NormalizeFlowID(flowID),
+		Event:      evt,
+		ChainDepth: evt.ChainDepth,
+		Handler:    handler,
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID(entityID),
 			CurrentState: strings.TrimSpace(string(currentState.Stage)),

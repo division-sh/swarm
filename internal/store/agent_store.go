@@ -9,6 +9,7 @@ import (
 	runtimeactors "empireai/internal/runtime/core/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimesessions "empireai/internal/runtime/sessions"
+	"github.com/google/uuid"
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
@@ -499,6 +500,9 @@ func shouldIgnoreLegacyConversationTable(err error) bool {
 func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string) error {
 	if strings.TrimSpace(entityID) == "" {
 		return fmt.Errorf("entity_id is required")
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(entityID)); err != nil {
+		return nil
 	}
 	var slug string
 	err := s.DB.QueryRowContext(ctx, `

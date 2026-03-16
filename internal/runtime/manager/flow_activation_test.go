@@ -17,6 +17,15 @@ type flowActivationTestBus struct {
 	published    []events.Event
 }
 
+type flowActivationTestInstanceStore struct {
+	upserts []runtimepipeline.WorkflowInstance
+}
+
+func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
+	s.upserts = append(s.upserts, instance)
+	return nil
+}
+
 func (b *flowActivationTestBus) Publish(_ context.Context, evt events.Event) error {
 	b.published = append(b.published, evt)
 	return nil
@@ -185,6 +194,42 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if got := autoEmit.EntityID(); got != "ent-1" {
 		t.Fatalf("published entity_id = %q, want ent-1", got)
+	}
+}
+
+func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	instances := &flowActivationTestInstanceStore{}
+	am := NewAgentManager(bus, nil)
+	am.SetWorkflowInstanceStore(instances)
+	bundle := testFlowBundle("task.started")
+
+	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		TemplateID:     "review",
+		InstanceID:     "inst-1",
+		EntityID:       "ent-1",
+		FlowPath:       "review/inst-1",
+		Config: map[string]any{
+			"name":     "alpha",
+			"priority": 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(instances.upserts) != 1 {
+		t.Fatalf("upserts = %d, want 1", len(instances.upserts))
+	}
+	got := instances.upserts[0]
+	if got.StorageRef != "review/inst-1" {
+		t.Fatalf("storage_ref = %q, want review/inst-1", got.StorageRef)
+	}
+	if got.Config["name"] != "alpha" {
+		t.Fatalf("config name = %#v, want alpha", got.Config["name"])
+	}
+	if got.Config["priority"] != 1 {
+		t.Fatalf("config priority = %#v, want 1", got.Config["priority"])
 	}
 }
 

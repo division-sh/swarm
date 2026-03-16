@@ -254,7 +254,7 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	id, name, entityID, flowInstance, scope, payload, producedBy, producedByType, createdAt := eventStorageEnvelope(evt)
+	id, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, createdAt := eventStorageEnvelope(evt)
 	const q = `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
@@ -262,7 +262,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 		)
 		VALUES (
 			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-			0, NULLIF($7,''), $8, $9
+			$7, NULLIF($8,''), $9, $10
 		)
 		ON CONFLICT (event_id) DO NOTHING
 	`
@@ -270,7 +270,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	if _, err := execFn(ctx, q, id, name, entityID, flowInstance, scope, string(payload), producedBy, producedByType, createdAt); err != nil {
+	if _, err := execFn(ctx, q, id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, createdAt); err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
 	return nil
@@ -456,7 +456,7 @@ func columnExists(ctx context.Context, q rowQueryer, tableName, columnName strin
 	return exists
 }
 
-func eventStorageEnvelope(evt events.Event) (id string, eventName string, entityID string, flowInstance string, scope string, payload []byte, producedBy string, producedByType string, createdAt time.Time) {
+func eventStorageEnvelope(evt events.Event) (id string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, createdAt time.Time) {
 	id = strings.TrimSpace(evt.ID)
 	if id == "" {
 		id = uuid.NewString()
@@ -470,6 +470,10 @@ func eventStorageEnvelope(evt events.Event) (id string, eventName string, entity
 		scope = "entity"
 	} else if flowInstance != "" {
 		scope = "flow"
+	}
+	chainDepth = evt.ChainDepth
+	if chainDepth < 0 {
+		chainDepth = 0
 	}
 	producedBy = strings.TrimSpace(evt.SourceAgent)
 	producedByType = "agent"

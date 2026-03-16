@@ -22,7 +22,7 @@ var tier6EventLoopFixtures = []string{
 }
 
 var tier6ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-chain-depth-limit":        {kind: "runtime-gap", reason: "the fixture now reaches runtime, but the live chain-depth path still records handler_outcome=completed instead of the expected kill semantics"},
+	"test-chain-depth-limit": {kind: "fixture-issue", reason: "the runtime now dead-letters the overflowed chain link, but the fixture still expects the root state to remain pending instead of the live retained state processing"},
 }
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {

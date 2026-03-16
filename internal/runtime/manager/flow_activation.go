@@ -17,6 +17,10 @@ import (
 	"github.com/google/uuid"
 )
 
+type flowInstancePersistence interface {
+	Upsert(ctx context.Context, instance runtimepipeline.WorkflowInstance) error
+}
+
 type flowInstanceRouteInstaller interface {
 	AddFlowInstance(template runtimecontracts.SystemNodeContract, instancePath string) error
 }
@@ -58,6 +62,30 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if am.store != nil {
 		if err := am.store.EnsureEntitySchema(ctx, entityID); err != nil {
 			return fmt.Errorf("ensure entity schema: %w", err)
+		}
+	}
+	if am.workflowInstances != nil {
+		initialState := strings.TrimSpace(schema.InitialState)
+		if initialState == "" {
+			initialState = strings.TrimSpace(req.InitialState)
+		}
+		if initialState == "" {
+			initialState = "pending"
+		}
+		if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
+			InstanceID:      instanceID,
+			StorageRef:      flowPath,
+			WorkflowName:    templateID,
+			WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+			CurrentState:    initialState,
+			Config:          cloneFlowConfig(req.Config),
+			Metadata: map[string]any{
+				"entity_id":   entityID,
+				"instance_id": instanceID,
+				"flow_path":   flowPath,
+			},
+		}); err != nil {
+			return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 		}
 	}
 
@@ -502,6 +530,17 @@ func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[s
 		vars[key] = stringifyPromptTemplateValue(value)
 	}
 	return vars
+}
+
+func cloneFlowConfig(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) map[string]struct{} {

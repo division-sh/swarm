@@ -26,9 +26,9 @@ var tier11FlowCompositionFixtures = []string{
 }
 
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-dynamic-flow-instance":   {kind: "runtime-gap", reason: "the fixture now reaches validation, but the live runtime still reports create_flow_instance as having no executable runtime implementation on this child-flow composition path"},
-	"test-data-pin-wiring":         {kind: "fixture-issue", reason: "the fixture now reaches runtime, but expected.entity_fields still assumes task_config and result are stored in root metadata paths the live runtime does not populate"},
-	"test-tool-override":           {kind: "fixture-issue", reason: "the child fixture still references missing tool lookup_data from the merged bundle, so boot fails before tool override behavior can be asserted"},
+	"test-dynamic-flow-instance": {kind: "fixture-issue", reason: "the fixture now reaches runtime, but expected.emitted_events still wants bare worker.ready instead of the live flow-instance event name worker/w-001/worker.ready"},
+	"test-data-pin-wiring":       {kind: "fixture-issue", reason: "the fixture now reaches runtime, but expected.entity_fields still assumes task_config and result are stored in root metadata paths the live runtime does not populate"},
+	"test-tool-override":         {kind: "fixture-issue", reason: "the child fixture still references missing tool lookup_data from the merged bundle, so boot fails before tool override behavior can be asserted"},
 }
 
 var tier11StartedRuntimeFixtures = map[string]struct{}{

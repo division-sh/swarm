@@ -520,10 +520,10 @@ func appendPlatformBuiltinActionEntries(existing []GuardActionEntry, builtins []
 	ID string `yaml:"id"`
 }) []GuardActionEntry {
 	out := append([]GuardActionEntry{}, existing...)
-	seen := make(map[string]struct{}, len(out))
-	for _, entry := range out {
+	seen := make(map[string]int, len(out))
+	for i, entry := range out {
 		if id := strings.TrimSpace(entry.ID); id != "" {
-			seen[id] = struct{}{}
+			seen[id] = i
 		}
 	}
 	for _, builtin := range builtins {
@@ -531,10 +531,16 @@ func appendPlatformBuiltinActionEntries(existing []GuardActionEntry, builtins []
 		if id == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
+		if idx, ok := seen[id]; ok {
+			if strings.TrimSpace(out[idx].PlatformBuiltin) == "" {
+				out[idx].PlatformBuiltin = id
+				if strings.TrimSpace(out[idx].Category) == "" {
+					out[idx].Category = "platform"
+				}
+			}
 			continue
 		}
-		seen[id] = struct{}{}
+		seen[id] = len(out)
 		out = append(out, GuardActionEntry{
 			ID:              id,
 			Category:        "platform",

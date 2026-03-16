@@ -3,11 +3,13 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	"empireai/internal/events"
+	runtimeengine "empireai/internal/runtime/engine"
 	"github.com/google/uuid"
 )
 
@@ -229,6 +231,10 @@ func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context
 		State: pc.currentWorkflowState(ctx, workflowEventEntityID(evt)),
 	}, false)
 	if err != nil {
+		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
+			setPipelineReceiptOverride(ctx, "dead_letter", err.Error())
+			return true
+		}
 		return false
 	}
 	if result.Handled {

@@ -40,7 +40,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	ictx := runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
+	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
 		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
 	}
@@ -57,6 +59,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		if err != nil {
 			status = "error"
 			errText = err.Error()
+		} else if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ictx); ok {
+			status = overrideStatus
+			errText = overrideErr
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
@@ -109,6 +114,8 @@ func (eb *EventBus) publishTransactional(
 	postCommitActions := make([]func(), 0, 8)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	txctx = runtimepipeline.WithPipelineReceiptOverride(txctx, receiptOverride)
 	committed := false
 	defer func() {
 		if !committed {
@@ -136,7 +143,13 @@ func (eb *EventBus) publishTransactional(
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
 	}
-	if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, "processed", ""); err != nil {
+	receiptStatus := "processed"
+	receiptErr := ""
+	if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(txctx); ok {
+		receiptStatus = overrideStatus
+		receiptErr = overrideErr
+	}
+	if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, receiptStatus, receiptErr); err != nil {
 		return fmt.Errorf("persist pipeline receipt: %w", err)
 	}
 
@@ -227,6 +240,8 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	eb.inFlightPublishes.Add(1)
 	defer eb.inFlightPublishes.Add(-1)
 	if evt.Type == "" {
@@ -254,6 +269,9 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		if err != nil {
 			status = "error"
 			errText = err.Error()
+		} else if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
+			status = overrideStatus
+			errText = overrideErr
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
@@ -286,6 +304,8 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 	if err := ensurePublishEpoch(ctx); err != nil {
 		return err
 	}
+	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
+	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	eb.inFlightPublishes.Add(1)
 	defer eb.inFlightPublishes.Add(-1)
 	if evt.Type == "" {
@@ -313,6 +333,9 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 		if err != nil {
 			status = "error"
 			errText = err.Error()
+		} else if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
+			status = overrideStatus
+			errText = overrideErr
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()

@@ -33,6 +33,7 @@ type AgentManager struct {
 	throttleSuppressPrefixes []string
 	inFlightMu               sync.Mutex
 	inFlight                 map[string]struct{}
+	workflowInstances        flowInstancePersistence
 
 	runMu              sync.Mutex
 	running            bool
@@ -100,6 +101,12 @@ func (am *AgentManager) SetBudgetTracker(tracker BudgetGuard) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.budget = tracker
+}
+
+func (am *AgentManager) SetWorkflowInstanceStore(store flowInstancePersistence) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.workflowInstances = store
 }
 
 func (am *AgentManager) runtimeContext() context.Context {

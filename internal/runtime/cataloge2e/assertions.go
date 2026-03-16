@@ -21,14 +21,14 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertCatalogRuntimeEntities(t, h, expected.Expected.Entities, flowPrefix)
 		return
 	}
-	if len(h.publishedIDs) > 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) != "" {
-		assertHandlerOutcome(t, h, expected.Expected.HandlerOutcome)
-	}
 	entityID := ""
 	for _, step := range expected.triggerSequence() {
 		if entityID = triggerPayloadEntityID(step.Payload); entityID != "" {
 			break
 		}
+	}
+	if len(h.publishedIDs) > 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) != "" {
+		assertHandlerOutcome(t, h, expected.Expected.HandlerOutcome, entityID, expected.Expected.ChainDepthExceeded)
 	}
 	if entityID != "" && strings.TrimSpace(expected.Expected.EntityState) != "" {
 		if flowPrefix != "" {
@@ -44,6 +44,7 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertDeadLetter(t, h.db, h.startedAt, entityID, expected.Expected.DeadLetter)
+		assertChainDepthExceeded(t, h.db, h.startedAt, entityID, expected.Expected.ChainDepthExceeded)
 	}
 	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
 	if len(expected.Expected.FlowInstanceCreated) > 0 {
@@ -62,7 +63,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 			continue
 		}
 		if strings.TrimSpace(want.HandlerOutcome) != "" {
-			assertHandlerOutcomeForEntity(t, h, want.HandlerOutcome, entityID)
+			assertHandlerOutcomeForEntity(t, h, want.HandlerOutcome, entityID, false)
 		}
 		if strings.TrimSpace(want.EntityState) != "" {
 			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
@@ -579,12 +580,12 @@ func assertFlowInstanceCount(t testing.TB, db *sql.DB, since time.Time, want int
 	}
 }
 
-func assertHandlerOutcome(t testing.TB, h *runtimeHarness, want string) {
+func assertHandlerOutcome(t testing.TB, h *runtimeHarness, want, entityID string, chainDepthExceeded bool) {
 	t.Helper()
-	assertHandlerOutcomeForEntity(t, h, want, "")
+	assertHandlerOutcomeForEntity(t, h, want, entityID, chainDepthExceeded)
 }
 
-func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entityID string) {
+func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entityID string, chainDepthExceeded bool) {
 	t.Helper()
 	if h == nil || h.db == nil {
 		t.Fatal("database is required for handler_outcome assertions")
@@ -593,6 +594,11 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	entityID = strings.TrimSpace(entityID)
 	if want == "" {
 		return
+	}
+	if chainDepthExceeded && entityID != "" && (want == "error" || want == "kill" || want == "dead_letter") {
+		if assertEntityDeadLetterOutcome(t, h.db, h.startedAt, entityID) {
+			return
+		}
 	}
 	eventIDs := h.publishedEventIDs(entityID)
 	if want != "success" && len(h.previews) > 0 {
@@ -654,6 +660,53 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 		return
 	}
 	t.Fatalf("handler_outcome %q could not be asserted: no platform pipeline receipt found", want)
+}
+
+func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_receipts r
+		JOIN events e ON e.event_id = r.event_id
+		WHERE r.processed_at >= $1
+		  AND r.subscriber_type = 'platform'
+		  AND r.subscriber_id = 'pipeline'
+		  AND r.outcome = 'dead_letter'
+		  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $2
+	`, since, entityID).Scan(&count); err != nil {
+		t.Fatalf("query dead_letter outcome receipts: %v", err)
+	}
+	return count > 0
+}
+
+func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
+	t.Helper()
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		if want {
+			t.Fatalf("chain_depth_exceeded = true requires entity_id in trigger payload")
+		}
+		return
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_receipts r
+		JOIN events e ON e.event_id = r.event_id
+		WHERE r.processed_at >= $1
+		  AND r.subscriber_type = 'platform'
+		  AND r.subscriber_id = 'pipeline'
+		  AND r.outcome = 'dead_letter'
+		  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $2
+		  AND LOWER(COALESCE(r.side_effects->>'error', '')) LIKE '%chain depth exceeded%'
+	`, since, entityID).Scan(&count); err != nil {
+		t.Fatalf("query chain_depth_exceeded receipts: %v", err)
+	}
+	got := count > 0
+	if got != want {
+		t.Fatalf("chain_depth_exceeded = %v, want %v", got, want)
+	}
 }
 
 func (h *runtimeHarness) publishedEventIDs(entityID string) []string {

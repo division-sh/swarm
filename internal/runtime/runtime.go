@@ -280,6 +280,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.ToolExecutor.SetFlowActivator(rt.Manager.ActivateFlowInstance)
 	}
 	if rt.Pipeline != nil && rt.Manager != nil {
+		rt.Manager.SetWorkflowInstanceStore(rt.Pipeline.WorkflowInstanceStore())
 		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
 		rt.Pipeline.SetInstanceDeactivator(func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
 			return rt.Manager.DeactivateFlowInstance(ctx, req.TemplateID, req.InstanceID, req.EntityID)

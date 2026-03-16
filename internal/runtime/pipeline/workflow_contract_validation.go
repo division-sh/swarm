@@ -100,8 +100,8 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(agent.Subscriptions) == 0 {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
 			}
-			if len(agent.EmitEvents) == 0 {
-				errs = append(errs, fmt.Sprintf("agent %s missing required field emit_events", agentLabel))
+			for _, warning := range workflowAgentPermissionWarnings(source, workflowProjectScopeLabel(scope), agentID, agent, scope.Policy) {
+				addWarning(warning.Category, warning.Message)
 			}
 			workflowValidatePromptWarnings(scope.PromptsDir, workflowProjectScopeLabel(scope), agentID, addWarning)
 		}
@@ -150,8 +150,8 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(agent.Subscriptions) == 0 {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
 			}
-			if len(agent.EmitEvents) == 0 {
-				errs = append(errs, fmt.Sprintf("agent %s missing required field emit_events", agentLabel))
+			for _, warning := range workflowAgentPermissionWarnings(source, scopeLabel, agentID, agent, source.ResolvedPolicyForFlow(scope.ID)) {
+				addWarning(warning.Category, warning.Message)
 			}
 			workflowValidatePromptWarnings(scope.PromptsDir, scopeLabel, agentID, addWarning)
 		}
@@ -200,7 +200,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 					errs = append(errs, fmt.Sprintf("transition %s action %s emits missing event %s", id, actionID, emits))
 				}
 			}
-			if !action.Executable() {
+			if !action.Executable() && !isSupportedWorkflowHandlerActionID(firstNonEmptyString(action.Builtin, action.Key.String())) {
 				errs = append(errs, fmt.Sprintf("transition %s action %s has no executable runtime implementation", id, actionID))
 			}
 		}
@@ -1265,6 +1265,156 @@ func workflowValidationFlowLabel(flowID string) string {
 		return "root"
 	}
 	return strings.TrimSpace(flowID)
+}
+
+func workflowAgentPermissionWarnings(source semanticview.Source, scopeLabel, agentID string, agent runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) []WorkflowContractWarning {
+	if source == nil {
+		return nil
+	}
+	perms, err := workflowResolvedAgentPermissions(agent, policy)
+	if err != nil {
+		return []WorkflowContractWarning{{
+			Category: "PERMISSION-MISMATCH",
+			Message:  fmt.Sprintf("%s/%s permissions resolution failed: %v", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), err),
+		}}
+	}
+	permSet := normalizeStringSet(perms)
+	warnings := make([]WorkflowContractWarning, 0, len(agent.ToolsTier2))
+	for _, toolID := range agent.ToolsTier2 {
+		toolID = strings.TrimSpace(toolID)
+		if toolID == "" {
+			continue
+		}
+		required := workflowToolRequiredPermission(toolID, source.ToolEntries()[toolID])
+		if required == "" {
+			continue
+		}
+		if _, ok := permSet[required]; ok {
+			continue
+		}
+		warnings = append(warnings, WorkflowContractWarning{
+			Category: "PERMISSION-MISMATCH",
+			Message:  fmt.Sprintf("%s/%s: tool %q missing permission %q", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), toolID, required),
+		})
+	}
+	return warnings
+}
+
+func workflowToolRequiredPermission(toolID string, entry runtimecontracts.ToolSchemaEntry) string {
+	if perm := strings.TrimSpace(entry.Permission); perm != "" {
+		return perm
+	}
+	if perm := strings.TrimSpace(entry.RequiredPermission); perm != "" {
+		return perm
+	}
+	if strings.TrimSpace(toolID) == "create_flow_instance" {
+		return "create_flow_instance"
+	}
+	return ""
+}
+
+func workflowResolvedAgentPermissions(agent runtimecontracts.AgentRegistryEntry, policy runtimecontracts.PolicyDocument) ([]string, error) {
+	perms := make([]string, 0, len(agent.Permissions)+4)
+	bundleName := strings.TrimSpace(agent.PermissionsBundle)
+	if bundleName != "" {
+		bundlePerms, ok, err := workflowPermissionBundlePermissions(policy, bundleName)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("unknown permissions_bundle %q", bundleName)
+		}
+		perms = append(perms, bundlePerms...)
+	}
+	perms = append(perms, agent.Permissions...)
+	return workflowNormalizeStringSlice(perms), nil
+}
+
+func workflowPermissionBundlePermissions(policy runtimecontracts.PolicyDocument, bundle string) ([]string, bool, error) {
+	root, ok := policy.Values["permission_bundles"]
+	if !ok {
+		return nil, false, nil
+	}
+	bundles, ok := workflowNormalizePolicyMap(root.Value)
+	if !ok {
+		return nil, false, fmt.Errorf("permission_bundles must be a mapping")
+	}
+	rawBundle, ok := bundles[strings.TrimSpace(bundle)]
+	if !ok {
+		return nil, false, nil
+	}
+	bundleMap, ok := workflowNormalizePolicyMap(rawBundle)
+	if !ok {
+		return nil, false, fmt.Errorf("permission_bundles.%s must be a mapping", bundle)
+	}
+	rawPerms, ok := bundleMap["permissions"]
+	if !ok {
+		return nil, false, fmt.Errorf("permission_bundles.%s.permissions is required", bundle)
+	}
+	perms, err := workflowStringsFromPolicyValue(rawPerms)
+	if err != nil {
+		return nil, false, fmt.Errorf("permission_bundles.%s.permissions: %w", bundle, err)
+	}
+	return perms, true, nil
+}
+
+func workflowNormalizePolicyMap(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case runtimecontracts.PolicyValue:
+		return workflowNormalizePolicyMap(typed.Value)
+	case map[string]any:
+		return typed, true
+	case map[string]runtimecontracts.PolicyValue:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = item.Value
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func workflowStringsFromPolicyValue(value any) ([]string, error) {
+	switch typed := value.(type) {
+	case runtimecontracts.PolicyValue:
+		return workflowStringsFromPolicyValue(typed.Value)
+	case []string:
+		return workflowNormalizeStringSlice(typed), nil
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("expected string list")
+			}
+			out = append(out, text)
+		}
+		return workflowNormalizeStringSlice(out), nil
+	default:
+		return nil, fmt.Errorf("expected string list")
+	}
+}
+
+func workflowNormalizeStringSlice(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func workflowHandlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {

@@ -887,6 +887,9 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var aux struct {
 		Action           yaml.Node                `yaml:"action"`
+		Template         string                   `yaml:"template"`
+		InstanceIDFrom   string                   `yaml:"instance_id_from"`
+		ConfigFrom       yaml.Node                `yaml:"config_from"`
 		Description      string                   `yaml:"description"`
 		Emits            EventEmission            `yaml:"emits"`
 		Guard            yaml.Node                `yaml:"guard"`
@@ -935,6 +938,20 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	var err error
 	if h.Action, err = decodeActionSpecNode(&aux.Action); err != nil {
 		return err
+	}
+	if strings.TrimSpace(h.Action.ID) != "" {
+		if strings.TrimSpace(h.Action.Template) == "" {
+			h.Action.Template = strings.TrimSpace(aux.Template)
+		}
+		if strings.TrimSpace(h.Action.InstanceIDFrom) == "" {
+			h.Action.InstanceIDFrom = strings.TrimSpace(aux.InstanceIDFrom)
+			h.Action.InstanceIDPath = paths.Parse(aux.InstanceIDFrom)
+		}
+		if h.Action.ConfigFrom == nil {
+			if h.Action.ConfigFrom, err = decodeConfigFromSpecNode(&aux.ConfigFrom); err != nil {
+				return err
+			}
+		}
 	}
 	if h.Guard, err = decodeGuardSpecNode(&aux.Guard); err != nil {
 		return err

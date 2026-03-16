@@ -48,6 +48,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-on-complete-state-invalid",
 	"test-boot-on-complete-dict",
 	"test-boot-payload-mismatch",
+	"test-boot-permission-tool-mismatch",
 	"test-boot-policy-conflict",
 	"test-boot-prompt-missing",
 	"test-boot-prompt-stub",
@@ -59,9 +60,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-tool-missing",
 }
 
-var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-permission-tool-mismatch":  {kind: "runtime-gap", reason: "the fixture now reaches validation, but the live validator still requires agent emit_events even though the spec now allows omission for observe-only agents"},
-}
+var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{}
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 	t.Setenv("MAS_EMIT_SCHEMA_STRICT", "false")

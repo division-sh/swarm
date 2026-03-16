@@ -206,12 +206,13 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID: identity.NormalizeEntityID(entityID),
-		NodeID:   identity.NormalizeNodeID(nodeID),
-		FlowID:   identity.NormalizeFlowID(flowID),
-		Event:    triggerCtx.Event,
-		Handler:  handler,
-		Preview:  preview,
+		EntityID:   identity.NormalizeEntityID(entityID),
+		NodeID:     identity.NormalizeNodeID(nodeID),
+		FlowID:     identity.NormalizeFlowID(flowID),
+		Event:      triggerCtx.Event,
+		ChainDepth: triggerCtx.Event.ChainDepth,
+		Handler:    handler,
+		Preview:    preview,
 		State: runtimeengine.StateSnapshot{
 			EntityID:     identity.NormalizeEntityID(entityID),
 			CurrentState: strings.TrimSpace(string(triggerCtx.State.Stage)),

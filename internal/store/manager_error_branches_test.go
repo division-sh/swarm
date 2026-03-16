@@ -44,6 +44,9 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	if err := pg.EnsureEntitySchema(ctx, vid); err == nil {
 		t.Fatal("expected EnsureEntitySchema to fail for empty slug")
 	}
+	if err := pg.EnsureEntitySchema(ctx, "ent-001"); err != nil {
+		t.Fatalf("expected EnsureEntitySchema to ignore non-UUID entity ids: %v", err)
+	}
 	if err := pg.EnsureEntitySchema(ctx, ""); err == nil {
 		t.Fatal("expected EnsureEntitySchema to require entity_id")
 	}

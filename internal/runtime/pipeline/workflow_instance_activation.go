@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/core/paths"
 	"empireai/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -65,9 +66,26 @@ func (pc *FactoryPipelineCoordinator) createFlowInstance(ctx context.Context, tr
 		TriggerEvent:   triggerCtx.Event,
 	}
 	if plan.ConfigFrom != nil {
-		req.Config = cloneMap(payload)
+		req.Config = resolveFlowInstanceConfig(plan.ConfigFrom, payload, entity)
 	}
 	return pc.instanceActivator(ctx, req) == nil
+}
+
+func resolveFlowInstanceConfig(spec *runtimecontracts.ConfigFromSpec, payload, entity map[string]any) map[string]any {
+	if spec == nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	for _, entry := range spec.ConfigEntries() {
+		key := strings.TrimSpace(entry.Key)
+		if key == "" {
+			continue
+		}
+		if value, ok := resolveFlowInstanceValue(entry.RefPath, entry.Ref, payload, entity); ok {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 func resolveFlowInstanceID(pathSpec paths.Path, expr string, payload, entity map[string]any) string {

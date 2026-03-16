@@ -298,6 +298,12 @@ func asObject(v any) (map[string]any, bool) {
 
 type sqlTxContextKey struct{}
 type pipelinePostCommitActionsKey struct{}
+type pipelineReceiptOverrideKey struct{}
+
+type PipelineReceiptOverride struct {
+	Status  string
+	ErrText string
+}
 
 func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 	if tx == nil {
@@ -362,6 +368,46 @@ func flushPipelinePostCommitActions(actions []func()) {
 
 func FlushPipelinePostCommitActions(actions []func()) {
 	flushPipelinePostCommitActions(actions)
+}
+
+func withPipelineReceiptOverride(ctx context.Context, override *PipelineReceiptOverride) context.Context {
+	if override == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, pipelineReceiptOverrideKey{}, override)
+}
+
+func WithPipelineReceiptOverride(ctx context.Context, override *PipelineReceiptOverride) context.Context {
+	return withPipelineReceiptOverride(ctx, override)
+}
+
+func setPipelineReceiptOverride(ctx context.Context, status, errText string) bool {
+	if ctx == nil {
+		return false
+	}
+	override, ok := ctx.Value(pipelineReceiptOverrideKey{}).(*PipelineReceiptOverride)
+	if !ok || override == nil {
+		return false
+	}
+	override.Status = strings.TrimSpace(strings.ToLower(status))
+	override.ErrText = strings.TrimSpace(errText)
+	return true
+}
+
+func PipelineReceiptOverrideFromContext(ctx context.Context) (status string, errText string, ok bool) {
+	if ctx == nil {
+		return "", "", false
+	}
+	override, ok := ctx.Value(pipelineReceiptOverrideKey{}).(*PipelineReceiptOverride)
+	if !ok || override == nil {
+		return "", "", false
+	}
+	status = strings.TrimSpace(strings.ToLower(override.Status))
+	errText = strings.TrimSpace(override.ErrText)
+	if status == "" && errText == "" {
+		return "", "", false
+	}
+	return status, errText, true
 }
 
 func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {

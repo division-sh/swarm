@@ -32,6 +32,7 @@ type WorkflowInstance struct {
 	WorkflowName      string
 	WorkflowVersion   string
 	CurrentState      string
+	Config            map[string]any
 	EnteredStageAt    time.Time
 	TransitionHistory []WorkflowTransitionRecord
 	StateBuckets      map[string]any
@@ -587,6 +588,13 @@ func workflowInstanceConfigPayload(instance WorkflowInstance, storageRef string)
 		"workflow_version": strings.TrimSpace(instance.WorkflowVersion),
 		"instance_id":      strings.TrimSpace(instance.InstanceID),
 		"storage_ref":      strings.TrimSpace(storageRef),
+	}
+	for key, value := range instance.Config {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		config[key] = value
 	}
 	metadata := cloneStringAnyMap(instance.Metadata)
 	for _, key := range []string{"flow_path", "instance_kind", "template_version", "status", "last_source_event"} {

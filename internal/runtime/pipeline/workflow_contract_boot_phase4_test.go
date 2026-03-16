@@ -24,6 +24,7 @@ func TestValidateWorkflowContractsDetailed_Tier8SemanticFixtures(t *testing.T) {
 		{name: "self emit", fixture: "test-boot-self-emit", wantCategory: "DIALECT-SELF-EMIT", wantContains: "loop.event"},
 		{name: "event cycle", fixture: "test-boot-event-cycle", wantCategory: "EVENT-CYCLE", wantContains: "cycle.ping"},
 		{name: "event without schema", fixture: "test-boot-event-no-schema", wantCategory: "EVENT-NO-SCHEMA", wantWarning: true, wantContains: "orphan.event"},
+		{name: "permission tool mismatch", fixture: "test-boot-permission-tool-mismatch", wantCategory: "PERMISSION-MISMATCH", wantWarning: true, wantContains: "lookup_data"},
 		{name: "prompt missing", fixture: "test-boot-prompt-missing", wantCategory: "PROMPT-MISSING", wantWarning: true, wantContains: "promptless-agent"},
 		{name: "prompt stub", fixture: "test-boot-prompt-stub", wantCategory: "PROMPT-STUB", wantWarning: true, wantContains: "TODO"},
 	}

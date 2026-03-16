@@ -1208,9 +1208,10 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 	}
 	return EmitIntent{
 		Event: events.Event{
-			Type:      events.EventType(strings.TrimSpace(eventType)),
-			Payload:   encoded,
-			CreatedAt: createdAt,
+			Type:       events.EventType(strings.TrimSpace(eventType)),
+			Payload:    encoded,
+			ChainDepth: chainDepth,
+			CreatedAt:  createdAt,
 		}.WithEntityID(frame.req.EntityID.String()),
 		ChainDepth:    chainDepth,
 		ParentEventID: strings.TrimSpace(frame.req.Event.ID),
