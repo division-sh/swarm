@@ -10,7 +10,10 @@ import (
 )
 
 var tier9CompositionPatternFixtures = []string{
+	"test-compose-accumulate-compute-branch",
+	"test-compose-clear-gates-reenter",
 	"test-compose-gate-chain-three",
+	"test-compose-gate-data-advance-emit",
 	"test-compose-guard-multi-source",
 	"test-compose-guard-query-capacity",
 	"test-compose-rules-fanout-data",
@@ -20,10 +23,7 @@ var tier9CompositionPatternFixtures = []string{
 }
 
 var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-compose-accumulate-compute-branch": {kind: "fixture-issue", reason: "the fixture still uses unsupported accumulate keys completion_mode and expected_count, so the real loader falls back to default completion and completes after the first score with composite=80"},
-	"test-compose-clear-gates-reenter":    {kind: "fixture-issue", reason: "the fixture re-enters from terminal state approved without declaring an explicit terminal exit, so the hardened runtime now correctly keeps the entity in approved"},
-	"test-compose-create-instance-config": {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no instance is created"},
-	"test-compose-gate-data-advance-emit": {kind: "fixture-issue", reason: "the fixture now fails real validation because stage_one_result and stage_two_result are written via data_accumulation but still missing from the declared entity_schema"},
+	"test-compose-create-instance-config": {kind: "runtime-gap", reason: "the fixture now reaches validation, but the live runtime still reports create_flow_instance as having no executable runtime implementation on this composition path"},
 	"test-compose-multi-emit-cross-flow":  {kind: "fixture-issue", reason: "the fixture now declares tracker/task.record, but expected.emitted_events still wants it even though the live runtime path for this package shape only emits task.logged"},
 }
 

@@ -20,6 +20,9 @@ var tier5LifecycleFixtures = []string{
 	"test-create-flow-instance-duplicate",
 	"test-create-flow-instance",
 	"test-template-no-boot-instance",
+	"test-terminal-state-preserves",
+	"test-terminal-state-rejects",
+	"test-timer-cancel",
 	"test-timer-fire",
 	"test-timer-recurring",
 	"test-timer-start-on",
@@ -27,9 +30,6 @@ var tier5LifecycleFixtures = []string{
 }
 
 var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-terminal-state-preserves":       {kind: "fixture-issue", reason: "fixture expected.emitted_events is stale: the first task.completed step still legitimately emits task.finished before the terminal follow-up is rejected"},
-	"test-terminal-state-rejects":         {kind: "fixture-issue", reason: "fixture expected.emitted_events is stale: the first task.completed step still legitimately emits task.finished before the reopen request is rejected"},
-	"test-timer-cancel":                   {kind: "fixture-issue", reason: "fixture now emits timer.cancelled through cancel-node, so expected.emitted_events: [] is stale"},
 }
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {

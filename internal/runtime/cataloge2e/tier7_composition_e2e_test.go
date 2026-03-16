@@ -11,14 +11,14 @@ import (
 
 var tier7CompositionFixtures = []string{
 	"test-full-lifecycle",
+	"test-multi-gate-pipeline",
 	"test-two-node-chain",
 }
 
 var tier7ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-agent-emits-to-node":     {kind: "fixture-issue", reason: "the fixture still expects only task.finalized, but the real runtime also persists the agent-emitted task.completed event in the chain"},
+	"test-agent-emits-to-node":     {kind: "fixture-issue", reason: "the fixture now fails earlier because assign-node omits required produces, so real boot validation rejects the package before the agent emit chain is exercised"},
 	"test-cross-flow-subscription": {kind: "fixture-issue", reason: "the fixture now boots, but expected.emitted_events still wants prefixed flow names while the live runtime emits order.completed and invoice.created on this package shape"},
 	"test-dual-delivery":           {kind: "fixture-issue", reason: "the fixture now boots, but expected.agent_received still wants audit-agent to receive task.completed even though the live runtime only persists the node delivery path here"},
-	"test-multi-gate-pipeline":     {kind: "fixture-issue", reason: "the fixture now boots, but expected.emitted_events still omits the emitted gate.set event that the live runtime persists before approval.granted"},
 	"test-wildcard-cross-flow":     {kind: "fixture-issue", reason: "the fixture now boots, but expected.emitted_events still wants prefixed flow names while the live runtime emits job.alpha_done and audit.logged on this package shape"},
 }
 

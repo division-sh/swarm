@@ -60,7 +60,7 @@ var tier8SupportedFixtures = []string{
 }
 
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-permission-tool-mismatch":  {kind: "fixture-issue", reason: "fixture still does not isolate PERMISSION-MISMATCH; current boot only surfaces generic producer/consumer/prompt warnings"},
+	"test-boot-permission-tool-mismatch":  {kind: "runtime-gap", reason: "the fixture now reaches validation, but the live validator still requires agent emit_events even though the spec now allows omission for observe-only agents"},
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {

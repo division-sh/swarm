@@ -17,6 +17,7 @@ var tier11FlowCompositionFixtures = []string{
 	"test-child-flow-pin-wiring",
 	"test-child-flow-policy-inherit",
 	"test-child-flow-tool-inherit",
+	"test-data-pin-write-conflict",
 	"test-gates-in-child-flow",
 	"test-required-agents-child",
 	"test-child-flow-sibling-isolation",
@@ -25,9 +26,8 @@ var tier11FlowCompositionFixtures = []string{
 }
 
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-dynamic-flow-instance":   {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no worker instance is created"},
-	"test-data-pin-wiring":         {kind: "fixture-issue", reason: "the parent and child handlers now fail real validation because task_config and result are written via data_accumulation but still missing from the declared entity_schema"},
-	"test-data-pin-write-conflict": {kind: "fixture-issue", reason: "the fixture still uses unsupported nested outputs.data.writes pins, so the bundle exposes no flow write pins and never reaches the intended DATA-PIN-CONFLICT validation"},
+	"test-dynamic-flow-instance":   {kind: "runtime-gap", reason: "the fixture now reaches validation, but the live runtime still reports create_flow_instance as having no executable runtime implementation on this child-flow composition path"},
+	"test-data-pin-wiring":         {kind: "fixture-issue", reason: "the fixture now reaches runtime, but expected.entity_fields still assumes task_config and result are stored in root metadata paths the live runtime does not populate"},
 	"test-tool-override":           {kind: "fixture-issue", reason: "the child fixture still references missing tool lookup_data from the merged bundle, so boot fails before tool override behavior can be asserted"},
 }
 
