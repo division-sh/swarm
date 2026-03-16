@@ -15,7 +15,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	if created.FanOut == nil {
 		t.Fatal("expected fan_out on item.created")
 	}
-	if created.FanOut.ItemsFrom != "payload.items" || created.FanOut.Target != "worker-a" || created.FanOut.EmitPerItem != "item.processed" {
+	if created.FanOut.ItemsFrom != "payload.items" || created.FanOut.Target != "worker-a" || created.FanOut.EmitPerItem != "intake/item.processed" {
 		t.Fatalf("unexpected fan_out spec: %+v", created.FanOut)
 	}
 	if len(created.Branch) != 1 || created.Branch[0].Then == nil || created.Branch[0].Else == nil {
@@ -60,7 +60,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	if completed.Stage != runtimepipeline.NormalizeWorkflowStateID("ready") {
 		t.Fatalf("expected ready state after accumulation completion, got %+v", completed)
 	}
-	if !hasAll(completed.Emits, "item.review_requested") {
+	if !hasAll(completed.Emits, "intake/item.review_requested") {
 		t.Fatalf("expected intake completion to emit item.review_requested, got %v", completed.Emits)
 	}
 	if completed.SetsGate != "intake_ready" {

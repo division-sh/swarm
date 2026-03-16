@@ -201,14 +201,40 @@ func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt event
 }
 
 func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
-	result, err := pc.executeAuthoritativeNodeHandler(ctx, evt, workflowTriggerContext{
+	if pc == nil {
+		return false
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return false
+	}
+	source := pc.SemanticSource()
+	if source == nil {
+		return false
+	}
+	trigger := strings.TrimSpace(string(evt.Type))
+	if trigger == "" {
+		return false
+	}
+	handler, ok := source.NodeEventHandler(nodeID, trigger)
+	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
+		handler, ok = findAccumulationTimeoutHandlerForNode(source, nodeID, trigger)
+	}
+	if !ok {
+		return false
+	}
+	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
+	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
 		Event: evt,
 		State: pc.currentWorkflowState(ctx, workflowEventEntityID(evt)),
-	})
+	}, false)
 	if err != nil {
 		return false
 	}
-	return result.Handled && strings.TrimSpace(result.Plan.NodeID) == strings.TrimSpace(nodeID)
+	if result.Handled {
+		pc.reconcileWorkflowEventTimers(ctx, workflowEventEntityID(evt), trigger)
+	}
+	return result.Handled
 }
 
 func (pc *FactoryPipelineCoordinator) notifyTestSubscribed() {

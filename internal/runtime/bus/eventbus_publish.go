@@ -274,7 +274,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	}
 	eb.logPublished(ctx, evt, 0)
 	for _, d := range deferred {
-		if err := eb.publishDeferredNoIntercept(ctx, d); err != nil {
+		if err := eb.publishDeferred(ctx, d); err != nil {
 			return err
 		}
 	}

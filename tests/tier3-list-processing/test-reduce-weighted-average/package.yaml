@@ -3,3 +3,6 @@ version: 1.0.0
 description: reduce with weighted_average computes weighted average of scored items.
 platform_version: ">=1.1.0"
 flows: []
+entity_schema:
+  core:
+    composite: numeric(5,2)

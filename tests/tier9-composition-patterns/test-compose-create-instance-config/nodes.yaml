@@ -10,8 +10,8 @@ spawner:
         flow_template: worker
         instance_id: "{{payload.instance_id}}"
         config_from:
-          name: payload.name
-          priority: payload.priority
-          owner: payload.owner
+          name: "{{payload.name}}"
+          priority: "{{payload.priority}}"
+          owner: "{{payload.owner}}"
       advances_to: spawned
       emits: spawn.done

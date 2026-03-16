@@ -6,4 +6,6 @@ tool-agent:
   permissions:
     - message_peers
   subscriptions:
-    - task.requested
+    - task.completed
+  emit_events:
+    - task.audited

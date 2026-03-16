@@ -7,3 +7,12 @@ pipeline.complete:
 child/work.begin:
   payload:
     entity_id: string
+child/work.finished:
+  payload:
+    entity_id: string
+child/grandchild/task.start:
+  payload:
+    entity_id: string
+child/grandchild/task.done:
+  payload:
+    entity_id: string

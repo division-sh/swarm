@@ -33,6 +33,7 @@ func (s bundleSource) WorkflowTerminalStages() []string { return s.bundle.Workfl
 func (s bundleSource) WorkflowTransitions() []runtimecontracts.WorkflowTransitionContract {
 	return s.bundle.WorkflowTransitions()
 }
+func (s bundleSource) WorkflowInitialStage() string { return s.bundle.WorkflowInitialStage() }
 func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract {
 	return s.bundle.WorkflowTimers()
 }

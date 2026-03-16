@@ -25,6 +25,26 @@ func (w waitInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []e
 	return true, nil, nil
 }
 
+type deferredChainInterceptor struct{}
+
+func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+	next := ""
+	switch evt.Type {
+	case events.EventType("custom.root"):
+		next = "custom.middle"
+	case events.EventType("custom.middle"):
+		next = "custom.leaf"
+	case events.EventType("custom.leaf"):
+		next = "custom.final"
+	default:
+		return true, nil, nil
+	}
+	return false, []events.Event{(events.Event{
+		Type:      events.EventType(next),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID(evt.EntityID())}, nil
+}
+
 func TestEventBusPublish_UsesPayloadValidator(t *testing.T) {
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
 		PayloadValidator: func(eventType string, payload []byte) error {
@@ -107,5 +127,24 @@ func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 	defer cancel()
 	if err := eb.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("WaitForQuiescence after publish completion: %v", err)
+	}
+}
+
+func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{deferredChainInterceptor{}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), (events.Event{
+		Type:      events.EventType("custom.root"),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID("ent-1")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
+		t.Fatalf("persisted event types prefix = %v, want prefix [custom.root custom.middle custom.leaf custom.final]", got)
 	}
 }

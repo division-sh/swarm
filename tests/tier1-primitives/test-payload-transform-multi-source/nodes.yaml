@@ -9,7 +9,7 @@ test-node:
         fields:
           id: payload.entity_id
           name: entity.name
-          status: entity.state
+          status: entity.current_state
       advances_to: done
       emits: item.exported
   state_schema:

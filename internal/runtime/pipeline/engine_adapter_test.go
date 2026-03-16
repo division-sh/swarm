@@ -38,6 +38,36 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 	}
 }
 
+func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing.T) {
+	instance := &WorkflowInstance{
+		Metadata: map[string]any{
+			"gates": map[string]any{
+				"g_a": true,
+				"g_b": true,
+			},
+		},
+	}
+	mutation := runtimeengine.StateMutation{
+		SetGate: "g_c",
+		Gates: map[string]bool{
+			"g_c": true,
+		},
+	}
+
+	applyEngineStateMutation(instance, mutation, nil)
+
+	gates := workflowStateGatesAsBools(instance.Metadata)
+	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
+	if len(gates) != len(want) {
+		t.Fatalf("gates len=%d want %d (%v)", len(gates), len(want), gates)
+	}
+	for key, value := range want {
+		if gates[key] != value {
+			t.Fatalf("gate %s=%v want %v (all=%v)", key, gates[key], value, gates)
+		}
+	}
+}
+
 type recordingScheduleStore struct {
 	upserts []Schedule
 	cancels []Schedule

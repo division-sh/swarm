@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"log/slog"
@@ -197,10 +198,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		payload := sc.Payload
-		if len(payload) == 0 {
-			payload = []byte("{}")
-		}
+		payload := scheduleEventPayload(sc)
 		if err := rt.Bus.Publish(callbackCtx, (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType(sc.EventType),
@@ -301,6 +299,31 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	return rt, nil
 }
 
+func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
+	payload := sc.Payload
+	if len(payload) == 0 {
+		payload = []byte("{}")
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil || decoded == nil {
+		return payload
+	}
+	delete(decoded, "__schedule_task_id")
+	delete(decoded, "timer_id")
+	delete(decoded, "trigger_reason")
+	entityID := strings.TrimSpace(sc.EffectiveEntityID())
+	if _, ok := decoded["entity_id"]; !ok {
+		if entityID != "" {
+			decoded["entity_id"] = entityID
+		}
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return payload
+	}
+	return encoded
+}
+
 func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
@@ -375,6 +398,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.Bus.StartOutboxSweeper(ctx, runtimebus.DefaultOutboxSweeperConfig())
 	}
 	if rt.Manager != nil {
+		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+			return fmt.Errorf("bootstrap static flow required agents: %w", err)
+		}
+	}
+	if rt.Manager != nil {
 		rt.Manager.Run(ctx)
 	}
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
@@ -441,6 +469,9 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 	}
 	for _, timer := range source.WorkflowTimers() {
 		if !timer.Recurring {
+			continue
+		}
+		if strings.TrimSpace(timer.StartOn) != "" || strings.TrimSpace(timer.CancelOn) != "" {
 			continue
 		}
 		owner := strings.TrimSpace(timer.Owner)

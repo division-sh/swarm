@@ -10,21 +10,21 @@ import (
 )
 
 var tier9CompositionPatternFixtures = []string{
-	"test-compose-accumulate-compute-branch",
-	"test-compose-clear-gates-reenter",
-	"test-compose-create-instance-config",
+	"test-compose-gate-chain-three",
 	"test-compose-guard-multi-source",
 	"test-compose-guard-query-capacity",
 	"test-compose-rules-fanout-data",
 	"test-compose-rules-per-rule-data",
 	"test-compose-guard-counter-escalate",
 	"test-compose-lifecycle-seven-states",
-	"test-compose-multi-emit-cross-flow",
 }
 
 var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-compose-gate-chain-three":       {kind: "runtime-gap", reason: "real runtime still only persists the final gate in the sequence; g_a and g_b are missing when the fixture expects all three gates"},
+	"test-compose-accumulate-compute-branch": {kind: "fixture-issue", reason: "the fixture still uses unsupported accumulate keys completion_mode and expected_count, so the real loader falls back to default completion and completes after the first score with composite=80"},
+	"test-compose-clear-gates-reenter":    {kind: "fixture-issue", reason: "the fixture re-enters from terminal state approved without declaring an explicit terminal exit, so the hardened runtime now correctly keeps the entity in approved"},
+	"test-compose-create-instance-config": {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no instance is created"},
 	"test-compose-gate-data-advance-emit": {kind: "fixture-issue", reason: "the fixture now fails real validation because stage_one_result and stage_two_result are written via data_accumulation but still missing from the declared entity_schema"},
+	"test-compose-multi-emit-cross-flow":  {kind: "fixture-issue", reason: "the fixture expects tracker/task.record but still does not declare that prefixed cross-flow event in events.yaml, so only task.logged is emitted on the real runtime path"},
 }
 
 func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {

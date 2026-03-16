@@ -8,7 +8,6 @@ import (
 
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
 	runtimeengine "empireai/internal/runtime/engine"
 	"empireai/internal/runtime/semanticview"
 )
@@ -113,53 +112,54 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}
-	deps := coordinatorEngineDependencies(pc)
-	deps.TransitionValidator = nil
-	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
-	if err != nil {
-		return HandlerPreview{}, err
-	}
-	node := runtimeengine.NewDeclarativeNode(nodeID, exec)
-	if node == nil {
-		return HandlerPreview{}, fmt.Errorf("preview executor is nil")
-	}
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now().UTC()
 	}
-	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID: identity.NormalizeEntityID(workflowEventEntityID(evt)),
-		NodeID:   identity.NormalizeNodeID(nodeID),
-		Event:    evt,
-		Handler:  handler,
-		Preview:  true,
-		State: runtimeengine.StateSnapshot{
-			EntityID:     identity.NormalizeEntityID(state.EntityID),
-			CurrentState: strings.TrimSpace(string(state.Stage)),
-			Metadata:     cloneStringAnyMap(state.Metadata),
-			StateBuckets: map[string]any{},
-		},
-	})
+	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
+		Event: evt,
+		State: state,
+	}, true)
 	if err != nil {
 		return HandlerPreview{}, err
 	}
-	emits := make([]string, 0, len(result.EmitIntents))
-	for _, item := range result.EmitIntents {
-		if eventType := strings.TrimSpace(string(item.Event.Type)); eventType != "" {
-			emits = append(emits, eventType)
-		}
+	emits := []string{}
+	if result.Outcome != nil {
+		emits = append(emits, result.Outcome.Emits...)
+	}
+	stage := state.Stage
+	if result.Outcome != nil && strings.TrimSpace(result.Outcome.AdvancesTo) != "" {
+		stage = NormalizeWorkflowStateID(result.Outcome.AdvancesTo)
+	}
+	actions := []string(nil)
+	guards := []string(nil)
+	ruleID := ""
+	setsGate := ""
+	clearGates := []string(nil)
+	fanOutCount := 0
+	computed := map[string]any(nil)
+	status := HandlerOutcomeCompleted
+	if result.Outcome != nil {
+		status = result.Outcome.Status
+		actions = append(actions, result.Outcome.ActionsExecuted...)
+		guards = append(guards, result.Outcome.GuardsEvaluated...)
+		ruleID = strings.TrimSpace(result.Outcome.RuleID)
+		setsGate = strings.TrimSpace(result.Outcome.SetsGate)
+		clearGates = append(clearGates, result.Outcome.ClearGates...)
+		fanOutCount = result.Outcome.FanOutCount
+		computed = cloneStringAnyMap(result.Outcome.Computed)
 	}
 	return HandlerPreview{
-		Status:          handlerOutcomeStatusFromEngine(result.Status),
-		Stage:           NormalizeWorkflowStateID(firstNonEmptyString(result.NextState, result.CurrentState, string(state.Stage))),
+		Status:          status,
+		Stage:           stage,
 		StatusText:      state.Status,
-		Metadata:        cloneStringAnyMap(result.StateMutation.Metadata),
+		Metadata:        cloneStringAnyMap(state.Metadata),
 		Emits:           emits,
-		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
-		GuardsEvaluated: append([]string{}, result.GuardsEvaluated...),
-		RuleID:          strings.TrimSpace(result.RuleID),
-		SetsGate:        strings.TrimSpace(result.SetsGate),
-		ClearGates:      append([]string{}, result.ClearGates...),
-		FanOutCount:     result.FanOutCount,
-		Computed:        cloneStringAnyMap(result.Computed),
+		ActionsExecuted: actions,
+		GuardsEvaluated: guards,
+		RuleID:          ruleID,
+		SetsGate:        setsGate,
+		ClearGates:      clearGates,
+		FanOutCount:     fanOutCount,
+		Computed:        computed,
 	}, nil
 }

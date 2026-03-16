@@ -5,7 +5,3 @@ task.submitted:
 task.accepted:
   payload:
     entity_id: string
-pipeline.dead_letter:
-  payload:
-    original_event: string
-    reason: string

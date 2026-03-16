@@ -10,25 +10,29 @@ import (
 )
 
 var tier11FlowCompositionFixtures = []string{
-	"test-dynamic-flow-instance",
+	"test-child-flow-absolute-path",
+	"test-child-flow-local-events",
+	"test-nested-three-levels",
+	"test-child-flow-pin-wiring",
+	"test-child-flow-policy-inherit",
+	"test-required-agents-child",
+	"test-child-flow-sibling-isolation",
+	"test-multi-level-policy-inherit",
 }
 
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-child-flow-absolute-path":     {kind: "fixture-issue", reason: "prefixed child event child/task.done is still not declared in the parent-visible event catalog"},
+	"test-dynamic-flow-instance":        {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no worker instance is created"},
 	"test-child-flow-loads":             {kind: "fixture-issue", reason: "fixture now boots, but it still expects a clean success while the real runtime emits producer/consumer warnings for the unwired parent and child events"},
-	"test-child-flow-local-events":      {kind: "harness-gap", reason: "fixture expects parent_state assertion, which cataloge2e does not support yet"},
-	"test-child-flow-pin-wiring":        {kind: "fixture-issue", reason: "prefixed child output event child/work.completed is still not declared in the parent-visible event catalog"},
-	"test-child-flow-policy-inherit":    {kind: "runtime-gap", reason: "fixture now boots, but the real runtime still leaves the child entity in pending instead of reaching approved"},
-	"test-child-flow-sibling-isolation": {kind: "harness-gap", reason: "fixture expects flow_b_state assertion, which cataloge2e does not support yet"},
 	"test-child-flow-tool-inherit":      {kind: "fixture-issue", reason: "fixture now boots, but it still expects clean success while the real runtime emits producer/consumer and prompt warnings"},
 	"test-data-pin-wiring":              {kind: "fixture-issue", reason: "prefixed child output event processor/process.done is still not declared in the parent-visible event catalog"},
-	"test-data-pin-write-conflict":      {kind: "validation-gap", reason: "fixture now boots cleanly enough that the real validator should catch DATA-PIN-CONFLICT, but it currently does not"},
+	"test-data-pin-write-conflict":      {kind: "fixture-issue", reason: "fixture still fails earlier because shared_field is written via data_accumulation without being declared in entity_schema, so it never reaches the intended DATA-PIN-CONFLICT validation"},
 	"test-gates-in-child-flow":          {kind: "fixture-issue", reason: "prefixed child event child/validation.done is still not declared in the parent-visible event catalog"},
-	"test-multi-level-policy-inherit":   {kind: "runtime-gap", reason: "fixture now boots, but the real runtime still leaves the nested child flow in pending instead of reaching approved"},
-	"test-nested-three-levels":          {kind: "fixture-issue", reason: "prefixed nested events grandchild/micro.done and child/step.result are still not declared in the parent-visible event catalog"},
-	"test-required-agents-child":        {kind: "fixture-issue", reason: "prefixed child event analyzer-flow/analysis.done is still not declared in the parent-visible event catalog"},
 	"test-tool-override":                {kind: "fixture-issue", reason: "fixture still references missing tool lookup_data and does not declare child/child.done in the parent-visible event catalog"},
 	"test-wildcard-deep-subscription":   {kind: "fixture-issue", reason: "deep wildcard and prefixed grandchild events are still not declared in the real event catalog"},
+}
+
+var tier11StartedRuntimeFixtures = map[string]struct{}{
+	"test-required-agents-child": {},
 }
 
 func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
@@ -44,7 +48,8 @@ func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
 				return
 			}
 
-			h := newRuntimeHarness(t, fixtureRoot, false)
+			_, startRuntime := tier11StartedRuntimeFixtures[fixtureName]
+			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
 				h.publishAndWait(step, 2*time.Second)

@@ -118,8 +118,13 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		if ok {
 			out.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 			out.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
-			out.CurrentState = strings.TrimSpace(instance.CurrentState)
 			out.Metadata = cloneStringAnyMap(instance.Metadata)
+			out.CurrentState = strings.TrimSpace(string(workflowScopedStateValue(
+				r.coordinator.SemanticSource(),
+				pipelineFlowScope(ctx),
+				out.Metadata,
+				instance.CurrentState,
+			)))
 			out.Gates = workflowStateGatesAsBools(instance.Metadata)
 			out.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
 			out.TimerState = make([]runtimeengine.TimerState, 0, len(instance.TimerState))
@@ -160,9 +165,6 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), next); err != nil {
 			return err
 		}
-	}
-	if len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
-		r.coordinator.applyWorkflowGateMutation(ctx, entityID.String(), "", strings.TrimSpace(mutation.SetGate), len(mutation.ClearGates) > 0)
 	}
 	return nil
 }
@@ -516,14 +518,27 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance == nil {
 		return
 	}
-	if len(mutation.Gates) > 0 {
+	if len(mutation.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
 		if mutation.Metadata == nil {
 			mutation.Metadata = cloneStringAnyMap(instance.Metadata)
 		}
-		mutation.Metadata["gates"] = workflowBoolGatesAsMap(mutation.Gates)
-	}
-	if next := strings.TrimSpace(mutation.NextState); next != "" {
-		instance.CurrentState = next
+		gates := workflowStateGatesAsBools(instance.Metadata)
+		for key, value := range mutation.Gates {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				gates[key] = value
+			}
+		}
+		for _, gate := range mutation.ClearGates {
+			gate = strings.TrimSpace(gate)
+			if gate != "" {
+				gates[gate] = false
+			}
+		}
+		if gate := strings.TrimSpace(mutation.SetGate); gate != "" {
+			gates[gate] = true
+		}
+		mutation.Metadata["gates"] = workflowBoolGatesAsMap(gates)
 	}
 	if mutation.Metadata != nil {
 		instance.Metadata = cloneStringAnyMap(mutation.Metadata)

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"empireai/internal/runtime/semanticview"
 )
 
 func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {
@@ -21,8 +23,9 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 	if err != nil || !ok {
 		return state
 	}
-	state.Stage = NormalizeWorkflowStateID(instance.CurrentState)
-	state.Metadata = cloneStringAnyMap(instance.Metadata)
+	metadata := cloneStringAnyMap(instance.Metadata)
+	state.Stage = workflowScopedStateValue(pc.SemanticSource(), pipelineFlowScope(ctx), metadata, instance.CurrentState)
+	state.Metadata = metadata
 	return state
 }
 
@@ -39,9 +42,11 @@ func (pc *FactoryPipelineCoordinator) updateEntityState(ctx context.Context, ent
 	current := pc.currentWorkflowState(ctx, entityID)
 	currentState := strings.TrimSpace(string(current.Stage))
 	source := pc.SemanticSource()
+	flowID := pipelineFlowScope(ctx)
+	stateKey := workflowScopedStateKey(source, flowID)
 	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		enteredStateAt := time.Now().UTC()
-		if strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
+		if flowID == "" && strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
 			enteredStateAt = instance.EnteredStageAt
 		}
 		if strings.TrimSpace(instance.WorkflowName) == "" {
@@ -57,9 +62,11 @@ func (pc *FactoryPipelineCoordinator) updateEntityState(ctx context.Context, ent
 		if sourceEvent != "" {
 			metadata["last_source_event"] = sourceEvent
 		}
-		instance.CurrentState = nextState
-		instance.EnteredStageAt = enteredStateAt
-		instance.Metadata = metadata
+		instance.Metadata = workflowWithScopedState(metadata, stateKey, nextState)
+		if flowID == "" {
+			instance.CurrentState = nextState
+			instance.EnteredStageAt = enteredStateAt
+		}
 		if currentState != "" && currentState != nextState {
 			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(currentState, nextState, sourceEvent))
 		} else if currentState == "" && len(instance.TransitionHistory) == 0 {
@@ -154,4 +161,67 @@ func workflowTransitionRecord(fromState, toState, sourceEvent string) WorkflowTr
 		)
 	}
 	return record
+}
+
+const workflowRootStateKey = "$root"
+
+func workflowScopedStateValue(source semanticview.Source, flowID string, metadata map[string]any, fallback string) WorkflowStateID {
+	fallback = strings.TrimSpace(string(NormalizeWorkflowStateID(fallback)))
+	stateKey := workflowScopedStateKey(source, flowID)
+	if scoped := strings.TrimSpace(workflowScopedStateFromMetadata(metadata, stateKey)); scoped != "" {
+		return NormalizeWorkflowStateID(scoped)
+	}
+	if initial := strings.TrimSpace(workflowScopedInitialState(source, flowID)); initial != "" {
+		return NormalizeWorkflowStateID(initial)
+	}
+	return NormalizeWorkflowStateID(fallback)
+}
+
+func workflowScopedStateKey(source semanticview.Source, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return workflowRootStateKey
+	}
+	if source != nil {
+		if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
+			return flowPath
+		}
+	}
+	return flowID
+}
+
+func workflowScopedInitialState(source semanticview.Source, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil {
+		return ""
+	}
+	if flowID == "" {
+		return strings.TrimSpace(source.WorkflowInitialStage())
+	}
+	return strings.TrimSpace(source.FlowInitialStage(flowID))
+}
+
+func workflowScopedStateFromMetadata(metadata map[string]any, stateKey string) string {
+	stateKey = strings.TrimSpace(stateKey)
+	if stateKey == "" || len(metadata) == 0 {
+		return ""
+	}
+	raw := payloadMap(metadata["flow_states"])
+	if len(raw) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(asString(raw[stateKey]))
+}
+
+func workflowWithScopedState(metadata map[string]any, stateKey, nextState string) map[string]any {
+	metadata = cloneStringAnyMap(metadata)
+	stateKey = strings.TrimSpace(stateKey)
+	nextState = strings.TrimSpace(nextState)
+	if stateKey == "" || nextState == "" {
+		return metadata
+	}
+	flowStates := payloadMap(metadata["flow_states"])
+	flowStates[stateKey] = nextState
+	metadata["flow_states"] = flowStates
+	return metadata
 }

@@ -63,6 +63,24 @@ func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.
 	return nil
 }
 
+type pipelineFlowScopeKey struct{}
+
+func withPipelineFlowScope(ctx context.Context, flowID string) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	flowID = strings.TrimSpace(flowID)
+	return context.WithValue(ctx, pipelineFlowScopeKey{}, flowID)
+}
+
+func pipelineFlowScope(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	flowID, _ := ctx.Value(pipelineFlowScopeKey{}).(string)
+	return strings.TrimSpace(flowID)
+}
+
 func pipelineCollectorExecutionContext(ctx context.Context) (context.Context, *[]events.Event, *[]runtimeengine.EmitIntent, bool) {
 	if ctx == nil {
 		return ctx, nil, nil, false

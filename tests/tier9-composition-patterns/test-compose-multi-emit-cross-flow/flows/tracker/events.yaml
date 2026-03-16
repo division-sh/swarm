@@ -1,3 +1,6 @@
 task.record:
   payload:
     entity_id: string
+task.recorded:
+  payload:
+    entity_id: string

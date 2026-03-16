@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [task.assigned]
   outputs:
-    events: [task.finalized]
+    events: [task.finalized, task.assign_ack]

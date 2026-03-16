@@ -9,13 +9,16 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 )
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {
 	t.Helper()
+	flowPrefix := expected.triggerFlowPrefix()
 	if len(expected.Expected.Entities) > 0 {
-		assertCatalogRuntimeEntities(t, h, expected.Expected.Entities)
+		assertCatalogRuntimeEntities(t, h, expected.Expected.Entities, flowPrefix)
 		return
 	}
 	if len(h.publishedIDs) > 0 && strings.TrimSpace(expected.Expected.HandlerOutcome) != "" {
@@ -28,24 +31,30 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		}
 	}
 	if entityID != "" && strings.TrimSpace(expected.Expected.EntityState) != "" {
-		assertEntityState(t, h.db, h.workflow, entityID, expected.Expected.EntityState)
+		if flowPrefix != "" {
+			assertFlowState(t, h.workflow, h.bundle, entityID, flowPrefix, expected.Expected.EntityState)
+		} else {
+			assertEntityState(t, h.db, h.workflow, entityID, expected.Expected.EntityState)
+		}
 	}
 	if entityID != "" {
+		assertFlowState(t, h.workflow, h.bundle, entityID, "", expected.Expected.ParentState)
+		assertFlowState(t, h.workflow, h.bundle, entityID, "flow-b", expected.Expected.FlowBState)
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
 		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
-		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents)
+		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertDeadLetter(t, h.db, h.startedAt, entityID, expected.Expected.DeadLetter)
 	}
 	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
 	if len(expected.Expected.FlowInstanceCreated) > 0 {
-		assertFlowInstanceCreated(t, h.db, h.startedAt)
+		assertFlowInstanceCreated(t, h.db, h.startedAt, expected.Expected.FlowInstanceCreated)
 	}
 	if expected.Expected.TemplateInstances != nil {
 		assertFlowInstanceCount(t, h.db, h.startedAt, *expected.Expected.TemplateInstances)
 	}
 }
 
-func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[string]catalogEntityExpected) {
+func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[string]catalogEntityExpected, flowPrefix string) {
 	t.Helper()
 	for entityID, want := range expected {
 		entityID = strings.TrimSpace(entityID)
@@ -60,7 +69,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 		}
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
 		assertGates(t, h.workflow, entityID, want.Gates)
-		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents)
+		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
 	}
 }
@@ -161,6 +170,95 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow *runtimepipeline.Workf
 	}
 }
 
+func assertFlowState(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, bundle *runtimecontracts.WorkflowContractBundle, entityID, flowID, wantState string) {
+	t.Helper()
+	wantState = strings.TrimSpace(wantState)
+	if wantState == "" {
+		return
+	}
+	if workflow == nil {
+		t.Fatal("workflow instance store is required")
+	}
+	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	if err != nil {
+		t.Fatalf("load workflow instance %s for flow state: %v", entityID, err)
+	}
+	if !ok {
+		t.Fatalf("workflow instance %s not found for flow state assertion", entityID)
+	}
+	var semanticSource = runtimepipeline.DefaultWorkflowSemanticSourceOrNil()
+	if bundle != nil {
+		semanticSource = semanticview.Wrap(bundle)
+	}
+	got := string(runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState))
+	if semanticSource != nil {
+		got = strings.TrimSpace(catalogFlowScopedStateValue(semanticSource, bundle, strings.TrimSpace(flowID), cloneStringAnyMap(instance.Metadata), instance.CurrentState))
+	}
+	if strings.TrimSpace(got) != wantState {
+		t.Fatalf("flow state %q = %q, want %q", strings.TrimSpace(flowID), strings.TrimSpace(got), wantState)
+	}
+}
+
+func catalogFlowScopedStateValue(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, flowID string, metadata map[string]any, fallback string) string {
+	fallback = strings.TrimSpace(string(runtimepipeline.NormalizeWorkflowStateID(fallback)))
+	stateKey := catalogFlowScopedStateKey(source, flowID)
+	if scoped := strings.TrimSpace(catalogFlowScopedStateFromMetadata(metadata, stateKey)); scoped != "" {
+		return scoped
+	}
+	if initial := strings.TrimSpace(catalogFlowScopedInitialState(source, bundle, flowID)); initial != "" {
+		return initial
+	}
+	return fallback
+}
+
+func catalogFlowScopedStateKey(source semanticview.Source, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return "$root"
+	}
+	if source != nil {
+		if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
+			return flowPath
+		}
+	}
+	return flowID
+}
+
+func catalogFlowScopedInitialState(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		if bundle != nil {
+			return strings.TrimSpace(bundle.WorkflowInitialStage())
+		}
+		return ""
+	}
+	if source == nil {
+		return ""
+	}
+	return strings.TrimSpace(source.FlowInitialStage(flowID))
+}
+
+func catalogFlowScopedStateFromMetadata(metadata map[string]any, stateKey string) string {
+	stateKey = strings.TrimSpace(stateKey)
+	if stateKey == "" || len(metadata) == 0 {
+		return ""
+	}
+	raw := catalogPayloadMap(metadata["flow_states"])
+	if len(raw) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(asString(raw[stateKey]))
+}
+
+func catalogPayloadMap(v any) map[string]any {
+	switch typed := v.(type) {
+	case map[string]any:
+		return cloneStringAnyMap(typed)
+	default:
+		return nil
+	}
+}
+
 func workflowStateDebugRows(db *sql.DB) (string, error) {
 	if db == nil {
 		return "", nil
@@ -191,10 +289,10 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 	return "[" + strings.Join(out, ", ") + "]", nil
 }
 
-func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string) {
+func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string, flowPrefix string, source semanticview.Source) {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), `
-		SELECT event_id::text, event_name, COALESCE(payload->>'entity_id', '')
+		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
 		WHERE created_at >= $1
 		ORDER BY created_at ASC, event_id ASC
@@ -206,6 +304,13 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	got := make([]string, 0, 8)
 	dedup := !hasDuplicateStrings(want)
 	seen := make(map[string]struct{}, 8)
+	wantNames := make(map[string]struct{}, len(want))
+	for _, name := range want {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			wantNames[name] = struct{}{}
+		}
+	}
 	for rows.Next() {
 		var eventID, eventName, payloadEntityID string
 		if err := rows.Scan(&eventID, &eventName, &payloadEntityID); err != nil {
@@ -219,6 +324,10 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 		}
 		eventName = strings.TrimSpace(eventName)
 		if shouldIgnoreCatalogE2EEvent(eventName) {
+			continue
+		}
+		eventName = normalizeCatalogObservedEventName(eventName, flowPrefix, source, wantNames)
+		if flowPrefix == "" && strings.Contains(eventName, "/") {
 			continue
 		}
 		if dedup {
@@ -235,6 +344,60 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	if fmt.Sprintf("%q", got) != fmt.Sprintf("%q", want) {
 		t.Fatalf("emitted_events = %v, want %v", got, want)
 	}
+}
+
+func normalizeCatalogObservedEventName(eventName, flowPrefix string, source semanticview.Source, want map[string]struct{}) string {
+	eventName = strings.Trim(strings.TrimSpace(eventName), "/")
+	flowPrefix = strings.Trim(strings.TrimSpace(flowPrefix), "/")
+	if eventName == "" {
+		return ""
+	}
+	if flowPrefix != "" {
+		prefix := flowPrefix + "/"
+		if strings.HasPrefix(eventName, prefix) {
+			eventName = strings.TrimPrefix(eventName, prefix)
+		}
+	}
+	if source == nil || !strings.Contains(eventName, "/") {
+		return eventName
+	}
+	for _, scope := range source.FlowScopes() {
+		scopePath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if scopePath == "" {
+			continue
+		}
+		prefix := scopePath + "/"
+		if !strings.HasPrefix(eventName, prefix) {
+			continue
+		}
+		localEvent := strings.TrimPrefix(eventName, prefix)
+		for _, candidate := range scope.OutputEvents {
+			if strings.TrimSpace(candidate) == localEvent {
+				if flowPrefix == "" {
+					if _, ok := want[localEvent]; !ok {
+						return eventName
+					}
+				} else if !catalogRootEventExists(source, localEvent) {
+					return eventName
+				}
+				return localEvent
+			}
+		}
+	}
+	return eventName
+}
+
+func catalogRootEventExists(source semanticview.Source, eventName string) bool {
+	eventName = strings.TrimSpace(eventName)
+	if source == nil || eventName == "" {
+		return false
+	}
+	for _, scope := range source.ProjectScopes() {
+		if _, ok := scope.Events[eventName]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func shouldIgnoreCatalogE2EEvent(eventName string) bool {
@@ -307,18 +470,97 @@ func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[str
 	}
 }
 
-func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time) {
+func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want map[string]any) {
 	t.Helper()
-	var count int
+	if db == nil {
+		t.Fatal("database is required for flow_instance_created assertions")
+	}
+	templateID := strings.TrimSpace(asString(want["template"]))
+	instanceID := strings.TrimSpace(asString(want["instance_id"]))
+	if templateID == "" || instanceID == "" {
+		var count int
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*)
+			FROM flow_instances
+			WHERE created_at >= $1
+		`, since).Scan(&count); err != nil {
+			t.Fatalf("query flow_instances: %v", err)
+		}
+		if count == 0 {
+			t.Fatal("expected flow instance to be created")
+		}
+		return
+	}
+	instancePath := strings.Trim(strings.TrimSpace(templateID+"/"+instanceID), "/")
+	var routeCount int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
-		FROM flow_instances
+		FROM routing_rules
 		WHERE created_at >= $1
-	`, since).Scan(&count); err != nil {
-		t.Fatalf("query flow_instances: %v", err)
+		  AND flow_instance = $2
+		  AND is_materialized = true
+		  AND status = 'active'
+	`, since, instancePath).Scan(&routeCount); err != nil {
+		t.Fatalf("query flow instance routes: %v", err)
 	}
-	if count == 0 {
-		t.Fatal("expected flow instance to be created")
+	if routeCount == 0 {
+		t.Fatalf("expected flow instance to be created")
+	}
+	if config, ok := want["config"].(map[string]any); ok && len(config) > 0 {
+		var raw []byte
+		err := db.QueryRowContext(context.Background(), `
+			SELECT config
+			FROM flow_instances
+			WHERE created_at >= $1
+			  AND instance_id = $2
+			ORDER BY created_at DESC
+			LIMIT 1
+		`, since, instancePath).Scan(&raw)
+		if err == sql.ErrNoRows {
+			t.Fatalf("expected flow instance config for %s", instancePath)
+		}
+		if err != nil {
+			t.Fatalf("query flow instance config: %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("decode flow instance config: %v", err)
+		}
+		for key, wantValue := range config {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			gotValue, ok := got[key]
+			if !ok {
+				t.Fatalf("flow instance config missing %q; have keys=%v", key, metadataKeys(got))
+			}
+			gotCanonical, err := canonicalJSONValue(gotValue)
+			if err != nil {
+				t.Fatalf("canonicalize flow instance config %q got value: %v", key, err)
+			}
+			wantCanonical, err := canonicalJSONValue(wantValue)
+			if err != nil {
+				t.Fatalf("canonicalize flow instance config %q expected value: %v", key, err)
+			}
+			if gotCanonical != wantCanonical {
+				t.Fatalf("flow instance config %q = %s, want %s", key, gotCanonical, wantCanonical)
+			}
+		}
+	}
+	if autoEmitted := strings.TrimSpace(asString(want["auto_emitted"])); autoEmitted != "" {
+		var count int
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COUNT(*)
+			FROM events
+			WHERE created_at >= $1
+			  AND event_name = $2
+		`, since, autoEmitted).Scan(&count); err != nil {
+			t.Fatalf("query flow auto-emitted event: %v", err)
+		}
+		if count == 0 {
+			t.Fatalf("expected auto-emitted event %q for flow instance", autoEmitted)
+		}
 	}
 }
 
@@ -352,11 +594,9 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	if want == "" {
 		return
 	}
+	eventIDs := h.publishedEventIDs(entityID)
 	if want != "success" && len(h.previews) > 0 {
-		for eventID := range h.publishedIDs {
-			if entityID != "" && strings.TrimSpace(h.eventEntityIDs[eventID]) != entityID {
-				continue
-			}
+		for _, eventID := range eventIDs {
 			if preview, ok := h.previews[eventID]; ok {
 				got := strings.TrimSpace(strings.ToLower(string(preview.Status)))
 				if got != want {
@@ -366,10 +606,7 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 			}
 		}
 	}
-	for eventID := range h.publishedIDs {
-		if entityID != "" && strings.TrimSpace(h.eventEntityIDs[eventID]) != entityID {
-			continue
-		}
+	for _, eventID := range eventIDs {
 		var outcome string
 		err := h.db.QueryRowContext(context.Background(), `
 			SELECT outcome
@@ -417,6 +654,30 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 		return
 	}
 	t.Fatalf("handler_outcome %q could not be asserted: no platform pipeline receipt found", want)
+}
+
+func (h *runtimeHarness) publishedEventIDs(entityID string) []string {
+	if h == nil {
+		return nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(h.publishedOrder) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(h.publishedOrder))
+	for i := len(h.publishedOrder) - 1; i >= 0; i-- {
+		eventID := strings.TrimSpace(h.publishedOrder[i])
+		if eventID == "" {
+			continue
+		}
+		if entityID != "" && strings.TrimSpace(h.eventEntityIDs[eventID]) != entityID {
+			continue
+		}
+		out = append(out, eventID)
+	}
+	return out
 }
 
 func metadataKeys(in map[string]any) []string {

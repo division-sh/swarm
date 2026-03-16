@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [task.completed, task.reopen_requested]
   outputs:
-    events: [task.finished]
+    events: [task.finished, state.reopened]

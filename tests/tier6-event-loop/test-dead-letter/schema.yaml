@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [task.submitted]
   outputs:
-    events: [task.accepted, pipeline.dead_letter]
+    events: [task.accepted]

@@ -24,10 +24,10 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 	if approved.RuleID != "approve" || approved.Stage != runtimepipeline.NormalizeWorkflowStateID("approved") {
 		t.Fatalf("expected approve rule execution, got %+v", approved)
 	}
-	if !hasAll(approved.Emits, "item.completed") {
+	if !hasAll(approved.Emits, "processing/item.completed") {
 		t.Fatalf("expected approval emission, got %v", approved.Emits)
 	}
-	if got := approved.Metadata["score"]; got == nil {
+	if got := approved.Computed["score"]; got == nil {
 		t.Fatalf("expected computed score to be stored, got %+v", approved)
 	}
 
@@ -46,7 +46,7 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 	if rejected.RuleID != "reject" || rejected.Stage != runtimepipeline.NormalizeWorkflowStateID("rejected") {
 		t.Fatalf("expected reject rule execution, got %+v", rejected)
 	}
-	if !hasAll(rejected.Emits, "item.rejected") {
+	if !hasAll(rejected.Emits, "processing/item.rejected") {
 		t.Fatalf("expected rejection emission, got %v", rejected.Emits)
 	}
 }

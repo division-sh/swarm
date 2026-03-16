@@ -124,15 +124,16 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 		}
 		subscriptions := make([]events.EventType, 0, len(entry.SubscribesTo))
 		for _, evt := range entry.SubscribesTo {
-			evt = strings.TrimSpace(evt)
-			if evt == "" {
-				continue
+			for _, resolved := range workflowNodeSubscriptionAliases(source, nodeID, evt) {
+				if resolved == "" {
+					continue
+				}
+				subscriptions = append(subscriptions, events.EventType(resolved))
 			}
-			subscriptions = append(subscriptions, events.EventType(evt))
 		}
 		produces := make([]events.EventType, 0, len(entry.Produces))
 		for _, evt := range entry.Produces {
-			evt = strings.TrimSpace(evt)
+			evt = workflowNodeExternalEventType(source, nodeID, evt)
 			if evt == "" {
 				continue
 			}
@@ -152,6 +153,58 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 		})
 	}
 	return out, nil
+}
+
+func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventType string) []string {
+	nodeID = strings.TrimSpace(nodeID)
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if nodeID == "" || eventType == "" || source == nil {
+		if eventType == "" {
+			return nil
+		}
+		return []string{eventType}
+	}
+	out := make([]string, 0, 2)
+	appendAlias := func(value string) {
+		value = strings.Trim(strings.TrimSpace(value), "/")
+		if value == "" {
+			return
+		}
+		for _, existing := range out {
+			if existing == value {
+				return
+			}
+		}
+		out = append(out, value)
+	}
+	appendAlias(workflowNodeExternalEventType(source, nodeID, eventType))
+	contractSource, ok := source.NodeContractSource(nodeID)
+	if !ok {
+		return out
+	}
+	flowID := strings.TrimSpace(contractSource.FlowID)
+	if flowID == "" {
+		return out
+	}
+	if !workflowFlowHasInputEvent(source, flowID, eventType) {
+		return out
+	}
+	appendAlias(eventType)
+	return out
+}
+
+func workflowFlowHasInputEvent(source semanticview.Source, flowID, eventType string) bool {
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || flowID == "" || eventType == "" {
+		return false
+	}
+	for _, candidate := range source.FlowInputEvents(flowID) {
+		if strings.TrimSpace(candidate) == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowRuntimeNodeIDs(source semanticview.Source) []string {
@@ -290,7 +343,7 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, 
 		}
 	}
 	for eventType := range source.NodeEventHandlers(nodeID) {
-		eventType = strings.TrimSpace(eventType)
+		eventType = workflowNodeExternalEventType(source, nodeID, eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
@@ -325,6 +378,127 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, 
 		return nil
 	}
 	return out
+}
+
+func workflowNodeExternalEventType(source semanticview.Source, nodeID, eventType string) string {
+	nodeID = strings.TrimSpace(nodeID)
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if nodeID == "" || eventType == "" || source == nil {
+		return eventType
+	}
+	if strings.Contains(eventType, "/") {
+		if absolute, ok := workflowNodeExternalDescendantEventType(source, nodeID, eventType); ok {
+			return absolute
+		}
+		return eventType
+	}
+	contractSource, ok := source.NodeContractSource(nodeID)
+	if !ok {
+		return eventType
+	}
+	flowID := strings.TrimSpace(contractSource.FlowID)
+	if flowID == "" {
+		return eventType
+	}
+	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	if flowPath == "" || !workflowFlowHasLocalEvent(source, flowID, eventType) {
+		return eventType
+	}
+	return flowPath + "/" + eventType
+}
+
+func workflowNodeExternalDescendantEventType(source semanticview.Source, nodeID, eventType string) (string, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if nodeID == "" || eventType == "" || source == nil {
+		return "", false
+	}
+	contractSource, ok := source.NodeContractSource(nodeID)
+	if !ok {
+		return "", false
+	}
+	flowID := strings.TrimSpace(contractSource.FlowID)
+	if flowID == "" {
+		return "", false
+	}
+	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(flowID, "/")
+	}
+	if flowPath == "" || strings.HasPrefix(eventType, flowPath+"/") {
+		return "", false
+	}
+	for _, scope := range source.FlowScopes() {
+		descendantPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if descendantPath == "" || !strings.HasPrefix(descendantPath, flowPath+"/") {
+			continue
+		}
+		relativePath := strings.TrimPrefix(descendantPath, flowPath+"/")
+		if relativePath == "" || !strings.HasPrefix(eventType, relativePath+"/") {
+			continue
+		}
+		localEvent := strings.TrimPrefix(eventType, relativePath+"/")
+		if _, ok := workflowFlowLocalEventSet(scope)[localEvent]; !ok {
+			continue
+		}
+		return flowPath + "/" + eventType, true
+	}
+	return "", false
+}
+
+func workflowFlowLocalEventSet(scope semanticview.FlowScope) map[string]struct{} {
+	out := make(map[string]struct{}, len(scope.Events)+len(scope.InputEvents)+len(scope.OutputEvents)+1)
+	for eventType := range scope.Events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	for _, eventType := range scope.InputEvents {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	for _, eventType := range scope.OutputEvents {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
+		out[autoEmit] = struct{}{}
+	}
+	return out
+}
+
+func workflowFlowHasLocalEvent(source semanticview.Source, flowID, eventType string) bool {
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || flowID == "" || eventType == "" {
+		return false
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return false
+	}
+	if _, ok := scope.Events[eventType]; ok {
+		return true
+	}
+	for _, candidate := range scope.InputEvents {
+		if strings.TrimSpace(candidate) == eventType {
+			return true
+		}
+	}
+	for _, candidate := range scope.OutputEvents {
+		if strings.TrimSpace(candidate) == eventType {
+			return true
+		}
+	}
+	return strings.TrimSpace(scope.AutoEmitEvent) == eventType
 }
 
 func workflowNodeTransitionTriggers(source semanticview.Source, nodeID string) map[string]bool {
@@ -437,9 +611,32 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 }
 
 func (pc *FactoryPipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
-	for _, executor := range pc.workflowNodeExecutors() {
-		if consume, handled := executor.InterceptPolicy(eventType, evt); handled {
-			return consume, true
+	eventType = strings.TrimSpace(eventType)
+	for _, node := range pc.WorkflowNodes() {
+		var (
+			policy WorkflowEventPolicy
+			ok     bool
+		)
+		if node.Policies != nil {
+			policy, ok = node.Policies[eventType]
+			if !ok {
+				for pattern, candidate := range node.Policies {
+					if strings.TrimSpace(pattern) == eventType {
+						continue
+					}
+					if runtimecontractsHandlerPatternMatches(pattern, eventType) {
+						policy = candidate
+						ok = true
+						break
+					}
+				}
+			}
+		}
+		if ok {
+			if policy.RequireEntity && workflowEventEntityID(evt) == "" {
+				continue
+			}
+			return policy.Consume, true
 		}
 	}
 	return false, false
@@ -450,8 +647,8 @@ func (pc *FactoryPipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Cont
 	if eventType == "" {
 		return false
 	}
-	for _, executor := range pc.workflowNodeExecutors() {
-		if handled := executor.Handle(ctx, evt); handled {
+	for _, node := range pc.WorkflowNodes() {
+		if handled := pc.executeNodeHandlerPlan(ctx, strings.TrimSpace(node.ID), evt); handled {
 			return true
 		}
 	}

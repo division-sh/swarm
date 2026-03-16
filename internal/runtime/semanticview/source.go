@@ -13,6 +13,7 @@ type Source interface {
 	WorkflowStages() []runtimecontracts.WorkflowStageContract
 	WorkflowTerminalStages() []string
 	WorkflowTransitions() []runtimecontracts.WorkflowTransitionContract
+	WorkflowInitialStage() string
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowTimerByID(id string) (runtimecontracts.WorkflowTimerContract, bool)
 	GuardInstructions() []runtimeregistry.GuardInstruction

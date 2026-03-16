@@ -69,6 +69,7 @@ type WorkflowTransition struct {
 	Trigger          string                                    `json:"trigger,omitempty"`
 	Node             string                                    `json:"node,omitempty"`
 	GuardIDs         []string                                  `json:"guard_ids,omitempty"`
+	AllowTerminalExit bool                                     `json:"allow_terminal_exit,omitempty"`
 	Guard            WorkflowGuard                             `json:"-"`
 	Actions          []WorkflowAction                          `json:"actions,omitempty"`
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation `json:"data_accumulation,omitempty"`
@@ -151,6 +152,11 @@ func (wd *WorkflowDefinition) Transition(state WorkflowState, to WorkflowStateID
 		}
 		if !containsWorkflowStateID(transition.From, state.Stage) {
 			continue
+		}
+		if state.Stage != "" && state.Stage != to {
+			if stage, ok := wd.Stage(state.Stage); ok && stage.Terminal && !transition.AllowTerminalExit {
+				continue
+			}
 		}
 		if transition.Guard == nil || transition.Guard(state, transition) {
 			return transition, true
@@ -374,6 +380,7 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 			Trigger:          strings.TrimSpace(transition.Trigger),
 			Node:             strings.TrimSpace(transition.Node),
 			GuardIDs:         guardIDs,
+			AllowTerminalExit: transition.AllowTerminalExit,
 			Guard:            alwaysWorkflowGuard,
 			Actions:          actions,
 			DataAccumulation: transition.DataAccumulation,

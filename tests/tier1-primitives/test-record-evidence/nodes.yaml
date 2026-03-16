@@ -5,6 +5,5 @@ test-node:
   produces: [evidence.recorded]
   event_handlers:
     evidence.submitted:
-      action:
-        type: record_evidence
+      action: record_evidence
       emits: evidence.recorded

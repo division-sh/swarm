@@ -42,6 +42,7 @@ type catalogExpectedDocument struct {
 		InjectFailure                 string               `yaml:"inject_failure"`
 	} `yaml:"trigger"`
 	Expected struct {
+		RuntimeOnly            bool                                `yaml:"runtime_only"`
 		BootResult             string                              `yaml:"boot_result"`
 		ErrorCategory          string                              `yaml:"error_category"`
 		ErrorContains          string                              `yaml:"error_contains"`
@@ -3138,6 +3139,9 @@ func validateCatalogExpectedDocument(dir string, expected catalogExpectedDocumen
 
 func catalogUnsupportedExecutableExpectations(expected catalogExpectedDocument) []string {
 	unsupported := make([]string, 0, 6)
+	if expected.Expected.RuntimeOnly {
+		unsupported = append(unsupported, "expected.runtime_only")
+	}
 	if expected.Expected.ChainDepthExceeded {
 		unsupported = append(unsupported, "expected.chain_depth_exceeded")
 	}
@@ -3167,6 +3171,9 @@ func catalogUnsupportedExecutableExpectations(expected catalogExpectedDocument) 
 
 func catalogCaseSimpleHarnessEligible(expected catalogExpectedDocument) bool {
 	if expected.Trigger.Boot || len(expected.Trigger.Concurrent) > 0 {
+		return false
+	}
+	if expected.Expected.RuntimeOnly {
 		return false
 	}
 	if expected.Trigger.AssertAtomicCommit || expected.Trigger.AssertPersistedBeforeDelivery || expected.Trigger.AssertSerialProcessing {

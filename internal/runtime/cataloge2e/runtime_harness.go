@@ -15,6 +15,7 @@ import (
 	runtime "empireai/internal/runtime"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
 	"empireai/internal/store"
 	"empireai/internal/testutil"
@@ -44,6 +45,8 @@ type catalogExpectedDocument struct {
 		BootResult          string         `yaml:"boot_result"`
 		HandlerOutcome      string         `yaml:"handler_outcome"`
 		EntityState         string         `yaml:"entity_state"`
+		ParentState         string         `yaml:"parent_state"`
+		FlowBState          string         `yaml:"flow_b_state"`
 		EntityFields        map[string]any `yaml:"entity_fields"`
 		Gates               map[string]bool `yaml:"gates"`
 		EmittedEvents       []string       `yaml:"emitted_events"`
@@ -81,6 +84,21 @@ func (d catalogExpectedDocument) triggerSequence() []catalogTriggerStep {
 	}}
 }
 
+func (d catalogExpectedDocument) triggerFlowPrefix() string {
+	for _, step := range d.triggerSequence() {
+		eventName := strings.Trim(strings.TrimSpace(step.Event), "/")
+		if eventName == "" {
+			continue
+		}
+		lastSlash := strings.LastIndex(eventName, "/")
+		if lastSlash <= 0 {
+			continue
+		}
+		return strings.Trim(eventName[:lastSlash], "/")
+	}
+	return ""
+}
+
 type runtimeHarness struct {
 	t            *testing.T
 	ctx          context.Context
@@ -94,6 +112,7 @@ type runtimeHarness struct {
 	initialState string
 	startedAt    time.Time
 	publishedIDs map[string]struct{}
+	publishedOrder []string
 	eventEntityIDs map[string]string
 	previews     map[string]runtimepipeline.HandlerPreview
 	mu           sync.Mutex
@@ -174,6 +193,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		initialState: strings.TrimSpace(rootSchema.InitialState),
 		startedAt:    time.Now().UTC(),
 		publishedIDs: map[string]struct{}{},
+		publishedOrder: []string{},
 		eventEntityIDs: map[string]string{},
 		previews:     map[string]runtimepipeline.HandlerPreview{},
 	}
@@ -210,42 +230,15 @@ func loadAgentFixtures(t testing.TB, fixtureRoot string, llmRuntime *scriptedLLM
 func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Duration) {
 	h.t.Helper()
 	payload := cloneStringAnyMap(step.Payload)
+	eventType := strings.TrimSpace(step.Event)
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		h.seedInitialState(entityID)
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		h.t.Fatalf("marshal trigger payload: %v", err)
-	}
-	evt := events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType(strings.TrimSpace(step.Event)),
-		SourceAgent: "cataloge2e",
-		Payload:     raw,
-		CreatedAt:   time.Now().UTC(),
-	}
-	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		evt = evt.WithEntityID(entityID)
-	}
-	if preview, ok := h.previewHandlerOutcome(evt); ok {
-		h.mu.Lock()
-		h.previews[evt.ID] = preview
-		h.mu.Unlock()
-	}
-	h.mu.Lock()
-	h.publishedIDs[evt.ID] = struct{}{}
-	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		h.eventEntityIDs[evt.ID] = entityID
-	}
-	h.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(h.ctx, timeout)
-	defer cancel()
-	if err := h.rt.Bus.Publish(ctx, evt); err != nil {
-		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(step.Event), err)
-	}
-	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
-		h.t.Fatalf("WaitForQuiescence(%s): %v", strings.TrimSpace(step.Event), err)
+	h.publishRuntimeEvent(eventType, "cataloge2e", payload, timeout, true, true)
+	if eventType == "flow.created" {
+		if autoEmit := h.rootAutoEmitOnCreateEvent(); autoEmit != "" {
+			h.publishRuntimeEvent(autoEmit, "flow-instance-activator", payload, timeout, true, false)
+		}
 	}
 }
 
@@ -288,6 +281,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		}
 		h.mu.Lock()
 		h.publishedIDs[evt.ID] = struct{}{}
+		h.publishedOrder = append(h.publishedOrder, evt.ID)
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
 			h.eventEntityIDs[evt.ID] = entityID
 		}
@@ -318,6 +312,59 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	}
 }
 
+func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) {
+	h.t.Helper()
+	payload = cloneStringAnyMap(payload)
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		h.t.Fatalf("marshal trigger payload: %v", err)
+	}
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType(strings.TrimSpace(eventType)),
+		SourceAgent: strings.TrimSpace(sourceAgent),
+		Payload:     raw,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if entityID := triggerPayloadEntityID(payload); entityID != "" {
+		evt = evt.WithEntityID(entityID)
+	}
+	if recordOutcome {
+		if preview, ok := h.previewHandlerOutcome(evt); ok {
+			h.mu.Lock()
+			h.previews[evt.ID] = preview
+			h.mu.Unlock()
+		}
+	}
+	h.mu.Lock()
+	if excludeFromEmitted {
+		h.publishedIDs[evt.ID] = struct{}{}
+	}
+	if recordOutcome {
+		h.publishedOrder = append(h.publishedOrder, evt.ID)
+		if entityID := triggerPayloadEntityID(payload); entityID != "" {
+			h.eventEntityIDs[evt.ID] = entityID
+		}
+	}
+	h.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(h.ctx, timeout)
+	defer cancel()
+	if err := h.rt.Bus.Publish(ctx, evt); err != nil {
+		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(eventType), err)
+	}
+	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
+		h.t.Fatalf("WaitForQuiescence(%s): %v", strings.TrimSpace(eventType), err)
+	}
+}
+
+func (h *runtimeHarness) rootAutoEmitOnCreateEvent() string {
+	if h == nil || h.bundle == nil || h.bundle.RootSchema == nil {
+		return ""
+	}
+	return strings.TrimSpace(h.bundle.RootSchema.AutoEmitOnCreate.Event)
+}
+
 func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDocument, timeout time.Duration) {
 	h.t.Helper()
 	entityID := ""
@@ -334,12 +381,14 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 	if entityID == "" || len(expected.Expected.EmittedEvents) == 0 {
 		return
 	}
+	flowPrefix := expected.triggerFlowPrefix()
+	source := semanticview.Wrap(h.bundle)
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if h.hasExpectedEmittedEvents(ctx, entityID, expected.Expected.EmittedEvents) {
+		if h.hasExpectedEmittedEvents(ctx, entityID, expected.Expected.EmittedEvents, flowPrefix, source) {
 			return
 		}
 		select {
@@ -350,10 +399,10 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 	}
 }
 
-func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID string, want []string) bool {
+func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID string, want []string, flowPrefix string, source semanticview.Source) bool {
 	h.t.Helper()
 	rows, err := h.db.QueryContext(ctx, `
-		SELECT event_id::text, event_name, COALESCE(payload->>'entity_id', '')
+		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
 		WHERE created_at >= $1
 		ORDER BY created_at ASC, event_id ASC
@@ -364,10 +413,12 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 	defer rows.Close()
 
 	counts := make(map[string]int, len(want))
+	wantNames := make(map[string]struct{}, len(want))
 	for _, name := range want {
 		name = strings.TrimSpace(name)
 		if name != "" {
 			counts[name]++
+			wantNames[name] = struct{}{}
 		}
 	}
 	for rows.Next() {
@@ -383,6 +434,10 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 		}
 		eventName = strings.TrimSpace(eventName)
 		if eventName == "" || shouldIgnoreCatalogE2EEvent(eventName) {
+			continue
+		}
+		eventName = normalizeCatalogObservedEventName(eventName, flowPrefix, source, wantNames)
+		if flowPrefix == "" && strings.Contains(eventName, "/") {
 			continue
 		}
 		if _, ok := counts[eventName]; !ok {

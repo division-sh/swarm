@@ -1,6 +1,6 @@
 initial_state: reviewing
-terminal_states: [approved]
-states: [reviewing, approved]
+terminal_states: [done]
+states: [reviewing, approved, done]
 pins:
   inputs:
     events: [review.done, review.insufficient]

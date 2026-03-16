@@ -7,12 +7,3 @@ test-node:
     task.requested:
       advances_to: done
       emits: task.completed
-
-sink-node:
-  id: sink-node
-  execution_type: system_node
-  subscribes_to: [task.completed]
-  produces: [task.logged]
-  event_handlers:
-    task.completed:
-      emits: task.logged

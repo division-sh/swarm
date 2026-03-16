@@ -15,21 +15,21 @@ type catalogExcludedFixture struct {
 }
 
 var tier5LifecycleFixtures = []string{
+	"test-auto-emit-on-create",
+	"test-create-flow-instance-config",
+	"test-create-flow-instance-duplicate",
 	"test-create-flow-instance",
 	"test-template-no-boot-instance",
+	"test-timer-fire",
+	"test-timer-recurring",
 	"test-timer-start-on",
 	"test-wildcard-subscription",
 }
 
 var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-auto-emit-on-create":            {kind: "fixture-issue", reason: "schema.yaml still uses scalar auto_emit_on_create; the real loader expects the structured {event,...} form"},
-	"test-create-flow-instance-config":    {kind: "fixture-issue", reason: "config_from is still encoded in an unsupported YAML shape, so the real loader rejects the action payload"},
-	"test-create-flow-instance-duplicate": {kind: "runtime-gap", reason: "real runtime still completes duplicate instance creation instead of surfacing the expected duplicate-instance error"},
-	"test-terminal-state-preserves":       {kind: "fixture-issue", reason: "fixture update-node uses produces: [] which real boot validation rejects"},
-	"test-terminal-state-rejects":         {kind: "fixture-issue", reason: "fixture reopen-node uses produces: [] which real boot validation rejects"},
-	"test-timer-cancel":                   {kind: "fixture-issue", reason: "fixture cancel-node uses produces: [] which real boot validation rejects"},
-	"test-timer-fire":                     {kind: "runtime-gap", reason: "fixture now boots, but the real runtime still does not deliver the expected one-shot timer.check event"},
-	"test-timer-recurring":                {kind: "runtime-gap", reason: "fixture now boots, but the real runtime still does not deliver the expected recurring timer.tick event"},
+	"test-terminal-state-preserves":       {kind: "fixture-issue", reason: "fixture expected.emitted_events is stale: the first task.completed step still legitimately emits task.finished before the terminal follow-up is rejected"},
+	"test-terminal-state-rejects":         {kind: "fixture-issue", reason: "fixture expected.emitted_events is stale: the first task.completed step still legitimately emits task.finished before the reopen request is rejected"},
+	"test-timer-cancel":                   {kind: "fixture-issue", reason: "fixture now emits timer.cancelled through cancel-node, so expected.emitted_events: [] is stale"},
 }
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
@@ -40,7 +40,8 @@ func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
-			h := newRuntimeHarness(t, fixtureRoot, false)
+			startRuntime := fixtureName == "test-auto-emit-on-create" || fixtureName == "test-timer-fire" || fixtureName == "test-timer-recurring"
+			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
 			h.seedEntityFields(expected)
 			if expected.Trigger.Boot || strings.TrimSpace(expected.Expected.BootResult) != "" {
 				assertCatalogRuntimeOutcome(t, h, expected)

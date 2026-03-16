@@ -9,3 +9,6 @@ flows:
 - id: flow-b
   flow: flow-b
   mode: static
+entity_schema:
+  core:
+    shared_field: text

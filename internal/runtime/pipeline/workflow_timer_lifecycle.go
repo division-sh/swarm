@@ -42,10 +42,10 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
-			if timer.Recurring || !workflowTimerLifecycleMatches(timer.StartOn, nextStage, sourceEvent) {
+			if !workflowTimerLifecycleMatches(timer.StartOn, nextStage, sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
@@ -63,7 +63,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 				StartedBy: "state:" + nextStage,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt, workflowTimerPolicy(source)))
 		}
 	}); err != nil {
 		return err
@@ -119,10 +119,10 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
-			if timer.Recurring || !workflowTimerLifecycleMatches(timer.StartOn, "", sourceEvent) {
+			if !workflowTimerLifecycleMatches(timer.StartOn, "", sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
@@ -140,7 +140,7 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 				StartedBy: "event:" + sourceEvent,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt, workflowTimerPolicy(source)))
 		}
 	}); err != nil {
 		runtimeWarn(runtimeWorkflowID, "workflow event timer projection failed entity_id=%s event=%s: %v", entityID, sourceEvent, err)
@@ -232,8 +232,8 @@ func workflowTimerPolicy(source semanticview.Source) map[string]any {
 	return policyDocumentToMap(source.ResolvedPolicyForFlow(""))
 }
 
-func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID string, fireAt time.Time) Schedule {
-	return Schedule{
+func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID string, fireAt time.Time, policy map[string]any) Schedule {
+	sc := Schedule{
 		AgentID:   strings.TrimSpace(timer.Owner),
 		EventType: strings.TrimSpace(timer.Event),
 		Mode:      "once",
@@ -242,6 +242,28 @@ func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityI
 		TaskID:    strings.TrimSpace(timer.ID),
 		Payload:   mustJSON(map[string]any{"timer_id": strings.TrimSpace(timer.ID), "trigger_reason": strings.TrimSpace(timer.ID)}),
 	}
+	if timer.Recurring {
+		if cronSpec, ok := workflowTimerRecurringSpec(timer, policy); ok {
+			sc.Mode = "cron"
+			sc.Cron = cronSpec
+			sc.At = time.Time{}
+		}
+	}
+	return sc
+}
+
+func workflowTimerRecurringSpec(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) (string, bool) {
+	if delay := workflowTimerRenderedDelay(timer.Delay, policy); delay != "" && !strings.Contains(delay, "{") {
+		return "@every " + delay, true
+	}
+	interval := time.Duration(timer.DelaySeconds) * time.Second
+	interval += time.Duration(timer.DelayMinutes) * time.Minute
+	interval += time.Duration(timer.DelayHours) * time.Hour
+	interval += time.Duration(timer.DelayDays) * 24 * time.Hour
+	if interval <= 0 {
+		return "", false
+	}
+	return "@every " + interval.String(), true
 }
 
 func (pc *FactoryPipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context, sc Schedule) {

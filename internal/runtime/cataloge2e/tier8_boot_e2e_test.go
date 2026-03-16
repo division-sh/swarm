@@ -31,8 +31,10 @@ type tier8ExcludedFixture struct {
 
 var tier8SupportedFixtures = []string{
 	"test-boot-advances-to-list",
+	"test-boot-bare-condition",
 	"test-boot-cel-parse-error",
 	"test-boot-condition-payload-mismatch",
+	"test-boot-condition-policy",
 	"test-boot-deprecated-field",
 	"test-boot-dialect-dual",
 	"test-boot-dialect-guard",
@@ -42,25 +44,23 @@ var tier8SupportedFixtures = []string{
 	"test-boot-event-no-producer",
 	"test-boot-event-no-schema",
 	"test-boot-handler-field-undefined",
+	"test-boot-on-complete-state-invalid",
 	"test-boot-on-complete-dict",
+	"test-boot-payload-mismatch",
+	"test-boot-policy-conflict",
 	"test-boot-prompt-missing",
 	"test-boot-prompt-stub",
+	"test-boot-produces-drift",
 	"test-boot-required-agent-missing",
 	"test-boot-self-emit",
+	"test-boot-state-machine-invalid",
 	"test-boot-success",
 	"test-boot-tool-missing",
 }
 
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-bare-condition":            {kind: "validation-gap", reason: "real boot path does not emit DIALECT-BARE-COND yet"},
-	"test-boot-condition-policy":          {kind: "validation-gap", reason: "real boot path does not emit CONDITION-POLICY warnings yet"},
 	"test-boot-missing-pin":               {kind: "fixture-issue", reason: "fixture still fails earlier because child/task.result is not declared in the real event catalog"},
-	"test-boot-on-complete-state-invalid": {kind: "validation-gap", reason: "real boot path does not catch invalid on_complete target state in this root-scope fixture"},
-	"test-boot-payload-mismatch":          {kind: "validation-gap", reason: "real boot path reports a different schema-field error instead of PAYLOAD-MISMATCH"},
 	"test-boot-permission-tool-mismatch":  {kind: "fixture-issue", reason: "fixture still does not isolate PERMISSION-MISMATCH; current boot only surfaces generic producer/consumer/prompt warnings"},
-	"test-boot-policy-conflict":           {kind: "validation-gap", reason: "real boot path does not surface POLICY-CONFLICT for this fixture shape yet"},
-	"test-boot-produces-drift":            {kind: "validation-gap", reason: "real boot path does not emit PRODUCES-DRIFT warnings yet"},
-	"test-boot-state-machine-invalid":     {kind: "validation-gap", reason: "real boot path does not catch invalid advances_to target state in this root-scope fixture"},
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {

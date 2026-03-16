@@ -3,3 +3,6 @@ version: 1.0.0
 description: Guard evaluates entity state BEFORE handler modifies it. Counter=5 fails guard check < 3.
 platform_version: ">=1.1.0"
 flows: []
+entity_schema:
+  core:
+    counter: integer

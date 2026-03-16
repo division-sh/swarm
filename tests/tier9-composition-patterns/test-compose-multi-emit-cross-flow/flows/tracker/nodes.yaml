@@ -5,4 +5,5 @@ recorder:
   produces: [task.recorded]
   event_handlers:
     task.record:
+      emits: task.recorded
       advances_to: recorded

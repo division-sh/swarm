@@ -4,6 +4,7 @@ trigger:
     entity_id: ent-001
 
 expected:
+  runtime_only: true
   handler_outcome: kill
   chain_depth_exceeded: true
   entity_state: pending

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -57,6 +58,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if payloadMap == nil {
 		payloadMap = map[string]any{}
 	}
+	eventType = e.resolveAgentScopedEmitEventType(actor, eventType)
 
 	inbound, _ := InboundEventFromContext(ctx)
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
@@ -116,4 +118,51 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		"event_id":   emitted.ID,
 		"event_type": eventType,
 	}, nil
+}
+
+func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eventType string) string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" || strings.Contains(eventType, "/") {
+		return eventType
+	}
+	flowID := strings.TrimSpace(actor.Mode)
+	if flowID == "" {
+		return eventType
+	}
+	flowPath := strings.TrimSpace(configString(actor.Config, "flow_path"))
+	flowPath = strings.Trim(flowPath, "/")
+	if flowPath == "" {
+		return eventType
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	if source == nil {
+		return eventType
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return eventType
+	}
+	for _, candidate := range append(append([]string{}, scope.OutputEvents...), scope.InputEvents...) {
+		if strings.TrimSpace(candidate) == eventType {
+			return strings.Trim(flowPath+"/"+eventType, "/")
+		}
+	}
+	if _, ok := scope.Events[eventType]; ok {
+		return strings.Trim(flowPath+"/"+eventType, "/")
+	}
+	return eventType
+}
+
+func configString(raw json.RawMessage, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" || len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(asString(payload[key]))
 }

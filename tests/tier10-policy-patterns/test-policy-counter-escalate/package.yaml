@@ -4,4 +4,7 @@ description: >
   Policy: guard checks entity counter against policy limit.
   Counter at limit triggers escalation event.
 platform_version: ">=1.1.0"
+entity_schema:
+  core:
+    attempt_count: integer
 flows: []

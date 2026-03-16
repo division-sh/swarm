@@ -183,7 +183,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 				continue
 			}
 			if _, ok := entityFields[field]; !ok {
-				errs = append(errs, fmt.Sprintf("transition %s data_accumulation field %s missing from workflow entity_schema", id, field))
+				errs = append(errs, fmt.Sprintf("transition %s data_accumulation writes '%s' missing from workflow entity_schema", id, field))
 			}
 		}
 		for _, actionID := range transition.Actions {
@@ -227,7 +227,10 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			continue
 		}
 		nodeFlowID := workflowNodeFlowID(source, nodeID)
-		declaredStates := normalizeStringSet(source.FlowStates(nodeFlowID))
+		declaredStates := workflowDeclaredStates(source, nodeFlowID)
+		resolvedPolicy := policyDocumentToMap(source.ResolvedPolicyForNode(nodeID))
+		subs := normalizeStringSet(node.SubscribesTo)
+		produces := normalizeStringSet(node.Produces)
 		for eventType, handler := range node.EventHandlers {
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
 				errs = append(errs, fmt.Sprintf("node %s handler %s declares both on_complete and rules", nodeID, strings.TrimSpace(eventType)))
@@ -244,6 +247,9 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 				}
 			}
 			for _, expr := range workflowHandlerConditions(handler) {
+				if workflowConditionMissingRecognizedPrefix(expr) {
+					errs = append(errs, fmt.Sprintf("node %s handler %s condition %q missing required prefix", nodeID, strings.TrimSpace(eventType), expr))
+				}
 				if err := validateWorkflowConditionCEL(expr); err != nil {
 					errs = append(errs, fmt.Sprintf("node %s handler %s CEL parse failed for %q: %v", nodeID, strings.TrimSpace(eventType), expr, err))
 				}
@@ -255,16 +261,24 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 						errs = append(errs, fmt.Sprintf("node %s handler %s references payload.%s outside event payload schema", nodeID, strings.TrimSpace(eventType), ref))
 					}
 				}
+				for _, ref := range workflowPolicyReferences(expr) {
+					if !workflowPolicyFieldExists(resolvedPolicy, ref) {
+						addWarning("CONDITION-POLICY", fmt.Sprintf("node %s handler %s references policy.%s but policy does not define it", nodeID, strings.TrimSpace(eventType), ref))
+					}
+				}
 			}
 			for _, emitted := range workflowHandlerEmits(handler) {
 				if strings.TrimSpace(emitted) == strings.TrimSpace(eventType) {
 					errs = append(errs, fmt.Sprintf("node %s handler %s emits its own trigger event", nodeID, strings.TrimSpace(eventType)))
 				}
+				if _, ok := produces[strings.TrimSpace(emitted)]; !ok {
+					addWarning("PRODUCES-DRIFT", fmt.Sprintf("node %s handler %s emits %s outside produces list", nodeID, strings.TrimSpace(eventType), strings.TrimSpace(emitted)))
+				}
 			}
 			if len(declaredStates) > 0 {
 				for _, target := range workflowHandlerAdvanceTargets(handler) {
 					if _, ok := declaredStates[strings.TrimSpace(target)]; !ok {
-						errs = append(errs, fmt.Sprintf("node %s handler %s advances_to %s outside flow %s states", nodeID, strings.TrimSpace(eventType), strings.TrimSpace(target), nodeFlowID))
+						errs = append(errs, fmt.Sprintf("node %s handler %s advances_to %s outside flow %s states", nodeID, strings.TrimSpace(eventType), strings.TrimSpace(target), workflowValidationFlowLabel(nodeFlowID)))
 					}
 				}
 			}
@@ -274,8 +288,6 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 				}
 			}
 		}
-		subs := normalizeStringSet(node.SubscribesTo)
-		produces := normalizeStringSet(node.Produces)
 		for _, transitionID := range node.OwnedTransitions {
 			transitionID = strings.TrimSpace(transitionID)
 			if transitionID == "" {
@@ -437,14 +449,11 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 	warnings = append(warnings, workflowPolicyConflictWarnings(projectScopes, source.FlowScopes())...)
 
 	for _, transition := range source.DerivedHandlerTransitions() {
-		if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
-			if target := strings.TrimSpace(transition.AdvancesTo); target != "" {
-				validTargets := normalizeStringSet(source.FlowStates(flowID))
-				for _, terminal := range source.FlowTerminalStages(flowID) {
-					validTargets[strings.TrimSpace(terminal)] = struct{}{}
-				}
+		if target := strings.TrimSpace(transition.AdvancesTo); target != "" {
+			validTargets := workflowDeclaredStates(source, strings.TrimSpace(transition.FlowID))
+			if len(validTargets) > 0 {
 				if _, ok := validTargets[target]; !ok {
-					errs = append(errs, fmt.Sprintf("handler transition %s advances_to %s outside flow %s states", transition.ID, target, flowID))
+					errs = append(errs, fmt.Sprintf("handler transition %s advances_to %s outside flow %s states", transition.ID, target, workflowValidationFlowLabel(strings.TrimSpace(transition.FlowID))))
 				}
 			}
 		}
@@ -951,6 +960,7 @@ func guardActionEntryByID(entries []runtimecontracts.GuardActionEntry, id string
 }
 
 var workflowPayloadReferencePattern = regexp.MustCompile(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+var workflowPolicyReferencePattern = regexp.MustCompile(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 
 func workflowNodeFlowID(source semanticview.Source, nodeID string) string {
 	if source == nil {
@@ -1046,6 +1056,57 @@ func workflowPayloadReferences(expression string) []string {
 	return out
 }
 
+func workflowPolicyReferences(expression string) []string {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return nil
+	}
+	matches := workflowPolicyReferencePattern.FindAllStringSubmatch(expression, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		ref := strings.TrimSpace(match[1])
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func workflowConditionMissingRecognizedPrefix(expression string) bool {
+	expression = strings.TrimSpace(expression)
+	if expression == "" || strings.EqualFold(expression, "else") {
+		return false
+	}
+	switch strings.ToLower(expression) {
+	case "true", "false", "null":
+		return false
+	}
+	for _, prefix := range []string{
+		"payload.",
+		"entity.",
+		"policy.",
+		"accumulated.",
+		"fan_out.",
+		"item.",
+		"query_entities(",
+		"gates[",
+	} {
+		if strings.Contains(expression, prefix) {
+			return false
+		}
+	}
+	return true
+}
+
 func workflowEventPayloadFields(source semanticview.Source, eventType string) map[string]struct{} {
 	if source == nil {
 		return nil
@@ -1082,6 +1143,65 @@ func workflowPayloadFieldExists(fields map[string]struct{}, ref string) bool {
 		}
 	}
 	return false
+}
+
+func workflowPolicyFieldExists(policy map[string]any, ref string) bool {
+	if len(policy) == 0 {
+		return false
+	}
+	_, ok := workflowLookupPolicyValue(policy, ref)
+	return ok
+}
+
+func workflowLookupPolicyValue(policy map[string]any, ref string) (any, bool) {
+	current := any(policy)
+	for _, part := range strings.Split(strings.TrimSpace(ref), ".") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, false
+		}
+		next, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		value, ok := next[part]
+		if !ok {
+			return nil, false
+		}
+		current = value
+	}
+	return current, true
+}
+
+func workflowDeclaredStates(source semanticview.Source, flowID string) map[string]struct{} {
+	flowID = strings.TrimSpace(flowID)
+	var states []string
+	var terminals []string
+	if flowID == "" {
+		for _, stage := range source.WorkflowStages() {
+			if id := strings.TrimSpace(stage.ID); id != "" {
+				states = append(states, id)
+			}
+		}
+		terminals = source.WorkflowTerminalStages()
+	} else {
+		states = source.FlowStates(flowID)
+		terminals = source.FlowTerminalStages(flowID)
+	}
+	out := normalizeStringSet(states)
+	for _, terminal := range terminals {
+		if terminal = strings.TrimSpace(terminal); terminal != "" {
+			out[terminal] = struct{}{}
+		}
+	}
+	return out
+}
+
+func workflowValidationFlowLabel(flowID string) string {
+	if strings.TrimSpace(flowID) == "" {
+		return "root"
+	}
+	return strings.TrimSpace(flowID)
 }
 
 func workflowHandlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {

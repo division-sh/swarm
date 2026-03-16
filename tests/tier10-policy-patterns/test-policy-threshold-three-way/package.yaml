@@ -4,4 +4,7 @@ description: >
   Policy: on_complete branches reference policy thresholds for 3-way
   routing — high/mid/low based on policy.high_mark and policy.low_mark.
 platform_version: ">=1.1.0"
+entity_schema:
+  core:
+    score: number
 flows: []

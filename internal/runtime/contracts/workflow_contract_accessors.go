@@ -416,16 +416,17 @@ func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (Sys
 	}
 	nodeID = strings.TrimSpace(nodeID)
 	eventType = strings.TrimSpace(eventType)
+	eventType = b.localizeNodeEventType(nodeID, eventType)
 	handlers, ok := b.Semantics.NodeHandlers[nodeID]
 	if !ok {
 		return SystemNodeEventHandler{}, false
 	}
 	if handler, ok := handlers[eventType]; ok {
-		return handler, true
+		return b.externalizeNodeHandler(nodeID, handler), true
 	}
 	for pattern, handler := range handlers {
 		if handlerPatternMatches(pattern, eventType) {
-			return handler, true
+			return b.externalizeNodeHandler(nodeID, handler), true
 		}
 	}
 	return SystemNodeEventHandler{}, false
@@ -437,17 +438,213 @@ func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 	eventType = strings.TrimSpace(eventType)
 	owners := append([]string{}, b.Semantics.EventOwners[eventType]...)
 	for nodeID, handlers := range b.Semantics.NodeHandlers {
+		localEventType := b.localizeNodeEventType(nodeID, eventType)
+		if _, ok := handlers[localEventType]; ok {
+			owners = appendIfMissingString(owners, nodeID)
+			continue
+		}
 		for pattern := range handlers {
-			if strings.TrimSpace(pattern) == eventType {
-				continue
-			}
-			if handlerPatternMatches(pattern, eventType) {
+			if handlerPatternMatches(pattern, localEventType) {
 				owners = appendIfMissingString(owners, nodeID)
 				break
 			}
 		}
 	}
 	return owners
+}
+
+func (b *WorkflowContractBundle) localizeNodeEventType(nodeID, eventType string) string {
+	if b == nil {
+		return strings.TrimSpace(eventType)
+	}
+	flowID := b.nodeFlowID(nodeID)
+	if flowID == "" {
+		return strings.TrimSpace(eventType)
+	}
+	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if flowPath == "" || eventType == "" {
+		return eventType
+	}
+	prefix := flowPath + "/"
+	if !strings.HasPrefix(eventType, prefix) {
+		return eventType
+	}
+	return strings.TrimPrefix(eventType, prefix)
+}
+
+func (b *WorkflowContractBundle) externalizeNodeEventType(nodeID, eventType string) string {
+	if b == nil {
+		return strings.TrimSpace(eventType)
+	}
+	flowID := b.nodeFlowID(nodeID)
+	if flowID == "" {
+		return strings.TrimSpace(eventType)
+	}
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if eventType == "" {
+		return eventType
+	}
+	if strings.Contains(eventType, "/") {
+		if absolute, ok := b.externalizeDescendantEventType(flowID, eventType); ok {
+			return absolute
+		}
+		return eventType
+	}
+	if !b.flowHasLocalEvent(flowID, eventType) {
+		return eventType
+	}
+	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	if flowPath == "" {
+		return eventType
+	}
+	return flowPath + "/" + eventType
+}
+
+func (b *WorkflowContractBundle) externalizeDescendantEventType(flowID, eventType string) (string, bool) {
+	if b == nil {
+		return "", false
+	}
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if flowID == "" || eventType == "" {
+		return "", false
+	}
+	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	if flowPath == "" || strings.HasPrefix(eventType, flowPath+"/") {
+		return "", false
+	}
+	for _, view := range b.FlowViews() {
+		descendantPath := strings.Trim(strings.TrimSpace(view.Path), "/")
+		if descendantPath == "" || !strings.HasPrefix(descendantPath, flowPath+"/") {
+			continue
+		}
+		relativePath := strings.TrimPrefix(descendantPath, flowPath+"/")
+		if relativePath == "" || !strings.HasPrefix(eventType, relativePath+"/") {
+			continue
+		}
+		localEvent := strings.TrimPrefix(eventType, relativePath+"/")
+		if !b.flowHasLocalEvent(strings.TrimSpace(view.Paths.ID), localEvent) {
+			continue
+		}
+		return flowPath + "/" + eventType, true
+	}
+	return "", false
+}
+
+func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
+	handler.Emits = b.externalizeEventEmission(nodeID, handler.Emits)
+	if handler.FanOut != nil {
+		clone := *handler.FanOut
+		clone.EmitPerItem = b.externalizeNodeEventType(nodeID, clone.EmitPerItem)
+		if len(clone.EmitMapping) > 0 {
+			mapping := make(map[string]string, len(clone.EmitMapping))
+			for key, value := range clone.EmitMapping {
+				mapping[key] = b.externalizeNodeEventType(nodeID, value)
+			}
+			clone.EmitMapping = mapping
+		}
+		handler.FanOut = &clone
+	}
+	if len(handler.Rules) > 0 {
+		rules := make([]HandlerRuleEntry, 0, len(handler.Rules))
+		for _, rule := range handler.Rules {
+			rule.Emits = b.externalizeEventEmission(nodeID, rule.Emits)
+			rules = append(rules, rule)
+		}
+		handler.Rules = rules
+	}
+	if len(handler.OnComplete) > 0 {
+		rules := make([]HandlerRuleEntry, 0, len(handler.OnComplete))
+		for _, rule := range handler.OnComplete {
+			rule.Emits = b.externalizeEventEmission(nodeID, rule.Emits)
+			rules = append(rules, rule)
+		}
+		handler.OnComplete = rules
+	}
+	if handler.Accumulate != nil {
+		clone := *handler.Accumulate
+		if len(clone.OnComplete) > 0 {
+			rules := make([]HandlerRuleEntry, 0, len(clone.OnComplete))
+			for _, rule := range clone.OnComplete {
+				rule.Emits = b.externalizeEventEmission(nodeID, rule.Emits)
+				rules = append(rules, rule)
+			}
+			clone.OnComplete = rules
+		}
+		if clone.OnTimeout != nil {
+			onTimeout := *clone.OnTimeout
+			onTimeout.Emits = b.externalizeEventEmission(nodeID, onTimeout.Emits)
+			clone.OnTimeout = &onTimeout
+		}
+		handler.Accumulate = &clone
+	}
+	return handler
+}
+
+func (b *WorkflowContractBundle) externalizeEventEmission(nodeID string, emission EventEmission) EventEmission {
+	values := emission.Values()
+	if len(values) == 0 {
+		return EventEmission{}
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, b.externalizeNodeEventType(nodeID, value))
+	}
+	if len(out) == 1 {
+		return EventEmission{Single: out[0]}
+	}
+	return EventEmission{Many: out}
+}
+
+func (b *WorkflowContractBundle) nodeFlowID(nodeID string) string {
+	if b == nil {
+		return ""
+	}
+	source, ok := b.NodeContractSource(nodeID)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(source.FlowID)
+}
+
+func (b *WorkflowContractBundle) flowHasLocalEvent(flowID, eventType string) bool {
+	if b == nil {
+		return false
+	}
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if flowID == "" || eventType == "" {
+		return false
+	}
+	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
+		if _, ok := view.Events[eventType]; ok {
+			return true
+		}
+		for _, candidate := range view.Schema.Pins.Inputs.Events {
+			if strings.TrimSpace(candidate) == eventType {
+				return true
+			}
+		}
+		for _, candidate := range view.Schema.Pins.Outputs.Events {
+			if strings.TrimSpace(candidate) == eventType {
+				return true
+			}
+		}
+		if strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event) == eventType {
+			return true
+		}
+	}
+	return false
 }
 func (b *WorkflowContractBundle) DerivedHandlerTransitions() []HandlerTransitionSemantic {
 	if b == nil {

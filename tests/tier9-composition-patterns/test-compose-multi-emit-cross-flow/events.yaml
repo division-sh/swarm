@@ -5,3 +5,6 @@ task.completed:
 task.logged:
   payload:
     entity_id: string
+tracker/task.record:
+  payload:
+    entity_id: string

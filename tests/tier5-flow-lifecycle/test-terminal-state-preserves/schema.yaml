@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [task.completed, task.updated]
   outputs:
-    events: [task.finished]
+    events: [task.finished, state.updated]

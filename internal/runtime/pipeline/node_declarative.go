@@ -252,6 +252,8 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	entityID := workflowEventEntityID(evt)
+	flowID := workflowNodeFlowID(e.coordinator.SemanticSource(), e.nodeID)
+	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
 	exec := e.executor
 	node := e.node
@@ -274,6 +276,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID(entityID),
 		NodeID:   identity.NormalizeNodeID(e.nodeID),
+		FlowID:   identity.NormalizeFlowID(flowID),
 		Event:    evt,
 		Handler:  handler,
 		State: runtimeengine.StateSnapshot{
@@ -290,8 +293,12 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return &HandlerOutcome{Handled: false}, nil
 	}
+	handled := result.Status != runtimeengine.OutcomeRejected && result.Status != runtimeengine.OutcomeDiscarded
+	if handled {
+		e.coordinator.reconcileWorkflowEventTimers(ctx, entityID, strings.TrimSpace(string(evt.Type)))
+	}
 	return &HandlerOutcome{
-		Handled:         result.Status != runtimeengine.OutcomeRejected && result.Status != runtimeengine.OutcomeDiscarded,
+		Handled:         handled,
 		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
 	}, nil
 }

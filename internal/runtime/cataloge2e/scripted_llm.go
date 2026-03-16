@@ -92,8 +92,10 @@ func (r *scriptedLLMRuntime) ContinueSession(_ context.Context, session *llm.Ses
 	r.mu.Unlock()
 	if !ok {
 		if response, ok = scriptedResponseForMessage(steps, message.Content); !ok {
-			response = llm.Response{
-				Message: llm.Message{Role: "assistant", Content: ""},
+			if response, ok = defaultScriptedResponseForTools(session, message.Content); !ok {
+				response = llm.Response{
+					Message: llm.Message{Role: "assistant", Content: ""},
+				}
 			}
 		}
 	}
@@ -126,6 +128,37 @@ func scriptedResponseForMessage(steps []scriptedAgentFixtureStep, content string
 		}, true
 	}
 	return llm.Response{}, false
+}
+
+func defaultScriptedResponseForTools(session *llm.Session, content string) (llm.Response, bool) {
+	if session == nil {
+		return llm.Response{}, false
+	}
+	eventType, entityID := parseAgentEventMessage(content)
+	if strings.TrimSpace(eventType) == "" {
+		return llm.Response{}, false
+	}
+	emitTools := make([]string, 0, len(session.Tools))
+	for _, tool := range session.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if strings.HasPrefix(name, "emit_") {
+			emitTools = append(emitTools, name)
+		}
+	}
+	if len(emitTools) != 1 {
+		return llm.Response{}, false
+	}
+	args := map[string]any{}
+	if strings.TrimSpace(entityID) != "" {
+		args["entity_id"] = strings.TrimSpace(entityID)
+	}
+	return llm.Response{
+		Message: llm.Message{Role: "assistant", Content: ""},
+		ToolCalls: []llm.ToolCall{{
+			Name:      emitTools[0],
+			Arguments: args,
+		}},
+	}, true
 }
 
 func parseAgentEventMessage(content string) (eventType, entityID string) {

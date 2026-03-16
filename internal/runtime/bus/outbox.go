@@ -109,6 +109,18 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return nil
 	}
+	passthrough, deferred, err := d.bus.runInterceptors(ctx, intent.Event)
+	if err != nil {
+		return err
+	}
+	for _, next := range deferred {
+		if err := d.bus.publishDeferred(ctx, next); err != nil {
+			return err
+		}
+	}
+	if !passthrough {
+		return nil
+	}
 	plan, err := d.bus.buildDeliveryPlan(ctx, intent.Event)
 	if err != nil {
 		return err

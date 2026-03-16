@@ -19,3 +19,22 @@ func TestValidateCatalogExpectedDocument_AllowsUnsupportedNonExecutableExpectati
 		t.Fatal("expected unsupported expectation case to be treated as non-executable")
 	}
 }
+
+func TestValidateCatalogExpectedDocument_RuntimeOnlyCaseIsNonExecutable(t *testing.T) {
+	var expected catalogExpectedDocument
+	expected.Trigger.Event = "task.started"
+	expected.Expected.RuntimeOnly = true
+	expected.Expected.HandlerOutcome = "kill"
+	expected.Expected.ChainDepthExceeded = true
+
+	err := validateCatalogExpectedDocument("tier6-event-loop/test-chain-depth-limit", expected)
+	if err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	if catalogCaseExecutableNowForDir("tier6-event-loop/test-chain-depth-limit", expected) {
+		t.Fatal("expected runtime-only case to be treated as non-executable")
+	}
+	if catalogCaseSimpleHarnessEligible(expected) {
+		t.Fatal("expected runtime-only case to be ineligible for the simple harness")
+	}
+}

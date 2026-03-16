@@ -4,6 +4,6 @@ task.requested:
 task.completed:
   payload:
     entity_id: string
-task.logged:
+task.audited:
   payload:
     entity_id: string

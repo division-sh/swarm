@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [task.record]
   outputs:
-    events: []
+    events: [task.recorded]

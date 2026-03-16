@@ -77,6 +77,63 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	}
 }
 
+func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
+	analysisFlow := &runtimecontracts.FlowContractView{
+		Path:  "analyzer-flow",
+		Paths: runtimecontracts.FlowContractPaths{ID: "analyzer-flow"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"analyzer": {
+				Type:          "generic",
+				Role:          "analyzer",
+				Subscriptions: []string{"analysis.requested"},
+				EmitEvents:    []string{"analysis.done"},
+			},
+		},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{*analysisFlow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"analyzer-flow": analysisFlow,
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"analyzer-flow": {
+				RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
+					Role:         "analyzer",
+					SubscribesTo: []string{"analysis.requested"},
+					Emits:        []string{"analysis.done"},
+				}},
+				Pins: runtimecontracts.FlowPins{
+					Inputs:  runtimecontracts.FlowInputPins{Events: []string{"analysis.requested"}},
+					Outputs: runtimecontracts.FlowOutputPins{Events: []string{"analysis.done"}},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Version: "v-test",
+			FlowAgents: map[string][]runtimecontracts.FlowRequiredAgent{
+				"analyzer-flow": {{
+					Role:         "analyzer",
+					SubscribesTo: []string{"analysis.requested"},
+					Emits:        []string{"analysis.done"},
+				}},
+			},
+			FlowInputs: map[string][]string{
+				"analyzer-flow": {"analysis.requested"},
+			},
+			FlowOutputs: map[string][]string{
+				"analyzer-flow": {"analysis.done"},
+			},
+			FlowPrefix: map[string]string{
+				"analyzer-flow": "analyzer-flow",
+			},
+		},
+	}
+}
+
 func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := NewAgentManager(bus, nil)
@@ -194,5 +251,25 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
 		t.Fatalf("removed pairs = %#v, want [review/inst-1]", bus.removedPairs)
+	}
+}
+
+func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := NewAgentManager(bus, nil)
+	bundle := testStaticFlowBundle()
+
+	if err := am.EnsureStaticFlowRequiredAgents(context.Background(), semanticview.Wrap(bundle)); err != nil {
+		t.Fatalf("EnsureStaticFlowRequiredAgents: %v", err)
+	}
+	cfg, ok := am.GetAgentConfig("analyzer")
+	if !ok {
+		t.Fatal("expected static flow required agent config")
+	}
+	if got := cfg.Mode; got != "analyzer-flow" {
+		t.Fatalf("mode = %q, want analyzer-flow", got)
+	}
+	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
+		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
 	}
 }

@@ -1,7 +1,10 @@
 name: test-compose-accumulate-compute-branch
 version: 1.0.0
 description: >
-  Composition: accumulate with dedup → compute weighted_average →
-  on_complete with 3 conditional branches based on computed result.
+  Composition: accumulate score via data_accumulation →
+  on_complete with 3 conditional branches based on score value.
 platform_version: ">=1.1.0"
 flows: []
+entity_schema:
+  core:
+    score: integer

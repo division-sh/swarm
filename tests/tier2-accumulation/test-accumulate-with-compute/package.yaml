@@ -3,3 +3,8 @@ version: 1.0.0
 description: Accumulate all items then compute weighted_average via on_complete.
 platform_version: ">=1.1.0"
 flows: []
+entity_schema:
+  core:
+    expected_count: integer
+    composite: numeric(5,2)
+    received_items: jsonb

@@ -10,4 +10,4 @@ trigger:
 expected:
   handler_outcome: success
   entity_state: cancelled
-  emitted_events: []
+  emitted_events: [timer.cancelled]

@@ -134,6 +134,31 @@ func findAccumulationTimeoutHandler(source interface {
 	return nodeID, handler, true
 }
 
+func findAccumulationTimeoutHandlerForNode(source interface {
+	NodeEntries() map[string]runtimecontracts.SystemNodeContract
+	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
+}, nodeID, trigger string) (runtimecontracts.SystemNodeEventHandler, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	trigger = strings.TrimSpace(trigger)
+	if source == nil || nodeID == "" || trigger == "" {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	node, ok := source.NodeEntries()[nodeID]
+	if !ok || !containsString(node.SubscribesTo, trigger) {
+		return runtimecontracts.SystemNodeEventHandler{}, false
+	}
+	for _, candidate := range source.NodeEventHandlers(nodeID) {
+		if candidate.Accumulate == nil {
+			continue
+		}
+		if candidate.Accumulate.Completion.Mode != runtimecontracts.AccumulateModeTimeout && candidate.Accumulate.OnTimeout == nil {
+			continue
+		}
+		return candidate, true
+	}
+	return runtimecontracts.SystemNodeEventHandler{}, false
+}
+
 func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 	ctx context.Context,
 	nodeID string,
@@ -145,16 +170,33 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 	if nodeID == "" {
 		return contractHandlerExecutionResult{}, nil
 	}
+	if terminalStateHandlerRejected(pc, triggerCtx.State, handler) {
+		outcome := &handlerExecutionOutcome{
+			Status:          HandlerOutcomeRejected,
+			GuardsEvaluated: []string{"not_in_terminal_state"},
+		}
+		plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), handler)
+		return contractHandlerExecutionResult{
+			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), outcome),
+			Plan:            plan,
+			Outcome:         outcome,
+			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
+			Handled:         true,
+		}, nil
+	}
 	entityID := strings.TrimSpace(firstNonEmptyString(
 		workflowEventEntityID(triggerCtx.Event),
 		triggerCtx.State.EntityID,
 	))
+	source := pc.SemanticSource()
+	flowID := workflowNodeFlowID(source, nodeID)
 	var (
 		parentEventCollector *[]events.Event
 		collectLocally       bool
 		collectedIntents     *[]runtimeengine.EmitIntent
 	)
 	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
+	ctx = withPipelineFlowScope(ctx, flowID)
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
 		deps.Outbox = noOpEngineOutbox{}
@@ -166,6 +208,7 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID: identity.NormalizeEntityID(entityID),
 		NodeID:   identity.NormalizeNodeID(nodeID),
+		FlowID:   identity.NormalizeFlowID(flowID),
 		Event:    triggerCtx.Event,
 		Handler:  handler,
 		Preview:  preview,
@@ -250,6 +293,32 @@ func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerO
 	default:
 		return HandlerOutcomeCompleted
 	}
+}
+
+func terminalStateHandlerRejected(pc *FactoryPipelineCoordinator, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
+	if pc == nil {
+		return false
+	}
+	currentState := strings.TrimSpace(string(state.Stage))
+	if currentState == "" {
+		return false
+	}
+	workflow := pc.WorkflowDefinition()
+	if workflow != nil {
+		if stage, ok := workflow.Stage(state.Stage); ok {
+			return stage.Terminal
+		}
+	}
+	source := pc.SemanticSource()
+	if source == nil {
+		return false
+	}
+	for _, terminal := range source.WorkflowTerminalStages() {
+		if strings.EqualFold(strings.TrimSpace(terminal), currentState) {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowTransitionFromHandlerOutcome(state WorkflowState, nodeID, eventType string, outcome *handlerExecutionOutcome) WorkflowTransition {

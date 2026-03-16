@@ -74,7 +74,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 
 	for _, key := range agentKeys {
 		entry := scope.Agents[key]
-		cfg, err := buildFlowAgentConfig(req.ContractBundle, templateID, instanceID, entityID, key, entry, vars, localEvents, req.Config)
+		cfg, err := buildFlowAgentConfig(req.ContractBundle, templateID, instanceID, entityID, flowPath, key, entry, vars, localEvents, req.Config)
 		if err != nil {
 			return err
 		}
@@ -132,6 +132,27 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	return nil
 }
 
+func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, source semanticview.Source) error {
+	if am == nil || source == nil {
+		return nil
+	}
+	for _, scope := range source.ProjectScopes() {
+		if err := am.ensureStaticRequiredAgentsForScope(ctx, source, "", "", scope.Agents, source.RequiredAgents()); err != nil {
+			return err
+		}
+	}
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		if err := am.ensureStaticRequiredAgentsForScope(ctx, source, flowID, strings.Trim(scope.Path, "/"), scope.Agents, source.FlowRequiredAgents(flowID)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, entityID string) error {
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
@@ -168,6 +189,7 @@ func buildFlowAgentConfig(
 	templateID string,
 	instanceID string,
 	entityID string,
+	flowPath string,
 	key string,
 	entry runtimecontracts.AgentRegistryEntry,
 	vars map[string]string,
@@ -205,6 +227,9 @@ func buildFlowAgentConfig(
 	if workspaceClass := strings.TrimSpace(entry.WorkspaceClass); workspaceClass != "" {
 		cfgPayload["workspace_class"] = workspaceClass
 	}
+	if flowPath != "" {
+		cfgPayload["flow_path"] = strings.Trim(flowPath, "/")
+	}
 	if managerFallback := strings.TrimSpace(entry.ManagerFallback); managerFallback != "" {
 		cfgPayload["manager_fallback"] = managerFallback
 	}
@@ -234,6 +259,162 @@ func buildFlowAgentConfig(
 		Subscriptions: rendered,
 		Config:        rawConfig,
 	}, nil
+}
+
+func (am *AgentManager) ensureStaticRequiredAgentsForScope(
+	ctx context.Context,
+	source semanticview.Source,
+	flowID string,
+	flowPath string,
+	agents map[string]runtimecontracts.AgentRegistryEntry,
+	required []runtimecontracts.FlowRequiredAgent,
+) error {
+	flowID = strings.TrimSpace(flowID)
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+	if len(required) == 0 || len(agents) == 0 {
+		return nil
+	}
+	localEvents := staticFlowLocalEventSet(agents)
+	for _, requiredAgent := range required {
+		logicalID, entry, ok := resolveRequiredAgentEntry(agents, requiredAgent)
+		if !ok {
+			return fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
+		}
+		cfg, err := buildStaticFlowAgentConfig(source, flowID, flowPath, logicalID, entry, localEvents)
+		if err != nil {
+			return err
+		}
+		rec := PersistedAgent{
+			Config:          cfg,
+			Status:          "active",
+			HiredBy:         "static-flow-required-agent",
+			TemplateVersion: "",
+		}
+		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !strings.Contains(err.Error(), "already exists") {
+			return err
+		}
+	}
+	return nil
+}
+
+func buildStaticFlowAgentConfig(
+	source semanticview.Source,
+	flowID string,
+	flowPath string,
+	logicalID string,
+	entry runtimecontracts.AgentRegistryEntry,
+	localEvents map[string]struct{},
+) (models.AgentConfig, error) {
+	vars := map[string]string{
+		"flow_id":   strings.TrimSpace(flowID),
+		"flow_path": strings.Trim(strings.TrimSpace(flowPath), "/"),
+	}
+	agentID := strings.TrimSpace(renderFlowTemplate(strings.TrimSpace(entry.ID), vars))
+	if agentID == "" {
+		agentID = strings.TrimSpace(logicalID)
+	}
+	if agentID == "" {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s resolved empty id", logicalID)
+	}
+	subscriptions := make([]string, 0, len(entry.Subscriptions)+len(entry.SubscriptionsBootstrap)+len(entry.SubscribesTo))
+	subscriptions = append(subscriptions, entry.Subscriptions...)
+	subscriptions = append(subscriptions, entry.SubscriptionsBootstrap...)
+	subscriptions = append(subscriptions, entry.SubscribesTo...)
+	rendered := make([]string, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		subscription = strings.TrimSpace(renderFlowTemplate(subscription, vars))
+		if subscription == "" {
+			continue
+		}
+		if _, ok := localEvents[subscription]; ok && flowPath != "" {
+			subscription = strings.Trim(flowPath+"/"+subscription, "/")
+		}
+		rendered = append(rendered, subscription)
+	}
+	rendered = dedupeStrings(rendered)
+
+	cfgPayload := map[string]any{}
+	if flowPath != "" {
+		cfgPayload["flow_path"] = flowPath
+	}
+	if workspaceClass := strings.TrimSpace(entry.WorkspaceClass); workspaceClass != "" {
+		cfgPayload["workspace_class"] = workspaceClass
+	}
+	if managerFallback := strings.TrimSpace(entry.ManagerFallback); managerFallback != "" {
+		cfgPayload["manager_fallback"] = managerFallback
+	}
+	if modelTier := strings.TrimSpace(entry.ModelTier); modelTier != "" {
+		cfgPayload["model_tier"] = modelTier
+	}
+	if conversationMode := strings.TrimSpace(entry.ConversationMode); conversationMode != "" {
+		cfgPayload["conversation_mode"] = conversationMode
+	}
+	if _, ok := cfgPayload["system_prompt"]; !ok {
+		role := strings.TrimSpace(entry.Role)
+		if role == "" {
+			role = strings.TrimSpace(logicalID)
+		}
+		if role == "" {
+			role = "agent"
+		}
+		if flowID != "" {
+			cfgPayload["system_prompt"] = fmt.Sprintf("Handle %s events for static flow %s.", role, flowID)
+		} else {
+			cfgPayload["system_prompt"] = fmt.Sprintf("Handle %s events.", role)
+		}
+	}
+	rawConfig, err := json.Marshal(cfgPayload)
+	if err != nil {
+		return models.AgentConfig{}, err
+	}
+	permissions, err := runtimetools.ResolveAgentPermissions(source, flowID, entry)
+	if err != nil {
+		return models.AgentConfig{}, fmt.Errorf("static flow agent %s permissions: %w", logicalID, err)
+	}
+	role := strings.TrimSpace(entry.Role)
+	if role == "" {
+		role = strings.TrimSpace(logicalID)
+	}
+	return models.AgentConfig{
+		ID:            agentID,
+		Type:          strings.TrimSpace(entry.Type),
+		Role:          role,
+		Mode:          flowID,
+		LLMBackend:    "",
+		Permissions:   permissions,
+		EntityID:      "",
+		Subscriptions: rendered,
+		Config:        rawConfig,
+	}, nil
+}
+
+func resolveRequiredAgentEntry(agents map[string]runtimecontracts.AgentRegistryEntry, required runtimecontracts.FlowRequiredAgent) (string, runtimecontracts.AgentRegistryEntry, bool) {
+	role := strings.TrimSpace(required.Role)
+	for logicalID, entry := range agents {
+		if strings.EqualFold(strings.TrimSpace(logicalID), role) || strings.EqualFold(strings.TrimSpace(entry.Role), role) || strings.EqualFold(strings.TrimSpace(entry.ID), role) {
+			return strings.TrimSpace(logicalID), entry, true
+		}
+	}
+	return "", runtimecontracts.AgentRegistryEntry{}, false
+}
+
+func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEntry) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, entry := range agents {
+		for _, eventType := range append(append([]string{}, entry.Subscriptions...), append(entry.SubscriptionsBootstrap, entry.SubscribesTo...)...) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" && !strings.Contains(eventType, "/") {
+				out[eventType] = struct{}{}
+			}
+		}
+		for _, eventType := range entry.EmitEvents {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" && !strings.Contains(eventType, "/") {
+				out[eventType] = struct{}{}
+			}
+		}
+	}
+	return out
 }
 
 func flowActivationVars(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
