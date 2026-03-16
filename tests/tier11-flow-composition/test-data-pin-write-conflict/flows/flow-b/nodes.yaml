@@ -6,7 +6,9 @@ b-node:
   event_handlers:
     b.start:
       data_accumulation:
-        shared_field:
-          source: flow-b
+        writes:
+          - source_field: shared_field
+            value:
+              source: flow-b
       advances_to: done
       emits: b.done

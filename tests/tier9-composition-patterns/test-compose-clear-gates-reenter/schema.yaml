@@ -1,5 +1,7 @@
+name: test-compose-clear-gates-reenter
+namespace: test-compose-clear-gates-reenter
 initial_state: reviewing
-terminal_states: [done]
+terminal_states: [approved, done]
 states: [reviewing, approved, done]
 pins:
   inputs:

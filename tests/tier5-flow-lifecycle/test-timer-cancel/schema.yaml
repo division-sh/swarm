@@ -1,3 +1,5 @@
+name: test-timer-cancel
+namespace: test-timer-cancel
 initial_state: waiting
 terminal_states: [done]
 states: [waiting, cancelled, done]
@@ -5,4 +7,4 @@ pins:
   inputs:
     events: [timer.scheduled, timer.cancel_requested, timer.check]
   outputs:
-    events: [timer.check]
+    events: [timer.check, timer.cancelled]

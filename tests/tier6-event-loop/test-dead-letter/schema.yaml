@@ -1,3 +1,5 @@
+name: test-dead-letter
+namespace: test-dead-letter
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

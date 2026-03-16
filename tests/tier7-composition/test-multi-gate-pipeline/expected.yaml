@@ -17,4 +17,7 @@ expected:
     g2: true
     g3: true
   emitted_events:
+    - gate.set
+    - gate.set
+    - gate.set
     - approval.granted

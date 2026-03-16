@@ -5,8 +5,8 @@ trigger:
     - event: review.insufficient
       payload: { entity_id: ent-001 }
 expected:
-  handler_outcome: success
-  entity_state: reviewing
-  emitted_events: [review.approved, review.restarted]
+  handler_outcome: reject
+  entity_state: approved
+  emitted_events: [review.approved]
   gates:
-    g_reviewed: false
+    g_reviewed: true

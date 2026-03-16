@@ -1,4 +1,5 @@
 name: worker
+namespace: worker
 initial_state: idle
 terminal_states: [complete]
 states: [idle, working, complete]

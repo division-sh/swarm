@@ -19,6 +19,14 @@ New `platform_tables` section in platform-spec.yaml declares the full DDL for al
 
 Legacy `workflow_state` section removed (superseded by `entity_state` table).
 
+### Catalog fixture spec gaps resolved (3 areas)
+
+**Loader-derived defaults** — schema.name derived from directory, schema.namespace from flow path, agent id from YAML map key, agent emit_events defaults to []. All optional in YAML.
+
+**data_accumulation canonical shape** — one shape: writes is list of strings or {source_field, target_field} objects. source_event optional (defaults to trigger). Legacy shapes (bare string, dict) accepted but deprecated.
+
+**Terminal state absorbing semantics** — terminal states are absorbing, no reopen mechanism. Backward transitions allowed for non-terminal states only. Reopen pattern: create new entity with copied data.
+
 ### Phase 8 final decisions (6)
 
 **workflow_instances replacement** — split across entity_state (current state, gates, fields, accumulator), flow_instances (template, config, version), timers (timer state), events (transition history). state_change_history deleted (reconstructible from event store). credentials deleted from platform (product-owned secret).

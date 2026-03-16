@@ -5,6 +5,6 @@ trigger:
     score: 0
 
 expected:
-  handler_outcome: reject
+  handler_outcome: discard
   entity_state: pending
   emitted_events: []

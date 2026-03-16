@@ -1,8 +1,10 @@
+name: test-wildcard-cross-flow
+namespace: test-wildcard-cross-flow
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: ["*/job.*"]
+    events: [flow-alpha/trigger.alpha, "*/job.*"]
   outputs:
     events: [audit.logged]

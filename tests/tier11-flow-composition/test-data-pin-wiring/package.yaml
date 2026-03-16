@@ -6,3 +6,7 @@ flows:
 - id: processor
   flow: processor
   mode: static
+entity_schema:
+  core:
+    task_config: json
+    result: json

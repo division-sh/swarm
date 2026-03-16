@@ -18,12 +18,16 @@ dispatcher:
         - name: sequential
           condition: "payload.mode == 'sequential'"
           data_accumulation:
-            dispatch_count: 1
+            writes:
+              - source_field: dispatch_count
+                value: 1
           advances_to: dispatched
           emits: batch.dispatched
         - name: fallback
           condition: "else"
           data_accumulation:
-            dispatch_count: 0
+            writes:
+              - source_field: dispatch_count
+                value: 0
           advances_to: dispatched
           emits: batch.dispatched

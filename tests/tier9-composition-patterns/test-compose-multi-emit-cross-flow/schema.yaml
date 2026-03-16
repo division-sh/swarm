@@ -1,3 +1,5 @@
+name: test-compose-multi-emit-cross-flow
+namespace: test-compose-multi-emit-cross-flow
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

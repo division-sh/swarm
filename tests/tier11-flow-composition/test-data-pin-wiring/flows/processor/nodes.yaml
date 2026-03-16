@@ -8,7 +8,9 @@ processor-node:
       guard:
         entity.task_config: { exists: true }
       data_accumulation:
-        result:
-          status: processed
+        writes:
+          - source_field: result
+            value:
+              status: processed
       advances_to: finished
       emits: process.done

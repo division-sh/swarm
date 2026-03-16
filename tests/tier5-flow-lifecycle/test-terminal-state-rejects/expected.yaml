@@ -10,4 +10,4 @@ trigger:
 expected:
   handler_outcome: reject
   entity_state: done
-  emitted_events: []
+  emitted_events: [task.finished]

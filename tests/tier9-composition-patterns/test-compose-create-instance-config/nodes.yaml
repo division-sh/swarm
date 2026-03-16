@@ -5,13 +5,14 @@ spawner:
   produces: [spawn.done]
   event_handlers:
     spawn.requested:
-      action:
-        type: create_flow_instance
-        flow_template: worker
-        instance_id: "{{payload.instance_id}}"
-        config_from:
-          name: "{{payload.name}}"
-          priority: "{{payload.priority}}"
-          owner: "{{payload.owner}}"
+      action: create_flow_instance
+      template: worker
+      instance_id_from: payload.instance_id
+      config_from:
+        name: payload.name
+        priority: payload.priority
+        owner: payload.owner
       advances_to: spawned
       emits: spawn.done
+  permissions:
+  - create_flow_instance

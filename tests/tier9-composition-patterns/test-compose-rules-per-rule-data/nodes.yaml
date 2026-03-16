@@ -9,22 +9,32 @@ resolver:
         - name: keep_first
           condition: "payload.strategy == 'keep_first'"
           data_accumulation:
-            resolved_value: payload.value_a
-            resolution_method: "first"
+            writes:
+              - source_field: value_a
+                target_field: resolved_value
+              - source_field: resolution_method
+                value: "first"
           advances_to: resolved
           emits: conflict.resolved
         - name: keep_best
           condition: "payload.strategy == 'keep_best'"
           data_accumulation:
-            resolved_value: payload.value_b
-            resolution_method: "best"
+            writes:
+              - source_field: value_b
+                target_field: resolved_value
+              - source_field: resolution_method
+                value: "best"
           advances_to: resolved
           emits: conflict.resolved
         - name: merge
           condition: "payload.strategy == 'merge'"
           data_accumulation:
-            resolved_value_a: payload.value_a
-            resolved_value_b: payload.value_b
-            resolution_method: "merged"
+            writes:
+              - source_field: value_a
+                target_field: resolved_value_a
+              - source_field: value_b
+                target_field: resolved_value_b
+              - source_field: resolution_method
+                value: "merged"
           advances_to: resolved
           emits: conflict.resolved

@@ -1,8 +1,10 @@
+name: test-cross-flow-subscription
+namespace: test-cross-flow-subscription
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: []
+    events: [flow-b/order.submitted]
   outputs:
-    events: []
+    events: [flow-a/invoice.created]

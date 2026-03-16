@@ -1,3 +1,5 @@
+name: test-dual-delivery
+namespace: test-dual-delivery
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

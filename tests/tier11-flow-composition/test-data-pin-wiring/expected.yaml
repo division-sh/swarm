@@ -9,7 +9,7 @@ expected:
   handler_outcome: success
   entity_state: done
   emitted_events:
-    - process.done
+    - processor/process.done
     - job.complete
   entity_fields:
     task_config:

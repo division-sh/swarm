@@ -6,7 +6,9 @@ scorer:
   event_handlers:
     score.submitted:
       data_accumulation:
-        score: payload.value
+        writes:
+          - source_field: value
+            target_field: score
       on_complete:
         - condition: "entity.score >= 75"
           advances_to: high

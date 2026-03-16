@@ -103,85 +103,17 @@ vocabulary:
     optional_fields:
     - description
 contract_formats:
-- description: A self-contained flow with 3 files
-  files:
-    events.yaml: Event payload schemas. Routing derived from agents + nodes at boot.
-    nodes.yaml: System nodes with event_handlers. State machine derived from advances_to fields.
-    schema.yaml: 'Pin declarations: input/output events, input/output data fields, states, namespace.'
-  name: flow_package
-- description: Flow schema (the datasheet)
-  name: schema_definition
-  optional_fields:
-  - initial_state
-  - terminal_states
-  - states
-  pins_format:
-    inputs:
-      events: list of event names this flow subscribes to (required=true by default)
-      reads: list of entity fields this flow reads
-    outputs:
-      events: list of event names this flow emits
-      writes: list of entity fields this flow writes (no two flows may write same field)
-  required_fields:
-  - name
-  - namespace
-  - pins
-- description: System node with event handlers
-  handler_fields:
-    advances_to: Target state (this IS the state_change)
-    data_accumulation: Entity fields to write from event payload
-    emits: Event to publish
-    guard: Condition to check before advancing (inline)
-    on_complete: Conditional outcomes for accumulation handlers
-    rules: Type-based routing for directive-style handlers
-    sets_gate: Gate flag to set on entity
-  name: node_definition
-  optional_fields:
-  - state_schema
-  - state_table
-  - timers
-  required_fields:
-  - id
-  - execution_type
-  - subscribes_to
-  - produces
-  - event_handlers
-- description: Agent definitions
-  name: agent_registry
-  optional_fields:
-  - tools_tier2
-  - permissions
-  - permissions_bundle
-  - max_turns_per_task
-  required_fields:
-  - id
-  - model_tier
-  - conversation_mode
-  - subscriptions
-  - emit_events
-- description: Event payload schema (payload only — routing derived at boot)
-  format:
-    event_name:
-      payload:
-        field: type
-  name: event_payload
-- description: Flow package.yaml — manifest for any flow (root or nested)
-  flows_format:
-    flow: Flow template directory under flows/
-    id: Instance name (unique within parent)
-    mode: static (one instance at boot) | template (zero at boot, created at runtime by nodes)
-  name: flow_manifest
-  optional_fields:
-  - platform_version
-  - author
-  - description
-  - flows
-  - entity_schema
-  - runtime_contracts
-  - target_contracts
-  required_fields:
-  - name
-  - version
+  loader_defaults:
+    description: Fields that are optional in contract YAML because the loader derives them from context.
+    schema_name: Optional. If omitted, derived from the directory name of the flow package. A flow at flows/scoring/ gets
+      name "scoring" automatically.
+    schema_namespace: Optional. If omitted, derived from the flow path relative to root. A flow at flows/scoring/ gets namespace
+      "scoring". Root flow gets empty namespace.
+    agent_id: 'Optional. If omitted, the YAML map key IS the agent ID. agents.yaml uses map keys as canonical identifiers:
+      {"opco-ceo": {model_tier: sonnet, ...}} means agent_id = "opco-ceo". Explicit id field overrides the map key if present,
+      but this is discouraged.'
+    agent_emit_events: Optional. If omitted, defaults to empty list []. An agent that only observes (subscribes but never
+      emits) may omit emit_events entirely.
 builtin_hooks:
   action_aliases:
     increment_revision_count:
@@ -1062,6 +994,14 @@ engine:
       event_rejection: 'When an event arrives targeting an entity in a terminal state, the platform rejects it before handler
         execution. No guard runs, no handler runs, no state changes. The event is marked as rejected with reason: terminal_entity.
         This is unconditional — no configuration can override it. Terminal means terminal.'
+      absorbing: Terminal states are absorbing by default. Once an entity reaches a terminal state, it cannot leave. All events
+        for that entity are rejected. This is unconditional.
+      no_reopen_mechanism: There is no opt-in mechanism to reopen a terminal entity. If a business process needs to "reopen"
+        a killed/closed entity, the correct pattern is to create a NEW entity (new entity_id) with data copied from the old
+        one. The old entity remains terminal. This preserves audit trail integrity.
+      backward_transitions: Backward transitions (e.g., cto_review → mvp_speccing) are allowed for NON-terminal states. The
+        prohibition is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-researching,
+        and similar patterns are valid.
   accumulation_engine:
     description: The accumulation engine is the platform subsystem that handles the accumulate primitive. It tracks multiple
       event arrivals for the same entity and fires on completion.
@@ -1369,6 +1309,22 @@ system_node_specification:
           for rename mapping) OR objects ({source_field: X, value: V} for literal value)'
         source_event: 'string — which event the payload comes from (default: current event). CANONICAL name — use this, not
           "source".'
+      canonical_shape:
+        description: One canonical shape. Legacy shapes are accepted by the loader but should not be used in new contracts.
+        canonical:
+          format: "data_accumulation:\n  writes:\n    - field_name                          # direct: payload.field_name →\
+            \ entity.field_name\n    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key\n\
+            \      target_field: entity_key\n  source_event: event_name                # optional: defaults to the trigger\
+            \ event"
+          rules:
+          - writes is always a list
+          - each item is either a string (direct name match) or a {source_field, target_field} object (mapped)
+          - source_event is optional — if omitted, the trigger event is the source
+          - the source_event payload must contain all referenced fields (verified at boot)
+        legacy_shapes:
+          description: Accepted by loader for backward compatibility. Do NOT use in new contracts.
+          bare_string: 'data_accumulation: field_name — single field direct write. Convert to writes: [field_name].'
+          writes_as_dict: 'writes: {key: value} — dict form. Convert to writes list.'
     emits:
       field: emits
       type: string or list of strings
@@ -1767,7 +1723,7 @@ platform_tables:
       entity_tables: Generated from entity_schema in the flow contracts loaded for the test. Optional — only if the test uses
         entity fields beyond the JSONB.
     generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
-      entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No ddl-canonical.sql.
+      entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No legacy SQL files.
       No migrations/ directory.
     product_integration_tests: Tests that need Empire-specific entity tables load Empire contracts and generate DDL from entity_schema.
       These tests are product tests, not platform tests.
@@ -1782,7 +1738,7 @@ platform_tables:
         DB, vault sidecar) handles encryption.'
       external_vault: 'For production deployments: use an external secrets manager (HashiCorp Vault, AWS Secrets Manager,
         etc.). flow_instances.config stores a vault reference, not the secret itself.'
-    migration_from_legacy: Code that reads workflow_instances.metadata.credentials should be rewritten to read from flow_instances.config.secrets.
+    migration_from_legacy: Legacy code that read workflow_instances.metadata.credentials must be rewritten to read from flow_instances.config.secrets.
       This is a product-level migration — inbound.go is product code, not platform code. Move it out of generic runtime.
     platform_guarantee: The platform never reads, writes, logs, or indexes credential fields. It treats flow_instances.config
       as opaque JSONB. Products own their secrets.

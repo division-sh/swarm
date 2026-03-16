@@ -5,9 +5,10 @@ orchestrator:
   produces: [spawn.confirmed]
   event_handlers:
     spawn.requested:
-      action:
-        type: create_flow_instance
-        flow_template: worker
-        instance_id: "{{payload.worker_id}}"
+      action: create_flow_instance
+      template: worker
+      instance_id_from: payload.worker_id
       emits: spawn.confirmed
       advances_to: done
+  permissions:
+  - create_flow_instance

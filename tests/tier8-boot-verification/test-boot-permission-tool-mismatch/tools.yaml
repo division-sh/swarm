@@ -1,7 +1,7 @@
 lookup_data:
   description: Looks up external data
   type: custom
-  required_permission: external_api_access
+  permission: external_api_access
   parameters:
     query:
       type: string

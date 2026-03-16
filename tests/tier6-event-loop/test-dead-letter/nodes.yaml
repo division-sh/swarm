@@ -6,7 +6,9 @@ test-node:
   event_handlers:
     task.submitted:
       guard:
-        id: impossible
-        check: "payload.score > 9999"
+        checks:
+          - id: impossible
+            check: "payload.score > 9999"
+        on_fail: discard
       advances_to: done
       emits: task.accepted

@@ -6,9 +6,11 @@ config-writer:
   event_handlers:
     job.start:
       data_accumulation:
-        task_config:
-          mode: "{{payload.mode}}"
-          threshold: "{{payload.threshold}}"
+        writes:
+          - source_field: task_config
+            value:
+              mode: "{{payload.mode}}"
+              threshold: "{{payload.threshold}}"
       advances_to: configured
       emits: processor/process.run
 

@@ -6,7 +6,8 @@ classifier:
   event_handlers:
     eval.submitted:
       data_accumulation:
-        score: payload.score
+        writes:
+          - score
       on_complete:
         - condition: "entity.score >= policy.high_mark"
           advances_to: tier_a

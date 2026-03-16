@@ -44,6 +44,7 @@ var tier8SupportedFixtures = []string{
 	"test-boot-event-no-producer",
 	"test-boot-event-no-schema",
 	"test-boot-handler-field-undefined",
+	"test-boot-missing-pin",
 	"test-boot-on-complete-state-invalid",
 	"test-boot-on-complete-dict",
 	"test-boot-payload-mismatch",
@@ -59,7 +60,6 @@ var tier8SupportedFixtures = []string{
 }
 
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-missing-pin":               {kind: "fixture-issue", reason: "fixture still fails earlier because child/task.result is not declared in the real event catalog"},
 	"test-boot-permission-tool-mismatch":  {kind: "fixture-issue", reason: "fixture still does not isolate PERMISSION-MISMATCH; current boot only surfaces generic producer/consumer/prompt warnings"},
 }
 

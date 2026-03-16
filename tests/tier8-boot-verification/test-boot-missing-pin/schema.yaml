@@ -1,3 +1,5 @@
+name: test-boot-missing-pin
+namespace: test-boot-missing-pin
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

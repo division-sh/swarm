@@ -1,3 +1,5 @@
+name: test-guards-pre-handler-state
+namespace: test-guards-pre-handler-state
 initial_state: active
 terminal_states: [processing]
 states: [active, processing]

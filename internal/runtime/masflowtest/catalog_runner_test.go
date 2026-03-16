@@ -869,8 +869,8 @@ func runEventLoopCatalogCase(
 			existing, _ := result.agentReceived[agent.ID].([]any)
 			result.agentReceived[agent.ID] = append(existing, ev.Event)
 			for _, produced := range catalogAgentProduces(agent) {
+				allEmitted = append(allEmitted, produced)
 				if len(catalogResolveAllHandlers(nodes, produced)) == 0 && len(catalogResolveAgents(agents, produced)) == 0 {
-					allEmitted = append(allEmitted, produced)
 					continue
 				}
 				nextDepth := ev.ChainDepth + 1
@@ -1443,6 +1443,9 @@ func catalogBootScopeLabel(scope catalogBootScope) string {
 }
 
 func catalogToolRequiredPermission(tool string, spec map[string]any) string {
+	if permission := strings.TrimSpace(catalogBootText(spec["permission"])); permission != "" {
+		return permission
+	}
 	if permission := strings.TrimSpace(catalogBootText(spec["required_permission"])); permission != "" {
 		return permission
 	}
@@ -2735,7 +2738,6 @@ func catalogNodeScope(node catalogNodeContract) string {
 
 func catalogApplyTerminalEventPolicy(result catalogRunResult, state, event string) catalogRunResult {
 	result.entityState = state
-	result.emittedEvents = nil
 	result.handlerOutcome = "reject"
 	return result
 }

@@ -1,3 +1,5 @@
+name: test-chain-depth-limit
+namespace: test-chain-depth-limit
 initial_state: pending
 terminal_states: [done]
 states: [pending, processing, done]

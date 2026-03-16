@@ -6,8 +6,9 @@ evaluator:
   event_handlers:
     score.final:
       data_accumulation:
-        main_score: payload.main_score
-        secondary_score: payload.secondary_score
+        writes:
+          - main_score
+          - secondary_score
       on_complete:
         - condition: "entity.main_score >= policy.high_mark AND entity.secondary_score >= policy.hard_floor"
           advances_to: promoted

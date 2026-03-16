@@ -1,4 +1,5 @@
 name: flow-beta
+namespace: flow-beta
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

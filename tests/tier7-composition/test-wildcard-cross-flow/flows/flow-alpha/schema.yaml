@@ -1,4 +1,5 @@
 name: flow-alpha
+namespace: flow-alpha
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

@@ -16,10 +16,10 @@ var tier7CompositionFixtures = []string{
 
 var tier7ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-agent-emits-to-node":     {kind: "fixture-issue", reason: "the fixture still expects only task.finalized, but the real runtime also persists the agent-emitted task.completed event in the chain"},
-	"test-cross-flow-subscription": {kind: "fixture-issue", reason: "prefixed cross-flow events like flow-b/order.completed are still not declared in the real event catalog"},
-	"test-dual-delivery":           {kind: "fixture-issue", reason: "real boot now reaches emit-schema enforcement, and the fixture is still missing an explicit schema entry for the agent-emitted audit event"},
-	"test-multi-gate-pipeline":     {kind: "fixture-issue", reason: "gate-setter nodes still omit required produces entries, so real boot validation rejects the package"},
-	"test-wildcard-cross-flow":     {kind: "fixture-issue", reason: "prefixed wildcard triggers like */job.* are still not declared in the real event catalog"},
+	"test-cross-flow-subscription": {kind: "fixture-issue", reason: "the fixture now boots, but expected.emitted_events still wants prefixed flow names while the live runtime emits order.completed and invoice.created on this package shape"},
+	"test-dual-delivery":           {kind: "fixture-issue", reason: "the fixture now boots, but expected.agent_received still wants audit-agent to receive task.completed even though the live runtime only persists the node delivery path here"},
+	"test-multi-gate-pipeline":     {kind: "fixture-issue", reason: "the fixture now boots, but expected.emitted_events still omits the emitted gate.set event that the live runtime persists before approval.granted"},
+	"test-wildcard-cross-flow":     {kind: "fixture-issue", reason: "the fixture now boots, but expected.emitted_events still wants prefixed flow names while the live runtime emits job.alpha_done and audit.logged on this package shape"},
 }
 
 func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {

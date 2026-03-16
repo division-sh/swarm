@@ -1,3 +1,5 @@
+name: test-dynamic-flow-instance
+namespace: test-dynamic-flow-instance
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

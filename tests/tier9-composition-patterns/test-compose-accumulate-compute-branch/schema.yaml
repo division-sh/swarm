@@ -1,3 +1,5 @@
+name: test-compose-accumulate-compute-branch
+namespace: test-compose-accumulate-compute-branch
 initial_state: collecting
 terminal_states: [high, mid, low]
 states: [collecting, high, mid, low]

@@ -113,3 +113,32 @@ func TestCatalogRunner_BootPermissionMismatchUsesToolRequiredPermission(t *testi
 		t.Fatalf("error category = %q, want %q", got, want)
 	}
 }
+
+func TestCatalogRunner_TerminalFollowUpPreservesPriorEmits(t *testing.T) {
+	dir := filepath.Join(repoRootFromMASTest(t), "tests", "tier5-flow-lifecycle", "test-terminal-state-preserves")
+	result, expected := runSimpleCatalogCase(t, dir)
+	if got, want := result.handlerOutcome, expected.Expected.HandlerOutcome; got != want {
+		t.Fatalf("handler outcome = %q, want %q", got, want)
+	}
+	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
+		t.Fatalf("emitted events mismatch (%s)", diff)
+	}
+}
+
+func TestCatalogRunner_AgentEmitsRecordedEvenWhenConsumed(t *testing.T) {
+	dir := filepath.Join(repoRootFromMASTest(t), "tests", "tier7-composition", "test-agent-emits-to-node")
+	result, expected := runSimpleCatalogCase(t, dir)
+	if got, want := result.handlerOutcome, expected.Expected.HandlerOutcome; got != want {
+		t.Fatalf("handler outcome = %q, want %q", got, want)
+	}
+	if diff := diffStringSet(normalizeSorted(result.emittedEvents), normalizeSorted(expected.Expected.EmittedEvents)); diff != "" {
+		t.Fatalf("emitted events mismatch (%s)", diff)
+	}
+}
+
+func TestCatalogToolRequiredPermission_AcceptsPermissionAlias(t *testing.T) {
+	spec := map[string]any{"permission": "external_api_access"}
+	if got, want := catalogToolRequiredPermission("lookup_data", spec), "external_api_access"; got != want {
+		t.Fatalf("required permission = %q, want %q", got, want)
+	}
+}

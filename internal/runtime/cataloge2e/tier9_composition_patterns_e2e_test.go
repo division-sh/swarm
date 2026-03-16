@@ -24,7 +24,7 @@ var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-compose-clear-gates-reenter":    {kind: "fixture-issue", reason: "the fixture re-enters from terminal state approved without declaring an explicit terminal exit, so the hardened runtime now correctly keeps the entity in approved"},
 	"test-compose-create-instance-config": {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no instance is created"},
 	"test-compose-gate-data-advance-emit": {kind: "fixture-issue", reason: "the fixture now fails real validation because stage_one_result and stage_two_result are written via data_accumulation but still missing from the declared entity_schema"},
-	"test-compose-multi-emit-cross-flow":  {kind: "fixture-issue", reason: "the fixture expects tracker/task.record but still does not declare that prefixed cross-flow event in events.yaml, so only task.logged is emitted on the real runtime path"},
+	"test-compose-multi-emit-cross-flow":  {kind: "fixture-issue", reason: "the fixture now declares tracker/task.record, but expected.emitted_events still wants it even though the live runtime path for this package shape only emits task.logged"},
 }
 
 func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {

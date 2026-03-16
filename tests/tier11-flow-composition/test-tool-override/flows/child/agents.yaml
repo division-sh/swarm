@@ -4,6 +4,5 @@ child-agent:
   tools_tier2:
     - lookup_data
   subscriptions:
-    - child.start
-  emit_events:
     - child.done
+  emit_events: []
