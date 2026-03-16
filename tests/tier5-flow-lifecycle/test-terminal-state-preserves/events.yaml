@@ -8,3 +8,6 @@ task.updated:
 task.finished:
   payload:
     entity_id: string
+state.updated:
+  payload:
+    entity_id: string

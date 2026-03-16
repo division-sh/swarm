@@ -6,3 +6,5 @@ task.finalized:
     entity_id: string
 task.audited:
   description: "Event emitted by audit-agent after auditing a completed task"
+  payload:
+    entity_id: string

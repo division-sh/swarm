@@ -8,3 +8,4 @@ expected:
   entity_state: started
   emitted_events:
     - auto.started
+    - auto.processed

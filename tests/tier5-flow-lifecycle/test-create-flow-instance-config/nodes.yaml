@@ -10,8 +10,8 @@ test-node:
         flow_template: worker-flow
         instance_id: "{{payload.instance_id}}"
         config_from:
-          threshold: "payload.threshold"
-          mode: "payload.mode"
-          limit: "payload.limit"
+          threshold: "{{payload.threshold}}"
+          mode: "{{payload.mode}}"
+          limit: "{{payload.limit}}"
       emits: flow.spawned
       advances_to: spawned

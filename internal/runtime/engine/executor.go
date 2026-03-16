@@ -67,13 +67,15 @@ type Executor struct {
 }
 
 type executionFrame struct {
-	tx      Tx
-	req     ExecutionRequest
-	base    BaseContext
-	state   ExecutionState
-	result  ExecutionResult
-	rule    *runtimecontracts.HandlerRuleEntry
-	payload map[string]any
+	tx                        Tx
+	req                       ExecutionRequest
+	base                      BaseContext
+	state                     ExecutionState
+	result                    ExecutionResult
+	rule                      *runtimecontracts.HandlerRuleEntry
+	payload                   map[string]any
+	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
+	topLevelDataWritesApplied bool
 }
 
 func NewExecutor(deps RuntimeDependencies, evaluator Evaluator) (*Executor, error) {
@@ -218,10 +220,11 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
 	return executionFrame{
-		tx:      tx,
-		req:     req,
-		base:    base,
-		payload: payload,
+		tx:                       tx,
+		req:                      req,
+		base:                     base,
+		payload:                  payload,
+		topLevelDataAccumulation: req.Handler.DataAccumulation,
 		state: ExecutionState{
 			State:       state,
 			Computed:    map[string]any{},
@@ -635,6 +638,7 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 }
 
 func (e *Executor) stepOnComplete(frame *executionFrame) error {
+	e.ensureTopLevelDataWritesApplied(frame)
 	rules := frame.req.Handler.OnComplete
 	if len(rules) == 0 && frame.req.Handler.Accumulate != nil {
 		rules = frame.req.Handler.Accumulate.OnComplete
@@ -646,6 +650,11 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	if rule != nil {
 		frame.rule = rule
 		e.applyRule(frame, rule)
+		if rule.FanOut != nil {
+			if _, err := e.stepFanOut(frame); err != nil {
+				return err
+			}
+		}
 		if rule.Compute != nil {
 			return e.stepCompute(frame)
 		}
@@ -657,6 +666,7 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 	if frame.rule != nil {
 		return nil
 	}
+	e.ensureTopLevelDataWritesApplied(frame)
 	rule, err := e.selectRule(frame, frame.req.Handler.Rules)
 	if err != nil {
 		return err
@@ -664,6 +674,11 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 	if rule != nil {
 		frame.rule = rule
 		e.applyRule(frame, rule)
+		if rule.FanOut != nil {
+			if _, err := e.stepFanOut(frame); err != nil {
+				return err
+			}
+		}
 		if rule.Compute != nil {
 			return e.stepCompute(frame)
 		}
@@ -725,14 +740,14 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 }
 
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
-	spec := frame.req.Handler.DataAccumulation
+	spec, isRuleSpecific := e.selectedDataAccumulation(frame)
+	if !isRuleSpecific && frame.topLevelDataWritesApplied {
+		return nil
+	}
 	if !spec.HasWrites() && strings.TrimSpace(spec.SourceEvent) == "" {
 		return nil
 	}
-	applyDataAccumulationToState(&frame.state.State, frame.payload, spec)
-	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
-	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
-	frame.result.StateMutation.DataAccumulation = spec
+	e.applyDataAccumulation(frame, spec)
 	return nil
 }
 
@@ -1140,6 +1155,35 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if rule.Compute != nil {
 		frame.req.Handler.Compute = rule.Compute
 	}
+	if rule.FanOut != nil {
+		frame.req.Handler.FanOut = rule.FanOut
+	}
+}
+
+func (e *Executor) selectedDataAccumulation(frame *executionFrame) (runtimecontracts.WorkflowDataAccumulation, bool) {
+	if frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "") {
+		return frame.rule.DataAccumulation, true
+	}
+	return frame.topLevelDataAccumulation, false
+}
+
+func (e *Executor) ensureTopLevelDataWritesApplied(frame *executionFrame) {
+	if frame.topLevelDataWritesApplied {
+		return
+	}
+	spec := frame.topLevelDataAccumulation
+	if !spec.HasWrites() && strings.TrimSpace(spec.SourceEvent) == "" {
+		return
+	}
+	e.applyDataAccumulation(frame, spec)
+	frame.topLevelDataWritesApplied = true
+}
+
+func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) {
+	applyDataAccumulationToState(e.currentContext(frame), frame.state, &frame.state.State, spec)
+	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
+	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	frame.result.StateMutation.DataAccumulation = spec
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
@@ -1247,6 +1291,8 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 	frame.req.Handler.AdvancesTo = ""
 	frame.req.Handler.SetsGate = nil
 	frame.req.Handler.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
+	frame.topLevelDataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
+	frame.topLevelDataWritesApplied = false
 	frame.req.Handler.Emits = runtimecontracts.EventEmission{}
 	switch parsed.Action {
 	case GuardFailureReject:

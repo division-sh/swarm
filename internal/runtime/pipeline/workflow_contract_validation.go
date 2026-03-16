@@ -1010,11 +1010,14 @@ func validateWorkflowConditionCEL(expression string) error {
 	if evaluator == nil {
 		return fmt.Errorf("workflow expression evaluator is not initialized")
 	}
-	normalized, _ := normalizeWorkflowExpression(expression, workflowExpressionContext{})
+	normalized, _, err := normalizeWorkflowExpression(expression, workflowExpressionContext{})
+	if err != nil {
+		return err
+	}
 	if normalized == "" {
 		return fmt.Errorf("workflow expression is empty")
 	}
-	_, err := evaluator.program(normalized)
+	_, err = evaluator.program(normalized)
 	return err
 }
 

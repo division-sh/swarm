@@ -3,3 +3,6 @@ item.received:
     entity_id: string
     kind: string
     value: integer
+item.accumulated:
+  payload:
+    entity_id: string

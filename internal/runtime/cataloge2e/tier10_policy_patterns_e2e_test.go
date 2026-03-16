@@ -10,16 +10,14 @@ import (
 )
 
 var tier10PolicyPatternFixtures = []string{
+	"test-policy-capacity-query",
 	"test-policy-counter-escalate",
+	"test-policy-hard-gate-override",
 	"test-policy-multi-guard-partial",
+	"test-policy-threshold-three-way",
 	"test-policy-timeout-elapsed",
 }
-
-var tier10ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-policy-capacity-query":      {kind: "validation-gap", reason: "real boot path does not expose query_entities to CEL guard parsing for this fixture shape"},
-	"test-policy-hard-gate-override":  {kind: "runtime-gap", reason: "real runtime leaves the entity in scoring and does not apply the expected on_complete branch transition"},
-	"test-policy-threshold-three-way": {kind: "runtime-gap", reason: "real runtime leaves the entity in evaluating and does not apply the expected on_complete threshold branch"},
-}
+var tier10ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier10PolicyPatternCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

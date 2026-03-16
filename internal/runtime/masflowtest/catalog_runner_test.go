@@ -1352,14 +1352,14 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				if tool == "" {
 					continue
 				}
-				if tool == "create_flow_instance" {
-					if !catalogSetHas(catalogBootStringSet(agent["permissions"]), tool) {
-						issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PERMISSION-MISMATCH", Message: fmt.Sprintf("%s/%s: tool '%s' missing matching permission", scopeLabel, agentID, tool)})
-					}
+				toolSpec := catalogMap(bundle.AllTools[tool])
+				if len(bundle.AllTools) == 0 || len(toolSpec) == 0 {
+					issues = append(issues, catalogBootIssue{Severity: "error", Category: "TOOL-MISSING", Message: fmt.Sprintf("%s/%s: tool '%s' not in any tools.yaml", scopeLabel, agentID, tool)})
 					continue
 				}
-				if len(bundle.AllTools) == 0 || len(catalogMap(bundle.AllTools[tool])) == 0 {
-					issues = append(issues, catalogBootIssue{Severity: "error", Category: "TOOL-MISSING", Message: fmt.Sprintf("%s/%s: tool '%s' not in any tools.yaml", scopeLabel, agentID, tool)})
+				requiredPermission := catalogToolRequiredPermission(tool, toolSpec)
+				if requiredPermission != "" && !catalogSetHas(catalogBootStringSet(agent["permissions"]), requiredPermission) {
+					issues = append(issues, catalogBootIssue{Severity: "warning", Category: "PERMISSION-MISMATCH", Message: fmt.Sprintf("%s/%s: tool '%s' missing permission '%s'", scopeLabel, agentID, tool, requiredPermission)})
 				}
 			}
 			promptPath := filepath.Join(scope.Dir, "prompts", agentID+".md")
@@ -1439,6 +1439,16 @@ func catalogBootScopeLabel(scope catalogBootScope) string {
 		return "root"
 	}
 	return strings.TrimSpace(scope.Name)
+}
+
+func catalogToolRequiredPermission(tool string, spec map[string]any) string {
+	if permission := strings.TrimSpace(catalogBootText(spec["required_permission"])); permission != "" {
+		return permission
+	}
+	if tool == "create_flow_instance" {
+		return tool
+	}
+	return ""
 }
 
 func catalogMap(value any) map[string]any {

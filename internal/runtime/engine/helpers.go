@@ -224,8 +224,8 @@ func normalizeStateField(field string) string {
 	}
 }
 
-func applyDataAccumulationToState(state *StateSnapshot, payload map[string]any, spec runtimecontracts.WorkflowDataAccumulation) {
-	if state == nil || len(spec.Writes) == 0 {
+func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapshot *StateSnapshot, spec runtimecontracts.WorkflowDataAccumulation) {
+	if snapshot == nil || len(spec.Writes) == 0 {
 		return
 	}
 	for _, write := range spec.Writes {
@@ -234,27 +234,23 @@ func applyDataAccumulationToState(state *StateSnapshot, payload map[string]any, 
 			continue
 		}
 		if write.HasLiteralValue() {
-			state.SetMetadata(target, write.Value.Literal)
+			snapshot.SetMetadata(target, write.Value.Literal)
 			continue
 		}
 		source := strings.TrimSpace(write.Source())
 		if source == "" {
 			continue
 		}
-		if write.SourcePath.HasExplicitRoot() && write.SourcePath.Root == paths.RootPayload {
-			if value, ok := lookupParsedPath(payload, write.SourcePath); ok {
-				state.SetMetadata(target, value)
-				continue
-			}
+		if value, ok := resolveContractPath(base, state, write.SourcePath, source); ok {
+			snapshot.SetMetadata(target, value)
+			continue
 		}
-		if value, ok := lookupPath(payload, source); ok {
-			state.SetMetadata(target, value)
-		} else if value, ok := payload[source]; ok {
-			state.SetMetadata(target, value)
+		if strings.TrimSpace(write.Value.CEL) != "" {
+			snapshot.SetMetadata(target, write.Value.CEL)
 		}
 	}
 	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
-		state.SetMetadata("last_data_accumulation_source", sourceEvent)
+		snapshot.SetMetadata("last_data_accumulation_source", sourceEvent)
 	}
 }
 

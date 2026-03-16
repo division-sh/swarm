@@ -7,3 +7,6 @@ timer.cancel_requested:
 timer.check:
   payload:
     entity_id: string
+timer.cancelled:
+  payload:
+    entity_id: string

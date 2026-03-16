@@ -1,3 +1,8 @@
-create_flow_instance:
-  description: Creates a new flow instance from a template
-  type: platform
+lookup_data:
+  description: Looks up external data
+  type: custom
+  required_permission: external_api_access
+  parameters:
+    query:
+      type: string
+      description: Search query

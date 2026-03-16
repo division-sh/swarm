@@ -7,3 +7,6 @@ task.reopen_requested:
 task.finished:
   payload:
     entity_id: string
+state.reopened:
+  payload:
+    entity_id: string

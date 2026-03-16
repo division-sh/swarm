@@ -13,3 +13,6 @@ approval.requested:
 approval.granted:
   payload:
     entity_id: string
+gate.set:
+  payload:
+    entity_id: string

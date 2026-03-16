@@ -97,3 +97,81 @@ value: premium
 		t.Fatalf("Value.CEL = %q", got)
 	}
 }
+
+func TestWorkflowDataAccumulationDecode_PreservesShorthandWrites(t *testing.T) {
+	var spec WorkflowDataAccumulation
+	if err := yaml.Unmarshal([]byte(`
+stage_one_result: payload.result
+resolution_method: "first"
+dispatch_count:
+  source: fan_out.count
+result:
+  status: processed
+score_expr: "entity.score + 1"
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := len(spec.Writes); got != 5 {
+		t.Fatalf("len(Writes) = %d", got)
+	}
+	if got := spec.Writes[0].Target(); got != "stage_one_result" {
+		t.Fatalf("Writes[0].Target() = %q", got)
+	}
+	if got := spec.Writes[0].Source(); got != "payload.result" {
+		t.Fatalf("Writes[0].Source() = %q", got)
+	}
+	if got := spec.Writes[1].Value.Literal; got != "first" {
+		t.Fatalf("Writes[1].Value.Literal = %#v", got)
+	}
+	if got := spec.Writes[2].Source(); got != "fan_out.count" {
+		t.Fatalf("Writes[2].Source() = %q", got)
+	}
+	if status, ok := spec.Writes[3].Value.Literal.(map[string]any)["status"]; !ok || status != "processed" {
+		t.Fatalf("Writes[3].Value.Literal = %#v", spec.Writes[3].Value.Literal)
+	}
+	if got := spec.Writes[4].Value.CEL; got != "entity.score + 1" {
+		t.Fatalf("Writes[4].Value.CEL = %q", got)
+	}
+}
+
+func TestWorkflowDataAccumulationDecode_AppliesLegacySourceAlias(t *testing.T) {
+	var spec WorkflowDataAccumulation
+	if err := yaml.Unmarshal([]byte(`
+writes: [value]
+source: payload.value
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := len(spec.Writes); got != 1 {
+		t.Fatalf("len(Writes) = %d", got)
+	}
+	if got := spec.Writes[0].Source(); got != "payload.value" {
+		t.Fatalf("Writes[0].Source() = %q", got)
+	}
+	if got := spec.Writes[0].Target(); got != "value" {
+		t.Fatalf("Writes[0].Target() = %q", got)
+	}
+}
+
+func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
+	var rule HandlerRuleEntry
+	if err := yaml.Unmarshal([]byte(`
+condition: "payload.mode == 'parallel'"
+fan_out:
+  items_from: payload.items
+data_accumulation:
+  dispatch_count:
+    source: fan_out.count
+`), &rule); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if rule.FanOut == nil {
+		t.Fatal("expected rule fan_out to be preserved")
+	}
+	if got := rule.FanOut.ItemsFrom; got != "payload.items" {
+		t.Fatalf("FanOut.ItemsFrom = %q", got)
+	}
+	if got := rule.DataAccumulation.Writes[0].Source(); got != "fan_out.count" {
+		t.Fatalf("DataAccumulation source = %q", got)
+	}
+}

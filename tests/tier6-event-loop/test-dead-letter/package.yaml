@@ -1,5 +1,5 @@
 name: test-dead-letter
 version: 1.0.0
-description: Unroutable event with no matching handler produces a dead letter.
+description: Guard that always fails causes handler failure, retries exhaust, and event is dead-lettered.
 platform_version: ">=1.1.0"
 flows: []

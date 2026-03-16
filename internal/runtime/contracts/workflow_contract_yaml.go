@@ -311,6 +311,184 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	w.TargetPath = paths.Parse(w.Target())
 	return nil
 }
+func (a *WorkflowDataAccumulation) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*a = WorkflowDataAccumulation{}
+		return nil
+	}
+	switch node.Kind {
+	case yaml.MappingNode:
+	default:
+		type alias WorkflowDataAccumulation
+		var aux alias
+		if err := node.Decode(&aux); err != nil {
+			return err
+		}
+		*a = WorkflowDataAccumulation(aux)
+		return nil
+	}
+
+	var aux struct {
+		Writes      []WorkflowDataWrite `yaml:"writes"`
+		Source      string              `yaml:"source"`
+		SourceEvent string              `yaml:"source_event"`
+		Value       ExpressionValue     `yaml:"value"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+
+	spec := WorkflowDataAccumulation{
+		Writes:      append([]WorkflowDataWrite(nil), aux.Writes...),
+		SourceEvent: strings.TrimSpace(aux.SourceEvent),
+		Value:       aux.Value,
+	}
+	commonSource := strings.TrimSpace(aux.Source)
+	if commonSource != "" {
+		for i := range spec.Writes {
+			if strings.TrimSpace(spec.Writes[i].SourceField) != "" {
+				continue
+			}
+			spec.Writes[i].SourceField = commonSource
+			spec.Writes[i].SourcePath = paths.Parse(spec.Writes[i].Source())
+			spec.Writes[i].TargetPath = paths.Parse(spec.Writes[i].Target())
+		}
+	}
+
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keyNode := node.Content[i]
+		valueNode := node.Content[i+1]
+		key := strings.TrimSpace(keyNode.Value)
+		switch key {
+		case "", "writes", "source", "source_event", "value":
+			continue
+		}
+		write, err := decodeWorkflowDataAccumulationShorthandWrite(key, valueNode)
+		if err != nil {
+			return err
+		}
+		spec.Writes = append(spec.Writes, write)
+	}
+
+	*a = spec
+	return nil
+}
+
+func decodeWorkflowDataAccumulationShorthandWrite(target string, node *yaml.Node) (WorkflowDataWrite, error) {
+	write := WorkflowDataWrite{TargetField: strings.TrimSpace(target)}
+	if node == nil || node.Kind == 0 {
+		write.TargetPath = paths.Parse(write.Target())
+		return write, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		value := strings.TrimSpace(node.Value)
+		switch {
+		case looksLikeWorkflowDataCEL(value):
+			write.Value = ExpressionValue{CEL: value}
+		case looksLikeWorkflowDataSourceRef(value):
+			write.SourceField = value
+		default:
+			var literal any
+			if err := node.Decode(&literal); err != nil {
+				return WorkflowDataWrite{}, err
+			}
+			write.Value = ExpressionValue{Literal: literal}
+		}
+	case yaml.MappingNode:
+		if hasAnyYAMLMappingKey(node, "source", "source_field", "value", "literal", "cel") {
+			var aux struct {
+				Source      string     `yaml:"source"`
+				SourceField string     `yaml:"source_field"`
+				Value       *yaml.Node `yaml:"value"`
+				Literal     *yaml.Node `yaml:"literal"`
+				CEL         string     `yaml:"cel"`
+			}
+			if err := node.Decode(&aux); err != nil {
+				return WorkflowDataWrite{}, err
+			}
+			if sourceField := strings.TrimSpace(aux.SourceField); sourceField != "" {
+				write.SourceField = sourceField
+			} else {
+				write.SourceField = strings.TrimSpace(aux.Source)
+			}
+			switch {
+			case strings.TrimSpace(aux.CEL) != "":
+				write.Value = ExpressionValue{CEL: strings.TrimSpace(aux.CEL)}
+			case aux.Value != nil:
+				var literal any
+				if err := aux.Value.Decode(&literal); err != nil {
+					return WorkflowDataWrite{}, err
+				}
+				write.Value = ExpressionValue{Literal: literal}
+			case aux.Literal != nil:
+				var literal any
+				if err := aux.Literal.Decode(&literal); err != nil {
+					return WorkflowDataWrite{}, err
+				}
+				write.Value = ExpressionValue{Literal: literal}
+			}
+		} else {
+			var literal any
+			if err := node.Decode(&literal); err != nil {
+				return WorkflowDataWrite{}, err
+			}
+			write.Value = ExpressionValue{Literal: literal}
+		}
+	default:
+		var literal any
+		if err := node.Decode(&literal); err != nil {
+			return WorkflowDataWrite{}, err
+		}
+		write.Value = ExpressionValue{Literal: literal}
+	}
+	write.SourcePath = paths.Parse(write.Source())
+	write.TargetPath = paths.Parse(write.Target())
+	return write, nil
+}
+
+func looksLikeWorkflowDataSourceRef(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"entity.",
+		"payload.",
+		"policy.",
+		"metadata.",
+		"gates.",
+		"accumulated.",
+		"fan_out.",
+		"computed.",
+	} {
+		if strings.HasPrefix(value, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeWorkflowDataCEL(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, needle := range []string{
+		" + ", " - ", " * ", " / ", " % ",
+		"==", "!=", ">=", "<=", " > ", " < ",
+		"&&", "||", " AND ", " OR ",
+		"(", ")",
+	} {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
 func (s *FilterSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -1050,7 +1228,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node) (*HandlerRuleEntry, error) {
 	if err := node.Decode(&rule); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.DataAccumulation.Value.IsZero() && rule.Compute == nil {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emits.Empty() && !rule.DataAccumulation.HasWrites() && rule.DataAccumulation.Value.IsZero() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil
@@ -1067,7 +1245,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node) ([]HandlerRuleEntry, error) {
 		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emits", "data_accumulation", "compute") {
+		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emits", "data_accumulation", "compute", "fan_out") {
 			rule, err := decodeHandlerRuleEntryNode(node)
 			if err != nil || rule == nil {
 				return nil, err

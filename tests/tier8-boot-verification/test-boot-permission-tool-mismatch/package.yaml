@@ -1,8 +1,8 @@
 name: test-boot-permission-tool-mismatch
 version: 1.0.0
 description: >
-  Boot verification: agent declares create_flow_instance in tools_tier2
-  but its permissions list does not include create_flow_instance.
+  Boot verification: agent declares lookup_data in tools_tier2
+  but its permissions list does not include external_api_access.
   Platform must flag PERMISSION-MISMATCH.
 platform_version: ">=1.1.0"
 flows: []

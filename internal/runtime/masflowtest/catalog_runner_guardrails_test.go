@@ -1,6 +1,9 @@
 package masflowtest
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestCatalogRunner_GuardOnFailDiscardPreventsStateAdvanceAndEmit(t *testing.T) {
 	dir := t.TempDir()
@@ -97,5 +100,16 @@ func TestCatalogGuardPasses_SupportsStrictComparisonOperators(t *testing.T) {
 				t.Fatalf("catalogGuardPasses() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCatalogRunner_BootPermissionMismatchUsesToolRequiredPermission(t *testing.T) {
+	dir := filepath.Join(repoRootFromMASTest(t), "tests", "tier8-boot-verification", "test-boot-permission-tool-mismatch")
+	result, expected := runSimpleCatalogCase(t, dir)
+	if got, want := result.bootResult, expected.Expected.BootResult; got != want {
+		t.Fatalf("boot result = %q, want %q", got, want)
+	}
+	if got, want := result.errorCategory, expected.Expected.ErrorCategory; got != want {
+		t.Fatalf("error category = %q, want %q", got, want)
 	}
 }

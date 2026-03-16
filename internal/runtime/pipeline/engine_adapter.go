@@ -17,14 +17,15 @@ import (
 )
 
 type pipelineEngineEvaluator struct {
-	evaluator *workflowExpressionEvaluator
+	evaluator   *workflowExpressionEvaluator
+	coordinator *FactoryPipelineCoordinator
 }
 
 func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext) (bool, error) {
 	if e.evaluator == nil {
 		return false, runtimeengine.ErrNotImplemented
 	}
-	return e.evaluator.EvalBool(expression, workflowExpressionContext{
+	queryCtx := workflowExpressionContext{
 		Entity:  cloneStringAnyMap(ctx.Entity.Raw()),
 		Payload: cloneStringAnyMap(ctx.Payload.Raw()),
 		Policy:  cloneStringAnyMap(ctx.Policy.Raw()),
@@ -33,7 +34,11 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 			"accumulated": cloneStringAnyMap(ctx.Accumulated.Raw()),
 			"fan_out":     cloneStringAnyMap(ctx.FanOut.Raw()),
 		},
-	})
+	}
+	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
+		return e.queryEntityCount(queryCtx, predicate)
+	}
+	return e.evaluator.EvalBool(expression, queryCtx)
 }
 
 func (e pipelineEngineEvaluator) EvalValue(string, runtimeengine.BaseContext) (any, error) {
@@ -205,7 +210,57 @@ func newCoordinatorEngineEvaluator(pc *FactoryPipelineCoordinator) runtimeengine
 	if pc == nil {
 		return nil
 	}
-	return pipelineEngineEvaluator{evaluator: pc.expressionEval}
+	return pipelineEngineEvaluator{evaluator: pc.expressionEval, coordinator: pc}
+}
+
+func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext, predicate string) (int, error) {
+	if e.coordinator == nil || e.coordinator.db == nil {
+		return 0, nil
+	}
+	parsed, err := parseWorkflowEntityQueryPredicate(predicate, ctx)
+	if err != nil {
+		return 0, err
+	}
+	return queryEntityStateCount(e.coordinator.db, parsed)
+}
+
+func queryEntityStateCount(db *sql.DB, predicate workflowEntityQueryPredicate) (int, error) {
+	if db == nil {
+		return 0, nil
+	}
+	var (
+		query string
+		args  []any
+	)
+	op, err := sqlComparisonOperator(predicate.Op)
+	if err != nil {
+		return 0, err
+	}
+	value := fmt.Sprintf("%v", predicate.Value)
+	switch strings.TrimSpace(predicate.Field) {
+	case "current_state", "name", "slug", "entity_type":
+		query = fmt.Sprintf(`SELECT COUNT(*) FROM entity_state WHERE %s %s $1`, predicate.Field, op)
+		args = []any{value}
+	default:
+		query = fmt.Sprintf(`SELECT COUNT(*) FROM entity_state WHERE fields ->> $1 %s $2`, op)
+		args = []any{strings.TrimSpace(predicate.Field), value}
+	}
+	var count int
+	if err := db.QueryRow(query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func sqlComparisonOperator(op string) (string, error) {
+	switch strings.TrimSpace(op) {
+	case "==":
+		return "=", nil
+	case "!=", ">=", "<=", ">", "<":
+		return strings.TrimSpace(op), nil
+	default:
+		return "", fmt.Errorf("unsupported query_entities operator %q", op)
+	}
 }
 
 func coordinatorEngineDependencies(pc *FactoryPipelineCoordinator) runtimeengine.RuntimeDependencies {

@@ -152,16 +152,18 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		"score":  4,
 		"nested": map[string]any{"value": "ok"},
 	}
+	base := BaseContext{Payload: values.Wrap(payload)}
 	spec := runtimecontracts.WorkflowDataAccumulation{
 		SourceEvent: "task.completed",
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{TargetField: "entity.score", SourceField: "score"},
 			{TargetField: "metadata.status", SourceField: "nested.value"},
 			{TargetField: "literal", Value: runtimecontracts.ExpressionValue{Literal: "fixed"}},
+			{TargetField: "dispatch_count", SourceField: "fan_out.count"},
 		},
 	}
 
-	applyDataAccumulationToState(state, payload, spec)
+	applyDataAccumulationToState(base, ExecutionState{FanOut: map[string]any{"count": 3}}, state, spec)
 
 	if got := state.Metadata["score"]; got != 4 {
 		t.Fatalf("score = %#v", got)
@@ -171,6 +173,9 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 	}
 	if got := state.Metadata["literal"]; got != "fixed" {
 		t.Fatalf("literal = %#v", got)
+	}
+	if got := state.Metadata["dispatch_count"]; got != 3 {
+		t.Fatalf("dispatch_count = %#v", got)
 	}
 	if got := state.Metadata["last_data_accumulation_source"]; got != "task.completed" {
 		t.Fatalf("source event = %#v", got)

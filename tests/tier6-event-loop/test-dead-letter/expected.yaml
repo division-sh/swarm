@@ -1,10 +1,10 @@
 trigger:
-  event: task.unknown
+  event: task.submitted
   payload:
     entity_id: ent-001
+    score: 0
 
 expected:
-  handler_outcome: success
+  handler_outcome: dead_letter
   entity_state: pending
-  emitted_events:
-    - pipeline.dead_letter
+  emitted_events: []

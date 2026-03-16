@@ -7,4 +7,4 @@ pins:
   inputs:
     events: [flow.created]
   outputs:
-    events: [auto.started]
+    events: [auto.started, auto.processed]

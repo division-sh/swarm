@@ -13,6 +13,10 @@ var tier9CompositionPatternFixtures = []string{
 	"test-compose-accumulate-compute-branch",
 	"test-compose-clear-gates-reenter",
 	"test-compose-create-instance-config",
+	"test-compose-guard-multi-source",
+	"test-compose-guard-query-capacity",
+	"test-compose-rules-fanout-data",
+	"test-compose-rules-per-rule-data",
 	"test-compose-guard-counter-escalate",
 	"test-compose-lifecycle-seven-states",
 	"test-compose-multi-emit-cross-flow",
@@ -20,11 +24,7 @@ var tier9CompositionPatternFixtures = []string{
 
 var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
 	"test-compose-gate-chain-three":       {kind: "runtime-gap", reason: "real runtime still only persists the final gate in the sequence; g_a and g_b are missing when the fixture expects all three gates"},
-	"test-compose-gate-data-advance-emit": {kind: "runtime-gap", reason: "real runtime applies the state transition and emits, but does not persist the shorthand data_accumulation fields expected by the fixture"},
-	"test-compose-guard-multi-source":     {kind: "validation-gap", reason: "real boot path still does not expose query_entities to CEL guard parsing for this multi-source guard fixture"},
-	"test-compose-guard-query-capacity":   {kind: "validation-gap", reason: "real boot path does not expose query_entities to CEL guard parsing for this fixture shape"},
-	"test-compose-rules-fanout-data":      {kind: "runtime-gap", reason: "real runtime selects the rule and transitions, but does not persist the expected per-rule dispatch_count field"},
-	"test-compose-rules-per-rule-data":    {kind: "runtime-gap", reason: "real runtime selects the winning rule and transitions, but does not persist the expected per-rule data_accumulation fields"},
+	"test-compose-gate-data-advance-emit": {kind: "fixture-issue", reason: "the fixture now fails real validation because stage_one_result and stage_two_result are written via data_accumulation but still missing from the declared entity_schema"},
 }
 
 func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {

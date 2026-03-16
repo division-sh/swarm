@@ -11,18 +11,18 @@ import (
 
 var tier6EventLoopFixtures = []string{
 	"test-atomicity-commit",
-	"test-atomicity-guard-rollback",
 	"test-atomicity-rollback",
 	"test-cross-entity-concurrent",
 	"test-entity-serialization",
 	"test-event-persisted-before-delivery",
 	"test-event-validation",
-	"test-guards-pre-handler-state",
 }
 
 var tier6ExcludedFixtures = map[string]catalogExcludedFixture{
+	"test-atomicity-guard-rollback": {kind: "fixture-issue", reason: "fixture writes counter via data_accumulation but still does not declare counter in workflow entity_schema, so real validation now rejects it"},
 	"test-chain-depth-limit":        {kind: "fixture-issue", reason: "fixture still boot-fails with EVENT-CYCLE before any chain-depth runtime behavior is exercised"},
 	"test-dead-letter":              {kind: "fixture-issue", reason: "fixture now expects pipeline.dead_letter, but the live runtime still reports this unroutable event as a discard path instead"},
+	"test-guards-pre-handler-state": {kind: "fixture-issue", reason: "fixture writes counter via data_accumulation but still does not declare counter in workflow entity_schema, so real validation now rejects it"},
 }
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {

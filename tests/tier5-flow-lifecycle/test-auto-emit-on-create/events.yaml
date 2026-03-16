@@ -4,3 +4,6 @@ flow.created:
 auto.started:
   payload:
     entity_id: string
+auto.processed:
+  payload:
+    entity_id: string

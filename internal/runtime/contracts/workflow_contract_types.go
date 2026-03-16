@@ -125,6 +125,7 @@ type HandlerRuleEntry struct {
 	Emits            EventEmission            `yaml:"emits"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
+	FanOut           *FanOutSpec              `yaml:"fan_out"`
 }
 type GuardSpec struct {
 	ID        string       `yaml:"id"`

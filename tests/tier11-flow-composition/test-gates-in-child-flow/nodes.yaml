@@ -2,7 +2,7 @@ router:
   id: router
   execution_type: system_node
   subscribes_to: [validate.requested, child/validation.done]
-  produces: [validate.passed]
+  produces: [validate.passed, child/validate.start]
   event_handlers:
     validate.requested:
       emits: child/validate.start

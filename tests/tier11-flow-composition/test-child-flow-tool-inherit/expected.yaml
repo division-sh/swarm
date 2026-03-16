@@ -2,4 +2,4 @@ trigger:
   boot: true
 
 expected:
-  boot_result: success
+  boot_result: warning

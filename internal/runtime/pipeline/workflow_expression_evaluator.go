@@ -17,13 +17,15 @@ var workflowExpressionKeywordReplacer = regexp.MustCompile(`\b(AND|OR|NOT|TRUE|F
 var workflowExpressionPolicyPlaceholder = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}`)
 var workflowExpressionCountGEPattern = regexp.MustCompile(`count\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*>=\s*([0-9]+(?:\.[0-9]+)?)\s*\)`)
 var workflowExpressionStageRangeCountPattern = regexp.MustCompile(`count\(\s*entities\s+in\s+\[([a-zA-Z_][a-zA-Z0-9_]*)\.\.([a-zA-Z_][a-zA-Z0-9_]*)\]\s*\)`)
-var workflowExpressionQueryEntitiesCountPattern = regexp.MustCompile(`query_entities\(\s*name\s*==\s*([a-zA-Z0-9_."-]+)\s*\)\.count`)
+var workflowExpressionQueryEntitiesCountPattern = regexp.MustCompile(`query_entities\(\s*([^()]+?)\s*\)\.count`)
+var workflowExpressionQueryPredicatePattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$`)
 
 type workflowExpressionContext struct {
-	Entity  map[string]any
-	Payload map[string]any
-	Policy  map[string]any
-	Vars    map[string]any
+	Entity           map[string]any
+	Payload          map[string]any
+	Policy           map[string]any
+	Vars             map[string]any
+	QueryEntityCount func(string) (int, error)
 }
 
 type workflowExpressionEvaluator struct {
@@ -60,7 +62,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	if e == nil || e.env == nil {
 		return false, fmt.Errorf("workflow expression evaluator is not initialized")
 	}
-	normalized, normalizedCtx := normalizeWorkflowExpression(expression, ctx)
+	normalized, normalizedCtx, err := normalizeWorkflowExpression(expression, ctx)
 	if normalized == "" {
 		return false, fmt.Errorf("workflow expression is empty")
 	}
@@ -111,15 +113,16 @@ func (e *workflowExpressionEvaluator) program(expression string) (cel.Program, e
 	return program, nil
 }
 
-func normalizeWorkflowExpression(expression string, ctx workflowExpressionContext) (string, workflowExpressionContext) {
+func normalizeWorkflowExpression(expression string, ctx workflowExpressionContext) (string, workflowExpressionContext, error) {
 	expression = strings.TrimSpace(expression)
 	if expression == "" {
 		return "", workflowExpressionContext{
-			Entity:  cloneStringAnyMap(ctx.Entity),
-			Payload: cloneStringAnyMap(ctx.Payload),
-			Policy:  cloneStringAnyMap(ctx.Policy),
-			Vars:    cloneStringAnyMap(ctx.Vars),
-		}
+			Entity:           cloneStringAnyMap(ctx.Entity),
+			Payload:          cloneStringAnyMap(ctx.Payload),
+			Policy:           cloneStringAnyMap(ctx.Policy),
+			Vars:             cloneStringAnyMap(ctx.Vars),
+			QueryEntityCount: ctx.QueryEntityCount,
+		}, nil
 	}
 	if strings.EqualFold(expression, "else") {
 		expression = "true"
@@ -142,10 +145,11 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	})
 	normalized = normalizeWorkflowExpressionStringLiterals(normalized)
 	normalizedCtx := workflowExpressionContext{
-		Entity:  cloneStringAnyMap(ctx.Entity),
-		Payload: cloneStringAnyMap(ctx.Payload),
-		Policy:  cloneStringAnyMap(ctx.Policy),
-		Vars:    workflowExpressionVars(ctx),
+		Entity:           cloneStringAnyMap(ctx.Entity),
+		Payload:          cloneStringAnyMap(ctx.Payload),
+		Policy:           cloneStringAnyMap(ctx.Policy),
+		Vars:             workflowExpressionVars(ctx),
+		QueryEntityCount: ctx.QueryEntityCount,
 	}
 	normalized = workflowExpressionPolicyPlaceholder.ReplaceAllStringFunc(normalized, func(token string) string {
 		match := workflowExpressionPolicyPlaceholder.FindStringSubmatch(token)
@@ -162,8 +166,108 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		return token
 	})
 	normalized = workflowExpressionCountGEPattern.ReplaceAllString(normalized, "count_ge($1, $2)")
+	var err error
+	normalized, err = rewriteWorkflowExpressionQueryEntityCounts(normalized, normalizedCtx)
+	if err != nil {
+		return "", workflowExpressionContext{}, err
+	}
 	normalized = rewriteWorkflowExpressionIdentifiers(normalized, normalizedCtx.Vars)
-	return normalized, normalizedCtx
+	return normalized, normalizedCtx, nil
+}
+
+func rewriteWorkflowExpressionQueryEntityCounts(expression string, ctx workflowExpressionContext) (string, error) {
+	matches := workflowExpressionQueryEntitiesCountPattern.FindAllStringSubmatchIndex(expression, -1)
+	if len(matches) == 0 {
+		return expression, nil
+	}
+	var out strings.Builder
+	last := 0
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		start, end := match[0], match[1]
+		predicate := strings.TrimSpace(expression[match[2]:match[3]])
+		if _, err := parseWorkflowEntityQueryPredicate(predicate, ctx); err != nil {
+			return "", err
+		}
+		count := 0
+		if ctx.QueryEntityCount != nil {
+			resolved, err := ctx.QueryEntityCount(predicate)
+			if err != nil {
+				return "", err
+			}
+			count = resolved
+		}
+		out.WriteString(expression[last:start])
+		out.WriteString(strconv.Itoa(count))
+		last = end
+	}
+	out.WriteString(expression[last:])
+	return out.String(), nil
+}
+
+type workflowEntityQueryPredicate struct {
+	Field string
+	Op    string
+	Value any
+}
+
+func parseWorkflowEntityQueryPredicate(predicate string, ctx workflowExpressionContext) (workflowEntityQueryPredicate, error) {
+	match := workflowExpressionQueryPredicatePattern.FindStringSubmatch(strings.TrimSpace(predicate))
+	if len(match) != 4 {
+		return workflowEntityQueryPredicate{}, fmt.Errorf("unsupported query_entities predicate %q", predicate)
+	}
+	value, err := workflowExpressionResolveQueryOperand(strings.TrimSpace(match[3]), ctx)
+	if err != nil {
+		return workflowEntityQueryPredicate{}, err
+	}
+	return workflowEntityQueryPredicate{
+		Field: strings.TrimSpace(match[1]),
+		Op:    strings.TrimSpace(match[2]),
+		Value: value,
+	}, nil
+}
+
+func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionContext) (any, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("query_entities operand is empty")
+	}
+	if unquoted, err := strconv.Unquote(raw); err == nil {
+		return unquoted, nil
+	}
+	switch strings.ToLower(raw) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	case "null":
+		return nil, nil
+	}
+	if value, ok := workflowExpressionLookupContextValue(raw, ctx); ok {
+		return value, nil
+	}
+	if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+		return parsed, nil
+	}
+	return raw, nil
+}
+
+func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionContext) (any, bool) {
+	ref = strings.TrimSpace(ref)
+	switch {
+	case strings.HasPrefix(ref, "entity."):
+		return workflowExpressionLookupPath(ctx.Entity, strings.TrimPrefix(ref, "entity."))
+	case strings.HasPrefix(ref, "payload."):
+		return workflowExpressionLookupPath(ctx.Payload, strings.TrimPrefix(ref, "payload."))
+	case strings.HasPrefix(ref, "policy."):
+		return workflowExpressionLookupPath(ctx.Policy, strings.TrimPrefix(ref, "policy."))
+	case strings.HasPrefix(ref, "vars."):
+		return workflowExpressionLookupPath(ctx.Vars, strings.TrimPrefix(ref, "vars."))
+	default:
+		return nil, false
+	}
 }
 
 func normalizeWorkflowExpressionStringLiterals(expression string) string {
