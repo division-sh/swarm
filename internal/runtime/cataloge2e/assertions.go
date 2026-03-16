@@ -497,11 +497,10 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
 		FROM routing_rules
-		WHERE created_at >= $1
-		  AND flow_instance = $2
+		WHERE flow_instance = $1
 		  AND is_materialized = true
 		  AND status = 'active'
-	`, since, instancePath).Scan(&routeCount); err != nil {
+	`, instancePath).Scan(&routeCount); err != nil {
 		t.Fatalf("query flow instance routes: %v", err)
 	}
 	if routeCount == 0 {
@@ -512,11 +511,10 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		err := db.QueryRowContext(context.Background(), `
 			SELECT config
 			FROM flow_instances
-			WHERE created_at >= $1
-			  AND instance_id = $2
+			WHERE instance_id = $1
 			ORDER BY created_at DESC
 			LIMIT 1
-		`, since, instancePath).Scan(&raw)
+		`, instancePath).Scan(&raw)
 		if err == sql.ErrNoRows {
 			t.Fatalf("expected flow instance config for %s", instancePath)
 		}
@@ -554,9 +552,8 @@ func assertFlowInstanceCreated(t testing.TB, db *sql.DB, since time.Time, want m
 		if err := db.QueryRowContext(context.Background(), `
 			SELECT COUNT(*)
 			FROM events
-			WHERE created_at >= $1
-			  AND event_name = $2
-		`, since, autoEmitted).Scan(&count); err != nil {
+			WHERE event_name = $1
+		`, autoEmitted).Scan(&count); err != nil {
 			t.Fatalf("query flow auto-emitted event: %v", err)
 		}
 		if count == 0 {

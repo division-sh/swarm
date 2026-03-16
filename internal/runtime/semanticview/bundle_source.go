@@ -189,3 +189,6 @@ func (s bundleSource) EventEntry(eventType string) (runtimecontracts.EventCatalo
 func (s bundleSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	return s.bundle.ToolEntries()
 }
+func (s bundleSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
+	return s.bundle.ToolEntryForAgent(agentID, toolID)
+}

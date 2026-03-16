@@ -435,7 +435,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if toolID == "" {
 				continue
 			}
-			if _, ok := source.ToolEntries()[toolID]; !ok {
+			if _, ok := source.ToolEntryForAgent(agentID, toolID); !ok {
 				errs = append(errs, fmt.Sprintf("agent %s references missing tool %s", strings.TrimSpace(agentID), toolID))
 			}
 		}
@@ -1285,7 +1285,8 @@ func workflowAgentPermissionWarnings(source semanticview.Source, scopeLabel, age
 		if toolID == "" {
 			continue
 		}
-		required := workflowToolRequiredPermission(toolID, source.ToolEntries()[toolID])
+		entry, _ := source.ToolEntryForAgent(agentID, toolID)
+		required := workflowToolRequiredPermission(toolID, entry)
 		if required == "" {
 			continue
 		}

@@ -48,4 +48,5 @@ type Source interface {
 	EventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool)
 	ToolEntries() map[string]runtimecontracts.ToolSchemaEntry
+	ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool)
 }
