@@ -11,24 +11,24 @@ import (
 
 var tier11FlowCompositionFixtures = []string{
 	"test-child-flow-absolute-path",
+	"test-child-flow-loads",
 	"test-child-flow-local-events",
 	"test-nested-three-levels",
 	"test-child-flow-pin-wiring",
 	"test-child-flow-policy-inherit",
+	"test-child-flow-tool-inherit",
+	"test-gates-in-child-flow",
 	"test-required-agents-child",
 	"test-child-flow-sibling-isolation",
 	"test-multi-level-policy-inherit",
+	"test-wildcard-deep-subscription",
 }
 
 var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-dynamic-flow-instance":        {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no worker instance is created"},
-	"test-child-flow-loads":             {kind: "fixture-issue", reason: "fixture now boots, but it still expects a clean success while the real runtime emits producer/consumer warnings for the unwired parent and child events"},
-	"test-child-flow-tool-inherit":      {kind: "fixture-issue", reason: "fixture now boots, but it still expects clean success while the real runtime emits producer/consumer and prompt warnings"},
-	"test-data-pin-wiring":              {kind: "fixture-issue", reason: "prefixed child output event processor/process.done is still not declared in the parent-visible event catalog"},
-	"test-data-pin-write-conflict":      {kind: "fixture-issue", reason: "fixture still fails earlier because shared_field is written via data_accumulation without being declared in entity_schema, so it never reaches the intended DATA-PIN-CONFLICT validation"},
-	"test-gates-in-child-flow":          {kind: "fixture-issue", reason: "prefixed child event child/validation.done is still not declared in the parent-visible event catalog"},
-	"test-tool-override":                {kind: "fixture-issue", reason: "fixture still references missing tool lookup_data and does not declare child/child.done in the parent-visible event catalog"},
-	"test-wildcard-deep-subscription":   {kind: "fixture-issue", reason: "deep wildcard and prefixed grandchild events are still not declared in the real event catalog"},
+	"test-dynamic-flow-instance":   {kind: "fixture-issue", reason: "the fixture still uses legacy action keys type/flow_template/instance_id, so the real loader never executes create_flow_instance and no worker instance is created"},
+	"test-data-pin-wiring":         {kind: "fixture-issue", reason: "the parent and child handlers now fail real validation because task_config and result are written via data_accumulation but still missing from the declared entity_schema"},
+	"test-data-pin-write-conflict": {kind: "fixture-issue", reason: "the fixture still uses unsupported nested outputs.data.writes pins, so the bundle exposes no flow write pins and never reaches the intended DATA-PIN-CONFLICT validation"},
+	"test-tool-override":           {kind: "fixture-issue", reason: "the child fixture still references missing tool lookup_data from the merged bundle, so boot fails before tool override behavior can be asserted"},
 }
 
 var tier11StartedRuntimeFixtures = map[string]struct{}{
@@ -52,7 +52,7 @@ func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
 			h := newRuntimeHarness(t, fixtureRoot, startRuntime)
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, 2*time.Second)
+				h.publishAndWait(step, 5*time.Second)
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})

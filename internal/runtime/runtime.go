@@ -398,6 +398,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.Bus.StartOutboxSweeper(ctx, runtimebus.DefaultOutboxSweeperConfig())
 	}
 	if rt.Manager != nil {
+		if err := rt.Manager.EnsureStaticAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
+			return fmt.Errorf("bootstrap static agents: %w", err)
+		}
+	}
+	if rt.Manager != nil {
 		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}

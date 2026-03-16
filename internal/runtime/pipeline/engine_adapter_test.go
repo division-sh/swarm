@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	runtimeengine "empireai/internal/runtime/engine"
+	"empireai/internal/runtime/semanticview"
 )
 
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
@@ -26,7 +27,7 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 			},
 		},
 	}
-	applyEngineStateMutation(instance, mutation, map[string]struct{}{"research_context": {}})
+	applyEngineStateMutation(instance, mutation, map[string]struct{}{"research_context": {}}, nil, "")
 
 	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
 	got, ok := entityProjection["research_context"].(map[string]any)
@@ -54,7 +55,7 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 		},
 	}
 
-	applyEngineStateMutation(instance, mutation, nil)
+	applyEngineStateMutation(instance, mutation, nil, nil, "")
 
 	gates := workflowStateGatesAsBools(instance.Metadata)
 	want := map[string]bool{"g_a": true, "g_b": true, "g_c": true}
@@ -65,6 +66,58 @@ func TestApplyEngineStateMutationMergesGateDeltasIntoExistingMetadata(t *testing
 		if gates[key] != value {
 			t.Fatalf("gate %s=%v want %v (all=%v)", key, gates[key], value, gates)
 		}
+	}
+}
+
+func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Version: "v-test",
+			FlowPrefix: map[string]string{
+				"child": "child",
+			},
+		},
+	})
+	instance := &WorkflowInstance{
+		Metadata: map[string]any{},
+	}
+	mutation := runtimeengine.StateMutation{
+		SetGate: "g_validated",
+		Gates: map[string]bool{
+			"g_validated": true,
+		},
+	}
+
+	applyEngineStateMutation(instance, mutation, nil, source, "child")
+
+	gates := workflowStateGatesAsBools(instance.Metadata)
+	if !gates["child/g_validated"] {
+		t.Fatalf("scoped gates = %#v, want child/g_validated=true", gates)
+	}
+	if gates["g_validated"] {
+		t.Fatalf("raw unscoped child gate leaked into metadata: %#v", gates)
+	}
+}
+
+func TestWorkflowStateGatesForScopeAddsLocalAliasesForChildFlow(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Version: "v-test",
+			FlowPrefix: map[string]string{
+				"child": "child",
+			},
+		},
+	})
+	got := workflowStateGatesForScope(source, "child", map[string]any{
+		"gates": map[string]any{
+			"child/g_validated": true,
+		},
+	})
+	if !got["child/g_validated"] {
+		t.Fatalf("scoped key missing from gates view: %#v", got)
+	}
+	if !got["g_validated"] {
+		t.Fatalf("local alias missing from gates view: %#v", got)
 	}
 }
 

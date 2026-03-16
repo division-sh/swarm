@@ -165,6 +165,9 @@ func (s bundleSource) RuntimeEventOwners(eventType string) []string {
 func (s bundleSource) NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool) {
 	return s.bundle.NodeContractSource(nodeID)
 }
+func (s bundleSource) AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool) {
+	return s.bundle.AgentContractSource(agentID)
+}
 func (s bundleSource) NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler {
 	return s.bundle.NodeEventHandlers(nodeID)
 }

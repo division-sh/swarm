@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -403,8 +402,57 @@ func handlerPatternMatches(pattern, eventType string) bool {
 	if !strings.Contains(pattern, "*") {
 		return false
 	}
-	matched, err := path.Match(pattern, eventType)
-	return err == nil && matched
+	return contractRouteMatches(pattern, eventType)
+}
+
+func contractRouteMatches(pattern, eventType string) bool {
+	switch {
+	case pattern == "", pattern == "*":
+		return true
+	default:
+		return contractRouteSegmentsMatch(contractSplitRouteSegments(pattern), contractSplitRouteSegments(eventType))
+	}
+}
+
+func contractSplitRouteSegments(raw string) []string {
+	raw = strings.Trim(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "/")
+}
+
+func contractRouteSegmentsMatch(pattern, event []string) bool {
+	if len(pattern) == 0 {
+		return len(event) == 0
+	}
+	head := strings.TrimSpace(pattern[0])
+	switch head {
+	case "**":
+		if len(pattern) == 1 {
+			return true
+		}
+		for i := 0; i <= len(event); i++ {
+			if contractRouteSegmentsMatch(pattern[1:], event[i:]) {
+				return true
+			}
+		}
+		return false
+	case "*":
+		if len(event) == 0 {
+			return false
+		}
+		return contractRouteSegmentsMatch(pattern[1:], event[1:])
+	default:
+		if len(event) == 0 {
+			return false
+		}
+		matched, err := filepath.Match(head, event[0])
+		if err != nil || !matched {
+			return false
+		}
+		return contractRouteSegmentsMatch(pattern[1:], event[1:])
+	}
 }
 func sortedContractKeys[T any](m map[string]T) []string {
 	if len(m) == 0 {

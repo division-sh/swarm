@@ -111,6 +111,39 @@ func TestWorkflowNodeEventPolicy_MatchesWildcardSubscription(t *testing.T) {
 	}
 }
 
+func TestDeclarativeNodeHandleEvent_MatchesDeepWildcardChildFlowHandler(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-wildcard-deep-subscription")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	entry := bundle.NodeEntries()["collector"]
+	engine := &recordingExecutionEngine{}
+	node := NewNode(entry, engine, nil)
+	handled := node.Handle(context.Background(), events.Event{Type: "child/grandchild/task.done"}.WithEntityID("ent-1"))
+	if !handled {
+		t.Fatal("expected deep wildcard event to be handled")
+	}
+	if !engine.called {
+		t.Fatal("expected execution engine to be called")
+	}
+}
+
+func TestValidateWorkflowContracts_AllowsDeepWildcardChildFlowSubscription(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-wildcard-deep-subscription")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	if err := ValidateWorkflowContracts(semanticview.Wrap(bundle)); err != nil {
+		t.Fatalf("ValidateWorkflowContracts: %v", err)
+	}
+}
+
 func TestWorkflowMaxChainDepthPolicy_UsesFixturePolicy(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier6-event-loop", "test-chain-depth-limit")

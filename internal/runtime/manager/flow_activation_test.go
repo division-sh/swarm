@@ -273,3 +273,57 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
 	}
 }
+
+func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := NewAgentManager(bus, nil)
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Version: "v-test",
+			FlowPrefix: map[string]string{
+				"ops-flow": "ops-flow",
+			},
+		},
+	})
+
+	rootAgents := map[string]runtimecontracts.AgentRegistryEntry{
+		"test-agent": {
+			ID:            "test-agent",
+			Type:          "generic",
+			Role:          "test-agent",
+			Subscriptions: []string{"task.assigned"},
+			EmitEvents:    []string{"task.completed"},
+		},
+	}
+	if err := am.ensureStaticAgentsForScope(context.Background(), source, "", "", rootAgents); err != nil {
+		t.Fatalf("ensureStaticAgentsForScope(root): %v", err)
+	}
+	flowAgents := map[string]runtimecontracts.AgentRegistryEntry{
+		"operator": {
+			ID:            "operator",
+			Type:          "generic",
+			Role:          "operator",
+			Subscriptions: []string{"work.requested"},
+			EmitEvents:    []string{"work.completed"},
+		},
+	}
+	if err := am.ensureStaticAgentsForScope(context.Background(), source, "ops-flow", "ops-flow", flowAgents); err != nil {
+		t.Fatalf("ensureStaticAgentsForScope(flow): %v", err)
+	}
+
+	rootCfg, ok := am.GetAgentConfig("test-agent")
+	if !ok {
+		t.Fatal("expected root static agent config")
+	}
+	if len(rootCfg.Subscriptions) != 1 || rootCfg.Subscriptions[0] != "task.assigned" {
+		t.Fatalf("root subscriptions = %#v, want [task.assigned]", rootCfg.Subscriptions)
+	}
+
+	flowCfg, ok := am.GetAgentConfig("operator")
+	if !ok {
+		t.Fatal("expected flow static agent config")
+	}
+	if len(flowCfg.Subscriptions) != 1 || flowCfg.Subscriptions[0] != "ops-flow/work.requested" {
+		t.Fatalf("flow subscriptions = %#v, want [ops-flow/work.requested]", flowCfg.Subscriptions)
+	}
+}

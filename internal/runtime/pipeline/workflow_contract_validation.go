@@ -3,7 +3,6 @@ package pipeline
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -571,8 +570,23 @@ func workflowEventExists(source semanticview.Source, eventType string) bool {
 	if _, ok := source.ResolvedEventCatalog()[eventType]; ok {
 		return true
 	}
-	_, ok := source.EventEntry(eventType)
-	return ok
+	if _, ok := source.EventEntry(eventType); ok {
+		return true
+	}
+	if !strings.Contains(eventType, "*") {
+		return false
+	}
+	for candidate := range source.ResolvedEventCatalog() {
+		if workflowRouteMatches(eventType, strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	for candidate := range source.EventEntries() {
+		if workflowRouteMatches(eventType, strings.TrimSpace(candidate)) {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowHandlerActionExecutable(source semanticview.Source, actionID string) bool {
@@ -945,8 +959,57 @@ func runtimecontractsHandlerPatternMatches(pattern, eventType string) bool {
 	if !strings.Contains(pattern, "*") {
 		return false
 	}
-	matched, err := path.Match(pattern, eventType)
-	return err == nil && matched
+	return workflowRouteMatches(pattern, eventType)
+}
+
+func workflowRouteMatches(pattern, eventType string) bool {
+	switch {
+	case pattern == "", pattern == "*":
+		return true
+	default:
+		return workflowRouteSegmentsMatch(workflowSplitRouteSegments(pattern), workflowSplitRouteSegments(eventType))
+	}
+}
+
+func workflowSplitRouteSegments(raw string) []string {
+	raw = strings.Trim(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "/")
+}
+
+func workflowRouteSegmentsMatch(pattern, event []string) bool {
+	if len(pattern) == 0 {
+		return len(event) == 0
+	}
+	head := strings.TrimSpace(pattern[0])
+	switch head {
+	case "**":
+		if len(pattern) == 1 {
+			return true
+		}
+		for i := 0; i <= len(event); i++ {
+			if workflowRouteSegmentsMatch(pattern[1:], event[i:]) {
+				return true
+			}
+		}
+		return false
+	case "*":
+		if len(event) == 0 {
+			return false
+		}
+		return workflowRouteSegmentsMatch(pattern[1:], event[1:])
+	default:
+		if len(event) == 0 {
+			return false
+		}
+		matched, err := filepath.Match(head, event[0])
+		if err != nil || !matched {
+			return false
+		}
+		return workflowRouteSegmentsMatch(pattern[1:], event[1:])
+	}
 }
 
 func guardActionEntryByID(entries []runtimecontracts.GuardActionEntry, id string) (runtimecontracts.GuardActionEntry, bool) {

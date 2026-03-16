@@ -40,6 +40,7 @@ type Source interface {
 	DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic
 	RuntimeEventOwners(eventType string) []string
 	NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool)
+	AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool)
 	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
 	NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool)
 	NodeEntries() map[string]runtimecontracts.SystemNodeContract

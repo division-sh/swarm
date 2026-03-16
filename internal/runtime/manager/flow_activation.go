@@ -153,6 +153,38 @@ func (am *AgentManager) EnsureStaticFlowRequiredAgents(ctx context.Context, sour
 	return nil
 }
 
+func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticview.Source) error {
+	if am == nil || source == nil {
+		return nil
+	}
+	for _, scope := range source.ProjectScopes() {
+		projectAgents := make(map[string]runtimecontracts.AgentRegistryEntry, len(scope.Agents))
+		for logicalID, entry := range scope.Agents {
+			agentID := strings.TrimSpace(entry.ID)
+			if agentID == "" {
+				agentID = strings.TrimSpace(logicalID)
+			}
+			if sourceInfo, ok := source.AgentContractSource(agentID); ok && strings.TrimSpace(sourceInfo.FlowID) != "" {
+				continue
+			}
+			projectAgents[strings.TrimSpace(logicalID)] = entry
+		}
+		if err := am.ensureStaticAgentsForScope(ctx, source, "", "", projectAgents); err != nil {
+			return err
+		}
+	}
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		if flowID == "" || strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
+			continue
+		}
+		if err := am.ensureStaticAgentsForScope(ctx, source, flowID, strings.Trim(scope.Path, "/"), scope.Agents); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, entityID string) error {
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
@@ -288,6 +320,46 @@ func (am *AgentManager) ensureStaticRequiredAgentsForScope(
 			Config:          cfg,
 			Status:          "active",
 			HiredBy:         "static-flow-required-agent",
+			TemplateVersion: "",
+		}
+		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !strings.Contains(err.Error(), "already exists") {
+			return err
+		}
+	}
+	return nil
+}
+
+func (am *AgentManager) ensureStaticAgentsForScope(
+	ctx context.Context,
+	source semanticview.Source,
+	flowID string,
+	flowPath string,
+	agents map[string]runtimecontracts.AgentRegistryEntry,
+) error {
+	flowID = strings.TrimSpace(flowID)
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+	if len(agents) == 0 {
+		return nil
+	}
+	localEvents := staticFlowLocalEventSet(agents)
+	logicalIDs := make([]string, 0, len(agents))
+	for logicalID := range agents {
+		logicalID = strings.TrimSpace(logicalID)
+		if logicalID != "" {
+			logicalIDs = append(logicalIDs, logicalID)
+		}
+	}
+	sort.Strings(logicalIDs)
+	for _, logicalID := range logicalIDs {
+		entry := agents[logicalID]
+		cfg, err := buildStaticFlowAgentConfig(source, flowID, flowPath, logicalID, entry, localEvents)
+		if err != nil {
+			return err
+		}
+		rec := PersistedAgent{
+			Config:          cfg,
+			Status:          "active",
+			HiredBy:         "static-flow-agent",
 			TemplateVersion: "",
 		}
 		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !strings.Contains(err.Error(), "already exists") {
