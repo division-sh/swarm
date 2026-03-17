@@ -77,11 +77,23 @@ func (pc *FactoryPipelineCoordinator) executeAuthoritativeNodeHandler(ctx contex
 		matched = true
 	}
 	if !matched && isAccumulationTimeoutEvent(events.EventType(trigger)) {
-		timeoutNodeID, timeoutHandler, ok := findAccumulationTimeoutHandler(source, trigger)
-		if ok {
-			nodeID = timeoutNodeID
-			handler = timeoutHandler
-			matched = true
+		payload := parsePayloadMap(evt.Payload)
+		hintNodeID := strings.TrimSpace(asString(payload["node_id"]))
+		if hintNodeID != "" {
+			timeoutHandler, ok := findAccumulationTimeoutHandlerForNode(source, hintNodeID, trigger)
+			if ok {
+				nodeID = hintNodeID
+				handler = timeoutHandler
+				matched = true
+			}
+		}
+		if !matched {
+			timeoutNodeID, timeoutHandler, ok := findAccumulationTimeoutHandler(source, trigger)
+			if ok {
+				nodeID = timeoutNodeID
+				handler = timeoutHandler
+				matched = true
+			}
 		}
 	}
 	if !matched {
@@ -221,6 +233,9 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 		},
 	})
 	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
+	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, result.StateMutation.StateBuckets, result.Status == runtimeengine.OutcomeWaiting); err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
 	if collectLocally {

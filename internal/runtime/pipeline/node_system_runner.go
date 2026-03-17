@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimedeadletters "empireai/internal/runtime/deadletters"
 	"github.com/google/uuid"
 )
 
@@ -180,6 +181,16 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 	}
 	if entityID := workflowEventEntityID(evt); entityID != "" {
 		payload["entity_id"] = entityID
+	}
+	if n.db != nil {
+		_ = runtimedeadletters.Insert(ctx, n.db, runtimedeadletters.Record{
+			OriginalEventID: strings.TrimSpace(evt.ID),
+			FailureType:     "retry_exhausted",
+			ErrorMessage:    msg,
+			RetryCount:      maxInt(n.retryLimit, 1),
+			ChainDepth:      evt.ChainDepth,
+			HandlerNode:     n.nodeID,
+		})
 	}
 	if err := n.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),

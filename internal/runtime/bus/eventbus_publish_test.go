@@ -86,6 +86,24 @@ func TestEventBusPublish_PayloadValidatorFailureAbortsPublish(t *testing.T) {
 	}
 }
 
+func TestEventBusPublishDirect_PayloadValidatorFailureAbortsPublish(t *testing.T) {
+	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		PayloadValidator: func(string, []byte) error {
+			return context.DeadlineExceeded
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	err = eb.PublishDirect(context.Background(), events.Event{
+		Type:    "task.completed",
+		Payload: []byte(`{}`),
+	}, []string{"agent-a"})
+	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
+		t.Fatalf("expected payload validator failure, got %v", err)
+	}
+}
+
 func TestEventBusWaitForQuiescenceWaitsForPublishCompletion(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})

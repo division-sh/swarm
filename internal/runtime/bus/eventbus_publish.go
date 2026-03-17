@@ -488,6 +488,11 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if !isValidEventTypeName(string(evt.Type)) {
 		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type)))
 	}
+	if eb.payloadValidator != nil {
+		if err := eb.payloadValidator(string(evt.Type), evt.Payload); err != nil {
+			return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type)), err)
+		}
+	}
 	if evt.ID == "" {
 		evt.ID = uuid.NewString()
 	}

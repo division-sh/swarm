@@ -13,6 +13,7 @@ import (
 
 type recordingSchedulePersistence struct {
 	schedules []Schedule
+	cancels   []Schedule
 }
 
 func (s *recordingSchedulePersistence) UpsertSchedule(_ context.Context, sc Schedule) error {
@@ -29,6 +30,15 @@ func (s *recordingSchedulePersistence) LoadActiveSchedules(context.Context) ([]S
 }
 
 func (s *recordingSchedulePersistence) MarkScheduleFired(context.Context, Schedule) error {
+	return nil
+}
+
+func (s *recordingSchedulePersistence) CancelScheduleExact(_ context.Context, sc Schedule) error {
+	s.cancels = append(s.cancels, sc)
+	return nil
+}
+
+func (s *recordingSchedulePersistence) MarkScheduleFiredExact(context.Context, Schedule) error {
 	return nil
 }
 
@@ -227,6 +237,144 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	}
 	if got := instance.CurrentState; got != "done" {
 		t.Fatalf("state after listener execution = %q, want done", got)
+	}
+}
+
+func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-timeout")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	store := &recordingSchedulePersistence{}
+	pc.SetTimerScheduling(NewScheduler(), store)
+
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      "ent-001",
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "pending",
+		Metadata:        map[string]any{"expected_count": 5},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	start := time.Now().UTC()
+	evt := events.Event{
+		ID:          "evt-item-a",
+		Type:        events.EventType("item.arrived"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
+		CreatedAt:   start,
+	}.WithEntityID("ent-001")
+
+	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", evt); !handled {
+		t.Fatal("expected item.arrived handler to be handled")
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("registered schedules = %d, want 1", len(store.schedules))
+	}
+	got := store.schedules[0]
+	if got.EventType != "accumulate.timeout" {
+		t.Fatalf("scheduled event = %q, want accumulate.timeout", got.EventType)
+	}
+	if got.AgentID != runtimeWorkflowID {
+		t.Fatalf("scheduled agent_id = %q, want %q", got.AgentID, runtimeWorkflowID)
+	}
+	if got.TaskID != accumulationTimeoutTaskID("test-node", "item.arrived") {
+		t.Fatalf("scheduled task_id = %q", got.TaskID)
+	}
+	if got.EntityID != "ent-001" {
+		t.Fatalf("scheduled entity_id = %q, want ent-001", got.EntityID)
+	}
+	if got.At.Before(start.Add(4900*time.Millisecond)) || got.At.After(start.Add(5100*time.Millisecond)) {
+		t.Fatalf("scheduled at = %s, want about %s", got.At.Format(time.RFC3339Nano), start.Add(5*time.Second).Format(time.RFC3339Nano))
+	}
+	payload := parsePayloadMap(got.Payload)
+	if asString(payload["node_id"]) != "test-node" || asString(payload["bucket_event_type"]) != "item.arrived" {
+		t.Fatalf("scheduled payload = %#v", payload)
+	}
+}
+
+func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-timeout")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	store := &recordingSchedulePersistence{}
+	pc.SetTimerScheduling(NewScheduler(), store)
+
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      "ent-001",
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "pending",
+		Metadata:        map[string]any{"expected_count": 5},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	evt := events.Event{
+		ID:          "evt-item-a",
+		Type:        events.EventType("item.arrived"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"ent-001","item_id":"a"}`),
+		CreatedAt:   time.Now().UTC(),
+	}.WithEntityID("ent-001")
+	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", evt); !handled {
+		t.Fatal("expected item.arrived handler to be handled")
+	}
+
+	timeoutEvt := events.Event{
+		ID:          "evt-timeout",
+		Type:        events.EventType("accumulate.timeout"),
+		SourceAgent: runtimeWorkflowID,
+		Payload: mustJSON(map[string]any{
+			"entity_id":         "ent-001",
+			"node_id":           "test-node",
+			"bucket_event_type": "item.arrived",
+		}),
+		CreatedAt: time.Now().UTC(),
+	}.WithEntityID("ent-001")
+	if handled := pc.executeNodeHandlerPlan(context.Background(), "test-node", timeoutEvt); !handled {
+		t.Fatal("expected accumulate.timeout handler to be handled")
+	}
+	if len(store.cancels) != 1 {
+		t.Fatalf("cancelled schedules = %d, want 1", len(store.cancels))
+	}
+	if got := store.cancels[0].TaskID; got != accumulationTimeoutTaskID("test-node", "item.arrived") {
+		t.Fatalf("cancelled task_id = %q", got)
 	}
 }
 

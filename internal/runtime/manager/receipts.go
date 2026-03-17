@@ -9,12 +9,17 @@ import (
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimedeadletters "empireai/internal/runtime/deadletters"
 	runtimerterr "empireai/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
 
 type eventReceiptReader interface {
 	GetEventReceipt(ctx context.Context, eventID, agentID string) (EventReceipt, bool, error)
+}
+
+type deadLetterRecorder interface {
+	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
 }
 
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
@@ -300,6 +305,15 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	}
 	if ReceiptStatus(strings.TrimSpace(string(receipt.Status))) != ReceiptStatusDeadLetter {
 		return
+	}
+	if recorder, ok := am.store.(deadLetterRecorder); ok && recorder != nil {
+		_ = recorder.RecordDeadLetter(ctx, runtimedeadletters.Record{
+			OriginalEventID: eventID,
+			FailureType:     "retry_exhausted",
+			ErrorMessage:    strings.TrimSpace(receipt.Error),
+			RetryCount:      receipt.RetryCount,
+			HandlerNode:     agentID,
+		})
 	}
 
 	managerID := am.resolveManagerAgentID(agentID)

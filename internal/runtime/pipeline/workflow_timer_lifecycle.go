@@ -154,6 +154,44 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 	}
 }
 
+func (pc *FactoryPipelineCoordinator) reconcileAccumulationTimeoutSchedule(
+	ctx context.Context,
+	entityID, nodeID string,
+	handler runtimecontracts.SystemNodeEventHandler,
+	evt Event,
+	stateBuckets map[string]any,
+	waiting bool,
+) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil
+	}
+	spec := handler.Accumulate
+	if spec == nil || spec.TimeoutMS <= 0 {
+		return nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	nodeID = strings.TrimSpace(nodeID)
+	if entityID == "" || nodeID == "" {
+		return nil
+	}
+	bucketEventType := accumulationTimeoutBucketEventType(evt, stateBuckets, nodeID)
+	if strings.TrimSpace(bucketEventType) == "" {
+		return nil
+	}
+	sc := accumulationTimeoutSchedule(entityID, nodeID, bucketEventType, time.Time{}, spec.TimeoutMS)
+	if isAccumulationTimeoutEvent(evt.Type) || !waiting {
+		pc.persistWorkflowTimerCancellation(ctx, sc)
+		return nil
+	}
+	startedAt, ok := accumulationTimeoutStartedAt(stateBuckets, nodeID, bucketEventType)
+	if !ok {
+		return nil
+	}
+	sc.At = startedAt.Add(time.Duration(spec.TimeoutMS) * time.Millisecond)
+	pc.persistWorkflowTimerSchedule(ctx, sc)
+	return nil
+}
+
 func workflowTimerLifecycleMatches(trigger, stage, sourceEvent string) bool {
 	trigger = strings.TrimSpace(trigger)
 	stage = strings.TrimSpace(stage)
@@ -169,6 +207,74 @@ func workflowTimerLifecycleMatches(trigger, stage, sourceEvent string) bool {
 	default:
 		return trigger == stage || trigger == sourceEvent
 	}
+}
+
+func accumulationTimeoutBucketEventType(evt Event, stateBuckets map[string]any, nodeID string) string {
+	payload := parsePayloadMap(evt.Payload)
+	if raw := strings.TrimSpace(asString(payload["bucket_event_type"])); raw != "" {
+		return raw
+	}
+	if !isAccumulationTimeoutEvent(evt.Type) {
+		return strings.TrimSpace(string(evt.Type))
+	}
+	nodeBucket, _ := stateBuckets[strings.TrimSpace(nodeID)].(map[string]any)
+	accumulators, _ := nodeBucket["handler_accumulators"].(map[string]any)
+	var (
+		bestBucket string
+		bestTime   string
+	)
+	for bucketID, raw := range accumulators {
+		bucket, _ := raw.(map[string]any)
+		sortKey := strings.TrimSpace(firstNonEmptyString(asString(bucket["last_received_at"]), asString(bucket["started_at"]), bucketID))
+		if bestBucket == "" || sortKey > bestTime {
+			bestBucket = strings.TrimSpace(bucketID)
+			bestTime = sortKey
+		}
+	}
+	prefix := strings.TrimSpace(nodeID) + ":"
+	return strings.TrimSpace(strings.TrimPrefix(bestBucket, prefix))
+}
+
+func accumulationTimeoutStartedAt(stateBuckets map[string]any, nodeID, bucketEventType string) (time.Time, bool) {
+	nodeBucket, _ := stateBuckets[strings.TrimSpace(nodeID)].(map[string]any)
+	accumulators, _ := nodeBucket["handler_accumulators"].(map[string]any)
+	bucketID := strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(bucketEventType)
+	raw, ok := accumulators[bucketID].(map[string]any)
+	if !ok {
+		return time.Time{}, false
+	}
+	startedAt := strings.TrimSpace(asString(raw["started_at"]))
+	if startedAt == "" {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed.UTC(), true
+}
+
+func accumulationTimeoutSchedule(entityID, nodeID, bucketEventType string, fireAt time.Time, timeoutMS int) Schedule {
+	taskID := accumulationTimeoutTaskID(nodeID, bucketEventType)
+	return Schedule{
+		AgentID:   runtimeWorkflowID,
+		EventType: "accumulate.timeout",
+		Mode:      "once",
+		At:        fireAt,
+		EntityID:  strings.TrimSpace(entityID),
+		TaskID:    taskID,
+		Payload: mustJSON(map[string]any{
+			"timer_id":          taskID,
+			"trigger_reason":    "accumulate_timeout",
+			"node_id":           strings.TrimSpace(nodeID),
+			"bucket_event_type": strings.TrimSpace(bucketEventType),
+			"timeout_ms":        timeoutMS,
+		}),
+	}
+}
+
+func accumulationTimeoutTaskID(nodeID, bucketEventType string) string {
+	return "accumulate_timeout:" + strings.TrimSpace(nodeID) + ":" + strings.TrimSpace(bucketEventType)
 }
 
 func workflowTimerStateActive(items []WorkflowTimerState, timerID string) bool {

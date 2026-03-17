@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimedeadletters "empireai/internal/runtime/deadletters"
 	runtimeengine "empireai/internal/runtime/engine"
 	"github.com/google/uuid"
 )
@@ -232,6 +233,13 @@ func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context
 	}, false)
 	if err != nil {
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
+			_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
+				OriginalEventID: strings.TrimSpace(evt.ID),
+				FailureType:     "chain_depth_exceeded",
+				ErrorMessage:    strings.TrimSpace(err.Error()),
+				ChainDepth:      evt.ChainDepth,
+				HandlerNode:     nodeID,
+			})
 			setPipelineReceiptOverride(ctx, "dead_letter", err.Error())
 			return true
 		}
