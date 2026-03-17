@@ -1,6 +1,5 @@
 lookup_data:
   description: Looks up data from the knowledge base (root v1).
-  type: custom
   endpoint: /api/v1/lookup
   parameters:
     query:

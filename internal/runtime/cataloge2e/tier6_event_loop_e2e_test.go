@@ -13,6 +13,7 @@ var tier6EventLoopFixtures = []string{
 	"test-atomicity-guard-rollback",
 	"test-atomicity-commit",
 	"test-atomicity-rollback",
+	"test-chain-depth-limit",
 	"test-cross-entity-concurrent",
 	"test-dead-letter",
 	"test-entity-serialization",
@@ -21,9 +22,7 @@ var tier6EventLoopFixtures = []string{
 	"test-guards-pre-handler-state",
 }
 
-var tier6ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-chain-depth-limit": {kind: "fixture-issue", reason: "the runtime now dead-letters the overflowed chain link, but the fixture still expects the root state to remain pending instead of the live retained state processing"},
-}
+var tier6ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

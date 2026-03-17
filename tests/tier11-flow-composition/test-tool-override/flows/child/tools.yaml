@@ -1,6 +1,5 @@
 lookup_data:
   description: Looks up data from the knowledge base (child v2 override).
-  type: custom
   endpoint: /api/v2/lookup
   parameters:
     query:

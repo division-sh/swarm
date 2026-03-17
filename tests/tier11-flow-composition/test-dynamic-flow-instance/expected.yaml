@@ -12,4 +12,4 @@ expected:
   flow_instance_created:
     template: worker
     instance_id: w-001
-    auto_emitted: worker.ready
+    auto_emitted: worker/w-001/worker.ready

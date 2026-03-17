@@ -13,10 +13,12 @@ var tier11FlowCompositionFixtures = []string{
 	"test-child-flow-absolute-path",
 	"test-child-flow-loads",
 	"test-child-flow-local-events",
+	"test-dynamic-flow-instance",
 	"test-nested-three-levels",
 	"test-child-flow-pin-wiring",
 	"test-child-flow-policy-inherit",
 	"test-child-flow-tool-inherit",
+	"test-data-pin-wiring",
 	"test-data-pin-write-conflict",
 	"test-gates-in-child-flow",
 	"test-required-agents-child",
@@ -26,10 +28,7 @@ var tier11FlowCompositionFixtures = []string{
 	"test-wildcard-deep-subscription",
 }
 
-var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-dynamic-flow-instance": {kind: "fixture-issue", reason: "the fixture now reaches runtime, but expected.emitted_events still wants bare worker.ready instead of the live flow-instance event name worker/w-001/worker.ready"},
-	"test-data-pin-wiring":       {kind: "fixture-issue", reason: "the fixture now reaches runtime, but expected.entity_fields still assumes task_config and result are stored in root metadata paths the live runtime does not populate"},
-}
+var tier11ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 var tier11StartedRuntimeFixtures = map[string]struct{}{
 	"test-required-agents-child": {},

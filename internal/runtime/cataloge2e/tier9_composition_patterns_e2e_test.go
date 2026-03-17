@@ -17,15 +17,14 @@ var tier9CompositionPatternFixtures = []string{
 	"test-compose-gate-data-advance-emit",
 	"test-compose-guard-multi-source",
 	"test-compose-guard-query-capacity",
+	"test-compose-multi-emit-cross-flow",
 	"test-compose-rules-fanout-data",
 	"test-compose-rules-per-rule-data",
 	"test-compose-guard-counter-escalate",
 	"test-compose-lifecycle-seven-states",
 }
 
-var tier9ExcludedFixtures = map[string]catalogExcludedFixture{
-	"test-compose-multi-emit-cross-flow": {kind: "fixture-issue", reason: "the fixture now declares tracker/task.record, but expected.emitted_events still wants it even though the live runtime path for this package shape only emits task.logged"},
-}
+var tier9ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier9CompositionPatternCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

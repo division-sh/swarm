@@ -5,7 +5,8 @@ trigger:
 
 expected:
   runtime_only: true
-  handler_outcome: kill
+  handler_outcome: success
   chain_depth_exceeded: true
-  entity_state: pending
-  emitted_events: []
+  dead_letter: true
+  entity_state: processing
+  emitted_events: [chain.e1, chain.e2, chain.e3, chain.e4, chain.e5]

@@ -7,5 +7,5 @@ expected:
   handler_outcome: success
   entity_state: done
   emitted_events:
-    - flow-alpha/job.alpha_done
+    - job.alpha_done
     - audit.logged

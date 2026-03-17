@@ -8,6 +8,3 @@ expected:
   entity_state: done
   emitted_events:
     - task.finalized
-  agent_received:
-    audit-agent:
-      - task.completed

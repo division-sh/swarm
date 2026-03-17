@@ -1,6 +1,9 @@
 task.assigned:
   payload:
     entity_id: string
+task.acknowledged:
+  payload:
+    entity_id: string
 task.completed:
   payload:
     entity_id: string

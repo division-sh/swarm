@@ -7,5 +7,6 @@ expected:
   handler_outcome: success
   entity_state: done
   emitted_events:
+    - task.acknowledged
     - task.completed
     - task.finalized
