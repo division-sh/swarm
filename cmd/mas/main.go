@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	dashboardserver "empireai/internal/dashboard/server"
 	"empireai/internal/runtime"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
@@ -134,7 +135,7 @@ func main() {
 	}()
 
 	var ready atomic.Bool
-	healthServer := newHealthServer(*healthAddr, &ready)
+	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(source, stores, &ready, cfg.LLM.Session.RotateAfterTurns))
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -436,7 +437,7 @@ func templateFlowCount(source semanticview.Source) int {
 	return count
 }
 
-func newHealthServer(addr string, ready *atomic.Bool) *http.Server {
+func newHealthServer(addr string, ready *atomic.Bool, dashboardOpts dashboardserver.Options) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -450,6 +451,8 @@ func newHealthServer(addr string, ready *atomic.Bool) *http.Server {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
+	mux.Handle("/api/", dashboardserver.NewHandler(dashboardOpts))
+	mux.Handle("/api", dashboardserver.NewHandler(dashboardOpts))
 	return &http.Server{
 		Addr:              strings.TrimSpace(addr),
 		Handler:           mux,
@@ -481,6 +484,46 @@ func logReadySummary(source semanticview.Source, contractsRoot, healthAddr strin
 		len(source.ResolvedEventCatalog()),
 		healthAddr,
 	)
+}
+
+func dashboardServerOptions(source semanticview.Source, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int) dashboardserver.Options {
+	var (
+		agents        dashboardserver.AgentReader
+		mailbox       dashboardserver.MailboxReader
+		conversations dashboardserver.ConversationReader
+	)
+	if stores.Postgres != nil {
+		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
+		mailbox = stores.Postgres
+		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB)
+	}
+	return dashboardserver.Options{
+		Health: func(ctx context.Context) (map[string]any, error) {
+			checks := map[string]any{
+				"runtime": map[string]any{
+					"ready":  ready != nil && ready.Load(),
+					"flows":  len(source.FlowSchemaEntries()),
+					"nodes":  len(source.NodeEntries()),
+					"agents": len(source.AgentEntries()),
+					"events": len(source.ResolvedEventCatalog()),
+				},
+			}
+			if stores.Postgres != nil {
+				dbErr := stores.Postgres.Ping(ctx)
+				checks["database"] = map[string]any{
+					"ok": dbErr == nil,
+				}
+				if dbErr != nil {
+					checks["database_error"] = dbErr.Error()
+				}
+			}
+			return checks, nil
+		},
+		Agents:        agents,
+		Mailbox:       mailbox,
+		Instances:     runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
+		Conversations: conversations,
+	}
 }
 
 func repoRoot() string {

@@ -1,4 +1,6 @@
 import { fetchJSON } from "./client.ts";
+import { adaptConversationDetail, adaptConversationSummaries } from "../adapters/conversations.ts";
+import { fetchGenericConversationDetail, fetchGenericConversations } from "./resources/conversations.ts";
 import type {
   ConversationDetail,
   ConversationRecord,
@@ -11,6 +13,11 @@ import type {
   LogFilter,
   RuntimeLogRecord,
 } from "../types/runtime.ts";
+
+function isGenericEndpointUnavailable(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message === "HTTP 404" || error.message === "HTTP 405" || error.message === "HTTP 501";
+}
 
 export async function fetchEvents(eventsFilter?: EventFilter): Promise<EventRecord[]> {
   const p = new URLSearchParams();
@@ -87,6 +94,12 @@ export async function fetchEventDetail(id?: string): Promise<EventDetail | null>
 }
 
 export async function fetchConversations(): Promise<ConversationRecord[]> {
+  try {
+    const generic = await fetchGenericConversations(100);
+    return adaptConversationSummaries(generic);
+  } catch (err) {
+    if (!isGenericEndpointUnavailable(err)) throw err;
+  }
   const d = await fetchJSON<{ conversations?: ConversationRecord[] }>("/dashboard/api/conversations?limit=100");
   return d.conversations || [];
 }
@@ -94,6 +107,12 @@ export async function fetchConversations(): Promise<ConversationRecord[]> {
 export async function fetchConversationDetail(agentID?: string): Promise<ConversationDetail> {
   const id = String(agentID || "").trim();
   if (!id) return { messages: [], turns: [] };
+  try {
+    const generic = await fetchGenericConversationDetail(id);
+    return adaptConversationDetail(generic);
+  } catch (err) {
+    if (!isGenericEndpointUnavailable(err)) throw err;
+  }
   const d = await fetchJSON<Partial<ConversationDetail>>(`/dashboard/api/conversations/${encodeURIComponent(id)}`);
   return { messages: d.messages || [], turns: d.turns || [] };
 }

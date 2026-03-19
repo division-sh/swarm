@@ -1,6 +1,8 @@
 import { fetchAgents } from "./agents.ts";
 import { fetchJSON } from "./client.ts";
 import { fetchHealth } from "./health.ts";
+import { adaptMailbox } from "../adapters/mailbox.ts";
+import { fetchGenericMailbox } from "./resources/mailbox.ts";
 import type {
   AgentsResponse,
   DigestResponse,
@@ -38,11 +40,16 @@ export async function fetchTaskStats(): Promise<Record<string, unknown> | null> 
 }
 
 export async function fetchMailbox(status?: string): Promise<MailboxResponse> {
-  const d = await fetchJSON<{ summary?: MailboxSummary; items?: MailboxResponse["items"] }>(`/api/mailbox?status=${encodeURIComponent(status || "all")}&limit=150`);
-  return {
-    summary: d.summary || {},
-    items: d.items || [],
-  };
+  const requestedStatus = status || "all";
+  const d = await fetchJSON<{ summary?: MailboxSummary; items?: MailboxResponse["items"] }>(`/api/mailbox?status=${encodeURIComponent(requestedStatus)}&limit=150`);
+  if (d.summary) {
+    return {
+      summary: d.summary || {},
+      items: d.items || [],
+    };
+  }
+  const generic = Array.isArray(d.items) ? d.items : await fetchGenericMailbox(requestedStatus, 150);
+  return adaptMailbox(generic);
 }
 
 export async function fetchTargets(): Promise<TargetRecord[]> {
