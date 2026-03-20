@@ -7,11 +7,6 @@ import { fetchGenericMailbox } from "./resources/mailbox.ts";
 import { fetchGenericInstanceDetail, fetchGenericInstances } from "./resources/instances.ts";
 import type { HoldingResponse, HoldingVerticalDetail, VerticalRecord } from "../types/portfolio.ts";
 
-function isGenericEndpointUnavailable(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return error.message === "HTTP 404" || error.message === "HTTP 405" || error.message === "HTTP 501";
-}
-
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -41,56 +36,38 @@ function mergeHoldingDetail(base: HoldingVerticalDetail, supplement: HoldingVert
 }
 
 export async function fetchHolding(): Promise<HoldingResponse> {
-  try {
-    const [instances, agents] = await Promise.all([
-      fetchGenericInstances(),
-      fetchGenericAgents(),
-    ]);
-    return adaptHolding(instances, agents);
-  } catch (err) {
-    if (!isGenericEndpointUnavailable(err)) throw err;
-  }
-  const d = await fetchJSON<Partial<HoldingResponse>>("/dashboard/api/holding");
-  return {
-    campaigns: d.campaigns || [],
-    verticals: d.verticals || [],
-    agent_counts: d.agent_counts || {},
-    summary: d.summary || {},
-    workflow_summary: d.workflow_summary || {},
-  };
+  const [instances, agents] = await Promise.all([
+    fetchGenericInstances(),
+    fetchGenericAgents(),
+  ]);
+  return adaptHolding(instances, agents);
 }
 
 export async function fetchHoldingVerticalDetail(verticalID: string): Promise<HoldingVerticalDetail | null> {
   const id = String(verticalID || "").trim();
   if (!id) return null;
+  const [instance, agents, pendingMailbox, approvedMailbox, rejectedMailbox, deferredMailbox, events] = await Promise.all([
+    fetchGenericInstanceDetail(id),
+    fetchGenericAgents(),
+    fetchGenericMailbox("pending", 150),
+    fetchGenericMailbox("approved", 150),
+    fetchGenericMailbox("rejected", 150),
+    fetchGenericMailbox("deferred", 150),
+    fetchEvents({ vertical: id }),
+  ]);
+  const scopedAgents = agents.filter((agent) => String(agent.entity_id || "").trim() === id);
+  const scopedMailbox = [...pendingMailbox, ...approvedMailbox, ...rejectedMailbox, ...deferredMailbox]
+    .filter((item) => String(item.entity_id || "").trim() === id);
+  const generic = adaptHoldingDetail({
+    instance,
+    agents: scopedAgents,
+    events,
+    mailbox: scopedMailbox,
+  });
   try {
-    const [instance, agents, pendingMailbox, approvedMailbox, rejectedMailbox, deferredMailbox, events] = await Promise.all([
-      fetchGenericInstanceDetail(id),
-      fetchGenericAgents(),
-      fetchGenericMailbox("pending", 150),
-      fetchGenericMailbox("approved", 150),
-      fetchGenericMailbox("rejected", 150),
-      fetchGenericMailbox("deferred", 150),
-      fetchEvents({ vertical: id }),
-    ]);
-    const scopedAgents = agents.filter((agent) => String(agent.entity_id || "").trim() === id);
-    const scopedMailbox = [...pendingMailbox, ...approvedMailbox, ...rejectedMailbox, ...deferredMailbox]
-      .filter((item) => String(item.entity_id || "").trim() === id);
-    const generic = adaptHoldingDetail({
-      instance,
-      agents: scopedAgents,
-      events,
-      mailbox: scopedMailbox,
-    });
-    try {
-      const legacy = await fetchJSON<HoldingVerticalDetail>(`/dashboard/api/holding/vertical?id=${encodeURIComponent(id)}`);
-      return mergeHoldingDetail(generic, legacy);
-    } catch (err) {
-      if (!isGenericEndpointUnavailable(err)) throw err;
-    }
+    const legacy = await fetchJSON<HoldingVerticalDetail>(`/dashboard/api/holding/vertical?id=${encodeURIComponent(id)}`);
+    return mergeHoldingDetail(generic, legacy);
+  } catch {
     return generic;
-  } catch (err) {
-    if (!isGenericEndpointUnavailable(err)) throw err;
   }
-  return fetchJSON<HoldingVerticalDetail>(`/dashboard/api/holding/vertical?id=${encodeURIComponent(id)}`);
 }
