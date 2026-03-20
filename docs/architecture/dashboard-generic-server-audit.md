@@ -62,11 +62,23 @@ Currently mounted generic endpoints:
 Implemented in TypeScript:
 
 - generic resource clients:
+  - `src/api/resources/agents.ts`
   - `src/api/resources/conversations.ts`
+  - `src/api/resources/health.ts`
+  - `src/api/resources/instances.ts`
   - `src/api/resources/mailbox.ts`
 - adapters:
+  - `src/adapters/agents.ts`
   - `src/adapters/conversations.ts`
+  - `src/adapters/digest.ts`
+  - `src/adapters/funnel.ts`
+  - `src/adapters/health.ts`
+  - `src/adapters/holding.ts`
+  - `src/adapters/holdingDetail.ts`
+  - `src/adapters/incidentArtifacts.ts`
   - `src/adapters/mailbox.ts`
+  - `src/adapters/overview.ts`
+  - `src/adapters/trace.ts`
 
 Current migration state:
 
@@ -78,17 +90,22 @@ Current migration state:
   - graph
   - pipeline/workflow flow
   - tasks
-- generic-first with adapter/fallback:
-  - conversations
-  - mailbox
-- still legacy-backed:
+- generic-only or generic-first:
   - agents
   - health
   - overview
   - digest
-  - control targets/actions
-  - holding / portfolio / funnel
+  - conversations
   - conversation artifacts
+  - holding
+  - holding detail (runtime-owned fields)
+  - mailbox
+-  - funnel
+  - trace
+- still legacy-backed or partially legacy-overlaid:
+  - control targets/actions
+  - holding detail business artifacts
+  - shard scans
 
 ## Important Correction
 
@@ -100,9 +117,13 @@ The generic Go server should not expose Empire concepts like:
 - campaigns
 - opcos
 - funnel
-- shard scans
 
 Those are product projections, not platform resources.
+
+Note on shard scans:
+
+- a dedicated shard-scan operator resource can still be generic if it is framed as runtime scan execution state
+- what should be avoided is a dashboard/Empire-specific projection of shard scans
 
 If the dashboard wants those views, the TS adapter should derive them from generic resources such as:
 
@@ -202,6 +223,11 @@ The generic server should speak in these platform terms:
 - directives / operator actions
 
 Everything else should be derived from those.
+
+Practical migration status:
+
+- `trace` is now derived in TypeScript from generic `/api/events`
+- `shard scans` remain the main unresolved portfolio/pipeline legacy surface because there is no generic runtime scan resource yet
 
 ## Recommended Generic Go API
 

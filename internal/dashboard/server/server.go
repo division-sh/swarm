@@ -61,34 +61,55 @@ type ConversationReader interface {
 	Get(ctx context.Context, agentID string) (ConversationDetail, bool, error)
 }
 
+type AgentController interface {
+	RestartAgent(agentID string) error
+	ReplayAgentBacklog(ctx context.Context, agentID string) error
+	ChatWithAgent(ctx context.Context, agentID, directive string) (string, error)
+}
+
+type RuntimeController interface {
+	PauseIngress()
+	ResumeIngress()
+	ResetState() error
+}
+
 type Options struct {
 	Health        HealthChecker
 	Agents        AgentReader
+	AgentControl  AgentController
 	Mailbox       MailboxReader
 	Instances     InstanceReader
 	Conversations ConversationReader
+	Runtime       RuntimeController
 }
 
 type Handler struct {
 	health        HealthChecker
 	agents        AgentReader
+	agentControl  AgentController
 	mailbox       MailboxReader
 	instances     InstanceReader
 	conversations ConversationReader
+	runtime       RuntimeController
 }
 
 func NewHandler(opts Options) http.Handler {
 	h := &Handler{
 		health:        opts.Health,
 		agents:        opts.Agents,
+		agentControl:  opts.AgentControl,
 		mailbox:       opts.Mailbox,
 		instances:     opts.Instances,
 		conversations: opts.Conversations,
+		runtime:       opts.Runtime,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", h.handleHealth)
 	mux.HandleFunc("GET /api/agents", h.handleAgents)
 	mux.HandleFunc("GET /api/agents/{id}", h.handleAgentDetail)
+	mux.HandleFunc("POST /api/agents/{id}/actions/directive", h.handleAgentDirective)
+	mux.HandleFunc("POST /api/agents/{id}/actions/restart", h.handleAgentRestart)
+	mux.HandleFunc("POST /api/agents/{id}/actions/replay", h.handleAgentReplay)
 	mux.HandleFunc("GET /api/conversations", h.handleConversations)
 	mux.HandleFunc("GET /api/conversations/{agentID}", h.handleConversationDetail)
 	mux.HandleFunc("GET /api/mailbox", h.handleMailbox)
@@ -96,6 +117,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/instances/aggregate", h.handleInstanceAggregate)
 	mux.HandleFunc("GET /api/instances/{id}", h.handleInstanceDetail)
 	mux.HandleFunc("GET /api/instances", h.handleInstances)
+	mux.HandleFunc("POST /api/runtime/actions", h.handleRuntimeAction)
 	return mux
 }
 
@@ -135,6 +157,20 @@ type genericAgent struct {
 type instanceAggregateGroup struct {
 	Key   string `json:"key"`
 	Count int    `json:"count"`
+}
+
+type controlResult struct {
+	OK      bool   `json:"ok,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type directiveRequest struct {
+	Message string `json:"message"`
+}
+
+type runtimeActionRequest struct {
+	Action string `json:"action"`
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -215,6 +251,68 @@ func (h *Handler) handleAgentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONError(w, http.StatusNotFound, errors.New("agent not found"))
+}
+
+func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
+	if h.agentControl == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("agent control is not configured"))
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
+		return
+	}
+	var req directiveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err)
+		return
+	}
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("message is required"))
+		return
+	}
+	resp, err := h.agentControl.ChatWithAgent(r.Context(), id, req.Message)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: strings.TrimSpace(resp)})
+}
+
+func (h *Handler) handleAgentRestart(w http.ResponseWriter, r *http.Request) {
+	if h.agentControl == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("agent control is not configured"))
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
+		return
+	}
+	if err := h.agentControl.RestartAgent(id); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "agent restarted"})
+}
+
+func (h *Handler) handleAgentReplay(w http.ResponseWriter, r *http.Request) {
+	if h.agentControl == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("agent control is not configured"))
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
+		return
+	}
+	if err := h.agentControl.ReplayAgentBacklog(r.Context(), id); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "agent backlog replayed"})
 }
 
 func (h *Handler) handleConversations(w http.ResponseWriter, r *http.Request) {
@@ -356,6 +454,34 @@ func (h *Handler) handleInstanceAggregate(w http.ResponseWriter, r *http.Request
 		"group_by": groupBy,
 		"groups":   out,
 	})
+}
+
+func (h *Handler) handleRuntimeAction(w http.ResponseWriter, r *http.Request) {
+	if h.runtime == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("runtime control is not configured"))
+		return
+	}
+	var req runtimeActionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err)
+		return
+	}
+	switch strings.TrimSpace(req.Action) {
+	case "pause":
+		h.runtime.PauseIngress()
+		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime paused"})
+	case "resume":
+		h.runtime.ResumeIngress()
+		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime resumed"})
+	case "reset_state":
+		if err := h.runtime.ResetState(); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, controlResult{OK: true, Message: "runtime state reset"})
+	default:
+		writeJSONError(w, http.StatusBadRequest, errors.New("unsupported runtime action"))
+	}
 }
 
 func filterInstances(rows []runtimepipeline.WorkflowInstance, r *http.Request) []runtimepipeline.WorkflowInstance {

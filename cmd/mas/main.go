@@ -135,7 +135,7 @@ func main() {
 	}()
 
 	var ready atomic.Bool
-	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(source, stores, &ready, cfg.LLM.Session.RotateAfterTurns))
+	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(source, stores, &ready, cfg.LLM.Session.RotateAfterTurns, rt))
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -486,16 +486,41 @@ func logReadySummary(source semanticview.Source, contractsRoot, healthAddr strin
 	)
 }
 
-func dashboardServerOptions(source semanticview.Source, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int) dashboardserver.Options {
+type dashboardRuntimeControl struct {
+	manager *runtimemanager.AgentManager
+}
+
+func (c dashboardRuntimeControl) PauseIngress() {
+	runtimebus.PauseRuntimeIngress()
+}
+
+func (c dashboardRuntimeControl) ResumeIngress() {
+	runtimebus.ResumeRuntimeIngress()
+}
+
+func (c dashboardRuntimeControl) ResetState() error {
+	if c.manager == nil {
+		return fmt.Errorf("runtime manager unavailable")
+	}
+	return c.manager.ResetRuntimeState()
+}
+
+func dashboardServerOptions(source semanticview.Source, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int, rt *runtime.Runtime) dashboardserver.Options {
 	var (
 		agents        dashboardserver.AgentReader
 		mailbox       dashboardserver.MailboxReader
 		conversations dashboardserver.ConversationReader
+		agentControl  dashboardserver.AgentController
+		runtimeCtl    dashboardserver.RuntimeController
 	)
 	if stores.Postgres != nil {
 		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
 		mailbox = stores.Postgres
 		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB)
+	}
+	if rt != nil {
+		agentControl = rt.Manager
+		runtimeCtl = dashboardRuntimeControl{manager: rt.Manager}
 	}
 	return dashboardserver.Options{
 		Health: func(ctx context.Context) (map[string]any, error) {
@@ -520,9 +545,11 @@ func dashboardServerOptions(source semanticview.Source, stores storeBundle, read
 			return checks, nil
 		},
 		Agents:        agents,
+		AgentControl:  agentControl,
 		Mailbox:       mailbox,
 		Instances:     runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
 		Conversations: conversations,
+		Runtime:       runtimeCtl,
 	}
 }
 

@@ -1,4 +1,5 @@
 import { fetchJSON } from "./client.ts";
+import { adaptIncidentArtifacts } from "../adapters/incidentArtifacts.ts";
 import { adaptConversationDetail, adaptConversationSummaries } from "../adapters/conversations.ts";
 import { fetchGenericConversationDetail, fetchGenericConversations } from "./resources/conversations.ts";
 import type {
@@ -84,6 +85,12 @@ export async function fetchIncidentLogs(code?: string): Promise<RuntimeLogRecord
 export async function fetchIncidentArtifacts(agentID?: string): Promise<IncidentArtifacts | null> {
   const id = String(agentID || "").trim();
   if (!id) return null;
+  try {
+    const generic = await fetchGenericConversationDetail(id);
+    return adaptIncidentArtifacts(generic);
+  } catch (err) {
+    if (!isGenericEndpointUnavailable(err)) throw err;
+  }
   return fetchJSON<IncidentArtifacts>(`/dashboard/api/conversations/${encodeURIComponent(id)}/artifacts?lines=120`);
 }
 

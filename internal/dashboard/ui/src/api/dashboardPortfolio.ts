@@ -1,8 +1,23 @@
 import { fetchJSON, postJSON } from "./client.ts";
+import { adaptFunnel } from "../adapters/funnel.ts";
+import { adaptTrace } from "../adapters/trace.ts";
+import { fetchEvents } from "./dashboardRuntime.ts";
+import { fetchGenericInstances } from "./resources/instances.ts";
 import { fetchHolding, fetchHoldingVerticalDetail } from "./holding.ts";
 import type { FunnelResponse, ShardDetailRecord, ShardScanRecord, TraceRecord, VerticalRecord } from "../types/portfolio.ts";
 
+function isGenericEndpointUnavailable(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message === "HTTP 404" || error.message === "HTTP 405" || error.message === "HTTP 501";
+}
+
 export async function fetchFunnel(): Promise<FunnelResponse> {
+  try {
+    const instances = await fetchGenericInstances();
+    return adaptFunnel(instances);
+  } catch (err) {
+    if (!isGenericEndpointUnavailable(err)) throw err;
+  }
   const d = await fetchJSON<Partial<FunnelResponse>>("/dashboard/api/funnel");
   return {
     throughput: d.throughput || {},
@@ -25,13 +40,19 @@ export async function fetchShardScanDetail(scanID?: string): Promise<ShardDetail
 export async function fetchTrace(vertical?: string): Promise<TraceRecord[]> {
   const value = String(vertical || "").trim();
   if (!value) return [];
+  try {
+    const events = await fetchEvents({ vertical: value });
+    return adaptTrace(events);
+  } catch (err) {
+    if (!isGenericEndpointUnavailable(err)) throw err;
+  }
   const d = await fetchJSON<{ trace?: TraceRecord[] }>(`/dashboard/api/verticals/${encodeURIComponent(value)}/trace`);
   return d.trace || [];
 }
 
 export async function fetchVerticals(): Promise<VerticalRecord[]> {
-  const d = await fetchJSON<{ verticals?: VerticalRecord[] }>("/api/verticals");
-  return d.verticals || [];
+  const holding = await fetchHolding();
+  return holding.verticals || [];
 }
 
 export async function shardActionRequest(scanID?: string, shardID?: string, action?: string): Promise<{ scanID: string; shardID: string; action?: string } | null> {

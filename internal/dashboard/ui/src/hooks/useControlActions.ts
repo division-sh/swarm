@@ -38,25 +38,25 @@ export function useControlActions({
   }, [addToast, loadMailbox]);
 
   const restartAgent = useCallback(async (agentID: string) => {
-    await postJSON("/dashboard/api/control/agents/restart", { agent_id: agentID });
+    await postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/restart`, {});
     addToast(`Restarted ${agentID}`, "success");
     await loadAgents();
   }, [addToast, loadAgents]);
 
   const sendDirective = useCallback(async (agentID: string, message: string) => {
-    await runControl(() => postJSON("/dashboard/api/control/directive", { agent_id: agentID, message: (message || "").trim() }));
+    await runControl(() => postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/directive`, { message: (message || "").trim() }));
   }, [runControl]);
 
   const sendChat = useCallback(async (agentID: string, mode: string, message: string) => {
-    await runControl(() => postJSON("/dashboard/api/control/chat", { agent_id: agentID, mode, message: (message || "").trim() }));
+    await runControl(() => postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/directive`, { mode, message: (message || "").trim() }));
   }, [runControl]);
 
   const restartControlTarget = useCallback(async (agentID: string) => {
-    await runControl(() => postJSON("/dashboard/api/control/agents/restart", { agent_id: agentID }));
+    await runControl(() => postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/restart`, {}));
   }, [runControl]);
 
   const replayControlTarget = useCallback(async (agentID: string) => {
-    await runControl(() => postJSON("/dashboard/api/control/agents/replay", { agent_id: agentID }));
+    await runControl(() => postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/replay`, {}));
   }, [runControl]);
 
   const createVertical = useCallback(async (payload: CreateVerticalPayload) => {
@@ -79,11 +79,11 @@ export function useControlActions({
   }, [runControl]);
 
   const pauseRuntime = useCallback(async () => {
-    await runControl(() => postJSON("/dashboard/api/control/runtime", { action: "pause" }));
+    await runControl(() => postJSON("/api/runtime/actions", { action: "pause" }));
   }, [runControl]);
 
   const resumeRuntime = useCallback(async () => {
-    await runControl(() => postJSON("/dashboard/api/control/runtime", { action: "resume" }));
+    await runControl(() => postJSON("/api/runtime/actions", { action: "resume" }));
   }, [runControl]);
 
   const resetDBAndSeed = useCallback(async (confirmText: string, clearConfirm: (value: string) => void) => {
@@ -96,7 +96,7 @@ export function useControlActions({
 
   const wipeDB = useCallback(async (confirmText: string, clearConfirm: (value: string) => void) => {
     await runControl(async () => {
-      const out = await postJSON<ControlResult>("/dashboard/api/control/runtime", { action: "reset_state", confirm: (confirmText || "").trim() });
+      const out = await postJSON<ControlResult>("/api/runtime/actions", { action: "reset_state", confirm: (confirmText || "").trim() });
       clearConfirm("");
       return out;
     });

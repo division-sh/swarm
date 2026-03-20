@@ -13,6 +13,7 @@ export type FunnelStuckRecord = {
   stage?: string;
   current_state?: string;
   workflow_current_state?: string;
+  idle_hours?: number;
   [key: string]: unknown;
 };
 
@@ -40,6 +41,9 @@ export type VerticalRecord = {
   active_timer_count?: number;
   revision_count?: number;
   kill_reason?: string;
+  updated_at?: string;
+  workflow_version?: string;
+  composite_score?: unknown;
   [key: string]: unknown;
 };
 
@@ -52,16 +56,24 @@ export type HoldingSummary = {
 
 export type HoldingWorkflowSummary = {
   drift?: number;
+  active_timers?: number;
+  revisioned?: number;
+  stage_entered_set?: number;
   timers?: number;
   revisions?: number;
   stale?: number;
   [key: string]: unknown;
 };
 
+export type HoldingAgentCount = {
+  total?: number;
+  active?: number;
+};
+
 export type HoldingResponse = {
   campaigns: CampaignRecord[];
   verticals: VerticalRecord[];
-  agent_counts: Record<string, number>;
+  agent_counts: Record<string, HoldingAgentCount>;
   summary: HoldingSummary;
   workflow_summary: HoldingWorkflowSummary;
 };
@@ -97,8 +109,11 @@ export type HoldingVerticalDetail = {
   vertical?: VerticalRecord & { [key: string]: unknown };
   events?: unknown[];
   mailbox?: unknown[];
+  agents?: unknown[];
   team?: unknown[];
   artifacts?: unknown[];
   workflow_state?: Record<string, unknown>;
+  workflow_state_error?: string;
+  spend?: Record<string, unknown>;
   [key: string]: unknown;
 };

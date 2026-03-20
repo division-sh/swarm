@@ -25,13 +25,13 @@ export async function sendAgentChat(agentID, mode, message) {
 }
 
 export async function sendAgentDirective(agentID, message) {
-  return postJSON("/dashboard/api/control/directive", { agent_id: agentID, message });
+  return postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/directive`, { message });
 }
 
 export async function restartAgentRuntime(agentID) {
-  return postJSON("/dashboard/api/control/agents/restart", { agent_id: agentID });
+  return postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/restart`, {});
 }
 
 export async function replayAgentRuntime(agentID) {
-  return postJSON("/dashboard/api/control/agents/replay", { agent_id: agentID });
+  return postJSON(`/api/agents/${encodeURIComponent(agentID)}/actions/replay`, {});
 }

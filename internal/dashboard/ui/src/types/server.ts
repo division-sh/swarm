@@ -71,3 +71,29 @@ export type GenericAgent = {
   last_tool?: Record<string, unknown>;
   started_at?: string;
 };
+
+export type GenericInstanceTimer = {
+  timer_id?: string;
+  event_type?: string;
+  created_at?: string;
+  fires_at?: string;
+  started_by?: string;
+  recurring?: boolean;
+  cancelled?: boolean;
+};
+
+export type GenericInstance = {
+  instance_id: string;
+  storage_ref?: string;
+  workflow_name?: string;
+  workflow_version?: string;
+  current_state?: string;
+  config?: Record<string, unknown>;
+  entered_stage_at?: string;
+  transition_history?: unknown[];
+  state_buckets?: Record<string, unknown>;
+  timer_state?: GenericInstanceTimer[];
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};

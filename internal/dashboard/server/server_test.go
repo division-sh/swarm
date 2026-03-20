@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,20 @@ func (s stubConversations) Get(_ context.Context, agentID string) (ConversationD
 	return item, ok, nil
 }
 
+type stubAgentControl struct{}
+
+func (stubAgentControl) RestartAgent(string) error                        { return nil }
+func (stubAgentControl) ReplayAgentBacklog(context.Context, string) error { return nil }
+func (stubAgentControl) ChatWithAgent(context.Context, string, string) (string, error) {
+	return "ok", nil
+}
+
+type stubRuntimeControl struct{}
+
+func (stubRuntimeControl) PauseIngress()     {}
+func (stubRuntimeControl) ResumeIngress()    {}
+func (stubRuntimeControl) ResetState() error { return nil }
+
 func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
 	handler := NewHandler(Options{
@@ -85,6 +100,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 			HiredBy:   "test",
 			StartedAt: now,
 		}}},
+		AgentControl: stubAgentControl{},
 		Conversations: stubConversations{
 			list: []ConversationSummary{{
 				AgentID:   "agent-1",
@@ -112,6 +128,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 				"wf-1": {InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
 			},
 		},
+		Runtime: stubRuntimeControl{},
 	})
 
 	rec := httptest.NewRecorder()
@@ -162,6 +179,27 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("health status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/restart", strings.NewReader(`{}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent restart status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello"}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("agent directive status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/runtime/actions", strings.NewReader(`{"action":"pause"}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime action status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

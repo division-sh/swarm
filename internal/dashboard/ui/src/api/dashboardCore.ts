@@ -1,8 +1,11 @@
 import { fetchAgents } from "./agents.ts";
-import { fetchJSON } from "./client.ts";
 import { fetchHealth } from "./health.ts";
+import { adaptDigest } from "../adapters/digest.ts";
 import { adaptMailbox } from "../adapters/mailbox.ts";
+import { adaptOverview } from "../adapters/overview.ts";
+import { fetchEvents, fetchIncidents } from "./dashboardRuntime.ts";
 import { fetchGenericMailbox } from "./resources/mailbox.ts";
+import { fetchJSON } from "./client.ts";
 import type {
   AgentsResponse,
   DigestResponse,
@@ -17,11 +20,43 @@ import type {
 } from "../types/core.ts";
 
 export async function fetchOverview(): Promise<OverviewResponse> {
-  return (await fetchJSON<OverviewResponse>("/dashboard/api/overview")) || {};
+  const [agentsResp, health, mailbox, tasksResp, events, incidents] = await Promise.all([
+    fetchAgents(),
+    fetchHealth(),
+    fetchMailbox("all"),
+    fetchTasks("open"),
+    fetchEvents(),
+    fetchIncidents({ sinceHours: 24, mcpOnly: false }),
+  ]);
+  return adaptOverview({
+    agentsResp,
+    health,
+    mailbox,
+    tasksResp,
+    events,
+    incidents,
+  });
 }
 
 export async function fetchDigest(top = 10): Promise<DigestResponse> {
-  return (await fetchJSON<DigestResponse>(`/dashboard/api/digest?top=${encodeURIComponent(top)}`)) || null;
+  const [agentsResp, health, mailbox, tasksResp, incidents] = await Promise.all([
+    fetchAgents(),
+    fetchHealth(),
+    fetchMailbox("all"),
+    fetchTasks("open"),
+    fetchIncidents({ sinceHours: 24, mcpOnly: false }),
+  ]);
+  const digest = adaptDigest({
+    agentsResp,
+    health,
+    mailbox,
+    tasksResp,
+    incidents,
+  });
+  if (digest && Array.isArray(digest.top) && digest.top.length > top) {
+    digest.top = digest.top.slice(0, top);
+  }
+  return digest;
 }
 
 export async function fetchTasks(status?: string): Promise<TasksResponse> {
@@ -53,8 +88,13 @@ export async function fetchMailbox(status?: string): Promise<MailboxResponse> {
 }
 
 export async function fetchTargets(): Promise<TargetRecord[]> {
-  const d = await fetchJSON<{ targets?: TargetRecord[] }>("/dashboard/api/control/targets");
-  return d.targets || [];
+  const agents = await fetchAgents();
+  return (agents.agents || []).map((agent) => ({
+    agent_id: String(agent.agent_id || agent.id || ""),
+    role: agent.role,
+    status: agent.status || agent.state,
+    vertical_slug: agent.vertical_slug || agent.vertical_id,
+  }));
 }
 
 export async function fetchDashboardHealth(): Promise<HealthResponse> {

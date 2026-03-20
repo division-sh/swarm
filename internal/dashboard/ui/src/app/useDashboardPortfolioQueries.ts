@@ -7,7 +7,6 @@ import {
   fetchShardScanDetail,
   fetchShardScans,
   fetchTrace,
-  fetchVerticals,
   shardActionRequest,
 } from "../api/dashboardPortfolio.ts";
 import { dashboardQueryKeys } from "./dashboardQueryKeys.ts";
@@ -75,11 +74,7 @@ export function useDashboardPortfolioQueries({
     queryFn: fetchHolding,
     refetchInterval: 22000,
   });
-  const verticalsQuery = useQuery<VerticalRecord[]>({
-    queryKey: dashboardQueryKeys.verticals(),
-    queryFn: fetchVerticals,
-    refetchInterval: 22000,
-  });
+  const holdingVerticals = holdingQuery.data?.verticals || [];
 
   useEffect(() => {
     const scans = shardScansQuery.data || [];
@@ -90,14 +85,14 @@ export function useDashboardPortfolioQueries({
   }, [selectedShardScanID, setSelectedShardScanID, shardScansQuery.data]);
 
   useEffect(() => {
-    const items = verticalsQuery.data || [];
+    const items = holdingVerticals;
     if (!graphVertical && items.length > 0) {
       setGraphVertical(items[0].slug || items[0].id);
     }
     if (!flowVertical && items.length > 0) {
       setFlowVertical(items[0].slug || items[0].id);
     }
-  }, [flowVertical, graphVertical, setFlowVertical, setGraphVertical, verticalsQuery.data]);
+  }, [flowVertical, graphVertical, holdingVerticals, setFlowVertical, setGraphVertical]);
 
   const loaders = useMemo(() => ({
     loadFunnel: () => runRefetch(funnelQuery.refetch),
@@ -120,7 +115,7 @@ export function useDashboardPortfolioQueries({
       });
     },
     loadHolding: () => runRefetch(holdingQuery.refetch),
-    loadVerticals: () => runRefetch(verticalsQuery.refetch),
+    loadVerticals: () => runRefetch(holdingQuery.refetch).then((value) => value?.verticals || []),
     shardAction: async (scanID: string, shardID: string, action: string) => {
       await shardActionRequest(scanID, shardID, action);
       addToast(`Shard ${action} queued`, "info");
@@ -159,7 +154,7 @@ export function useDashboardPortfolioQueries({
     setSelectedShardScanID,
     shardScansQuery.refetch,
     traceVertical,
-    verticalsQuery.refetch,
+    holdingQuery.refetch,
   ]);
 
   return useMemo(() => ({
@@ -171,7 +166,7 @@ export function useDashboardPortfolioQueries({
         : {},
       traceRows: traceQuery.data || [],
       holdingData: holdingQuery.data || { campaigns: [], verticals: [], agent_counts: {}, summary: {}, workflow_summary: {} },
-      verticals: verticalsQuery.data || [],
+      verticals: holdingVerticals,
     },
     queries: {
       funnel: funnelQuery,
@@ -179,7 +174,7 @@ export function useDashboardPortfolioQueries({
       shardScanDetail: shardScanDetailQuery,
       trace: traceQuery,
       holding: holdingQuery,
-      verticals: verticalsQuery,
+      verticals: holdingQuery,
     },
     loaders,
   }), [
@@ -190,6 +185,6 @@ export function useDashboardPortfolioQueries({
     shardScanDetailQuery,
     shardScansQuery,
     traceQuery,
-    verticalsQuery,
+    holdingVerticals,
   ]);
 }
