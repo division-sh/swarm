@@ -363,7 +363,7 @@ opco-marketing:
   - channel_blocked
   - spend_needed
   - channel_update
-  permissions_bundle: worker
+  permissions_bundle: specialist
   permissions: *id003
   workspace_class: opco
   manager_fallback: opco-head-of-growth
@@ -387,7 +387,7 @@ opco-support:
   - support_critical
   - churn_risk
   - market_feedback
-  permissions_bundle: worker
+  permissions_bundle: specialist
   permissions: *id003
   workspace_class: opco
   manager_fallback: opco-head-of-product

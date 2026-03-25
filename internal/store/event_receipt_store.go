@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	runtimemanager "empireai/internal/runtime/manager"
 )
 
@@ -228,10 +229,12 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 	if status == runtimemanager.ReceiptStatusError && retryCount >= 4 {
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": finalStatus,
 		"retry_count":    retryCount,
 		"error":          strings.TrimSpace(errText),
+		"trace_id":       traceID,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal event receipt side effects: %w", err)

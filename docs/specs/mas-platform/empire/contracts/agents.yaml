@@ -136,6 +136,10 @@ holding-devops:
   - devops.ssl_provisioned
   - devops.health_check_failed
   permissions_bundle: specialist
-  permissions: *id001
+  permissions:
+  - message_domain
+  - mailbox_send
+  - configure_routing
+  - system_admin
   workspace_class: holding
   manager_fallback: empire-coordinator

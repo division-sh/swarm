@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
@@ -38,10 +39,11 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
+	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ictx := runtimepipeline.WithPipelineTransitionCollector(ctx, &deferredTransitions)
+	ictx = runtimepipeline.WithPipelineTransitionCollector(ictx, &deferredTransitions)
 	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
 		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
@@ -63,7 +65,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 			status = overrideStatus
 			errText = overrideErr
 		}
-		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
+		eb.markPipelineReceipt(ictx, evt.ID, status, errText)
 	}()
 
 	// Interceptors execute before fan-out and can consume the event.
@@ -76,20 +78,20 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	}
 
 	if passthrough {
-		if err := eb.routeAndDeliver(ctx, evt); err != nil {
+		if err := eb.routeAndDeliver(ictx, evt); err != nil {
 			return err
 		}
 		persisted = true
 	} else {
-		if err := eb.persistEventRecord(ctx, evt, nil); err != nil {
+		if err := eb.persistEventRecord(ictx, evt, nil); err != nil {
 			return err
 		}
 		persisted = true
 	}
-	eb.logPublished(ctx, evt, int(time.Since(start)/time.Microsecond))
-	runtimepipeline.FlushDeferredPipelineTransitions(ctx, deferredTransitions)
+	eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
+	runtimepipeline.FlushDeferredPipelineTransitions(ictx, deferredTransitions)
 	for _, d := range deferred {
-		if err := eb.publishDeferred(ctx, d); err != nil {
+		if err := eb.publishDeferred(ictx, d); err != nil {
 			return err
 		}
 	}
@@ -256,6 +258,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
+	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	if strings.TrimSpace(evt.SourceAgent) == "" {
 		evt.SourceAgent = "runtime"
 	}
@@ -349,8 +352,10 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 
 func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
 	eb.logRuntime(ctx, "debug", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", "", "", map[string]any{
-		"type":   string(evt.Type),
-		"source": evt.SourceAgent,
+		"type":            string(evt.Type),
+		"source":          evt.SourceAgent,
+		"trace_id":        strings.TrimSpace(evt.TraceID),
+		"parent_event_id": strings.TrimSpace(evt.ParentEventID),
 	}, "", durationUS)
 }
 
@@ -449,7 +454,11 @@ func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, re
 }
 
 func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipients []string, extra map[string]any) {
-	detail := map[string]any{"recipients_count": len(recipients)}
+	detail := map[string]any{
+		"recipients_count": len(recipients),
+		"trace_id":         strings.TrimSpace(evt.TraceID),
+		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
+	}
 	for k, v := range extra {
 		detail[k] = v
 	}
@@ -499,6 +508,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
 	}
+	ctx, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	if err := eb.persistEventRecord(ctx, evt, recipients); err != nil {
 		return err
 	}
@@ -507,6 +517,8 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", "", "", map[string]any{
 		"direct":           true,
 		"recipients_count": len(recipients),
+		"trace_id":         strings.TrimSpace(evt.TraceID),
+		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
 	}, "", int(time.Since(start)/time.Microsecond))
 	return nil
 }

@@ -90,6 +90,25 @@ func TestValidateWorkflowContractsDetailed_AllowsStatelessFlow(t *testing.T) {
 	}
 }
 
+func TestValidateWorkflowContractsDetailed_EmpireBundleDoesNotWarnOnKnownPermissionBundles(t *testing.T) {
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(contractComplianceRepoRoot(t))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+	}
+	warnings, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractsDetailed: %v", err)
+	}
+	for _, warning := range warnings {
+		if warning.Category != "PERMISSION-MISMATCH" {
+			continue
+		}
+		if strings.Contains(warning.Message, "permissions resolution failed") {
+			t.Fatalf("unexpected permission resolution warning: %s", warning.Message)
+		}
+	}
+}
+
 func TestWorkflowPolicyConflictWarnings(t *testing.T) {
 	projectScopes := []semanticview.ProjectScope{{
 		Key: "root",

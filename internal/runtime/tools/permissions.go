@@ -115,46 +115,16 @@ func scopedAgentEntries(source semanticview.Source) []scopedAgentEntry {
 		return nil
 	}
 	entries := make([]scopedAgentEntry, 0)
-	projectScopes := append([]semanticview.ProjectScope(nil), source.ProjectScopes()...)
-	sort.Slice(projectScopes, func(i, j int) bool {
-		return strings.TrimSpace(projectScopes[i].Key) < strings.TrimSpace(projectScopes[j].Key)
-	})
-	for _, scope := range projectScopes {
-		for _, id := range sortedAgentIDs(scope.Agents) {
-			entries = append(entries, scopedAgentEntry{
-				id:     id,
-				entry:  scope.Agents[id],
-				policy: scope.Policy,
-			})
-		}
-	}
-	flowScopes := append([]semanticview.FlowScope(nil), source.FlowScopes()...)
-	sort.Slice(flowScopes, func(i, j int) bool {
-		left := strings.TrimSpace(flowScopes[i].Path)
-		right := strings.TrimSpace(flowScopes[j].Path)
-		if left == right {
-			return strings.TrimSpace(flowScopes[i].ID) < strings.TrimSpace(flowScopes[j].ID)
-		}
-		return left < right
-	})
-	for _, scope := range flowScopes {
-		for _, id := range sortedAgentIDs(scope.Agents) {
-			entries = append(entries, scopedAgentEntry{
-				id:     id,
-				flowID: strings.TrimSpace(scope.ID),
-				entry:  scope.Agents[id],
-				policy: source.ResolvedPolicyForFlow(scope.ID),
-			})
-		}
-	}
-	if len(entries) > 0 {
-		return entries
-	}
 	for _, id := range sortedAgentIDs(source.AgentEntries()) {
+		flowID := ""
+		if sourceInfo, ok := source.AgentContractSource(id); ok {
+			flowID = strings.TrimSpace(sourceInfo.FlowID)
+		}
 		entries = append(entries, scopedAgentEntry{
 			id:     id,
+			flowID: flowID,
 			entry:  source.AgentEntries()[id],
-			policy: source.ResolvedPolicyForFlow(""),
+			policy: source.ResolvedPolicyForFlow(flowID),
 		})
 	}
 	return entries

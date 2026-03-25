@@ -8,6 +8,7 @@ import (
 	"empireai/internal/events"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	"empireai/internal/runtime/core/identity"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	runtimeengine "empireai/internal/runtime/engine"
 )
 
@@ -209,6 +210,9 @@ func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
 	)
 	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
 	ctx = withPipelineFlowScope(ctx, flowID)
+	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
+	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(triggerCtx.Event.TraceID))
+	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type)))
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
 		deps.Outbox = noOpEngineOutbox{}

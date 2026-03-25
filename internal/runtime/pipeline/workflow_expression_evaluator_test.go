@@ -52,3 +52,17 @@ func TestParseWorkflowEntityQueryPredicate_ResolvesPayloadReference(t *testing.T
 		t.Fatalf("predicate = %#v", predicate)
 	}
 }
+
+func TestNormalizeWorkflowExpression_PreservesCelLambdaBindings(t *testing.T) {
+	got, _, err := normalizeWorkflowExpression(
+		`entity.composite_score >= policy.hard_gate_floor && accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`,
+		workflowExpressionContext{},
+	)
+	if err != nil {
+		t.Fatalf("normalizeWorkflowExpression(...) error = %v", err)
+	}
+	want := `entity.composite_score >= policy.hard_gate_floor && vars.accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`
+	if got != want {
+		t.Fatalf("normalizeWorkflowExpression(...) = %q, want %q", got, want)
+	}
+}

@@ -9,6 +9,7 @@ import (
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 )
 
 type waitInterceptor struct {
@@ -164,5 +165,49 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	}
 	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
 		t.Fatalf("persisted event types prefix = %v, want prefix [custom.root custom.middle custom.leaf custom.final]", got)
+	}
+}
+
+func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ctx := runtimecorrelation.WithInboundEvent(context.Background(), events.Event{
+		ID:      "evt-parent",
+		Type:    events.EventType("task.started"),
+		TraceID: "trace-abc",
+	})
+	if err := eb.Publish(ctx, events.Event{
+		ID:   "evt-child",
+		Type: events.EventType("task.completed"),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.events) != 1 {
+		found := false
+		for _, evt := range store.events {
+			if evt.ID != "evt-child" {
+				continue
+			}
+			found = true
+			if got := evt.TraceID; got != "trace-abc" {
+				t.Fatalf("persisted trace_id = %q, want trace-abc", got)
+			}
+			if got := evt.ParentEventID; got != "evt-parent" {
+				t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)
+			}
+		}
+		if !found {
+			t.Fatalf("persisted events = %#v, want child event", store.events)
+		}
+		return
+	}
+	if got := store.events[0].TraceID; got != "trace-abc" {
+		t.Fatalf("persisted trace_id = %q, want trace-abc", got)
+	}
+	if got := store.events[0].ParentEventID; got != "evt-parent" {
+		t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)
 	}
 }

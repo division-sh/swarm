@@ -1,4 +1,4 @@
-# AUTO-GENERATED — DO NOT EDIT DIRECTLY
+# AUTO-GENERATED
 permission_bundles:
   coordinator:
     description: Full control — top-level workflow coordinator
@@ -11,6 +11,8 @@ permission_bundles:
     - message_all
     - mailbox_send
     - human_task_request
+    - human_task_decide
+    - schedule
   lead:
     description: Domain/team lead — can manage team and routing
     permissions:
@@ -21,19 +23,30 @@ permission_bundles:
     - message_domain
     - mailbox_send
     - human_task_request
+    - schedule
   specialist:
     description: Skilled agent — can message domain and send to mailbox
     permissions:
     - message_domain
     - mailbox_send
     - configure_routing
+    - schedule
+    - human_task_request
   worker:
     description: Execution agent — can message peers only
     permissions:
     - message_peers
+    - schedule
   system_node:
     description: Deterministic node — no permissions (platform handles internally)
     permissions: []
+workflow_extension_permissions:
+  system_admin:
+    description: Execute infrastructure tools (nginx, systemd, certbot). Workflow extension — not a platform permission.
+    required_by_tools:
+    - nginx_reload
+    - systemd_control
+    - certbot_execute
 mra_self_filter_threshold: 40
 evidence_url_minimum: 2
 composite_marginal_high: 74

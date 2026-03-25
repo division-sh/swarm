@@ -9,13 +9,15 @@ import (
 type EventType string
 
 type Event struct {
-	ID          string          `json:"id"`
-	Type        EventType       `json:"type"`
-	SourceAgent string          `json:"source_agent"`
-	TaskID      string          `json:"task_id,omitempty"`
-	Payload     json.RawMessage `json:"payload"`
-	ChainDepth  int             `json:"-"`
-	CreatedAt   time.Time       `json:"created_at"`
+	ID            string          `json:"id"`
+	Type          EventType       `json:"type"`
+	SourceAgent   string          `json:"source_agent"`
+	TaskID        string          `json:"task_id,omitempty"`
+	Payload       json.RawMessage `json:"payload"`
+	ChainDepth    int             `json:"-"`
+	TraceID       string          `json:"-"`
+	ParentEventID string          `json:"-"`
+	CreatedAt     time.Time       `json:"created_at"`
 }
 
 func (e Event) WithEntityID(entityID string) Event {

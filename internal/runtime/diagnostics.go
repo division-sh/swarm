@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
 
@@ -262,20 +263,34 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	if db == nil {
 		return nil
 	}
+	detailMap := map[string]any{}
+	_ = json.Unmarshal(detail, &detailMap)
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	if traceID == "" {
+		traceID = strings.TrimSpace(asString(detailMap["trace_id"]))
+	}
+	parentEventID := strings.TrimSpace(asString(detailMap["parent_event_id"]))
+	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
+	if handlerID == "" {
+		handlerID = strings.TrimSpace(asString(detailMap["handler_id"]))
+	}
 	payload := map[string]any{
-		"level":       level,
-		"component":   component,
-		"action":      action,
-		"event_id":    strings.TrimSpace(e.EventID),
-		"event_type":  strings.TrimSpace(e.EventType),
-		"agent_id":    strings.TrimSpace(e.AgentID),
-		"entity_id":   strings.TrimSpace(e.EffectiveEntityID()),
-		"campaign_id": strings.TrimSpace(e.CampaignID),
-		"scan_id":     strings.TrimSpace(e.ScanID),
-		"session_id":  strings.TrimSpace(e.SessionID),
-		"detail":      json.RawMessage(detail),
-		"error":       strings.TrimSpace(e.Error),
-		"duration_us": e.DurationUS,
+		"level":           level,
+		"component":       component,
+		"action":          action,
+		"event_id":        strings.TrimSpace(e.EventID),
+		"event_type":      strings.TrimSpace(e.EventType),
+		"agent_id":        strings.TrimSpace(e.AgentID),
+		"entity_id":       strings.TrimSpace(e.EffectiveEntityID()),
+		"campaign_id":     strings.TrimSpace(e.CampaignID),
+		"scan_id":         strings.TrimSpace(e.ScanID),
+		"session_id":      strings.TrimSpace(e.SessionID),
+		"trace_id":        traceID,
+		"parent_event_id": parentEventID,
+		"handler_id":      handlerID,
+		"detail":          json.RawMessage(detail),
+		"error":           strings.TrimSpace(e.Error),
+		"duration_us":     e.DurationUS,
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -298,10 +313,17 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 }
 
 func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
+	if handlerID == "" {
+		handlerID = strings.TrimSpace(handler)
+	}
 	sideEffects, err := json.Marshal(map[string]any{
 		"pipeline_type":  pipelineType,
 		"pipeline_id":    pipelineID,
 		"action":         action,
+		"handler_id":     handlerID,
+		"trace_id":       traceID,
 		"events_emitted": eventsEmitted,
 		"drop_reason":    strings.TrimSpace(dropReason),
 		"error":          strings.TrimSpace(errText),

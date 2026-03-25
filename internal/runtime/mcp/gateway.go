@@ -11,6 +11,7 @@ import (
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
 	models "empireai/internal/runtime/core/actors"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	llm "empireai/internal/runtime/llm"
 )
 
@@ -107,6 +108,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 	if g.hooks.WithActor != nil {
 		ctx = g.hooks.WithActor(ctx, actor)
 	}
@@ -274,6 +276,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 				if g.hooks.WithRuntimeEpoch != nil {
 					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
 				}
+				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
 					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
 				}
@@ -292,6 +295,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 				if g.hooks.WithCurrentRuntimeEpoch != nil {
 					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 				}
+				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 				return ctx, nil
 			}
 		}
@@ -311,6 +315,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
+	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 	return ctx, nil
 }
 

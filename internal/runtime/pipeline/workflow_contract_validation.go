@@ -97,9 +97,6 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(agent.Subscriptions) == 0 {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
 			}
-			for _, warning := range workflowAgentPermissionWarnings(source, workflowProjectScopeLabel(scope), agentID, agent, scope.Policy) {
-				addWarning(warning.Category, warning.Message)
-			}
 			workflowValidatePromptWarnings(scope.PromptsDir, workflowProjectScopeLabel(scope), agentID, addWarning)
 		}
 	}
@@ -144,11 +141,11 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(agent.Subscriptions) == 0 {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
 			}
-			for _, warning := range workflowAgentPermissionWarnings(source, scopeLabel, agentID, agent, source.ResolvedPolicyForFlow(scope.ID)) {
-				addWarning(warning.Category, warning.Message)
-			}
 			workflowValidatePromptWarnings(scope.PromptsDir, scopeLabel, agentID, addWarning)
 		}
+	}
+	for _, warning := range workflowMergedAgentPermissionWarnings(source) {
+		addWarning(warning.Category, warning.Message)
 	}
 	if strings.TrimSpace(source.PlatformSpec().Platform.Name) == "" {
 		errs = append(errs, "platform.name missing")
@@ -1291,6 +1288,33 @@ func workflowAgentPermissionWarnings(source semanticview.Source, scopeLabel, age
 			Category: "PERMISSION-MISMATCH",
 			Message:  fmt.Sprintf("%s/%s: tool %q missing permission %q", strings.TrimSpace(scopeLabel), strings.TrimSpace(agentID), toolID, required),
 		})
+	}
+	return warnings
+}
+
+func workflowMergedAgentPermissionWarnings(source semanticview.Source) []WorkflowContractWarning {
+	if source == nil {
+		return nil
+	}
+	agents := source.AgentEntries()
+	ids := make([]string, 0, len(agents))
+	for agentID := range agents {
+		agentID = strings.TrimSpace(agentID)
+		if agentID != "" {
+			ids = append(ids, agentID)
+		}
+	}
+	sort.Strings(ids)
+	warnings := make([]WorkflowContractWarning, 0, len(ids))
+	for _, agentID := range ids {
+		agent := agents[agentID]
+		flowID := ""
+		if sourceInfo, ok := source.AgentContractSource(agentID); ok {
+			flowID = strings.TrimSpace(sourceInfo.FlowID)
+		}
+		scopeLabel := workflowValidationFlowLabel(flowID)
+		policy := source.ResolvedPolicyForFlow(flowID)
+		warnings = append(warnings, workflowAgentPermissionWarnings(source, scopeLabel, agentID, agent, policy)...)
 	}
 	return warnings
 }

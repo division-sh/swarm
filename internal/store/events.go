@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"empireai/internal/events"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
 
@@ -322,9 +323,11 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.T
 }
 
 func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": strings.TrimSpace(status),
 		"error":          strings.TrimSpace(errText),
+		"trace_id":       traceID,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal pipeline receipt side effects: %w", err)

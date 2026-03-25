@@ -1,5 +1,19 @@
 # EmpireAI Changelog
 
+## v3.0.5 (2026-03-25)
+
+### Permission fixes (root agents)
+- Added `human_task_decide` to coordinator bundle — empire-coordinator uses the human_task_decide tool but the permission was missing from the bundle
+- Added `system_admin` workflow extension permission — gates infrastructure tools (nginx_reload, systemd_control, certbot_execute). Defined in `workflow_extension_permissions` per platform spec §permissions_model.workflow_extensions
+- Added `system_admin` to holding-devops explicit permissions (broke off shared anchor since no other agent needs it)
+
+## v3.0.4 (2026-03-25)
+
+### Permission bundle fixes
+- Added `schedule` to coordinator, lead, specialist, and worker bundles — all operating agents use the schedule tool for self-reminders; no bundle previously included it
+- Added `human_task_request` to specialist bundle — opco-marketing and opco-support (promoted to specialist in prior fix) use human_task_request in tools_tier2 but specialist lacked the permission
+- Net result: all 12 tool/permission mismatches resolved (10 schedule, 2 human_task_request)
+
 ## v3.0.3 (2026-03-13)
 
 ### Handler count: 62 (was 51)

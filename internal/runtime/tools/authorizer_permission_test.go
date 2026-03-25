@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "empireai/internal/runtime/contracts"
 	models "empireai/internal/runtime/core/actors"
+	runtimepipeline "empireai/internal/runtime/pipeline"
 	"empireai/internal/runtime/semanticview"
 )
 
@@ -137,5 +138,18 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 	}
 	if !strings.Contains(errs[0].Error(), `agent invalid-agent declares tool agent_fire without required permission "agent_fire"`) {
 		t.Fatalf("unexpected validation error: %v", errs[0])
+	}
+}
+
+func TestValidateAgentPermissions_EmpireBundleDoesNotReportUnknownBundles(t *testing.T) {
+	bundle, err := runtimecontracts.LoadWorkflowContractBundle(runtimepipeline.WorkflowRepoRoot())
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+	}
+	_, errs := ValidateAgentPermissions(semanticview.Wrap(bundle))
+	for _, err := range errs {
+		if strings.Contains(err.Error(), "unknown permissions_bundle") {
+			t.Fatalf("unexpected bundle resolution error: %v", err)
+		}
 	}
 }

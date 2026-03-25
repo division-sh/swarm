@@ -44,33 +44,38 @@ type eventDeliveryRecord struct {
 }
 
 type eventRecord struct {
-	ID           string                `json:"id"`
-	EventID      string                `json:"event_id,omitempty"`
-	Type         string                `json:"type,omitempty"`
-	CreatedAt    string                `json:"created_at,omitempty"`
-	SourceAgent  string                `json:"source_agent,omitempty"`
-	EntityID     string                `json:"entity_id,omitempty"`
-	Scope        string                `json:"scope,omitempty"`
-	Payload      any                   `json:"payload,omitempty"`
-	Deliveries   []eventDeliveryRecord `json:"deliveries,omitempty"`
-	ErrorCount   int                   `json:"error_count,omitempty"`
-	DeadCount    int                   `json:"dead_count,omitempty"`
-	PendingCount int                   `json:"pending_count,omitempty"`
+	ID            string                `json:"id"`
+	EventID       string                `json:"event_id,omitempty"`
+	Type          string                `json:"type,omitempty"`
+	CreatedAt     string                `json:"created_at,omitempty"`
+	SourceAgent   string                `json:"source_agent,omitempty"`
+	EntityID      string                `json:"entity_id,omitempty"`
+	Scope         string                `json:"scope,omitempty"`
+	TraceID       string                `json:"trace_id,omitempty"`
+	ParentEventID string                `json:"parent_event_id,omitempty"`
+	Payload       any                   `json:"payload,omitempty"`
+	Deliveries    []eventDeliveryRecord `json:"deliveries,omitempty"`
+	ErrorCount    int                   `json:"error_count,omitempty"`
+	DeadCount     int                   `json:"dead_count,omitempty"`
+	PendingCount  int                   `json:"pending_count,omitempty"`
 }
 
 type runtimeLogRecord struct {
-	ID        string `json:"id"`
-	TS        string `json:"ts,omitempty"`
-	Level     string `json:"level,omitempty"`
-	Component string `json:"component,omitempty"`
-	Action    string `json:"action,omitempty"`
-	EventType string `json:"event_type,omitempty"`
-	Error     string `json:"error,omitempty"`
-	ErrorCode string `json:"error_code,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
-	EntityID  string `json:"entity_id,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Message   string `json:"message,omitempty"`
+	ID            string `json:"id"`
+	TS            string `json:"ts,omitempty"`
+	Level         string `json:"level,omitempty"`
+	Component     string `json:"component,omitempty"`
+	Action        string `json:"action,omitempty"`
+	EventType     string `json:"event_type,omitempty"`
+	TraceID       string `json:"trace_id,omitempty"`
+	ParentEventID string `json:"parent_event_id,omitempty"`
+	HandlerID     string `json:"handler_id,omitempty"`
+	Error         string `json:"error,omitempty"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	AgentID       string `json:"agent_id,omitempty"`
+	EntityID      string `json:"entity_id,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 type incidentRecord struct {
@@ -112,6 +117,24 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, COALESCE(e.payload->>'entity_id', '')),
 			COALESCE(e.scope, ''),
+			COALESCE((
+				SELECT COALESCE(l.payload->>'trace_id', '')
+				FROM events l
+				WHERE l.event_name = 'platform.runtime_log'
+				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
+				  AND COALESCE(l.payload->>'action', '') = 'published'
+				ORDER BY l.created_at DESC
+				LIMIT 1
+			), '') AS trace_id,
+			COALESCE((
+				SELECT COALESCE(l.payload->>'parent_event_id', COALESCE(l.payload->'detail'->>'parent_event_id', ''))
+				FROM events l
+				WHERE l.event_name = 'platform.runtime_log'
+				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
+				  AND COALESCE(l.payload->>'action', '') = 'published'
+				ORDER BY l.created_at DESC
+				LIMIT 1
+			), '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb),
 			COALESCE((
 				SELECT COUNT(*)::int
@@ -160,7 +183,7 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 			item       eventRecord
 			payloadRaw []byte
 		)
-		if err := rows.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &payloadRaw, &item.DeadCount, &item.ErrorCount, &item.PendingCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.TraceID, &item.ParentEventID, &payloadRaw, &item.DeadCount, &item.ErrorCount, &item.PendingCount); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		item.EventID = item.ID
@@ -196,6 +219,24 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, COALESCE(e.payload->>'entity_id', '')),
 			COALESCE(e.scope, ''),
+			COALESCE((
+				SELECT COALESCE(l.payload->>'trace_id', '')
+				FROM events l
+				WHERE l.event_name = 'platform.runtime_log'
+				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
+				  AND COALESCE(l.payload->>'action', '') = 'published'
+				ORDER BY l.created_at DESC
+				LIMIT 1
+			), '') AS trace_id,
+			COALESCE((
+				SELECT COALESCE(l.payload->>'parent_event_id', COALESCE(l.payload->'detail'->>'parent_event_id', ''))
+				FROM events l
+				WHERE l.event_name = 'platform.runtime_log'
+				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
+				  AND COALESCE(l.payload->>'action', '') = 'published'
+				ORDER BY l.created_at DESC
+				LIMIT 1
+			), '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb)
 		FROM events e
 		WHERE e.event_id::text = $1
@@ -205,7 +246,7 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 		item       eventRecord
 		payloadRaw []byte
 	)
-	if err := row.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &payloadRaw); err == sql.ErrNoRows {
+	if err := row.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.TraceID, &item.ParentEventID, &payloadRaw); err == sql.ErrNoRows {
 		return eventRecord{}, false, nil
 	} else if err != nil {
 		return eventRecord{}, false, fmt.Errorf("get event: %w", err)
@@ -292,6 +333,9 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 			COALESCE(e.payload->>'component', ''),
 			COALESCE(e.payload->>'action', ''),
 			COALESCE(e.payload->>'event_type', ''),
+			COALESCE(e.payload->>'trace_id', ''),
+			COALESCE(e.payload->>'parent_event_id', COALESCE(e.payload->'detail'->>'parent_event_id', '')),
+			COALESCE(e.payload->>'handler_id', COALESCE(e.payload->'detail'->>'handler_id', '')),
 			COALESCE(e.payload->>'error', ''),
 			COALESCE(e.payload->'detail'->>'error_code', ''),
 			COALESCE(e.payload->>'agent_id', ''),
@@ -328,7 +372,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	out := make([]runtimeLogRecord, 0, limit)
 	for rows.Next() {
 		var item runtimeLogRecord
-		if err := rows.Scan(&item.ID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.Message); err != nil {
+		if err := rows.Scan(&item.ID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.TraceID, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.Message); err != nil {
 			return nil, fmt.Errorf("scan runtime log: %w", err)
 		}
 		out = append(out, item)

@@ -5,22 +5,17 @@ import (
 	"sync"
 
 	"empireai/internal/events"
+	runtimecorrelation "empireai/internal/runtime/correlation"
 )
 
-type inboundEventContextKey struct{}
 type emittedEventsContextKey struct{}
 
 func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
-	return context.WithValue(ctx, inboundEventContextKey{}, evt)
+	return runtimecorrelation.WithInboundEvent(ctx, evt)
 }
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
-	v := ctx.Value(inboundEventContextKey{})
-	if v == nil {
-		return events.Event{}, false
-	}
-	evt, ok := v.(events.Event)
-	return evt, ok
+	return runtimecorrelation.InboundEventFromContext(ctx)
 }
 
 type EmittedEventsRecorder struct {

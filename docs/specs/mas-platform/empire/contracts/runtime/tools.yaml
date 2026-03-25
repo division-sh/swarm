@@ -1,4 +1,4 @@
-# AUTO-GENERATED — DO NOT EDIT DIRECTLY
+# AUTO-GENERATED
 dns_configure:
   category: per_agent
   description: Configure DNS records for a domain

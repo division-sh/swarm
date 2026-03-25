@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecorrelation "empireai/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
 
@@ -148,10 +149,17 @@ func isMissingDiagnosticsTable(err error) bool {
 }
 
 func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
+	if handlerID == "" {
+		handlerID = strings.TrimSpace(handler)
+	}
 	sideEffects, err := json.Marshal(map[string]any{
 		"pipeline_type":  pipelineType,
 		"pipeline_id":    pipelineID,
 		"action":         action,
+		"handler_id":     handlerID,
+		"trace_id":       traceID,
 		"events_emitted": eventsEmitted,
 		"drop_reason":    strings.TrimSpace(dropReason),
 		"error":          strings.TrimSpace(errText),

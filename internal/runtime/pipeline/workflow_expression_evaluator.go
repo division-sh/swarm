@@ -469,6 +469,7 @@ func rewriteWorkflowExpressionIdentifiers(expression string, vars map[string]any
 	if expression == "" {
 		return expression
 	}
+	lambdaBindings := workflowExpressionLambdaBindings(expression)
 	var out strings.Builder
 	inSingle := false
 	inDouble := false
@@ -511,6 +512,10 @@ func rewriteWorkflowExpressionIdentifiers(expression string, vars map[string]any
 		token := expression[start:idx]
 		prev := workflowExpressionPrevNonSpace(expression, start-1)
 		next := workflowExpressionNextNonSpace(expression, idx)
+		if _, bound := lambdaBindings[token]; bound {
+			out.WriteString(token)
+			continue
+		}
 		if workflowExpressionShouldRewriteToken(token, prev, next) {
 			if _, exists := vars[token]; !exists {
 				vars[token] = token
@@ -522,6 +527,59 @@ func rewriteWorkflowExpressionIdentifiers(expression string, vars map[string]any
 		out.WriteString(token)
 	}
 	return out.String()
+}
+
+func workflowExpressionLambdaBindings(expression string) map[string]struct{} {
+	bindings := map[string]struct{}{}
+	if expression == "" {
+		return bindings
+	}
+	macros := []string{"filter", "map", "all", "exists", "exists_one"}
+	for idx := 0; idx < len(expression); idx++ {
+		if expression[idx] != '.' {
+			continue
+		}
+		macro := ""
+		for _, candidate := range macros {
+			if strings.HasPrefix(expression[idx+1:], candidate) {
+				macro = candidate
+				break
+			}
+		}
+		if macro == "" {
+			continue
+		}
+		pos := idx + 1 + len(macro)
+		for pos < len(expression) && unicode.IsSpace(rune(expression[pos])) {
+			pos++
+		}
+		if pos >= len(expression) || expression[pos] != '(' {
+			continue
+		}
+		pos++
+		for pos < len(expression) && unicode.IsSpace(rune(expression[pos])) {
+			pos++
+		}
+		start := pos
+		if start >= len(expression) || !workflowExpressionIdentStart(rune(expression[start])) {
+			continue
+		}
+		pos++
+		for pos < len(expression) && workflowExpressionIdentPart(rune(expression[pos])) {
+			pos++
+		}
+		binding := strings.TrimSpace(expression[start:pos])
+		if binding == "" {
+			continue
+		}
+		for pos < len(expression) && unicode.IsSpace(rune(expression[pos])) {
+			pos++
+		}
+		if pos < len(expression) && expression[pos] == ',' {
+			bindings[binding] = struct{}{}
+		}
+	}
+	return bindings
 }
 
 func workflowExpressionShouldRewriteToken(token string, prev rune, next rune) bool {

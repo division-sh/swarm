@@ -1,5 +1,5 @@
 name: empire
-version: 3.0.3
+version: 3.0.5
 author: youmew
 description: AI-powered venture studio — discovers, validates, and operates micro-SaaS businesses
 flows:
@@ -37,6 +37,9 @@ entity_schema:
     signal_strength: integer
     opportunity_pattern: text
     discovery_mode: text (saas_gap | saas_trend | local_services | corpus | derived)
+    scan_expected_count: integer
+    merged_signal: jsonb
+    resolved_signal: jsonb
   scoring_phase:
     composite_score: numeric(5,2) (computed by scoring-node weighted_average)
     scoring_rubric: text
@@ -52,6 +55,7 @@ entity_schema:
     cto_feasibility: jsonb (from cto.spec_approved)
     brand: jsonb (from brand.candidates_ready)
     validation_kit: jsonb (accumulated validation artifacts)
+    research_context: jsonb
   operating_phase:
     full_spec: jsonb
     deploy_config: jsonb
