@@ -128,14 +128,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("init runtime: %v", err)
 	}
+
+	var ready atomic.Bool
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, contractsRoot, bundle, source, rt)
 	defer func() {
-		if err := rt.Shutdown(); err != nil {
+		if _, err := supervisor.CloseProject(context.Background()); err != nil {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
-
-	var ready atomic.Bool
-	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(source, stores, &ready, cfg.LLM.Session.RotateAfterTurns, rt))
+	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns))
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -439,6 +440,7 @@ func templateFlowCount(source semanticview.Source) int {
 
 func newHealthServer(addr string, ready *atomic.Bool, dashboardOpts dashboardserver.Options) *http.Server {
 	mux := http.NewServeMux()
+	dashboardHandler := dashboardserver.NewHandler(dashboardOpts)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
@@ -451,8 +453,8 @@ func newHealthServer(addr string, ready *atomic.Bool, dashboardOpts dashboardser
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
-	mux.Handle("/api/", dashboardserver.NewHandler(dashboardOpts))
-	mux.Handle("/api", dashboardserver.NewHandler(dashboardOpts))
+	mux.Handle("/api/", dashboardHandler)
+	mux.Handle("/api", dashboardHandler)
 	return &http.Server{
 		Addr:              strings.TrimSpace(addr),
 		Handler:           mux,
@@ -486,30 +488,12 @@ func logReadySummary(source semanticview.Source, contractsRoot, healthAddr strin
 	)
 }
 
-type dashboardRuntimeControl struct {
-	manager *runtimemanager.AgentManager
-}
-
-func (c dashboardRuntimeControl) PauseIngress() {
-	runtimebus.PauseRuntimeIngress()
-}
-
-func (c dashboardRuntimeControl) ResumeIngress() {
-	runtimebus.ResumeRuntimeIngress()
-}
-
-func (c dashboardRuntimeControl) ResetState() error {
-	if c.manager == nil {
-		return fmt.Errorf("runtime manager unavailable")
-	}
-	return c.manager.ResetRuntimeState()
-}
-
-func dashboardServerOptions(source semanticview.Source, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int, rt *runtime.Runtime) dashboardserver.Options {
+func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int) dashboardserver.Options {
 	var (
 		agents        dashboardserver.AgentReader
 		mailbox       dashboardserver.MailboxReader
 		conversations dashboardserver.ConversationReader
+		observability dashboardserver.ObservabilityReader
 		agentControl  dashboardserver.AgentController
 		runtimeCtl    dashboardserver.RuntimeController
 	)
@@ -517,21 +501,31 @@ func dashboardServerOptions(source semanticview.Source, stores storeBundle, read
 		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
 		mailbox = stores.Postgres
 		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB)
+		observability = dashboardserver.NewSQLObservabilityReader(stores.Postgres.DB)
 	}
-	if rt != nil {
-		agentControl = rt.Manager
-		runtimeCtl = dashboardRuntimeControl{manager: rt.Manager}
+	if supervisor != nil {
+		agentControl = dashboardDynamicAgentControl{supervisor: supervisor}
+		runtimeCtl = dashboardDynamicRuntimeControl{supervisor: supervisor}
 	}
 	return dashboardserver.Options{
 		Health: func(ctx context.Context) (map[string]any, error) {
+			source := semanticview.Source(nil)
+			if supervisor != nil {
+				source = supervisor.CurrentSource()
+			}
 			checks := map[string]any{
 				"runtime": map[string]any{
+					"ready": ready != nil && ready.Load(),
+				},
+			}
+			if source != nil {
+				checks["runtime"] = map[string]any{
 					"ready":  ready != nil && ready.Load(),
 					"flows":  len(source.FlowSchemaEntries()),
 					"nodes":  len(source.NodeEntries()),
 					"agents": len(source.AgentEntries()),
 					"events": len(source.ResolvedEventCatalog()),
-				},
+				}
 			}
 			if stores.Postgres != nil {
 				dbErr := stores.Postgres.Ping(ctx)
@@ -544,12 +538,17 @@ func dashboardServerOptions(source semanticview.Source, stores storeBundle, read
 			}
 			return checks, nil
 		},
-		Agents:        agents,
-		AgentControl:  agentControl,
-		Mailbox:       mailbox,
-		Instances:     runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
-		Conversations: conversations,
-		Runtime:       runtimeCtl,
+		Agents:         agents,
+		AgentControl:   agentControl,
+		Mailbox:        mailbox,
+		Instances:      runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
+		Conversations:  conversations,
+		Observability:  observability,
+		Runtime:        runtimeCtl,
+		Version:        "mas-dev",
+		CurrentSource:  supervisor.CurrentSource,
+		CurrentRuntime: supervisor.CurrentRuntime,
+		ProjectControl: supervisor,
 	}
 }
 

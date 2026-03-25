@@ -1,44 +1,19 @@
 platform:
   name: mas-orchestrator
-  version: 1.1.0
+  version: 1.2.0
 vocabulary:
-  state_change:
-    description: 'A directed edge between two stages. Fires when a trigger event arrives AND all guards pass. On fire, executes
-      actions and moves the entity to the target stage. A transition is owned by exactly one agent_role (system_node, agent,
-      or runtime). Ownership means: this agent_role''s code/logic decides whether the transition fires.'
-    required_fields:
-    - id
-    - from
-    - to
-    - trigger
-    - node
-    optional_fields:
-    - guards
-    - actions
+  state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
-    description: 'A named boolean check evaluated before a transition fires. If any guard returns false, the transition is
-      blocked. Guards are code-backed — the ID maps to a function.
-
-      '
-    required_fields:
-    - id
-    - category
-    - description
-    optional_fields:
-    - input
-    - check
-    - policy_ref
+    description: A boolean check evaluated before handler execution. If any guard check fails, the handler is blocked. Guards
+      use CEL expressions evaluated against entity, payload, and policy context.
+    on_fail_actions:
+    - reject (default)
+    - discard
+    - kill
+    - escalate:{event}
   action:
-    description: 'A named side effect executed when a transition fires. Actions are code-backed — the ID maps to a function.
-
-      '
-    required_fields:
-    - id
-    - category
-    - description
-    optional_fields:
-    - effect
-    - emits
+    description: 'A platform-provided operation executed as the final step of a handler. Only two valid actions exist: create_flow_instance
+      and record_evidence. Product-specific actions are not supported.'
   timer:
     description: 'A time-based trigger attached to a stage. When the delay elapses, the platform emits the timer''s event,
       which can trigger a transition.
@@ -93,8 +68,8 @@ vocabulary:
     - events.yaml
     - schema.yaml
   state:
-    description: 'A named state in a workflow. An entity (e.g. a entity, a ticket, a document) is always in exactly one state.
-      States belong to phases for grouping. Some states are terminal (no outgoing transitions).
+    description: 'A named state in a workflow. An entity (e.g. a vertical, a ticket, a document) is always in exactly one
+      state. States belong to phases for grouping. Some states are terminal (no outgoing transitions).
 
       '
     required_fields:
@@ -103,6 +78,7 @@ vocabulary:
     optional_fields:
     - description
 contract_formats:
+  description: Canonical format for all flow contract files.
   loader_defaults:
     description: Fields that are optional in contract YAML because the loader derives them from context.
     schema_name: Optional. If omitted, derived from the directory name of the flow package. A flow at flows/scoring/ gets
@@ -114,521 +90,108 @@ contract_formats:
       but this is discouraged.'
     agent_emit_events: Optional. If omitted, defaults to empty list []. An agent that only observes (subscribes but never
       emits) may omit emit_events entirely.
-builtin_hooks:
-  action_aliases:
-    increment_revision_count:
-      effect: workflow_state.metadata.revision_count += 1
-      platform_builtin: increment_revision_count
-  actions:
-  - description: Increment metadata.revision_count
-    id: increment_revision_count
-  - description: Append to state_change_history (always runs, implicit)
-    id: record_state_change
-  - description: Set current_state to state_change.to (always runs, implicit)
-    id: update_stage
-  - description: Cancel all timers scoped to the departed stage (always runs, implicit)
-    id: cancel_stage_timers
-  - description: Start all timers scoped to the entered stage (always runs, implicit)
-    id: start_stage_timers
-  guard_aliases:
-    has_entity_id:
-      check: event.payload.entity_id is non-empty UUID
-      platform_builtin: has_entity_id
-    has_human_decision:
-      check: event originated from mailbox decision path
-      platform_builtin: has_human_decision
-    inner_revision_count_below_limit:
-      check: revision_count < max_revisions (default 3)
-      platform_builtin: revision_count_below_limit
-    not_in_operating_phase:
-      check: stage not in [launched, operating, expanding]
-      platform_builtin: not_in_terminal_state
-  guards:
-  - description: Payload contains a valid entity ID
-    id: has_entity_id
-  - description: Entity is not in a terminal stage
-    id: not_in_terminal_state
-  - config_key: max_revisions
-    description: Revision counter hasn't exceeded max
-    id: revision_count_below_limit
-  - description: Transition was triggered by a human decision
-    id: has_human_decision
-  - config_key: required_phase
-    description: Entity's current stage belongs to the specified phase
-    id: state_in_phase
-  notes: 'record_state_change, update_stage, cancel_stage_timers, and start_stage_timers are implicit — the platform executes
-    them on every state_change automatically. They do NOT appear in workflow hook registries. The remaining builtins (has_entity_id,
-    not_in_terminal_state, revision_count_below_limit, has_human_decision, state_in_phase) are abstract. Workflows bind them
-    to concrete implementations via aliases. Example: Product binds has_entity_id → has_entity_id, revision_count_below_limit
-    → inner_revision_count_below_limit.'
-compliance_rules:
-  flow_coherence:
-  - Every handler with advances_to must reference a state declared in schema.yaml or reachable from initial_state
-  - No two flows may declare the same output data pin (write conflict = boot error)
-  - Every required input event pin must be satisfied by some flow output or project-level event
-  - Every required agent role must be fulfilled by an agent in agents.yaml
-  - Namespace substitution must produce no event name collisions
-  node_coherence:
-  - Every event in event_handlers must appear in subscribes_to
-  - Every event in produces must have a payload schema in events.yaml
-  - Guards must reference fields that exist on the entity or in policy.yaml
-  - advances_to states must be reachable from the current flow state space
-  agent_coherence:
-  - Every tool in tools_tier2 must exist in tools.yaml
-  - Every event in emit_events must have a payload schema in events.yaml
-  - Agent permissions must include required permissions for their tools
-  - Every subscription event must be emitted by some node or agent
-  project_coherence:
-  - Every flow declared in package.yaml must have a directory under flows/
-  - Project-level nodes must not duplicate flow-level node IDs
-  - All handoff events must have both an emitter (source flow) and subscriber (target flow or declarative handoff)
-versioning:
-  description: Platform and products version independently.
-  platform_versioning:
-    scheme: semver (major.minor.patch)
-    major: Breaking changes to flow model, handler fields, boot validation, or contract formats
-    minor: New execution primitives, new handler fields (backward compatible), new compliance checks
-    patch: Bug fixes, documentation, clarifications
-  product_versioning:
-    scheme: semver (major.minor.patch)
-    major: Flow restructuring, agent hierarchy changes, breaking event schema changes
-    minor: New agents, new events, new tools, threshold adjustments
-    patch: Prompt improvements, policy tuning, bug fixes
-  compatibility:
-    declaration: Products declare platform_version in package.yaml using semver range (e.g., >=1.0.0)
-    enforcement: Platform checks product platform_version at boot. Rejects if platform version is outside range.
-    forward_compatible: Platform minor/patch releases do not break existing products
-    example: 'Product v3.0.0 declares platform_version: ">=1.0.0". Works on platform 1.0.0, 1.1.0, 1.9.0. May not work on
-      2.0.0.'
-file_layout:
-  description: Every flow has the same directory structure. The root flow is the entry point. Flows nest via flows/ subdirectories.
-    The runtime/ bridge provides merged flat files for legacy loaders.
-  structure: "\n{root_flow}/                         # Root flow (entry point)\n  package.yaml                       # Manifest:\
-    \ name, version, flows, handoffs, entity_schema\n  schema.yaml                        # Root flow pins\n  nodes.yaml \
-    \                        # Root-level system nodes\n  events.yaml                        # Root-level events\n  agents.yaml\
-    \                        # Root-level agents\n  tools.yaml                         # Shared tools\n  policy.yaml     \
-    \                   # Shared policy\n  prompts/                           # Root-level agent prompts\n  runtime/     \
-    \                      # Merged flat files for legacy loader\n    nodes.yaml\n    events.yaml\n    agents.yaml\n    tools.yaml\n\
-    \    policy.yaml\n  flows/\n    {child_flow}/                    # Child flow (same structure, recursive)\n      package.yaml\n\
-    \      schema.yaml\n      nodes.yaml\n      events.yaml\n      agents.yaml\n      tools.yaml                     # Optional\n\
-    \      policy.yaml                    # Optional\n      prompts/\n      flows/                         # Grandchild flows\
-    \ (if any)\n        {grandchild}/\n          package.yaml\n          ...\n\nplatform/                            # Platform\
-    \ contracts (separate from any flow)\n  package.yaml\n  platform-spec.yaml\n"
-permissions_model:
-  description: Agents have a permissions list controlling what capabilities they can exercise. The platform enforces permissions
-    at tool execution time and message routing time. Workflows define permissions per agent in their agent registry. Optional
-    permission_bundles in policy files provide shorthand for common sets.
-  enforcement: Before executing any tool call, the platform checks the calling agent's permissions list. If the tool requires
-    a permission the agent lacks, the call is rejected. Message scope is enforced at agent_message delivery — the most permissive
-    message permission wins (message_all > message_domain > message_peers).
-  workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
-    permissions to workflow-registered handlers. Example: an Product workflow might define approve_deployment or override_scoring.'
-  permissions:
-  - agent_fire
-  - agent_hire
-  - agent_reconfigure
-  - approve_spend
-  - configure_routing
-  - create_flow_instance
-  - human_task_decide
-  - human_task_request
-  - mailbox_send
-  - message_all
-  - message_domain
-  - message_peers
-  - schedule
-  bundle_semantics:
-    description: An agent may declare permissions_bundle and/or explicit permissions. If both are present, the explicit permissions
-      list EXTENDS the bundle. Duplicates are deduplicated. The bundle is expanded first, then explicit permissions are added.
-tool_model:
-  description: The platform owns ALL tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates
-    calls against schemas, and routes to handlers. Tool handlers are either platform-builtin or workflow-registered.
-  platform_builtin_tools:
-    agent_message: Send message to another agent
-    mailbox_send: Send item to human mailbox
-    create_flow_instance:
-      description: Create a new instance of a template flow at runtime.
-      input_schema:
-        template: 'string — flow template ID (must be mode: template)'
-        instance_id: string — unique ID for this instance within the template scope
-        config: object — optional instance-specific configuration (merged into flow policy)
-      permission: create_flow_instance
-      behavior:
-      - Validate instance_id uniqueness — error if already exists
-      - Load flow template contracts
-      - 'Construct paths: {template_id}/{instance_id}/{local_name}'
-      - Register nodes, agents, events in runtime registry
-      - Expand wildcard subscriptions to include new instance
-      - Resolve local subscriptions for new instance
-      - Create entity record at initial_state
-      - Start nodes and agents
-  handler_registration: At bootstrap, the workflow module registers handlers for its tools. The platform provides the MCP
-    gateway and schema validation. One tools file per workflow containing all tool schemas (universal + workflow-specific).
-    The platform does not need separate tool files.
-directive_pattern:
-  description: Human directives (system.directive events) are handled by a system node, not by LLM reasoning. The node reads
-    the directive type and routes to the appropriate follow-up event. Directive types and their routing are declared in the
-    node's event_handlers, same pattern as all other system nodes.
-  example:
-    system.directive:
-      action: route_directive
-      rules:
-        scan:
-          condition: directive.type == scan
-          emits: scan.requested
-        budget:
-          condition: directive.type == budget_adjust
-          emits: budget.adjustment_requested
-        policy:
-          condition: directive.type == policy_change
-          emits: policy.change_requested
-persistence_model:
-  description: Agents do not have raw database access. The platform provides typed persistence tools auto-generated from the
-    entity_schema in package.yaml. For each field group in the entity schema, the platform generates save/get tools with validated
-    input schemas. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
-  auto_generated_tools:
-    get_entity: Read entity by ID. Returns all fields the agent has permission to see.
-    save_entity_field: Write a specific field on an entity. Field must exist in entity_schema.
-    search_entities: Query entities by stage, field values, or metadata.
-    query_metrics: Read aggregated metrics (counts, sums, averages) across entities.
-  schema_source: package.yaml → entity_schema
-event_schema:
-  description: Each workflow defines event payload schemas in events.yaml. Events are keyed by event name. Each entry contains
-    a payload object mapping field names to types (string, integer, object, array, boolean). The platform uses these schemas
-    to validate emit tool calls at runtime. Routing, consumers, and delivery are NOT declared in events.yaml — the platform
-    derives routing from agents.yaml (subscriptions, emit_events) and nodes.yaml (subscribes_to, event_handlers).
-  format:
-    event_name:
-      payload:
-        field_name: type (string | integer | boolean | object | array)
-  routing_derivation:
-    owning_node: If a system node subscribes_to the event → that node owns it
-    dual_delivery: If a node AND agents subscribe → route to both
-    consuming: If only a node subscribes → route to node only
-    passthrough: If no node subscribes → pure agent delivery
-prompt_templating:
-  description: Agent prompts are markdown files in the prompts/ directory. They may contain {{variable}} placeholders that
-    the platform substitutes from policy.yaml at agent session creation time. The substitution is simple string replacement
-    — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward compatibility).
-  convention:
-    prompt_path: prompts/{agent-id}.md
-    variable_syntax: '{{variable_name}}'
-    variable_source: policy.yaml
-  variable_resolution:
-    description: Prompt variables ({{token}}) are resolved from multiple sources in priority order. All sources must be scanned
-      by compliance tests.
-    resolution_order:
-    - source: instance_variables (schema.yaml)
-      description: Variables declared in the flow schema. Populated at flow instance creation via config_from.
-      example: vertical_name, mandate_document, geography
-    - source: policy (policy.yaml)
-      description: Policy values from flow and root policy files.
-      example: monthly_api_cap, growth_budget, max_escalations
-    - source: entity_state fields
-      description: Entity fields written by data_accumulation. Available at render time from entity context.
-      example: composite_score, business_brief
-    - source: runtime tokens
-      description: Platform-injected tokens not declared in contracts. Hardcoded allowlist.
-      example: current_date, agent_id, flow_instance_path
-    compliance_test_sources: 'TestPromptVariablesComplete must scan ALL of these for each prompt directory: schema.yaml (instance_variables.variables),
-      policy.yaml (all keys), agents.yaml (prompt_inputs), and the runtime-token allowlist. A variable is valid if it appears
-      in ANY of these sources.'
-flow_model:
-  description: A Flow is the universal building block. Every level of the system is a flow — from the root project down to
-    the smallest sub-flow. A flow can contain child flows. The root flow is what others call "the project." There is no separate
-    project concept.
-  flow_package:
-    description: A flow is a directory with a standard file set. package.yaml is the manifest — it declares identity, child
-      flows, and handoffs. All other files are optional depending on what the flow does.
-    files:
-      package.yaml: Flow manifest (required)
-      schema.yaml: Pins, states, required_agents (required)
-      agents.yaml: Agent definitions (required if flow has agents)
-      events.yaml: Event schemas (optional — flow may only compose children)
-      nodes.yaml: System nodes with handlers (optional)
-      tools.yaml: Flow-specific tools (optional — inherits root)
-      policy.yaml: Flow-specific config (optional — inherits root)
-      prompts/: Agent prompt files (optional)
-      flows/: Child flows (optional)
-  nesting:
-    description: 'Flows nest recursively. A flow''s package.yaml declares child flows in its flows: list. Each child is a
-      directory under flows/ with the same structure. There is no depth limit. The platform discovers flows by walking the
-      tree from the root.'
-    discovery_algorithm: '1. Read package.yaml in the current directory. 2. Register this flow (its nodes, events, agents,
-      schema, etc.). 3. For each entry in flows: list, resolve the child directory under flows/. 4. Recurse: read the child''s
-      package.yaml and repeat from step 1. 5. Stop when a flow has no flows: list or the directory doesn''t exist.'
-    root_flow: The root flow is the entry point — what was previously called "the project." It has project-level agents, nodes,
-      events, policy. It declares the top-level child flows. It is structurally identical to any other flow.
-    example: "\nproduct/                          # root flow\n  package.yaml                   # name: product, flows: [discovery,\
-      \ scoring, ...]\n  nodes.yaml                     # portfolio-node\n  events.yaml                    # cross-flow events\
-      \  \n  agents.yaml                    # 3 root-level agents\n  schema.yaml                   # root flow pins\n  flows/\n\
-      \    discovery/                   # child flow\n      package.yaml               # name: discovery, flows: [] (leaf)\n\
-      \      nodes.yaml\n      events.yaml\n      schema.yaml\n      agents.yaml\n      prompts/\n    validation/        \
-      \          # child flow with sub-flows\n      package.yaml               # name: validation, flows: [research, speccing,\
-      \ ...]\n      nodes.yaml                 # gate orchestrator\n      schema.yaml\n      flows/\n        research/   \
-      \             # grandchild flow\n          package.yaml\n          nodes.yaml\n          agents.yaml\n          prompts/\n\
-      \        speccing/\n          ...\n"
-  pins:
-    description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
-    input_event_pins:
-      description: Events the flow subscribes to. Required pins must be wired (some other flow emits them) or boot warns.
-      required: true
-    output_event_pins:
-      description: Events the flow emits. Optional — subscribers consume them if present, otherwise events are logged only.
-      required: false
-    input_data_pins:
-      description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
-      required_configurable: true
-    output_data_pins:
-      description: Entity fields the flow writes. Always written. No two flows may write the same field.
-      conflict_rule: Two flows writing the same field is a boot error (short circuit).
-    internal_events_convention: Schema pins declare the flow's EXTERNAL interface only. Internal agent-to-agent events within
-      a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
-      pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
-      or trigger/complete the flow appear in pins.
+  file_layout:
+    description: Every flow has the same directory structure. The root flow is the entry point. Flows nest via flows/ subdirectories.
+      The runtime/ bridge provides merged flat files for flat file loaders.
+    structure: "\n{root_flow}/                         # Root flow (entry point)\n  package.yaml                       # Manifest:\
+      \ name, version, flows, handoffs, entity_schema\n  schema.yaml                        # Root flow pins\n  nodes.yaml\
+      \                         # Root-level system nodes\n  events.yaml                        # Root-level events\n  agents.yaml\
+      \                        # Root-level agents\n  tools.yaml                         # Shared tools\n  policy.yaml   \
+      \                     # Shared policy\n  prompts/                           # Root-level agent prompts\n  runtime/ \
+      \                          # Merged flat files for flat file loader\n    nodes.yaml\n    events.yaml\n    agents.yaml\n\
+      \    tools.yaml\n    policy.yaml\n  flows/\n    {child_flow}/                    # Child flow (same structure, recursive)\n\
+      \      package.yaml\n      schema.yaml\n      nodes.yaml\n      events.yaml\n      agents.yaml\n      tools.yaml   \
+      \                  # Optional\n      policy.yaml                    # Optional\n      prompts/\n      flows/       \
+      \                  # Grandchild flows (if any)\n        {grandchild}/\n          package.yaml\n          ...\n\nplatform/\
+      \                            # Platform contracts (separate from any flow)\n  package.yaml\n  platform-spec.yaml\n"
+  minimum_flow_package:
+    required_files:
+    - package.yaml
+    - schema.yaml
+    optional_files:
+    - nodes.yaml
+    - events.yaml
+    - agents.yaml
+    - tools.yaml
+    - policy.yaml
+    optional_directories:
+    - prompts/
+    - flows/
+    rule: A flow with no agents needs no prompts/. A flow with no handlers needs no nodes.yaml. A flow with no events needs
+      no events.yaml.
+  entity_schema:
+    description: entity_schema in package.yaml declares the persistent fields for entities managed by this flow. The platform
+      derives database DDL from this schema at boot.
+    format:
+      groups: Schema is organized into named groups (e.g., discovery_phase, scoring_phase).
+      fields: 'Each field is declared as: field_name: type_description'
+      types: text, integer, numeric(precision,scale), boolean, jsonb, timestamp, uuid
+      annotations: Parenthetical notes after the type are human-readable, not machine-parsed.
+    example: "entity_schema:\n  identity:\n    vertical_id: uuid (primary key)\n    name: text\n  scoring_phase:\n    composite_score:\
+      \ numeric(5,2)\n    discovery_mode: text"
+  event_schema:
+    description: Each workflow defines event payload schemas in events.yaml. Events are keyed by event name. Each entry contains
+      a payload object mapping field names to types (string, integer, object, array, boolean). The platform uses these schemas
+      to validate emit tool calls at runtime. Routing, consumers, and delivery are NOT declared in events.yaml — the platform
+      derives routing from agents.yaml (subscriptions, emit_events) and nodes.yaml (subscribes_to, event_handlers).
+    format:
+      event_name:
+        payload:
+          field_name: type (string | integer | boolean | object | array)
+    routing_derivation:
+      owning_node: If a system node subscribes_to the event → that node owns it
+      dual_delivery: If a node AND agents subscribe → route to both
+      consuming: If only a node subscribes → route to node only
+      passthrough: If no node subscribes → pure agent delivery
+  persistence_model:
+    description: Agents do not have raw database access. The platform provides typed persistence tools auto-generated from
+      the entity_schema in package.yaml. For each field group in the entity schema, the platform generates save/get tools
+      with validated input schemas. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
+    auto_generated_tools:
+      get_entity: Read entity by ID. Returns all fields the agent has permission to see.
+      save_entity_field: Write a specific field on an entity. Field must exist in entity_schema.
+      search_entities: Query entities by stage, field values, or metadata.
+      query_metrics: Read aggregated metrics (counts, sums, averages) across entities.
+    schema_source: package.yaml → entity_schema
   required_agents:
-    description: 'Each flow schema declares required_agents — agent role sockets that the project must fill. Each entry specifies:
-      role name, events the agent subscribes to, events it emits, and a description. The platform validates at boot that every
-      required role has a matching agent in agents.yaml.'
-    schema_field: required_agents
-    entry_format:
-      role: Name of the required role
-      subscribes_to: Events the agent must subscribe to
-      emits: Events the agent must emit
-      description: What the agent does in this flow
-    fulfillment: An agent fulfills a role if its subscriptions include the required subscribes_to events (after namespace
-      substitution) and its emit_events include the required emits. The project author maps agents to roles — the platform
-      enforces the contract.
-  schema_merging:
-    description: When a project installs multiple flows, the platform merges their schemas. All output data pins become entity
-      table columns. Input data pins are validated against available outputs. Two flows writing the same field is a conflict
-      (boot error).
-  cross_flow_events:
-    rule: An event schema is defined ONCE, in the flow that emits it. Consuming flows reference it by absolute path — they
-      do NOT redefine the schema. If both flows need the schema for validation, the consuming flow imports it by reference,
-      not by copy.
-    enforcement: At boot, if the same event name appears in multiple flow event files, the platform logs a warning. The emitter
-      flow's definition is authoritative.
-execution_primitives:
-  description: All patterns the platform engine interprets from YAML handler declarations. These patterns eliminate the need
-    for product-specific code hooks. The platform derives all behavior from contracts.
-  handler_patterns:
-    description: Core handler fields interpreted by the engine.
-    advances_to: Set entity.state to target state
-    emits: Publish follow-up event with entity context
-    sets_gate: Set entity.gates.{name} = true
-    guard: Evaluate condition against entity state + policy. Block if false.
-    data_accumulation: 'Write event payload fields to entity. Supports direct mapping (field names match) and explicit mapping
-      (source_field → target_field). Format: list of strings (direct) or objects (mapped). Example: writes: ["name", "geography",
-      {source_field: mode, target_field: discovery_mode}]'
-    on_complete: Evaluate conditional branches top-to-bottom, execute first match
-    rules: Match payload field against conditions, emit matching event (typed routing)
-    record_evidence: Append event payload to entity accumulator state
-    from: 'Filter: only accept events from this sender path'
-  list_processing:
-    description: Functional list processing patterns for handlers. Operate on lists from event payload or entity state.
-    fan_out:
-      description: For each item in a list, emit an event with the item as payload.
-      fields:
-        items_from: Source list (payload field or entity field)
-        target: Agent path to receive events
-        emit_per_item: Event name to emit for each item
-        emit_mapping: 'Optional — map item values to different event names. If omitted, all items emit the same event (emit_per_item).
-          If present, the platform reads a key field from each item and emits the mapped event. Format: {key_field: "item.type",
-          mapping: {google_maps: "scanner.google_maps.scan_assigned", instagram: "scanner.instagram.scan_assigned"}}'
-      side_effect: Writes fan_out.count to entity state (for accumulation tracking)
-      example: "fan_out:\n  items_from: payload.subcategories\n  target: discovery/market-research-agent\n  emit_per_item:\
-        \ market_research.scan_assigned"
-    filter:
-      description: Keep items from a list that match a condition.
-      fields:
-        items_from: Source list
-        condition: Expression evaluated per item
-        store_as: Entity field to store result
-    reduce:
-      description: Combine items into a single value.
-      fields:
-        items_from: Source list or accumulated items
-        operation: 'Built-in: weighted_average, pick_or_average, sum, min, max, count'
-        params: Operation-specific parameters (tiers, threshold, etc.)
-        store_as: Entity field to store result
-      built_in_operations:
-        weighted_average: Average with tier grouping and weights
-        pick_or_average: If spread > threshold pick higher, else average
-        sum: Sum all values
-        min: Minimum value
-        max: Maximum value
-        count: Count items (optionally matching a condition)
-    count:
-      description: Count items matching a condition.
-      fields:
-        items_from: Source list
-        condition: Expression evaluated per item (optional — count all if omitted)
-        store_as: Entity field to store count
-    group_by:
-      description: Partition a list by a key field.
-      fields:
-        items_from: Source list
-        key: Field to group by
-        store_as: Entity field to store grouped result
-  cross_entity:
-    description: Patterns that operate across multiple entities. The platform derives table structure from entity_schema in
-      package.yaml.
-    query:
-      description: Read and aggregate across entities. For system node handlers.
-      fields:
-        entities: Entity table name (from entity_schema)
-        filter: Optional condition to select entities
-        group_by: Field to group by
-        count: Boolean — count per group
-        select: Fields to include in results
-      output: Query result is packaged into the emitted event payload.
-      example: "query:\n  entities: verticals\n  group_by: state\n  count: true\nemits: portfolio.digest_compiled"
-    clear:
-      description: Bulk reset state tables. For admin/ops handlers.
-      fields:
-        targets: List of state stores to clear (accumulator_state, cycle_counters, etc.)
-      note: The platform knows these tables from nodes.yaml state_schema.
-      example: "clear:\n  targets:\n    - accumulator_state: all\n    - cycle_counters: all\n    - pending_dedup: all"
-  accumulate:
-    description: Track multiple events arriving for the same entity. Fire on_complete when completion condition is met. Expected
-      count read from entity state (written by initiating handler).
-    fields:
-      expected_from: Entity field containing expected count or expected items list
-      completion_event: Event name that signals one item completed
-      from: Optional sender path filter
-      completion: all | threshold | timeout
-      on_complete: Handler fields to execute when done
-      on_timeout: Handler fields to execute on timeout (partial results available)
-    guarantees:
-    - 'Idempotent: duplicate arrivals ignored'
-    - 'Crash-safe: accumulator state persisted after each arrival'
-    - Expected count read from entity state (immutable once written)
-  platform_builtin_tools:
-    description: Tools the platform provides to agents and nodes.
-    agent_message: Send message to another agent (by path)
-    mailbox_send: Send item to human mailbox for decision
-    agent_hire: Spawn a new agent session
-    agent_fire: Terminate an agent session
-    agent_reconfigure: Modify agent prompt, tools, subscriptions
-    configure_routing: Modify event routing at runtime
-    human_task_request: Create a task for human execution
-    human_task_decide: Record human decision on a task
-    schedule: Set timers and delayed actions
-    create_flow_instance: Create new instance of a template flow
-    create_entity:
-      description: Create a new entity row. Platform validates against entity_schema.
-      input: entity fields (must satisfy required fields from schema)
-      output: entity_id of created entity
-    query_entities:
-      description: Cross-entity read for agents. Same semantics as the query handler pattern but available as a tool for agent
-        reasoning.
-      input: entity type, optional filter, optional group_by
-      output: Query results
-  coverage:
-    handler_patterns: 32 handlers
-    list_processing: ~8 handlers (fan_out, filter, reduce for scoring/discovery/dedup/synthesis)
-    cross_entity: 2 handlers (digest, reset)
-    accumulate: 7 handlers
-    platform_actions_only: 'true'
-    total: 51 handlers, 100% declarative
-    note: Zero platform actions. All behavior derived from contracts.
-  planned_events:
-    description: 'Events marked _status: planned are excluded from boot validation. They are not required to have emitters
-      or subscribers. They represent future capabilities.'
-    field: '_status: planned'
-    boot_behavior: Skip during pin wiring validation and subscription resolution.
-compliance_guidelines:
-  boot_validation:
-    description: Checks the platform performs at startup before any flow runs.
-    required_checks:
-    - All YAML files parse without errors
-    - package.yaml declares flows; each flow directory exists with nodes.yaml, events.yaml, schema.yaml
-    - All required input event pins are wired (some flow or project node emits them)
-    - All required_agents roles are fulfilled by agents in agents.yaml
-    - No data pin write conflicts (two flows writing same entity field)
-    - Namespace substitution produces no event name collisions
-    - All tools in agents tools_tier2 exist in tools.yaml
-    - All agent permissions include required permissions for their tools
-    - All event payloads referenced by emit_events have schemas in events.yaml
-    - Entity schema in package.yaml covers all data_accumulation write targets
-  contract_loading:
-    current:
-      events: runtime/events.yaml — all events with full metadata
-      nodes: runtime/nodes.yaml — all nodes in one file
-      note: Runtime reads from product/runtime/ (merged flat files)
-    description: How the runtime loads contracts.
-    target:
-      events: Merge flows/*/events.yaml + product/events.yaml; derive routing from agents + nodes
-      nodes: Merge flows/*/nodes.yaml + product/nodes.yaml into one node map
-      note: Runtime reads from product/flows/ (per-flow files) + project-level
-  description: Guidelines for the implementer to achieve and maintain spec compliance. These are the rules the runtime must
-    follow to be a valid platform implementation.
-  handler_execution:
-    description: How the runtime executes event handlers.
-    rules:
-    - Match inbound event to handler in owning node
-    - 'If handler has guard: evaluate condition. If false, reject or kill.'
-    - 'If handler has accumulate: track arrival, check completion, proceed only on complete.'
-    - 'If handler has advances_to: update entity state.'
-    - 'If handler has emits: publish follow-up event.'
-    - 'If handler has sets_gate: update entity gate state.'
-    - 'If handler has data_accumulation: write payload fields to entity.'
-    - 'If handler has on_complete: evaluate conditions, execute matching branch.'
-    - 'If handler has rules: match payload field, emit matching event.'
-    - 'If handler has action that is a platform action: call registered hook function.'
-  product_boundary:
-    description: Rules for product-specific code isolation.
-    rules:
-    - Product-specific Go code lives only in approved product packages (e.g., internal/runtime/pipeline/product/)
-    - Generic runtime packages contain zero product references
-    - Product hooks are registered at bootstrap, not imported by generic code
-    - CI guard fails if product literals appear in generic non-test Go files
-  runtime_enforcement:
-    description: Checks the platform performs during execution.
-    required_checks:
-    - Tool calls validated against tool schema before execution
-    - Tool calls checked against agent permissions before execution
-    - Message delivery checked against agent message scope permission
-    - State state_changes only follow declared advances_to paths
-    - Guards evaluated before state advancement — block if false
-    - Events validated against payload schema before publish
-    - Accumulation is idempotent — duplicate events do not double-count
-    - Permission checks read from agent.permissions, not hardcoded policy functions
-    - Scan mode behavior read from policy.scan_modes, not hardcoded
-    - Manager fallback read from agent.manager_fallback, not hardcoded role mapping
-    - Workspace class read from agent.workspace_class, not hardcoded
-  testing:
-    description: Required test coverage for spec compliance.
-    required_tests:
-    - Boot validation passes with current contracts (all checks green)
-    - Every declared handler has a matching Handle() implementation
-    - Every state state_change follows declared advances_to paths
-    - Every emitted event has a payload schema in events.yaml
-    - Every agent subscription resolves to an event some node or agent produces
-    - Permission enforcement blocks unauthorized tool calls
-    - Accumulation is idempotent under duplicate event delivery
-    - Crash recovery replays undelivered events correctly
-    - Namespace substitution works for multi-instance flows
-agent_registry_fields:
-  description: Fields the platform reads from agents.yaml to replace hardcoded policy functions.
-  permissions: List of capabilities. Platform checks before tool execution and message delivery.
-  permissions_bundle: Shorthand referencing a bundle in policy.yaml.
-  workspace_class: Agent grouping for workspace isolation (e.g., holding, factory, child_entity).
-  manager_fallback: Agent ID to escalate to when this agent cannot handle a situation. Platform uses for message routing fallback.
-  model_tier: LLM model selection. AUTHORITATIVE — agents.yaml model_tier wins over policy.yaml model_tiers on conflict. policy.yaml
-    model_tiers is a convenience lookup for tooling and dashboards.
-  max_turns_per_task: Turn budget per task.
-policy_driven_behavior:
-  description: Behavior the platform derives from policy.yaml instead of hardcoded functions. The runtime reads these at boot
-    and uses them for decisions during execution.
-  scan_modes: Map of mode → rubric, signal types, priority. Replaces NormalizeScanMode, DefaultScanMode, RubricNameForScanMode,
-    EmitsCategorySignals, EmitsTrendSignals.
-  permission_bundles: Named permission sets. Replaces AllowHumanTaskDecision, AllowGlobalRouting, AllowGlobalManagement, AllowMailboxSend.
-  thresholds: Scoring thresholds, revision limits, park durations. Referenced by guards via policy_ref.
-handler_execution_order:
-  description: Handler execution follows a dependency graph, not a flat sequence. Steps with causal dependencies must execute
-    in order. Independent steps may execute in any order. ALL side effects commit atomically in one transaction.
+    description: required_agents in schema.yaml declares agents the flow needs.
+    fulfillment_rule: 'The agent YAML map key must match the role field in required_agents. This is the canonical identity:
+      if schema says role: classifier-agent, agents.yaml must have a top-level key classifier-agent. No separate fulfills:
+      field.'
+    note_on_empty: required_agents entries with empty subscriptions and emits are valid. They declare that the flow needs
+      this agent role to exist, even if the agent only uses universal tools (agent_message, mailbox_send). Common for managerial
+      roles that coordinate via messages rather than event subscriptions.
+  hello_world_example:
+    description: Minimal flow that processes one event and advances state.
+    package_yaml: 'name: hello
+
+      version: 1.0.0
+
+      platform_version: ">=1.1.0"
+
+      flows: []'
+    schema_yaml: "initial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events:\
+      \ [hello.requested]\n  outputs:\n    events: [hello.completed]"
+    nodes_yaml: "hello-node:\n  id: hello-node\n  execution_type: system_node\n  subscribes_to: [hello.requested]\n  produces:\
+      \ [hello.completed]\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emits: hello.completed"
+    events_yaml: "hello.requested:\n  payload:\n    entity_id: string\n    message: string\nhello.completed:\n  payload:\n\
+      \    entity_id: string"
+    agents_yaml: '{}'
+  produces_derivation: The produces field on system nodes is OPTIONAL. If omitted, the platform derives it from handler emits,
+    rules emits, on_complete emits, and fan_out emit_per_item at boot. If present, the verifier checks it matches actual emits
+    (PRODUCES-DRIFT warning). Authors should omit produces and let the platform derive it.
+  underscore_prefix_convention:
+    description: Fields starting with _ in contract YAML files.
+    semantic_fields:
+      _source: 'Event producer type. Suppresses NO-PRODUCER verifier warnings. Values: external (...)'
+      _consumer: 'Event consumer type. Suppresses NO-CONSUMER warnings. Values: mailbox_system (...)'
+      _status: 'Event lifecycle. Values: planned (future feature).'
+      _producer: Event producer agent. Suppresses NO-PRODUCER warnings for agent-emitted events.
+    documentation_fields: Any other _-prefixed field (_note, _routing_note, _internal_events_note, etc.) is a human comment.
+      The platform ignores them. The verifier ignores them. They are not part of the contract.
+handler_specification:
+  description: Unified handler specification. Each handler field is documented once with its schema, purpose, execution position
+    in the dependency graph, and dependencies.
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
@@ -642,20 +205,6 @@ handler_execution_order:
       \                                                       └→ emits\n                                                 \
       \           └→ action\n                                                                 └→ clear (optional — reset accumulator/state\
       \ buckets)\n    "
-  dependency_rules:
-  - 'query → clear_gates: cross-entity data fetched before any state evaluation'
-  - 'clear_gates → guard: gates reset before guard reads them'
-  - 'guard → accumulate: guard must pass before accumulation is checked'
-  - 'accumulate → filter: accumulated items available before pruning'
-  - 'filter → reduce: pruned items available before aggregation'
-  - 'reduce → count: aggregated result available before counting'
-  - 'count → compute: all list processing complete before computation'
-  - 'compute → on_complete/rules: computed values written before branch conditions evaluate'
-  - 'on_complete/rules → {advances_to, sets_gate, data_accumulation}: branches may override these fields'
-  - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
-  - 'payload_transform → emits: output payload constructed before event persisted'
-  - 'emits → action: events persisted before platform actions execute'
-  - 'action → clear: state cleanup runs last, after all side effects committed'
   atomicity:
     description: ALL side effects from one handler execution commit in a single database transaction. State advance, gate
       set, data write, and event persistence happen atomically. No external observer sees intermediate state.
@@ -673,6 +222,289 @@ handler_execution_order:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
     accumulate_incomplete: If accumulation is not yet complete, handler stops after recording the arrival. No further steps
       until completion condition met.
+  handler_fields:
+    description: Fields within an event_handler declaration. Executed per the dependency graph defined in handler_execution_order.
+      All fields are optional — the engine skips absent fields.
+    description_field:
+      field: description
+      type: string
+      purpose: Human-readable description of what this handler does. Not executed.
+    guard:
+      field: guard
+      type: object — single check OR list of checks
+      purpose: Evaluate conditions before proceeding. All checks must pass.
+      single_form:
+        id: string — check identifier
+        check: string — expression evaluated against entity state, payload, and policy
+        policy_ref: string — optional annotation documenting which policy key is referenced
+        platform_builtin: string — optional reference to a platform-provided guard (e.g., authorization checks)
+      list_form:
+        checks: list of {id, check} objects — ALL must pass
+        on_fail: 'reject | kill | discard | escalate:{event_name} — what to do when any check fails. Default: reject.'
+    accumulate:
+      field: accumulate
+      type: object
+      purpose: Track multiple event arrivals for same entity. Wait until completion.
+      sub_fields:
+        expected_from: string — entity field containing expected count or items list
+        completion: all | threshold | timeout
+        from: string — optional sender path filter
+        on_complete: handler fields to execute when done
+        on_timeout: handler fields to execute on timeout
+        description: string — human-readable note
+        dedup_by: 'string — field path for deduplication. Default: "sender" (sender session ID). Set to a payload field path
+          (e.g., "payload.dimension") when accumulating items identified by content rather than sender. Duplicate arrivals
+          with the same dedup key are ignored.'
+      concept: Track multiple events arriving for the same entity. Fire on_complete when completion condition is met. Expected
+        count read from entity state (written by initiating handler).
+    compute:
+      field: compute
+      type: object
+      purpose: Execute a platform computation primitive.
+      sub_fields:
+        operation: string — weighted_average | pick_or_average | sum | min | max | count
+        tiers: 'list — for weighted_average: [{dimensions, weight}]'
+        params: object — operation-specific parameters
+        store_as: string — entity field to store result
+        description: string — human-readable note
+    on_complete:
+      field: on_complete
+      type: list of {condition, advances_to, emits} objects — evaluated top-to-bottom, first match wins
+      purpose: Conditional branching after accumulation or computation.
+      branch_fields:
+        condition: string — expression evaluated against entity state and policy
+        advances_to: string — target state
+        emits: string — event to emit
+      _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
+        condition executes.
+    advances_to:
+      field: advances_to
+      type: string
+      purpose: Set entity.state to target. Skipped if on_complete already advanced.
+    sets_gate:
+      field: sets_gate
+      type: string
+      purpose: Set entity.gates.{name} = true.
+    data_accumulation:
+      field: data_accumulation
+      type: object
+      purpose: Write event payload fields to entity.
+      sub_fields:
+        writes: 'list — field names (direct mapping: payload.X → entity.X) OR objects ({source_field: X, target_field: Y}
+          for rename mapping) OR objects ({source_field: X, value: V} for literal value)'
+        source_event: 'string — which event the payload comes from (default: current event). CANONICAL name — use this, not
+          "source".'
+      canonical_shape:
+        description: One canonical shape. This is the only accepted shape.
+        canonical:
+          format: "data_accumulation:\n  writes:\n    - field_name                          # direct: payload.field_name →\
+            \ entity.field_name\n    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key\n\
+            \      target_field: entity_key\n  source_event: event_name                # optional: defaults to the trigger\
+            \ event"
+          rules:
+          - writes is always a list
+          - each item is either a string (direct name match) or a {source_field, target_field} object (mapped)
+          - source_event is optional — if omitted, the trigger event is the source
+          - the source_event payload must contain all referenced fields (verified at boot)
+        format: "data_accumulation:\n  writes:\n    - field_name                          # direct: payload.field_name → entity.field_name\n\
+          \    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key\n      target_field:\
+          \ entity_key\n    - target_field: entity_key            # computed: CEL expression → entity.target_key\n      expression:\
+          \ \"entity.counter + 1\"\n  source_event: event_name                # optional: defaults to the trigger event"
+        rules:
+        - computed writes use {target_field, expression} — expression is CEL evaluated against handler context (entity, payload,
+          policy)
+        - source_event is optional. When omitted, the trigger event is the source. When present, it must be a valid event
+          name in events.yaml. It is NOT a path expression — use data_accumulation.writes with {source_field, target_field}
+          for field mapping.
+    emits:
+      field: emits
+      type: string or list of strings
+      purpose: Publish follow-up event(s). Skipped if on_complete already emitted.
+    rules:
+      field: rules
+      type: map of rule_name → rule
+      purpose: Type-based routing. Match payload field against conditions.
+      rule_fields:
+        condition: string — expression evaluated against payload
+        emits: string or list — event(s) to emit
+        advances_to: string — optional state change
+        data_accumulation: object — optional data write (same format as handler-level)
+        description: string — human-readable note
+    fan_out:
+      field: fan_out
+      type: object
+      purpose: For each item in a list, emit an event.
+      sub_fields:
+        items_from: string — source list (payload field or entity field)
+        target: string — agent path to receive events
+        emit_per_item: string — event name to emit for each item (all same type)
+        emit_mapping: 'object — optional: map item key values to different event names'
+      side_effect: Writes fan_out.count to handler context (available for data_accumulation).
+    query:
+      field: query
+      type: object or list of objects
+      purpose: Cross-entity read and aggregation.
+      sub_fields:
+        entities: string — entity table name
+        filter: string — optional condition
+        group_by: string — field to group by
+        count: boolean — count per group
+        select: list — fields to include
+        store_as: string — where to put results (in emit payload)
+      execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
+        or on_complete.
+    reduce:
+      field: reduce
+      type: object
+      purpose: Combine accumulated items into a single value.
+      sub_fields:
+        items_from: string — source list
+        operation: string — weighted_average | pick_or_average | sum | min | max | count
+        params: object — operation-specific parameters
+        store_as: string — entity field to store result
+      execution_position: After filter, before count. Aggregates filtered items into a single value (weighted_average, sum,
+        min, max, pick_or_average).
+    filter:
+      field: filter
+      type: object
+      purpose: Keep items from a list that match a condition.
+      sub_fields:
+        items_from: string — source list
+        condition: string — expression per item
+        store_as: string — entity field for result
+      execution_position: After accumulate, before reduce. Prunes accumulated items based on CEL condition. Only matching
+        items pass through.
+    count:
+      field: count
+      type: object
+      purpose: Count items matching a condition.
+      sub_fields:
+        items_from: string — source list
+        condition: string — optional filter
+        store_as: string — entity field for count
+      execution_position: After reduce, before compute. Counts items (optionally matching a condition). Stores result in entity
+        field.
+    clear:
+      field: clear
+      type: object
+      purpose: Bulk reset state tables.
+      sub_fields:
+        targets: list of state store names to clear
+      execution_position: After action. Last step. Resets accumulator state or specific entity field buckets. Distinct from
+        clear_gates which runs before guard.
+    action:
+      field: action
+      type: string
+      purpose: 'Names a platform-provided action. Valid values: create_flow_instance, record_evidence. The platform executes
+        the named action. NOT for platform actions — all behavior must be declarative.'
+      valid_values:
+        create_flow_instance:
+          description: Create a new dynamic flow instance.
+          required_sibling_fields:
+            template: 'string — flow template ID (must be mode: template)'
+            instance_id_from: string — payload field containing the unique instance ID
+            config_from: object — maps instance variable names to payload field paths. Platform reads payload values and passes
+              them as config to the new flow instance.
+        record_evidence:
+          description: Append event payload to entity accumulator state.
+          behavior: Reads the event payload and appends it as a new entry in the entity's evidence accumulator (from state_schema).
+            Append-only — never replaces. Used for building an audit trail of signals, scores, or decisions.
+          required_sibling_fields: {}
+    payload_transform:
+      field: payload_transform
+      type: object
+      purpose: Construct an output event payload from multiple sources. Used when emitting an event that combines fields from
+        entity state, incoming event payload, and computed values.
+      sub_fields:
+        fields: map of output_field_name → source expression (CEL)
+      example: "payload_transform:\n  fields:\n    vertical_id: payload.vertical_id\n    brand_choice: entity.brand\n    mandate:\
+        \ entity.mvp_spec\n    founder_directives: payload.notes"
+    clear_gates:
+      field: clear_gates
+      type: boolean
+      purpose: Reset all entity gates to false. Used before re-entering a validation cycle.
+      scope: 'Clears all gates on the ENTITY, not scoped to flow schema or node. An entity has one flat gate map. clear_gates:
+        true resets every key in that map to false. Rationale: gates are entity-level state. A flow that resets an entity
+        to an earlier phase (e.g., vertical.needs_more_data returning to researching) must clear all gates, not just the ones
+        its node declared.'
+      limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
+    evidence_target:
+      description: Required when action is record_evidence. Specifies which accumulator key the evidence is appended to.
+      type: string
+      example: build_evidence
+  node_specification:
+    node_fields:
+      description: Top-level fields on a system node declaration.
+      required:
+        id: string — unique node identifier within the flow
+        execution_type: string — must be "system_node"
+        subscribes_to: list of event names this node receives
+        event_handlers: map of event_name → handler declaration
+      optional:
+        description: string — human-readable description
+        state_schema: map — fields the node persists per entity (accumulator state)
+        state_table: string — table name for node state persistence
+        timers: list of timer declarations (see timer_model)
+        gate_state: map — gate field definitions for this node (boolean flags on entity)
+        permissions: list of platform permissions this node requires (e.g., create_flow_instance)
+    description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
+      Every field used in nodes.yaml must be defined here.
+  dependency_rules:
+  - 'query → clear_gates: cross-entity data fetched before any state evaluation'
+  - 'clear_gates → guard: gates reset before guard reads them'
+  - 'guard → accumulate: guard must pass before accumulation is checked'
+  - 'accumulate → filter: accumulated items available before pruning'
+  - 'filter → reduce: pruned items available before aggregation'
+  - 'reduce → count: aggregated result available before counting'
+  - 'count → compute: all list processing complete before computation'
+  - 'compute → on_complete/rules: computed values written before branch conditions evaluate'
+  - 'on_complete/rules → {advances_to, sets_gate, data_accumulation}: branches may override these fields'
+  - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
+  - 'payload_transform → emits: output payload constructed before event persisted'
+  - 'emits → action: events persisted before platform actions execute'
+  - 'action → clear: state cleanup runs last, after all side effects committed'
+  core_vs_extensions:
+    description: Most handlers use a small core subset. Advanced features are extensions.
+    core_fields:
+      description: Used by 90%+ of handlers. Learn these first.
+      fields:
+      - guard
+      - advances_to
+      - sets_gate
+      - data_accumulation
+      - emits
+      - rules
+      - on_complete
+    extension_fields:
+      description: Used by specialized handlers. Learn when needed.
+      fields:
+      - accumulate
+      - compute
+      - fan_out
+      - filter
+      - reduce
+      - count
+      - query
+      - clear
+      - payload_transform
+      - clear_gates
+      - action
+  yaml_field_order: YAML field order within a handler is cosmetic. The engine executes fields per the dependency graph, not
+    per source order. A handler may list on_complete before accumulate in YAML — the engine still runs accumulate first. Authors
+    SHOULD order fields to match the dependency graph for readability, but the engine does not require it.
+  rules_handler_interaction:
+    description: When a handler has both rules and handler-level fields (emits, data_accumulation).
+    execution_order: 1. rules execute first — the matching rule fires its condition-specific side effects (rule-level emits,
+      rule-level data_accumulation, rule-level advances_to). 2. Handler-level data_accumulation executes AFTER rules — it
+      supplements rule-level writes, does not replace them. Both write to the entity in the same atomic transaction. 3. Handler-level
+      emits executes AFTER rules — rule-level emits AND handler-level emits BOTH fire. Handler-level emits are unconditional;
+      rule-level emits are conditional on the matched rule.
+    example: 'vertical.discovered has handler-level data_accumulation (6 fields) + rules with per-rule data_accumulation (scoring_rubric).
+      Result: all 6 handler-level fields are written, PLUS the matching rule writes scoring_rubric. Handler-level emits (scoring.requested)
+      fires regardless of which rule matched.'
+    precedence: Handler-level advances_to, sets_gate, data_accumulation, and emits are defaults. If the matched rule specifies
+      any of these, the rule value OVERRIDES the handler-level value for that field only. Fields not specified in the rule
+      fall through to handler-level.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
   flow_tree_walker:
@@ -945,15 +777,15 @@ engine:
         event_handlers, boot fails. This ensures unambiguous state authority — one event, one state transition, one owner.
       agents: Not constrained. Multiple agents may subscribe to the same event freely.
       enforcement: Boot validation rejects duplicate node handlers for the same event.
-    payload_shaping:
-      description: Payload construction for emitted events is part of the generic engine contract, not an adapter concern.
-      default_behavior: When a handler emits an event without payload_transform, the platform constructs the emitted event
-        payload by copying the entity_id from the triggering event. No other fields are auto-populated.
-      payload_transform_behavior: When payload_transform is present, the platform evaluates each field as a CEL expression
-        against the handler context (entity, payload, policy, accumulated, fan_out) and constructs the output payload from
-        the results. This is engine-level, not adapter-level.
-      no_implicit_forwarding: The platform does NOT auto-forward the triggering event payload to emitted events. Only entity_id
-        is carried by default. All other fields must be explicitly declared in payload_transform or come from the entity state.
+    emit_payload_default: 'When a handler emits without payload_transform, the platform constructs the payload by: 1. Start
+      with contract-visible entity fields (from entity_state.fields). 2. Overlay triggering event payload (trigger wins on
+      collision with entity fields). 3. Force platform fields: entity_id, trigger_event_type, current_state (always present,
+      always from platform). 4. If payload_transform is present, its result replaces steps 1-2 entirely (step 3 still applies).
+      Collision order: platform fields > payload_transform > trigger payload > entity fields.'
+    dual_path_events: An event can be both an input pin (arriving from outside the flow) and internally generated (emitted
+      by a handler within the flow). The system node handler processes it identically regardless of source. No priority or
+      deduplication between paths — if the same event fires from both, it runs twice (idempotency_key in the events table
+      prevents true duplicates).
   state_management:
     description: The platform tracks three kinds of state per entity instance. All state is persisted. All mutations happen
       within the handler atomic boundary.
@@ -1002,6 +834,14 @@ engine:
       backward_transitions: Backward transitions (e.g., cto_review → mvp_speccing) are allowed for NON-terminal states. The
         prohibition is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-researching,
         and similar patterns are valid.
+    entity_field_resolution:
+      description: 'In CEL expressions, entity.X resolves against a unified namespace that includes: entity_state.fields (from
+        data_accumulation writes), entity_state.current_state (as entity.state), entity_state.gates (as entity.gates.X), and
+        node state_schema fields (from accumulate/compute writes). There is no distinction between entity_schema and state_schema
+        at resolution time — both are accessible via entity.X. The storage layer may use separate tables, but the CEL context
+        merges them.'
+    state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
+      state. Cross-node state reads are not supported — use events to pass data between nodes.
   accumulation_engine:
     description: The accumulation engine is the platform subsystem that handles the accumulate primitive. It tracks multiple
       event arrivals for the same entity and fires on completion.
@@ -1059,8 +899,6 @@ engine:
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
         be modified at runtime. This is the agent's declared event contract.
-      subscriptions_bootstrap: DEPRECATED. Use subscriptions for static subscriptions. If an agent needs dynamic subscriptions
-        added at runtime, use the configure_routing platform tool. Agents should not declare both subscriptions and subscriptions_bootstrap.
     emit_tool_convention:
       description: The platform auto-generates emit tools from each agent's emit_events list. Agents do NOT need to list emit
         tools in tools_tier2.
@@ -1076,6 +914,11 @@ engine:
     provider_session_ids: External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in agent_sessions.runtime_state.provider_session_id,
       NOT in session_id. session_id is the platform-owned UUID primary key. The provider ID is an implementation detail that
       may change if the provider is swapped.
+    conversation_mode_values:
+      task: Stateless. No session persisted. Each invocation is independent.
+      session: Persistent session across events. Conversation history maintained.
+      session_per_entity: One session per agent × entity. Context preserved per entity.
+      stateless: Alias for task. Accepted by the loader, normalized to task internally.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Timers are declared in nodes.yaml.
@@ -1165,295 +1008,329 @@ engine:
         chain_depth: integer — current chain depth (for chain_depth_exceeded)
         handler_node: string — which system node was handling (if handler_error)
         timestamp: string — ISO 8601
+    chain_depth_behavior:
+      description: 'What happens when chain_depth exceeds the limit (default: 50).'
+      intercepted_event: The event that would exceed the limit is NOT emitted. It is intercepted before entering the event
+        loop. It does NOT appear in emitted_events.
+      dead_letter_record: 'A dead_letters row is created with failure_type: chain_depth_exceeded, containing the intercepted
+        event name, payload, and the chain depth at interception.'
+      triggering_handler_outcome: 'The handler that attempted to emit the chain-exceeding event gets outcome: success. The
+        handler itself succeeded — it is the EMITTED event that was intercepted. The handler''s other side effects (state
+        changes, gate sets, data writes) still commit.'
+      note: Chain depth overflow is NOT a handler failure. It is an emission interception. The dead_letter is for the downstream
+        event, not the handler that produced it.
   boot_verification:
     description: The platform runs contract verification at boot, after loading all contracts and before starting any nodes
       or agents. If any check fails, boot aborts. These checks are the authoritative integration test.
     checks:
     - id: event_chain_integrity
-      description: Every emitted event (from nodes produces, handler emits, fan_out emit_per_item, rules emits, agent emit_events,
-        auto_emit_on_create) must have a schema definition in events.yaml.
       severity: warning
-      exceptions:
-      - timer.* events (platform-managed)
-      - pipeline.dead_letter (platform-managed)
     - id: event_consumer_exists
-      description: 'Every emitted event should have at least one subscriber (node subscribes_to or agent subscriptions). Events
-        with _source: external are exempt.'
       severity: warning
     - id: event_producer_exists
-      description: 'Every subscribed event should have at least one producer. Events marked _source: external, _status: planned,
-        auto_emit_on_create, and fan_out-derived events are exempt.'
       severity: warning
     - id: payload_field_coverage
-      description: Every field in data_accumulation.writes must exist in the source event payload schema. For direct writes
-        (string), the field name must match a payload field. For mapped writes ({source_field, target_field}), source_field
-        must match a payload field.
+      severity: error
+    - id: condition_payload_alignment
+      severity: error
+    - id: condition_policy_alignment
+      severity: warning
+    - id: state_machine_coherence
       severity: error
     - id: required_agents_match
-      description: Every required_agents entry in schema.yaml must have a matching agent in agents.yaml. emit_events in schema
-        must be a subset of emit_events in agents.yaml.
       severity: error
     - id: handler_field_compliance
-      description: Every field in every event_handler must be defined in system_node_specification.handler_fields.
       severity: error
     - id: tool_resolution
-      description: Every tool in every agent tools_tier2 must exist in tools.yaml (flow-level or root-level).
-      severity: error
+      severity: warning
     - id: prompt_exists
-      description: Every agent must have a prompt file in the flow prompts/ directory.
       severity: warning
-    - id: policy_conflict_detection
-      description: If the same key exists in both root policy.yaml and flow policy.yaml with different non-object values,
-        log a warning. Flow value wins at runtime.
+    - id: produces_drift
       severity: warning
-    - id: deprecated_field_detection
-      description: Agents and handlers must not use deprecated fields (subscriptions_bootstrap, logic, on_below_threshold,
-        on_dedup, on_pass, policy_ref, condition at handler level).
+    - id: invalid_field_detection
       severity: error
-    - id: guard_expression_parse
-      description: Every guard check, rule condition, filter condition, and on_complete condition must parse as valid CEL.
-        Syntax errors abort boot.
+    - id: policy_conflict_detection
+      severity: warning
+    - id: event_cycle_detection
+      severity: error
+    - id: dialect_compliance
       severity: error
     - id: single_node_per_event
-      description: No two system nodes may declare the same event in event_handlers. One event, one node authority.
       severity: error
+    - id: config_from_payload_alignment
+      severity: error
+    - id: phantom_produces
+      severity: warning
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
-    reference_implementation: verify.py in the repository root implements all checks except CEL parsing.
-system_node_specification:
-  description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
-    Every field used in nodes.yaml must be defined here.
-  node_fields:
-    description: Top-level fields on a system node declaration.
-    required:
-      id: string — unique node identifier within the flow
-      execution_type: string — must be "system_node"
-      subscribes_to: list of event names this node receives
-      produces: list of event names this node may emit
-      event_handlers: map of event_name → handler declaration
-    optional:
-      description: string — human-readable description
-      state_schema: map — fields the node persists per entity (accumulator state)
-      state_table: string — table name for node state persistence
-      timers: list of timer declarations (see timer_model)
-      gate_state: map — gate field definitions for this node (boolean flags on entity)
-      permissions: list of platform permissions this node requires (e.g., create_flow_instance)
-  handler_fields:
-    description: Fields within an event_handler declaration. Executed per the dependency graph defined in handler_execution_order.
-      All fields are optional — the engine skips absent fields.
-    description_field:
-      field: description
-      type: string
-      purpose: Human-readable description of what this handler does. Not executed.
-    guard:
-      field: guard
-      type: object — single check OR list of checks
-      purpose: Evaluate conditions before proceeding. All checks must pass.
-      single_form:
-        id: string — check identifier
-        check: string — expression evaluated against entity state, payload, and policy
-        policy_ref: string — optional annotation documenting which policy key is referenced
-        platform_builtin: string — optional reference to a platform-provided guard (e.g., authorization checks)
-      list_form:
-        checks: list of {id, check} objects — ALL must pass
-        on_fail: 'reject | kill | discard | escalate:{event_name} — what to do when any check fails. Default: reject.'
-    accumulate:
-      field: accumulate
-      type: object
-      purpose: Track multiple event arrivals for same entity. Wait until completion.
-      sub_fields:
-        expected_from: string — entity field containing expected count or items list
-        completion: all | threshold | timeout
-        from: string — optional sender path filter
-        on_complete: handler fields to execute when done
-        on_timeout: handler fields to execute on timeout
-        description: string — human-readable note
-        dedup_by: 'string — field path for deduplication. Default: "sender" (sender session ID). Set to a payload field path
-          (e.g., "payload.dimension") when accumulating items identified by content rather than sender. Duplicate arrivals
-          with the same dedup key are ignored.'
-    compute:
-      field: compute
-      type: object
-      purpose: Execute a platform computation primitive.
-      sub_fields:
-        operation: string — weighted_average | pick_or_average | sum | min | max | count
-        tiers: 'list — for weighted_average: [{dimensions, weight}]'
-        params: object — operation-specific parameters
-        store_as: string — entity field to store result
-        description: string — human-readable note
-    on_complete:
-      field: on_complete
-      type: list of {condition, advances_to, emits} objects — evaluated top-to-bottom, first match wins
-      purpose: Conditional branching after accumulation or computation.
-      branch_fields:
-        condition: string — expression evaluated against entity state and policy
-        advances_to: string — target state
-        emits: string — event to emit
-      _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
-        condition executes.
-    advances_to:
-      field: advances_to
-      type: string
-      purpose: Set entity.state to target. Skipped if on_complete already advanced.
-    sets_gate:
-      field: sets_gate
-      type: string
-      purpose: Set entity.gates.{name} = true.
-    data_accumulation:
-      field: data_accumulation
-      type: object
-      purpose: Write event payload fields to entity.
-      sub_fields:
-        writes: 'list — field names (direct mapping: payload.X → entity.X) OR objects ({source_field: X, target_field: Y}
-          for rename mapping) OR objects ({source_field: X, value: V} for literal value)'
-        source_event: 'string — which event the payload comes from (default: current event). CANONICAL name — use this, not
-          "source".'
-      canonical_shape:
-        description: One canonical shape. Legacy shapes are accepted by the loader but should not be used in new contracts.
-        canonical:
-          format: "data_accumulation:\n  writes:\n    - field_name                          # direct: payload.field_name →\
-            \ entity.field_name\n    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key\n\
-            \      target_field: entity_key\n  source_event: event_name                # optional: defaults to the trigger\
-            \ event"
-          rules:
-          - writes is always a list
-          - each item is either a string (direct name match) or a {source_field, target_field} object (mapped)
-          - source_event is optional — if omitted, the trigger event is the source
-          - the source_event payload must contain all referenced fields (verified at boot)
-        legacy_shapes:
-          description: Accepted by loader for backward compatibility. Do NOT use in new contracts.
-          bare_string: 'data_accumulation: field_name — single field direct write. Convert to writes: [field_name].'
-          writes_as_dict: 'writes: {key: value} — dict form. Convert to writes list.'
-    emits:
-      field: emits
-      type: string or list of strings
-      purpose: Publish follow-up event(s). Skipped if on_complete already emitted.
+    reference_implementation: 'verify.py implements structural checks (payload fields, handler fields, state machine, tools,
+      dialect, cycles, produces). It does NOT implement: CEL parsing, pin wiring, permission validation, entity schema coverage,
+      or namespace collision detection. Those require the Go runtime loader.'
+    check_count: 19 checks (10 error, 9 warning)
+compliance:
+  description: Boot-time and runtime compliance enforcement.
+  runtime_enforcement:
+    description: Checks the platform performs during execution.
+    required_checks:
+    - Tool calls validated against tool schema before execution
+    - Tool calls checked against agent permissions before execution
+    - Message delivery checked against agent message scope permission
+    - State state_changes only follow declared advances_to paths
+    - Guards evaluated before state advancement — block if false
+    - Events validated against payload schema before publish
+    - Accumulation is idempotent — duplicate events do not double-count
+    - Permission checks read from agent.permissions, not hardcoded policy functions
+    - Scan mode behavior read from policy.scan_modes, not hardcoded
+    - Manager fallback read from agent.manager_fallback, not hardcoded role mapping
+    - Workspace class read from agent.workspace_class, not hardcoded
+  testing:
+    description: Required test coverage for spec compliance.
+    required_tests:
+    - Boot validation passes with current contracts (all checks green)
+    - Every declared handler has a matching Handle() implementation
+    - Every state state_change follows declared advances_to paths
+    - Every emitted event has a payload schema in events.yaml
+    - Every agent subscription resolves to an event some node or agent produces
+    - Permission enforcement blocks unauthorized tool calls
+    - Accumulation is idempotent under duplicate event delivery
+    - Crash recovery replays undelivered events correctly
+    - Namespace substitution works for multi-instance flows
+  handler_execution:
+    description: How the runtime executes event handlers.
     rules:
-      field: rules
-      type: map of rule_name → rule
-      purpose: Type-based routing. Match payload field against conditions.
-      rule_fields:
-        condition: string — expression evaluated against payload
-        emits: string or list — event(s) to emit
-        advances_to: string — optional state change
-        data_accumulation: object — optional data write (same format as handler-level)
-        description: string — human-readable note
-    fan_out:
-      field: fan_out
-      type: object
-      purpose: For each item in a list, emit an event.
-      sub_fields:
-        items_from: string — source list (payload field or entity field)
-        target: string — agent path to receive events
-        emit_per_item: string — event name to emit for each item (all same type)
-        emit_mapping: 'object — optional: map item key values to different event names'
-      side_effect: Writes fan_out.count to handler context (available for data_accumulation).
-    query:
-      field: query
-      type: object or list of objects
-      purpose: Cross-entity read and aggregation.
-      sub_fields:
-        entities: string — entity table name
-        filter: string — optional condition
-        group_by: string — field to group by
-        count: boolean — count per group
-        select: list — fields to include
-        store_as: string — where to put results (in emit payload)
-      execution_position: Before clear_gates. Pre-fetches cross-entity data into handler context for use by guard, compute,
-        or on_complete.
-    reduce:
-      field: reduce
-      type: object
-      purpose: Combine accumulated items into a single value.
-      sub_fields:
-        items_from: string — source list
-        operation: string — weighted_average | pick_or_average | sum | min | max | count
-        params: object — operation-specific parameters
-        store_as: string — entity field to store result
-      execution_position: After filter, before count. Aggregates filtered items into a single value (weighted_average, sum,
-        min, max, pick_or_average).
-    filter:
-      field: filter
-      type: object
-      purpose: Keep items from a list that match a condition.
-      sub_fields:
-        items_from: string — source list
-        condition: string — expression per item
-        store_as: string — entity field for result
-      execution_position: After accumulate, before reduce. Prunes accumulated items based on CEL condition. Only matching
-        items pass through.
-    count:
-      field: count
-      type: object
-      purpose: Count items matching a condition.
-      sub_fields:
-        items_from: string — source list
-        condition: string — optional filter
-        store_as: string — entity field for count
-      execution_position: After reduce, before compute. Counts items (optionally matching a condition). Stores result in entity
-        field.
-    clear:
-      field: clear
-      type: object
-      purpose: Bulk reset state tables.
-      sub_fields:
-        targets: list of state store names to clear
-      execution_position: After action. Last step. Resets accumulator state or specific entity field buckets. Distinct from
-        clear_gates which runs before guard.
-    action:
-      field: action
-      type: string
-      purpose: 'Names a platform-provided action. Valid values: create_flow_instance, record_evidence. The platform executes
-        the named action. NOT for platform actions — all behavior must be declarative.'
-      valid_values:
-        create_flow_instance:
-          description: Create a new dynamic flow instance.
-          required_sibling_fields:
-            template: 'string — flow template ID (must be mode: template)'
-            instance_id_from: string — payload field containing the unique instance ID
-            config_from: object — maps instance variable names to payload field paths. Platform reads payload values and passes
-              them as config to the new flow instance.
-        record_evidence:
-          description: Append event payload to entity accumulator state.
-          behavior: Reads the event payload and appends it as a new entry in the entity's evidence accumulator (from state_schema).
-            Append-only — never replaces. Used for building an audit trail of signals, scores, or decisions.
-          required_sibling_fields: {}
-    payload_transform:
-      field: payload_transform
-      type: object
-      purpose: Construct an output event payload from multiple sources. Used when emitting an event that combines fields from
-        entity state, incoming event payload, and computed values.
-      sub_fields:
-        fields: map of output_field_name → source expression (CEL)
-      example: "payload_transform:\n  fields:\n    vertical_id: payload.vertical_id\n    brand_choice: entity.brand\n    mandate:\
-        \ entity.mvp_spec\n    founder_directives: payload.notes"
-    clear_gates:
-      field: clear_gates
-      type: boolean
-      purpose: Reset all entity gates to false. Used before re-entering a validation cycle.
-      scope: 'Clears all gates on the ENTITY, not scoped to flow schema or node. An entity has one flat gate map. clear_gates:
-        true resets every key in that map to false. Rationale: gates are entity-level state. A flow that resets an entity
-        to an earlier phase (e.g., vertical.needs_more_data returning to researching) must clear all gates, not just the ones
-        its node declared.'
-  deprecated_fields:
-    description: Fields that may appear in legacy contracts but should be removed.
-    logic: Free-text prose description. Replace with proper declarative patterns.
-    on_below_threshold: Replace with accumulate.on_timeout or on_complete branch with threshold condition.
-    on_dedup: Replace with rules pattern (agent resolves dedup, handler applies via rules).
-    on_pass: Replace with accumulate.on_complete.
-    policy_ref: Informational annotation only. Not executed. Guards reference policy via check expressions.
-    condition: At handler level — move into guard.check or rules.
-entity_schema_format:
-  description: entity_schema in package.yaml declares the persistent fields for entities managed by this flow. The platform
-    derives database DDL from this schema at boot.
-  format:
-    groups: Schema is organized into named groups (e.g., discovery_phase, scoring_phase).
-    fields: 'Each field is declared as: field_name: type_description'
-    types: text, integer, numeric(precision,scale), boolean, jsonb, timestamp, uuid
-    annotations: Parenthetical notes after the type are human-readable, not machine-parsed.
-  example: "entity_schema:\n  identity:\n    vertical_id: uuid (primary key)\n    name: text\n  scoring_phase:\n    composite_score:\
-    \ numeric(5,2)\n    discovery_mode: text"
+    - Match inbound event to handler in owning node
+    - 'If handler has guard: evaluate condition. If false, reject or kill.'
+    - 'If handler has accumulate: track arrival, check completion, proceed only on complete.'
+    - 'If handler has advances_to: update entity state.'
+    - 'If handler has emits: publish follow-up event.'
+    - 'If handler has sets_gate: update entity gate state.'
+    - 'If handler has data_accumulation: write payload fields to entity.'
+    - 'If handler has on_complete: evaluate conditions, execute matching branch.'
+    - 'If handler has rules: match payload field, emit matching event.'
+    - 'If handler has action that is a platform action: call registered platform action.'
+  product_boundary:
+    description: Rules for product-specific code isolation.
+    rules:
+    - Product-specific Go code lives only in approved product packages (e.g., internal/runtime/pipeline/product/)
+    - Generic runtime packages contain zero product references
+    - Platform actions are platform action, not imported by generic code
+    - CI guard fails if product literals appear in generic non-test Go files
+  flow_coherence:
+  - Every flow declared in package.yaml must have a directory under flows/
+  - Root-level nodes must not duplicate flow-level node IDs
+  - All handoff events must have both an emitter (source flow) and subscriber (target flow or declarative handoff)
+  node_coherence:
+  - Every event in event_handlers must appear in subscribes_to
+  - Every event in produces must have a payload schema in events.yaml
+  - Guards must reference fields that exist on the entity or in policy.yaml
+  - advances_to states must be reachable from the current flow state space
+  agent_coherence:
+  - Every tool in tools_tier2 must exist in tools.yaml
+  - Every event in emit_events must have a payload schema in events.yaml
+  - Agent permissions must include required permissions for their tools
+  - Every subscription event must be emitted by some node or agent
+  boot_enforcement: All boot checks are defined in engine.boot_verification.checks. This is the single authoritative list.
+permissions_model:
+  description: Agents have a permissions list controlling what capabilities they can exercise. The platform enforces permissions
+    at tool execution time and message routing time. Workflows define permissions per agent in their agent registry. Optional
+    permission_bundles in policy files provide shorthand for common sets.
+  enforcement: Before executing any tool call, the platform checks the calling agent's permissions list. If the tool requires
+    a permission the agent lacks, the call is rejected. Message scope is enforced at agent_message delivery — the most permissive
+    message permission wins (message_all > message_domain > message_peers).
+  workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
+    permissions to workflow-registered handlers. Example: an Product workflow might define approve_deployment or override_scoring.'
+  permissions:
+  - agent_fire
+  - agent_hire
+  - agent_reconfigure
+  - approve_spend
+  - configure_routing
+  - create_flow_instance
+  - human_task_decide
+  - human_task_request
+  - mailbox_send
+  - message_all
+  - message_domain
+  - message_peers
+  - schedule
+  bundle_semantics:
+    description: An agent may declare permissions_bundle and/or explicit permissions. If both are present, the explicit permissions
+      list EXTENDS the bundle. Duplicates are deduplicated. The bundle is expanded first, then explicit permissions are added.
+tool_model:
+  description: The platform owns ALL tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates
+    calls against schemas, and routes to handlers. Tool handlers are either platform-builtin or workflow-registered.
+  platform_builtin_tools:
+    description: Authoritative list of platform-provided tools. Defined here only.
+    tools:
+      create_flow_instance: Create a new dynamic flow instance from a template. Handler action only.
+      record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler specifying which
+        accumulator key to write to.
+      create_entity: Create a new entity row in entity_state.
+      query_entities: Query entities by state, fields, or aggregation.
+      agent_message: Send a message to another agent (auto-granted to all agents).
+      mailbox_send: Send an item to the human mailbox (auto-granted to all agents).
+    note: 'create_flow_instance is a handler ACTION field value, not a tool agents can call. It is listed here for completeness
+      but invoked via action: create_flow_instance in node handlers.'
+  handler_registration: At bootstrap, the workflow module registers handlers for its tools. The platform provides the MCP
+    gateway and schema validation. One tools file per workflow containing all tool schemas (universal + workflow-specific).
+    The platform does not need separate tool files.
+  custom_tool_schema:
+    description: Accepted fields for tool definitions in tools.yaml.
+    required_fields:
+      description: string — human-readable description of what the tool does
+    optional_fields:
+      handler_type: string — workflow_registered (default), api_call, builtin
+      input_schema: object — parameter names and types the tool accepts
+      output_schema: object — field names and types the tool returns
+      parameters: object — alias for input_schema (accepted by loader)
+      returns: object — alias for output_schema (accepted by loader)
+    not_accepted:
+      endpoint: NOT a valid field. API endpoint configuration belongs in agent config or environment, not tool schema.
+      type: NOT a valid field. Use handler_type instead.
+prompt_templating:
+  description: Agent prompts are markdown files in the prompts/ directory. They may contain {{variable}} placeholders that
+    the platform substitutes from policy.yaml at agent session creation time. The substitution is simple string replacement
+    — no logic, no conditionals. Variables not found in policy.yaml are left as-is (fail-open for forward compatibility).
+  convention:
+    prompt_path: prompts/{agent-id}.md
+    variable_syntax: '{{variable_name}}'
+    variable_source: policy.yaml
+  variable_resolution:
+    description: Prompt variables ({{token}}) are resolved from multiple sources in priority order. All sources must be scanned
+      by compliance tests.
+    resolution_order:
+    - source: instance_variables (schema.yaml)
+      description: Variables declared in the flow schema. Populated at flow instance creation via config_from.
+      example: vertical_name, mandate_document, geography
+    - source: policy (policy.yaml)
+      description: Policy values from flow and root policy files.
+      example: monthly_api_cap, growth_budget, max_escalations
+    - source: entity_state fields
+      description: Entity fields written by data_accumulation. Available at render time from entity context.
+      example: composite_score, business_brief
+    - source: runtime tokens
+      description: Platform-injected tokens not declared in contracts. Hardcoded allowlist.
+      example: current_date, agent_id, flow_instance_path
+    compliance_test_sources: 'TestPromptVariablesComplete must scan ALL of these for each prompt directory: schema.yaml (instance_variables.variables),
+      policy.yaml (all keys), agents.yaml (prompt_inputs), and the runtime-token allowlist. A variable is valid if it appears
+      in ANY of these sources.'
+flow_model:
+  description: A Flow is the universal building block. Every level of the system is a flow — from the root flow down to the
+    smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate
+    project concept (removed).
+  flow_package:
+    description: A flow is a directory with a standard file set. package.yaml is the manifest — it declares identity, child
+      flows, and handoffs. All other files are optional depending on what the flow does.
+    files:
+      package.yaml: Flow manifest (required)
+      schema.yaml: Pins, states, required_agents (required)
+      agents.yaml: Agent definitions (required if flow has agents)
+      events.yaml: Event schemas (optional — flow may only compose children)
+      nodes.yaml: System nodes with handlers (optional)
+      tools.yaml: Flow-specific tools (optional — inherits root)
+      policy.yaml: Flow-specific config (optional — inherits root)
+      prompts/: Agent prompt files (optional)
+      flows/: Child flows (optional)
+  nesting:
+    description: 'Flows nest recursively. A flow''s package.yaml declares child flows in its flows: list. Each child is a
+      directory under flows/ with the same structure. There is no depth limit. The platform discovers flows by walking the
+      tree from the root.'
+    discovery_algorithm: '1. Read package.yaml in the current directory. 2. Register this flow (its nodes, events, agents,
+      schema, etc.). 3. For each entry in flows: list, resolve the child directory under flows/. 4. Recurse: read the child''s
+      package.yaml and repeat from step 1. 5. Stop when a flow has no flows: list or the directory doesn''t exist.'
+    root_flow: The root flow is the entry point. It has flow-level agents, nodes, events, policy. It declares the top-level
+      child flows. It is structurally identical to any other flow.
+    example: "\nproduct/                          # root flow\n  package.yaml                   # name: product, flows: [discovery,\
+      \ scoring, ...]\n  nodes.yaml                     # portfolio-node\n  events.yaml                    # cross-flow events\
+      \  \n  agents.yaml                    # 3 root-level agents\n  schema.yaml                   # root flow pins\n  flows/\n\
+      \    discovery/                   # child flow\n      package.yaml               # name: discovery, flows: [] (leaf)\n\
+      \      nodes.yaml\n      events.yaml\n      schema.yaml\n      agents.yaml\n      prompts/\n    validation/        \
+      \          # child flow with sub-flows\n      package.yaml               # name: validation, flows: [research, speccing,\
+      \ ...]\n      nodes.yaml                 # gate orchestrator\n      schema.yaml\n      flows/\n        research/   \
+      \             # grandchild flow\n          package.yaml\n          nodes.yaml\n          agents.yaml\n          prompts/\n\
+      \        speccing/\n          ...\n"
+  pins:
+    description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
+    input_event_pins:
+      description: Events the flow subscribes to. Required pins must be wired (some other flow emits them) or boot warns.
+      required: true
+    output_event_pins:
+      description: Events the flow emits. Optional — subscribers consume them if present, otherwise events are logged only.
+      required: false
+    input_data_pins:
+      description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
+      required_configurable: true
+    output_data_pins:
+      description: Entity fields the flow writes. Always written. No two flows may write the same field.
+      conflict_rule: Two flows writing the same field is a boot error (short circuit).
+    internal_events_convention: Schema pins declare the flow's EXTERNAL interface only. Internal agent-to-agent events within
+      a flow (e.g., spec.requested between two agents in the same flow) exist in events.yaml but are NOT listed in schema
+      pins. They are implementation details, not part of the flow's public contract. Only events that cross flow boundaries
+      or trigger/complete the flow appear in pins.
+  required_agents:
+    description: 'Each flow schema declares required_agents — agent role sockets that the root flow must fill. Each entry
+      specifies: role name, events the agent subscribes to, events it emits, and a description. The platform validates at
+      boot that every required role has a matching agent in agents.yaml.'
+    schema_field: required_agents
+    entry_format:
+      role: Name of the required role
+      subscribes_to: Events the agent must subscribe to
+      emits: Events the agent must emit
+      description: What the agent does in this flow
+    fulfillment: An agent fulfills a role if its subscriptions include the required subscribes_to events (after namespace
+      substitution) and its emit_events include the required emits. The flow author maps agents to roles — the platform enforces
+      the contract.
+  schema_merging:
+    description: When a root flow installs multiple flows, the platform merges their schemas. All output data pins become
+      entity table columns. Input data pins are validated against available outputs. Two flows writing the same field is a
+      conflict (boot error).
+  cross_flow_events:
+    rule: An event schema is defined ONCE, in the flow that emits it. Consuming flows reference it by absolute path — they
+      do NOT redefine the schema. If both flows need the schema for validation, the consuming flow imports it by reference,
+      not by copy.
+    enforcement: At boot, if the same event name appears in multiple flow event files, the platform logs a warning. The emitter
+      flow's definition is authoritative.
+  stateless_flows:
+    description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. Discovery is
+      an example: it scans, filters, and emits verticals without maintaining per-entity state.'
+    schema_for_stateless: 'A stateless flow still has schema.yaml but may set initial_state: null and states: []. Events pass
+      through system nodes which accumulate, filter, and emit — but no entity state machine is maintained. The accumulator
+      state is flow-scoped, not entity-scoped.'
+    when_to_use: Producer pipelines, ETL flows, signal processing, fan-out dispatchers.
+    entity_behavior: 'In a stateless flow (initial_state: null, states: []), the platform does not create entity_state rows.
+      Events pass through system nodes for accumulation and fan_out but no state machine is maintained. advances_to is invalid
+      in a stateless flow handler (boot error if used). Guards may reference payload and policy but not entity (no entity
+      exists). Accumulators are flow-scoped, keyed by a handler-declared key, not by entity_id.'
+  state_composition:
+    description: How flow-level state machines compose into the entity lifecycle.
+    per_flow_states: Each flow defines its own state space. An entity in the scoring flow has scoring states. The same entity
+      in the validation flow has validation states. These are SEPARATE state machines — not one unified enum.
+    cross_flow_transitions: 'When an entity moves from one flow to another (scoring → validation), the transition is: 1. Scoring
+      flow handler emits a cross-flow event (e.g., vertical.shortlisted). 2. Validation flow node handles it, advances entity
+      to validation initial state (researching). 3. The entity now has a validation flow state. Its scoring flow state is
+      terminal (shortlisted). There is no "global state" — each flow tracks its own state for the entity.'
+    killed_across_flows: killed is a terminal state in every flow. When validation kills an entity, it emits vertical.killed
+      + vertical.killed_backprop. The scoring flow handles killed_backprop and advances the entity to killed in the scoring
+      state machine too.
+versioning:
+  description: Platform and products version independently.
+  platform_versioning:
+    scheme: semver (major.minor.patch)
+    major: Breaking changes to flow model, handler fields, boot validation, or contract formats
+    minor: New execution primitives, new handler fields (backward compatible), new compliance checks
+    patch: Bug fixes, documentation, clarifications
+  product_versioning:
+    scheme: semver (major.minor.patch)
+    major: Flow restructuring, agent hierarchy changes, breaking event schema changes
+    minor: New agents, new events, new tools, threshold adjustments
+    patch: Prompt improvements, policy tuning, bug fixes
+  compatibility:
+    declaration: Products declare platform_version in package.yaml using semver range (e.g., >=1.0.0)
+    enforcement: Platform checks product platform_version at boot. Rejects if platform version is outside range.
+    forward_compatible: Platform minor/patch releases do not break existing products
+    example: 'Product v3.0.0 declares platform_version: ">=1.0.0". Works on platform 1.0.0, 1.1.0, 1.9.0. May not work on
+      2.0.0.'
 platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
     NOT entity tables (those are contract-driven from entity_schema). The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
@@ -1532,8 +1409,8 @@ platform_tables:
       description: 'Agent conversation sessions. Supports three scopes: entity (one session per agent × entity), flow (one
         session per agent × flow instance), global (one session per agent, shared across all entities). scope_key is the lookup
         key used by the runtime: for entity scope it is the entity_id, for flow scope it is the flow_instance path, for global
-        scope it is the literal "global". This replaces both the legacy conversations and agent_turns tables. runtime_mode
-        matches the agent conversation_mode from contracts. lease_holder/lease_expires_at for distributed session locking.'
+        scope it is the literal "global". runtime_mode matches the agent conversation_mode from contracts. lease_holder/lease_expires_at
+        for distributed session locking.'
       ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id\
         \          TEXT NOT NULL REFERENCES agents(agent_id),\n    entity_id         UUID,\n    flow_instance     TEXT,\n\
         \    scope_key         TEXT NOT NULL,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
@@ -1578,8 +1455,7 @@ platform_tables:
         distinguishes task kinds: human_task, review_request, approval, alert, operational_decision. human_tasks are represented
         as mailbox items with item_type = "human_task". from_agent identifies the requesting agent. summary provides a human-readable
         description. decision_notes captures the human rationale. notified tracks whether the human was alerted. source_event_id
-        links back to the triggering event for traceability. Old legacy columns (context, timeout_at, priority, event_id)
-        are replaced by payload (JSONB), expires_at, severity, source_event_id respectively.'
+        links back to the triggering event for traceability.'
       ddl: "CREATE TABLE mailbox (\n    item_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id     \
         \    UUID,\n    flow_instance     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
         \ 'flow', 'global')),\n    item_type         TEXT NOT NULL,\n    source_event_id   UUID,\n    from_agent        TEXT,\n\
@@ -1653,8 +1529,7 @@ platform_tables:
     index_syntax: INDEX declarations are logical — the implementer may use CREATE INDEX statements or database-specific syntax.
       The spec declares intent, not SQL dialect.
   diagnostics_encoding:
-    description: Runtime diagnostics (formerly runtime_log + pipeline_transitions) are encoded into existing platform tables.
-      No dedicated diagnostics table.
+    description: Runtime diagnostics are encoded into existing platform tables. No dedicated diagnostics table.
     runtime_log_encoding:
       table: events
       event_name: platform.runtime_log
@@ -1677,24 +1552,6 @@ platform_tables:
         duration: event_receipts.duration_ms
       note: Every handler execution already produces an event_receipt. The receipt captures state_before, state_after, outcome,
         duration, and side_effects. This IS the pipeline transition record. No separate table needed.
-  workflow_instances_migration:
-    description: Canonical mapping from legacy workflow_instances to spec tables.
-    mapping:
-      instance_id: entity_state.entity_id
-      workflow_name: flow_instances.flow_template
-      workflow_version: flow_instances.config.workflow_version (JSONB field — version is config, not state)
-      current_state: entity_state.current_state
-      entered_stage_at: entity_state.entered_state_at
-      state_change_history: DELETED — reconstructible from events table (SELECT event_name, created_at FROM events WHERE entity_id
-        = X ORDER BY created_at)
-      accumulator_state: entity_state.accumulator
-      timer_state: 'DELETED — timers table owns all timer state. Query: SELECT * FROM timers WHERE entity_id = X'
-      metadata: 'Split across tables:'
-      metadata.slug: entity_state.fields.slug (entity field, contract-driven)
-      metadata.credentials: DELETED from platform tables. Product-owned secret. Store in product config or external vault,
-        never in entity_state.
-      metadata.instance_kind: flow_instances.config.instance_kind (JSONB field)
-      created_at: entity_state.created_at
   entity_registry_policy: There is no separate entity registry table. entity_state IS the registry. Generic reads (list entities,
     find by slug, count by state) query entity_state directly. Contract-driven entity tables are optional optimizations —
     they materialize fields JSONB into typed columns for query performance. Not required for correctness.
@@ -1708,10 +1565,6 @@ platform_tables:
       spend: 'Aggregate from spend_ledger: SELECT SUM(cost_usd) FROM spend_ledger WHERE entity_id = X'
     digest_queries: Digest/reporting code should query entity_state for current metrics and spend_ledger for cost aggregates.
       No entity_metrics table.
-  removed_from_platform:
-    prompt_overrides: DELETED from platform. prompt_overrides is product-owned. Delete generic PromptOverridePersistence and
-      prompt_overrides_test.go. If Empire needs prompt overrides, it manages them in its own product config, not through the
-      platform store layer.
   migration_policy: 'schema_version is a platform table. It survives the legacy SQL deletion. MigrationSpec and ApplyManagedMigrations
     remain as platform APIs — they apply DDL diffs between platform versions. ApplyMigrationFile is DELETED (no more file-based
     migrations). The boot sequence: read schema_version → compare to current platform version → generate DDL diff → apply
@@ -1742,3 +1595,53 @@ platform_tables:
       This is a product-level migration — inbound.go is product code, not platform code. Move it out of generic runtime.
     platform_guarantee: The platform never reads, writes, logs, or indexes credential fields. It treats flow_instances.config
       as opaque JSONB. Products own their secrets.
+observation_model:
+  description: Defines exactly what is observable from a test, audit, or flight recorder perspective. This is the external
+    contract of the engine — what an observer sees after a handler runs.
+  emitted_events:
+    description: The list of events produced by system node handler execution.
+    includes:
+    - Events from handler emits field
+    - Events from handler rules emits
+    - Events from handler on_complete emits
+    - Events from handler fan_out emit_per_item
+    - Events from handler action side effects (e.g., auto_emit_on_create)
+    excludes:
+    - Agent fixture emissions (agents are independent, their emissions route through the event loop separately)
+    - Dead-lettered events (intercepted before delivery, recorded in dead_letters table instead)
+    - Child flow auto_emit events (visible within the child, not in parent emission log)
+    naming: Events are recorded with their fully-qualified URI in the parent flow context. When a child flow node emits order.completed,
+      the parent sees child-flow-id/order.completed. Within the same flow, events use local names (no prefix).
+    payload_rules:
+      description: Rules for constructing emitted event payloads.
+      construction_order:
+      - 1. Entity fields (base layer — contract-visible fields from entity_state)
+      - 2. Trigger payload (overlays entity fields — trigger wins on collision)
+      - '3. Platform fields forced: entity_id, trigger_event_type, current_state'
+      - 4. payload_transform replaces steps 1-2 if present
+      collision_priority: platform fields > payload_transform > trigger payload > entity fields
+      note: This means emitted events carry context from both entity state AND the triggering event. If the trigger payload
+        has a field with the same name as an entity field, the trigger value is used. Platform fields (entity_id, trigger_event_type,
+        current_state) are always present and cannot be overridden.
+  entity_state:
+    description: The entity document after handler execution commits.
+    observable_fields:
+      current_state: The state after advances_to (or unchanged if no advances_to)
+      gates: Map of gate names to boolean values, after sets_gate and clear_gates
+      fields: JSONB of entity fields, after data_accumulation writes
+      accumulator: JSONB of accumulated items, after accumulate step
+      revision: Incremented on every handler commit
+  handler_outcome:
+    description: The result of a single handler execution.
+    values:
+      success: Handler ran to completion. All side effects committed.
+      reject: 'Guard failed with on_fail: reject. No side effects. Entity unchanged.'
+      discard: 'Guard failed with on_fail: discard. No side effects. No record.'
+      kill: 'Guard failed with on_fail: kill. Entity advanced to terminal state.'
+      escalate: 'Guard failed with on_fail: escalate:{event}. Escalation event emitted instead.'
+      dead_letter: Handler failed after retry exhaustion OR chain depth exceeded. Event moved to dead_letters.
+      terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
+  agent_vs_node_observability: System node handler emissions are recorded in the entity emission chain and appear in emitted_events.
+    Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
+    An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
+    agent emission does not appear in the triggering handler's emitted_events list.

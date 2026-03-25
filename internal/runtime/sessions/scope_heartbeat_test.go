@@ -19,6 +19,16 @@ func TestScopeFromContext_DefaultsToSession(t *testing.T) {
 	}
 }
 
+func TestNormalizeConversationRuntimeMode_AcceptsStatelessAlias(t *testing.T) {
+	if got := NormalizeConversationRuntimeMode("stateless"); got != RuntimeModeTask {
+		t.Fatalf("NormalizeConversationRuntimeMode(stateless) = %q, want %q", got, RuntimeModeTask)
+	}
+	scope := ResolveScope("stateless", "ignored")
+	if scope.RuntimeMode != RuntimeModeTask || !scope.Stateless {
+		t.Fatalf("ResolveScope(stateless) = %+v, want task/stateless", scope)
+	}
+}
+
 func TestLeaseHeartbeatInterval_ClampsRange(t *testing.T) {
 	if got := LeaseHeartbeatInterval(time.Time{}); got != 30*time.Second {
 		t.Fatalf("zero expiry: got %s", got)

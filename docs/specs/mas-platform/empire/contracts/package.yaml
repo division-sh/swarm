@@ -1,6 +1,5 @@
 name: empire
 version: 3.0.3
-platform_version: '>=1.1.0'
 author: youmew
 description: AI-powered venture studio — discovers, validates, and operates micro-SaaS businesses
 flows:
@@ -16,9 +15,6 @@ flows:
 - id: operating
   flow: operating
   mode: template
-runtime_contracts:
-  nodes: runtime/nodes.yaml
-  events: runtime/events.yaml
 target_contracts:
   nodes: flows/*/nodes.yaml + nodes.yaml (project-level)
   events: flows/*/events.yaml + events.yaml (project-level, payload-only)
@@ -46,6 +42,10 @@ entity_schema:
     scoring_rubric: text
     scores: jsonb (dimension scores)
     generator_agent_id: text (agent that scored this entity)
+    build_complexity: numeric(5,2)
+    automation_completeness: numeric(5,2)
+    child_count: integer
+    is_duplicate: boolean
   validation_phase:
     business_brief: jsonb (from research.completed)
     mvp_spec: jsonb (from spec.approved)
@@ -57,6 +57,9 @@ entity_schema:
     deploy_config: jsonb
     live_url: text
     launch_targets: jsonb
+    active_pipeline_count: integer
+    red_flag_count: integer
+    evidence_count: integer
   metadata:
     human_notes: text
     created_at: timestamptz
@@ -64,4 +67,4 @@ entity_schema:
   derivation:
     parent_id: uuid (null for non-derived)
     generation_depth: integer default 0
-platform: '>=1.1.1'
+platform: '>=1.2.0'

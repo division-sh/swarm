@@ -1,6 +1,7 @@
 export type EventFilter = {
   type?: string;
   source?: string;
+  entity_id?: string;
   vertical?: string;
   component?: string;
   level?: string;
@@ -30,6 +31,8 @@ export type EventRecord = {
   type?: string;
   created_at?: string;
   source_agent?: string;
+  entity_id?: string;
+  scope?: string;
   vertical_id?: string;
   vertical_slug?: string;
   component?: string;
@@ -51,6 +54,7 @@ export type RuntimeLogRecord = {
   error?: string;
   error_code?: string;
   agent_id?: string;
+  entity_id?: string;
   vertical_id?: string;
   source?: string;
   message?: string;

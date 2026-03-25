@@ -33,6 +33,73 @@ compute:
 	}
 }
 
+func TestFlowPinsDecode_AcceptsStructuredEventEntries(t *testing.T) {
+	var schema FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+states:
+  - pending
+initial_state: pending
+terminal_states: []
+pins:
+  inputs:
+    events:
+      - name: check.requested
+        required: false
+    reads:
+      - field: entity.score
+        type: number
+  outputs:
+    events:
+      - name: check.passed
+        required: false
+    writes:
+      - field: entity.status
+        type: string
+`), &schema); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := len(schema.Pins.Inputs.Events); got != 1 {
+		t.Fatalf("len(Inputs.Events) = %d", got)
+	}
+	if got := schema.Pins.Inputs.Events[0]; got != "check.requested" {
+		t.Fatalf("Inputs.Events[0] = %q", got)
+	}
+	if got := schema.Pins.Outputs.Events[0]; got != "check.passed" {
+		t.Fatalf("Outputs.Events[0] = %q", got)
+	}
+	if got := schema.Pins.Inputs.Reads[0]; got != "entity.score" {
+		t.Fatalf("Inputs.Reads[0] = %q", got)
+	}
+	if got := schema.Pins.Outputs.Writes[0]; got != "entity.status" {
+		t.Fatalf("Outputs.Writes[0] = %q", got)
+	}
+}
+
+func TestFlowPinsDecode_PreservesLegacyStringEventEntries(t *testing.T) {
+	var schema FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+states:
+  - pending
+initial_state: pending
+terminal_states: []
+pins:
+  inputs:
+    events: [check.requested]
+    reads: []
+  outputs:
+    events: [check.passed]
+    writes: []
+`), &schema); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := schema.Pins.Inputs.Events[0]; got != "check.requested" {
+		t.Fatalf("Inputs.Events[0] = %q", got)
+	}
+	if got := schema.Pins.Outputs.Events[0]; got != "check.passed" {
+		t.Fatalf("Outputs.Events[0] = %q", got)
+	}
+}
+
 func TestFanOutSpecDecode_PreservesStructuredEmitMapping(t *testing.T) {
 	var spec FanOutSpec
 	if err := yaml.Unmarshal([]byte(`
@@ -205,5 +272,21 @@ config_from:
 	}
 	if got := handler.Action.ConfigFrom.Bindings["priority"]; got != "payload.priority" {
 		t.Fatalf("ConfigFrom.Bindings[priority] = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_PreservesEvidenceTarget(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+action: record_evidence
+evidence_target: validation.results
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := handler.Action.ID; got != "record_evidence" {
+		t.Fatalf("Action.ID = %q", got)
+	}
+	if got := handler.EvidenceTarget; got != "validation.results" {
+		t.Fatalf("EvidenceTarget = %q", got)
 	}
 }

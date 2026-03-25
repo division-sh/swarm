@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "flows": {
+    "": {
+      "node_positions": {
+        "router": {
+          "x": 160,
+          "y": -360
+        },
+        "child": {
+          "x": 60,
+          "y": -140
+        }
+      },
+      "edge_routes": {},
+      "use_edge_routes": false,
+      "handler_display_order": {},
+      "breakpoints": [],
+      "pin_data": {},
+      "annotations": [],
+      "acknowledged_warnings": [],
+      "viewport": {
+        "x": 89.57071557086806,
+        "y": 369.33613985292413,
+        "zoom": 0.8479199646331499
+      }
+    },
+    "child": {
+      "node_positions": {
+        "validator": {
+          "x": 40,
+          "y": 40
+        }
+      },
+      "edge_routes": {},
+      "use_edge_routes": false,
+      "handler_display_order": {},
+      "breakpoints": [],
+      "pin_data": {},
+      "annotations": [],
+      "acknowledged_warnings": []
+    }
+  }
+}

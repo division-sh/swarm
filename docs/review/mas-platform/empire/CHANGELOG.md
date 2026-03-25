@@ -1,0 +1,68 @@
+# EmpireAI Changelog
+
+## v3.0.3 (2026-03-13)
+
+### Handler count: 62 (was 51)
+New handlers: spec.draft_ready, spec_review.passed, spec_review.issues_found (validation review chain fix), plus build-orchestrator handlers.
+
+### Event count: 195 (was 181)
+New events: spec.draft_ready, spec_review.requested, spec_review.passed, spec_review.issues_found, budget.alert_sent, mailbox.review_requested, vertical.marginal_review_due, research.additional_requested, validation.package_ready, and others.
+
+### System nodes: 7 (was 6)
+build-orchestrator split from lifecycle-orchestrator for build pipeline gate enforcement.
+
+### Validation review chain fixed
+spec.draft_ready → spec_review.requested → [reviewer] → spec_review.passed → cto.spec_review_requested. Loop broken: spec.approved no longer routes to spec_review.requested. spec.validation_requested removed (stale).
+
+### All legacy actions removed
+36 legacy action values (set_gate, kill_vertical, finalize_validation, emit_spinup, accumulate_signal, etc.) replaced with declarative handler fields. Only platform actions remain (create_flow_instance, record_evidence).
+
+### State machine fixes
+- Validation: cto_spec_review → cto_review (name alignment)
+- Operating: expanding → growth (name alignment)
+- Both: killed added to states (was in terminal_states but not states)
+
+### Condition → payload alignment
+All guard/rule conditions verified against event payload schemas:
+- scoring rules: payload.discovery_mode → payload.mode
+- derivation guard: payload.derived_name → payload.opportunity_name
+- mailbox rules: decision == approve → payload.decision == approve
+
+### system.directive structured payload
+directive_text (string) → directive: {type, parameters} (object). Matches portfolio-node rule conditions.
+
+### on_complete ordering
+Scoring on_complete converted from dict (unordered) to list (ordered, first-match-wins).
+
+### Scoring dedup_by
+score.dimension_complete accumulator: dedup_by: payload.dimension (content-identified, not sender-identified).
+
+### Produces lists synced
+All 7 system node produces lists verified against actual handler emits.
+
+### Event metadata
+All events categorized: _source: external, _consumer: mailbox_system, _status: planned. 0 unresolved warnings.
+
+### Anti-bias routing
+analysis-agent (primary) subscribes to scoring.requested. analysis-agent-secondary subscribes to scoring.derived_requested. Same prompt, different pool.
+
+### spec.validation_passed gate fix
+Sets g2_spec_review (not g3_cto). Advances to cto_review.
+
+### Phantom events cleaned
+scoring.contest_resolved, scoring.contested removed (YAGNI). Empty strings in pins cleaned. deploy.completed orphan removed. g_build_complete phantom gate removed.
+
+## v3.0.2 (2026-03-10)
+
+### Formally retired files
+empire-spec.md, spec-writer-guide.md, SPEC-COMPLIANCE.md — replaced by contracts-as-spec, platform system_node_specification, and verify.py respectively.
+
+## v3.0.1 (2026-03-09)
+
+### All handlers declarative
+8 product hooks eliminated. 100% YAML.
+
+## v3.0.0 (2026-03-09)
+
+### First independent release
+Split from monolithic spec v2.6.0. 4 flows (discovery, scoring, validation, operating) + root. Platform dependency >=1.0.0.

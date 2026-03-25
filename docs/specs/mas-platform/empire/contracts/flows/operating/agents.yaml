@@ -6,7 +6,6 @@ opco-ceo:
   conversation_mode: session
   max_turns_per_task: 30
   subscriptions:
-  - opco.spinup_requested
   - product_report
   - growth_report
   - cross_domain_report
@@ -26,6 +25,7 @@ opco-ceo:
   - devops.deploy_failed
   - devops.rollback_complete
   - cto.pattern_detected
+  - opco.ceo_ready
   tools_tier2:
   - agent_hire
   - agent_fire
@@ -214,12 +214,12 @@ opco-cto:
   - build_progress
   - cto.tech_spec_review_requested
   - cycle_reset
-  - deploy_requested
+  - deploy.requested
   - feature_deployed
   - bug_fix_deployed
   - launch_ready
-  - spec.approved
   - review.deploy_feedback
+  - spec.draft_ready
   permissions_bundle: lead
   permissions: *id001
   workspace_class: opco
@@ -234,7 +234,7 @@ opco-cto:
   - cycle_limit_reached
   - build_progress
   - build_blocked
-  - deploy_requested
+  - deploy.requested
   - backend.task_complete
   - backend.blocked
   - frontend.task_complete
@@ -337,7 +337,7 @@ opco-devops:
   workspace_class: opco
   manager_fallback: opco-cto
   subscriptions:
-  - deploy_requested
+  - deploy.requested
   - deploy.authorized
 opco-marketing:
   id: marketing-{vertical_id}

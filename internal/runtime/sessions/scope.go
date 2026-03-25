@@ -51,7 +51,7 @@ func ScopeFromContext(ctx context.Context) ScopeContext {
 
 func NormalizeConversationRuntimeMode(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case RuntimeModeTask:
+	case RuntimeModeTask, "stateless":
 		return RuntimeModeTask
 	case RuntimeModeSessionPerEntity:
 		return RuntimeModeSessionPerEntity

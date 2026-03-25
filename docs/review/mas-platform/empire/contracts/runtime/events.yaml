@@ -1,0 +1,1252 @@
+# AUTO-GENERATED — DO NOT EDIT DIRECTLY
+analyst.anti_pattern_advisory:
+  payload:
+    pattern: string
+    affected_verticals: array
+    severity: number
+    recommendation: string
+analyst.bootstrap_upgrade_proposal:
+  payload:
+    proposal_type: string
+    affected_routes: array
+    evidence: object
+    recommendation: string
+analyst.prompt_refinement_proposal:
+  payload:
+    agent_role: string
+    current_behavior: string
+    proposed_change: string
+    evidence: object
+board.chat:
+  payload:
+    message: string
+    context: object
+    response_requested: boolean
+  _source: external (human board interface)
+board.directive:
+  payload:
+    directive_type: string
+    target: string
+    parameters: object
+    priority: string
+  _source: external (human board interface)
+budget.emergency:
+  payload:
+    level: string
+    message: string
+    action_taken: string
+budget.resumed:
+  payload:
+    previous_level: number
+    message: string
+budget.threshold_crossed:
+  payload:
+    level: string
+    current_spend: number
+    budget_cap: number
+    percentage: number
+  _source: external (monitoring system)
+budget.throttle:
+  payload:
+    throttle_level: number
+    affected_agents: array
+budget.warning:
+  payload:
+    level: string
+    message: string
+cto.architecture_directive:
+  payload:
+    directive: string
+    affected_verticals: array
+    rationale: string
+cto.extraction_recommended:
+  payload:
+    pattern_id: string
+    affected_verticals: array
+    recommendation: string
+cycle_limit_reached:
+  payload:
+    vertical_id: string
+    event_pattern: string
+    count: integer
+    window_hours: string
+    agents_involved:
+      type: array
+      items: string
+    recommendation: string
+  _status: planned
+  _source: external (platform monitoring)
+devops.capacity_warning:
+  payload:
+    resource: string
+    current_usage: string
+    threshold: string
+    recommendation: string
+devops.deploy_complete:
+  payload:
+    vertical_id: string
+    environment: string
+    url: string
+    version: number
+devops.deploy_failed:
+  payload:
+    vertical_id: string
+    environment: string
+    error: string
+devops.deploy_requested:
+  payload:
+    vertical_id: string
+    manifest:
+      type: object
+    environment: string
+    requesting_agent: string
+devops.health_check_failed:
+  payload:
+    vertical_id: string
+    endpoint: string
+    error: string
+devops.infra_change_needed:
+  payload:
+    change_type: string
+    reason: string
+    estimated_cost: number
+devops.rollback_complete:
+  payload:
+    vertical_id: string
+    environment: string
+    active_version: integer
+devops.rollback_failed:
+  payload:
+    vertical_id: string
+    environment: string
+    error: string
+devops.rollback_requested:
+  payload:
+    vertical_id: string
+    target_version: integer
+    requesting_agent: string
+devops.ssl_provisioned:
+  payload:
+    vertical_id: string
+    domain: string
+    expiry: string
+human_task.approved:
+  payload:
+    task_id: string
+    notes: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+human_task.completed:
+  payload:
+    task_id: string
+    result: object
+  _status: planned
+human_task.deferred:
+  payload:
+    task_id: string
+    defer_until: string
+    reason: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+human_task.expired:
+  payload:
+    task_id: string
+  _source: external (task management system)
+human_task.rejected:
+  payload:
+    task_id: string
+    reason: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+human_task.requested:
+  payload:
+    task_id: string
+    requesting_agent: string
+    task_type: string
+    description: string
+  _source: external (task management system)
+inbound.email:
+  payload:
+    vertical_id: string
+    from: string
+    subject: string
+    body: string
+    attachments:
+      type: array
+      items: string
+  _status: planned
+  _source: external (messaging gateway)
+inbound.whatsapp_message:
+  payload:
+    vertical_id: string
+    from: string
+    message: string
+    timestamp: string
+    media_urls:
+      type: array
+      items: string
+  _status: planned
+  _source: external (messaging gateway)
+opco.ceo_report:
+  payload:
+    vertical_id: string
+    phase: string
+    metrics: object
+    decisions: string
+opco.escalation:
+  payload:
+    vertical_id: string
+    issue: string
+    recommendation: string
+opco.escalation_response:
+  payload:
+    vertical_id: string
+    original_escalation_id: string
+    directive: string
+    priority: string
+opco.launched:
+  payload:
+    vertical_id: string
+    launch_url: string
+    metrics: object
+opco.teardown_complete:
+  payload:
+    vertical_id: string
+ops.agent_failed:
+  payload:
+    agent_id: string
+    vertical_id: string
+    error: string
+    retry_count: number
+    last_event_type: string
+  _source: external (platform monitoring)
+ops.agent_panic:
+  payload:
+    agent_id: string
+    vertical_id: string
+    error: string
+    stack_trace: string
+    conversation_id: string
+  _status: planned
+portfolio.digest_compiled:
+  payload:
+    digest_text: string
+    trigger_reason: string
+    action_required_count: integer
+spend.approved:
+  payload:
+    amount: string
+    purpose: string
+  _producer: agent (portfolio-node agent or mailbox decision)
+spend.rejected:
+  payload:
+    reason: string
+  _producer: agent (portfolio-node agent or mailbox decision)
+system.directive:
+  _source: external (platform admin CLI)
+  payload:
+    directive:
+      type: string (scan | budget_adjust | policy_change | vertical_override)
+      parameters: object (type-specific parameters)
+    timestamp: string
+system.started:
+  payload:
+    timestamp: string
+    config_version: string
+    agent_count: number
+    is_cold_start: boolean
+  _source: external (platform boot)
+template.migration_approved:
+  payload:
+    template_version: string
+    verticals: string
+  _status: planned
+template.migration_completed:
+  payload:
+    template_version: string
+    vertical_id: string
+    result: object
+template.migration_failed:
+  payload:
+    template_version: string
+    vertical_id: string
+    error: string
+template.migration_planned:
+  payload:
+    template_version: string
+    migration_plan:
+      type: object
+    affected_verticals:
+      type: array
+      items: string
+  _status: planned
+template.version_published:
+  payload:
+    template_version: string
+    changelog: string
+timer.infra_health_check:
+  payload:
+    check_type: string
+timer.portfolio_digest:
+  payload:
+    trigger_reason: string
+vertical.health_warning:
+  payload:
+    vertical_id: string
+    severity: string
+    metrics: object
+    recommendation: string
+  _status: planned
+opco.routing_updated:
+  payload:
+    vertical_id: string
+    event_pattern: string
+    subscriber_id: string
+    installed_by: string
+    reason: string
+    status: string
+    source: string
+    bootstrap_version: integer
+    runtime_tool_event: boolean
+  _status: planned
+human_task.assigned:
+  payload:
+    task_id: string
+    requesting_agent: string
+    vertical_id: string
+    assigned_to: string
+  _status: planned
+runtime.reset:
+  payload:
+    source: string
+    timestamp: string
+  _source: external (platform admin CLI)
+review.product_spec_feedback:
+  payload:
+    vertical_id: string
+    feedback: string
+    reviewer: string
+  _status: planned
+budget.adjustment_requested:
+  payload:
+    vertical_id: string
+    adjustment_type: string
+    amount: number
+    reason: string
+policy.change_requested:
+  payload:
+    policy_key: string
+    new_value: string
+    reason: string
+    requested_by: string
+  _status: planned
+directive.unhandled:
+  payload:
+    directive_text: string
+    directive_type: string
+    reason: string
+pipeline.dead_letter:
+  payload:
+    original_event: string
+    error: string
+    flow: string
+  _producer: agent (platform error model)
+opco.spinup_requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    vertical_description: string
+    geography: string
+    tech_stack: string
+    mandate:
+      type: object
+    brand:
+      type: object
+    founder_directives: string
+scan.requested:
+  payload:
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+vertical.resumed:
+  payload:
+    vertical_id: string
+    reason: string
+    resumed_from: string
+budget.alert_sent:
+  payload:
+    entity_id: string
+    alert_type: string
+    details: object
+market_research.scan_complete:
+  payload:
+    scan_id: string
+    categories_assessed: integer
+    high_signal_count: integer
+    geography: string
+trend_research.scan_complete:
+  payload:
+    scan_id: string
+    trends_identified: string
+    geography: string
+scanner.google_maps.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.instagram.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.reviews.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.directories.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+scanner.yelp.scan_complete:
+  payload:
+    scan_id: string
+    vertical_id: string
+    sources_found: string
+    sources_scraped: string
+    errors: string
+timer.scan_timeout:
+  payload:
+    scan_id: string
+    elapsed_minutes: integer
+timer.campaign_deadline:
+  payload:
+    campaign_id: string
+    elapsed_hours: integer
+scan.completed:
+  payload:
+    mode: string
+    geography: string
+    reports_received: integer
+    agents_expected: integer
+    agents_complete: integer
+    verticals_discovered: integer
+    campaign_id: string
+    verticals_skipped: integer
+campaign.completed:
+  payload:
+    campaign_id: string
+    geography: string
+    modes_completed: string
+    verticals_discovered: integer
+    verticals_shortlisted: integer
+    verticals_skipped: integer
+category.assessed:
+  payload:
+    scan_id: string
+    category: string
+    subcategory: string
+    geography: string
+    signal_strength: integer
+    opportunity_name: string
+    preliminary_icp: string
+    build_sketch:
+      type: object
+      properties:
+        core_features:
+          type: array
+          items: string
+        key_integrations:
+          type: array
+          items: string
+        red_flags:
+          type: array
+          items:
+            type: object
+            properties:
+              notes: string
+              source_url: string
+              type: string
+    evidence:
+      type: object
+      properties:
+        buyer_communities:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              source_url: string
+        competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              pricing: string
+              source_url: string
+        pain_signals:
+          type: array
+          items:
+            type: object
+            properties:
+              signal: string
+              source_url: string
+        regulatory:
+          type: array
+          items:
+            type: object
+            properties:
+              detail: string
+              source_url: string
+    opportunity_hypothesis: string
+    geographic_scope: string
+    opportunity_pattern: string
+    signal_sources:
+      type: array
+      items:
+        type: object
+        properties:
+          signal_type: string
+          source: string
+          url: string
+    required_capabilities:
+      type: object
+      properties:
+        automation_with_unlock: number
+        current:
+          type: array
+          items: string
+        would_unlock: string
+trend.identified:
+  payload:
+    scan_id: string
+    trend_category: string
+    geography: string
+    signal_strength: integer
+    opportunity_name: string
+    preliminary_icp: string
+    build_sketch:
+      type: object
+      properties:
+        core_features:
+          type: array
+          items: string
+        key_integrations:
+          type: array
+          items: string
+        red_flags:
+          type: array
+          items:
+            type: object
+            properties:
+              notes: string
+              source_url: string
+              type: string
+    evidence:
+      type: object
+      properties:
+        buyer_communities:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              source_url: string
+        competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: string
+              pricing: string
+              source_url: string
+        pain_signals:
+          type: array
+          items:
+            type: object
+            properties:
+              signal: string
+              source_url: string
+        regulatory:
+          type: array
+          items:
+            type: object
+            properties:
+              detail: string
+              source_url: string
+    trend_description: string
+    opportunity_hypothesis: string
+    geographic_scope: string
+source.scraped:
+  payload:
+    scan_id: string
+    source: string
+    evidence: string
+    geography: string
+dedup.resolved:
+  payload:
+    dedup_id: string
+    vertical_id: string
+    strategy: string (keep_first | keep_best | merge_fields)
+    signal_a: object
+    signal_b: object
+    best_signal: object (populated when strategy=keep_best)
+    merged: object (populated when strategy=merge_fields)
+    reasoning: string
+synthesis.resolved:
+  payload:
+    synthesis_id: string
+    vertical_id: string
+    resolution: string (accept_a | accept_b | synthesize)
+    signal_a: object
+    signal_b: object
+    synthesized: object (populated when resolution=synthesize)
+    reasoning: string
+vertical.discovered:
+  payload:
+    vertical_name: string
+    raw_signals:
+      type: object
+    geography: string
+    mode: string
+    discovery_context:
+      type: object
+    geographic_scope: string
+    signal_strength: integer
+    opportunity_pattern: string
+  _producer: agent (discovery-coordinator agent emission)
+synthesis.needed:
+  payload:
+    conflicting_reports: string
+    context: object
+  _producer: agent (discovery-coordinator agent emission)
+dedup.ambiguous:
+  payload:
+    dedup_id: string
+    new_candidate: string
+    existing_vertical: string
+    similarity: string
+  _producer: agent (discovery-coordinator agent emission)
+market_research.scan_assigned:
+  payload:
+    geography: string
+    scan_id: string
+    taxonomy_categories:
+      type: array
+      items: string
+    shard:
+      type: object
+    mode: string
+    corpus_signals:
+      type: array
+      items:
+        type: object
+scanner.directories.scan_assigned:
+  payload:
+    scan_id: string
+    vertical_id: string
+    geography: string
+    subcategory: string
+    source_config: string
+scanner.google_maps.scan_assigned:
+  payload:
+    scan_id: string
+    vertical_id: string
+    geography: string
+    subcategory: string
+    source_config: string
+scanner.instagram.scan_assigned:
+  payload:
+    scan_id: string
+    vertical_id: string
+    geography: string
+    subcategory: string
+    source_config: string
+scanner.reviews.scan_assigned:
+  payload:
+    scan_id: string
+    vertical_id: string
+    geography: string
+    subcategory: string
+    source_config: string
+scanner.yelp.scan_assigned:
+  payload:
+    scan_id: string
+    vertical_id: string
+    geography: string
+    subcategory: string
+    source_config: string
+trend_research.scan_assigned:
+  payload:
+    geography: string
+    scan_id: string
+scanner.scan_assigned:
+  payload:
+    scan_id: string
+    geography: string
+    source: string
+    partition: object
+scan.category_dispatch:
+  payload:
+    scan_id: string
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+  _note: Internal routing event from scan-orchestrator rules to fan_out handlers
+scan.trend_dispatch:
+  payload:
+    scan_id: string
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+    trend_topics: array
+  _note: Internal routing event from scan-orchestrator rules to fan_out handlers
+scan.source_dispatch:
+  payload:
+    scan_id: string
+    geography: string
+    mode: string
+    subcategories: array
+    sources: array
+  _note: Internal routing event from scan-orchestrator rules to fan_out handlers
+vertical.derived:
+  payload:
+    opportunity_id: string
+    parent_id: string
+    generation_depth: integer
+    generator_agent_id: string
+    campaign_id: string
+    derivation_rationale:
+      type: object
+    opportunity_name: string
+    preliminary_icp: string
+    build_sketch:
+      type: object
+    evidence:
+      type: object
+    geographic_scope: string
+    signal_strength: number
+    discovery_context:
+      type: object
+score.dimension_complete:
+  payload:
+    vertical_id: string
+    dimension: string
+    score:
+      type: integer
+      minimum: 0
+      maximum: 100
+    evidence: string
+    confidence: string
+scoring.requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    mode: string
+    rubric: string
+    dimensions_requested:
+      type: array
+      items: string
+    discovery_context:
+      type: object
+    assigned_analysis_agent_id: string
+    excluded_analysis_agent_id: string
+  _note: rubric is derived from mode by scoring-node rules. Both fields set at emit time.
+vertical.shortlisted:
+  payload:
+    vertical_id: string
+    composite_score: number
+    viability_score: number
+    scoring_payload:
+      type: object
+vertical.marginal:
+  payload:
+    vertical_id: string
+    composite_score: number
+    viability_score: number
+    dimensions:
+      type: object
+    promotion_eligible: boolean
+vertical.rejected:
+  payload:
+    vertical_id: string
+    reason: string
+  _status: planned
+vertical.killed_backprop:
+  payload:
+    vertical_id: string
+    kill_reason: string
+    killed_by_flow: string
+  _note: Back-propagation from validation. Scoring node advances entity to killed.
+scoring.derived_requested:
+  payload:
+    vertical_id: string
+    dimensions_requested: array
+    rubric: string
+    mode: string
+  _note: 'Routed to analysis-agent-secondary (anti-bias: different agent pool from parent scorer)'
+research.completed:
+  payload:
+    vertical_id: string
+    business_brief: object
+    research_context: object
+spec.revision_requested:
+  payload:
+    vertical_id: string
+    cto_feedback: string
+spec.validation_passed:
+  payload:
+    vertical_id: string
+    validation_notes: string
+spec.validation_failed:
+  payload:
+    vertical_id: string
+    issues:
+      type: array
+      items:
+        type: object
+    severity: string
+cto.spec_approved:
+  payload:
+    vertical_id: string
+    cto_notes: string
+cto.spec_revision_needed:
+  payload:
+    vertical_id: string
+    technical_issues: string
+cto.spec_vetoed:
+  payload:
+    vertical_id: string
+    reason: string
+brand.candidates_ready:
+  payload:
+    vertical_id: string
+    candidates: array
+brand.revision_needed:
+  payload:
+    vertical_id: string
+    feedback: string
+vertical.ready_for_review:
+  payload:
+    vertical_id: string
+    validation_kit:
+      type: object
+vertical.needs_more_data:
+  payload:
+    vertical_id: string
+    questions: string
+  _source: external (mailbox human decision)
+research.vertical_rejected:
+  payload:
+    vertical_id: string
+    rejection_reason: string
+    evidence: object
+spec.revision_needed:
+  payload:
+    vertical_id: string
+    misalignment_details: string
+validation.started:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    scoring_context: string
+spec.validation_requested:
+  payload:
+    spec_content: string
+    spec_tier: string
+    vertical_id: string
+cto.spec_review_requested:
+  payload:
+    vertical_id: string
+    mvp_spec: string
+    business_brief: object
+    vertical_context: object
+brand.requested:
+  payload:
+    vertical_id: string
+    vertical_name: string
+    geography: string
+    business_brief: object
+validation.more_data_needed:
+  payload:
+    vertical_id: string
+    questions: string
+validation.package_ready:
+  payload:
+    vertical_id: string
+    research: string
+    spec: string
+    cto_notes: string
+    brand: string
+vertical.killed:
+  payload:
+    vertical_id: string
+    reason: string
+    source: string
+cto.pattern_detected:
+  payload:
+    pattern_type: string
+    verticals: string
+    description: string
+cto.tech_spec_feedback:
+  payload:
+    vertical_id: string
+    feedback: string
+    severity: number
+spec.contradiction_detected:
+  payload:
+    agent_id: string
+    contradiction_type: string
+    detail: object
+spec.draft_ready:
+  payload:
+    vertical_id: string
+    mvp_spec: string
+spec.requested:
+  payload:
+    vertical_id: string
+    business_brief: object
+spec_review.issues_found:
+  payload:
+    vertical_id: string
+    issues: array
+spec_review.passed:
+  payload:
+    entity_id: string
+    final_spec: string
+    review_notes: string
+spec_review.requested:
+  payload:
+    vertical_id: string
+    mvp_spec: string
+    business_brief: object
+template.publish_requested:
+  payload:
+    template_version: string
+    changes: string
+  _status: planned
+timer.validation_timeout:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    elapsed_hours: integer
+validation.timeout_escalation:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    action: string
+validation.revision_limit_reached:
+  payload:
+    vertical_id: string
+    gate: string
+    revision_count: integer
+mailbox.review_requested:
+  payload:
+    entity_id: string
+    review_type: string
+    validation_kit: object
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+research.additional_requested:
+  payload:
+    entity_id: string
+    requested_by: string
+    focus_areas: array
+vertical.approved:
+  payload:
+    vertical_id: string
+    brand_choice: string
+    founder_directives: string
+opco.ceo_ready:
+  payload:
+    vertical_id: string
+    agent_count: number
+timer.marginal_review:
+  payload:
+    parked_marginals_summary: string
+timer.marginal_kill:
+  payload:
+    vertical_id: string
+    parked_days: integer
+build_complete:
+  payload:
+    feature: string
+    environment: string
+launch_ready:
+  payload:
+    vertical_id: string
+    version: number
+    deploy_url: string
+    test_results: object
+qa.validation_passed:
+  payload:
+    test_summary: string
+    coverage_notes: string
+    staging_url: string
+review.deploy_feedback:
+  payload:
+    vertical_id: string
+    feedback: string
+    reviewer: string
+opco.steady_state_reached:
+  payload:
+    vertical_id: string
+opco.growth_triggered:
+  payload:
+    vertical_id: string
+    trigger_reason: string
+opco.growth_stabilized:
+  payload:
+    vertical_id: string
+    stabilization_metrics: object
+opco.teardown_requested:
+  payload:
+    vertical_id: string
+    reason: string
+mailbox.item_decided:
+  payload:
+    item_id: string
+    decision: string
+    decided_by: string
+    vertical_id: string
+    original_event_type: string
+  _source: external (mailbox UI human decision)
+bug_fix_deployed:
+  payload:
+    vertical_id: string
+    bug_id: string
+    version: number
+    resolution: string
+bug_reported:
+  payload:
+    description: string
+    severity: number
+    reproduction_steps: string
+build_blocked:
+  payload:
+    task: string
+    blocker: string
+    severity: string
+build_progress:
+  payload:
+    task: string
+    progress_pct: integer
+    status: string
+channel_blocked:
+  payload:
+    channel: string
+    reason: string
+channel_update:
+  payload:
+    channel: string
+    status: string
+    metrics: object
+churn_risk:
+  payload:
+    customer_id: string
+    risk_score: number
+    signals: array
+cross_domain_report:
+  payload:
+    domains: array
+    summary: string
+cto.tech_spec_review_requested:
+  payload:
+    vertical_id: string
+    spec_content: string
+cycle_reset:
+  payload:
+    reason: string
+deploy_requested:
+  payload:
+    vertical_id: string
+    component: string
+    version: number
+    deploy_config: string
+feature_deployed:
+  payload:
+    feature: string
+    version: string
+feature_request:
+  payload:
+    source: string
+    description: string
+    priority: string
+founder_input.response:
+  payload:
+    request_id: string
+    response: string
+    decision: string
+  _source: external (human founder reply)
+growth_escalation:
+  payload:
+    issue: string
+    severity: string
+growth_report:
+  payload:
+    period: string
+    metrics: object
+    experiments: array
+mandate_updated:
+  payload:
+    vertical_id: string
+    changes: object
+market_feedback:
+  payload:
+    source: string
+    feedback: string
+    sentiment: string
+market_signals:
+  payload:
+    signal_type: string
+    data: object
+opco.deploy_review:
+  payload:
+    deployment_id: string
+    review_notes: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+opco.founder_input:
+  payload:
+    question: string
+    context: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+opco.product_spec_review:
+  payload:
+    spec_id: string
+    review_result: string
+    feedback: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+opco.spend_request:
+  payload:
+    vertical_id: string
+    amount: number
+    reason: string
+  _consumer: mailbox_system (external UI, not agent-subscribed)
+outreach_digest:
+  payload:
+    messages_sent: string
+    responses: string
+    response_rate: string
+    leads_converted: string
+    best_channel: string
+    intelligence: string
+prelaunch_ready:
+  payload:
+    checklist: object
+    blockers: array
+product_escalation:
+  payload:
+    issue: string
+    severity: string
+    context: object
+product_report:
+  payload:
+    period: string
+    metrics: object
+    highlights: string
+product_spec_ready:
+  payload:
+    spec_id: string
+    feature: string
+qa.validation_failed:
+  payload:
+    failures: string
+    expected_vs_actual: string
+    severity: number
+    reproduction_steps: string
+spend_needed:
+  payload:
+    requester: string
+    amount: number
+    reason: string
+spend_request:
+  payload:
+    vertical_id: string
+    amount: string
+    currency: string
+    purpose: string
+    justification: string
+support_critical:
+  payload:
+    ticket_id: string
+    issue: string
+    customer: string
+support_digest:
+  payload:
+    period: string
+    ticket_count: integer
+    themes: array
+technical_spec_ready:
+  payload:
+    spec_id: string
+    feature: string
+user_onboarded:
+  payload:
+    user_id: string
+    channel: string
+  _status: planned
+opco.terminated:
+  payload:
+    vertical_id: string
+    instance_id: string
+    teardown_summary: string
+    terminated_at: timestamp
+timer.operating_timeout:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    elapsed_hours: integer
+operating.timeout_escalation:
+  payload:
+    vertical_id: string
+    stuck_state: string
+    action: string
+backend.task_complete:
+  payload:
+    task: string
+    status: string
+    details: string
+backend.blocked:
+  payload:
+    task: string
+    status: string
+    details: string
+frontend.task_complete:
+  payload:
+    task: string
+    status: string
+    details: string
+frontend.blocked:
+  payload:
+    task: string
+    status: string
+    details: string
+deploy.requested:
+  payload:
+    deployment_id: string
+    environment: string
+deploy.authorized:
+  payload:
+    deployment_id: string
+    environment: string
+    authorized_by: string
+build.escalation:
+  payload:
+    vertical_id: string
+    blocker: string
+    severity: string
+vertical.marginal_review_due:
+  payload:
+    entity_id: string
+    parked_days: integer

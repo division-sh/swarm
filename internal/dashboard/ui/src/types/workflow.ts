@@ -59,6 +59,8 @@ export type FlowEventRecord = {
   source_agent?: string;
   source_node?: string;
   target_nodes?: string[];
+  entity_id?: string;
+  scope?: string;
   vertical_id?: string;
   vertical_slug?: string;
   subscriber?: string;

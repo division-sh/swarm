@@ -64,6 +64,25 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsMultipleAuthoritati
 	}
 }
 
+func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
+	bundle, err := LoadWorkflowContractBundle(contractRepoRoot(t))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+	}
+	for _, node := range bundle.Nodes {
+		for _, handler := range node.EventHandlers {
+			if strings.TrimSpace(handler.Action.ID) != "record_evidence" {
+				continue
+			}
+			if strings.TrimSpace(handler.EvidenceTarget) == "" {
+				t.Fatal("expected record_evidence handler to preserve evidence_target")
+			}
+			return
+		}
+	}
+	t.Fatal("expected at least one record_evidence handler")
+}
+
 func contractRepoRoot(t *testing.T) string {
 	t.Helper()
 	return strings.TrimSpace(repoRootForContractsTest(t))

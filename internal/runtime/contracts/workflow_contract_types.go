@@ -675,6 +675,7 @@ type SystemNodeContract struct {
 type SystemNodeEventHandler struct {
 	Action           ActionSpec               `yaml:"action"`
 	Description      string                   `yaml:"description"`
+	EvidenceTarget   string                   `yaml:"evidence_target"`
 	Emits            EventEmission            `yaml:"emits"`
 	Guard            *GuardSpec               `yaml:"guard"`
 	AdvancesTo       string                   `yaml:"advances_to"`
@@ -719,6 +720,7 @@ type AgentRegistryEntry struct {
 	ID                     string   `yaml:"id"`
 	Type                   string   `yaml:"type"`
 	Role                   string   `yaml:"role"`
+	PromptRef              string   `yaml:"prompt_ref"`
 	Permissions            []string `yaml:"permissions" json:"permissions,omitempty"`
 	PermissionsBundle      string   `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
 	WorkspaceClass         string   `yaml:"workspace_class"`

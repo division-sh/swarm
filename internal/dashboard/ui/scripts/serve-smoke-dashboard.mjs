@@ -10,6 +10,7 @@ const distDir = path.join(root, "dist");
 const htmlPath = path.resolve(root, "..", "assets", "dashboard.html");
 const monacoRoot = path.join(root, "node_modules", "monaco-editor", "min");
 const port = Number(process.env.PLAYWRIGHT_DASHBOARD_PORT || 4173);
+const apiOrigin = process.env.DASHBOARD_API_ORIGIN || "http://127.0.0.1:8081";
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -38,6 +39,29 @@ function resolveMonacoAsset(requestPath) {
   return path.join(monacoRoot, relative);
 }
 
+function proxyRequest(req, res, requestUrl) {
+  const upstreamUrl = new URL(requestUrl.pathname + requestUrl.search, apiOrigin);
+  const proxy = http.request(upstreamUrl, {
+    method: req.method,
+    headers: {
+      ...req.headers,
+      host: upstreamUrl.host,
+    },
+  }, (upstream) => {
+    const headers = { ...upstream.headers };
+    delete headers["content-length"];
+    res.writeHead(upstream.statusCode || 502, headers);
+    upstream.pipe(res);
+  });
+
+  proxy.on("error", (err) => {
+    res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+    res.end(`Proxy error: ${err.message}`);
+  });
+
+  req.pipe(proxy);
+}
+
 const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url || "/", `http://127.0.0.1:${port}`);
   const pathname = requestUrl.pathname;
@@ -56,6 +80,10 @@ const server = http.createServer((req, res) => {
   }
   if (pathname.startsWith("/vs/") || pathname.startsWith("/dashboard/assets/vs/")) {
     sendFile(res, resolveMonacoAsset(pathname));
+    return;
+  }
+  if (pathname.startsWith("/api/") || pathname.startsWith("/dashboard/api/") || pathname === "/healthz") {
+    proxyRequest(req, res, requestUrl);
     return;
   }
 

@@ -10,11 +10,14 @@ import (
 	"testing"
 	"time"
 
+	runtimepkg "empireai/internal/runtime"
+	runtimebus "empireai/internal/runtime/bus"
 	runtimeactors "empireai/internal/runtime/core/actors"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
 	runtimetools "empireai/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gorilla/websocket"
 )
 
 type stubAgents struct {
@@ -66,6 +69,30 @@ func (s stubConversations) Get(_ context.Context, agentID string) (ConversationD
 	return item, ok, nil
 }
 
+type stubObservability struct {
+	events      []eventRecord
+	eventDetail map[string]eventRecord
+	runtimeLogs []runtimeLogRecord
+	incidents   []incidentRecord
+}
+
+func (s stubObservability) ListEvents(context.Context, EventFilter, int) ([]eventRecord, error) {
+	return s.events, nil
+}
+
+func (s stubObservability) GetEvent(_ context.Context, id string) (eventRecord, bool, error) {
+	item, ok := s.eventDetail[id]
+	return item, ok, nil
+}
+
+func (s stubObservability) ListRuntimeLogs(context.Context, RuntimeLogFilter, int) ([]runtimeLogRecord, error) {
+	return s.runtimeLogs, nil
+}
+
+func (s stubObservability) ListIncidents(context.Context, IncidentFilter) ([]incidentRecord, error) {
+	return s.incidents, nil
+}
+
 type stubAgentControl struct{}
 
 func (stubAgentControl) RestartAgent(string) error                        { return nil }
@@ -74,11 +101,49 @@ func (stubAgentControl) ChatWithAgent(context.Context, string, string) (string, 
 	return "ok", nil
 }
 
-type stubRuntimeControl struct{}
+type stubRuntimeControl struct {
+	resetCalls int
+	pauseCalls int
+	resumeCalls int
+}
 
-func (stubRuntimeControl) PauseIngress()     {}
-func (stubRuntimeControl) ResumeIngress()    {}
-func (stubRuntimeControl) ResetState() error { return nil }
+func (s *stubRuntimeControl) PauseIngress()  { s.pauseCalls++ }
+func (s *stubRuntimeControl) ResumeIngress() { s.resumeCalls++ }
+func (s *stubRuntimeControl) ResetState() error {
+	s.resetCalls++
+	return nil
+}
+
+type stubProjectControl struct {
+	current BuilderProjectStatus
+}
+
+func (s *stubProjectControl) OpenProject(_ context.Context, projectDir string) (BuilderProjectStatus, error) {
+	s.current = BuilderProjectStatus{
+		ProjectDir:      strings.TrimSpace(projectDir),
+		Loaded:          true,
+		WorkflowName:    "sample",
+		WorkflowVersion: "v1",
+	}
+	return s.current, nil
+}
+
+func (s *stubProjectControl) ReloadProject(_ context.Context, projectDir string) (BuilderProjectStatus, error) {
+	if strings.TrimSpace(projectDir) != "" {
+		s.current.ProjectDir = strings.TrimSpace(projectDir)
+	}
+	s.current.Loaded = true
+	return s.current, nil
+}
+
+func (s *stubProjectControl) CloseProject(context.Context) (BuilderProjectStatus, error) {
+	s.current = BuilderProjectStatus{}
+	return s.current, nil
+}
+
+func (s *stubProjectControl) CurrentProject() BuilderProjectStatus {
+	return s.current
+}
 
 func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
@@ -119,6 +184,37 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 				},
 			},
 		},
+		Observability: stubObservability{
+			events: []eventRecord{{
+				ID:          "evt-1",
+				EventID:     "evt-1",
+				Type:        "task.completed",
+				CreatedAt:   now.Format(time.RFC3339),
+				SourceAgent: "agent-1",
+			}},
+			eventDetail: map[string]eventRecord{
+				"evt-1": {
+					ID:      "evt-1",
+					EventID: "evt-1",
+					Type:    "task.completed",
+					Deliveries: []eventDeliveryRecord{{
+						AgentID: "agent-1",
+						Status:  "success",
+					}},
+				},
+			},
+			runtimeLogs: []runtimeLogRecord{{
+				ID:        "log-1",
+				TS:        now.Format(time.RFC3339),
+				Level:     "error",
+				Component: "runtime",
+				Action:    "dispatch",
+			}},
+			incidents: []incidentRecord{{
+				Code:  "MCP_TIMEOUT",
+				Count: 1,
+			}},
+		},
 		Instances: stubInstances{
 			rows: []runtimepipeline.WorkflowInstance{
 				{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
@@ -128,7 +224,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 				"wf-1": {InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
 			},
 		},
-		Runtime: stubRuntimeControl{},
+		Runtime: &stubRuntimeControl{},
 	})
 
 	rec := httptest.NewRecorder()
@@ -151,6 +247,34 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 	if detail.AgentID != "agent-1" || len(detail.Messages) != 1 {
 		t.Fatalf("unexpected conversation detail: %+v", detail)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("events status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/events/evt-1", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("event detail status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/runtime/logs", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime logs status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/runtime/incidents", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime incidents status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
@@ -279,5 +403,1144 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestHandler_BuilderRPC(t *testing.T) {
+	projectCtl := &stubProjectControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Instances: stubInstances{
+			rows: []runtimepipeline.WorkflowInstance{
+				{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active"},
+			},
+			byID: map[string]runtimepipeline.WorkflowInstance{
+				"wf-1": {
+					InstanceID:   "wf-1",
+					WorkflowName: "order",
+					CurrentState: "active",
+					Metadata: map[string]any{
+						"score": 3.7,
+						"gates": map[string]any{"review_gate": true},
+						"slug":  "order-1",
+					},
+					StateBuckets: map[string]any{
+						"accumulator": map[string]any{"count": 2},
+					},
+				},
+			},
+		},
+		Version:        "mas-test",
+		ProjectControl: projectCtl,
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"1","method":"engine.ping"}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("engine.ping status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var pingResp builderRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &pingResp); err != nil {
+		t.Fatalf("unmarshal ping response: %v", err)
+	}
+	result, ok := pingResp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected ping result: %#v", pingResp.Result)
+	}
+	if result["status"] != "ok" || result["version"] != "mas-test" {
+		t.Fatalf("unexpected ping result: %#v", result)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"2","method":"state.list_instances"}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("state.list_instances status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var instancesResp builderRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &instancesResp); err != nil {
+		t.Fatalf("unmarshal instances response: %v", err)
+	}
+	result, ok = instancesResp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected instances result: %#v", instancesResp.Result)
+	}
+	instances, ok := result["instances"].([]any)
+	if !ok || len(instances) != 1 {
+		t.Fatalf("unexpected instances payload: %#v", result)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"3","method":"state.get_instances"}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("state.get_instances status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"4","method":"state.get_entity","params":{"instance_id":"wf-1"}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("state.get_entity status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var entityResp builderRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &entityResp); err != nil {
+		t.Fatalf("unmarshal entity response: %v", err)
+	}
+	result, ok = entityResp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected entity result: %#v", entityResp.Result)
+	}
+	entity, ok := result["entity"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected entity payload: %#v", result)
+	}
+	if entity["state"] != "active" || entity["score"] != 3.7 {
+		t.Fatalf("unexpected entity payload: %#v", entity)
+	}
+	gates, ok := result["gates"].(map[string]any)
+	if !ok || gates["review_gate"] != true {
+		t.Fatalf("unexpected gates payload: %#v", result["gates"])
+	}
+	accumulated, ok := result["accumulated"].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected accumulated payload: %#v", result["accumulated"])
+	}
+	accBucket, ok := accumulated["accumulator"].(map[string]any)
+	if !ok || accBucket["count"] != float64(2) {
+		t.Fatalf("unexpected accumulated payload: %#v", accumulated)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"5","method":"project.open","params":{"project_dir":"/tmp/builder-project"}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("project.open status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var projectResp builderRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &projectResp); err != nil {
+		t.Fatalf("unmarshal project.open response: %v", err)
+	}
+	result, ok = projectResp.Result.(map[string]any)
+	if !ok || result["project_dir"] != "/tmp/builder-project" || result["loaded"] != true {
+		t.Fatalf("unexpected project.open payload: %#v", projectResp.Result)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"6","method":"engine.ping"}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/api/rpc engine.ping status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var apiPingResp builderRPCResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiPingResp); err != nil {
+		t.Fatalf("unmarshal /api/rpc response: %v", err)
+	}
+	result, ok = apiPingResp.Result.(map[string]any)
+	if !ok || result["status"] != "ok" || result["version"] != "mas-test" {
+		t.Fatalf("unexpected /api/rpc result: %#v", apiPingResp.Result)
+	}
+}
+
+func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
+	oldInterval := builderHealthHeartbeatInterval
+	builderHealthHeartbeatInterval = 20 * time.Millisecond
+	defer func() {
+		builderHealthHeartbeatInterval = oldInterval
+	}()
+
+	ts := httptest.NewServer(NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version: "mas-test",
+	}))
+	defer ts.Close()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{"type": "subscribe", "channel": "engine:health"}); err != nil {
+		t.Fatalf("subscribe write: %v", err)
+	}
+
+	var frame builderWSEventFrame
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("read first event: %v", err)
+	}
+	if frame.Channel != "engine:health" {
+		t.Fatalf("unexpected channel: %#v", frame.Channel)
+	}
+	data, ok := frame.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected event payload: %#v", frame.Data)
+	}
+	if data["status"] != "ok" || data["version"] != "mas-test" {
+		t.Fatalf("unexpected health payload: %#v", data)
+	}
+}
+
+func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
+	oldInterval := builderHealthHeartbeatInterval
+	builderHealthHeartbeatInterval = 20 * time.Millisecond
+	defer func() {
+		builderHealthHeartbeatInterval = oldInterval
+	}()
+
+	ts := httptest.NewServer(NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version: "mas-test",
+	}))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial builder ws alias: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "engine:health",
+	}); err != nil {
+		t.Fatalf("subscribe health alias: %v", err)
+	}
+
+	var frame builderWSEventFrame
+	if err := conn.ReadJSON(&frame); err != nil {
+		t.Fatalf("read health alias frame: %v", err)
+	}
+	if frame.Channel != "engine:health" {
+		t.Fatalf("unexpected alias channel: %#v", frame.Channel)
+	}
+	payload, ok := frame.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected alias payload: %#v", frame.Data)
+	}
+	if payload["version"] != "mas-test" {
+		t.Fatalf("unexpected alias payload: %#v", payload)
+	}
+}
+
+func TestHandler_HealthzAliases(t *testing.T) {
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version: "mas-test",
+	})
+
+	for _, path := range []string{"/healthz", "/api/healthz"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("unmarshal %s: %v", path, err)
+		}
+		if payload["ok"] != true {
+			t.Fatalf("unexpected %s payload: %#v", path, payload)
+		}
+	}
+}
+
+func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_001"
+	if err := conn.WriteJSON(map[string]any{"type": "subscribe", "channel": "run:events:" + runID}); err != nil {
+		t.Fatalf("subscribe run events: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	receivedTypes := map[string]struct{}{}
+	done := make(chan map[string]struct{}, 1)
+	go func() {
+		defer close(done)
+		for {
+			var frame builderWSEventFrame
+			if err := conn.ReadJSON(&frame); err != nil {
+				done <- receivedTypes
+				return
+			}
+			if frame.Channel != "run:events:"+runID {
+				continue
+			}
+			payload, ok := frame.Data.(map[string]any)
+			if !ok {
+				continue
+			}
+			eventType, _ := payload["type"].(string)
+			if eventType != "" {
+				receivedTypes[eventType] = struct{}{}
+			}
+			if _, ok := receivedTypes["run.started"]; ok {
+				if _, ok := receivedTypes["event.fired"]; ok {
+					if _, ok := receivedTypes["run.completed"]; ok {
+						done <- receivedTypes
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	select {
+	case got := <-done:
+		if _, ok := got["run.started"]; !ok {
+			t.Fatalf("expected run.started, got %#v", got)
+		}
+		if _, ok := got["event.fired"]; !ok {
+			t.Fatalf("expected event.fired, got %#v", got)
+		}
+		if _, ok := got["run.completed"]; !ok {
+			t.Fatalf("expected run.completed, got %#v", got)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timed out waiting for run events")
+	}
+}
+
+func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_stop_001"
+	if err := conn.WriteJSON(map[string]any{"type": "subscribe", "channel": "run:events:" + runID}); err != nil {
+		t.Fatalf("subscribe run events: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_stop_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.stop","params":{"run_id":"run_test_stop_001"}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.stop status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for run.stopped")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		eventType, _ := payload["type"].(string)
+		if eventType != "run.stopped" {
+			continue
+		}
+		if runtimeCtl.resetCalls != 1 {
+			t.Fatalf("expected runtime reset once, got %d", runtimeCtl.resetCalls)
+		}
+		return
+	}
+}
+
+func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := strings.Replace(ts.URL, "http://", "ws://", 1) + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_pause_001"
+	if err := conn.WriteJSON(map[string]any{"type": "subscribe", "channel": "run:events:" + runID}); err != nil {
+		t.Fatalf("subscribe run events: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_pause_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.pause","params":{"run_id":"run_test_pause_001"}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.pause status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"12","method":"run.continue","params":{"run_id":"run_test_pause_001"}}`))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.continue status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	received := map[string]struct{}{}
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for pause/resume events: %#v", received)
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		eventType, _ := payload["type"].(string)
+		if eventType == "" {
+			continue
+		}
+		received[eventType] = struct{}{}
+		if _, ok := received["run.paused"]; ok {
+			if _, ok := received["run.resumed"]; ok {
+				break
+			}
+		}
+	}
+
+	if runtimeCtl.pauseCalls != 1 {
+		t.Fatalf("expected runtime pause once, got %d", runtimeCtl.pauseCalls)
+	}
+	if runtimeCtl.resumeCalls != 1 {
+		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
+	}
+}
+
+func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket alias: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_api_alias_001"
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "run:events:" + runID,
+	}); err != nil {
+		t.Fatalf("subscribe run events alias: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_api_alias_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.pause","params":{"run_id":"run_test_api_alias_001"}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.pause alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"12","method":"run.continue","params":{"run_id":"run_test_api_alias_001"}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.continue alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	received := map[string]struct{}{}
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for alias run events: %#v", received)
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read alias run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		eventType, _ := payload["type"].(string)
+		if eventType == "" {
+			continue
+		}
+		received[eventType] = struct{}{}
+		if _, ok := received["run.started"]; ok {
+			if _, ok := received["event.fired"]; ok {
+				if _, ok := received["run.paused"]; ok {
+					if _, ok := received["run.resumed"]; ok {
+						if _, ok := received["run.completed"]; ok {
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if runtimeCtl.pauseCalls != 1 {
+		t.Fatalf("expected alias runtime pause once, got %d", runtimeCtl.pauseCalls)
+	}
+	if runtimeCtl.resumeCalls != 1 {
+		t.Fatalf("expected alias runtime resume once, got %d", runtimeCtl.resumeCalls)
+	}
+}
+
+func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket alias: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_breakpoint_001"
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "run:events:" + runID,
+	}); err != nil {
+		t.Fatalf("subscribe run events alias: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_breakpoint_001","inputs":{"scan.requested":{"topic":"fusion"}},"breakpoints":["agent-source"]}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	typedHandler, ok := handler.(*Handler)
+	if !ok || typedHandler.runHub == nil {
+		t.Fatalf("expected typed handler with run hub")
+	}
+
+	typedHandler.runHub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+		Level:     "info",
+		Component: "pipeline",
+		Action:    "handled",
+		AgentID:   "agent-source",
+		EntityID:  runID,
+		EventID:   "evt-breakpoint",
+	})
+
+	deadline := time.After(1 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for breakpoint event")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		if payload["type"] != "run.breakpoint_hit" {
+			continue
+		}
+		if payload["node_id"] != "agent-source" {
+			t.Fatalf("unexpected node_id: %#v", payload)
+		}
+		if payload["instance_id"] != runID {
+			t.Fatalf("unexpected instance_id: %#v", payload)
+		}
+		break
+	}
+
+	if runtimeCtl.pauseCalls != 1 {
+		t.Fatalf("expected runtime pause once, got %d", runtimeCtl.pauseCalls)
+	}
+}
+
+func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket alias: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_human_001"
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "run:events:" + runID,
+	}); err != nil {
+		t.Fatalf("subscribe run events alias: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_human_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	typedHandler, ok := handler.(*Handler)
+	if !ok || typedHandler.runHub == nil {
+		t.Fatalf("expected typed handler with run hub")
+	}
+
+	typedHandler.runHub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+		Level:     "info",
+		Component: "eventbus",
+		Action:    "published",
+		AgentID:   "agent-source",
+		EntityID:  runID,
+		EventType: "human_task.requested",
+		EventID:   "evt-human",
+		Detail: map[string]any{
+			"type":   "human_task.requested",
+			"source": "agent-source",
+		},
+	})
+
+	receivedWaiting := false
+	deadline := time.After(1 * time.Second)
+	for !receivedWaiting {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for human.task_waiting")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch payload["type"] {
+		case "human.task_waiting":
+			receivedWaiting = true
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.continue","params":{"run_id":"run_test_human_001","decision":"approved","instance_ids":["run_test_human_001"]}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.continue alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	receivedSubmitted := false
+	receivedResumed := false
+	deadline = time.After(1 * time.Second)
+	for !(receivedSubmitted && receivedResumed) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for human submit/resume events")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch payload["type"] {
+		case "human.task_submitted":
+			receivedSubmitted = true
+		case "run.resumed":
+			receivedResumed = true
+		}
+	}
+
+	if runtimeCtl.pauseCalls != 1 {
+		t.Fatalf("expected runtime pause once, got %d", runtimeCtl.pauseCalls)
+	}
+	if runtimeCtl.resumeCalls != 1 {
+		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
+	}
+}
+
+func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket alias: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_step_001"
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "run:events:" + runID,
+	}); err != nil {
+		t.Fatalf("subscribe run events alias: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_step_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.step","params":{"run_id":"run_test_step_001","node_id":"agent-source","instance_id":"run_test_step_001"}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.step alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	typedHandler, ok := handler.(*Handler)
+	if !ok || typedHandler.runHub == nil {
+		t.Fatalf("expected typed handler with run hub")
+	}
+
+	typedHandler.runHub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+		Level:     "info",
+		Component: "pipeline",
+		Action:    "handled",
+		AgentID:   "agent-source",
+		EntityID:  runID,
+		EventID:   "evt-step",
+	})
+
+	receivedResumed := false
+	receivedPaused := false
+	deadline := time.After(1 * time.Second)
+	for !(receivedResumed && receivedPaused) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for step events")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch payload["type"] {
+		case "run.resumed":
+			if payload["node_id"] == "agent-source" {
+				receivedResumed = true
+			}
+		case "run.paused":
+			stepPayload, _ := payload["payload"].(map[string]any)
+			if stepPayload["reason"] == "step_complete" {
+				receivedPaused = true
+			}
+		}
+	}
+
+	if runtimeCtl.resumeCalls != 1 {
+		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
+	}
+	if runtimeCtl.pauseCalls != 1 {
+		t.Fatalf("expected runtime pause once from step completion, got %d", runtimeCtl.pauseCalls)
+	}
+}
+
+func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket alias: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_retry_001"
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "run:events:" + runID,
+	}); err != nil {
+		t.Fatalf("subscribe run events alias: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_retry_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.retry","params":{"run_id":"run_test_retry_001","node_id":"agent-source","instance_id":"run_test_retry_001"}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.retry alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	receivedRetried := false
+	receivedResumed := false
+	deadline := time.After(1 * time.Second)
+	for !(receivedRetried && receivedResumed) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for retry events")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch payload["type"] {
+		case "handler.retried":
+			receivedRetried = true
+		case "run.resumed":
+			modePayload, _ := payload["payload"].(map[string]any)
+			if modePayload["mode"] == "retry" {
+				receivedResumed = true
+			}
+		}
+	}
+
+	if runtimeCtl.resumeCalls != 1 {
+		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
+	}
+}
+
+func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("new event bus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{Bus: bus}
+	runtimeCtl := &stubRuntimeControl{}
+	handler := NewHandler(Options{
+		Health: func(context.Context) (map[string]any, error) {
+			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+		},
+		Version:    "mas-test",
+		RuntimeRef: rt,
+		Runtime:    runtimeCtl,
+	})
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket alias: %v", err)
+	}
+	defer conn.Close()
+
+	runID := "run_test_skip_001"
+	if err := conn.WriteJSON(map[string]any{
+		"type":    "subscribe",
+		"channel": "run:events:" + runID,
+	}); err != nil {
+		t.Fatalf("subscribe run events alias: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_skip_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.start alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":"11","method":"run.skip","params":{"run_id":"run_test_skip_001","node_id":"agent-source","instance_id":"run_test_skip_001"}}`),
+	)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("run.skip alias status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	receivedSkipped := false
+	receivedResumed := false
+	deadline := time.After(1 * time.Second)
+	for !(receivedSkipped && receivedResumed) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for skip events")
+		default:
+		}
+
+		var frame builderWSEventFrame
+		if err := conn.ReadJSON(&frame); err != nil {
+			t.Fatalf("read run event: %v", err)
+		}
+		if frame.Channel != "run:events:"+runID {
+			continue
+		}
+		payload, ok := frame.Data.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch payload["type"] {
+		case "handler.skipped":
+			receivedSkipped = true
+		case "run.resumed":
+			modePayload, _ := payload["payload"].(map[string]any)
+			if modePayload["mode"] == "skip" {
+				receivedResumed = true
+			}
+		}
+	}
+
+	if runtimeCtl.resumeCalls != 1 {
+		t.Fatalf("expected runtime resume once, got %d", runtimeCtl.resumeCalls)
 	}
 }

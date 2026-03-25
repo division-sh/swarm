@@ -74,6 +74,7 @@ cycle_limit_reached:
       type: array
       items: string
     recommendation: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
   _source: external (platform monitoring)
 devops.capacity_warning:
@@ -88,11 +89,13 @@ devops.deploy_complete:
     environment: string
     url: string
     version: number
+    entity_id: string (= vertical_id for Empire)
 devops.deploy_failed:
   payload:
     vertical_id: string
     environment: string
     error: string
+    entity_id: string (= vertical_id for Empire)
 devops.deploy_requested:
   payload:
     vertical_id: string
@@ -100,11 +103,13 @@ devops.deploy_requested:
       type: object
     environment: string
     requesting_agent: string
+    entity_id: string (= vertical_id for Empire)
 devops.health_check_failed:
   payload:
     vertical_id: string
     endpoint: string
     error: string
+    entity_id: string (= vertical_id for Empire)
 devops.infra_change_needed:
   payload:
     change_type: string
@@ -115,21 +120,25 @@ devops.rollback_complete:
     vertical_id: string
     environment: string
     active_version: integer
+    entity_id: string (= vertical_id for Empire)
 devops.rollback_failed:
   payload:
     vertical_id: string
     environment: string
     error: string
+    entity_id: string (= vertical_id for Empire)
 devops.rollback_requested:
   payload:
     vertical_id: string
     target_version: integer
     requesting_agent: string
+    entity_id: string (= vertical_id for Empire)
 devops.ssl_provisioned:
   payload:
     vertical_id: string
     domain: string
     expiry: string
+    entity_id: string (= vertical_id for Empire)
 human_task.approved:
   payload:
     task_id: string
@@ -171,6 +180,7 @@ inbound.email:
     attachments:
       type: array
       items: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
   _source: external (messaging gateway)
 inbound.whatsapp_message:
@@ -182,6 +192,7 @@ inbound.whatsapp_message:
     media_urls:
       type: array
       items: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
   _source: external (messaging gateway)
 opco.ceo_report:
@@ -190,25 +201,30 @@ opco.ceo_report:
     phase: string
     metrics: object
     decisions: string
+    entity_id: string (= vertical_id for Empire)
 opco.escalation:
   payload:
     vertical_id: string
     issue: string
     recommendation: string
+    entity_id: string (= vertical_id for Empire)
 opco.escalation_response:
   payload:
     vertical_id: string
     original_escalation_id: string
     directive: string
     priority: string
+    entity_id: string (= vertical_id for Empire)
 opco.launched:
   payload:
     vertical_id: string
     launch_url: string
     metrics: object
+    entity_id: string (= vertical_id for Empire)
 opco.teardown_complete:
   payload:
     vertical_id: string
+    entity_id: string (= vertical_id for Empire)
 ops.agent_failed:
   payload:
     agent_id: string
@@ -216,6 +232,7 @@ ops.agent_failed:
     error: string
     retry_count: number
     last_event_type: string
+    entity_id: string (= vertical_id for Empire)
   _source: external (platform monitoring)
 ops.agent_panic:
   payload:
@@ -224,6 +241,7 @@ ops.agent_panic:
     error: string
     stack_trace: string
     conversation_id: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 portfolio.digest_compiled:
   payload:
@@ -234,9 +252,11 @@ spend.approved:
   payload:
     amount: string
     purpose: string
+  _producer: agent (portfolio-node agent or mailbox decision)
 spend.rejected:
   payload:
     reason: string
+  _producer: agent (portfolio-node agent or mailbox decision)
 system.directive:
   _source: external (platform admin CLI)
   payload:
@@ -244,8 +264,6 @@ system.directive:
       type: string (scan | budget_adjust | policy_change | vertical_override)
       parameters: object (type-specific parameters)
     timestamp: string
-  _note: Admin sends structured directive. portfolio-node routes by directive.type via rules. Old directive_text format is
-    deprecated.
 system.started:
   payload:
     timestamp: string
@@ -263,11 +281,13 @@ template.migration_completed:
     template_version: string
     vertical_id: string
     result: object
+    entity_id: string (= vertical_id for Empire)
 template.migration_failed:
   payload:
     template_version: string
     vertical_id: string
     error: string
+    entity_id: string (= vertical_id for Empire)
 template.migration_planned:
   payload:
     template_version: string
@@ -293,6 +313,7 @@ vertical.health_warning:
     severity: string
     metrics: object
     recommendation: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 opco.routing_updated:
   payload:
@@ -305,6 +326,7 @@ opco.routing_updated:
     source: string
     bootstrap_version: integer
     runtime_tool_event: boolean
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 human_task.assigned:
   payload:
@@ -312,6 +334,7 @@ human_task.assigned:
     requesting_agent: string
     vertical_id: string
     assigned_to: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 runtime.reset:
   payload:
@@ -323,6 +346,7 @@ review.product_spec_feedback:
     vertical_id: string
     feedback: string
     reviewer: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 budget.adjustment_requested:
   payload:
@@ -330,6 +354,7 @@ budget.adjustment_requested:
     adjustment_type: string
     amount: number
     reason: string
+    entity_id: string (= vertical_id for Empire)
 policy.change_requested:
   payload:
     policy_key: string
@@ -347,38 +372,32 @@ pipeline.dead_letter:
     original_event: string
     error: string
     flow: string
+  _producer: agent (platform error model)
 opco.spinup_requested:
   payload:
     vertical_id: string
+    vertical_name: string
+    vertical_description: string
+    geography: string
+    tech_stack: string
     mandate:
       type: object
     brand:
       type: object
     founder_directives: string
+    entity_id: string (= vertical_id for Empire)
 scan.requested:
   payload:
     geography: string
     mode: string
-    taxonomy_categories:
-      type: array
-      items: string
-    sources:
-      type: array
-      items: string
-    depth: string
-    campaign_id: string
-    campaign_context:
-      type: object
-      properties:
-        directive_id: string
-        modes:
-          type: array
-          items: string
-        strategic_context: string
-    corpus_path: string
+    subcategories: array
+    sources: array
 vertical.resumed:
   payload:
     vertical_id: string
+    reason: string
+    resumed_from: string
+    entity_id: string (= vertical_id for Empire)
 budget.alert_sent:
   payload:
     entity_id: string
@@ -402,6 +421,7 @@ scanner.google_maps.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.instagram.scan_complete:
   payload:
     scan_id: string
@@ -409,6 +429,7 @@ scanner.instagram.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.reviews.scan_complete:
   payload:
     scan_id: string
@@ -416,6 +437,7 @@ scanner.reviews.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.directories.scan_complete:
   payload:
     scan_id: string
@@ -423,6 +445,7 @@ scanner.directories.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.yelp.scan_complete:
   payload:
     scan_id: string
@@ -430,6 +453,7 @@ scanner.yelp.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 timer.scan_timeout:
   payload:
     scan_id: string
@@ -609,6 +633,7 @@ dedup.resolved:
     best_signal: object (populated when strategy=keep_best)
     merged: object (populated when strategy=merge_fields)
     reasoning: string
+    entity_id: string (= vertical_id for Empire)
 synthesis.resolved:
   payload:
     synthesis_id: string
@@ -618,6 +643,7 @@ synthesis.resolved:
     signal_b: object
     synthesized: object (populated when resolution=synthesize)
     reasoning: string
+    entity_id: string (= vertical_id for Empire)
 vertical.discovered:
   payload:
     vertical_name: string
@@ -630,16 +656,19 @@ vertical.discovered:
     geographic_scope: string
     signal_strength: integer
     opportunity_pattern: string
+  _producer: agent (discovery-coordinator agent emission)
 synthesis.needed:
   payload:
     conflicting_reports: string
     context: object
+  _producer: agent (discovery-coordinator agent emission)
 dedup.ambiguous:
   payload:
     dedup_id: string
     new_candidate: string
     existing_vertical: string
     similarity: string
+  _producer: agent (discovery-coordinator agent emission)
 market_research.scan_assigned:
   payload:
     geography: string
@@ -661,6 +690,7 @@ scanner.directories.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.google_maps.scan_assigned:
   payload:
     scan_id: string
@@ -668,6 +698,7 @@ scanner.google_maps.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.instagram.scan_assigned:
   payload:
     scan_id: string
@@ -675,6 +706,7 @@ scanner.instagram.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.reviews.scan_assigned:
   payload:
     scan_id: string
@@ -682,6 +714,7 @@ scanner.reviews.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.yelp.scan_assigned:
   payload:
     scan_id: string
@@ -689,6 +722,7 @@ scanner.yelp.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 trend_research.scan_assigned:
   payload:
     geography: string
@@ -753,6 +787,7 @@ score.dimension_complete:
       maximum: 100
     evidence: string
     confidence: string
+    entity_id: string (= vertical_id for Empire)
 scoring.requested:
   payload:
     vertical_id: string
@@ -767,6 +802,7 @@ scoring.requested:
       type: object
     assigned_analysis_agent_id: string
     excluded_analysis_agent_id: string
+    entity_id: string (= vertical_id for Empire)
   _note: rubric is derived from mode by scoring-node rules. Both fields set at emit time.
 vertical.shortlisted:
   payload:
@@ -775,6 +811,7 @@ vertical.shortlisted:
     viability_score: number
     scoring_payload:
       type: object
+    entity_id: string (= vertical_id for Empire)
 vertical.marginal:
   payload:
     vertical_id: string
@@ -783,16 +820,19 @@ vertical.marginal:
     dimensions:
       type: object
     promotion_eligible: boolean
+    entity_id: string (= vertical_id for Empire)
 vertical.rejected:
   payload:
     vertical_id: string
     reason: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 vertical.killed_backprop:
   payload:
     vertical_id: string
     kill_reason: string
     killed_by_flow: string
+    entity_id: string (= vertical_id for Empire)
   _note: Back-propagation from validation. Scoring node advances entity to killed.
 scoring.derived_requested:
   payload:
@@ -800,24 +840,24 @@ scoring.derived_requested:
     dimensions_requested: array
     rubric: string
     mode: string
+    entity_id: string (= vertical_id for Empire)
   _note: 'Routed to analysis-agent-secondary (anti-bias: different agent pool from parent scorer)'
 research.completed:
   payload:
     vertical_id: string
     business_brief: object
     research_context: object
+    entity_id: string (= vertical_id for Empire)
 spec.revision_requested:
   payload:
     vertical_id: string
     cto_feedback: string
-spec.approved:
-  payload:
-    vertical_id: string
-    final_spec: string
+    entity_id: string (= vertical_id for Empire)
 spec.validation_passed:
   payload:
     vertical_id: string
     validation_notes: string
+    entity_id: string (= vertical_id for Empire)
 spec.validation_failed:
   payload:
     vertical_id: string
@@ -826,72 +866,87 @@ spec.validation_failed:
       items:
         type: object
     severity: string
+    entity_id: string (= vertical_id for Empire)
 cto.spec_approved:
   payload:
     vertical_id: string
     cto_notes: string
+    entity_id: string (= vertical_id for Empire)
 cto.spec_revision_needed:
   payload:
     vertical_id: string
     technical_issues: string
+    entity_id: string (= vertical_id for Empire)
 cto.spec_vetoed:
   payload:
     vertical_id: string
     reason: string
+    entity_id: string (= vertical_id for Empire)
 brand.candidates_ready:
   payload:
     vertical_id: string
     candidates: array
+    entity_id: string (= vertical_id for Empire)
 brand.revision_needed:
   payload:
     vertical_id: string
     feedback: string
+    entity_id: string (= vertical_id for Empire)
 vertical.ready_for_review:
   payload:
     vertical_id: string
     validation_kit:
       type: object
+    entity_id: string (= vertical_id for Empire)
 vertical.needs_more_data:
   payload:
     vertical_id: string
     questions: string
+    entity_id: string (= vertical_id for Empire)
   _source: external (mailbox human decision)
 research.vertical_rejected:
   payload:
     vertical_id: string
     rejection_reason: string
     evidence: object
+    entity_id: string (= vertical_id for Empire)
 spec.revision_needed:
   payload:
     vertical_id: string
     misalignment_details: string
+    entity_id: string (= vertical_id for Empire)
 validation.started:
   payload:
     vertical_id: string
     vertical_name: string
     geography: string
     scoring_context: string
+    entity_id: string (= vertical_id for Empire)
 spec.validation_requested:
   payload:
     spec_content: string
     spec_tier: string
     vertical_id: string
+    entity_id: string (= vertical_id for Empire)
 cto.spec_review_requested:
   payload:
     vertical_id: string
     mvp_spec: string
     business_brief: object
     vertical_context: object
+    entity_id: string (= vertical_id for Empire)
 brand.requested:
   payload:
     vertical_id: string
     vertical_name: string
     geography: string
     business_brief: object
+    entity_id: string (= vertical_id for Empire)
 validation.more_data_needed:
   payload:
     vertical_id: string
     questions: string
+    entity_id: string (= vertical_id for Empire)
 validation.package_ready:
   payload:
     vertical_id: string
@@ -899,11 +954,13 @@ validation.package_ready:
     spec: string
     cto_notes: string
     brand: string
+    entity_id: string (= vertical_id for Empire)
 vertical.killed:
   payload:
     vertical_id: string
     reason: string
     source: string
+    entity_id: string (= vertical_id for Empire)
 cto.pattern_detected:
   payload:
     pattern_type: string
@@ -914,6 +971,7 @@ cto.tech_spec_feedback:
     vertical_id: string
     feedback: string
     severity: number
+    entity_id: string (= vertical_id for Empire)
 spec.contradiction_detected:
   payload:
     agent_id: string
@@ -923,14 +981,17 @@ spec.draft_ready:
   payload:
     vertical_id: string
     mvp_spec: string
+    entity_id: string (= vertical_id for Empire)
 spec.requested:
   payload:
     vertical_id: string
     business_brief: object
+    entity_id: string (= vertical_id for Empire)
 spec_review.issues_found:
   payload:
     vertical_id: string
     issues: array
+    entity_id: string (= vertical_id for Empire)
 spec_review.passed:
   payload:
     entity_id: string
@@ -941,6 +1002,7 @@ spec_review.requested:
     vertical_id: string
     mvp_spec: string
     business_brief: object
+    entity_id: string (= vertical_id for Empire)
 template.publish_requested:
   payload:
     template_version: string
@@ -951,16 +1013,19 @@ timer.validation_timeout:
     vertical_id: string
     stuck_state: string
     elapsed_hours: integer
+    entity_id: string (= vertical_id for Empire)
 validation.timeout_escalation:
   payload:
     vertical_id: string
     stuck_state: string
     action: string
+    entity_id: string (= vertical_id for Empire)
 validation.revision_limit_reached:
   payload:
     vertical_id: string
     gate: string
     revision_count: integer
+    entity_id: string (= vertical_id for Empire)
 mailbox.review_requested:
   payload:
     entity_id: string
@@ -977,10 +1042,12 @@ vertical.approved:
     vertical_id: string
     brand_choice: string
     founder_directives: string
+    entity_id: string (= vertical_id for Empire)
 opco.ceo_ready:
   payload:
     vertical_id: string
     agent_count: number
+    entity_id: string (= vertical_id for Empire)
 timer.marginal_review:
   payload:
     parked_marginals_summary: string
@@ -988,6 +1055,7 @@ timer.marginal_kill:
   payload:
     vertical_id: string
     parked_days: integer
+    entity_id: string (= vertical_id for Empire)
 build_complete:
   payload:
     feature: string
@@ -998,6 +1066,7 @@ launch_ready:
     version: number
     deploy_url: string
     test_results: object
+    entity_id: string (= vertical_id for Empire)
 qa.validation_passed:
   payload:
     test_summary: string
@@ -1008,21 +1077,26 @@ review.deploy_feedback:
     vertical_id: string
     feedback: string
     reviewer: string
+    entity_id: string (= vertical_id for Empire)
 opco.steady_state_reached:
   payload:
     vertical_id: string
+    entity_id: string (= vertical_id for Empire)
 opco.growth_triggered:
   payload:
     vertical_id: string
     trigger_reason: string
+    entity_id: string (= vertical_id for Empire)
 opco.growth_stabilized:
   payload:
     vertical_id: string
     stabilization_metrics: object
+    entity_id: string (= vertical_id for Empire)
 opco.teardown_requested:
   payload:
     vertical_id: string
     reason: string
+    entity_id: string (= vertical_id for Empire)
 mailbox.item_decided:
   payload:
     item_id: string
@@ -1030,6 +1104,7 @@ mailbox.item_decided:
     decided_by: string
     vertical_id: string
     original_event_type: string
+    entity_id: string (= vertical_id for Empire)
   _source: external (mailbox UI human decision)
 bug_fix_deployed:
   payload:
@@ -1037,6 +1112,7 @@ bug_fix_deployed:
     bug_id: string
     version: number
     resolution: string
+    entity_id: string (= vertical_id for Empire)
 bug_reported:
   payload:
     description: string
@@ -1074,15 +1150,10 @@ cto.tech_spec_review_requested:
   payload:
     vertical_id: string
     spec_content: string
+    entity_id: string (= vertical_id for Empire)
 cycle_reset:
   payload:
     reason: string
-deploy_requested:
-  payload:
-    vertical_id: string
-    component: string
-    version: number
-    deploy_config: string
 feature_deployed:
   payload:
     feature: string
@@ -1111,6 +1182,7 @@ mandate_updated:
   payload:
     vertical_id: string
     changes: object
+    entity_id: string (= vertical_id for Empire)
 market_feedback:
   payload:
     source: string
@@ -1141,6 +1213,7 @@ opco.spend_request:
     vertical_id: string
     amount: number
     reason: string
+    entity_id: string (= vertical_id for Empire)
   _consumer: mailbox_system (external UI, not agent-subscribed)
 outreach_digest:
   payload:
@@ -1186,6 +1259,7 @@ spend_request:
     currency: string
     purpose: string
     justification: string
+    entity_id: string (= vertical_id for Empire)
 support_critical:
   payload:
     ticket_id: string
@@ -1211,16 +1285,19 @@ opco.terminated:
     instance_id: string
     teardown_summary: string
     terminated_at: timestamp
+    entity_id: string (= vertical_id for Empire)
 timer.operating_timeout:
   payload:
     vertical_id: string
     stuck_state: string
     elapsed_hours: integer
+    entity_id: string (= vertical_id for Empire)
 operating.timeout_escalation:
   payload:
     vertical_id: string
     stuck_state: string
     action: string
+    entity_id: string (= vertical_id for Empire)
 backend.task_complete:
   payload:
     task: string
@@ -1255,6 +1332,7 @@ build.escalation:
     vertical_id: string
     blocker: string
     severity: string
+    entity_id: string (= vertical_id for Empire)
 vertical.marginal_review_due:
   payload:
     entity_id: string

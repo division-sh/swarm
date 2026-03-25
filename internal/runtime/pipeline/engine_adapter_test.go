@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimecontracts "empireai/internal/runtime/contracts"
+	"empireai/internal/runtime/core/identity"
 	runtimeengine "empireai/internal/runtime/engine"
 	"empireai/internal/runtime/semanticview"
 )
@@ -187,5 +188,24 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 	flushPipelinePostCommitActions(cancelActions)
 	if got := len(scheduler.tasks); got != 0 {
 		t.Fatalf("scheduler tasks after cancel flush = %d, want 0", got)
+	}
+}
+
+func TestPipelineEngineActionRegistry_SynthesizesSupportedBuiltinActions(t *testing.T) {
+	registry := pipelineEngineActionRegistry{}
+	id := identity.NormalizeActionKey("increment_revision_count")
+
+	if !registry.HasAction(id) {
+		t.Fatal("expected builtin action to be discoverable without explicit registry entry")
+	}
+	if !registry.IsExecutable(id) {
+		t.Fatal("expected builtin action to be executable without explicit registry entry")
+	}
+	instruction, ok := registry.Action(id)
+	if !ok {
+		t.Fatal("expected builtin action instruction")
+	}
+	if got := instruction.Builtin; got != "increment_revision_count" {
+		t.Fatalf("Builtin = %q", got)
 	}
 }

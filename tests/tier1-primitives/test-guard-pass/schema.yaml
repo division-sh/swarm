@@ -1,8 +1,17 @@
+states:
+  - pending
+  - done
 initial_state: pending
-terminal_states: [done]
-states: [pending, done]
+terminal_states:
+  - done
 pins:
   inputs:
-    events: [check.requested]
+    events:
+      - name: check.requested
+        required: false
+    reads: []
   outputs:
-    events: [check.passed]
+    events:
+      - name: check.passed
+        required: false
+    writes: []

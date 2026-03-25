@@ -94,6 +94,7 @@ def is_suppressed(ev_name):
         if ev.get('_source', '').startswith('external'): return True
         if ev.get('_consumer', '').startswith('mailbox'): return True
         if ev.get('_status') == 'planned': return True
+        if ev.get('_producer', '').startswith('agent'): return True
     return False
 
 # ============================================================
@@ -224,7 +225,7 @@ for flow in ['root'] + FLOWS:
                     cond = rule.get('condition', '')
                     if cond == 'else': continue
                     for ref in extract_payload_refs(cond):
-                        if not any(ref == pf or ref.startswith(pf+'.') or pf.startswith(ref) for pf in payload_fields):
+                        if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
                             error("CONDITION-PAYLOAD", "%s/%s/%s rule '%s': payload.%s not in event payload %s" % (flow, nid, ev, rule_name, ref, sorted(payload_fields)))
 
             # Guard conditions
@@ -236,7 +237,7 @@ for flow in ['root'] + FLOWS:
                 for check in checks:
                     if not isinstance(check, dict): continue
                     for ref in extract_payload_refs(check.get('check', '')):
-                        if not any(ref == pf or ref.startswith(pf+'.') or pf.startswith(ref) for pf in payload_fields):
+                        if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
                             error("CONDITION-PAYLOAD", "%s/%s/%s guard: payload.%s not in event payload %s" % (flow, nid, ev, ref, sorted(payload_fields)))
 
             # on_complete conditions
@@ -246,7 +247,7 @@ for flow in ['root'] + FLOWS:
                 for branch in items:
                     if isinstance(branch, dict):
                         for ref in extract_payload_refs(branch.get('condition', '')):
-                            if not any(ref == pf or ref.startswith(pf+'.') or pf.startswith(ref) for pf in payload_fields):
+                            if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
                                 error("CONDITION-PAYLOAD", "%s/%s/%s on_complete: payload.%s not in event payload" % (flow, nid, ev, ref))
 
 # ============================================================
@@ -339,8 +340,8 @@ DEFINED_HANDLER_FIELDS = {
     'description', '_note', 'guard', 'accumulate', 'compute', 'on_complete',
     'advances_to', 'sets_gate', 'data_accumulation', 'emits', 'rules',
     'fan_out', 'query', 'reduce', 'filter', 'count', 'clear', 'action',
-    'template', 'instance_id_from', 'config_from', 'from', 'payload_transform',
-    'clear_gates', 'dedup_by',
+    'template', 'instance_id_from', 'config_from', 'payload_transform',
+    'clear_gates', 'evidence_target',
 }
 for flow in ['root'] + FLOWS:
     nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
@@ -438,7 +439,7 @@ for flow in ['root'] + FLOWS:
                 warn("PRODUCES-DRIFT", "%s/%s: emits '%s' but not in produces list" % (flow, nid, e))
 
 # ============================================================
-# CHECK 12: Gate references — sets_gate targets exist in schema or node gate_state
+# CHECK 12: Gate references — sets_gate targets must be referenced by guards — sets_gate targets exist in schema or node gate_state
 # ============================================================
 for flow in FLOWS:
     schema = flow_data[flow]['schema']
@@ -446,12 +447,30 @@ for flow in FLOWS:
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         declared_gates = set(node.get('gate_state', {}).keys())
+
+gates_set = set()
+gates_read = set()
+for flow in ['root'] + FLOWS:
+    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
-            gate = h.get('sets_gate')
-            if gate:
-                # Gate should be somewhere — node gate_state or just used
-                pass  # Gates are created on first set, no pre-declaration required
+            g = h.get('sets_gate')
+            if g: gates_set.add(g)
+            guard = h.get('guard', {})
+            if isinstance(guard, dict):
+                for check in guard.get('checks', []) + ([guard] if 'check' in guard else []):
+                    if isinstance(check, dict):
+                        cond = check.get('check', '')
+                        import re as re2
+                        for gate_ref in re2.findall(r'entity\.gates\.(\w+)', cond):
+                            gates_read.add(gate_ref)
+
+for g in gates_set:
+    if g not in gates_read:
+        warn("GATE-INFO", "sets_gate '%s' but no guard reads entity.gates.%s" % (g, g))
+
 
 # ============================================================
 # CHECK 13: Policy conflict detection
@@ -581,6 +600,66 @@ for flow in ['root'] + FLOWS:
                 error("DUPLICATE-NODE-HANDLER", "'%s' handled by both %s/%s and %s/%s" % (ev, prev_flow, prev_nid, flow, nid))
             else:
                 event_node_map[ev] = (nid, flow)
+
+
+# ============================================================
+# CHECK 17: config_from payload alignment
+# ============================================================
+for flow in ['root'] + FLOWS:
+    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
+        for ev, h in node.get('event_handlers', {}).items():
+            if not isinstance(h, dict): continue
+            cf = h.get('config_from', {})
+            if not isinstance(cf, dict): continue
+            event_payload = all_events.get(ev, {})
+            payload_fields = set()
+            if isinstance(event_payload, dict) and 'payload' in event_payload:
+                p = event_payload['payload']
+                if isinstance(p, dict):
+                    payload_fields = set(p.keys())
+            for key, path in cf.items():
+                if isinstance(path, str) and path.startswith('payload.'):
+                    field = path.split('.', 1)[1]
+                    if payload_fields and field not in payload_fields:
+                        error("CONFIG-FROM-MISMATCH", "%s/%s/%s: config_from reads payload.%s but event payload has %s" % (flow, nid, ev, field, sorted(payload_fields)))
+
+# ============================================================
+# CHECK 18: Bidirectional produces check (phantom produces)
+# ============================================================
+for flow in ['root'] + FLOWS:
+    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
+        declared_produces = set(node.get('produces', []))
+        actual_emits = set()
+        for ev, h in node.get('event_handlers', {}).items():
+            if not isinstance(h, dict): continue
+            e = h.get('emits')
+            if isinstance(e, str): actual_emits.add(e)
+            elif isinstance(e, list): actual_emits.update(e)
+            ru = h.get('rules', {})
+            if isinstance(ru, dict):
+                for r in ru.values():
+                    if isinstance(r, dict):
+                        re_ = r.get('emits')
+                        if isinstance(re_, str): actual_emits.add(re_)
+                        elif isinstance(re_, list): actual_emits.update(re_)
+            oc = h.get('on_complete')
+            if isinstance(oc, list):
+                for b in oc:
+                    if isinstance(b, dict):
+                        be = b.get('emits')
+                        if isinstance(be, str): actual_emits.add(be)
+                        elif isinstance(be, list): actual_emits.update(be)
+            fo = h.get('fan_out', {})
+            if isinstance(fo, dict) and fo.get('emit_per_item'):
+                actual_emits.add(fo['emit_per_item'])
+        phantom = declared_produces - actual_emits
+        if phantom:
+            for p in phantom:
+                warn("PHANTOM-PRODUCES", "%s/%s: produces '%s' but no handler emits it" % (flow, nid, p))
 
 # ============================================================
 # Report

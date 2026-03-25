@@ -1,4 +1,4 @@
-# MAS Platform Specification v1.1.0
+# MAS Platform Specification v1.2.0
 
 > **Note:** The authoritative specification is `platform/contracts/platform-spec.yaml`. This prose document is a high-level overview. When in conflict, the YAML wins.
 

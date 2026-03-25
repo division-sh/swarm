@@ -1,0 +1,125 @@
+# Happy path: vertical goes discovery → scoring → validation → operating
+# All agents succeed. No revisions, no kills, no marginals.
+
+agent_fixtures:
+
+  # Discovery
+  market-research-agent:
+    - on: market_research.scan_assigned
+      emits:
+        - event: category.assessed
+          payload:
+            entity_id: "{{entity_id}}"
+            category: "test-category"
+            signals: [{ type: gap, strength: 80, description: "Strong market gap" }]
+        - event: market_research.scan_complete
+          payload:
+            entity_id: "{{entity_id}}"
+            scan_id: "{{scan_id}}"
+
+  discovery-coordinator:
+    - on: dedup.ambiguous
+      emits:
+        - event: dedup.resolved
+          payload:
+            entity_id: "{{entity_id}}"
+            strategy: keep_best
+            best_signal: { type: gap, strength: 80 }
+
+  # Scoring
+  analysis-agent:
+    - on: scoring.requested
+      emits:
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: build_complexity, score: 82 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: automation_completeness, score: 78 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: icp_crispness, score: 85 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: distribution_leverage, score: 70 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: time_to_value, score: 88 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: operational_drag, score: 75 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: pain_severity, score: 80 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: competition_gap, score: 65 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: monetization_clarity, score: 72 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: retention_architecture, score: 70 }
+        - event: score.dimension_complete
+          payload: { entity_id: "{{entity_id}}", dimension: expansion_potential, score: 68 }
+
+  # Validation
+  business-research-agent:
+    - on: validation.started
+      emits:
+        - event: research.completed
+          payload:
+            entity_id: "{{entity_id}}"
+            business_brief: "Comprehensive market analysis showing strong PMF signals."
+            research_context: { market_size: 5000000, competitors: 2, moat: "WhatsApp integration" }
+
+  lightweight-spec-agent:
+    - on: spec.requested
+      emits:
+        - event: spec.draft_ready
+          payload:
+            entity_id: "{{entity_id}}"
+            final_spec: "MVP specification: REST API + WhatsApp bot + simple dashboard."
+
+  spec-reviewer:
+    - on: spec_review.requested
+      emits:
+        - event: spec_review.passed
+          payload:
+            entity_id: "{{entity_id}}"
+
+  factory-cto:
+    - on: cto.spec_review_requested
+      emits:
+        - event: cto.spec_approved
+          payload:
+            entity_id: "{{entity_id}}"
+            cto_notes: "Technically feasible. Recommend Node.js + PostgreSQL stack."
+
+  pre-brand-agent:
+    - on: brand.requested
+      emits:
+        - event: brand.candidates_ready
+          payload:
+            entity_id: "{{entity_id}}"
+            candidates: [{ name: "QuickInvoice", domain: "quickinvoice.com", available: true }]
+
+  # Operating
+  opco-ceo:
+    - on: opco.ceo_ready
+      emits:
+        - event: product_spec_ready
+          payload: { entity_id: "{{entity_id}}" }
+
+  opco-cto:
+    - on: build.escalation
+      emits: []
+    - on: technical_spec_ready
+      # CTO receives and starts build
+      emits: []
+
+  opco-pm:
+    - on: product_spec_ready
+      emits: []
+
+  opco-qa:
+    - on: build_complete
+      emits:
+        - event: qa.validation_passed
+          payload: { entity_id: "{{entity_id}}" }
+
+  opco-devops:
+    - on: deploy.authorized
+      emits:
+        - event: devops.deploy_complete
+          payload: { entity_id: "{{entity_id}}", environment: production }

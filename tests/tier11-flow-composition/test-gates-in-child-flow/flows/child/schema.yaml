@@ -1,9 +1,18 @@
-name: child
+states:
+  - idle
+  - done
 initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+terminal_states:
+  - done
 pins:
   inputs:
-    events: [validate.start]
+    events:
+      - name: validate.start
+        required: false
+    reads: []
   outputs:
-    events: [validation.done]
+    events:
+      - name: validation.done
+        required: false
+    writes: []
+name: child

@@ -30,9 +30,14 @@ var (
 func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
 	candidates, dirs := promptLookupPlan(cfg)
 	repoRoot := promptContractsRepoRoot()
+	bundle, _ := promptWorkflowBundle()
 	for _, agentID := range candidates {
+		var record bundleAgentRecord
+		if bundle != nil {
+			record, _ = bundleAgentRecordByLogicalID(bundle, agentID)
+		}
 		for _, dir := range dirs[agentID] {
-			prompt, found, err := loadPromptForAgentFromDir(repoRoot, dir, agentID, mode)
+			prompt, found, err := loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, mode)
 			if err != nil {
 				return "", false, err
 			}
@@ -273,17 +278,17 @@ func promptContractsRepoRoot() string {
 }
 
 func loadPromptForAgentFromDir(repoRoot, promptsDir, agentID, mode string) (string, bool, error) {
+	return loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, AgentRegistryEntry{}, mode)
+}
+
+func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, mode string) (string, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if agentID == "" || strings.TrimSpace(promptsDir) == "" {
 		return "", false, nil
 	}
 
-	candidates := make([]string, 0, 2)
-	if mode != "" {
-		candidates = append(candidates, filepath.Join(promptsDir, agentID+"."+mode+".md"))
-	}
-	candidates = append(candidates, filepath.Join(promptsDir, agentID+".md"))
+	candidates := promptPathCandidates(promptsDir, agentID, entry, mode)
 
 	for _, candidate := range candidates {
 		raw, err := os.ReadFile(candidate)
@@ -300,6 +305,45 @@ func loadPromptForAgentFromDir(repoRoot, promptsDir, agentID, mode string) (stri
 		return strings.TrimSpace(rendered), true, nil
 	}
 	return "", false, nil
+}
+
+func promptPathCandidates(promptsDir, logicalID string, entry AgentRegistryEntry, mode string) []string {
+	refs := []string{
+		strings.TrimSpace(entry.PromptRef),
+		strings.TrimSpace(logicalID),
+		strings.TrimSpace(entry.ID),
+		strings.TrimSpace(promptWorkspaceRoleRef(entry)),
+	}
+	refs = uniqueStrings(refs...)
+	paths := make([]string, 0, len(refs)*2)
+	for _, ref := range refs {
+		if ref == "" {
+			continue
+		}
+		if filepath.Ext(ref) != "" {
+			paths = append(paths, filepath.Join(promptsDir, ref))
+			continue
+		}
+		if mode != "" {
+			paths = append(paths, filepath.Join(promptsDir, ref+"."+mode+".md"))
+		}
+		paths = append(paths, filepath.Join(promptsDir, ref+".md"))
+	}
+	return uniqueStrings(paths...)
+}
+
+func promptWorkspaceRoleRef(entry AgentRegistryEntry) string {
+	workspaceClass := strings.TrimSpace(entry.WorkspaceClass)
+	role := strings.TrimSpace(entry.Role)
+	if workspaceClass == "" || role == "" {
+		return ""
+	}
+	role = strings.ReplaceAll(role, "_", "-")
+	role = strings.TrimSpace(role)
+	if role == "" {
+		return ""
+	}
+	return workspaceClass + "-" + role
 }
 
 func renderPromptWithRuntimeVariables(repoRoot, promptText string) (string, error) {

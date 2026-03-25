@@ -26,7 +26,7 @@ export async function fetchShardScanDetail(scanID?: string): Promise<ShardDetail
 export async function fetchTrace(vertical?: string): Promise<TraceRecord[]> {
   const value = String(vertical || "").trim();
   if (!value) return [];
-  const events = await fetchEvents({ vertical: value });
+  const events = await fetchEvents({ entity_id: value });
   return adaptTrace(events);
 }
 

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "flows": {
+    "": {
+      "node_positions": {
+        "test-node": {
+          "x": -417.6524386225951,
+          "y": 6.742083450124298
+        }
+      },
+      "edge_routes": {},
+      "handler_display_order": {},
+      "viewport": {
+        "x": 584.1054083576423,
+        "y": 149.11411834677483,
+        "zoom": 0.8480531334225828
+      },
+      "breakpoints": [],
+      "pin_data": {},
+      "annotations": [],
+      "acknowledged_warnings": []
+    }
+  }
+}

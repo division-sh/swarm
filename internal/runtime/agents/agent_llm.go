@@ -108,7 +108,7 @@ func extractConversationConstraints(raw json.RawMessage) (*llm.ConversationMode,
 
 func parseConversationMode(raw string) (llm.ConversationMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "task", "task_scoped", "task-scoped":
+	case "task", "task_scoped", "task-scoped", "stateless":
 		return llm.TaskScoped, true
 	case "session", "session_scoped", "session-scoped":
 		return llm.SessionScoped, true

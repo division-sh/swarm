@@ -24,6 +24,110 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
+	if p == nil {
+		return nil
+	}
+	var aux struct {
+		Events yaml.Node `yaml:"events"`
+		Reads  yaml.Node `yaml:"reads"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	events, err := decodeFlowPinEventsNode(&aux.Events)
+	if err != nil {
+		return err
+	}
+	reads, err := decodeFlowPinFieldNamesNode(&aux.Reads)
+	if err != nil {
+		return err
+	}
+	*p = FlowInputPins{
+		Events: events,
+		Reads:  reads,
+	}
+	return nil
+}
+
+func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
+	if p == nil {
+		return nil
+	}
+	var aux struct {
+		Events yaml.Node `yaml:"events"`
+		Writes yaml.Node `yaml:"writes"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	events, err := decodeFlowPinEventsNode(&aux.Events)
+	if err != nil {
+		return err
+	}
+	writes, err := decodeFlowPinFieldNamesNode(&aux.Writes)
+	if err != nil {
+		return err
+	}
+	*p = FlowOutputPins{
+		Events: events,
+		Writes: writes,
+	}
+	return nil
+}
+
+func decodeFlowPinEventsNode(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	var legacy []string
+	if err := node.Decode(&legacy); err == nil {
+		return append([]string{}, legacy...), nil
+	}
+
+	var structured []struct {
+		Name string `yaml:"name"`
+	}
+	if err := node.Decode(&structured); err != nil {
+		return nil, err
+	}
+	events := make([]string, 0, len(structured))
+	for _, entry := range structured {
+		name := strings.TrimSpace(entry.Name)
+		if name == "" {
+			continue
+		}
+		events = append(events, name)
+	}
+	return events, nil
+}
+
+func decodeFlowPinFieldNamesNode(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	var legacy []string
+	if err := node.Decode(&legacy); err == nil {
+		return append([]string{}, legacy...), nil
+	}
+
+	var structured []struct {
+		Field string `yaml:"field"`
+	}
+	if err := node.Decode(&structured); err != nil {
+		return nil, err
+	}
+	fields := make([]string, 0, len(structured))
+	for _, entry := range structured {
+		field := strings.TrimSpace(entry.Field)
+		if field == "" {
+			continue
+		}
+		fields = append(fields, field)
+	}
+	return fields, nil
+}
+
 func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -890,6 +994,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Template         string                   `yaml:"template"`
 		InstanceIDFrom   string                   `yaml:"instance_id_from"`
 		ConfigFrom       yaml.Node                `yaml:"config_from"`
+		EvidenceTarget   string                   `yaml:"evidence_target"`
 		Description      string                   `yaml:"description"`
 		Emits            EventEmission            `yaml:"emits"`
 		Guard            yaml.Node                `yaml:"guard"`
@@ -919,6 +1024,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*h = SystemNodeEventHandler{
+		EvidenceTarget:   strings.TrimSpace(aux.EvidenceTarget),
 		Description:      strings.TrimSpace(aux.Description),
 		Emits:            aux.Emits,
 		DataAccumulation: aux.DataAccumulation,
@@ -1148,6 +1254,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"action":            {},
 		"description":       {},
 		"_note":             {},
+		"evidence_target":   {},
 		"emits":             {},
 		"guard":             {},
 		"advances_to":       {},

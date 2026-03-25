@@ -31,7 +31,7 @@ my-ticket-flow/
 name: ticket-flow
 version: 1.0.0
 description: Support ticket classification and resolution
-platform_version: ">=1.1.0"
+platform: ">=1.1.0"
 flows: []
 ```
 
@@ -129,7 +129,7 @@ ticket-orchestrator:
       start_on: state:assigned
       cancel_on: state:resolved
 
-  state_schema:
+  entity_schema:
     fields:
       ticket_id: uuid
       category: text
@@ -294,6 +294,8 @@ You resolve support tickets using the knowledge base.
 python3 verify.py
 # Should output: 0 errors, 0 warnings
 ```
+
+**Note on emitted event payloads:** By default, emitted events carry entity fields as a base, overlaid with the triggering event payload (trigger wins on collision), plus platform fields (entity_id, trigger_event_type, current_state). Use `payload_transform` when you need to construct a custom payload from entity state, policy, or computed values instead of forwarding the trigger payload.
 
 That's it. The platform loads your contracts, boots the state machine, starts the agents, and processes tickets.
 
@@ -751,7 +753,7 @@ timestamp: string
 python3 verify.py
 ```
 
-16 checks covering event chains, payload fields, conditions, state machines, required agents, handler fields, tools, prompts, deprecated fields, produces lists, policy conflicts, cycles, and dialect compliance.
+19 checks covering event chains, payload fields, conditions, state machines, required agents, handler fields, tools, prompts, deprecated fields, produces lists, policy conflicts, cycles, and dialect compliance.
 
 ### Write Test Packages
 

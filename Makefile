@@ -1,8 +1,11 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
 	lint dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
+	dashboard-local dashboard-local-build dashboard-local-stop \
 	sync-current-spec
 
 COMPOSE ?= docker compose
+DASHBOARD_LOCAL_PORT ?= 4173
+DASHBOARD_API_ORIGIN ?= http://127.0.0.1:8081
 
 COVER_DIR ?= coverage
 MIN_RUNTIME_COVER ?= 32
@@ -60,6 +63,21 @@ dashboard-logs:
 
 dashboard-ps:
 	$(COMPOSE) ps dashboard orchestrator
+
+dashboard-local-build:
+	cd internal/dashboard/ui && npm run build
+
+dashboard-local-stop:
+	@pids="$$(lsof -ti tcp:$(DASHBOARD_LOCAL_PORT) 2>/dev/null)"; \
+	if [ -n "$$pids" ]; then \
+		echo "Stopping dashboard server on port $(DASHBOARD_LOCAL_PORT): $$pids"; \
+		kill $$pids; \
+	else \
+		echo "No dashboard server listening on port $(DASHBOARD_LOCAL_PORT)"; \
+	fi
+
+dashboard-local: dashboard-local-build dashboard-local-stop
+	cd internal/dashboard/ui && PLAYWRIGHT_DASHBOARD_PORT=$(DASHBOARD_LOCAL_PORT) DASHBOARD_API_ORIGIN=$(DASHBOARD_API_ORIGIN) node scripts/serve-smoke-dashboard.mjs
 
 sync-current-spec:
 	./scripts/sync_current_spec.sh

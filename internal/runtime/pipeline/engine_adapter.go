@@ -352,16 +352,30 @@ func (r pipelineEngineGuardRegistry) Guard(id identity.GuardKey) (runtimeregistr
 type pipelineEngineActionRegistry struct{ registry ActionRegistry }
 
 func (r pipelineEngineActionRegistry) HasAction(id identity.ActionKey) bool {
-	return r.registry != nil && r.registry.HasAction(id)
+	if r.registry != nil && r.registry.HasAction(id) {
+		return true
+	}
+	return isSupportedWorkflowHandlerActionID(id.String())
 }
 func (r pipelineEngineActionRegistry) IsExecutable(id identity.ActionKey) bool {
-	return r.registry != nil && r.registry.IsExecutable(id)
+	if r.registry != nil && r.registry.IsExecutable(id) {
+		return true
+	}
+	return isSupportedWorkflowHandlerActionID(id.String())
 }
 func (r pipelineEngineActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {
-	if r.registry == nil {
+	if r.registry != nil {
+		if instruction, ok := r.registry.Action(id); ok {
+			return instruction, true
+		}
+	}
+	if !isSupportedWorkflowHandlerActionID(id.String()) {
 		return runtimeregistry.ActionInstruction{}, false
 	}
-	return r.registry.Action(id)
+	return runtimeregistry.ActionInstruction{
+		Key:     id,
+		Builtin: id.String(),
+	}, true
 }
 
 type pipelineEngineGuardRunner struct {
@@ -481,7 +495,11 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		return true, nil
 	case "record_evidence":
 		payload := parsePayloadMap(execCtx.Request.Event.Payload)
-		return pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), execCtx.Request.NodeID.String(), payload), nil
+		bucketID := pc.evidenceTargetForHandler(execCtx.Request.NodeID.String(), string(execCtx.Request.Event.Type))
+		if bucketID == "" {
+			bucketID = execCtx.Request.NodeID.String()
+		}
+		return pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload), nil
 	case "create_flow_instance":
 		plan := handlerExecutionPlan{
 			NodeID:         execCtx.Request.NodeID.String(),
@@ -496,6 +514,21 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	default:
 		return false, nil
 	}
+}
+
+func (pc *FactoryPipelineCoordinator) evidenceTargetForHandler(nodeID, eventType string) string {
+	if pc == nil {
+		return ""
+	}
+	source := pc.SemanticSource()
+	if source == nil {
+		return ""
+	}
+	handler, ok := source.NodeEventHandler(strings.TrimSpace(nodeID), strings.TrimSpace(eventType))
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(handler.EvidenceTarget)
 }
 
 type pipelineEnginePayloadShaper struct {

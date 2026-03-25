@@ -1,10 +1,11 @@
 validator:
-  id: validator
   execution_type: system_node
-  subscribes_to: [validate.start]
-  produces: [validation.done]
+  subscribes_to:
+    - validate.start
+  produces:
+    - validation.done
   event_handlers:
     validate.start:
-      sets_gate: g_validated
       advances_to: done
+      sets_gate: g_validated
       emits: validation.done

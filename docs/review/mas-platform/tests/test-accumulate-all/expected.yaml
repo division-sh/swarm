@@ -1,0 +1,17 @@
+trigger:
+  # Send 3 events sequentially
+  sequence:
+    - event: item.arrived
+      payload: { entity_id: ent-001, item_id: a }
+    - event: item.arrived
+      payload: { entity_id: ent-001, item_id: b }
+    - event: item.arrived
+      payload: { entity_id: ent-001, item_id: c }
+  entity_fields_before:
+    expected_count: 3
+
+expected:
+  entity_state: complete
+  emitted_events:
+    - collection.done
+  handler_outcome: success

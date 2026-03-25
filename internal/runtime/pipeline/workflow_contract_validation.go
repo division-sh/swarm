@@ -78,9 +78,6 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(node.SubscribesTo) == 0 {
 				errs = append(errs, fmt.Sprintf("node %s missing required field subscribes_to", nodeLabel))
 			}
-			if len(node.Produces) == 0 {
-				errs = append(errs, fmt.Sprintf("node %s missing required field produces", nodeLabel))
-			}
 			if len(node.EventHandlers) == 0 {
 				errs = append(errs, fmt.Sprintf("node %s missing required field event_handlers", nodeLabel))
 			}
@@ -110,7 +107,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 		if strings.TrimSpace(schema.Name) == "" {
 			errs = append(errs, fmt.Sprintf("flow schema %s missing required field name", strings.TrimSpace(flowID)))
 		}
-		if len(schema.States) == 0 {
+		if len(schema.States) == 0 && strings.TrimSpace(schema.InitialState) != "" {
 			errs = append(errs, fmt.Sprintf("flow schema %s missing required field states", strings.TrimSpace(flowID)))
 		}
 	}
@@ -127,9 +124,6 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			}
 			if len(node.SubscribesTo) == 0 {
 				errs = append(errs, fmt.Sprintf("node %s missing required field subscribes_to", nodeLabel))
-			}
-			if len(node.Produces) == 0 {
-				errs = append(errs, fmt.Sprintf("node %s missing required field produces", nodeLabel))
 			}
 			if len(node.EventHandlers) == 0 {
 				errs = append(errs, fmt.Sprintf("node %s missing required field event_handlers", nodeLabel))

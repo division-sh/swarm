@@ -16,7 +16,7 @@ export async function fetchPipelineFlow({
   p.set("view", flowView || "design");
   p.set("limit", "500");
   if (flowVertical && (flowView === "runtime" || flowView === "replay")) {
-    p.set("vertical", flowVertical);
+    p.set("entity_id", flowVertical);
   }
   if (flowView === "replay") {
     if (flowStart) p.set("start", flowStart);

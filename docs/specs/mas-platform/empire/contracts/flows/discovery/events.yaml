@@ -1,24 +1,3 @@
-scan.requested:
-  payload:
-    geography: string
-    mode: string
-    taxonomy_categories:
-      type: array
-      items: string
-    sources:
-      type: array
-      items: string
-    depth: string
-    campaign_id: string
-    campaign_context:
-      type: object
-      properties:
-        directive_id: string
-        modes:
-          type: array
-          items: string
-        strategic_context: string
-    corpus_path: string
 market_research.scan_complete:
   payload:
     scan_id: string
@@ -37,6 +16,7 @@ scanner.google_maps.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.instagram.scan_complete:
   payload:
     scan_id: string
@@ -44,6 +24,7 @@ scanner.instagram.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.reviews.scan_complete:
   payload:
     scan_id: string
@@ -51,6 +32,7 @@ scanner.reviews.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.directories.scan_complete:
   payload:
     scan_id: string
@@ -58,6 +40,7 @@ scanner.directories.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 scanner.yelp.scan_complete:
   payload:
     scan_id: string
@@ -65,6 +48,7 @@ scanner.yelp.scan_complete:
     sources_found: string
     sources_scraped: string
     errors: string
+    entity_id: string (= vertical_id for Empire)
 timer.scan_timeout:
   payload:
     scan_id: string
@@ -244,6 +228,7 @@ dedup.resolved:
     best_signal: object (populated when strategy=keep_best)
     merged: object (populated when strategy=merge_fields)
     reasoning: string
+    entity_id: string (= vertical_id for Empire)
 synthesis.resolved:
   payload:
     synthesis_id: string
@@ -253,6 +238,7 @@ synthesis.resolved:
     signal_b: object
     synthesized: object (populated when resolution=synthesize)
     reasoning: string
+    entity_id: string (= vertical_id for Empire)
 vertical.discovered:
   payload:
     vertical_name: string
@@ -265,16 +251,19 @@ vertical.discovered:
     geographic_scope: string
     signal_strength: integer
     opportunity_pattern: string
+  _producer: agent (discovery-coordinator agent emission)
 synthesis.needed:
   payload:
     conflicting_reports: string
     context: object
+  _producer: agent (discovery-coordinator agent emission)
 dedup.ambiguous:
   payload:
     dedup_id: string
     new_candidate: string
     existing_vertical: string
     similarity: string
+  _producer: agent (discovery-coordinator agent emission)
 market_research.scan_assigned:
   payload:
     geography: string
@@ -296,6 +285,7 @@ scanner.directories.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.google_maps.scan_assigned:
   payload:
     scan_id: string
@@ -303,6 +293,7 @@ scanner.google_maps.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.instagram.scan_assigned:
   payload:
     scan_id: string
@@ -310,6 +301,7 @@ scanner.instagram.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.reviews.scan_assigned:
   payload:
     scan_id: string
@@ -317,6 +309,7 @@ scanner.reviews.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 scanner.yelp.scan_assigned:
   payload:
     scan_id: string
@@ -324,6 +317,7 @@ scanner.yelp.scan_assigned:
     geography: string
     subcategory: string
     source_config: string
+    entity_id: string (= vertical_id for Empire)
 trend_research.scan_assigned:
   payload:
     geography: string

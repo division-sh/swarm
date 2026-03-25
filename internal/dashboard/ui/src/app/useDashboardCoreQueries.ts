@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, useState } from "react";
 import { useQuery, useQueryClient, type QueryObserverResult } from "@tanstack/react-query";
 import {
   fetchDashboardAgents,
@@ -34,6 +34,7 @@ export function useDashboardCoreQueries({
   setStatusText: (value: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const [bootstrapped, setBootstrapped] = useState(false);
 
   const overviewQuery = useQuery<OverviewResponse>({
     queryKey: dashboardQueryKeys.overview(),
@@ -86,6 +87,19 @@ export function useDashboardCoreQueries({
     setControlTarget(String(targetsQuery.data[0].agent_id || ""));
   }, [controlTarget, setControlTarget, targetsQuery.data]);
 
+  useEffect(() => {
+    if (bootstrapped) return;
+    const bootstrapQueries = [
+      overviewQuery,
+      agentsQuery,
+      digestQuery,
+      healthQuery,
+      targetsQuery,
+    ];
+    const settled = bootstrapQueries.every((query) => !query.isLoading);
+    if (settled) setBootstrapped(true);
+  }, [agentsQuery, bootstrapped, digestQuery, healthQuery, overviewQuery, targetsQuery]);
+
   const invalidate = useMemo(() => ({
     overview: () => queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.overview() }),
     agents: () => queryClient.invalidateQueries({ queryKey: dashboardQueryKeys.agents() }),
@@ -129,17 +143,10 @@ export function useDashboardCoreQueries({
       loadTargets: () => runRefetch(targetsQuery.refetch),
     },
     invalidate,
-    isInitialLoading: [
-      overviewQuery,
-      agentsQuery,
-      digestQuery,
-      tasksQuery,
-      mailboxQuery,
-      healthQuery,
-      targetsQuery,
-    ].some((query) => query.isLoading),
+    isInitialLoading: !bootstrapped,
   }), [
     agentsQuery,
+    bootstrapped,
     digestQuery,
     healthQuery,
     invalidate,

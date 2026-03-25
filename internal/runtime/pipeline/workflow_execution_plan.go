@@ -19,6 +19,7 @@ type handlerExecutionPlan struct {
 	Guard            string
 	GuardSpec        *runtimecontracts.GuardSpec
 	Action           string
+	EvidenceTarget   string
 	Template         string
 	InstanceIDFrom   string
 	InstanceIDPath   paths.Path
@@ -71,6 +72,7 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		Guard:            handlerGuardID(handler.Guard),
 		GuardSpec:        handler.Guard,
 		Action:           strings.TrimSpace(handler.Action.ID),
+		EvidenceTarget:   strings.TrimSpace(handler.EvidenceTarget),
 		Template:         strings.TrimSpace(handler.Action.Template),
 		InstanceIDFrom:   strings.TrimSpace(handler.Action.InstanceIDFrom),
 		InstanceIDPath:   handler.Action.InstanceIDPath,

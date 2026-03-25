@@ -3,13 +3,12 @@ vertical.approved:
     vertical_id: string
     brand_choice: string
     founder_directives: string
-vertical.resumed:
-  payload:
-    vertical_id: string
+    entity_id: string (= vertical_id for Empire)
 opco.ceo_ready:
   payload:
     vertical_id: string
     agent_count: number
+    entity_id: string (= vertical_id for Empire)
 timer.marginal_review:
   payload:
     parked_marginals_summary: string
@@ -17,6 +16,7 @@ timer.marginal_kill:
   payload:
     vertical_id: string
     parked_days: integer
+    entity_id: string (= vertical_id for Empire)
 build_complete:
   payload:
     feature: string
@@ -27,6 +27,7 @@ launch_ready:
     version: number
     deploy_url: string
     test_results: object
+    entity_id: string (= vertical_id for Empire)
 qa.validation_passed:
   payload:
     test_summary: string
@@ -37,21 +38,26 @@ review.deploy_feedback:
     vertical_id: string
     feedback: string
     reviewer: string
+    entity_id: string (= vertical_id for Empire)
 opco.steady_state_reached:
   payload:
     vertical_id: string
+    entity_id: string (= vertical_id for Empire)
 opco.growth_triggered:
   payload:
     vertical_id: string
     trigger_reason: string
+    entity_id: string (= vertical_id for Empire)
 opco.growth_stabilized:
   payload:
     vertical_id: string
     stabilization_metrics: object
+    entity_id: string (= vertical_id for Empire)
 opco.teardown_requested:
   payload:
     vertical_id: string
     reason: string
+    entity_id: string (= vertical_id for Empire)
 mailbox.item_decided:
   payload:
     item_id: string
@@ -59,6 +65,7 @@ mailbox.item_decided:
     decided_by: string
     vertical_id: string
     original_event_type: string
+    entity_id: string (= vertical_id for Empire)
   _source: external (mailbox UI human decision)
 bug_fix_deployed:
   payload:
@@ -66,6 +73,7 @@ bug_fix_deployed:
     bug_id: string
     version: number
     resolution: string
+    entity_id: string (= vertical_id for Empire)
 bug_reported:
   payload:
     description: string
@@ -103,15 +111,10 @@ cto.tech_spec_review_requested:
   payload:
     vertical_id: string
     spec_content: string
+    entity_id: string (= vertical_id for Empire)
 cycle_reset:
   payload:
     reason: string
-deploy_requested:
-  payload:
-    vertical_id: string
-    component: string
-    version: number
-    deploy_config: string
 feature_deployed:
   payload:
     feature: string
@@ -140,6 +143,7 @@ mandate_updated:
   payload:
     vertical_id: string
     changes: object
+    entity_id: string (= vertical_id for Empire)
 market_feedback:
   payload:
     source: string
@@ -170,6 +174,7 @@ opco.spend_request:
     vertical_id: string
     amount: number
     reason: string
+    entity_id: string (= vertical_id for Empire)
   _consumer: mailbox_system (external UI, not agent-subscribed)
 outreach_digest:
   payload:
@@ -215,6 +220,7 @@ spend_request:
     currency: string
     purpose: string
     justification: string
+    entity_id: string (= vertical_id for Empire)
 support_critical:
   payload:
     ticket_id: string
@@ -240,16 +246,19 @@ opco.terminated:
     instance_id: string
     teardown_summary: string
     terminated_at: timestamp
+    entity_id: string (= vertical_id for Empire)
 timer.operating_timeout:
   payload:
     vertical_id: string
     stuck_state: string
     elapsed_hours: integer
+    entity_id: string (= vertical_id for Empire)
 operating.timeout_escalation:
   payload:
     vertical_id: string
     stuck_state: string
     action: string
+    entity_id: string (= vertical_id for Empire)
 backend.task_complete:
   payload:
     task: string
@@ -284,12 +293,8 @@ build.escalation:
     vertical_id: string
     blocker: string
     severity: string
+    entity_id: string (= vertical_id for Empire)
 vertical.marginal_review_due:
   payload:
     entity_id: string
     parked_days: integer
-research.additional_requested:
-  payload:
-    entity_id: string
-    requested_by: string
-    focus_areas: array

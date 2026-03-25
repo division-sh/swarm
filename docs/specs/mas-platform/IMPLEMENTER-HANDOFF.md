@@ -1,4 +1,4 @@
-# Implementer Handoff: v2.6.0 Runtime → Platform v1.1.0 / Empire v3.0.1
+# Implementer Handoff: v2.6.0 Runtime → Platform v1.2.0 / Empire v3.0.3
 
 **Date:** 2026-03-10
 **From:** Spec team
@@ -45,7 +45,7 @@ The handler declares the complete packaging: `data_accumulation` writes (brand, 
 ---
 ---
 
-## Answers to Your 4 Questions
+## Answers to New Implementer Questions (March 2026)
 
 ### Q1: Which source is authoritative when the handoff and YAML disagree?
 
@@ -153,7 +153,7 @@ timers:
 
 **8. Boot verification**
 
-11 checks run at boot. 6 are errors (abort), 5 are warnings (log). See `boot_verification` in `platform-spec.yaml`. Reference implementation: `verify.py` in repo root.
+19 checks run at boot. 6 are errors (abort), 5 are warnings (log). See `boot_verification` in `platform-spec.yaml`. Reference implementation: `verify.py` in repo root.
 
 ---
 
@@ -260,7 +260,7 @@ Implement durable timers with start_on/cancel_on lifecycle.
 
 ### Phase 16: Boot verification
 
-Port `verify.py` checks into Go boot sequence. Errors abort, warnings log.
+Go boot sequence already implements semantic validation (CEL parsing, contract checking). verify.py is a supplementary structural linter, not the reference verifier. Errors abort, warnings log.
 
 ---
 

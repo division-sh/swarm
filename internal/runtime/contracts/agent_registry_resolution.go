@@ -92,3 +92,16 @@ func bundleAgentRecords(bundle *WorkflowContractBundle) []bundleAgentRecord {
 	}
 	return records
 }
+
+func bundleAgentRecordByLogicalID(bundle *WorkflowContractBundle, logicalID string) (bundleAgentRecord, bool) {
+	logicalID = strings.TrimSpace(logicalID)
+	if bundle == nil || logicalID == "" {
+		return bundleAgentRecord{}, false
+	}
+	for _, record := range bundleAgentRecords(bundle) {
+		if strings.TrimSpace(record.LogicalID) == logicalID {
+			return record, true
+		}
+	}
+	return bundleAgentRecord{}, false
+}

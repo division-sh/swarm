@@ -1,14 +1,17 @@
 router:
-  id: router
   execution_type: system_node
-  subscribes_to: [validate.requested, child/validation.done]
-  produces: [validate.passed, child/validate.start]
+  subscribes_to:
+    - validate.requested
+    - child/validation.done
+  produces:
+    - validate.passed
+    - child/validate.start
   event_handlers:
     validate.requested:
       emits: child/validate.start
     child/validation.done:
       guard:
         id: check_child_gate
-        check: "gates['child/g_validated'] == true"
+        check: gates['child/g_validated'] == true
       advances_to: done
       emits: validate.passed

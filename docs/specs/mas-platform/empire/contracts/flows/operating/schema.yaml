@@ -53,11 +53,15 @@ required_agents:
   description: Technical leadership
 - role: opco-chief-of-staff
   subscribes_to: []
-  emits: []
+  emits:
+  - cross_domain_report
   description: Operations coordination
 - role: opco-head-of-product
   subscribes_to: []
-  emits: []
+  emits:
+  - product_report
+  - product_escalation
+  - opco.product_spec_review
   description: Product management
 - role: opco-head-of-growth
   subscribes_to: []
@@ -66,15 +70,22 @@ required_agents:
   description: Growth strategy
 - role: opco-pm
   subscribes_to: []
-  emits: []
+  emits:
+  - product_spec_ready
   description: Sprint management
 - role: opco-backend
   subscribes_to: []
-  emits: []
+  emits:
+  - backend.task_complete
+  - backend.blocked
+  - build_progress
   description: Backend engineering
 - role: opco-frontend
   subscribes_to: []
-  emits: []
+  emits:
+  - frontend.task_complete
+  - frontend.blocked
+  - build_progress
   description: Frontend engineering
 - role: opco-qa
   subscribes_to: []
@@ -83,19 +94,36 @@ required_agents:
   description: Quality assurance
 - role: opco-devops
   subscribes_to: []
-  emits: []
+  emits:
+  - devops.deploy_requested
+  - devops.rollback_requested
+  - deploy.requested
   description: Infrastructure and deployment
 - role: opco-tech-writer
   subscribes_to: []
-  emits: []
+  emits:
+  - technical_spec_ready
   description: Documentation
 - role: opco-marketing
   subscribes_to: []
-  emits: []
+  emits:
+  - prelaunch_ready
+  - spend_request
+  - market_signals
+  - outreach_digest
+  - channel_blocked
+  - spend_needed
+  - channel_update
   description: Marketing and growth
 - role: opco-support
   subscribes_to: []
-  emits: []
+  emits:
+  - bug_reported
+  - feature_request
+  - support_digest
+  - support_critical
+  - churn_risk
+  - market_feedback
   description: Customer support
 instance_variables:
   description: Variables populated at instance creation from the vertical validation kit

@@ -84,6 +84,16 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	}
 }
 
+func TestParseConversationMode_AcceptsStatelessAlias(t *testing.T) {
+	mode, ok := parseConversationMode("stateless")
+	if !ok {
+		t.Fatal("expected stateless alias to be accepted")
+	}
+	if mode != llm.TaskScoped {
+		t.Fatalf("parseConversationMode(stateless) = %v, want %v", mode, llm.TaskScoped)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == strings.TrimSpace(target) {

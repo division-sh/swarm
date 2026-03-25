@@ -1,0 +1,49 @@
+name: discovery
+pins:
+  inputs:
+    events:
+    - scan.requested
+    reads: []
+    _note: Only external trigger events. Internal agent→node events are not listed as input pins.
+  outputs:
+    events:
+    - campaign.completed
+    - dedup.ambiguous
+    - pipeline.dead_letter
+    - scan.completed
+    - synthesis.needed
+    - vertical.discovered
+    writes: []
+required_agents:
+- role: discovery-coordinator
+  subscribes_to:
+  - dedup.ambiguous
+  - synthesis.needed
+  emits:
+  - dedup.resolved
+  - synthesis.resolved
+  description: Resolves dedup and synthesis conflicts
+- role: market-research-agent
+  subscribes_to:
+  - market_research.scan_assigned
+  emits:
+  - category.assessed
+  - market_research.scan_complete
+  description: Researches market categories
+- role: trend-research-agent
+  subscribes_to:
+  - trend_research.scan_assigned
+  emits:
+  - trend.identified
+  - trend_research.scan_complete
+  description: Identifies market trends
+- role: scanner-agent
+  subscribes_to:
+  - scanner.scan_assigned
+  emits:
+  - source.scraped
+  description: Scrapes data sources
+initial_state: null
+terminal_states: []
+states: []
+_note: Discovery is a producer flow. It creates entity instances but does not manage entity state transitions.

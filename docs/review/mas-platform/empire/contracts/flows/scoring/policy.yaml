@@ -1,0 +1,83 @@
+composite_shortlist: 75
+hard_gate_floor: 50
+contest_spread_threshold: 30
+tier1_dimensions:
+- build_complexity
+- automation_completeness
+- icp_crispness
+- distribution_leverage
+- time_to_value
+- operational_drag
+tier2_dimensions:
+- pain_severity
+- competition_gap
+- monetization_clarity
+tier3_dimensions:
+- retention_architecture
+- expansion_potential
+analyst_anti_bias:
+  description: When assigning an analyst for a derived vertical, use a different analyst than the parent scorer.
+  rule: derived_vertical.analyst != parent_vertical.analyst
+competition_gap_anchors:
+  dimension: competition_gap
+  tier: 2
+  anchors:
+    '20': 'Dominant incumbent(s) with direct feature overlap at comparable or lower price points. No viable differentiation
+      axis — not on features, not on price, not on segment.
+
+      '
+    '50': 'Multiple competitors exist with partial overlap. EITHER differentiation possible on features/segment but competitors
+      price at comparable levels, OR competitors price high (3x+ EmpireAI''s viable price) but one or more already offer a
+      credible downmarket tier.
+
+      '
+    '80': 'Clear open niche (few/no competitors) OR multiple competitors exist but ALL priced at 3x+ EmpireAI''s viable price
+      point ($150+/month) with no credible downmarket offering AND an identifiable underserved segment that can''t justify
+      incumbent pricing.
+
+      '
+  evaluation_rules:
+  - id: price_floor_comparison
+    rule: 'Analyst MUST identify cheapest viable competitor''s price point and compare to EmpireAI''s viable range ($29-99/month).
+      Required evidence, not optional context.
+
+      '
+  - id: price_gap_threshold
+    rule: 'If cheapest incumbent with comparable features is ≥3x EmpireAI''s viable price (~$150+/month) AND no incumbent
+      offers credible budget/starter tier, analyst evaluates price-disruption wedge. Can elevate score 15-20 points above
+      pure competitor-count analysis.
+
+      '
+  - id: segment_specificity
+    rule: 'Price disruption alone insufficient. Analyst must identify specific underserved segment (e.g., "solo appliance
+      repair techs doing <$500k revenue who can''t justify $300/month ServiceTitan") — not just "small businesses who want
+      it cheaper."
+
+      '
+  - id: downmarket_tier_check
+    rule: 'If any competitor offers $29-79/month starter tier (even limited), price disruption thesis weakened. Score as if
+      that tier is the relevant competitor.
+
+      '
+  - id: cost_structure_moat
+    rule: 'Disruption thesis depends on incumbents being structurally unable to match price. Indicators: sales-led motion,
+      enterprise focus (SOC2/SSO/dedicated CSM), VC-funded with burn rate expectations, complex onboarding requiring professional
+      services. Lean bootstrapped tool at $49/month = no cost structure moat.
+
+      '
+  derivation_interaction: 'When analyst scores competition_gap <65 due to competitor count but observes significant price
+    gap, can emit vertical.derived with modification_type=''feature_reframe'' targeting competition_gap improvement via price-disruption
+    wedge.
+
+    '
+max_derivation_depth: 2
+tier1_weight: 0.6
+tier2_weight: 0.3
+tier3_weight: 0.1
+hard_gate_dimensions:
+- build_complexity
+- automation_completeness
+min_derivation_signal: 40
+min_icp_score: 50
+min_evidence_for_derivation: 3
+min_retention_score: 40

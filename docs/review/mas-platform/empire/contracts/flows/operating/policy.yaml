@@ -1,0 +1,18 @@
+marginal_park_days: 14
+operating_state_timeout_hours: 168
+marginal_kill_days: 60
+opco_max_concurrent_builds: 3
+build_timeout_hours: 336
+deploy_timeout_hours: 24
+qa_timeout_hours: 48
+monthly_budget_usd: 500
+budget_alert_threshold_pct: 80
+escalation_wait_hours: 4
+steady_state_criteria:
+  min_active_users: 10
+  min_revenue_usd: 100
+  max_churn_pct: 20
+  min_uptime_pct: 99
+monthly_api_cap: 500
+growth_budget: 200
+product_budget: 300

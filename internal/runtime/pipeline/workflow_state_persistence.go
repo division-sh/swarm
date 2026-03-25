@@ -106,18 +106,18 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowGateMutation(ctx context.Cont
 	})
 }
 
-func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, nodeID string, payload map[string]any) bool {
+func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) bool {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return false
 	}
 	entityID = strings.TrimSpace(entityID)
-	nodeID = strings.TrimSpace(nodeID)
-	if entityID == "" || nodeID == "" {
+	bucketID = strings.TrimSpace(bucketID)
+	if entityID == "" || bucketID == "" {
 		return false
 	}
 	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		bucket := workflowMutableStateBucket(instance, "evidence")
-		bucket[nodeID] = cloneMap(payload)
+		bucket[bucketID] = cloneMap(payload)
 		workflowSetStateBucket(instance, "evidence", bucket)
 	})
 	return true

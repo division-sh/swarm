@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	runtimepkg "empireai/internal/runtime"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 	runtimetools "empireai/internal/runtime/tools"
 )
 
@@ -61,6 +64,13 @@ type ConversationReader interface {
 	Get(ctx context.Context, agentID string) (ConversationDetail, bool, error)
 }
 
+type ObservabilityReader interface {
+	ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error)
+	GetEvent(ctx context.Context, id string) (eventRecord, bool, error)
+	ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error)
+	ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error)
+}
+
 type AgentController interface {
 	RestartAgent(agentID string) error
 	ReplayAgentBacklog(ctx context.Context, agentID string) error
@@ -73,38 +83,93 @@ type RuntimeController interface {
 	ResetState() error
 }
 
+type SourceProvider func() semanticview.Source
+
+type RuntimeProvider func() *runtimepkg.Runtime
+
 type Options struct {
-	Health        HealthChecker
-	Agents        AgentReader
-	AgentControl  AgentController
-	Mailbox       MailboxReader
-	Instances     InstanceReader
-	Conversations ConversationReader
-	Runtime       RuntimeController
+	Health         HealthChecker
+	Agents         AgentReader
+	AgentControl   AgentController
+	Mailbox        MailboxReader
+	Instances      InstanceReader
+	Conversations  ConversationReader
+	Observability  ObservabilityReader
+	Runtime        RuntimeController
+	Version        string
+	SemanticSource semanticview.Source
+	RuntimeRef     *runtimepkg.Runtime
+	CurrentSource  SourceProvider
+	CurrentRuntime RuntimeProvider
+	ProjectControl BuilderProjectController
 }
 
 type Handler struct {
-	health        HealthChecker
-	agents        AgentReader
-	agentControl  AgentController
-	mailbox       MailboxReader
-	instances     InstanceReader
-	conversations ConversationReader
-	runtime       RuntimeController
+	health         HealthChecker
+	agents         AgentReader
+	agentControl   AgentController
+	mailbox        MailboxReader
+	instances      InstanceReader
+	conversations  ConversationReader
+	observability  ObservabilityReader
+	runtime        RuntimeController
+	version        string
+	semanticSource semanticview.Source
+	currentSource  SourceProvider
+	currentRuntime RuntimeProvider
+	projectControl BuilderProjectController
+	runHub         *builderRunHub
+	mux            *http.ServeMux
 }
 
 func NewHandler(opts Options) http.Handler {
 	h := &Handler{
-		health:        opts.Health,
-		agents:        opts.Agents,
-		agentControl:  opts.AgentControl,
-		mailbox:       opts.Mailbox,
-		instances:     opts.Instances,
-		conversations: opts.Conversations,
-		runtime:       opts.Runtime,
+		health:         opts.Health,
+		agents:         opts.Agents,
+		agentControl:   opts.AgentControl,
+		mailbox:        opts.Mailbox,
+		instances:      opts.Instances,
+		conversations:  opts.Conversations,
+		observability:  opts.Observability,
+		runtime:        opts.Runtime,
+		version:        strings.TrimSpace(opts.Version),
+		semanticSource: opts.SemanticSource,
+		currentSource:  opts.CurrentSource,
+		currentRuntime: opts.CurrentRuntime,
+		projectControl: opts.ProjectControl,
+	}
+	if h.currentRuntime == nil && opts.RuntimeRef != nil {
+		h.currentRuntime = func() *runtimepkg.Runtime { return opts.RuntimeRef }
+	}
+	if h.currentRuntime != nil {
+		h.runHub = newBuilderRunHub(
+			h.currentRuntime,
+			func() error {
+				if h.runtime == nil {
+					return errors.New("runtime controller is not configured")
+				}
+				return h.runtime.ResetState()
+			},
+			func() error {
+				if h.runtime == nil {
+					return errors.New("runtime controller is not configured")
+				}
+				h.runtime.PauseIngress()
+				return nil
+			},
+			func() error {
+				if h.runtime == nil {
+					return errors.New("runtime controller is not configured")
+				}
+				h.runtime.ResumeIngress()
+				return nil
+			},
+		)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", h.handleHealth)
+	mux.HandleFunc("GET /healthz", h.handleHealth)
+	mux.HandleFunc("GET /api/healthz", h.handleHealth)
 	mux.HandleFunc("GET /api/agents", h.handleAgents)
 	mux.HandleFunc("GET /api/agents/{id}", h.handleAgentDetail)
 	mux.HandleFunc("POST /api/agents/{id}/actions/directive", h.handleAgentDirective)
@@ -112,13 +177,31 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/agents/{id}/actions/replay", h.handleAgentReplay)
 	mux.HandleFunc("GET /api/conversations", h.handleConversations)
 	mux.HandleFunc("GET /api/conversations/{agentID}", h.handleConversationDetail)
+	mux.HandleFunc("GET /api/events", h.handleEvents)
+	mux.HandleFunc("GET /api/events/flow", h.handleFlowEvents)
+	mux.HandleFunc("GET /api/events/{id}", h.handleEventDetail)
 	mux.HandleFunc("GET /api/mailbox", h.handleMailbox)
 	mux.HandleFunc("GET /api/mailbox/{id}", h.handleMailboxDetail)
 	mux.HandleFunc("GET /api/instances/aggregate", h.handleInstanceAggregate)
 	mux.HandleFunc("GET /api/instances/{id}", h.handleInstanceDetail)
 	mux.HandleFunc("GET /api/instances", h.handleInstances)
+	mux.HandleFunc("GET /api/runtime/logs", h.handleRuntimeLogs)
+	mux.HandleFunc("GET /api/runtime/incidents", h.handleRuntimeIncidents)
 	mux.HandleFunc("POST /api/runtime/actions", h.handleRuntimeAction)
-	return mux
+	mux.HandleFunc("POST /rpc", h.handleBuilderRPC)
+	mux.HandleFunc("POST /api/rpc", h.handleBuilderRPC)
+	mux.HandleFunc("GET /ws", h.handleBuilderWS)
+	mux.HandleFunc("GET /api/ws", h.handleBuilderWS)
+	h.mux = mux
+	return h
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.mux == nil {
+		http.NotFound(w, r)
+		return
+	}
+	h.mux.ServeHTTP(w, r)
 }
 
 type genericAgent struct {
@@ -349,6 +432,226 @@ func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, row)
+}
+
+func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("stream")), "true") {
+		h.handleEventStream(w, r)
+		return
+	}
+	rows := []eventRecord{}
+	if h.observability != nil {
+		filter := EventFilter{
+			Type:       strings.TrimSpace(r.URL.Query().Get("type")),
+			Source:     strings.TrimSpace(r.URL.Query().Get("source")),
+			EntityID:   strings.TrimSpace(r.URL.Query().Get("entity_id")),
+			Subscriber: strings.TrimSpace(r.URL.Query().Get("subscriber")),
+		}
+		var err error
+		rows, err = h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"events": rows})
+}
+
+func (h *Handler) handleEventDetail(w http.ResponseWriter, r *http.Request) {
+	if h.observability == nil {
+		writeJSONError(w, http.StatusNotFound, errors.New("event not found"))
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if id == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("event id is required"))
+		return
+	}
+	row, ok, err := h.observability.GetEvent(r.Context(), id)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, errors.New("event not found"))
+		return
+	}
+	writeJSON(w, http.StatusOK, row)
+}
+
+func (h *Handler) handleFlowEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSONError(w, http.StatusInternalServerError, errors.New("streaming is not supported"))
+		return
+	}
+	w.Header().Set("content-type", "text/event-stream")
+	w.Header().Set("cache-control", "no-cache")
+	w.Header().Set("connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	filter := EventFilter{
+		EntityID: strings.TrimSpace(r.URL.Query().Get("entity_id")),
+		After:    time.Now().UTC().Add(-2 * time.Second),
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	poll := time.NewTicker(2 * time.Second)
+	defer heartbeat.Stop()
+	defer poll.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-poll.C:
+			if h.observability == nil {
+				continue
+			}
+			rows, err := h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
+			if err != nil || len(rows) == 0 {
+				continue
+			}
+			latest := filter.After
+			for i := len(rows) - 1; i >= 0; i-- {
+				payload := map[string]any{
+					"event_id":     rows[i].ID,
+					"id":           rows[i].ID,
+					"type":         rows[i].Type,
+					"event_type":   rows[i].Type,
+					"source_agent": rows[i].SourceAgent,
+					"entity_id":    rows[i].EntityID,
+					"scope":        rows[i].Scope,
+					"created_at":   rows[i].CreatedAt,
+					"payload":      rows[i].Payload,
+				}
+				encoded, _ := json.Marshal(payload)
+				_, _ = fmt.Fprintf(w, "event: flow\ndata: %s\n\n", encoded)
+				if ts, err := time.Parse(time.RFC3339, rows[i].CreatedAt); err == nil && ts.After(latest) {
+					latest = ts
+				}
+			}
+			filter.After = latest
+			flusher.Flush()
+		}
+	}
+}
+
+func (h *Handler) handleRuntimeLogs(w http.ResponseWriter, r *http.Request) {
+	rows := []runtimeLogRecord{}
+	if h.observability != nil {
+		filter := RuntimeLogFilter{
+			Type:      strings.TrimSpace(r.URL.Query().Get("type")),
+			Source:    strings.TrimSpace(r.URL.Query().Get("source")),
+			EntityID:  strings.TrimSpace(r.URL.Query().Get("entity_id")),
+			Component: strings.TrimSpace(r.URL.Query().Get("component")),
+			Level:     strings.TrimSpace(r.URL.Query().Get("level")),
+			ErrorCode: strings.TrimSpace(r.URL.Query().Get("error_code")),
+			Order:     strings.TrimSpace(r.URL.Query().Get("order")),
+		}
+		var err error
+		rows, err = h.observability.ListRuntimeLogs(r.Context(), filter, intQuery(r, "limit", 200))
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runtime_logs": rows})
+}
+
+func (h *Handler) handleRuntimeIncidents(w http.ResponseWriter, r *http.Request) {
+	rows := []incidentRecord{}
+	if h.observability != nil {
+		filter := IncidentFilter{
+			SinceHours: intQuery(r, "since_hours", 24),
+			MCPOnly:    strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("mcp_only")), "true"),
+			Level:      strings.TrimSpace(r.URL.Query().Get("level")),
+			Component:  strings.TrimSpace(r.URL.Query().Get("component")),
+			Limit:      intQuery(r, "limit", 2000),
+		}
+		var err error
+		rows, err = h.observability.ListIncidents(r.Context(), filter)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
+}
+
+func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSONError(w, http.StatusInternalServerError, errors.New("streaming is not supported"))
+		return
+	}
+	w.Header().Set("content-type", "text/event-stream")
+	w.Header().Set("cache-control", "no-cache")
+	w.Header().Set("connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	includeRuntime := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_runtime")), "true")
+	eventFilter := EventFilter{
+		Type:       strings.TrimSpace(r.URL.Query().Get("type")),
+		Source:     strings.TrimSpace(r.URL.Query().Get("source")),
+		EntityID:   strings.TrimSpace(r.URL.Query().Get("entity_id")),
+		Subscriber: strings.TrimSpace(r.URL.Query().Get("subscriber")),
+		After:      time.Now().UTC().Add(-2 * time.Second),
+	}
+	logFilter := RuntimeLogFilter{
+		Type:      strings.TrimSpace(r.URL.Query().Get("type")),
+		Source:    strings.TrimSpace(r.URL.Query().Get("source")),
+		EntityID:  strings.TrimSpace(r.URL.Query().Get("entity_id")),
+		Component: strings.TrimSpace(r.URL.Query().Get("component")),
+		Level:     strings.TrimSpace(r.URL.Query().Get("level")),
+		After:     time.Now().UTC().Add(-2 * time.Second),
+	}
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	poll := time.NewTicker(2 * time.Second)
+	defer heartbeat.Stop()
+	defer poll.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-heartbeat.C:
+			_, _ = fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+		case <-poll.C:
+			if h.observability != nil {
+				if rows, err := h.observability.ListEvents(r.Context(), eventFilter, 50); err == nil && len(rows) > 0 {
+					latest := eventFilter.After
+					for i := len(rows) - 1; i >= 0; i-- {
+						_, _ = fmt.Fprintf(w, "event: event\ndata: {\"id\":%q}\n\n", rows[i].ID)
+						if ts, err := time.Parse(time.RFC3339, rows[i].CreatedAt); err == nil && ts.After(latest) {
+							latest = ts
+						}
+					}
+					eventFilter.After = latest
+					flusher.Flush()
+				}
+				if includeRuntime {
+					if rows, err := h.observability.ListRuntimeLogs(r.Context(), logFilter, 50); err == nil && len(rows) > 0 {
+						latest := logFilter.After
+						for i := len(rows) - 1; i >= 0; i-- {
+							_, _ = fmt.Fprintf(w, "event: runtime_log\ndata: {\"id\":%q}\n\n", rows[i].ID)
+							if ts, err := time.Parse(time.RFC3339, rows[i].TS); err == nil && ts.After(latest) {
+								latest = ts
+							}
+						}
+						logFilter.After = latest
+						flusher.Flush()
+					}
+				}
+			}
+		}
+	}
 }
 
 func (h *Handler) handleMailbox(w http.ResponseWriter, r *http.Request) {
@@ -593,4 +896,93 @@ func writeJSONError(w http.ResponseWriter, status int, err error) {
 		status = http.StatusInternalServerError
 	}
 	writeJSON(w, status, map[string]any{"error": err.Error()})
+}
+
+func (h *Handler) builderVersion() string {
+	version := strings.TrimSpace(h.version)
+	if version == "" {
+		return "dev"
+	}
+	return version
+}
+
+func (h *Handler) currentSemanticSource() semanticview.Source {
+	if h.currentSource != nil {
+		if source := h.currentSource(); source != nil {
+			return source
+		}
+	}
+	return h.semanticSource
+}
+
+func (h *Handler) currentProjectStatus() BuilderProjectStatus {
+	if h.projectControl == nil {
+		return BuilderProjectStatus{}
+	}
+	return h.projectControl.CurrentProject()
+}
+
+func (h *Handler) runFullValidation(_ context.Context) builderValidationResult {
+	startedAt := time.Now()
+	flowCount := 0
+	source := h.currentSemanticSource()
+	if source != nil {
+		flowCount = len(source.FlowSchemaEntries())
+	}
+	result := builderValidationResult{
+		Status:   "pass",
+		Errors:   []builderValidationIssue{},
+		Warnings: []builderValidationIssue{},
+		Summary: builderValidationSummary{
+			FlowsChecked: flowCount,
+		},
+	}
+	if source == nil {
+		result.Status = "fail"
+		result.Errors = append(result.Errors, builderValidationIssue{
+			CheckID:  "engine_source_unavailable",
+			Severity: "error",
+			Message:  "semantic source is not configured",
+		})
+		result.Summary.Errors = len(result.Errors)
+		result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
+		return result
+	}
+	warnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
+	if err != nil {
+		for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			result.Errors = append(result.Errors, builderValidationIssue{
+				CheckID:  "workflow_contract_validation",
+				Severity: "error",
+				Message:  line,
+			})
+		}
+	}
+	agentCount, permissionErrors := runtimetools.ValidateAgentPermissions(source)
+	_ = agentCount
+	for _, permissionErr := range permissionErrors {
+		result.Errors = append(result.Errors, builderValidationIssue{
+			CheckID:  "agent_permission_validation",
+			Severity: "error",
+			Message:  strings.TrimSpace(permissionErr.Error()),
+		})
+	}
+	for _, warning := range warnings {
+		result.Warnings = append(result.Warnings, builderValidationIssue{
+			CheckID:  normalizeBuilderCheckID(warning.Category),
+			Severity: "warning",
+			Message:  strings.TrimSpace(warning.Message),
+		})
+	}
+	if len(result.Errors) > 0 {
+		result.Status = "fail"
+	}
+	result.Summary.Errors = len(result.Errors)
+	result.Summary.Warnings = len(result.Warnings)
+	result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
+	return result
 }

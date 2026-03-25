@@ -27,6 +27,7 @@ score.dimension_complete:
       maximum: 100
     evidence: string
     confidence: string
+    entity_id: string (= vertical_id for Empire)
 scoring.requested:
   payload:
     vertical_id: string
@@ -41,6 +42,7 @@ scoring.requested:
       type: object
     assigned_analysis_agent_id: string
     excluded_analysis_agent_id: string
+    entity_id: string (= vertical_id for Empire)
   _note: rubric is derived from mode by scoring-node rules. Both fields set at emit time.
 vertical.shortlisted:
   payload:
@@ -49,6 +51,7 @@ vertical.shortlisted:
     viability_score: number
     scoring_payload:
       type: object
+    entity_id: string (= vertical_id for Empire)
 vertical.marginal:
   payload:
     vertical_id: string
@@ -57,16 +60,19 @@ vertical.marginal:
     dimensions:
       type: object
     promotion_eligible: boolean
+    entity_id: string (= vertical_id for Empire)
 vertical.rejected:
   payload:
     vertical_id: string
     reason: string
+    entity_id: string (= vertical_id for Empire)
   _status: planned
 vertical.killed_backprop:
   payload:
     vertical_id: string
     kill_reason: string
     killed_by_flow: string
+    entity_id: string (= vertical_id for Empire)
   _note: Back-propagation from validation. Scoring node advances entity to killed.
 scoring.derived_requested:
   payload:
@@ -74,4 +80,5 @@ scoring.derived_requested:
     dimensions_requested: array
     rubric: string
     mode: string
+    entity_id: string (= vertical_id for Empire)
   _note: 'Routed to analysis-agent-secondary (anti-bias: different agent pool from parent scorer)'

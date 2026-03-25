@@ -74,6 +74,22 @@ func TestValidateWorkflowContractsDetailed_RejectsMissingRootRequiredAgentRole(t
 	}
 }
 
+func TestValidateWorkflowContractsDetailed_AllowsNodeWithoutProduces(t *testing.T) {
+	bundle := newNodeProducesOptionalValidationBundle()
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("expected validator to allow omitted produces, got %v", err)
+	}
+}
+
+func TestValidateWorkflowContractsDetailed_AllowsStatelessFlow(t *testing.T) {
+	bundle := newStatelessFlowValidationBundle()
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("expected validator to allow stateless flow, got %v", err)
+	}
+}
+
 func TestWorkflowPolicyConflictWarnings(t *testing.T) {
 	projectScopes := []semanticview.ProjectScope{{
 		Key: "root",
@@ -166,6 +182,131 @@ func newRequiredAgentValidationBundle() *runtimecontracts.WorkflowContractBundle
 	}
 	bundle.Platform.Platform.Name = "MAS Platform"
 	bundle.Platform.Platform.Version = "1.0.0"
+	return bundle
+}
+
+func newNodeProducesOptionalValidationBundle() *runtimecontracts.WorkflowContractBundle {
+	const flowID = "phase4-produces-optional"
+	schema := runtimecontracts.FlowSchemaDocument{
+		Name:         flowID,
+		InitialState: "pending",
+		States:       []string{"pending", "done"},
+		TerminalStates: []string{
+			"done",
+		},
+		Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{
+				Events: []string{"task.requested"},
+			},
+			Outputs: runtimecontracts.FlowOutputPins{
+				Events: []string{"task.completed"},
+			},
+		},
+	}
+	node := runtimecontracts.SystemNodeContract{
+		ID:            "system-node",
+		ExecutionType: "system",
+		SubscribesTo:  []string{"task.requested"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"task.requested": {
+				AdvancesTo: "done",
+				Emits:      runtimecontracts.EventEmission{Single: "task.completed"},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			flowID: schema,
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {},
+			"task.completed": {},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"system-node": node,
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInitial: map[string]string{
+				flowID: schema.InitialState,
+			},
+			FlowStates: map[string][]string{
+				flowID: append([]string{}, schema.States...),
+			},
+			FlowTerminal: map[string][]string{
+				flowID: append([]string{}, schema.TerminalStates...),
+			},
+			FlowInputs: map[string][]string{
+				flowID: append([]string{}, schema.Pins.Inputs.Events...),
+			},
+			FlowOutputs: map[string][]string{
+				flowID: append([]string{}, schema.Pins.Outputs.Events...),
+			},
+		},
+	}
+	bundle.Platform.Platform.Name = "MAS Platform"
+	bundle.Platform.Platform.Version = "1.2.0"
+	return bundle
+}
+
+func newStatelessFlowValidationBundle() *runtimecontracts.WorkflowContractBundle {
+	const flowID = "phase4-stateless"
+	schema := runtimecontracts.FlowSchemaDocument{
+		Name:         flowID,
+		InitialState: "",
+		States:       []string{},
+		Pins: runtimecontracts.FlowPins{
+			Inputs: runtimecontracts.FlowInputPins{
+				Events: []string{"scan.requested"},
+			},
+			Outputs: runtimecontracts.FlowOutputPins{
+				Events: []string{"scan.completed"},
+			},
+		},
+	}
+	node := runtimecontracts.SystemNodeContract{
+		ID:            "scan-node",
+		ExecutionType: "system",
+		SubscribesTo:  []string{"scan.requested"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"scan.requested": {
+				Emits: runtimecontracts.EventEmission{Single: "scan.completed"},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			flowID: schema,
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {},
+			"scan.completed": {},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scan-node": node,
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInitial: map[string]string{
+				flowID: schema.InitialState,
+			},
+			FlowStates: map[string][]string{
+				flowID: append([]string{}, schema.States...),
+			},
+			FlowInputs: map[string][]string{
+				flowID: append([]string{}, schema.Pins.Inputs.Events...),
+			},
+			FlowOutputs: map[string][]string{
+				flowID: append([]string{}, schema.Pins.Outputs.Events...),
+			},
+		},
+	}
+	bundle.Platform.Platform.Name = "MAS Platform"
+	bundle.Platform.Platform.Version = "1.2.0"
 	return bundle
 }
 

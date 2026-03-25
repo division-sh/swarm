@@ -1,5 +1,78 @@
 # MAS Platform Changelog
 
+### Critical: emit payload default changed
+
+**Default emit: entity base → trigger overlay → platform force.** Entity fields are the base layer, trigger payload overlays (trigger wins on collision), platform forces entity_id/trigger_event_type/current_state. payload_transform replaces entity+trigger layers.
+
+### Additional spec clarifications
+- produces field: optional, platform derives at boot
+- required_agents: empty subscriptions/emits valid for managerial roles  
+- Stateless flows: discovery-style flows documented (initial_state: null, states: [])
+- Core vs extension fields: 7 core (guard, advances_to, sets_gate, data_accumulation, emits, rules, on_complete) + 11 extensions
+
+### Audit remediation: vocabulary, CEL, dialect, docs
+
+**Vocabulary cleaned** — guard and action definitions removed "code-backed function ID" language. Guards are CEL expressions. Actions are platform-only (create_flow_instance, record_evidence).
+
+**Template syntax → CEL** — scoring on_complete conditions converted from `{{composite_shortlist}}` to `policy.composite_shortlist`. Operating guard converted from pseudo-code to valid CEL. All conditions now parseable CEL.
+
+**Discovery cleanup** — source: → source_event: in aggregator data_accumulation. Empty signal handlers given accumulate declarations. Scan-orchestrator wildcard vs explicit subscriptions noted.
+
+**Developer guide** — state_schema → entity_schema in quick-start. Payload transform note added for emitted events with custom fields.
+
+**Product brief** — numbers updated to current (62 handlers, 29 agents, 195 events, 21 tools).
+
+**Handoff** — duplicate Q&A sections labeled by date.
+
+### Test writer feedback: observation model + 6 fixes
+
+**observation_model section** — new top-level section defining exactly what emitted_events, entity_state, entity_fields, and handler_outcome contain from an external observer's perspective. Defines agent vs node observability asymmetry. Documents emission naming (fully-qualified URI in parent context).
+
+**Computed write shape** — {target_field, expression} added to canonical data_accumulation. CEL expressions like "entity.counter + 1" now have a non-deprecated path.
+
+**Custom tool schema** — enumerated required (description), optional (handler_type, input_schema, output_schema, parameters, returns), and invalid (endpoint, type) fields for tools.yaml definitions.
+
+**Chain depth boundary** — clarified: intercepted event NOT emitted, handler outcome is success (handler succeeded, emission was intercepted), dead_letter records the downstream event.
+
+**stateless alias** — conversation_mode: stateless accepted by loader, normalized to task internally.
+
+## v1.2.0 (2026-03-16)
+
+### Spec restructure: 23 sections → 12
+
+Unified handler specification, eliminated redundant sections, consolidated compliance, cleaned terminology.
+
+**Deleted sections (7):**
+- builtin_hooks — product-specific guards/actions removed from platform spec
+- directive_pattern — example, not a primitive
+- compliance_rules — merged into compliance
+- agent_registry_fields — redundant with handler_specification
+- policy_driven_behavior — vague, covered by engine sections
+- entity_schema_format — merged into contract_formats
+- event_schema — merged into contract_formats
+
+**Merged sections (6 → 2):**
+- execution_primitives + handler_execution_order + system_node_specification → handler_specification
+- compliance_rules + compliance_guidelines → compliance
+- file_layout + entity_schema_format + event_schema + persistence_model → contract_formats
+
+**New content:**
+- hello_world_example — minimal 5-file flow example in contract_formats
+- required_agents fulfillment rule — agent YAML key must match role name
+- Minimum flow package defined once (was defined three times)
+- platform_builtin_tools consolidated to one authoritative list in tool_model
+
+**Terminology:**
+- "stage" → "state" (normalized throughout)
+- "project" → "flow" (no separate project concept)
+- subscriptions_bootstrap — removed (was deprecated)
+- Legacy data_accumulation shapes — removed from spec (loader still accepts)
+
+**Coherence fixes:**
+- create_flow_instance: handler action only, not a tool
+- Timer shape: one canonical shape (runtime), glossary shape removed
+- "a entity" → "a vertical" (typo)
+
 ## v1.1.1 (2026-03-13)
 
 ### Platform tables DDL (12 tables)
@@ -133,7 +206,7 @@ New sub-field on `accumulate`. Default: sender (session ID). Override with paylo
 10-field schema for pipeline.dead_letter events: original_event, original_payload, entity_id, flow_instance, failure_type, error_message, retry_count, chain_depth, handler_node, timestamp.
 
 ### Payload shaping semantics
-Specified as engine contract (not adapter concern). Default: only entity_id carried to emitted events. All other fields require explicit payload_transform with CEL expressions. No implicit forwarding.
+Specified as engine contract. Default: trigger payload merged with entity state fields. payload_transform for explicit override.
 
 ### clear_gates scope
 Clarified: clears ALL entity gates, not scoped to node or flow schema. Entity has one flat gate map.

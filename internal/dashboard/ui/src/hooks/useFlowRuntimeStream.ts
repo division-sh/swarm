@@ -23,15 +23,23 @@ export function useFlowRuntimeStream({ activeView, activeSubview, flowView, flow
       const p = new URLSearchParams();
       p.set("stream", "true");
       p.set("limit", "200");
-      if (flowVertical) p.set("vertical", flowVertical);
+      if (flowVertical) p.set("entity_id", flowVertical);
       const key = getKey();
       if (key) p.set("key", key);
       stream = new EventSource(`/api/events/flow?${p.toString()}`);
       stream.addEventListener("flow", (ev) => {
         retryCount = 0;
         try {
-          const item = JSON.parse((ev as MessageEvent).data || "{}");
+          const item = JSON.parse((ev as MessageEvent).data || "{}") as FlowEventRecord & { payload?: Record<string, unknown> };
           if (!item || !item.event_id) return;
+          const payload = item.payload && typeof item.payload === "object" ? item.payload : {};
+          const entityID = typeof item.entity_id === "string" ? item.entity_id.trim() : "";
+          if (!item.vertical_id) item.vertical_id = entityID || (typeof payload.entity_id === "string" ? payload.entity_id.trim() : "");
+          if (!item.vertical_slug) {
+            const payloadSlug = typeof payload.vertical_slug === "string" ? payload.vertical_slug.trim() : "";
+            const payloadVertical = typeof payload.vertical === "string" ? payload.vertical.trim() : "";
+            item.vertical_slug = payloadSlug || payloadVertical || item.vertical_id;
+          }
           patchFlowEvent(item);
         } catch {}
       });
