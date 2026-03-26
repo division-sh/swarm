@@ -9,9 +9,10 @@ import (
 )
 
 func TestValidateWorkflowContractsRejectsOnCompleteAndRulesInSameHandler(t *testing.T) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(contractComplianceRepoRoot(t))
+	repoRoot := contractComplianceRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractComplianceBundleRoot(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
 	nodeID, eventType, handler, ok := firstWorkflowHandler(bundle)
@@ -35,9 +36,10 @@ func TestValidateWorkflowContractsRejectsOnCompleteAndRulesInSameHandler(t *test
 }
 
 func TestValidateWorkflowContractsRejectsUnknownHandlerAction(t *testing.T) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(contractComplianceRepoRoot(t))
+	repoRoot := contractComplianceRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractComplianceBundleRoot(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
 	nodeID, eventType, handler, ok := firstWorkflowHandler(bundle)
@@ -60,9 +62,10 @@ func TestValidateWorkflowContractsRejectsUnknownHandlerAction(t *testing.T) {
 }
 
 func TestValidateWorkflowContractsRejectsUnsupportedGuardOnFail(t *testing.T) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(contractComplianceRepoRoot(t))
+	repoRoot := contractComplianceRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractComplianceBundleRoot(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 
 	nodeID, eventType, handler, ok := firstWorkflowHandler(bundle)

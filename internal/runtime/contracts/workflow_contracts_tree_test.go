@@ -110,6 +110,11 @@ func repoRootForContractsTest(t *testing.T) string {
 	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
 }
 
+func currentWorkflowContractsDirForTest(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(repoRootForContractsTest(t), "docs", "specs", "mas-platform", "empire", "contracts")
+}
+
 func writeLayer3FlowTreeFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

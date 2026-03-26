@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	"empireai/internal/events"
+	runtimeauthority "empireai/internal/runtime/authority"
 	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
 	runtimepipeline "empireai/internal/runtime/pipeline"
@@ -606,15 +606,29 @@ func (e *Executor) ExecCertbotExecuteDirect(ctx context.Context, actor models.Ag
 }
 
 func authorizeRouting(actor, target models.AgentConfig, status string) error {
-	return commgraph.AuthorizeRouting(actor, target, status)
+	return runtimeauthority.Active().AuthorizeRouting(actor, target, status)
 }
 
-func authorizeManage(actor models.AgentConfig, targetRole, targetEntityID string) error {
-	return commgraph.AuthorizeManagement(actor, targetRole, targetEntityID)
+func authorizeManage(actor, target models.AgentConfig, manager Manager) error {
+	if !runtimeauthority.SameFlowInstance(actor, target) {
+		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+	}
+	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
+		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+	}
+	if manager != nil {
+		if isManagerAncestor(manager, strings.TrimSpace(target.ID), strings.TrimSpace(actor.ID)) {
+			return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		}
+		if isManagerAncestor(manager, strings.TrimSpace(actor.ID), strings.TrimSpace(target.ID)) {
+			return nil
+		}
+	}
+	return runtimeauthority.Active().AuthorizeManagement(actor, target)
 }
 
 func authorizeMailboxSend(actor models.AgentConfig) error {
-	return commgraph.AuthorizeMailboxSend(actor)
+	return runtimeauthority.Active().AuthorizeMailboxSend(actor)
 }
 
 func coalesce(values ...string) string {

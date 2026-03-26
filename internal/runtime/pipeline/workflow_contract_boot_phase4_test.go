@@ -91,9 +91,10 @@ func TestValidateWorkflowContractsDetailed_AllowsStatelessFlow(t *testing.T) {
 }
 
 func TestValidateWorkflowContractsDetailed_EmpireBundleDoesNotWarnOnKnownPermissionBundles(t *testing.T) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(contractComplianceRepoRoot(t))
+	repoRoot := contractComplianceRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractComplianceBundleRoot(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	warnings, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
 	if err != nil {

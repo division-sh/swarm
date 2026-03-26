@@ -14,3 +14,8 @@ func contractComplianceRepoRoot(t *testing.T) string {
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 }
+
+func contractComplianceBundleRoot(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(contractComplianceRepoRoot(t), "docs", "specs", "mas-platform", "empire", "contracts")
+}

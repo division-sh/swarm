@@ -111,12 +111,12 @@ func (s *sharedPostgresState) startLocked() error {
 		return err
 	}
 
-	name := fmt.Sprintf("empireai-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("mas-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
 	runArgs := []string{
 		"run", "-d", "--rm",
 		"--name", name,
 		"-e", "POSTGRES_PASSWORD=postgres",
-		"-e", "POSTGRES_DB=empireai",
+		"-e", "POSTGRES_DB=mas",
 		"-p", "127.0.0.1::5432",
 		"postgres:16",
 		"-c", "max_connections=300",
@@ -187,10 +187,10 @@ func cleanupStaleTestContainers(dockerBin string) error {
 		return fmt.Errorf("list docker containers: %v output=%s", err, strings.TrimSpace(string(out)))
 	}
 	for _, name := range strings.Fields(string(out)) {
-		if !strings.HasPrefix(name, "empireai-test-pg-") {
+		if !strings.HasPrefix(name, "mas-test-pg-") {
 			continue
 		}
-		rest := strings.TrimPrefix(name, "empireai-test-pg-")
+		rest := strings.TrimPrefix(name, "mas-test-pg-")
 		pidPart := rest
 		if idx := strings.Index(pidPart, "-"); idx >= 0 {
 			pidPart = pidPart[:idx]
@@ -210,7 +210,7 @@ func cleanupStaleTestContainers(dockerBin string) error {
 
 func (s *sharedPostgresState) nextDatabaseName() string {
 	id := atomic.AddUint64(&s.nextDBID, 1)
-	return fmt.Sprintf("empireai_test_%d_%d", os.Getpid(), id)
+	return fmt.Sprintf("mas_test_%d_%d", os.Getpid(), id)
 }
 
 func initializeDatabase(db *sql.DB) error {

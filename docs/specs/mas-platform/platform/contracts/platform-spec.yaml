@@ -1,6 +1,6 @@
 platform:
   name: mas-orchestrator
-  version: 1.2.0
+  version: 1.3.0
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
@@ -1136,10 +1136,10 @@ permissions_model:
     at tool execution time and message routing time. Workflows define permissions per agent in their agent registry. Optional
     permission_bundles in policy files provide shorthand for common sets.
   enforcement: Before executing any tool call, the platform checks the calling agent's permissions list. If the tool requires
-    a permission the agent lacks, the call is rejected. Message scope is enforced at agent_message delivery — the most permissive
-    message permission wins (message_all > message_domain > message_peers).
+    a permission the agent lacks, the call is rejected. Message scope is enforced at agent_message delivery per the scoping
+    rules defined in permission_scoping.
   workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
-    permissions to workflow-registered handlers. Example: an Product workflow might define approve_deployment or override_scoring.'
+    permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.'
   permissions:
   - agent_fire
   - agent_hire
@@ -1150,13 +1150,48 @@ permissions_model:
   - human_task_decide
   - human_task_request
   - mailbox_send
-  - message_all
-  - message_domain
+  - message_flow
   - message_peers
   - schedule
   bundle_semantics:
     description: An agent may declare permissions_bundle and/or explicit permissions. If both are present, the explicit permissions
       list EXTENDS the bundle. Duplicates are deduplicated. The bundle is expanded first, then explicit permissions are added.
+  permission_scoping:
+    description: Defines the target scope for each permission. The platform enforces these constraints at tool execution time.
+      All scoping is flow-instance-local — no permission grants cross-flow access. Cross-flow communication is via events only.
+    messaging:
+      message_peers:
+        scope: Agents sharing the same manager_fallback value, within the same flow instance.
+        rule: Caller and target must be in the same flow instance AND target.manager_fallback == caller.manager_fallback.
+      message_flow:
+        scope: Any agent in the same flow instance.
+        rule: Caller and target must be in the same flow instance. No further constraint.
+      cross_flow: Not supported. agent_message delivery is rejected if target is in a different flow instance. Cross-flow communication
+        uses events (emit + subscribe).
+    management:
+      description: agent_hire, agent_fire, agent_reconfigure target constraints.
+      scope: Same flow instance, target below caller in manager_fallback chain.
+      rules:
+      - Caller and target must be in the same flow instance.
+      - Target's manager_fallback chain must include the caller. (A can manage B if B.manager_fallback == A, or B.manager_fallback.manager_fallback
+        == A, etc.)
+      - An agent cannot manage itself.
+      - An agent cannot manage its own manager_fallback ancestor.
+    routing:
+      description: configure_routing target constraints.
+      scope: Self + manageable agents (same rules as management scope).
+      rules:
+      - Caller can modify routes for itself.
+      - Caller can modify routes for any agent it can manage (per management scope).
+      - Caller cannot modify routes for agents outside its flow instance.
+    manager_fallback_semantics:
+      description: manager_fallback is an escalation path, not a messaging or management grant. It determines where dead-lettered
+        agent sessions route to and defines the management hierarchy. It does NOT grant the fallback target messaging access
+        to the agent, and it does NOT allow messaging across flow boundaries even when the fallback target is in a different
+        flow.
+      cross_flow_fallback: When manager_fallback references an agent in a parent flow (e.g., an operating agent falls back to
+        a root-level coordinator), escalation produces an event (pipeline.dead_letter or equivalent), not a direct message.
+        The platform routes the escalation event through the normal event loop.
 tool_model:
   description: The platform owns ALL tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates
     calls against schemas, and routes to handlers. Tool handlers are either platform-builtin or workflow-registered.
@@ -1595,6 +1630,102 @@ platform_tables:
       This is a product-level migration — inbound.go is product code, not platform code. Move it out of generic runtime.
     platform_guarantee: The platform never reads, writes, logs, or indexes credential fields. It treats flow_instances.config
       as opaque JSONB. Products own their secrets.
+platform_events:
+  description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
+    the engine. All platform events use the platform.* namespace, with the sole exception of pipeline.dead_letter (legacy name,
+    retained for clarity). Products MUST NOT define events with reserved prefixes.
+  namespace_reservation:
+    reserved_prefixes:
+    - platform.
+    rule: Boot error if any product events.yaml contains an event name starting with a reserved prefix.
+  catalog:
+    pipeline.dead_letter:
+      description: Failed event after retry exhaustion or chain depth overflow.
+      defined_in: engine.error_model.dead_letter_schema
+      note: Full payload schema defined in engine.error_model. Not duplicated here.
+    platform.runtime_log:
+      description: Diagnostic log record persisted as a global event.
+      defined_in: platform_tables.diagnostics_encoding
+      note: Full payload schema defined in platform_tables. Not duplicated here.
+    platform.agent_failed:
+      description: Agent session failed after retry.
+      scope: entity (if entity-scoped agent) or flow
+      payload:
+        agent_id: string
+        flow_instance: string
+        entity_id: string (nullable)
+        error: string
+        retry_count: integer
+        last_event_type: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.agent_panic:
+      description: Agent session panicked with unrecoverable error.
+      scope: entity or flow
+      payload:
+        agent_id: string
+        flow_instance: string
+        entity_id: string (nullable)
+        error: string
+        stack_trace: string
+        conversation_id: string (nullable)
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.event_quarantined:
+      description: Poison event quarantined after repeated handler failures on different entities.
+      scope: global
+      payload:
+        event_name: string
+        quarantine_reason: string
+        affected_entity_count: integer
+        sample_error: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.dead_letter_escalation:
+      description: Dead letter volume or pattern crossed escalation threshold.
+      scope: global
+      payload:
+        flow_instance: string
+        dead_letter_count: integer
+        window_minutes: integer
+        sample_events: array
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.reset:
+      description: Admin-initiated platform state reset.
+      scope: global
+      payload:
+        source: string
+        timestamp: string
+      produced_by_type: platform
+      _source: external (platform admin CLI)
+    platform.auth_required:
+      description: Agent or tool call blocked pending authorization.
+      scope: flow
+      payload:
+        agent_id: string
+        tool_name: string (nullable)
+        action: string
+        reason: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.paused:
+      description: Platform entered paused state. No new events processed until resumed.
+      scope: global
+      payload:
+        reason: string
+        paused_by: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+  routing_rules:
+    description: Platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
+      them. They follow all standard routing, delivery, and persistence rules. The only special behavior is that platform events
+      are emitted by the engine, not by product handlers or agents.
+    no_special_path: Platform events are persisted to the events table, routed to subscribers, and delivered like any other event.
+      No bypass, no side channel.
+  go_source_rule:
+    description: Every hardcoded event name in Go runtime source must appear in this catalog. CI should enforce this — grep
+      Go source for event name literals, verify each exists in platform_events.catalog or is a product event loaded from contracts.
 observation_model:
   description: Defines exactly what is observable from a test, audit, or flight recorder perspective. This is the external
     contract of the engine — what an observer sees after a handler runs.
@@ -1645,3 +1776,82 @@ observation_model:
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
     agent emission does not appear in the triggering handler's emitted_events list.
+workspace_model:
+  description: Defines the filesystem contract for agent sessions. The platform provides three standard mount points and a
+    scoping model. Products define workspace classes that map agent roles to specific scope configurations. If a product declares
+    a workspace_class on an agent, the platform MUST provide all mounts at the declared scopes.
+  standard_mounts:
+    description: Three mount points are available to every agent session. Products cannot add new mount points — they configure
+      access and scope for these three via workspace class definitions.
+    /workspace:
+      description: Writable working directory for agent output — drafts, artifacts, intermediate files.
+      access: read-write
+      scope_options:
+      - per-agent — private to one agent, invisible to others
+      - per-flow-instance — shared by all agents in the same flow instance, isolated across instances
+      lifecycle:
+        per-agent: Created at agent registration. Cleaned on agent termination. Persists across sessions for session/session_per_entity
+          conversation modes. Ephemeral for task mode.
+        per-flow-instance: Created on create_flow_instance. Preserved on instance termination (for post-mortem). Archival is
+          an operational concern.
+    /data:
+      description: Read-only shared reference data. Products populate this via deployment configuration. The platform treats
+        /data as opaque — it never reads, writes, indexes, or validates /data contents.
+      access: read-only
+      scope: global — identical content visible to every agent regardless of workspace class
+      lifecycle: Mounted at boot. Contents managed outside the platform (deployment, CI, admin).
+    /opt/mas/contracts:
+      description: Loaded flow contracts. Agents can read their own flow's contract files for self-reference.
+      access: read-only
+      scope: global
+      lifecycle: Populated by the contract loader at boot. Immutable during runtime.
+  workspace_class_definition:
+    description: Products define workspace classes in their policy.yaml under workspace_classes. Each class maps standard mount
+      points to scope configurations. The platform reads these definitions at boot and provisions mounts accordingly.
+    format:
+      workspace_classes:
+        class_name:
+          description: string — human-readable purpose
+          workspace_scope: string — per-agent | per-flow-instance
+    rules:
+    - /data and /opt/mas/contracts are always global, read-only. Products cannot override their scope or access.
+    - workspace_scope controls the /workspace mount only — the sole configurable dimension.
+    - Every workspace_class referenced by an agent in agents.yaml must be defined in policy.yaml workspace_classes.
+    - The platform validates this at boot. Missing class definition is a boot error.
+  mount_guarantees:
+    description: Rules the runtime MUST enforce.
+    rules:
+    - Every agent session executes with all three standard mounts active. No mount may be missing.
+    - /data is the SAME mount point across all workspace classes. An agent in any class sees identical /data contents.
+    - /workspace isolation follows the workspace_scope declared by the agent's workspace class. per-agent workspaces are never
+      visible to other agents. per-flow-instance workspaces are visible to all agents in that flow instance only.
+    - Read-only mounts are enforced at the filesystem level (read-only bind mount, or equivalent). Agents cannot write to /data
+      or /opt/mas/contracts.
+    - The runtime MUST NOT vary mount availability based on conversation_mode, model_tier, or any other agent property. Workspace
+      class is the sole determinant of /workspace scope.
+  boot_validation:
+    description: The platform verifies workspace infrastructure at boot.
+    checks:
+    - Every workspace_class referenced in agents.yaml is defined in policy.yaml workspace_classes
+    - /data mount exists and is readable
+    - /opt/mas/contracts is populated from contract loader
+    - For each registered agent, /workspace path is creatable under the declared scope
+    failure: Boot aborts if any workspace mount cannot be satisfied. Error message identifies the failing mount, workspace class,
+      and agent.
+  deployment_mapping:
+    description: How standard mounts map to deployment environments. Mount paths are invariant — only backing storage changes.
+    local_dev:
+      /data: Host directory bind-mounted read-only. Same path for all agent processes.
+      /workspace: Host directory under a platform-managed root (e.g., ~/.mas/workspaces/{scope}/{id}).
+      /opt/mas/contracts: Host directory populated by contract loader at boot.
+    docker:
+      /data: Named volume or bind mount, shared across all containers. Read-only flag required.
+      /workspace: Per-scope volumes. per-agent classes get per-agent volumes. per-flow-instance classes share an instance volume.
+      /opt/mas/contracts: Read-only volume populated by init container or bind mount.
+    production:
+      /data: Network-attached storage (NFS, EFS, GCS FUSE) mounted read-only. Consistent across all compute nodes.
+      /workspace: 'Storage persistence follows conversation_mode. task mode: ephemeral (tmpfs acceptable). session modes: persistent
+        storage required.'
+      /opt/mas/contracts: Read-only volume from deployment artifact.
+    portability_rule: A product contract that works on local dev MUST work on Docker and production without contract changes.
+      Mount paths are invariant. Only the backing storage implementation changes.

@@ -22,8 +22,7 @@ var defaultPlatformPermissions = []string{
 	"human_task_decide",
 	"human_task_request",
 	"mailbox_send",
-	"message_all",
-	"message_domain",
+	"message_flow",
 	"message_peers",
 	"schedule",
 }

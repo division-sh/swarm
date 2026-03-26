@@ -1,13 +1,13 @@
 permission_bundles:
   coordinator:
-    description: Full control — top-level workflow coordinator
+    description: Full control — top-level flow coordinator
     permissions:
     - agent_hire
     - agent_fire
     - agent_reconfigure
     - configure_routing
     - approve_spend
-    - message_all
+    - message_flow
     - mailbox_send
     - human_task_request
     - human_task_decide
@@ -19,14 +19,14 @@ permission_bundles:
     - agent_fire
     - agent_reconfigure
     - configure_routing
-    - message_domain
+    - message_flow
     - mailbox_send
     - human_task_request
     - schedule
   specialist:
-    description: Skilled agent — can message domain and send to mailbox
+    description: Skilled agent — can message flow and send to mailbox
     permissions:
-    - message_domain
+    - message_flow
     - mailbox_send
     - configure_routing
     - schedule
@@ -39,6 +39,18 @@ permission_bundles:
   system_node:
     description: Deterministic node — no permissions (platform handles internally)
     permissions: []
+workspace_classes:
+  holding:
+    description: Long-lived system-level workspace for root agents (coordinators, analysts, devops). Agent-private working directory.
+    workspace_scope: per-agent
+  factory:
+    description: Workspace for pre-operating agents (discovery, scoring, validation). Agent-private working directory. Shared
+      /data for corpora and reference inputs.
+    workspace_scope: per-agent
+  opco:
+    description: Workspace for operating company agents. Shared within a flow instance — all agents in the same OpCo read/write
+      the same /workspace. Different OpCos are isolated.
+    workspace_scope: per-flow-instance
 workflow_extension_permissions:
   system_admin:
     description: Execute infrastructure tools (nginx, systemd, certbot). Workflow extension — not a platform permission.

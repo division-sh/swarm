@@ -1,48 +1,48 @@
+name: mas
+
 services:
   postgres:
     image: postgres:16
-    container_name: empireai-postgres
+    container_name: mas-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: empireai
+      POSTGRES_DB: mas
     ports:
       - "5432:5432"
     volumes:
-      - empireai_pgdata:/var/lib/postgresql/data
+      - mas_pgdata:/var/lib/postgresql/data
 
   orchestrator:
     build:
       context: .
       dockerfile: Dockerfile.orchestrator
-    container_name: empireai-orchestrator
+    container_name: mas-orchestrator
     restart: unless-stopped
     depends_on:
       - postgres
     environment:
-      EMPIREAI_INBOUND_ADDR: ":8080"
-      EMPIREAI_TOOL_GATEWAY_ADDR: ":8090"
-      EMPIREAI_TOOL_GATEWAY_TOKEN: ${EMPIREAI_TOOL_GATEWAY_TOKEN:-}
-      EMPIREAI_DASHBOARD_ADDR: ":8070"
-      EMPIREAI_API_KEY: ${EMPIREAI_API_KEY:-local-dev-key}
-      EMPIREAI_ENABLE_DOCKER_WORKSPACES: "true"
-      EMPIREAI_CLAUDE_USE_MCP: ${EMPIREAI_CLAUDE_USE_MCP:-true}
-      EMPIREAI_CLAUDE_PERMISSION_MODE: ${EMPIREAI_CLAUDE_PERMISSION_MODE:-bypassPermissions}
-      EMPIREAI_CLAUDE_BYPASS_PERMISSIONS: ${EMPIREAI_CLAUDE_BYPASS_PERMISSIONS:-true}
-      EMPIREAI_CLAUDE_TIMEOUT_SECONDS: ${EMPIREAI_CLAUDE_TIMEOUT_SECONDS:-900}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      MAS_TOOL_GATEWAY_TOKEN: ${MAS_TOOL_GATEWAY_TOKEN:-}
       MAS_DB_HOST: postgres
       MAS_DB_PORT: "5432"
-      MAS_DB_NAME: empireai
+      MAS_DB_NAME: mas
       MAS_DB_USER: postgres
       MAS_DB_PASSWORD: postgres
       MAS_DB_SSLMODE: disable
       MAS_LLM_RUNTIME_MODE: cli_test
+      MAS_CLAUDE_USE_MCP: ${MAS_CLAUDE_USE_MCP:-true}
+      MAS_CLAUDE_PERMISSION_MODE: ${MAS_CLAUDE_PERMISSION_MODE:-bypassPermissions}
+      MAS_CLAUDE_BYPASS_PERMISSIONS: ${MAS_CLAUDE_BYPASS_PERMISSIONS:-true}
+      MAS_CLAUDE_TIMEOUT_SECONDS: ${MAS_CLAUDE_TIMEOUT_SECONDS:-900}
       MAS_CLAUDE_CLI_COMMAND: claude
       MAS_CLAUDE_CLI_OUTPUT_FORMAT: stream-json
+      MAS_WORKSPACE_IMAGE: mas-workspace:latest
+      MAS_WORKSPACE_VOLUMES_FROM: mas-orchestrator
     volumes:
       - ./docs:/app/docs
+      - ${MAS_CONTRACTS_HOST_DIR:?MAS_CONTRACTS_HOST_DIR must point to a contract bundle}:/opt/mas/contracts:ro
       - ./migrations:/app/migrations
       - ./contracts:/app/contracts
       - ./internal:/app/internal
@@ -50,20 +50,22 @@ services:
       - ./data:/data:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "8080:8080"
+      - "8070:8070"
       - "8090:8090"
     command:
       - -store
       - postgres
       - -contracts
-      - /app/docs/specs/mas-platform/empire/contracts
+      - /opt/mas/contracts
+      - -health-addr
+      - :8070
       - -self-check=false
 
   dashboard:
     build:
       context: .
       dockerfile: Dockerfile.dashboard
-    container_name: empireai-dashboard
+    container_name: mas-dashboard
     restart: unless-stopped
     depends_on:
       - orchestrator
@@ -79,9 +81,9 @@ services:
       args:
         INSTALL_CLAUDE_CLI: "true"
         INSTALL_CODEX_CLI: "true"
-    image: empireai-workspace:latest
+    image: mas-workspace:latest
     profiles:
       - workspace
 
 volumes:
-  empireai_pgdata:
+  mas_pgdata:

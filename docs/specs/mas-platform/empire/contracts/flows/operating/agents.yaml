@@ -52,7 +52,7 @@ opco-ceo:
   - agent_reconfigure
   - configure_routing
   - approve_spend
-  - message_all
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: opco
@@ -96,7 +96,7 @@ opco-chief-of-staff:
   - cross_domain_report
   permissions_bundle: specialist
   permissions: &id002
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: opco
@@ -138,7 +138,7 @@ opco-head-of-product:
   - agent_fire
   - agent_reconfigure
   - configure_routing
-  - message_domain
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: opco

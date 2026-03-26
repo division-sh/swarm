@@ -8,10 +8,7 @@ import (
 )
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsOnCompleteAndRules(t *testing.T) {
-	bundle, err := LoadWorkflowContractBundle(contractRepoRoot(t))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
-	}
+	bundle := loadCurrentWorkflowBundleForTest(t)
 
 	nodeID, eventType, handler, ok := firstLoadedWorkflowHandler(bundle)
 	if !ok {
@@ -23,17 +20,14 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsOnCompleteAndRules(
 	node.EventHandlers[eventType] = handler
 	bundle.Nodes[nodeID] = node
 
-	err = validateWorkflowContractBundleLoadConstraints(bundle)
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !errors.Is(err, ErrConflictingCompletion) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsDeprecatedGuardFallback(t *testing.T) {
-	bundle, err := LoadWorkflowContractBundle(contractRepoRoot(t))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
-	}
+	bundle := loadCurrentWorkflowBundleForTest(t)
 
 	nodeID, eventType, handler, ok := firstLoadedWorkflowHandler(bundle)
 	if !ok {
@@ -44,31 +38,25 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsDeprecatedGuardFall
 	node.EventHandlers[eventType] = handler
 	bundle.Nodes[nodeID] = node
 
-	err = validateWorkflowContractBundleLoadConstraints(bundle)
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !errors.Is(err, ErrDeprecatedGuardFallback) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
 
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsMultipleAuthoritativeOwners(t *testing.T) {
-	bundle, err := LoadWorkflowContractBundle(contractRepoRoot(t))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
-	}
+	bundle := loadCurrentWorkflowBundleForTest(t)
 
 	bundle.Semantics.EventOwners["task.completed"] = []string{"node-a", "node-b"}
 
-	err = validateWorkflowContractBundleLoadConstraints(bundle)
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
 	if err == nil || !errors.Is(err, ErrMultipleAuthoritativeOwners) {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
 
 func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
-	bundle, err := LoadWorkflowContractBundle(contractRepoRoot(t))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
-	}
+	bundle := loadCurrentWorkflowBundleForTest(t)
 	for _, node := range bundle.Nodes {
 		for _, handler := range node.EventHandlers {
 			if strings.TrimSpace(handler.Action.ID) != "record_evidence" {
@@ -86,6 +74,16 @@ func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
 func contractRepoRoot(t *testing.T) string {
 	t.Helper()
 	return strings.TrimSpace(repoRootForContractsTest(t))
+}
+
+func loadCurrentWorkflowBundleForTest(t *testing.T) *WorkflowContractBundle {
+	t.Helper()
+	repoRoot := contractRepoRoot(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, currentWorkflowContractsDirForTest(t), DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
 }
 
 func firstLoadedWorkflowHandler(bundle *WorkflowContractBundle) (string, string, SystemNodeEventHandler, bool) {

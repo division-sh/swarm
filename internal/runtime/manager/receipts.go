@@ -323,6 +323,10 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		am.mu.RUnlock()
 		managerID = am.defaultManagerAgentID(cfg)
 	}
+	if strings.TrimSpace(managerID) == "" {
+		log.Printf("dead-letter escalation skipped without manager agent=%s event=%s", agentID, eventID)
+		return
+	}
 	if managerID == agentID {
 		// Prevent infinite self-escalation chains.
 		log.Printf("dead-letter escalation suppressed for self-managed agent=%s event=%s", agentID, eventID)

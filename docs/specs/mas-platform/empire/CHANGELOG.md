@@ -1,5 +1,32 @@
 # EmpireAI Changelog
 
+## v4.0.0 (2026-03-26)
+
+### Breaking: messaging permissions renamed
+- `message_all` removed — replaced by `message_flow` (same flow instance scope)
+- `message_domain` removed — replaced by `message_flow` (same flow instance scope)
+- `message_peers` unchanged (same manager_fallback parent, same flow instance)
+- Cross-flow communication is events only. agent_message cannot cross flow boundaries.
+- All bundles updated: coordinator, lead, specialist now use `message_flow`
+- All agent explicit permissions updated across root, discovery, scoring, validation, operating
+
+### Breaking: management and routing scoped to flow instance
+- agent_hire/fire/reconfigure: target must be in same flow instance and below caller in manager_fallback chain
+- configure_routing: self + manageable agents only
+- manager_fallback is an escalation path (produces events), not a messaging or management grant
+
+Requires platform >=1.3.0 (permission_scoping support).
+
+## v3.1.0 (2026-03-26)
+
+### Workspace classes defined
+Added `workspace_classes` to policy.yaml — declares the three Empire workspace classes per platform spec §workspace_model:
+- `holding` (per-agent) — root agents (empire-coordinator, operations-analyst, holding-devops)
+- `factory` (per-agent) — discovery, scoring, validation agents
+- `opco` (per-flow-instance) — operating company agents share /workspace within their OpCo instance
+
+Platform dependency bumped to >=1.3.0 (requires workspace_model support).
+
 ## v3.0.5 (2026-03-25)
 
 ### Permission fixes (root agents)

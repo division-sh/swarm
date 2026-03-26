@@ -2,20 +2,27 @@ package agents
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"empireai/internal/events"
+	runtimecontracts "empireai/internal/runtime/contracts"
 	models "empireai/internal/runtime/core/actors"
 	llm "empireai/internal/runtime/llm"
+	runtimepipeline "empireai/internal/runtime/pipeline"
+	"empireai/internal/runtime/semanticview"
 	runtimetools "empireai/internal/runtime/tools"
 )
 
-func TestFormatEventForAgent_IncludesEntityToolsLine(t *testing.T) {
+func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 	cfg := models.AgentConfig{
 		ID:   "agent-1",
 		Role: "operator",
 		Mode: "task",
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"allowed_tools": []string{"schedule", "get_entity", "emit_example"},
+		}),
 	}
 	evt := (events.Event{
 		ID:          "evt-1",
@@ -26,8 +33,8 @@ func TestFormatEventForAgent_IncludesEntityToolsLine(t *testing.T) {
 	}).WithEntityID("entity-1")
 
 	formatted := formatEventForAgent(cfg, evt)
-	if !strings.Contains(formatted, "Available entity persistence tools: get_entity, save_entity_field, create_entity, search_entities, query_metrics") {
-		t.Fatalf("expected entity tools line, got %q", formatted)
+	if !strings.Contains(formatted, "Available non-emit tools from your contract: get_entity, schedule") {
+		t.Fatalf("expected configured tool summary, got %q", formatted)
 	}
 }
 
@@ -63,6 +70,17 @@ func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 }
 
 func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	runtimecontracts.SetActivePromptBundle(bundle)
+
 	agent := &LLMAgent{
 		cfg: models.AgentConfig{
 			ID:   "cos-entity-1",
@@ -91,6 +109,55 @@ func TestParseConversationMode_AcceptsStatelessAlias(t *testing.T) {
 	}
 	if mode != llm.TaskScoped {
 		t.Fatalf("parseConversationMode(stateless) = %v, want %v", mode, llm.TaskScoped)
+	}
+}
+
+func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
+	runtimetools.InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"coord.done": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+						"task_id":   {Type: "string"},
+					},
+					Required: []string{"entity_id"},
+				},
+			},
+		},
+	}))
+	agent := NewLLMAgent(
+		models.AgentConfig{
+			ID:   "coordinator-1",
+			Role: "coordinator",
+			Config: mustAgentConfigJSON(t, map[string]any{
+				"allowed_tools": []string{"schedule"},
+				"emit_events":   []string{"coord.done"},
+			}),
+		},
+		nil,
+		nil,
+		[]llm.ToolDefinition{
+			{Name: "schedule"},
+			{Name: "systemd_control"},
+			{Name: "agent_message"},
+		},
+	)
+	names := make([]string, 0, len(agent.conversation.Tools))
+	for _, tool := range agent.conversation.Tools {
+		names = append(names, tool.Name)
+	}
+	if !containsString(names, "schedule") {
+		t.Fatalf("expected configured tier2 tool in session, got %v", names)
+	}
+	if !containsString(names, "agent_message") {
+		t.Fatalf("expected universal tool in session, got %v", names)
+	}
+	if !containsString(names, "emit_coord_done") {
+		t.Fatalf("expected explicit emit tool in session, got %v", names)
+	}
+	if containsString(names, "systemd_control") {
+		t.Fatalf("expected unconstrained non-universal tool to be filtered out, got %v", names)
 	}
 }
 

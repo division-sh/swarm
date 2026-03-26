@@ -53,7 +53,8 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 func TestPhase1SchemaRegistryUsesMASContractsSource(t *testing.T) {
 	t.Parallel()
 
-	bundle, err := LoadWorkflowContractBundle(repoRootForContractsTest(t))
+	repoRoot := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, currentWorkflowContractsDirForTest(t), DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Skipf("no contract bundle: %v", err)
 	}
@@ -79,31 +80,14 @@ func TestPhase1DefaultContractPathsAreMASOnly(t *testing.T) {
 	paths := ResolveWorkflowContractPaths(repoRoot)
 
 	got := filepath.ToSlash(DefaultWorkflowContractsDir(repoRoot))
-	if got == "" {
-		t.Fatal("expected default workflow contracts dir to resolve from MAS product bundles")
+	if got != "" {
+		t.Fatalf("expected no implicit workflow contracts dir, got %q", got)
 	}
-	if !strings.Contains(got, "/docs/specs/mas-platform/") && !strings.HasPrefix(got, "docs/specs/mas-platform/") {
-		t.Fatalf("unexpected non-MAS default workflow contracts dir %q", got)
+	if strings.TrimSpace(paths.WorkflowDir) != "" {
+		t.Fatalf("expected empty workflow dir without explicit contracts root, got %q", paths.WorkflowDir)
 	}
-	if strings.Contains(got, "/platform/contracts") || strings.HasSuffix(got, "/tests/test-guard-pass") || strings.Contains(got, "/tests/") {
-		t.Fatalf("unexpected non-product workflow contracts dir %q", got)
-	}
-	if strings.Contains(filepath.ToSlash(paths.WorkflowDir), "/contracts/") && !strings.Contains(filepath.ToSlash(paths.WorkflowDir), "/docs/specs/mas-platform/") {
-		t.Fatalf("unexpected legacy workflow dir %q", paths.WorkflowDir)
-	}
-	for _, candidate := range []string{
-		paths.ProjectNodesFile,
-		paths.ProjectEventsFile,
-		paths.ProjectAgentsFile,
-		paths.ProjectToolsFile,
-		paths.ProjectPolicyFile,
-	} {
-		if strings.TrimSpace(candidate) == "" {
-			t.Fatalf("unexpected empty contract candidate")
-		}
-	}
-	if strings.TrimSpace(paths.DDLFile) != "" {
-		t.Fatalf("expected no legacy canonical DDL authority path, got %q", paths.DDLFile)
+	if strings.TrimSpace(paths.ProjectPackageFile) != "" {
+		t.Fatalf("expected no project package file without explicit contracts root, got %q", paths.ProjectPackageFile)
 	}
 }
 

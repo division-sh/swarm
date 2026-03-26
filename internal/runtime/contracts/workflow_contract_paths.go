@@ -49,27 +49,9 @@ func DefaultWorkflowContractsDir(repoRoot string) string {
 	if env := strings.TrimSpace(os.Getenv("MAS_CONTRACTS_DIR")); env != "" {
 		return env
 	}
-	base := filepath.Join(repoRoot, "docs", "specs", "mas-platform")
-	entries, err := os.ReadDir(base)
-	if err == nil {
-		candidates := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			name := strings.TrimSpace(entry.Name())
-			if name == "" || name == "platform" || name == "tests" {
-				continue
-			}
-			dir := filepath.Join(base, name, "contracts")
-			if existingFile(filepath.Join(dir, "package.yaml")) != "" {
-				candidates = append(candidates, dir)
-			}
-		}
-		sort.Strings(candidates)
-		if len(candidates) > 0 {
-			return candidates[0]
-		}
+	dir := filepath.Join(repoRoot, "contracts")
+	if existingFile(filepath.Join(dir, "package.yaml")) != "" {
+		return dir
 	}
 	return ""
 }

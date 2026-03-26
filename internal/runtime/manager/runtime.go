@@ -115,6 +115,9 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 	if strings.TrimSpace(managerID) == "" || managerID == agentID {
 		managerID = am.defaultManagerAgentID(runtimeactors.AgentConfig{ID: agentID})
 	}
+	if strings.TrimSpace(managerID) == "" {
+		return
+	}
 	payload := map[string]any{
 		"agent_id":    agentID,
 		"event_id":    strings.TrimSpace(evt.ID),
@@ -147,7 +150,7 @@ func (am *AgentManager) defaultManagerAgentID(cfg runtimeactors.AgentConfig) str
 			}
 		}
 	}
-	return "control-plane"
+	return ""
 }
 
 func managerFallbackFromConfig(cfg runtimeactors.AgentConfig) string {
@@ -626,7 +629,7 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	if strings.TrimSpace(managerID) == "" || managerID == agent.ID() {
 		managerID = am.defaultManagerAgentID(cfg)
 	}
-	if managerID != agent.ID() {
+	if strings.TrimSpace(managerID) != "" && managerID != agent.ID() {
 		if err := am.bus.PublishDirect(am.runtimeContext(), (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("ops.agent_failed"),

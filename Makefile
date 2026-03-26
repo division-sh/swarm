@@ -1,17 +1,16 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
 	lint dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
 	dashboard-local dashboard-local-build dashboard-local-stop \
-	postgres-up postgres-reset empire-local \
+	postgres-up postgres-reset mas-local \
 	sync-current-spec
 
 COMPOSE ?= docker compose
 DASHBOARD_LOCAL_PORT ?= 4173
 DASHBOARD_API_ORIGIN ?= http://127.0.0.1:8081
-EMPIRE_HEALTH_PORT ?= 18082
-EMPIRE_CONTRACTS ?= docs/specs/mas-platform/empire/contracts
+MAS_HEALTH_PORT ?= 18082
 MAS_DB_HOST ?= 127.0.0.1
 MAS_DB_PORT ?= 5432
-MAS_DB_NAME ?= empireai
+MAS_DB_NAME ?= mas
 MAS_DB_USER ?= postgres
 MAS_DB_PASSWORD ?= postgres
 MAS_DB_SSLMODE ?= disable
@@ -98,9 +97,9 @@ postgres-reset: postgres-up
 		-c "GRANT ALL ON SCHEMA public TO $(MAS_DB_USER);" \
 		-c "GRANT ALL ON SCHEMA public TO public;"
 
-empire-local: postgres-up
+mas-local: postgres-up
 	MAS_DB_HOST=$(MAS_DB_HOST) MAS_DB_PORT=$(MAS_DB_PORT) MAS_DB_NAME=$(MAS_DB_NAME) MAS_DB_USER=$(MAS_DB_USER) MAS_DB_PASSWORD=$(MAS_DB_PASSWORD) MAS_DB_SSLMODE=$(MAS_DB_SSLMODE) \
-		go run ./cmd/mas -contracts $(EMPIRE_CONTRACTS) -store postgres -health-addr 127.0.0.1:$(EMPIRE_HEALTH_PORT)
+		go run ./cmd/mas -store postgres -health-addr 127.0.0.1:$(MAS_HEALTH_PORT)
 
 sync-current-spec:
 	./scripts/sync_current_spec.sh

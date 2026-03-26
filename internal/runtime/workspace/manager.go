@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -32,6 +33,7 @@ type Resolver interface {
 
 type Lifecycle interface {
 	Resolver
+	ValidateSource(ctx context.Context, source semanticview.Source) error
 	EnsureSystemWorkspaces(ctx context.Context) error
 	EnsureEntityWorkspace(ctx context.Context, entityID string) error
 	StopEntityWorkspace(ctx context.Context, entityID string) error
@@ -45,6 +47,11 @@ type DockerConfig struct {
 	DockerBin             string
 	WorkspaceImage        string
 	WorkspaceNetwork      string
+	WorkspaceVolumesFrom  string
+	SharedDataSource      string
+	DataMountPoint        string
+	ContractsSource       string
+	ContractsMountPoint   string
 	ScaffoldContainer     string
 	ScaffoldWorkdir       string
 	ScaffoldVolume        string
@@ -58,10 +65,16 @@ type DockerConfig struct {
 }
 
 func DefaultDockerConfig() DockerConfig {
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	return DockerConfig{
 		DockerBin:             EnvOrDefault("MAS_DOCKER_BIN", "docker"),
 		WorkspaceImage:        EnvOrDefault("MAS_WORKSPACE_IMAGE", "mas-workspace:latest"),
 		WorkspaceNetwork:      EnvOrDefault("MAS_WORKSPACE_NETWORK", "mas_default"),
+		WorkspaceVolumesFrom:  EnvOrDefault("MAS_WORKSPACE_VOLUMES_FROM", ""),
+		SharedDataSource:      EnvOrDefault("MAS_WORKSPACE_DATA_SOURCE", filepath.Join(repoRoot, "data")),
+		DataMountPoint:        EnvOrDefault("MAS_WORKSPACE_DATA_MOUNT", "/data"),
+		ContractsSource:       EnvOrDefault("MAS_WORKSPACE_CONTRACTS_SOURCE", runtimecontracts.DefaultWorkflowContractsDir(repoRoot)),
+		ContractsMountPoint:   EnvOrDefault("MAS_WORKSPACE_CONTRACTS_MOUNT", "/opt/mas/contracts"),
 		ScaffoldContainer:     EnvOrDefault("MAS_SCAFFOLD_CONTAINER", "mas-scaffold"),
 		ScaffoldWorkdir:       EnvOrDefault("MAS_SCAFFOLD_WORKDIR", "/opt/mas/scaffold"),
 		ScaffoldVolume:        EnvOrDefault("MAS_SCAFFOLD_VOLUME", "scaffold"),
@@ -78,6 +91,7 @@ func DefaultDockerConfig() DockerConfig {
 type DockerManager struct {
 	db          *sql.DB
 	cfg         DockerConfig
+	source      semanticview.Source
 	RunDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
 }
 
@@ -106,6 +120,20 @@ func (m *DockerManager) SetConfigForTest(cfg DockerConfig) {
 	m.cfg = cfg
 }
 
+func (m *DockerManager) SetConfig(cfg DockerConfig) {
+	if m == nil {
+		return
+	}
+	m.cfg = cfg
+}
+
+func (m *DockerManager) SetSemanticSource(source semanticview.Source) {
+	if m == nil {
+		return
+	}
+	m.source = source
+}
+
 func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Context, args ...string) (string, error)) {
 	if m == nil {
 		return
@@ -114,25 +142,62 @@ func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Conte
 }
 
 func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
-	if err := m.EnsureContainerRunning(ctx, m.cfg.ScaffoldContainer, []string{
-		"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
-		"-w", m.cfg.ScaffoldWorkdir,
-		m.cfg.WorkspaceImage,
-		"sleep", "infinity",
-	}); err != nil {
+	if err := m.EnsureContainerRunning(ctx, m.cfg.ScaffoldContainer, append(m.standardMountArgs(),
+		[]string{
+			"-v", fmt.Sprintf("%s:%s", m.cfg.ScaffoldVolume, m.cfg.ScaffoldWorkdir),
+			"-w", m.cfg.ScaffoldWorkdir,
+			m.cfg.WorkspaceImage,
+			"sleep", "infinity",
+		}...)); err != nil {
 		return fmt.Errorf("ensure scaffold workspace: %w", err)
 	}
 
-	if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, []string{
-		"--privileged",
-		"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.SystemEntitiesVolume),
-		"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.SystemNginxVolume),
-		"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
-		"-w", m.cfg.SystemWorkdir,
-		m.cfg.WorkspaceImage,
-		"sleep", "infinity",
-	}); err != nil {
+	if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, append(m.standardMountArgs(),
+		[]string{
+			"--privileged",
+			"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.SystemEntitiesVolume),
+			"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.SystemNginxVolume),
+			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
+			"-w", m.cfg.SystemWorkdir,
+			m.cfg.WorkspaceImage,
+			"sleep", "infinity",
+		}...)); err != nil {
 		return fmt.Errorf("ensure system workspace: %w", err)
+	}
+	return nil
+}
+
+func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.Source) error {
+	if m == nil {
+		return fmt.Errorf("workspace manager is required")
+	}
+	if source == nil {
+		return fmt.Errorf("workspace semantic source is required")
+	}
+	m.source = source
+	if err := m.validateSharedMounts(ctx); err != nil {
+		return err
+	}
+	classes, err := workspaceClassesForSource(source)
+	if err != nil {
+		return err
+	}
+	for agentID, entry := range source.AgentEntries() {
+		agentID = strings.TrimSpace(agentID)
+		class := strings.TrimSpace(entry.WorkspaceClass)
+		if class == "" {
+			continue
+		}
+		scope, ok := classes[class]
+		if !ok {
+			return fmt.Errorf("workspace validation failed: agent %s references undefined workspace_class %q", agentID, class)
+		}
+		if !isSupportedWorkspaceScope(scope) {
+			return fmt.Errorf("workspace validation failed: workspace_class %q declares unsupported workspace_scope %q", class, scope)
+		}
+	}
+	if strings.TrimSpace(m.cfg.WorkspaceImage) == "" {
+		return fmt.Errorf("workspace validation failed: workspace image is required")
 	}
 	return nil
 }
@@ -148,12 +213,13 @@ func (m *DockerManager) EnsureEntityWorkspace(ctx context.Context, entityID stri
 	container := m.EntityContainerName(slug)
 	volume := fmt.Sprintf("entities_%s", slug)
 
-	return m.EnsureContainerRunning(ctx, container, []string{
-		"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
-		"-w", m.cfg.EntityWorkdir,
-		m.cfg.WorkspaceImage,
-		"sleep", "infinity",
-	})
+	return m.EnsureContainerRunning(ctx, container, append(m.standardMountArgs(),
+		[]string{
+			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
+			"-w", m.cfg.EntityWorkdir,
+			m.cfg.WorkspaceImage,
+			"sleep", "infinity",
+		}...))
 }
 
 func (m *DockerManager) StopEntityWorkspace(ctx context.Context, entityID string) error {
@@ -271,20 +337,22 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Workdir:   m.cfg.SystemWorkdir,
 		}, nil
 	}
-
-	entityID := actor.EffectiveEntityID()
-	if entityID == "" {
-		return nil, nil
-	}
-	if err := m.EnsureEntityWorkspace(ctx, entityID); err != nil {
-		return nil, err
-	}
-	slug, err := m.LookupEntitySlug(ctx, entityID)
+	scope, scopeKey, err := m.workspaceScopeForActor(actor)
 	if err != nil {
 		return nil, err
 	}
+	container, volume := m.workspaceContainerAndVolume(scope, scopeKey)
+	if err := m.EnsureContainerRunning(ctx, container, append(m.standardMountArgs(),
+		[]string{
+			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
+			"-w", m.cfg.EntityWorkdir,
+			m.cfg.WorkspaceImage,
+			"sleep", "infinity",
+		}...)); err != nil {
+		return nil, err
+	}
 	return &Target{
-		Container: m.EntityContainerName(slug),
+		Container: container,
 		Workdir:   m.cfg.EntityWorkdir,
 	}, nil
 }
@@ -332,6 +400,202 @@ func RoleWorkspaceRouteClass(role string) string {
 func workflowAgentRegistryEntry(source semanticview.Source, agentID, role string) (runtimecontracts.AgentRegistryEntry, bool) {
 	entry, ok := semanticview.FindAgentEntry(source, agentID, role)
 	return entry, ok
+}
+
+func (m *DockerManager) semanticSource() semanticview.Source {
+	if m != nil && m.source != nil {
+		return m.source
+	}
+	return runtimepipeline.DefaultWorkflowSemanticSourceOrNil()
+}
+
+func (m *DockerManager) workspaceScopeForActor(actor models.AgentConfig) (string, string, error) {
+	class := WorkspaceClass(actor)
+	scope := "per-agent"
+	if class != "" {
+		resolved, ok, err := workspaceClassScope(m.semanticSource(), class)
+		if err != nil {
+			return "", "", err
+		}
+		if !ok {
+			return "", "", fmt.Errorf("workspace resolution failed: workspace_class %q is not defined for agent %s", class, strings.TrimSpace(actor.ID))
+		}
+		scope = resolved
+	}
+	switch scope {
+	case "per-agent":
+		agentID := strings.TrimSpace(actor.ID)
+		if agentID == "" {
+			return "", "", fmt.Errorf("workspace resolution failed: per-agent workspace requires agent id")
+		}
+		return scope, agentID, nil
+	case "per-flow-instance":
+		flowPath := strings.Trim(strings.TrimSpace(configString(actor.Config, "flow_path")), "/")
+		if flowPath == "" {
+			return "", "", fmt.Errorf("workspace resolution failed: per-flow-instance workspace for agent %s requires flow_path", strings.TrimSpace(actor.ID))
+		}
+		return scope, flowPath, nil
+	default:
+		return "", "", fmt.Errorf("workspace resolution failed: unsupported workspace scope %q", scope)
+	}
+}
+
+func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string) (string, string) {
+	scope = strings.TrimSpace(scope)
+	scopeKey = SanitizeSlug(scopeKey)
+	switch scope {
+	case "per-flow-instance":
+		return "mas-flow-" + scopeKey, "workspaces_flow_" + scopeKey
+	default:
+		return "mas-agent-" + scopeKey, "workspaces_agent_" + scopeKey
+	}
+}
+
+func (m *DockerManager) standardMountArgs() []string {
+	if m == nil {
+		return nil
+	}
+	if volumesFrom := strings.TrimSpace(m.cfg.WorkspaceVolumesFrom); volumesFrom != "" {
+		return []string{"--volumes-from", volumesFrom + ":ro"}
+	}
+	args := []string{}
+	if source := strings.TrimSpace(m.cfg.SharedDataSource); source != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.DataMountPoint)))
+	}
+	if source := strings.TrimSpace(m.cfg.ContractsSource); source != "" {
+		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.ContractsMountPoint)))
+	}
+	return args
+}
+
+func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
+	if volumesFrom := strings.TrimSpace(m.cfg.WorkspaceVolumesFrom); volumesFrom != "" {
+		mounts, err := m.inspectContainerMountDestinations(ctx, volumesFrom)
+		if err != nil {
+			return fmt.Errorf("workspace validation failed: inspect shared mounts from %s: %w", volumesFrom, err)
+		}
+		for _, required := range []string{strings.TrimSpace(m.cfg.DataMountPoint), strings.TrimSpace(m.cfg.ContractsMountPoint)} {
+			if required == "" {
+				continue
+			}
+			if _, ok := mounts[required]; !ok {
+				return fmt.Errorf("workspace validation failed: shared mount source %s does not provide %s", volumesFrom, required)
+			}
+		}
+		return nil
+	}
+	if err := validateReadableDir(strings.TrimSpace(m.cfg.SharedDataSource), "workspace validation failed: /data source"); err != nil {
+		return err
+	}
+	if err := validateReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/mas/contracts source"); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(strings.TrimSpace(m.cfg.ContractsSource), "package.yaml")); err != nil {
+		return fmt.Errorf("workspace validation failed: contracts source %s missing package.yaml", strings.TrimSpace(m.cfg.ContractsSource))
+	}
+	return nil
+}
+
+func (m *DockerManager) inspectContainerMountDestinations(ctx context.Context, container string) (map[string]struct{}, error) {
+	out, err := m.RunDocker(ctx, "inspect", "--format", "{{json .Mounts}}", strings.TrimSpace(container))
+	if err != nil {
+		return nil, err
+	}
+	var mounts []struct {
+		Destination string `json:"Destination"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &mounts); err != nil {
+		return nil, err
+	}
+	destinations := make(map[string]struct{}, len(mounts))
+	for _, mount := range mounts {
+		dest := strings.TrimSpace(mount.Destination)
+		if dest != "" {
+			destinations[dest] = struct{}{}
+		}
+	}
+	return destinations, nil
+}
+
+func workspaceClassScope(source semanticview.Source, class string) (string, bool, error) {
+	classes, err := workspaceClassesForSource(source)
+	if err != nil {
+		return "", false, err
+	}
+	scope, ok := classes[strings.TrimSpace(class)]
+	return scope, ok, nil
+}
+
+func workspaceClassesForSource(source semanticview.Source) (map[string]string, error) {
+	if source == nil {
+		return map[string]string{}, nil
+	}
+	value, ok := semanticview.PolicyValueForFlow(source, "", "workspace_classes")
+	if !ok {
+		return map[string]string{}, nil
+	}
+	rawClasses, ok := normalizePolicyMap(value.Value)
+	if !ok {
+		return nil, fmt.Errorf("workspace_classes must be a mapping")
+	}
+	out := make(map[string]string, len(rawClasses))
+	for className, rawClass := range rawClasses {
+		className = strings.TrimSpace(className)
+		if className == "" {
+			continue
+		}
+		classMap, ok := normalizePolicyMap(rawClass)
+		if !ok {
+			return nil, fmt.Errorf("workspace_classes.%s must be a mapping", className)
+		}
+		scope := strings.TrimSpace(asString(classMap["workspace_scope"]))
+		if !isSupportedWorkspaceScope(scope) {
+			return nil, fmt.Errorf("workspace_classes.%s.workspace_scope must be per-agent or per-flow-instance", className)
+		}
+		out[className] = scope
+	}
+	return out, nil
+}
+
+func isSupportedWorkspaceScope(scope string) bool {
+	switch strings.TrimSpace(scope) {
+	case "per-agent", "per-flow-instance":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizePolicyMap(value any) (map[string]any, bool) {
+	switch typed := value.(type) {
+	case runtimecontracts.PolicyValue:
+		return normalizePolicyMap(typed.Value)
+	case map[string]any:
+		return typed, true
+	case map[any]any:
+		out := make(map[string]any, len(typed))
+		for key, val := range typed {
+			out[strings.TrimSpace(asString(key))] = val
+		}
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func validateReadableDir(path, prefix string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("%s is not configured", prefix)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", prefix, path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s %s is not a directory", prefix, path)
+	}
+	return nil
 }
 
 func configString(raw []byte, key string) string {

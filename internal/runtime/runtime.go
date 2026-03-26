@@ -9,13 +9,12 @@ import (
 	"log/slog"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
-	"empireai/internal/commgraph"
 	"empireai/internal/config"
 	"empireai/internal/events"
 	runtimeagents "empireai/internal/runtime/agents"
+	runtimeauthority "empireai/internal/runtime/authority"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
@@ -70,25 +69,13 @@ type Runtime struct {
 }
 
 var (
-	defaultControlPlaneRecipientOnce  sync.Once
-	defaultControlPlaneRecipientValue string
 )
 
 func runtimeControlPlaneRecipient() string {
 	if recipient := controlPlaneRecipientFromSource(runtimepipeline.DefaultWorkflowSemanticSourceOrNil()); recipient != "" {
 		return recipient
 	}
-	defaultControlPlaneRecipientOnce.Do(func() {
-		repoRoot := runtimepipeline.WorkflowRepoRoot()
-		bundle, err := runtimecontracts.LoadWorkflowContractBundle(repoRoot)
-		if err == nil {
-			defaultControlPlaneRecipientValue = controlPlaneRecipientFromSource(semanticview.Wrap(bundle))
-		}
-	})
-	if strings.TrimSpace(defaultControlPlaneRecipientValue) != "" {
-		return strings.TrimSpace(defaultControlPlaneRecipientValue)
-	}
-	return "control-plane"
+	return ""
 }
 
 func controlPlaneRecipientFromSource(source semanticview.Source) string {
@@ -106,10 +93,7 @@ func controlPlaneRecipientFromSource(source semanticview.Source) string {
 }
 
 func DefaultControlPlaneRecipient() string {
-	if recipient := strings.TrimSpace(runtimeControlPlaneRecipient()); recipient != "" {
-		return recipient
-	}
-	return "control-plane"
+	return strings.TrimSpace(runtimeControlPlaneRecipient())
 }
 
 func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
@@ -160,10 +144,12 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
 	source := opts.WorkflowModule.SemanticSource()
-	commgraph.SetContractSource(source)
-	commgraph.SetDefaultPolicyFactory(func() commgraph.Policy {
-		return commgraph.NewSourcePolicy(source)
-	})
+	if bundle, ok := semanticview.Bundle(source); ok {
+		runtimecontracts.SetActivePromptBundle(bundle)
+	} else {
+		runtimecontracts.SetActivePromptBundle(nil)
+	}
+	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(source))
 
 	rt := &Runtime{
 		Config:    cfg,

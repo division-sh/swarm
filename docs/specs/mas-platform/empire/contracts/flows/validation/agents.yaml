@@ -12,7 +12,7 @@ validation-coordinator:
   - vertical.ready_for_review
   permissions_bundle: specialist
   permissions: &id002
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: factory
@@ -115,7 +115,7 @@ factory-cto:
   - agent_fire
   - agent_reconfigure
   - configure_routing
-  - message_domain
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: holding

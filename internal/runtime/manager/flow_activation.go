@@ -299,6 +299,16 @@ func buildFlowAgentConfig(
 	if conversationMode := strings.TrimSpace(entry.ConversationMode); conversationMode != "" {
 		cfgPayload["conversation_mode"] = conversationMode
 	}
+	if maxTurns := entry.MaxTurnsPerTask; maxTurns > 0 {
+		cfgPayload["max_turns_per_task"] = maxTurns
+	}
+	if tools := normalizedConfiguredToolList(entry.ToolsTier2); len(tools) > 0 {
+		cfgPayload["tools_tier2"] = append([]string{}, tools...)
+		cfgPayload["allowed_tools"] = append([]string{}, tools...)
+	}
+	if emitEvents := normalizedConfiguredEventList(entry.EmitEvents, vars); len(emitEvents) > 0 {
+		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
+	}
 	rawConfig, err := json.Marshal(cfgPayload)
 	if err != nil {
 		return models.AgentConfig{}, err
@@ -449,6 +459,16 @@ func buildStaticFlowAgentConfig(
 	if conversationMode := strings.TrimSpace(entry.ConversationMode); conversationMode != "" {
 		cfgPayload["conversation_mode"] = conversationMode
 	}
+	if maxTurns := entry.MaxTurnsPerTask; maxTurns > 0 {
+		cfgPayload["max_turns_per_task"] = maxTurns
+	}
+	if tools := normalizedConfiguredToolList(entry.ToolsTier2); len(tools) > 0 {
+		cfgPayload["tools_tier2"] = append([]string{}, tools...)
+		cfgPayload["allowed_tools"] = append([]string{}, tools...)
+	}
+	if emitEvents := normalizedConfiguredEventList(entry.EmitEvents, vars); len(emitEvents) > 0 {
+		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
+	}
 	if _, ok := cfgPayload["system_prompt"]; !ok {
 		role := strings.TrimSpace(entry.Role)
 		if role == "" {
@@ -541,6 +561,25 @@ func cloneFlowConfig(in map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func normalizedConfiguredToolList(raw []string) []string {
+	return dedupeStrings(raw)
+}
+
+func normalizedConfiguredEventList(raw []string, vars map[string]string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	rendered := make([]string, 0, len(raw))
+	for _, eventType := range raw {
+		eventType = strings.TrimSpace(renderFlowTemplate(eventType, vars))
+		if eventType == "" {
+			continue
+		}
+		rendered = append(rendered, eventType)
+	}
+	return dedupeStrings(rendered)
 }
 
 func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) map[string]struct{} {

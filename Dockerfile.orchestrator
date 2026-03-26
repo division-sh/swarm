@@ -1,10 +1,12 @@
 FROM golang:1.23-bookworm AS build
 
+ARG CMD_PATH=./cmd/mas
+
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/orchestrator ./cmd/empire
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/orchestrator ${CMD_PATH}
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg && \

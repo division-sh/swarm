@@ -99,7 +99,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 		}
 		return decision
 	}
-	if IsEmitToolAllowedForRole(actor.Role, toolName) {
+	if IsEmitToolAllowedForRole(actor.Role, toolName) || IsEmitToolAllowedForConfig(actor.Config, toolName) {
 		decision.class = toolAuthorizationEmitAllowed
 		decision.allowed = true
 		return decision

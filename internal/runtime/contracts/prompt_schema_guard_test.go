@@ -7,19 +7,26 @@ import (
 )
 
 func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
-	if err := ValidatePromptSchemaGuards(repoRoot(t)); err != nil {
+	repoRoot := repoRoot(t)
+	if err := ValidatePromptSchemaGuardsForBundle(loadPromptTestBundle(t, repoRoot)); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemasForBundle(t *testing.T) {
-	bundle, err := LoadWorkflowContractBundle(repoRoot(t))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
-	}
+	bundle := loadPromptTestBundle(t, repoRoot(t))
 	if err := ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func loadPromptTestBundle(t *testing.T, repoRoot string) *WorkflowContractBundle {
+	t.Helper()
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"), DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
 }
 
 func repoRoot(t *testing.T) string {

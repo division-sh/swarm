@@ -1,5 +1,33 @@
 # MAS Platform Changelog
 
+## v1.3.0 (2026-03-25)
+
+### Breaking: permission_scoping added, message_all/message_domain removed
+- Removed `message_all` and `message_domain` from platform permission list
+- Added `message_flow` — scoped to same flow instance
+- `message_peers` unchanged — same manager_fallback parent, same flow instance
+- New `permission_scoping` sub-section in §permissions_model defines:
+  - Messaging scope: flow-instance-local only, cross-flow rejected
+  - Management scope: same flow instance + target below caller in manager_fallback chain
+  - Routing scope: self + manageable agents
+  - manager_fallback semantics: escalation path (events), not messaging/management grant
+
+### New: workspace_model (section 14)
+Defines filesystem surfaces available to agent sessions. Three standard mount points, product-configurable scoping:
+- `/workspace` — read-write, scope configured per workspace class (per-agent or per-flow-instance)
+- `/data` — read-only, global, same mount across all workspace classes
+- `/opt/mas/contracts` — read-only, global, populated from contract loader at boot
+
+Products define workspace classes in policy.yaml with a `workspace_scope` for /workspace. Platform validates at boot.
+
+Key rules:
+- /data is identical across all classes — no agent is denied access based on workspace class
+- Mount paths are invariant across local, Docker, and production deployments
+- Boot validation checks workspace class definitions exist and mounts are satisfiable
+- Product-generic: no product-specific classes in platform spec
+
+## v1.2.0
+
 ### Critical: emit payload default changed
 
 **Default emit: entity base → trigger overlay → platform force.** Entity fields are the base layer, trigger payload overlays (trigger wins on collision), platform forces entity_id/trigger_event_type/current_state. payload_transform replaces entity+trigger layers.

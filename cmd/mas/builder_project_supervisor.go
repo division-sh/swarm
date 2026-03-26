@@ -135,10 +135,15 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if _, err := initializeStateStores(ctx, s.stores, bundle); err != nil {
 		return dashboardserver.BuilderProjectStatus{}, err
 	}
+	workspaces := configuredWorkspaceLifecycle(s.stores.SQLDB, s.repoRoot, resolvedRoot, source)
+	if err := workspaces.ValidateSource(ctx, source); err != nil {
+		return dashboardserver.BuilderProjectStatus{}, err
+	}
 
 	newRT, err := runtime.NewRuntime(ctx, s.cfg, s.stores.runtimeStores(), runtime.RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		WorkspaceLifecycle: workspaces,
 	})
 	if err != nil {
 		return dashboardserver.BuilderProjectStatus{}, err

@@ -15,7 +15,7 @@ discovery-coordinator:
   - vertical.discovered
   permissions_bundle: specialist
   permissions:
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: factory

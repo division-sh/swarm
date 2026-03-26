@@ -11,10 +11,21 @@ import (
 	"empireai/internal/runtime/sessions"
 )
 
-func TestDefaultContractsPathExists(t *testing.T) {
-	path := filepath.Join(repoRoot(), defaultContractsPath, "package.yaml")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("default contracts path missing package.yaml: %v", err)
+func TestResolveContractsPath_RequiresExplicitWorkflowContracts(t *testing.T) {
+	path := resolveContractsPath(repoRoot(), "")
+	if strings.TrimSpace(path) != "" {
+		t.Fatalf("expected no implicit contracts path, got %q", path)
+	}
+}
+
+func TestResolveContractsPath_UsesMASContractsDirOverride(t *testing.T) {
+	t.Setenv("MAS_CONTRACTS_DIR", filepath.Join(repoRoot(), "docs", "specs", "mas-platform", "empire", "contracts"))
+	path := resolveContractsPath(repoRoot(), "")
+	if strings.TrimSpace(path) == "" {
+		t.Fatal("expected contracts path from MAS_CONTRACTS_DIR")
+	}
+	if _, err := os.Stat(filepath.Join(path, "package.yaml")); err != nil {
+		t.Fatalf("contracts path missing package.yaml: %v", err)
 	}
 }
 

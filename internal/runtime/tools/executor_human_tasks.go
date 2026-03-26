@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/commgraph"
 	"empireai/internal/events"
+	runtimeauthority "empireai/internal/runtime/authority"
 	models "empireai/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
@@ -136,7 +136,7 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	if e.bus == nil {
 		return nil, errors.New("event bus is not configured")
 	}
-	if !commgraph.CanDecideHumanTasks(actor.Role) {
+	if !runtimeauthority.Active().CanDecideHumanTasks(actor.Role) {
 		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
 	}
 

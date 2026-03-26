@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) {
+	SetActivePromptBundle(loadPromptTestBundle(t, repoRoot(t)))
 	prompt, found, err := LoadPromptForAgent(models.AgentConfig{
 		ID:   "cos-entity-1",
 		Role: "chief_of_staff",

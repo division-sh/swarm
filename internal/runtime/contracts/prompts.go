@@ -18,6 +18,8 @@ var (
 	promptBundleOnce sync.Once
 	promptBundle     *WorkflowContractBundle
 	promptBundleErr  error
+	activePromptMu   sync.RWMutex
+	activePromptBundle *WorkflowContractBundle
 
 	promptTemplateFieldPattern = regexp.MustCompile(`\{[^}]+\}`)
 	promptTokenPattern         = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)\}\}`)
@@ -26,6 +28,12 @@ var (
 	promptVariables     map[string]any
 	promptVariablesErr  error
 )
+
+func SetActivePromptBundle(bundle *WorkflowContractBundle) {
+	activePromptMu.Lock()
+	defer activePromptMu.Unlock()
+	activePromptBundle = bundle
+}
 
 func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
 	candidates, dirs := promptLookupPlan(cfg)
@@ -257,9 +265,18 @@ func uniqueStrings(values ...string) []string {
 }
 
 func promptWorkflowBundle() (*WorkflowContractBundle, error) {
+	activePromptMu.RLock()
+	active := activePromptBundle
+	activePromptMu.RUnlock()
+	if active != nil {
+		return active, nil
+	}
 	promptBundleOnce.Do(func() {
 		repoRoot := promptContractsRepoRoot()
 		contractsDir := DefaultWorkflowContractsDir(repoRoot)
+		if strings.TrimSpace(contractsDir) == "" {
+			return
+		}
 		promptBundle, promptBundleErr = LoadWorkflowContractBundleWithOverrides(
 			repoRoot,
 			contractsDir,

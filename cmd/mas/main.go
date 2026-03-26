@@ -30,11 +30,11 @@ import (
 	"empireai/internal/runtime/semanticview"
 	"empireai/internal/runtime/sessions"
 	runtimetools "empireai/internal/runtime/tools"
+	workspace "empireai/internal/runtime/workspace"
 	"empireai/internal/store"
 )
 
 const (
-	defaultContractsPath    = "docs/specs/mas-platform/tests/test-guard-pass"
 	defaultPlatformSpecPath = "docs/specs/mas-platform/platform/contracts/platform-spec.yaml"
 	defaultHealthAddr       = ":8081"
 )
@@ -65,7 +65,7 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 func main() {
 	repo := repoRoot()
 	configPath := flag.String("config", "", "Optional path to MAS runtime config")
-	contractsPath := flag.String("contracts", defaultContractsPath, "Path to MAS contract bundle root")
+	contractsPath := flag.String("contracts", "", "Path to MAS contract bundle root")
 	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := flag.String("store", "postgres", "Store mode: postgres")
 	healthAddr := flag.String("health-addr", defaultHealthAddr, "HTTP bind address for health checks")
@@ -76,7 +76,7 @@ func main() {
 	defer stop()
 
 	resolvedConfigPath := resolvePath(repo, *configPath)
-	resolvedContractsPath := resolvePath(repo, *contractsPath)
+	resolvedContractsPath := resolveContractsPath(repo, *contractsPath)
 	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
 
 	cfg, err := loadRuntimeConfig(resolvedConfigPath)
@@ -120,10 +120,16 @@ func main() {
 		slog.Error("initialize state stores", "error", err)
 		os.Exit(1)
 	}
+	workspaces := configuredWorkspaceLifecycle(stores.SQLDB, repo, contractsRoot, source)
+	if err := workspaces.ValidateSource(ctx, source); err != nil {
+		slog.Error("validate workspaces", "error", err)
+		os.Exit(1)
+	}
 
 	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
-		SelfCheck:      *selfCheck,
-		WorkflowModule: module,
+		SelfCheck:          *selfCheck,
+		WorkflowModule:     module,
+		WorkspaceLifecycle: workspaces,
 	})
 	if err != nil {
 		log.Fatalf("init runtime: %v", err)
@@ -181,7 +187,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 		Database: config.DatabaseConfig{
 			Host:     envOrDefault("MAS_DB_HOST", envOrDefault("PGHOST", "127.0.0.1")),
 			Port:     envInt("MAS_DB_PORT", envInt("PGPORT", 5432)),
-			Name:     envOrDefault("MAS_DB_NAME", envOrDefault("PGDATABASE", "empireai")),
+			Name:     envOrDefault("MAS_DB_NAME", envOrDefault("PGDATABASE", "mas")),
 			User:     envOrDefault("MAS_DB_USER", envOrDefault("PGUSER", "postgres")),
 			Password: envOrDefault("MAS_DB_PASSWORD", envOrDefault("PGPASSWORD", "postgres")),
 			SSLMode:  envOrDefault("MAS_DB_SSLMODE", "disable"),
@@ -277,6 +283,16 @@ func normalizeContractsRoot(path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no package.yaml found under %s", path)
+}
+
+func resolveContractsPath(repoRoot, raw string) string {
+	if resolved := resolvePath(repoRoot, raw); strings.TrimSpace(resolved) != "" {
+		return resolved
+	}
+	if discovered := strings.TrimSpace(runtimecontracts.DefaultWorkflowContractsDir(repoRoot)); discovered != "" {
+		return discovered
+	}
+	return ""
 }
 
 func resolvePath(repoRoot, path string) string {
@@ -547,6 +563,20 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		CurrentRuntime: supervisor.CurrentRuntime,
 		ProjectControl: supervisor,
 	}
+}
+
+func configuredWorkspaceLifecycle(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) *workspace.DockerManager {
+	manager := workspace.NewDockerManager(db)
+	cfg := workspace.DefaultDockerConfig()
+	if dataDir := strings.TrimSpace(filepath.Join(repoRoot, "data")); dataDir != "" {
+		cfg.SharedDataSource = dataDir
+	}
+	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
+		cfg.ContractsSource = contractsDir
+	}
+	manager.SetConfig(cfg)
+	manager.SetSemanticSource(source)
+	return manager
 }
 
 func repoRoot() string {

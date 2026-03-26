@@ -2,12 +2,13 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strings"
 	"sync"
 
-	"empireai/internal/commgraph"
 	"empireai/internal/events"
+	runtimeauthority "empireai/internal/runtime/authority"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	llm "empireai/internal/runtime/llm"
@@ -47,7 +48,8 @@ func InitEventSchemaRegistry(source semanticview.Source) {
 			}
 		}
 	} else {
-		missing := missingProducerEventSchemas(commgraph.ProducerRoles, commgraph.ProducerEventsForRole, activeSchemas)
+		provider := runtimeauthority.Active()
+		missing := missingProducerEventSchemas(provider.ProducerRoles, provider.ProducerEventsForRole, activeSchemas)
 		for _, eventType := range missing {
 			generatedSchemas[eventType] = struct{}{}
 		}
@@ -88,9 +90,10 @@ func missingProducerEventSchemas(producerRoles func() []string, producerEvents f
 
 func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...any)) []llm.ToolDefinition {
 	ensureEventSchemaRegistry()
+	provider := runtimeauthority.Active()
 	return GenerateEmitTools(
 		role,
-		commgraph.ProducerEventsForRole,
+		provider.ProducerEventsForRole,
 		func(eventType string) (EmitSchema, bool) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
@@ -104,6 +107,40 @@ func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...
 		},
 		warn,
 	)
+}
+
+func GenerateEmitToolsForEvents(eventTypes []string, warn func(string, string, string, ...any)) []llm.ToolDefinition {
+	ensureEventSchemaRegistry()
+	allowed := UniqueNonEmpty(eventTypes)
+	if len(allowed) == 0 {
+		return nil
+	}
+	tools := make([]llm.ToolDefinition, 0, len(allowed))
+	for _, eventType := range allowed {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			continue
+		}
+		schema, ok := activeSchemas[eventType]
+		if !ok {
+			if warn != nil {
+				warn(
+					"emit-tool-missing-schema-"+eventType,
+					"event-schema-registry",
+					"skipping emit tool generation for %q because no explicit schema exists",
+					eventType,
+				)
+			}
+			continue
+		}
+		tools = append(tools, llm.ToolDefinition{
+			Name:        EmitToolName(eventType),
+			Description: schema.Description,
+			Schema:      schema.Schema,
+		})
+	}
+	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
+	return tools
 }
 
 func GeneratedEmitSchemasForAgentRoles() []string {
@@ -135,8 +172,21 @@ func IsEmitToolAllowedForRole(role, toolName string) bool {
 	if !ok {
 		return false
 	}
-	for _, evt := range commgraph.ProducerEventsForRole(role) {
+	for _, evt := range runtimeauthority.Active().ProducerEventsForRole(role) {
 		if strings.TrimSpace(evt) == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func IsEmitToolAllowedForConfig(raw json.RawMessage, toolName string) bool {
+	eventType, ok := eventTypeFromEmitToolName(toolName)
+	if !ok {
+		return false
+	}
+	for _, configured := range configuredEmitEvents(raw) {
+		if strings.TrimSpace(configured) == eventType {
 			return true
 		}
 	}
@@ -162,6 +212,33 @@ func schemaForEventType(eventType string) EmitSchema {
 			"additionalProperties": false,
 		},
 	}
+}
+
+func configuredEmitEvents(raw json.RawMessage) []string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	eventsRaw, ok := payload["emit_events"]
+	if !ok {
+		return nil
+	}
+	items, ok := eventsRaw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		eventType := strings.TrimSpace(asString(item))
+		if eventType == "" {
+			continue
+		}
+		out = append(out, eventType)
+	}
+	return UniqueNonEmpty(out)
 }
 
 func InboundEventFromContext(ctx context.Context) (events.Event, bool) {

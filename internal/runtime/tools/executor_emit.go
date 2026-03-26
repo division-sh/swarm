@@ -23,7 +23,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			toolName,
 		)
 	}
-	if !IsEmitToolAllowedForRole(actor.Role, toolName) {
+	if !IsEmitToolAllowedForRole(actor.Role, toolName) && !IsEmitToolAllowedForConfig(actor.Config, toolName) {
 		return nil, NewRuntimeError(
 			"emit_tool_not_allowed",
 			"tool-executor",

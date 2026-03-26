@@ -75,7 +75,7 @@ empire-coordinator:
   - agent_reconfigure
   - configure_routing
   - approve_spend
-  - message_all
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: holding
@@ -100,7 +100,7 @@ operations-analyst:
   - analyst.anti_pattern_advisory
   permissions_bundle: specialist
   permissions:
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: holding
@@ -138,7 +138,7 @@ holding-devops:
   - devops.health_check_failed
   permissions_bundle: specialist
   permissions:
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   - system_admin
@@ -161,7 +161,7 @@ discovery-coordinator:
   - vertical.discovered
   permissions_bundle: specialist
   permissions:
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: factory
@@ -274,7 +274,7 @@ validation-coordinator:
   - vertical.ready_for_review
   permissions_bundle: specialist
   permissions: &id005
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: factory
@@ -377,7 +377,7 @@ factory-cto:
   - agent_fire
   - agent_reconfigure
   - configure_routing
-  - message_domain
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: holding
@@ -476,7 +476,7 @@ opco-ceo:
   - agent_reconfigure
   - configure_routing
   - approve_spend
-  - message_all
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: opco
@@ -520,7 +520,7 @@ opco-chief-of-staff:
   - cross_domain_report
   permissions_bundle: specialist
   permissions: &id007
-  - message_domain
+  - message_flow
   - mailbox_send
   - configure_routing
   workspace_class: opco
@@ -562,7 +562,7 @@ opco-head-of-product:
   - agent_fire
   - agent_reconfigure
   - configure_routing
-  - message_domain
+  - message_flow
   - mailbox_send
   - human_task_request
   workspace_class: opco

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -36,9 +37,11 @@ func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAg
 	return nil
 }
 
-func (*flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) { return nil, nil }
-func (*flowActivationTestStore) MarkAgentTerminated(context.Context, string) error     { return nil }
-func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error      { return nil }
+func (*flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
+	return nil, nil
+}
+func (*flowActivationTestStore) MarkAgentTerminated(context.Context, string) error { return nil }
+func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error  { return nil }
 func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
 	return nil
 }
@@ -398,4 +401,56 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 	if len(flowCfg.Subscriptions) != 1 || flowCfg.Subscriptions[0] != "ops-flow/work.requested" {
 		t.Fatalf("flow subscriptions = %#v, want [ops-flow/work.requested]", flowCfg.Subscriptions)
 	}
+}
+
+func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
+	cfg, err := buildFlowAgentConfig(
+		semanticview.Wrap(testFlowBundle("")),
+		"review",
+		"inst-1",
+		"ent-1",
+		"review/inst-1",
+		"reviewer",
+		runtimecontracts.AgentRegistryEntry{
+			ID:              "reviewer-{instance_id}",
+			Type:            "generic",
+			Role:            "reviewer",
+			ToolsTier2:      []string{"schedule", "systemd_control"},
+			EmitEvents:      []string{"task.completed", "task.completed", "review.failed"},
+			MaxTurnsPerTask: 7,
+		},
+		map[string]string{"instance_id": "inst-1"},
+		map[string]struct{}{},
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("buildFlowAgentConfig: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(config): %v", err)
+	}
+	if got := payload["max_turns_per_task"]; got != float64(7) {
+		t.Fatalf("max_turns_per_task = %#v, want 7", got)
+	}
+	if got := anySliceToStrings(payload["allowed_tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "systemd_control" {
+		t.Fatalf("allowed_tools = %#v, want [schedule systemd_control]", got)
+	}
+	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "task.completed" || got[1] != "review.failed" {
+		t.Fatalf("emit_events = %#v, want [task.completed review.failed]", got)
+	}
+}
+
+func anySliceToStrings(raw any) []string {
+	items, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

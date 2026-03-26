@@ -18,6 +18,23 @@ func Wrap(bundle *runtimecontracts.WorkflowContractBundle) Source {
 	return bundleSource{bundle: bundle}
 }
 
+func Bundle(source Source) (*runtimecontracts.WorkflowContractBundle, bool) {
+	switch typed := source.(type) {
+	case bundleSource:
+		if typed.bundle == nil {
+			return nil, false
+		}
+		return typed.bundle, true
+	case *bundleSource:
+		if typed == nil || typed.bundle == nil {
+			return nil, false
+		}
+		return typed.bundle, true
+	default:
+		return nil, false
+	}
+}
+
 func (s bundleSource) WorkflowVersion() string { return s.bundle.WorkflowVersion() }
 func (s bundleSource) WorkflowName() string    { return s.bundle.WorkflowName() }
 func (s bundleSource) PlatformSpec() runtimecontracts.PlatformSpecDocument {

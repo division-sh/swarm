@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
-	"empireai/internal/commgraph"
 	"empireai/internal/events"
+	runtimeauthority "empireai/internal/runtime/authority"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
 	models "empireai/internal/runtime/core/actors"
@@ -40,7 +41,7 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
 	allowedToolSet, constrained := extractAllowedToolSet(cfg)
-	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), runtimetools.GenerateEmitToolsForRole(cfg.Role, runtimeWarnOnce))
+	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
 
 	maxTurns := 1000
 	mode := llm.SessionScoped
@@ -499,6 +500,40 @@ func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 	return allowed, found
 }
 
+func extractEmitEvents(cfg models.AgentConfig) []string {
+	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(cfg.Config, &obj); err != nil {
+		return nil
+	}
+	raw, ok := obj["emit_events"]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		eventType := strings.TrimSpace(sharedjson.AsString(item))
+		if eventType == "" {
+			continue
+		}
+		out = append(out, eventType)
+	}
+	return uniqueStrings(out)
+}
+
+func emitToolDefinitions(cfg models.AgentConfig) []llm.ToolDefinition {
+	if emitEvents := extractEmitEvents(cfg); len(emitEvents) > 0 {
+		return runtimetools.GenerateEmitToolsForEvents(emitEvents, runtimeWarnOnce)
+	}
+	return runtimetools.GenerateEmitToolsForRole(cfg.Role, runtimeWarnOnce)
+}
+
 func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {
 	if !constrained {
 		return in
@@ -554,7 +589,10 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	if payload == "" {
 		payload = "{}"
 	}
-	allowed := commgraph.ProducerEventsForRole(cfg.Role)
+	allowed := extractEmitEvents(cfg)
+	if len(allowed) == 0 {
+		allowed = runtimeauthority.Active().ProducerEventsForRole(cfg.Role)
+	}
 	emitTools := make([]string, 0, len(allowed))
 	for _, evtType := range allowed {
 		emitTools = append(emitTools, runtimetools.EmitToolName(evtType))
@@ -563,7 +601,19 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	if len(emitTools) > 0 {
 		toolsLine = strings.Join(emitTools, ", ")
 	}
-	entityToolsLine := "\n- Available entity persistence tools: get_entity, save_entity_field, create_entity, search_entities, query_metrics"
+	allowedTools, _ := extractAllowedToolSet(cfg)
+	nonEmitTools := make([]string, 0, len(allowedTools))
+	for tool := range allowedTools {
+		if strings.TrimSpace(tool) == "" || strings.HasPrefix(tool, "emit_") {
+			continue
+		}
+		nonEmitTools = append(nonEmitTools, tool)
+	}
+	slices.Sort(nonEmitTools)
+	toolSummaryLine := ""
+	if len(nonEmitTools) > 0 {
+		toolSummaryLine = "\n- Available non-emit tools from your contract: " + strings.Join(nonEmitTools, ", ")
+	}
 	return fmt.Sprintf(
 		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s%s",
 		cfg.ID,
@@ -576,13 +626,33 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 		evt.EntityID(),
 		payload,
 		toolsLine,
-		entityToolsLine,
+		toolSummaryLine,
 		"",
 	)
 }
 
 func canonicalRuntimeRole(role string) string {
-	return commgraph.CanonicalRole(role)
+	return runtimeauthority.Active().CanonicalRole(role)
+}
+
+func uniqueStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 func contractRemediationPrompt(cfg models.AgentConfig, evt events.Event, contractErr error) (string, bool) {

@@ -2,7 +2,9 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -142,14 +144,31 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 }
 
 func TestValidateAgentPermissions_EmpireBundleDoesNotReportUnknownBundles(t *testing.T) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundle(runtimepipeline.WorkflowRepoRoot())
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundle: %v", err)
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	_, errs := ValidateAgentPermissions(semanticview.Wrap(bundle))
 	for _, err := range errs {
 		if strings.Contains(err.Error(), "unknown permissions_bundle") {
 			t.Fatalf("unexpected bundle resolution error: %v", err)
 		}
+	}
+}
+
+func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"emit_events": []string{"coord.done"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	err = NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		ID:     "coordinator-1",
+		Config: raw,
+	}, "emit_coord_done")
+	if err != nil {
+		t.Fatalf("expected configured emit tool to be allowed: %v", err)
 	}
 }

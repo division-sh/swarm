@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/commgraph"
 	"empireai/internal/events"
+	runtimeauthority "empireai/internal/runtime/authority"
 	models "empireai/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
@@ -120,58 +120,11 @@ func authorizeAgentMessage(actor, target models.AgentConfig, manager Manager) er
 	if hasRoleMessageAuthority(actor, target) {
 		return nil
 	}
-	if manager != nil && isManagerAncestor(manager, actor.ID, target.ID) {
-		return nil
-	}
-	if manager != nil && isManagerAncestor(manager, target.ID, actor.ID) {
-		return nil
-	}
 	return fmt.Errorf("role %s cannot message role %s", actor.Role, target.Role)
 }
 
 func hasRoleMessageAuthority(actor, target models.AgentConfig) bool {
-	sender := normalizeCommRole(actor.Role)
-	recipient := normalizeCommRole(target.Role)
-	if sender == "" || recipient == "" {
-		return false
-	}
-	for _, rule := range commgraph.MessageAuthorities() {
-		if normalizeCommRole(rule.SenderRole) != sender {
-			continue
-		}
-		if !messageScopeAllowed(actor, target, rule.Scope) {
-			continue
-		}
-		for _, candidate := range rule.RecipientRoles {
-			if normalizeCommRole(candidate) == recipient {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func messageScopeAllowed(actor, target models.AgentConfig, scope string) bool {
-	scope = strings.TrimSpace(strings.ToLower(scope))
-	switch scope {
-	case "", "any":
-		return true
-	case "global":
-		return actor.EffectiveEntityID() == "" && target.EffectiveEntityID() == ""
-	case "entity":
-		actorEntity := actor.EffectiveEntityID()
-		targetEntity := target.EffectiveEntityID()
-		return actorEntity != "" && actorEntity == targetEntity
-	default:
-		return false
-	}
-}
-
-func normalizeCommRole(role string) string {
-	role = strings.TrimSpace(strings.ToLower(role))
-	role = strings.ReplaceAll(role, "_", "-")
-	role = strings.Join(strings.Fields(role), "-")
-	return role
+	return runtimeauthority.Active().HasMessageAuthority(actor, target)
 }
 
 func isManagerAncestor(manager Manager, managerID, targetID string) bool {
@@ -325,7 +278,7 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if in.Config.Mode == "" {
 		in.Config.Mode = coalesce(actor.Mode, "entity")
 	}
-	if err := authorizeManage(actor, in.Config.Role, in.Config.EffectiveEntityID()); err != nil {
+	if err := authorizeManage(actor, in.Config, manager); err != nil {
 		return nil, err
 	}
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
@@ -352,7 +305,7 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if !ok {
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
-	if err := authorizeManage(actor, targetCfg.Role, targetCfg.EffectiveEntityID()); err != nil {
+	if err := authorizeManage(actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
 	if err := manager.TeardownAgent(in.AgentID); err != nil {
@@ -380,7 +333,7 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	if !ok {
 		return nil, fmt.Errorf("target agent not found: %s", in.AgentID)
 	}
-	if err := authorizeManage(actor, targetCfg.Role, targetCfg.EffectiveEntityID()); err != nil {
+	if err := authorizeManage(actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {
