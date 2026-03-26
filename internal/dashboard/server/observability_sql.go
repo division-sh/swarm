@@ -62,6 +62,7 @@ type eventRecord struct {
 
 type runtimeLogRecord struct {
 	ID            string `json:"id"`
+	EventID       string `json:"event_id,omitempty"`
 	TS            string `json:"ts,omitempty"`
 	Level         string `json:"level,omitempty"`
 	Component     string `json:"component,omitempty"`
@@ -74,8 +75,12 @@ type runtimeLogRecord struct {
 	ErrorCode     string `json:"error_code,omitempty"`
 	AgentID       string `json:"agent_id,omitempty"`
 	EntityID      string `json:"entity_id,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	DurationUS    int    `json:"duration_us,omitempty"`
 	Source        string `json:"source,omitempty"`
 	Message       string `json:"message,omitempty"`
+	Detail        any    `json:"detail,omitempty"`
+	Correlation   any    `json:"correlation,omitempty"`
 }
 
 type incidentRecord struct {
@@ -328,6 +333,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	query := fmt.Sprintf(`
 		SELECT
 			e.event_id::text,
+			COALESCE(e.payload->>'event_id', ''),
 			e.created_at,
 			COALESCE(e.payload->>'level', ''),
 			COALESCE(e.payload->>'component', ''),
@@ -341,6 +347,10 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 			COALESCE(e.payload->>'agent_id', ''),
 			COALESCE(e.payload->>'agent_id', ''),
 			COALESCE(e.payload->>'entity_id', ''),
+			COALESCE(e.payload->>'session_id', ''),
+			COALESCE(NULLIF(e.payload->>'duration_us', ''), '0')::int,
+			COALESCE(e.payload->'detail', '{}'::jsonb),
+			COALESCE(e.payload->'correlation', '{}'::jsonb),
 			COALESCE(e.payload->'detail'->>'message', COALESCE(e.payload->>'error', COALESCE(e.payload->>'action', COALESCE(e.payload->>'event_type', ''))))
 		FROM events e
 		WHERE e.event_name = 'platform.runtime_log'
@@ -372,9 +382,23 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	out := make([]runtimeLogRecord, 0, limit)
 	for rows.Next() {
 		var item runtimeLogRecord
-		if err := rows.Scan(&item.ID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.TraceID, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.Message); err != nil {
+		var (
+			detailRaw      []byte
+			correlationRaw []byte
+		)
+		if err := rows.Scan(&item.ID, &item.EventID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.TraceID, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.SessionID, &item.DurationUS, &detailRaw, &correlationRaw, &item.Message); err != nil {
 			return nil, fmt.Errorf("scan runtime log: %w", err)
 		}
+		detailMap, err := decodeJSONMap(detailRaw)
+		if err != nil {
+			return nil, fmt.Errorf("decode runtime log detail: %w", err)
+		}
+		correlationMap, err := decodeJSONMap(correlationRaw)
+		if err != nil {
+			return nil, fmt.Errorf("decode runtime log correlation: %w", err)
+		}
+		item.Detail = detailMap
+		item.Correlation = correlationMap
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {

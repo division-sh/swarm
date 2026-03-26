@@ -16,19 +16,18 @@ import (
 )
 
 type RuntimeLogEntry struct {
-	Level      string
-	Component  string
-	Action     string
-	EventID    string
-	EventType  string
-	AgentID    string
-	EntityID   string
-	CampaignID string
-	ScanID     string
-	SessionID  string
-	Detail     any
-	Error      string
-	DurationUS int
+	Level       string
+	Component   string
+	Action      string
+	EventID     string
+	EventType   string
+	AgentID     string
+	EntityID    string
+	SessionID   string
+	Correlation map[string]string
+	Detail      any
+	Error       string
+	DurationUS  int
 }
 
 func (e RuntimeLogEntry) EffectiveEntityID() string {

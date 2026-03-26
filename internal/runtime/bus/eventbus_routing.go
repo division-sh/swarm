@@ -95,7 +95,7 @@ func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agent
 		case <-ctx.Done():
 			return
 		case <-time.After(deliverySendTimeout):
-			eb.logRuntime(ctx, "warn", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", "", "", map[string]any{
+			eb.logRuntime(ctx, "warn", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
 				"timeout_ms": int(deliverySendTimeout / time.Millisecond),
 			}, "", 0)
 		}
@@ -269,7 +269,7 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 	_ = recorder.UpsertPipelineReceipt(ctx, eventID, status, errText)
 }
 
-func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int) {
+func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
 	if eb == nil {
 		return
 	}
@@ -279,9 +279,9 @@ func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, ev
 	if logger == nil {
 		return
 	}
-	logger.Log(ctx, level, component, action, eventID, eventType, agentID, entityID, campaignID, scanID, sessionID, detail, errText, durationUS)
+	logger.Log(ctx, level, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS)
 }
 
 func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) {
-	eb.logRuntime(ctx, entry.Level, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.CampaignID, entry.ScanID, entry.SessionID, entry.Detail, entry.Error, entry.DurationUS)
+	eb.logRuntime(ctx, entry.Level, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, entry.Error, entry.DurationUS)
 }

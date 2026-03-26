@@ -726,10 +726,10 @@ type runtimeLoggerHook struct {
 	hub  *runHub
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, campaignID, scanID, sessionID string, detail any, errText string, durationUS int) {
+func (h runtimeLoggerHook) Log(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
 	entry := runtimepkg.RuntimeLogEntry{
 		Level: level, Component: component, Action: action, EventID: eventID, EventType: eventType,
-		AgentID: agentID, EntityID: entityID, CampaignID: campaignID, ScanID: scanID, SessionID: sessionID,
+		AgentID: agentID, EntityID: entityID, SessionID: sessionID, Correlation: correlation,
 		Detail: detail, Error: errText, DurationUS: durationUS,
 	}
 	if h.base != nil {

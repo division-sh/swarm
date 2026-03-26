@@ -18,13 +18,12 @@ type RuntimeLogEntry struct {
 	Component string
 	Action    string
 
-	EventID    string
-	EventType  string
-	AgentID    string
-	EntityID   string
-	CampaignID string
-	ScanID     string
-	SessionID  string
+	EventID     string
+	EventType   string
+	AgentID     string
+	EntityID    string
+	SessionID   string
+	Correlation map[string]string
 
 	Detail     any
 	Error      string
@@ -248,6 +247,25 @@ func sanitizeStringSlice(in []string) []string {
 	return out
 }
 
+func sanitizeStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(in))
+	for rawKey, rawValue := range in {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(rawValue)
+		if value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
+}
+
 func isMissingDiagnosticsTable(err error) bool {
 	if err == nil {
 		return false
@@ -282,12 +300,11 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 		"event_type":      strings.TrimSpace(e.EventType),
 		"agent_id":        strings.TrimSpace(e.AgentID),
 		"entity_id":       strings.TrimSpace(e.EffectiveEntityID()),
-		"campaign_id":     strings.TrimSpace(e.CampaignID),
-		"scan_id":         strings.TrimSpace(e.ScanID),
 		"session_id":      strings.TrimSpace(e.SessionID),
 		"trace_id":        traceID,
 		"parent_event_id": parentEventID,
 		"handler_id":      handlerID,
+		"correlation":     sanitizeStringMap(e.Correlation),
 		"detail":          json.RawMessage(detail),
 		"error":           strings.TrimSpace(e.Error),
 		"duration_us":     e.DurationUS,

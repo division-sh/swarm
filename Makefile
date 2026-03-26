@@ -1,12 +1,8 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
-	lint dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
-	dashboard-local dashboard-local-build dashboard-local-stop \
-	postgres-up postgres-reset mas-local \
+	lint postgres-up postgres-reset mas-local \
 	sync-current-spec
 
 COMPOSE ?= docker compose
-DASHBOARD_LOCAL_PORT ?= 4173
-DASHBOARD_API_ORIGIN ?= http://127.0.0.1:8081
 MAS_HEALTH_PORT ?= 18082
 MAS_DB_HOST ?= 127.0.0.1
 MAS_DB_PORT ?= 5432
@@ -58,34 +54,6 @@ check-key-package-cover:
 
 lint:
 	golangci-lint run ./...
-
-dashboard-build:
-	$(COMPOSE) build dashboard
-
-dashboard-redeploy:
-	$(COMPOSE) up -d --build dashboard
-	@echo "Dashboard redeployed: http://localhost:8070/dashboard/"
-
-dashboard-logs:
-	$(COMPOSE) logs -f dashboard
-
-dashboard-ps:
-	$(COMPOSE) ps dashboard orchestrator
-
-dashboard-local-build:
-	cd internal/dashboard/ui && npm run build
-
-dashboard-local-stop:
-	@pids="$$(lsof -ti tcp:$(DASHBOARD_LOCAL_PORT) 2>/dev/null)"; \
-	if [ -n "$$pids" ]; then \
-		echo "Stopping dashboard server on port $(DASHBOARD_LOCAL_PORT): $$pids"; \
-		kill $$pids; \
-	else \
-		echo "No dashboard server listening on port $(DASHBOARD_LOCAL_PORT)"; \
-	fi
-
-dashboard-local: dashboard-local-build dashboard-local-stop
-	cd internal/dashboard/ui && PLAYWRIGHT_DASHBOARD_PORT=$(DASHBOARD_LOCAL_PORT) DASHBOARD_API_ORIGIN=$(DASHBOARD_API_ORIGIN) node scripts/serve-smoke-dashboard.mjs
 
 postgres-up:
 	$(COMPOSE) up -d postgres

@@ -61,17 +61,6 @@ services:
       - :8070
       - -self-check=false
 
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile.dashboard
-    container_name: mas-dashboard
-    restart: unless-stopped
-    depends_on:
-      - orchestrator
-    ports:
-      - "8070:8070"
-
   # Per-entity and privileged workspaces are created dynamically by runtime policy.
   # This image is the base for those dynamic containers.
   workspace-base:

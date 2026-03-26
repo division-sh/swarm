@@ -102,7 +102,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		recipients := uniqueStrings(intent.Recipients)
 		if len(recipients) > 0 {
 			d.bus.deliverToAgents(ctx, intent.Event, recipients)
-			d.bus.logRuntime(ctx, "debug", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", "", "", map[string]any{
+			d.bus.logRuntime(ctx, "debug", "eventbus", "delivered", intent.Event.ID, string(intent.Event.Type), "", intent.Event.EntityID(), "", nil, map[string]any{
 				"direct":           true,
 				"recipients_count": len(recipients),
 			}, "", 0)
