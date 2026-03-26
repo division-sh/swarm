@@ -1,115 +1,110 @@
 # MAS Platform Guide
 
-This guide is the human-oriented companion to [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md). It covers the same platform surface, but organizes the material around how a reader usually learns and uses the platform rather than around the raw contract layout.
+This guide is the human-oriented companion to [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md). It covers the same platform surface but organizes the material around how a reader usually learns and uses the platform, rather than around the raw contract layout.
 
-The authoritative source of truth remains [platform-spec.yaml](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/contracts/platform-spec.yaml). The prose spec in [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md) is the exact rendering of that YAML. This guide is explanatory. If this guide and the spec ever disagree, the YAML and spec win.
+**Authority boundary.** The authoritative source of truth is always [platform-spec.yaml](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/contracts/platform-spec.yaml). The prose spec in [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md) is the exact rendering of that YAML. This guide is explanatory only. If this guide and the spec ever disagree, the YAML and spec win.
+
+---
 
 ## How To Read This Guide
 
-Read the guide in this order:
+The guide is written in a learning order:
 
-1. Start with the platform mental model.
-2. Read the contract package model and the flow model together.
-3. Read handler execution and engine execution as one runtime story.
+1. Start with the platform mental model — what the platform *is* and what the key nouns mean.
+2. Read the contract package model and the flow model together — these define how you author things.
+3. Read handler execution and engine execution as one runtime story — this is how authored contracts come to life.
 4. Read permissions, tools, prompts, compliance, and workspaces as the control surface around that runtime.
-5. Use the platform tables and observation model as the “what can I inspect?” layer.
+5. Use the platform tables and observation model as the "what can I inspect?" layer.
 
 The guide keeps exact identifiers, enum values, and technical terms from the spec. Where the spec is dense, the guide explains how adjacent sections fit together.
 
+### Five Nouns To Keep Separate
+
+Most onboarding confusion comes from mixing these five concepts together. Before you go further, make sure they are distinct in your head:
+
+A **flow** is a reusable package definition — a directory on disk containing contract files that describe a piece of work. Think of it as a blueprint. It defines states, events, agents, and how they connect.
+
+A **flow instance** is one running copy of that flow. A flow called `scoring` might produce many scoring instances at runtime, each tracking a different piece of work independently. The flow is the class; the instance is the object.
+
+An **entity** is the thing moving through a flow instance's state machine. It has a current state, gate flags, and accumulated data fields. Each entity belongs to exactly one flow instance and progresses through that instance's states.
+
+An **agent** is a runtime role with subscriptions, tools, and permissions. It is defined in `agents.yaml` — its identity, what events it listens to, what tools it can use, and what model tier it runs on.
+
+An **agent session** is one execution context for an agent, scoped by `conversation_mode`. In `task` mode, every event creates a fresh session. In `session_per_entity` mode, the agent keeps continuity across events for the same entity. The agent is the role definition; the session is one active invocation of that role.
+
+---
+
 ## 1. Platform Identity And Vocabulary
 
-The platform is `mas-orchestrator` at version `1.3.0`. The platform vocabulary defines the basic terms used throughout the contracts and runtime.
+The platform is `mas-orchestrator` at version `1.3.0`. Everything in this guide describes behavior at that version.
 
-The key terms are these:
+The platform vocabulary defines the basic terms used throughout all contracts and the runtime. The most important ones are covered below; the full list is in the spec.
 
-- `state_change` is a transition in the entity state machine, triggered by an `advances_to` handler field.
-- `guard` is a boolean check evaluated before handler execution. Guards use CEL expressions evaluated against `entity`, `payload`, and `policy` context. If a guard fails, the handler is blocked.
-- `action` is a platform-provided operation executed as the final step of a handler. Only two valid actions exist: `create_flow_instance` and `record_evidence`.
-- `timer` is a time-based trigger attached to a stage. When its delay elapses, the platform emits the timer’s event, which can trigger a transition.
-- `agent_role` is an entity that owns transitions, handles events, and executes logic.
-- `flow` is the platform’s reusable building block.
-- `state` is a named state in a workflow.
+### Core Vocabulary
 
-### Guard Failure Behavior
+A **state_change** is a transition in the entity state machine, triggered by the `advances_to` field in a handler.
 
-When a guard fails, the platform uses one of these `on_fail_actions`:
+A **guard** is a boolean check evaluated before handler execution. Guards use CEL expressions evaluated against `entity`, `payload`, and `policy` context. If a guard fails, the handler is blocked and the configured `on_fail` action runs. The possible `on_fail_actions` are:
 
-- `reject (default)`
-- `discard`
-- `kill`
-- `escalate:{event}`
+- `reject` (the default) — refuse the event
+- `discard` — silently drop it
+- `kill` — move the entity to a terminal state
+- `escalate:{event}` — emit a named escalation event
 
-### Agent Execution Types
+An **action** is a platform-provided operation that runs as the final step of a handler. Only two valid actions exist: `create_flow_instance` and `record_evidence`. There are no product-specific actions.
 
-The vocabulary distinguishes three execution types:
+A **timer** is a time-based trigger attached to a stage. When its delay elapses, the platform emits the timer's configured event, which enters the normal event loop like any other event. Timers are declared with these required fields: `id`, `state`, `event`, `owner`. Optional fields include `delay_seconds`, `delay_minutes`, `delay_hours`, `delay_days`, `cancellation`, and `recurring`.
 
-- `system_node`: deterministic code, no LLM, fixed logic, event-driven orchestration, workflow transition owner.
-- `agent`: LLM-powered, prompt-driven, model-backed, event-driven, tool-calling, and able to own transitions where judgment is required.
-- `runtime`: the platform itself, handling implicit transitions such as human decisions and lifecycle behavior, without contract declaration.
+### Three Execution Types
 
-### Timer Fields
+The platform distinguishes three kinds of runtime actors. Understanding this distinction is important because it determines what an actor can do and how it is declared.
 
-The vocabulary-level `timer` shape defines these required fields:
+A **system_node** is deterministic code. No LLM. It subscribes to events, executes fixed logic, emits events, and owns workflow transitions. System nodes are the backbone of orchestration.
 
-- `id`
-- `state`
-- `event`
-- `owner`
+An **agent** is LLM-powered. It has a system prompt, a model tier, and a conversation mode. It subscribes to events, reasons about them, and calls tools. Agents can own transitions where the decision requires judgment.
 
-It also defines these optional fields:
-
-- `delay_seconds`
-- `delay_minutes`
-- `delay_hours`
-- `delay_days`
-- `cancellation`
-- `recurring`
+The **runtime** is the platform itself. It handles transitions that are implicit — human decisions, system lifecycle behavior — without needing to be declared in any contract.
 
 ### Flow And State Basics
 
-A `flow` is a self-contained unit with input and output pins, system nodes that orchestrate transitions, and required agent roles. The required files named in the vocabulary are:
+A **flow** is a self-contained unit with input and output pins, system nodes that orchestrate transitions, and required agent roles. The required contract files named in the vocabulary are `nodes.yaml`, `events.yaml`, and `schema.yaml`.
 
-- `nodes.yaml`
-- `events.yaml`
-- `schema.yaml`
+A **state** always belongs to a workflow. An entity is always in exactly one state. States belong to phases for grouping, and some states are terminal (no outgoing transitions). The required state fields are `id` and `phase`. An optional `description` field is also available.
 
-A `state` always belongs to a workflow. An entity is always in exactly one state, states belong to phases for grouping, and some states are terminal. The required state fields are:
-
-- `id`
-- `phase`
-
-The optional state field is:
-
-- `description`
+---
 
 ## 2. The Core Mental Model
 
-The easiest way to understand the MAS platform is to think in layers:
+The easiest way to understand the MAS platform is to think in layers. At the bottom are contract files that define what a flow does. On top of those, the engine loads, validates, and runs everything.
 
-- A `flow` is the unit of composition.
-- `schema.yaml` defines the flow contract.
-- `nodes.yaml` defines deterministic orchestration.
+The contract layer has these files:
+
+- `schema.yaml` defines the flow's public interface — its states, pins, and required roles.
+- `nodes.yaml` defines deterministic orchestration — system nodes and their handlers.
 - `agents.yaml` defines LLM workers and coordinators.
-- `events.yaml` defines payload shapes.
+- `events.yaml` defines event payload shapes.
 - `tools.yaml`, `policy.yaml`, and `prompts/` define the operating environment for agents.
-- The engine loads all flows, resolves their paths, validates them, starts subscribers, and runs the event loop.
 
-In practice, the runtime story is:
+The engine layer loads all flows, resolves their paths, validates them against every contract rule, starts subscribers, and runs the event loop.
+
+### The Runtime In Six Sentences
+
+Here is the thread connecting the rest of the spec:
 
 1. A flow declares states, pins, and required roles.
 2. System nodes subscribe to events and own deterministic transitions.
 3. Agents subscribe to events and handle reasoning work.
-4. Events move work through the system.
-5. Handler execution commits atomically.
+4. Events move work through the system — they are the only communication mechanism.
+5. Each handler execution commits atomically.
 6. The platform persists state, events, deliveries, receipts, sessions, timers, and other runtime infrastructure in platform-owned tables.
 
-That is the thread connecting the rest of the spec.
+---
 
 ## 3. Flow Packages And Contract Files
 
 Every flow uses the same contract layout. `package.yaml` is the manifest. `schema.yaml` is always required. The remaining files are present when the flow needs them.
 
-The canonical layout is:
+### Canonical Directory Layout
 
 ```text
 {root_flow}/                         # Root flow (entry point)
@@ -149,170 +144,127 @@ platform/                            # Platform contracts (separate from any flo
 
 ### Minimum Package Rules
 
-The minimum flow package requires:
+The minimum flow package requires only `package.yaml` and `schema.yaml`. Everything else is optional and follows a simple logic:
 
-- `package.yaml`
-- `schema.yaml`
+- No agents means no `prompts/`.
+- No handlers means no `nodes.yaml`.
+- No events means no `events.yaml`.
 
-The optional files are:
-
-- `nodes.yaml`
-- `events.yaml`
-- `agents.yaml`
-- `tools.yaml`
-- `policy.yaml`
-
-The optional directories are:
-
-- `prompts/`
-- `flows/`
-
-The guide-level summary is simple:
-
-- no agents means no `prompts/`
-- no handlers means no `nodes.yaml`
-- no events means no `events.yaml`
+The optional files are `nodes.yaml`, `events.yaml`, `agents.yaml`, `tools.yaml`, and `policy.yaml`. The optional directories are `prompts/` and `flows/`.
 
 ### Loader Defaults
 
-Several fields are optional because the loader derives them:
+Several fields are optional in contract YAML because the loader derives them from context:
 
-- `schema_name`
-- `schema_namespace`
-- `agent_id`
-- `agent_emit_events`
-
-The important identity rule is that the YAML map key in `agents.yaml` is the canonical agent identity when `agent_id` is omitted.
+- `schema_name` — derived from the directory name if omitted. A flow at `flows/scoring/` gets name `"scoring"`.
+- `schema_namespace` — derived from the flow path relative to root.
+- `agent_id` — derived from the YAML map key. In `agents.yaml`, `{"opco-ceo": {model_tier: sonnet, ...}}` means `agent_id = "opco-ceo"`. An explicit `id` field overrides the map key if present, but this is discouraged.
+- `agent_emit_events` — defaults to an empty list. An agent that only observes may omit `emit_events` entirely.
 
 ### Entity Schema And Event Schema
 
-`entity_schema` in `package.yaml` declares persistent entity fields. The platform derives database DDL from it at boot. The schema is organized into named groups, and its supported types are:
+These two schemas serve very different purposes and are easy to confuse.
 
-- `text`
-- `integer`
-- `numeric(precision,scale)`
-- `boolean`
-- `jsonb`
-- `timestamp`
-- `uuid`
+**Entity schema** (`entity_schema` in `package.yaml`) declares the persistent fields for entities managed by this flow. The platform derives database DDL from it at boot. The schema is organized into named groups, and the supported types are: `text`, `integer`, `numeric(precision,scale)`, `boolean`, `jsonb`, `timestamp`, `uuid`.
 
-`events.yaml` defines payload schemas. It does not define routing. Routing is derived from:
+**Event schema** (`events.yaml`) defines the payload shape for each event. It tells the platform what fields an event carries so it can validate emit calls at runtime.
 
-- `agents.yaml` subscriptions and `emit_events`
-- `nodes.yaml` `subscribes_to` and `event_handlers`
+Here is the critical distinction: `events.yaml` defines payload *shapes*. It does **not** define routing. Routing is derived from:
+
+- `agents.yaml` — subscriptions and `emit_events`
+- `nodes.yaml` — `subscribes_to` and `event_handlers`
 
 The routing consequences are:
 
-- if a system node subscribes to an event, that node owns it
-- if a node and agents subscribe, both receive it
-- if only a node subscribes, it is node-only delivery
-- if no node subscribes, it is pure agent delivery
+- If a system node subscribes to an event, that node owns it.
+- If both a node and agents subscribe, both receive it (dual delivery).
+- If only a node subscribes, it is node-only delivery.
+- If no node subscribes, it is pure agent delivery (passthrough).
+
+This separation means you can change who receives an event by editing subscriptions, without touching the event's payload schema.
 
 ### Persistence Tools Derived From Entity Schema
 
-Agents do not get raw database access. Instead, the platform auto-generates typed persistence tools from `entity_schema`. The guide-level list is:
+Agents do not get raw database access. Instead, the platform auto-generates typed persistence tools from `entity_schema`:
 
-- `get_entity`
-- `save_entity_field`
-- `search_entities`
-- `query_metrics`
+- `get_entity` — read an entity by ID
+- `save_entity_field` — write a specific field on an entity
+- `search_entities` — query entities by stage, field values, or metadata
+- `query_metrics` — read aggregated metrics across entities
 
 ### Required Agents
 
-`required_agents` in `schema.yaml` names the roles a flow requires. The fulfillment rule is strict: the role name in `required_agents` must match the top-level agent key in `agents.yaml`.
+`required_agents` in `schema.yaml` names the roles a flow requires. The fulfillment rule is strict: the role name in `required_agents` must exactly match the top-level agent key in `agents.yaml`. There is no separate `fulfills:` field.
 
-The spec also allows “empty” required agent declarations. A role may exist with empty subscriptions and emits if it coordinates through universal tools like `agent_message` and `mailbox_send`.
+The spec also allows "empty" required agent declarations. A role may exist with empty subscriptions and emits if it coordinates through universal tools like `agent_message` and `mailbox_send`. This is common for managerial roles that coordinate via messages rather than event subscriptions.
 
 ### Underscore-Prefixed Contract Fields
 
 The contracts use two categories of `_`-prefixed fields:
 
-- semantic fields the platform and verifier understand
-- documentation-only fields the platform ignores
+**Semantic fields** that the platform and verifier understand: `_source`, `_consumer`, `_status`, `_producer`. These suppress verifier warnings (like NO-PRODUCER or NO-CONSUMER) and carry meaning.
 
-The semantic fields are:
+**Documentation-only fields** that the platform ignores: anything else starting with `_` (like `_note`, `_routing_note`, `_internal_events_note`). These are human comments. The verifier skips them. They are not part of the contract.
 
-- `_source`
-- `_consumer`
-- `_status`
-- `_producer`
-
-Any other `_`-prefixed field is treated as documentation.
+---
 
 ## 4. The Flow Model
 
-The spec says a `Flow` is the universal building block. There is no separate project concept. Every level of the system is a flow, from the root flow down to the smallest sub-flow.
+The spec says a `Flow` is the universal building block. There is no separate "project" concept. Every level of the system is a flow, from the root flow down to the smallest sub-flow.
 
 ### What A Flow Declares
 
-A flow package is defined by:
-
-- `package.yaml`
-- `schema.yaml`
-- `agents.yaml` when the flow has agents
-- `events.yaml` when the flow declares event schemas
-- `nodes.yaml` when the flow has system nodes
-- `tools.yaml` when the flow needs flow-specific tools
-- `policy.yaml` when the flow needs flow-specific configuration
-- `prompts/` when the flow has agent prompts
-- `flows/` when the flow has child flows
+A flow package is defined by its directory of contract files. `package.yaml` and `schema.yaml` are always required. Beyond those, you add files based on what the flow does: `agents.yaml` when the flow has agents, `events.yaml` when it declares event schemas, `nodes.yaml` when it has system nodes, `tools.yaml` and `policy.yaml` when it needs flow-specific configuration, `prompts/` when it has agent prompts, and `flows/` when it has child flows.
 
 ### Nesting
 
-Flows nest recursively. A flow’s `package.yaml` names child flows in `flows:`. Each child lives under `flows/` and has the same structure. The root flow is not structurally special. It is the entry point, but it is still just a flow with nodes, agents, events, policy, and child flows.
+Flows nest recursively. A flow's `package.yaml` names child flows in its `flows:` list. Each child lives under `flows/` and has the same structure. The root flow is not structurally special — it is the entry point, but it is still just a flow with nodes, agents, events, policy, and child flows.
 
-### Pins
+The practical way to think about nesting:
 
-Pins are the public interface of a flow.
+- The root flow is the top of the address tree.
+- Child flows are named subdomains under that root.
+- Each nested flow keeps its own local contract files.
+- The engine walks the tree and turns that nested structure into one runtime registry.
 
-The guide version of the pin model is:
+So the filesystem is nested for authors, but the runtime turns it into one connected event system.
 
-- input event pins are the events the flow subscribes to
-- output event pins are the events the flow emits
-- input data pins are the entity fields the flow reads
-- output data pins are the entity fields the flow writes
+### Pins: The Public Interface Of A Flow
 
-The spec-level consequences matter:
+Pins are what the outside world is allowed to assume about a flow. They are its public API.
 
-- required input event pins must be wired
-- required input data pins must be available from earlier outputs or initial data
-- no two flows may write the same output data pin
-- internal events inside a flow are not part of the public pin interface
+- **Input event pins** are the events the flow subscribes to from the outside.
+- **Output event pins** are the events the flow emits to the outside.
+- **Input data pins** are the entity fields the flow reads.
+- **Output data pins** are the entity fields the flow writes.
 
-### Required Agents In The Flow Model
+The spec enforces these constraints at boot:
 
-At the flow-model level, a `required_agents` entry contains:
+- Required input event pins must be wired (some other flow must emit them).
+- Required input data pins must be available from earlier outputs or initial data.
+- No two flows may write the same output data pin.
 
-- `role`
-- `subscribes_to`
-- `emits`
-- `description`
-
-The platform validates that actual agents fulfill those event contract requirements after namespace resolution.
+An important subtlety: `events.yaml` can contain more events than the pin list shows. That is because a flow may have **internal events** — events used inside the flow's own orchestration that are not part of its public interface. The pin list is the public contract; `events.yaml` is the full implementation inventory.
 
 ### Cross-Flow Event Ownership
 
-Event schemas are defined once, in the flow that emits them. Consuming flows reference them by absolute path. They do not redefine them. If the same event name appears in multiple flow event files, the emitter flow’s definition is authoritative and boot logs a warning.
+Event schemas are defined once, in the flow that emits them. Consuming flows reference them by absolute path. They do not redefine them. If the same event name appears in multiple flow event files, the emitter flow's definition is authoritative and boot logs a warning.
 
 ### Stateless Flows
 
-The spec explicitly allows stateless flows. In a stateless flow:
-
-- `initial_state: null`
-- `states: []`
-- no `entity_state` rows are created
-- `advances_to` is invalid
-- guards may reference `payload` and `policy`, but not `entity`
-- accumulators are flow-scoped rather than entity-scoped
+The spec explicitly allows stateless flows. In a stateless flow, `initial_state` is `null`, `states` is empty, no `entity_state` rows are created, `advances_to` is invalid, guards may reference `payload` and `policy` but not `entity`, and accumulators are flow-scoped rather than entity-scoped.
 
 ### State Composition Across Flows
 
-Each flow has its own state machine. There is no single global enum for an entity across the entire platform. When an entity moves from one flow to another, one flow emits a cross-flow event and the next flow handles that event into its own state space.
+Each flow has its own state machine. There is no single global state enum for an entity across the entire platform. When an entity moves from one flow to another, one flow emits a cross-flow event and the next flow handles that event into its own state space.
+
+---
 
 ## 5. Hello World Example
 
-The spec’s hello world example is the smallest useful illustration of the contract model:
+The spec's hello world example is the smallest useful illustration of the contract model. It shows one flow with one event, one handler, and one state transition.
 
+**package.yaml:**
 ```yaml
 name: hello
 version: 1.0.0
@@ -320,6 +272,7 @@ platform_version: ">=1.1.0"
 flows: []
 ```
 
+**schema.yaml:**
 ```yaml
 initial_state: waiting
 terminal_states: [done]
@@ -331,6 +284,7 @@ pins:
     events: [hello.completed]
 ```
 
+**nodes.yaml:**
 ```yaml
 hello-node:
   id: hello-node
@@ -343,6 +297,7 @@ hello-node:
       emits: hello.completed
 ```
 
+**events.yaml:**
 ```yaml
 hello.requested:
   payload:
@@ -353,19 +308,19 @@ hello.completed:
     entity_id: string
 ```
 
-The example is useful because it shows the core platform loop in one handler:
+This example shows the core platform loop in one handler: receive an event, advance state, emit a follow-up event. Every handler in the platform, no matter how complex, is a variation on this pattern.
 
-- receive an event
-- advance state
-- emit a follow-up event
+---
 
 ## 6. Handler Execution
 
-The handler specification is one of the most important parts of the platform. The spec does not define a 10-step sequential recipe. It defines a dependency graph.
+The handler specification is one of the most important parts of the platform. If you understand handlers, you understand how all work actually happens.
+
+A common misconception is that the spec defines a 10-step sequential recipe. It does not. It defines a **dependency graph**. The graph says which steps must finish before other steps can begin. Steps at the same level are independent — the engine may execute them in any order.
 
 ### The Dependency Graph
 
-This graph is the central model:
+This graph is the central execution model:
 
 ```text
 query (optional — pre-fetch cross-entity data into handler context)
@@ -386,502 +341,444 @@ query (optional — pre-fetch cross-entity data into handler context)
                                                                  └→ clear (optional — reset accumulator/state buckets)
 ```
 
-The key interpretive point is that arrows mean “must complete before.” Steps at the same level are independent. That is why the spec says YAML field order is cosmetic.
+Arrows mean "must complete before." That is why the spec says YAML field order within a handler is cosmetic — the engine executes fields per this graph, not per source order. Authors *should* order fields to match the graph for readability, but the engine does not require it.
 
 ### Atomicity
 
-A handler execution is atomic. State change, gate updates, data writes, and event persistence commit in one transaction. Guards read pre-handler state. The current handler’s `data_accumulation` does not affect the current handler’s guard; it affects later handler executions after commit.
+Every handler execution is atomic. State changes, gate updates, data writes, and event persistence all commit in a single database transaction. No external observer ever sees intermediate state.
+
+An important consequence: guards evaluate against entity state *before* any handler writes. The current handler's `data_accumulation` does not affect the current handler's guard. It affects the *next* handler that runs after this transaction commits.
 
 ### Short-Circuits
 
 Handlers can stop early in two important ways:
 
-- `guard_fail`: the handler stops and runs the configured `on_fail` behavior
-- `accumulate_incomplete`: the handler records the arrival and stops until completion criteria are met
+- **Guard failure:** The handler stops and runs the configured `on_fail` behavior (`reject`, `discard`, `kill`, or `escalate:{event}`). No further steps execute.
+- **Accumulate incomplete:** The handler records the event arrival and stops. No further steps execute until the accumulation completion condition is met.
 
-### `on_complete` And `rules`
+### `on_complete` And `rules`: Two Ways To Branch
 
-These are mutually exclusive branch mechanisms:
+These are mutually exclusive — a handler uses one or the other, never both.
 
-- `on_complete` is an ordered list, first match wins, and is used after accumulation or computation
-- `rules` is a map used for payload-based routing
+**`on_complete`** is an ordered list of `{condition, advances_to, emits}` objects. Conditions are evaluated top to bottom; the first match wins. This is used after accumulation or computation when you need conditional branching based on computed results.
 
-### Core Handler Fields
+**`rules`** is a map of named rules used for payload-based routing. Each rule has a condition evaluated against the payload, plus optional `emits`, `advances_to`, and `data_accumulation`. This is used for type-dispatching — routing different kinds of incoming events to different outcomes.
 
-The spec calls these the core fields:
+### Core Fields vs. Extension Fields
 
-- `guard`
-- `advances_to`
-- `sets_gate`
-- `data_accumulation`
-- `emits`
-- `rules`
-- `on_complete`
+Most handlers use a small core subset. The spec draws this distinction explicitly.
 
-The extension fields are:
+**Core fields** (used by 90%+ of handlers — learn these first):
+`guard`, `advances_to`, `sets_gate`, `data_accumulation`, `emits`, `rules`, `on_complete`
 
-- `accumulate`
-- `compute`
-- `fan_out`
-- `filter`
-- `reduce`
-- `count`
-- `query`
-- `clear`
-- `payload_transform`
-- `clear_gates`
-- `action`
+**Extension fields** (used by specialized handlers — learn when needed):
+`accumulate`, `compute`, `fan_out`, `filter`, `reduce`, `count`, `query`, `clear`, `payload_transform`, `clear_gates`, `action`
 
 ### Handler Fields At A Glance
 
-This is the practical reading of the handler field surface:
-
-- `description`: documentation only
-- `guard`: gatekeeper for execution
-- `accumulate`: wait for multiple arrivals
-- `compute`: run a platform computation primitive
-- `on_complete`: post-accumulation branching
-- `advances_to`: set `entity.state`
-- `sets_gate`: set `entity.gates.{name} = true`
-- `data_accumulation`: write payload-derived values into entity state
-- `emits`: publish follow-up events
-- `rules`: payload-based routing
-- `fan_out`: emit per item in a list
-- `query`: pre-fetch cross-entity data
-- `reduce`: aggregate items
-- `filter`: prune items by condition
-- `count`: count items
-- `clear`: clear state buckets
-- `action`: invoke a platform action
-- `payload_transform`: construct emitted payloads explicitly
-- `clear_gates`: reset all entity gates to `false`
-- `evidence_target`: required when `action` is `record_evidence`
+| Field | Purpose |
+| --- | --- |
+| `description` | Documentation only. Not executed. |
+| `guard` | Gatekeeper — blocks execution if conditions fail. |
+| `accumulate` | Wait for multiple event arrivals before continuing. |
+| `compute` | Run a platform computation primitive (weighted_average, sum, etc.). |
+| `on_complete` | Post-accumulation/computation conditional branching. |
+| `advances_to` | Set `entity.state` to a target state. |
+| `sets_gate` | Set `entity.gates.{name} = true`. |
+| `data_accumulation` | Write payload-derived values into entity state. |
+| `emits` | Publish follow-up event(s). |
+| `rules` | Payload-based routing with per-rule side effects. |
+| `fan_out` | Emit one event per item in a list. |
+| `query` | Pre-fetch cross-entity data into handler context. |
+| `reduce` | Aggregate accumulated items into a single value. |
+| `filter` | Keep only items matching a condition. |
+| `count` | Count items matching a condition. |
+| `clear` | Reset accumulator or state buckets after everything else. |
+| `action` | Invoke a platform action (`create_flow_instance` or `record_evidence`). |
+| `payload_transform` | Construct emitted payloads explicitly from multiple sources. |
+| `clear_gates` | Reset all entity gates to `false`. |
+| `evidence_target` | Required when `action` is `record_evidence`. |
 
 ### The Only Valid Actions
 
 The platform has exactly two valid handler actions:
 
-- `create_flow_instance`
-- `record_evidence`
+**`create_flow_instance`** creates a new dynamic flow instance from a template. It requires three sibling fields: `template` (the template flow ID), `instance_id_from` (the payload field containing the unique instance ID), and `config_from` (maps instance variable names to payload field paths).
 
-`create_flow_instance` requires:
-
-- `template`
-- `instance_id_from`
-- `config_from`
-
-`record_evidence` appends payload data to the target accumulator and requires:
-
-- `evidence_target`
+**`record_evidence`** appends event payload data to the target accumulator. It requires `evidence_target`.
 
 ### Canonical `data_accumulation`
 
-The spec gives a canonical shape for `data_accumulation`:
+The spec defines one canonical shape for `data_accumulation`:
 
 ```yaml
 data_accumulation:
   writes:
-    - field_name
-    - source_field: payload_key
+    - field_name                          # direct: payload.field_name → entity.field_name
+    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key
       target_field: entity_key
-  source_event: event_name
+  source_event: event_name                # optional: defaults to the trigger event
 ```
 
-It also allows computed writes:
+Computed writes are also supported:
 
 ```yaml
 data_accumulation:
   writes:
-    - field_name
-    - source_field: payload_key
-      target_field: entity_key
     - target_field: entity_key
-      expression: "entity.counter + 1"
-  source_event: event_name
+      expression: "entity.counter + 1"    # CEL expression → entity.target_key
 ```
 
 ### Rules And Handler-Level Defaults
 
-When a handler has both `rules` and handler-level fields:
+When a handler has both `rules` and handler-level fields, the interaction is:
 
-- rule-level side effects execute first
-- handler-level `data_accumulation` supplements rule-level writes
-- handler-level `emits` supplements rule-level emits
-- rule values override handler-level defaults for the same field
+1. The matching rule fires first with its condition-specific side effects.
+2. Handler-level `data_accumulation` executes after rules — it *supplements* rule-level writes, it does not replace them.
+3. Handler-level `emits` fires after rules — both rule-level emits and handler-level emits fire (handler-level is unconditional).
+4. For fields like `advances_to` and `sets_gate`, the rule value *overrides* the handler-level value if present. Fields not specified in the rule fall through to handler-level.
+
+---
 
 ## 7. The Engine Runtime
 
-The engine defines how flows are discovered, loaded, validated, started, and executed.
+The engine defines how flows are discovered, loaded, validated, started, and executed. This section tells the runtime story from boot to steady-state event processing.
 
 ### Flow Tree Walker
 
-The flow tree walker starts at the root directory, reads `package.yaml`, registers the flow, descends through `flows:`, and produces a flat list of flow entries. Important constraints include:
+The engine starts by discovering the flow structure. The flow tree walker begins at the root directory, reads `package.yaml`, registers the flow, descends through `flows:`, and produces a flat list of flow entries.
 
-- `package.yaml` and `schema.yaml` are always required
-- a flow must have either `agents.yaml` or at least one child flow
-- maximum nesting depth is `99`
-- duplicate flow IDs anywhere in the tree are a boot error
+Important constraints:
+
+- `package.yaml` and `schema.yaml` are always required.
+- A flow must have either `agents.yaml` or at least one child flow.
+- Maximum nesting depth is `99`.
+- Duplicate flow IDs anywhere in the tree are a boot error.
+
+The important onboarding point is that the engine first discovers structure and only then validates meaning. It does not try to partially execute contracts while still discovering them.
 
 ### URI Addressing
 
-The engine gives every addressable runtime entity a path.
+The engine gives every addressable runtime entity — every node, agent, and event — a path. Two forms matter day to day:
 
-Two forms matter day to day:
+- **Local:** `{name}` — means "the thing called this in the current flow."
+- **Absolute:** `{flow_id}/{flow_id}/.../{name}` — means "the thing at this specific location from the root."
 
-- local: `{name}`
-- absolute: `{flow_id}/{flow_id}/.../{name}`
+The rule is simple: no slash means local, slash means absolute. So `portfolio-node` is "the node in my flow," while `validation/research/research.completed` is "the `research.completed` event inside the `research` flow inside the `validation` flow."
 
-The rule is simple:
+The path is not decoration. It is how the platform avoids global name collisions. Two flows can each have a node called `orchestrator` and there is no conflict — they live at different paths.
 
-- no slash means local to the current flow
-- slash means absolute from the root
+#### What `*` And `**` Mean In Subscriptions
 
-The spec also defines wildcard patterns:
+This is one of the places where the spec is compact and first-time readers benefit from a more explicit explanation.
 
-- `*/entity.shortlisted`
-- `**/entity.completed`
+**`*` matches one path segment** at that position. Think of it as "one hop." So `*/entity.shortlisted` means "match `entity.shortlisted` from any direct child flow under the current level."
+
+**`**` matches across any depth** below that point. Think of it as "any number of hops." So `**/entity.completed` means "match `entity.completed` anywhere below this point, even through multiple levels of nested flows."
+
+These wildcard patterns are used in subscription matching across flow instances. They are not a separate routing system — they are a way to write subscriptions that match events from flows that may not exist yet (like dynamic instances).
+
+#### Local Versus Absolute References
+
+When authoring contracts, prefer local names when the target is inside the same flow and absolute paths when the target is in another flow. This keeps contracts readable and lets the platform resolve everything into full internal paths at boot.
 
 ### Contract Merger
 
-After flow discovery, the engine builds runtime registries. Every node, agent, and event receives a full URI. Tools are flat and shared. Policy is hierarchical, with child overrides of parent values.
+After flow discovery, the engine builds runtime registries. Every node, agent, and event receives a full URI. Tools are flat and shared (root-level tools are available to all children; a child tool with the same ID overrides the root tool within that child). Policy is hierarchical, with child values overriding parent values for the same key.
 
-### Dynamic Instances
+The useful consequence is that authors can reuse common local names like `orchestrator`, `ready`, or `completed` in different flows without creating runtime ambiguity. The full path makes each one unique.
 
-Dynamic flow instances are created by handler action, not by ad hoc runtime code. The parent flow must declare the child flow as `mode: template`. At runtime:
+### Static Flows, Template Flows, And Dynamic Instances
 
-1. the handler calls `create_flow_instance`
-2. the platform validates the template and `instance_id`
-3. the platform loads the template contracts
-4. the platform registers nodes, agents, and events
-5. the platform creates the entity at the flow’s `initial_state`
-6. wildcard subscriptions are expanded
-7. the new instance starts
+This is another area that benefits from a clear explanation of three distinct concepts:
 
-The addressing distinction is:
+A **static flow** is declared in `package.yaml` with `mode: static` (the default). The platform creates one running instance at boot. It has a fixed path like `{flow_id}/{local_name}`.
 
-- static flow: `{flow_id}/{local_name}`
-- template instance: `{template_id}/{instance_id}/{local_name}`
+A **template flow** is declared with `mode: template`. The platform loads its definition at boot but does *not* start a running copy. It is a blueprint waiting to be instantiated.
+
+A **dynamic instance** is a running copy created from a template at runtime. A handler calls `create_flow_instance`, the platform validates the template and `instance_id`, loads the template contracts, registers nodes, agents, and events, creates the entity at the flow's `initial_state`, expands wildcard subscriptions, and starts the new instance. Its path includes the instance ID: `{template_id}/{instance_id}/{local_name}`.
+
+That means a template can produce many sibling instances, each with its own path, entity state, subscriptions, and runtime lifecycle.
+
+#### Why Wildcard Expansion Matters For Dynamic Instances
+
+Suppose an agent wants to observe events from every instance under a template. The agent cannot hardcode future instance IDs, because those instances do not exist yet. A wildcard subscription like `{template_id}/*/entity.completed` solves that. When a new instance is created, the platform expands existing wildcard subscriptions so the new instance becomes visible automatically.
+
+That is why the spec talks about wildcard subscriptions being updated on dynamic instance creation — it is the mechanism that makes dynamic flows observable.
 
 ### Boot Sequence
 
-The boot sequence moves from `load_platform_spec` to `ready`. The most important checkpoints are:
+The boot sequence moves from `load_platform_spec` to `ready` through 15 ordered steps. The most important checkpoints are:
 
-- walk the flow tree
-- construct paths
-- register templates
-- build registries
-- resolve subscriptions
-- validate pins
-- validate required agents
-- validate tools
-- validate permissions
-- validate platform version
-- initialize state stores
-- start system nodes
-- start agents
+1. Walk the flow tree.
+2. Construct paths.
+3. Register templates (but do not start them).
+4. Build registries (nodes, agents, events, tools, policy).
+5. Resolve subscriptions (local, absolute, and wildcard).
+6. Validate: pins, required agents, tools, permissions, platform version.
+7. Initialize state stores.
+8. Start system nodes, then start agents.
 
-If any boot step fails, startup aborts completely.
+If any boot step fails, startup aborts completely. There is no partially-valid runtime where some flows started and others did not. That "all or nothing" behavior is one of the platform's strongest operational guarantees.
 
 ### Event Loop
 
-The runtime cycle is:
+Once boot completes, the platform enters the event loop. This is the core runtime cycle:
 
-1. an event arrives
-2. payload validation runs
-3. the event is persisted
-4. subscribers are resolved
-5. subscribing system nodes handle it
-6. subscribing agents receive inbox delivery
-7. emitted events are delivered after commit
-8. the original event is marked delivered
+1. **Event arrives** — from an agent emit, system node emit, timer fire, human input, handoff, or external API.
+2. **Payload validation** — checked against `events.yaml` schema. Invalid events are rejected.
+3. **Event persisted** — written to the event store before any processing begins. If the platform crashes after this point, the event replays on recovery.
+4. **Subscribers resolved** — system nodes (from `subscribes_to`) and agents (from subscriptions) are identified.
+5. **Node handling** — for each subscribing system node: acquire entity lock, execute the dependency-graph handler atomically, release lock. Emitted events are persisted inside the atomic boundary but delivered *after* commit.
+6. **Agent delivery** — for each subscribing agent: the event is placed in the agent's inbox. Processing is asynchronous.
+7. **Emitted events delivered** — events emitted by node handlers in step 5 now enter the loop at step 1 in their own cycle.
+8. **Original event marked delivered.**
 
-Important runtime semantics:
+Two implications are especially important:
 
-- events are serialized per entity
-- events across different entities are concurrent
-- emitted events from node handlers are persisted inside the atomic boundary but delivered after commit
-- agent deliveries are asynchronous
+**Per-entity serialization.** Events for the same entity are processed one at a time. This means the platform protects entity state from races without requiring flow authors to reason about low-level locking. Events for *different* entities are fully concurrent.
+
+**Post-commit delivery.** A node handler never recursively "dives into" the next emitted handler before its own transaction is complete. This keeps handler chains understandable and prevents deadlock-style behavior.
 
 ### State Management
 
-The engine tracks three state kinds:
+The engine tracks three kinds of state per entity instance. Understanding the distinction helps you reason about contracts:
 
-- `entity_state`
-- `accumulator_state`
-- `gate_state`
+**`entity_state`** answers "where is this entity in the flow?" It is a single string value set by `advances_to`. Initial value comes from `schema.yaml`, terminal values from `terminal_states`.
 
-Terminal states are absorbing. Once an entity reaches a terminal state:
+**`accumulator_state`** answers "what partial work has this handler pattern collected so far?" It tracks intermediate data for handlers using the `accumulate` pattern — which scoring dimensions have arrived, which partitions completed, what intermediate values have been computed.
 
-- new events targeting that entity are rejected before handler execution
-- timers are cancelled
-- agent sessions are terminated
-- persisted state remains queryable
+**`gate_state`** answers "which boolean milestones are already complete?" Gates are boolean flags on the entity, set by `sets_gate` and checked by guards. They are useful for validation-style flows that track which sub-steps have finished.
+
+These are different kinds of state that solve different problems. Blurring them together makes contracts hard to reason about.
+
+**Terminal states** are absorbing. Once an entity reaches a terminal state, new events targeting it are rejected before handler execution, timers are cancelled, agent sessions are terminated, and all persisted state remains queryable. There is no mechanism to reopen a terminal entity — if the business needs to "reopen" something, the correct pattern is to create a new entity with data copied from the old one. The old entity stays terminal to preserve the audit trail.
+
+Backward transitions to *non-terminal* states are allowed. Revision loops, reset-to-researching, and similar patterns are valid — the prohibition is specifically on leaving terminal states.
 
 ### Accumulation Engine
 
-The accumulation engine creates and updates accumulator records for handlers using `accumulate`. It tracks received items by `dedup_by`, checks `all`, `threshold`, or `timeout` completion modes, and makes accumulated data available to `on_complete`, `compute`, and later steps.
+The accumulation engine handles the `accumulate` primitive. Think of it as "wait for enough pieces before continuing."
+
+When an entity first encounters a handler with `accumulate`, the platform creates an accumulator record tracking expected and received items. Each event arrival is identified by its `dedup_by` key (default: sender session ID; can be overridden to a payload field like `payload.dimension`). Duplicate arrivals with the same key are ignored — accumulation is idempotent.
+
+After each arrival, the platform checks the completion condition:
+
+- **`all`** — proceed when every expected item has been received.
+- **`threshold`** — proceed when the received count reaches a configured number.
+- **`timeout`** — proceed when a timer fires, regardless of how many items arrived.
+
+When the condition is met, the handler continues to its remaining steps (`compute`, `on_complete`, etc.). If the handler declares `on_timeout`, the platform executes that branch when the timer fires before completion, with whatever partial data arrived.
 
 ### Agent Session Management
 
-Agent sessions follow this lifecycle:
+When an event arrives in an agent's inbox, the platform creates or resumes an agent session:
 
-1. event arrives in inbox
-2. prompt is loaded and variables are substituted
-3. tools are attached
-4. the agent processes the event
-5. tool calls are validated
-6. emitted events are validated and published
-7. session completes or hits `max_turns_per_task`
-8. session state is persisted when applicable
+1. Event arrives in inbox.
+2. Prompt is loaded from `prompts/` and `{{variables}}` are substituted.
+3. Tools are attached from the tool registry.
+4. The agent processes the event — reasons, calls tools, emits events.
+5. Each tool call is validated (schema and permissions) before execution.
+6. Each emitted event is validated against its payload schema and enters the event loop.
+7. Session completes when the agent signals done or hits `max_turns_per_task`.
+8. Session state is persisted for audit and debugging.
 
-The supported `conversation_mode` values are:
+The platform auto-generates emit tools from each agent's `emit_events` list. Agents do not need to list emit tools in `tools_tier2`. Universal tools (`agent_message`, `mailbox_send`) are also auto-granted.
 
-- `task`
-- `session`
-- `session_per_entity`
-- `stateless` as an alias normalized to `task`
+#### Conversation Modes
+
+The `conversation_mode` field controls how the platform manages session context:
+
+- **`task`** — new session per event. No memory between invocations. This is the default.
+- **`session`** — session persists across events. Conversation history accumulates.
+- **`session_per_entity`** — one session per (agent, entity) pair. The agent retains context across multiple events for the same entity but has separate sessions for different entities. Useful for agents that build understanding over time, like a research agent assembling a brief over multiple turns.
+- **`stateless`** — alias for `task`, normalized internally.
 
 ### Timer Model
 
-Timers are durable delayed events. They start on a configured state or event, are persisted, fire as regular events, and can be recurring.
+Timers are durable delayed events. They are not special background magic — they are delayed event producers. When a timer fires, the resulting event goes through the normal event loop like any other event.
 
-The declaration fields are:
+Timer declaration fields: `id`, `event`, `delay` (duration string or policy reference), `recurring` (boolean), `start_on` (state or event that starts the timer), `cancel_on` (state or event that cancels it).
 
-- `id`
-- `event`
-- `delay`
-- `recurring`
-- `start_on`
-- `cancel_on`
+The lifecycle: the timer starts when the entity enters the `start_on` state or the `start_on` event fires; the platform persists the timer with a `fire_at` timestamp; when `fire_at` is reached, the timer event enters the event loop; if `cancel_on` fires first, the timer is cancelled. Recurring timers restart after firing unless cancelled. Timers survive crashes because they are persisted.
 
 ### Expression Language
 
-The platform uses CEL for:
+The platform uses CEL (Common Expression Language) for all guard checks, rule conditions, filter conditions, and `on_complete` branch conditions.
 
-- guard checks
-- rule conditions
-- filter conditions
-- `on_complete` branch conditions
+The context variables available in CEL expressions are:
 
-The context variables are:
-
-- `entity`
-- `payload`
-- `policy`
-- `fan_out`
-- `accumulated`
+- `entity` — current entity state (all fields from entity_schema, state, and gates)
+- `payload` — current event payload fields
+- `policy` — policy values from flow and root policy files
+- `fan_out` — available after a fan_out step (e.g., `fan_out.count`)
+- `accumulated` — available inside `on_complete` after accumulation
 
 ### Error Model
 
-The engine distinguishes:
+The engine handles failures at each layer:
 
-- event validation failure
-- handler execution failure
-- agent session failure
-- timer failure
-- chain depth overflow
-
-The chain depth limit is `50`. When it is exceeded, the would-be emitted event is intercepted and moved to `dead_letters`. The triggering handler still succeeds.
+- **Event validation failure:** rejected, logged, not delivered, no retry.
+- **Handler execution failure:** atomic boundary rolls back. Retries up to 3 with exponential backoff (1s, 2s, 4s) for transient errors. Guard failures and business logic errors are not retried. After retry exhaustion, the event goes to `dead_letters`.
+- **Agent session failure:** terminated after 1 retry, then dead-lettered.
+- **Timer failure:** treated as a regular event, same retry policy.
+- **Chain depth overflow:** the platform tracks a `chain_depth` counter on each event. When it exceeds `50`, the would-be emitted event is intercepted and sent to `dead_letters`. The triggering handler still succeeds — chain depth overflow is an emission interception, not a handler failure.
 
 ### Boot Verification
 
-The engine’s authoritative boot verification list includes `19` checks. The most important names to recognize are:
+The engine runs 19 contract verification checks at boot, after loading all contracts and before starting any nodes or agents. If any check with `error` severity fails, boot aborts. Checks with `warning` severity log a finding but allow boot to continue.
 
-- `event_chain_integrity`
-- `event_consumer_exists`
-- `event_producer_exists`
-- `payload_field_coverage`
-- `condition_payload_alignment`
-- `state_machine_coherence`
-- `required_agents_match`
-- `handler_field_compliance`
-- `tool_resolution`
-- `prompt_exists`
-- `produces_drift`
-- `invalid_field_detection`
-- `policy_conflict_detection`
-- `event_cycle_detection`
-- `dialect_compliance`
-- `single_node_per_event`
-- `config_from_payload_alignment`
-- `phantom_produces`
+The most important checks to recognize:
+
+- `event_chain_integrity`, `event_consumer_exists`, `event_producer_exists` — verify events have both producers and consumers.
+- `payload_field_coverage`, `condition_payload_alignment` — verify handlers reference fields that actually exist.
+- `state_machine_coherence` — verify state transitions make sense.
+- `required_agents_match` — verify agent roles are fulfilled.
+- `handler_field_compliance` — verify handlers use only valid field names and shapes.
+- `single_node_per_event` — verify each event is handled by at most one system node.
+- `event_cycle_detection` — verify no infinite event loops.
+
+---
 
 ## 8. Compliance, Permissions, Tools, And Prompts
 
-These four sections define the control layer around execution.
+These four areas define the control layer around execution. They answer: what is an agent *allowed* to do, what tools does it have, how is its prompt constructed, and how does the platform verify all of this?
 
 ### Compliance
 
-Compliance defines both boot-time and runtime enforcement.
+Compliance defines both boot-time and runtime enforcement. The most important runtime checks are:
 
-At runtime, the required checks include:
+- Tool calls are validated against tool schema before execution.
+- Tool calls are checked against agent permissions before execution.
+- Message delivery is checked against agent messaging scope.
+- State changes only follow declared `advances_to` paths.
+- Guards execute before state advancement.
+- Event payloads are validated before publish.
+- Accumulation is idempotent.
 
-- tool schema validation before execution
-- permission checks before tool execution
-- message scope enforcement for agent messaging
-- state changes limited to declared `advances_to` paths
-- guard execution before state advancement
-- payload validation before publish
-- idempotent accumulation behavior
-- reading permissions from `agent.permissions`
-- reading scan modes from `policy.scan_modes`
-- reading manager fallback from `agent.manager_fallback`
-- reading workspace class from `agent.workspace_class`
-
-The testing section turns those guarantees into required test coverage.
+The spec is written so both the runtime and test suite can enforce these guarantees. Compliance is not advisory — it is mechanical.
 
 ### Permissions Model
 
 Agents have a `permissions` list. The platform enforces permissions at tool execution time and message routing time.
 
-The platform-defined permissions are:
+The platform-defined permissions are: `agent_fire`, `agent_hire`, `agent_reconfigure`, `approve_spend`, `configure_routing`, `create_flow_instance`, `human_task_decide`, `human_task_request`, `mailbox_send`, `message_flow`, `message_peers`, `schedule`.
 
-- `agent_fire`
-- `agent_hire`
-- `agent_reconfigure`
-- `approve_spend`
-- `configure_routing`
-- `create_flow_instance`
-- `human_task_decide`
-- `human_task_request`
-- `mailbox_send`
-- `message_flow`
-- `message_peers`
-- `schedule`
-
-`permissions_bundle` can be combined with explicit `permissions`, and explicit permissions extend the bundle.
+An agent may declare both `permissions_bundle` and explicit `permissions`. The bundle is expanded first, then explicit permissions are added (extending, not replacing).
 
 #### Permission Scoping
 
-The spec is strict here:
+The spec is strict about scoping. **All scoping is flow-instance-local.** No permission grants cross-flow access. Cross-flow communication happens through events only.
 
-- all scoping is flow-instance-local
-- no permission grants cross-flow access
-- cross-flow communication is via events only
+**Messaging scope** is limited to two options:
 
-Messaging scope is limited to:
+- `message_peers` — the agent can message other agents that share the same `manager_fallback` value within the same flow instance.
+- `message_flow` — the agent can message any agent in the same flow instance.
 
-- `message_peers`: agents sharing the same `manager_fallback` value in the same flow instance
-- `message_flow`: any agent in the same flow instance
+There is no `message_all` and no `message_domain`. The spec explicitly rejects broader interpretations like "I can message anywhere in the product" or "I can message across flow boundaries because I know the path."
 
-There is no `message_all` and no `message_domain`.
+**Management scope** (`agent_hire`, `agent_fire`, `agent_reconfigure`) follows the `manager_fallback` chain downward within the same flow instance. An agent can manage those below it in the chain, but cannot manage itself or its own ancestors.
 
-Management scope for `agent_hire`, `agent_fire`, and `agent_reconfigure` follows the `manager_fallback` chain downward within the same flow instance.
+**Routing scope** (`configure_routing`) allows self-modification and modification of agents the caller can manage.
 
-Routing scope for `configure_routing` allows self-modification and modification of agents the caller can manage.
+#### Why `manager_fallback` Confuses People
+
+`manager_fallback` does two things:
+
+1. It defines escalation behavior — where dead-lettered agent sessions route to.
+2. It defines the management hierarchy used by management-scope permissions.
+
+What it does **not** do is grant general messaging access. That separation matters because otherwise hierarchy and communication scope become entangled in hard-to-audit ways. When `manager_fallback` references an agent in a parent flow, escalation produces an event through the normal event loop, not a direct message.
 
 ### Tool Model
 
-The platform owns tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates calls, and routes them to handlers.
+The platform owns all tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates calls against schemas, and routes them to handlers.
 
-The platform-builtins list contains:
+The platform-builtin tools are:
 
-- `create_flow_instance`
-- `record_evidence`
-- `create_entity`
-- `query_entities`
-- `agent_message`
-- `mailbox_send`
+- `create_flow_instance` — create a new dynamic flow instance from a template (**handler action only**, not directly callable by agents)
+- `record_evidence` — append payload to entity accumulator (also handler action only)
+- `create_entity` — create a new entity row
+- `query_entities` — query entities by state, fields, or aggregation
+- `agent_message` — send a message to another agent (auto-granted)
+- `mailbox_send` — send an item to the human mailbox (auto-granted)
 
-The subtle but important point is that `create_flow_instance` is a handler action value, not a tool agents can call directly.
-
-The accepted custom tool schema fields are:
-
-- required: `description`
-- optional: `handler_type`, `input_schema`, `output_schema`, `parameters`, `returns`
-
-The explicitly not accepted fields are:
-
-- `endpoint`
-- `type`
+Custom tool definitions in `tools.yaml` require a `description` field and optionally include `handler_type`, `input_schema`, `output_schema`, `parameters`, and `returns`. The fields `endpoint` and `type` are explicitly not accepted.
 
 ### Prompt Templating
 
-Agent prompts live in `prompts/{agent-id}.md`. Prompt variables use `{{variable_name}}` syntax.
+Agent prompts live in `prompts/{agent-id}.md`. They use `{{variable_name}}` syntax for variable substitution.
 
 Prompt variables resolve from these sources in priority order:
 
 1. `instance_variables` from `schema.yaml`
-2. `policy` values
+2. `policy` values from `policy.yaml`
 3. `entity_state` fields
-4. runtime tokens
+4. Runtime tokens (hardcoded allowlist: `current_date`, `agent_id`, `flow_instance_path`)
 
-The runtime-token examples named in the spec are:
+The substitution is intentionally simple: no logic, no conditionals, no custom mini-template engine. The platform substitutes strings from approved sources. That keeps prompt rendering easy to inspect and easy to validate.
 
-- `current_date`
-- `agent_id`
-- `flow_instance_path`
-
-The compliance rule is that prompt variable validation must scan all declared sources.
+---
 
 ## 9. Versioning
 
 Platform and products version independently using semver.
 
 For the platform:
-
-- `major` means breaking changes to flow model, handler fields, boot validation, or contract formats
-- `minor` means backward-compatible new primitives, fields, or checks
-- `patch` means bug fixes and clarifications
+- `major` — breaking changes to flow model, handler fields, boot validation, or contract formats.
+- `minor` — backward-compatible new primitives, fields, or checks.
+- `patch` — bug fixes and clarifications.
 
 For products:
-
-- `major` means breaking flow or event-schema changes
-- `minor` means additive agents, events, tools, or threshold changes
-- `patch` means prompt improvements, policy tuning, and bug fixes
+- `major` — breaking flow or event-schema changes.
+- `minor` — additive agents, events, tools, or threshold changes.
+- `patch` — prompt improvements, policy tuning, and bug fixes.
 
 Products declare `platform_version` in `package.yaml`, and boot enforces compatibility against the running platform version.
 
+---
+
 ## 10. Platform Tables And Runtime Data
 
-The platform tables are the runtime’s infrastructure layer. These are not contract-driven entity tables. They are platform-owned tables that exist regardless of which product contracts are loaded.
+The platform tables are the runtime's infrastructure layer. These are not contract-driven entity tables — they are platform-owned tables that exist regardless of which product contracts are loaded.
 
 ### The Table Set
 
-The platform tables are:
-
-- `events`
-- `event_deliveries`
-- `event_receipts`
-- `entity_state`
-- `agents`
-- `agent_sessions`
-- `routing_rules`
-- `mailbox`
-- `spend_ledger`
-- `flow_instances`
-- `timers`
-- `dead_letters`
-- `schema_version`
+The platform maintains these tables: `events`, `event_deliveries`, `event_receipts`, `entity_state`, `agents`, `agent_sessions`, `routing_rules`, `mailbox`, `spend_ledger`, `flow_instances`, `timers`, `dead_letters`, `schema_version`.
 
 ### What Each Table Is For
 
-- `events`: append-only event store
-- `event_deliveries`: delivery tracking per subscriber
-- `event_receipts`: per-handler completion acknowledgements and side effects
-- `entity_state`: current entity registry and state store
-- `agents`: runtime agent registry
-- `agent_sessions`: session state by scope
-- `routing_rules`: contract routes and materialized wildcard routes
-- `mailbox`: human-in-the-loop task queue
-- `spend_ledger`: LLM usage and cost tracking
-- `flow_instances`: static and dynamic instance registry
-- `timers`: durable timer and scheduled task store
-- `dead_letters`: retry exhaustion and chain depth overflow outcomes
-- `schema_version`: applied platform schema version
+| Table | Purpose |
+| --- | --- |
+| `events` | Append-only event store |
+| `event_deliveries` | Delivery tracking per subscriber |
+| `event_receipts` | Per-handler completion acknowledgements and side effects |
+| `entity_state` | Current entity registry and state store |
+| `agents` | Runtime agent registry |
+| `agent_sessions` | Session state by scope |
+| `routing_rules` | Contract routes and materialized wildcard routes |
+| `mailbox` | Human-in-the-loop task queue |
+| `spend_ledger` | LLM usage and cost tracking |
+| `flow_instances` | Static and dynamic instance registry |
+| `timers` | Durable timer and scheduled task store |
+| `dead_letters` | Retry exhaustion and chain depth overflow outcomes |
+| `schema_version` | Applied platform schema version |
 
-### Additional Runtime Data Policies
+The spec also defines diagnostics encoding inside existing tables, the rule that `entity_state` is the entity registry, entity metrics conventions, migration policy through `schema_version`, test bootstrap rules, and credentials policy.
 
-The spec also defines:
+For exact DDL, see [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md).
 
-- diagnostics encoding inside existing tables
-- the rule that `entity_state` is the entity registry
-- entity metrics conventions using `entity_state.fields` and `spend_ledger`
-- migration policy through `schema_version`
-- test bootstrap rules
-- credentials policy using `flow_instances.config` or an external vault
+### Where To Start
 
-For exact DDL, use [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md). The guide keeps the functional model readable and leaves the full table definitions in the reference spec.
+If you are onboarding and only want three tables to understand first:
+
+- **`events`** — for what happened
+- **`entity_state`** — for where things are now
+- **`event_receipts`** — for what each handler did
+
+Those three tables answer most runtime questions before you need the rest of the storage model.
+
+---
 
 ## 11. Observation Model
 
@@ -889,58 +786,23 @@ The observation model defines what a test, audit, or flight recorder can see aft
 
 ### Emitted Events
 
-The `emitted_events` view includes:
-
-- events from handler `emits`
-- events from handler `rules`
-- events from handler `on_complete`
-- events from handler `fan_out`
-- events from handler action side effects such as `auto_emit_on_create`
-
-It excludes:
-
-- agent fixture emissions
-- dead-lettered events
-- child flow `auto_emit` events from the parent emission log
+The `emitted_events` view includes events from handler `emits`, `rules`, `on_complete`, `fan_out`, and handler action side effects like `auto_emit_on_create`. It excludes agent fixture emissions, dead-lettered events, and child flow `auto_emit` events from the parent emission log.
 
 ### Payload Construction
 
-When `payload_transform` is absent, emitted payloads are constructed from:
-
-1. entity fields
-2. trigger payload
-3. forced platform fields
-
-The collision priority is:
-
-- platform fields
-- `payload_transform`
-- trigger payload
-- entity fields
+When `payload_transform` is absent, emitted payloads are constructed from entity fields, then overlaid with trigger payload fields, then forced platform fields. The collision priority (highest to lowest) is: platform fields > `payload_transform` > trigger payload > entity fields.
 
 ### Entity State Observation
 
-The observable entity fields after commit are:
-
-- `current_state`
-- `gates`
-- `fields`
-- `accumulator`
-- `revision`
+The observable entity fields after commit are: `current_state`, `gates`, `fields`, `accumulator`, `revision`.
 
 ### Handler Outcome
 
-The observable `handler_outcome` values are:
+The observable `handler_outcome` values are: `success`, `reject`, `discard`, `kill`, `escalate`, `dead_letter`, `terminal_reject`.
 
-- `success`
-- `reject`
-- `discard`
-- `kill`
-- `escalate`
-- `dead_letter`
-- `terminal_reject`
+System node emissions appear in the triggering handler's observation chain. Agent emissions are independent events entering the loop separately.
 
-The final distinction is that system node emissions appear in the triggering handler’s observation chain, while agent emissions are independent events entering the loop separately.
+---
 
 ## 12. Workspace Model
 
@@ -948,111 +810,63 @@ The workspace model defines the filesystem contract for agent sessions.
 
 ### Standard Mounts
 
-There are exactly three standard mounts:
+Every agent session gets exactly three standard mounts:
 
-- `/workspace`
-- `/data`
-- `/opt/mas/contracts`
+- **`/workspace`** — writable. Scoped either `per-agent` or `per-flow-instance` depending on the workspace class.
+- **`/data`** — global, read-only. Identical across all workspace classes.
+- **`/opt/mas/contracts`** — global, read-only. Contains the contract files.
 
-`/workspace` is writable and can be either:
+Products cannot add new mount points. They only define workspace classes (in `policy.yaml` under `workspace_classes`) that choose the `workspace_scope` for `/workspace`. Every `workspace_class` referenced by an agent must exist in policy — missing definitions are boot errors.
 
-- `per-agent`
-- `per-flow-instance`
-
-`/data` is always:
-
-- global
-- read-only
-
-`/opt/mas/contracts` is always:
-
-- global
-- read-only
-
-Products cannot add new mount points. They only define workspace classes that choose the `workspace_scope` for `/workspace`.
-
-### Workspace Class Definition
-
-Workspace classes live in `policy.yaml` under `workspace_classes`. Each class defines:
-
-- `description`
-- `workspace_scope`
-
-Every `workspace_class` referenced by an agent must exist in policy. Missing definitions are boot errors.
+This constraint is good for onboarding because every agent session has the same filesystem shape. The only variable is how widely `/workspace` is shared.
 
 ### Mount Guarantees
 
-The runtime guarantees:
-
-- every agent session has all three standard mounts
-- `/data` is identical across all workspace classes
-- `/workspace` visibility follows the declared scope
-- read-only mounts are enforced at the filesystem level
-- mount availability does not vary by `conversation_mode`, `model_tier`, or any other agent property
+The runtime guarantees that every agent session has all three standard mounts, that `/data` is identical across all workspace classes, that `/workspace` visibility follows the declared scope, that read-only mounts are enforced at the filesystem level, and that mount availability does not vary by `conversation_mode`, `model_tier`, or any other agent property.
 
 ### Deployment Mapping
 
-The deployment section explains how the same mount contract maps to:
+The same mount contract maps to local development, Docker, and production. Only the backing storage implementation changes — contracts do not. Workspace behavior is part of the platform contract, not a local-dev convenience that disappears in production.
 
-- local development
-- Docker
-- production
-
-The portability rule is that contracts should not change across those environments. Only the backing storage implementation changes.
+---
 
 ## 13. Crosswalk To The Reference Spec
 
-This guide covers every top-level section from the reference spec:
+This guide covers every top-level section from the reference spec, reorganized into a learning order:
 
-1. `platform`
-2. `vocabulary`
-3. `contract_formats`
-4. `handler_specification`
-5. `engine`
-6. `compliance`
-7. `permissions_model`
-8. `tool_model`
-9. `prompt_templating`
-10. `flow_model`
-11. `versioning`
-12. `platform_tables`
-13. `observation_model`
-14. `workspace_model`
+| Spec section | Guide section |
+| --- | --- |
+| `platform`, `vocabulary` | 1. Platform Identity And Vocabulary |
+| `contract_formats` | 3. Flow Packages And Contract Files |
+| `flow_model` | 4. The Flow Model |
+| `handler_specification` | 6. Handler Execution |
+| `engine` | 7. The Engine Runtime |
+| `compliance` | 8. Compliance |
+| `permissions_model` | 8. Permissions Model |
+| `tool_model` | 8. Tool Model |
+| `prompt_templating` | 8. Prompt Templating |
+| `versioning` | 9. Versioning |
+| `platform_tables` | 10. Platform Tables |
+| `observation_model` | 11. Observation Model |
+| `workspace_model` | 12. Workspace Model |
 
-The guide reorganizes them into a learning order:
-
-- identity and vocabulary
-- package and contract model
-- flow model
-- handler execution
-- engine runtime
-- compliance, permissions, tools, prompts
-- versioning
-- platform tables and runtime data
-- observation
-- workspaces
+---
 
 ## 14. Recommended Documentation Split
 
-What I recommend is this:
+The recommended approach for this documentation:
 
-- keep [platform-spec.yaml](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/contracts/platform-spec.yaml) as the sole authority
-- keep [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md) as the exact prose rendering of that authority
-- use this guide as the reader-first companion for humans
+- Keep [platform-spec.yaml](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/contracts/platform-spec.yaml) as the sole authority.
+- Keep [platform-spec.md](/Users/youmew/dev/empireai/docs/specs/mas-platform/platform/platform-spec.md) as the exact prose rendering of that authority.
+- Use this guide as the reader-first companion for humans.
 
-That gives you three layers with clear jobs:
+That gives you three layers with clear jobs: YAML for exactness, spec markdown for exact prose reference, guide markdown for comprehension.
 
-- YAML for exactness
-- spec markdown for exact prose reference
-- guide markdown for comprehension
-
-The next sections add the practical appendices that make the guide easier to use day to day without weakening the authority boundary.
+---
 
 ## 15. Appendix A: Runtime Story
 
-This appendix combines the flow model, boot sequence, event loop, and handler dependency graph into one runtime picture.
-
-### End-To-End Runtime Story
+This appendix combines the flow model, boot sequence, event loop, and handler dependency graph into one end-to-end picture.
 
 ```text
 contracts on disk
@@ -1091,49 +905,32 @@ contracts on disk
 
 The story has three distinct phases:
 
-1. Contract loading and boot.
-2. Event routing.
-3. Subscriber execution.
+**Phase 1: Contract loading and boot.** The platform discovers flows, builds runtime addressing, resolves subscriptions, validates everything, and initializes state stores. Either everything validates or nothing starts.
 
-The boot phase is where the platform establishes:
+**Phase 2: Event routing.** Every event is validated before publish, persisted before processing, serialized per entity, and delivered concurrently across entities.
 
-- flow discovery
-- runtime addressing
-- subscriptions
-- tool registry
-- policy inheritance
-- validation
-- state-store initialization
-
-The event phase is where the platform guarantees:
-
-- every event is validated before publish
-- every event is persisted before processing
-- system node handling is serialized per entity
-- agent delivery is asynchronous
-
-The handler phase is where the platform guarantees:
-
-- dependency-graph execution rather than source-order execution
-- atomic commit of handler side effects
-- post-commit delivery of emitted events
+**Phase 3: Subscriber execution.** System node handlers follow the dependency graph and commit atomically. Emitted events are delivered after commit. Agent deliveries are asynchronous.
 
 ### The Minimal Mental Shortcut
 
-If someone needs the shortest faithful summary of the runtime, it is this:
+If someone needs the shortest faithful summary of the runtime:
 
-- boot builds a validated flow graph
-- events drive all work
-- system nodes own deterministic transition logic
-- agents own reasoning work
-- handlers commit atomically
-- emitted events continue the chain after commit
+- Boot builds a validated flow graph.
+- Events drive all work.
+- System nodes own deterministic transition logic.
+- Agents own reasoning work.
+- Handlers commit atomically.
+- Emitted events continue the chain after commit.
+
+If someone remembers only one sentence, it should be: "Contracts define the graph, events move work through it, and handlers commit one atomic step at a time."
+
+---
 
 ## 16. Appendix B: Contract Author Checklist
 
 This checklist is derived from the boot verification list, flow coherence rules, node coherence rules, agent coherence rules, and runtime compliance expectations.
 
-### Package-Level Checklist
+### Package-Level
 
 - `package.yaml` exists.
 - `schema.yaml` exists.
@@ -1141,14 +938,14 @@ This checklist is derived from the boot verification list, flow coherence rules,
 - Every flow declared in `package.yaml` has a matching directory under `flows/`.
 - `platform_version` is compatible with the running platform version.
 
-### Schema-Level Checklist
+### Schema-Level
 
 - `states`, `initial_state`, and `terminal_states` form a coherent state space.
 - Input pins are wired by some producer.
-- Output data pins do not conflict with another flow’s writes.
+- Output data pins do not conflict with another flow's writes.
 - `required_agents` roles are fulfilled by actual agent entries.
 
-### Event Checklist
+### Events
 
 - Every emitted event has a payload schema in `events.yaml`.
 - Every event in `event_handlers` appears in `subscribes_to`.
@@ -1156,15 +953,15 @@ This checklist is derived from the boot verification list, flow coherence rules,
 - Every subscription resolves to an event some node or agent produces.
 - Cross-flow event consumers reference emitter-owned schemas rather than redefining them.
 
-### Node Checklist
+### Nodes
 
 - Each event is handled by at most one system node.
-- `advances_to` values stay inside the flow’s state space.
+- `advances_to` values stay inside the flow's state space.
 - Guards reference real entity or policy fields.
-- `produces`, if present, matches actual emitted events.
-- Handler fields use the platform-defined names and shapes only.
+- `produces`, if present, matches actual emitted events. (Better to omit it and let the platform derive it.)
+- Handler fields use platform-defined names and shapes only.
 
-### Handler Checklist
+### Handlers
 
 - `on_complete` and `rules` are not used together in the same handler.
 - `data_accumulation.source_event` uses the canonical name `source_event`, not `source`.
@@ -1173,7 +970,7 @@ This checklist is derived from the boot verification list, flow coherence rules,
 - `evidence_target` is present when `action` is `record_evidence`.
 - `template`, `instance_id_from`, and `config_from` are present when `action` is `create_flow_instance`.
 
-### Agent Checklist
+### Agents
 
 - Every tool in `tools_tier2` exists in the tool registry.
 - Agent permissions cover the tools they use.
@@ -1181,13 +978,13 @@ This checklist is derived from the boot verification list, flow coherence rules,
 - `manager_fallback` is treated as escalation and hierarchy metadata, not as cross-flow messaging permission.
 - Every referenced `workspace_class` exists in `policy.yaml`.
 
-### Prompt And Policy Checklist
+### Prompts And Policy
 
-- Prompt files exist for the agents that require them.
+- Prompt files exist for agents that require them.
 - Prompt variables resolve from allowed sources only.
 - Policy keys referenced by guards or prompts exist in the merged policy tree.
 
-### Runtime Behavior Checklist
+### Runtime Behavior
 
 - Tool calls are schema-validated before execution.
 - Tool calls are permission-checked before execution.
@@ -1196,152 +993,89 @@ This checklist is derived from the boot verification list, flow coherence rules,
 - State changes only occur along declared paths.
 - Workspace provisioning satisfies `/workspace`, `/data`, and `/opt/mas/contracts`.
 
+---
+
 ## 17. Appendix C: What Changes Where?
 
 This matrix summarizes which contract file is responsible for which kind of declaration.
 
 | File | Primary responsibility | Typical contents |
 | --- | --- | --- |
-| `package.yaml` | flow manifest and package identity | `name`, `version`, `platform_version`, `flows`, `entity_schema` |
-| `schema.yaml` | flow contract surface | states, pins, `required_agents`, `initial_state`, `terminal_states` |
-| `nodes.yaml` | deterministic orchestration | `system_node` declarations, `subscribes_to`, `event_handlers`, `timers`, `state_schema`, `permissions` |
-| `events.yaml` | event payload schemas | event names and payload field types |
-| `agents.yaml` | agent registry | subscriptions, `emit_events`, tools, permissions, model and conversation settings |
-| `tools.yaml` | tool schema definitions | custom tool descriptions, input and output schemas, handler type |
-| `policy.yaml` | flow-scoped configuration | policy keys, bundles, `workspace_classes` |
-| `prompts/` | agent prompt bodies | `prompts/{agent-id}.md` files with `{{variable}}` placeholders |
+| `package.yaml` | Flow manifest and package identity | `name`, `version`, `platform_version`, `flows`, `entity_schema` |
+| `schema.yaml` | Flow contract surface | States, pins, `required_agents`, `initial_state`, `terminal_states` |
+| `nodes.yaml` | Deterministic orchestration | `system_node` declarations, `subscribes_to`, `event_handlers`, `timers`, `state_schema`, `permissions` |
+| `events.yaml` | Event payload schemas | Event names and payload field types |
+| `agents.yaml` | Agent registry | Subscriptions, `emit_events`, tools, permissions, model and conversation settings |
+| `tools.yaml` | Tool schema definitions | Custom tool descriptions, input and output schemas, handler type |
+| `policy.yaml` | Flow-scoped configuration | Policy keys, bundles, `workspace_classes` |
+| `prompts/` | Agent prompt bodies | `prompts/{agent-id}.md` files with `{{variable}}` placeholders |
 
-### Practical Reading Order For Authors
+### Practical Authoring Order
 
 When authoring a new flow, the least confusing sequence is:
 
-1. define the flow lifecycle in `schema.yaml`
-2. define event payload shapes in `events.yaml`
-3. define deterministic transitions in `nodes.yaml`
-4. define required and concrete agents in `schema.yaml` and `agents.yaml`
-5. define tool schemas in `tools.yaml`
-6. define thresholds, bundles, and workspace classes in `policy.yaml`
-7. write prompts in `prompts/`
+1. Define the flow lifecycle in `schema.yaml` — states, pins, required roles.
+2. Define event payload shapes in `events.yaml`.
+3. Define deterministic transitions in `nodes.yaml`.
+4. Define required and concrete agents in `schema.yaml` and `agents.yaml`.
+5. Define tool schemas in `tools.yaml`.
+6. Define thresholds, bundles, and workspace classes in `policy.yaml`.
+7. Write prompts in `prompts/`.
 
 ### The Common Misplacements
 
 The spec repeatedly draws these boundaries:
 
-- event routing is not declared in `events.yaml`
-- tool endpoint configuration is not part of `tools.yaml`
-- cross-flow messaging is not granted by permissions
-- `manager_fallback` is not a direct messaging grant
-- `create_flow_instance` is not an agent-callable tool
+- Event routing is not declared in `events.yaml` — it is derived from subscriptions.
+- Tool endpoint configuration is not part of `tools.yaml`.
+- Cross-flow messaging is not granted by permissions.
+- `manager_fallback` is not a direct messaging grant.
+- `create_flow_instance` is not an agent-callable tool — it is a handler action.
+
+This appendix is worth revisiting during onboarding because most contract mistakes are not syntax errors. They are ownership mistakes: putting a concept in the wrong file or assuming one field does more than the spec says it does.
+
+---
 
 ## 18. Appendix D: State And Storage Cheat Sheet
 
 This appendix groups the runtime state and the platform tables by the questions operators and developers usually ask.
 
-### “What State Does An Entity Have?”
+### "What state does an entity have?"
 
-The spec defines three persisted state kinds per entity instance:
+Three persisted state kinds per entity instance:
 
-- `entity_state`
-- `accumulator_state`
-- `gate_state`
+- **`entity_state`** — lifecycle position in `current_state`, gate flags in `gates`, contract-visible fields in `fields`.
+- **`accumulator_state`** — intermediate data for handlers using `accumulate`, stored in per-node state tables.
+- **`gate_state`** — boolean milestone flags, stored in `entity_state.gates`.
 
-The practical mapping is:
+### "Where do I look for event history?"
 
-- lifecycle position lives in `entity_state.current_state`
-- gate flags live in `entity_state.gates`
-- contract-visible entity fields live in `entity_state.fields`
-- accumulator material may live in `entity_state.accumulator` and per-node state storage, depending on the handler pattern
+- `events` — raw event history (append-only)
+- `event_deliveries` — per-subscriber delivery status
+- `event_receipts` — per-handler outcomes and side effects
+- `dead_letters` — retry-exhausted and chain-depth-overflow failures
 
-### “Where Do I Look For Event History?”
+### "Where do I look for flow routing?"
 
-- raw event history is in `events`
-- per-subscriber delivery status is in `event_deliveries`
-- per-handler outcomes and side effects are in `event_receipts`
-- retry-exhausted and chain-depth-overflow failures are in `dead_letters`
+`routing_rules` contains both contract-defined routing patterns (inserted at boot) and materialized concrete routes for dynamic instances (inserted by `create_flow_instance`). Instance termination inactivates materialized rows.
 
-### “Where Do I Look For Flow Routing?”
+### "Where do I look for sessions and agents?"
 
-Use `routing_rules`.
+- `agents` — current runtime agent registry
+- `agent_sessions` — session state, keyed by `(agent_id, scope_key)` with entity, flow, or global scope
 
-It contains both:
+### "Where do I look for human tasks?"
 
-- contract-defined routing patterns
-- materialized concrete routes for dynamic instances
+`mailbox` stores `human_task`, `review_request`, `approval`, `alert`, and `operational_decision` items.
 
-The lifecycle is:
+### "Where do I look for spend?"
 
-- boot inserts pattern rows
-- `create_flow_instance` inserts materialized rows
-- instance termination inactivates materialized rows
+`spend_ledger` stores one row per agent invocation, tracking `input_tokens`, `output_tokens`, `cost_usd`, `model`, and `invocation_type`.
 
-### “Where Do I Look For Sessions And Agents?”
+### "Where do I look for dynamic flow instances?"
 
-- current runtime agents are in `agents`
-- session state is in `agent_sessions`
-- session lookup is by `(agent_id, scope_key)`
+`flow_instances` tracks `instance_id`, `flow_template`, `mode`, `parent_instance`, `config`, and `status`.
 
-The session scopes are:
+### "Where do I look for timers?"
 
-- entity scope
-- flow scope
-- global scope
-
-### “Where Do I Look For Human Tasks?”
-
-Use `mailbox`.
-
-That is where the platform stores:
-
-- `human_task`
-- `review_request`
-- `approval`
-- `alert`
-- `operational_decision`
-
-### “Where Do I Look For Spend?”
-
-Use `spend_ledger`.
-
-It stores one row per agent invocation and tracks:
-
-- `input_tokens`
-- `output_tokens`
-- `cost_usd`
-- `model`
-- `invocation_type`
-
-### “Where Do I Look For Dynamic Flow Instances?”
-
-Use `flow_instances`.
-
-That is where the platform tracks:
-
-- `instance_id`
-- `flow_template`
-- `mode`
-- `parent_instance`
-- `config`
-- `status`
-
-### “Where Do I Look For Timers?”
-
-Use `timers`.
-
-That table covers:
-
-- entity-scoped timers
-- flow-scoped timers
-- global timers
-
-The important task types are:
-
-- `timer`
-- `scheduled_task`
-- `deadline`
-- `global_recurring`
-
-### “Where Do I Look For Schema Lifecycle?”
-
-Use `schema_version`.
-
-That table records the currently applied platform schema version and the migration log. It is the table the boot sequence consults before applying platform DDL changes.
+`timers`.

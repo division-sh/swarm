@@ -173,18 +173,23 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		}
 	}
 	payload := map[string]any{
-		"node_id":     n.nodeID,
-		"event_id":    strings.TrimSpace(evt.ID),
-		"event_type":  strings.TrimSpace(string(evt.Type)),
-		"last_error":  msg,
-		"retry_count": maxInt(n.retryLimit, 1),
-	}
-	if entityID := workflowEventEntityID(evt); entityID != "" {
-		payload["entity_id"] = entityID
+		"original_event":   strings.TrimSpace(string(evt.Type)),
+		"original_payload": json.RawMessage(evt.Payload),
+		"entity_id":        workflowEventEntityID(evt),
+		"flow_instance":    "runtime",
+		"failure_type":     "retry_exhausted",
+		"error_message":    msg,
+		"retry_count":      maxInt(n.retryLimit, 1),
+		"chain_depth":      evt.ChainDepth,
+		"handler_node":     n.nodeID,
+		"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if n.db != nil {
 		_ = runtimedeadletters.Insert(ctx, n.db, runtimedeadletters.Record{
 			OriginalEventID: strings.TrimSpace(evt.ID),
+			OriginalEvent:   strings.TrimSpace(string(evt.Type)),
+			OriginalPayload: evt.Payload,
+			EntityID:        workflowEventEntityID(evt),
 			FailureType:     "retry_exhausted",
 			ErrorMessage:    msg,
 			RetryCount:      maxInt(n.retryLimit, 1),
@@ -194,7 +199,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 	}
 	if err := n.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
-		Type:        events.EventType("pipeline.dead_letter"),
+		Type:        events.EventType("platform.dead_letter"),
 		SourceAgent: n.nodeID,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),

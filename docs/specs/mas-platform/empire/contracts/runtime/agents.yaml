@@ -91,7 +91,7 @@ operations-analyst:
   - opco.ceo_report
   - operating/*/opco.steady_state_reached
   - budget.threshold_crossed
-  - operating/*/pipeline.dead_letter
+  - operating/*/platform.dead_letter
   tools_tier2:
   - query_entities
   emit_events:
@@ -119,7 +119,7 @@ holding-devops:
   - spend.approved
   - spend.rejected
   - timer.infra_health_check
-  - ops.agent_failed
+  - platform.agent_failed
   - devops.infra_change_needed
   - devops.rollback_failed
   tools_tier2:

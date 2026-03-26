@@ -224,24 +224,6 @@ opco.teardown_complete:
   payload:
     vertical_id: string
     entity_id: string (= vertical_id for Empire)
-ops.agent_failed:
-  payload:
-    agent_id: string
-    vertical_id: string
-    error: string
-    retry_count: number
-    last_event_type: string
-    entity_id: string (= vertical_id for Empire)
-  _source: external (platform monitoring)
-ops.agent_panic:
-  payload:
-    agent_id: string
-    vertical_id: string
-    error: string
-    stack_trace: string
-    conversation_id: string
-    entity_id: string (= vertical_id for Empire)
-  _status: planned
 portfolio.digest_compiled:
   payload:
     digest_text: string
@@ -335,11 +317,6 @@ human_task.assigned:
     assigned_to: string
     entity_id: string (= vertical_id for Empire)
   _status: planned
-runtime.reset:
-  payload:
-    source: string
-    timestamp: string
-  _source: external (platform admin CLI)
 review.product_spec_feedback:
   payload:
     vertical_id: string
@@ -366,12 +343,6 @@ directive.unhandled:
     directive_text: string
     directive_type: string
     reason: string
-pipeline.dead_letter:
-  payload:
-    original_event: string
-    error: string
-    flow: string
-  _producer: agent (platform error model)
 opco.spinup_requested:
   payload:
     vertical_id: string

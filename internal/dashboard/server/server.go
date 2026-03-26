@@ -11,10 +11,8 @@ import (
 	"strings"
 	"time"
 
-	runtimepkg "empireai/internal/runtime"
 	runtimemanager "empireai/internal/runtime/manager"
 	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
 	runtimetools "empireai/internal/runtime/tools"
 )
 
@@ -83,88 +81,44 @@ type RuntimeController interface {
 	ResetState() error
 }
 
-type SourceProvider func() semanticview.Source
-
-type RuntimeProvider func() *runtimepkg.Runtime
-
 type Options struct {
-	Health         HealthChecker
-	Agents         AgentReader
-	AgentControl   AgentController
-	Mailbox        MailboxReader
-	Instances      InstanceReader
-	Conversations  ConversationReader
-	Observability  ObservabilityReader
-	Runtime        RuntimeController
-	Version        string
-	SemanticSource semanticview.Source
-	RuntimeRef     *runtimepkg.Runtime
-	CurrentSource  SourceProvider
-	CurrentRuntime RuntimeProvider
-	ProjectControl BuilderProjectController
+	Health        HealthChecker
+	Agents        AgentReader
+	AgentControl  AgentController
+	Mailbox       MailboxReader
+	Instances     InstanceReader
+	Conversations ConversationReader
+	Observability ObservabilityReader
+	Runtime       RuntimeController
+	Version       string
+	Builder       http.Handler
 }
 
 type Handler struct {
-	health         HealthChecker
-	agents         AgentReader
-	agentControl   AgentController
-	mailbox        MailboxReader
-	instances      InstanceReader
-	conversations  ConversationReader
-	observability  ObservabilityReader
-	runtime        RuntimeController
-	version        string
-	semanticSource semanticview.Source
-	currentSource  SourceProvider
-	currentRuntime RuntimeProvider
-	projectControl BuilderProjectController
-	runHub         *builderRunHub
-	mux            *http.ServeMux
+	health        HealthChecker
+	agents        AgentReader
+	agentControl  AgentController
+	mailbox       MailboxReader
+	instances     InstanceReader
+	conversations ConversationReader
+	observability ObservabilityReader
+	runtime       RuntimeController
+	version       string
+	builder       http.Handler
+	mux           *http.ServeMux
 }
 
 func NewHandler(opts Options) http.Handler {
 	h := &Handler{
-		health:         opts.Health,
-		agents:         opts.Agents,
-		agentControl:   opts.AgentControl,
-		mailbox:        opts.Mailbox,
-		instances:      opts.Instances,
-		conversations:  opts.Conversations,
-		observability:  opts.Observability,
-		runtime:        opts.Runtime,
-		version:        strings.TrimSpace(opts.Version),
-		semanticSource: opts.SemanticSource,
-		currentSource:  opts.CurrentSource,
-		currentRuntime: opts.CurrentRuntime,
-		projectControl: opts.ProjectControl,
-	}
-	if h.currentRuntime == nil && opts.RuntimeRef != nil {
-		h.currentRuntime = func() *runtimepkg.Runtime { return opts.RuntimeRef }
-	}
-	if h.currentRuntime != nil {
-		h.runHub = newBuilderRunHub(
-			h.currentRuntime,
-			func() error {
-				if h.runtime == nil {
-					return errors.New("runtime controller is not configured")
-				}
-				return h.runtime.ResetState()
-			},
-			func() error {
-				if h.runtime == nil {
-					return errors.New("runtime controller is not configured")
-				}
-				h.runtime.PauseIngress()
-				return nil
-			},
-			func() error {
-				if h.runtime == nil {
-					return errors.New("runtime controller is not configured")
-				}
-				h.runtime.ResumeIngress()
-				return nil
-			},
-		)
+		health:        opts.Health,
+		agents:        opts.Agents,
+		agentControl:  opts.AgentControl,
+		mailbox:       opts.Mailbox,
+		instances:     opts.Instances,
+		conversations: opts.Conversations,
+		observability: opts.Observability,
+		runtime:       opts.Runtime,
+		version:       strings.TrimSpace(opts.Version),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", h.handleHealth)
@@ -188,10 +142,14 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/runtime/logs", h.handleRuntimeLogs)
 	mux.HandleFunc("GET /api/runtime/incidents", h.handleRuntimeIncidents)
 	mux.HandleFunc("POST /api/runtime/actions", h.handleRuntimeAction)
-	mux.HandleFunc("POST /rpc", h.handleBuilderRPC)
-	mux.HandleFunc("POST /api/rpc", h.handleBuilderRPC)
-	mux.HandleFunc("GET /ws", h.handleBuilderWS)
-	mux.HandleFunc("GET /api/ws", h.handleBuilderWS)
+	builderHandler := opts.Builder
+	if builderHandler != nil {
+		h.builder = builderHandler
+		mux.Handle("POST /rpc", builderHandler)
+		mux.Handle("POST /api/rpc", builderHandler)
+		mux.Handle("GET /ws", builderHandler)
+		mux.Handle("GET /api/ws", builderHandler)
+	}
 	h.mux = mux
 	return h
 }
@@ -885,104 +843,9 @@ type genericAgentProvider interface {
 	GetGenericAgent(ctx context.Context, id string) (genericAgent, bool, error)
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("content-type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func writeJSONError(w http.ResponseWriter, status int, err error) {
 	if status <= 0 {
 		status = http.StatusInternalServerError
 	}
 	writeJSON(w, status, map[string]any{"error": err.Error()})
-}
-
-func (h *Handler) builderVersion() string {
-	version := strings.TrimSpace(h.version)
-	if version == "" {
-		return "dev"
-	}
-	return version
-}
-
-func (h *Handler) currentSemanticSource() semanticview.Source {
-	if h.currentSource != nil {
-		if source := h.currentSource(); source != nil {
-			return source
-		}
-	}
-	return h.semanticSource
-}
-
-func (h *Handler) currentProjectStatus() BuilderProjectStatus {
-	if h.projectControl == nil {
-		return BuilderProjectStatus{}
-	}
-	return h.projectControl.CurrentProject()
-}
-
-func (h *Handler) runFullValidation(_ context.Context) builderValidationResult {
-	startedAt := time.Now()
-	flowCount := 0
-	source := h.currentSemanticSource()
-	if source != nil {
-		flowCount = len(source.FlowSchemaEntries())
-	}
-	result := builderValidationResult{
-		Status:   "pass",
-		Errors:   []builderValidationIssue{},
-		Warnings: []builderValidationIssue{},
-		Summary: builderValidationSummary{
-			FlowsChecked: flowCount,
-		},
-	}
-	if source == nil {
-		result.Status = "fail"
-		result.Errors = append(result.Errors, builderValidationIssue{
-			CheckID:  "engine_source_unavailable",
-			Severity: "error",
-			Message:  "semantic source is not configured",
-		})
-		result.Summary.Errors = len(result.Errors)
-		result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
-		return result
-	}
-	warnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
-	if err != nil {
-		for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			result.Errors = append(result.Errors, builderValidationIssue{
-				CheckID:  "workflow_contract_validation",
-				Severity: "error",
-				Message:  line,
-			})
-		}
-	}
-	agentCount, permissionErrors := runtimetools.ValidateAgentPermissions(source)
-	_ = agentCount
-	for _, permissionErr := range permissionErrors {
-		result.Errors = append(result.Errors, builderValidationIssue{
-			CheckID:  "agent_permission_validation",
-			Severity: "error",
-			Message:  strings.TrimSpace(permissionErr.Error()),
-		})
-	}
-	for _, warning := range warnings {
-		result.Warnings = append(result.Warnings, builderValidationIssue{
-			CheckID:  normalizeBuilderCheckID(warning.Category),
-			Severity: "warning",
-			Message:  strings.TrimSpace(warning.Message),
-		})
-	}
-	if len(result.Errors) > 0 {
-		result.Status = "fail"
-	}
-	result.Summary.Errors = len(result.Errors)
-	result.Summary.Warnings = len(result.Warnings)
-	result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
-	return result
 }

@@ -21,7 +21,7 @@ pins:
   outputs:
     events:
     - opco.spinup_requested
-    - pipeline.dead_letter
+    - platform.dead_letter
     - vertical.killed
     - vertical.approved
     - opco.terminated

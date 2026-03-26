@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"empireai/internal/config"
-	dashboardserver "empireai/internal/dashboard/server"
+	builderpkg "empireai/internal/builder"
 	"empireai/internal/runtime"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimecontracts "empireai/internal/runtime/contracts"
@@ -69,17 +69,17 @@ func (s *runtimeProjectSupervisor) CurrentRuntime() *runtime.Runtime {
 	return s.currentRT
 }
 
-func (s *runtimeProjectSupervisor) CurrentProject() dashboardserver.BuilderProjectStatus {
+func (s *runtimeProjectSupervisor) CurrentProject() builderpkg.ProjectStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.projectStatusLocked()
 }
 
-func (s *runtimeProjectSupervisor) OpenProject(ctx context.Context, projectDir string) (dashboardserver.BuilderProjectStatus, error) {
+func (s *runtimeProjectSupervisor) OpenProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	return s.loadProject(ctx, projectDir)
 }
 
-func (s *runtimeProjectSupervisor) ReloadProject(ctx context.Context, projectDir string) (dashboardserver.BuilderProjectStatus, error) {
+func (s *runtimeProjectSupervisor) ReloadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	projectDir = strings.TrimSpace(projectDir)
 	if projectDir == "" {
 		s.mu.RLock()
@@ -87,12 +87,12 @@ func (s *runtimeProjectSupervisor) ReloadProject(ctx context.Context, projectDir
 		s.mu.RUnlock()
 	}
 	if projectDir == "" {
-		return dashboardserver.BuilderProjectStatus{}, fmt.Errorf("project is not loaded")
+		return builderpkg.ProjectStatus{}, fmt.Errorf("project is not loaded")
 	}
 	return s.loadProject(ctx, projectDir)
 }
 
-func (s *runtimeProjectSupervisor) CloseProject(context.Context) (dashboardserver.BuilderProjectStatus, error) {
+func (s *runtimeProjectSupervisor) CloseProject(context.Context) (builderpkg.ProjectStatus, error) {
 	s.mu.Lock()
 	oldRT := s.currentRT
 	s.currentRoot = ""
@@ -106,38 +106,38 @@ func (s *runtimeProjectSupervisor) CloseProject(context.Context) (dashboardserve
 
 	if oldRT != nil {
 		if err := oldRT.Shutdown(); err != nil {
-			return dashboardserver.BuilderProjectStatus{}, err
+			return builderpkg.ProjectStatus{}, err
 		}
 	}
-	return dashboardserver.BuilderProjectStatus{}, nil
+	return builderpkg.ProjectStatus{}, nil
 }
 
-func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (dashboardserver.BuilderProjectStatus, error) {
+func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	resolvedRoot, err := normalizeContractsRoot(resolvePath(s.repoRoot, projectDir))
 	if err != nil {
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 
 	module, bundle, err := newMASWorkflowModule(s.repoRoot, resolvedRoot, s.platformSpecPath)
 	if err != nil {
-		return dashboardserver.BuilderProjectStatus{}, fmt.Errorf("load project: %w", err)
+		return builderpkg.ProjectStatus{}, fmt.Errorf("load project: %w", err)
 	}
 	if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 	source := semanticview.Wrap(bundle)
 	if _, err := runtimepipeline.ValidateWorkflowContractsDetailed(source); err != nil {
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 	if _, permissionErrors := runtimetools.ValidateAgentPermissions(source); len(permissionErrors) > 0 {
-		return dashboardserver.BuilderProjectStatus{}, permissionErrors[0]
+		return builderpkg.ProjectStatus{}, permissionErrors[0]
 	}
 	if _, err := initializeStateStores(ctx, s.stores, bundle); err != nil {
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 	workspaces := configuredWorkspaceLifecycle(s.stores.SQLDB, s.repoRoot, resolvedRoot, source)
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 
 	newRT, err := runtime.NewRuntime(ctx, s.cfg, s.stores.runtimeStores(), runtime.RuntimeOptions{
@@ -146,11 +146,11 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		WorkspaceLifecycle: workspaces,
 	})
 	if err != nil {
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 	if err := newRT.Start(ctx); err != nil {
 		_ = newRT.Shutdown()
-		return dashboardserver.BuilderProjectStatus{}, err
+		return builderpkg.ProjectStatus{}, err
 	}
 
 	s.mu.Lock()
@@ -174,8 +174,8 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	return status, nil
 }
 
-func (s *runtimeProjectSupervisor) projectStatusLocked() dashboardserver.BuilderProjectStatus {
-	status := dashboardserver.BuilderProjectStatus{
+func (s *runtimeProjectSupervisor) projectStatusLocked() builderpkg.ProjectStatus {
+	status := builderpkg.ProjectStatus{
 		ProjectDir: strings.TrimSpace(s.currentRoot),
 		Loaded:     s.currentSource != nil && s.currentRT != nil,
 	}

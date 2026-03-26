@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -111,28 +112,22 @@ func (am *AgentManager) clearPoisonPanicCount(agentID, eventID string) {
 
 func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID string, evt events.Event, count int, panicText string) {
 	am.writeReceipt(ctx, evt.ID, agentID, ReceiptStatusProcessed, fmt.Sprintf("quarantined poison event after %d panics: %s", count, strings.TrimSpace(panicText)))
-	managerID := am.resolveManagerAgentID(agentID)
-	if strings.TrimSpace(managerID) == "" || managerID == agentID {
-		managerID = am.defaultManagerAgentID(runtimeactors.AgentConfig{ID: agentID})
-	}
-	if strings.TrimSpace(managerID) == "" {
-		return
-	}
 	payload := map[string]any{
-		"agent_id":    agentID,
-		"event_id":    strings.TrimSpace(evt.ID),
-		"event_type":  strings.TrimSpace(string(evt.Type)),
-		"entity_id":   strings.TrimSpace(evt.EntityID()),
-		"panic_count": count,
-		"error":       strings.TrimSpace(panicText),
+		"event_name":             strings.TrimSpace(string(evt.Type)),
+		"quarantine_reason":      fmt.Sprintf("event quarantined after %d repeated panics while processing", count),
+		"affected_entity_count":  1,
+		"sample_error":           strings.TrimSpace(panicText),
+		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	_ = am.bus.PublishDirect(am.runtimeContext(), (events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
-		Type:        events.EventType("ops.poison_event_quarantined"),
+		Type:        events.EventType("platform.event_quarantined"),
 		SourceAgent: "runtime",
 		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now(),
-	}).WithEntityID(strings.TrimSpace(evt.EntityID())), []string{managerID})
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		RuntimeWarn("agent-manager", "platform.event_quarantined publish failed agent=%s event=%s err=%v", agentID, strings.TrimSpace(evt.ID), err)
+	}
 }
 
 func deterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
@@ -175,6 +170,20 @@ func normalizedManagerFallback(cfg runtimeactors.AgentConfig, managerID string) 
 	return managerID
 }
 
+func flowPathFromAgentConfig(cfg runtimeactors.AgentConfig) string {
+	if len(cfg.Config) == 0 {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
+		return ""
+	}
+	if value, ok := payload["flow_path"].(string); ok {
+		return strings.Trim(strings.TrimSpace(value), "/")
+	}
+	return ""
+}
+
 type eventExistenceReader interface {
 	EventExists(ctx context.Context, eventID string) (bool, error)
 }
@@ -195,11 +204,12 @@ func (am *AgentManager) shouldSkipAlreadyPublishedOutput(ctx context.Context, ev
 	return exists
 }
 
-func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt events.Event) (err error, panicked bool, panicText string) {
+func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt events.Event) (err error, panicked bool, panicText string, stackTrace string) {
 	defer func() {
 		if r := recover(); r != nil {
 			panicked = true
 			panicText = fmt.Sprint(r)
+			stackTrace = strings.TrimSpace(string(debug.Stack()))
 		}
 	}()
 	err = am.processEvent(ctx, agent, evt)
@@ -508,11 +518,14 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 		for {
 			panicked := false
 			panicText := ""
+			lastEventType := ""
+			stackTrace := ""
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
 						panicked = true
 						panicText = fmt.Sprint(r)
+						stackTrace = strings.TrimSpace(string(debug.Stack()))
 					}
 				}()
 				for {
@@ -523,7 +536,7 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						if !ok {
 							return
 						}
-						err, evtPanicked, evtPanicText := am.safeProcessEvent(loopCtx, agent, evt)
+						err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(loopCtx, agent, evt)
 						if evtPanicked {
 							panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID)
 							am.writeReceipt(loopCtx, evt.ID, agent.ID(), ReceiptStatusError, "panic: "+strings.TrimSpace(evtPanicText))
@@ -535,6 +548,8 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 							}
 							panicked = true
 							panicText = evtPanicText
+							stackTrace = evtStackTrace
+							lastEventType = strings.TrimSpace(string(evt.Type))
 							return
 						}
 						am.clearPoisonPanicCount(agent.ID(), evt.ID)
@@ -549,7 +564,7 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 				return
 			}
 			consecutivePanics++
-			am.handleAgentLoopPanic(loopCtx, agent, consecutivePanics, panicText)
+			am.handleAgentLoopPanic(loopCtx, agent, consecutivePanics, lastEventType, panicText, stackTrace)
 			if consecutivePanics >= 5 {
 				return
 			}
@@ -578,7 +593,7 @@ func panicBackoff(consecutivePanics int) time.Duration {
 	}
 }
 
-func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, consecutivePanics int, panicText string) {
+func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, consecutivePanics int, lastEventType, panicText, stackTrace string) {
 	panicText = strings.TrimSpace(panicText)
 	if panicText == "" {
 		panicText = "unknown panic"
@@ -586,27 +601,31 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	log.Printf("agent loop panic: agent=%s count=%d err=%s", agent.ID(), consecutivePanics, panicText)
 
 	entityID := ""
+	flowInstance := ""
 	am.mu.RLock()
 	cfg, ok := am.agentCfg[agent.ID()]
 	am.mu.RUnlock()
 	if ok {
 		entityID = cfg.EffectiveEntityID()
+		flowInstance = flowPathFromAgentConfig(cfg)
 	}
 
 	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
-		Type:        events.EventType("ops.agent_panic"),
+		Type:        events.EventType("platform.agent_panic"),
 		SourceAgent: "runtime",
 		Payload: mustJSON(map[string]any{
-			"agent_id":           agent.ID(),
-			"entity_id":          entityID,
-			"consecutive_panics": consecutivePanics,
-			"error":              panicText,
-			"backoff_seconds":    int(panicBackoff(consecutivePanics).Seconds()),
+			"agent_id":        agent.ID(),
+			"flow_instance":   flowInstance,
+			"entity_id":       entityID,
+			"error":           panicText,
+			"stack_trace":     stackTrace,
+			"conversation_id": "",
+			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 		}),
-		CreatedAt: time.Now(),
+		CreatedAt: time.Now().UTC(),
 	}).WithEntityID(entityID)); err != nil {
-		RuntimeWarn("agent-manager", "ops.agent_panic publish failed agent=%s err=%v", agent.ID(), err)
+		RuntimeWarn("agent-manager", "platform.agent_panic publish failed agent=%s err=%v", agent.ID(), err)
 	}
 
 	if consecutivePanics < 5 {
@@ -625,26 +644,21 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		})
 	}
 
-	managerID := am.resolveManagerAgentID(agent.ID())
-	if strings.TrimSpace(managerID) == "" || managerID == agent.ID() {
-		managerID = am.defaultManagerAgentID(cfg)
-	}
-	if strings.TrimSpace(managerID) != "" && managerID != agent.ID() {
-		if err := am.bus.PublishDirect(am.runtimeContext(), (events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 			ID:          uuid.NewString(),
-			Type:        events.EventType("ops.agent_failed"),
+			Type:        events.EventType("platform.agent_failed"),
 			SourceAgent: "runtime",
 			Payload: mustJSON(map[string]any{
-				"agent_id":           agent.ID(),
-				"manager_id":         managerID,
-				"entity_id":          entityID,
-				"consecutive_panics": consecutivePanics,
-				"error":              panicText,
-				"instruction":        "Agent loop failed after repeated panics. Decide: reconfigure, restart, or replace agent.",
+				"agent_id":        agent.ID(),
+				"flow_instance":   flowInstance,
+				"entity_id":       entityID,
+				"error":           panicText,
+				"retry_count":     consecutivePanics,
+				"last_event_type": strings.TrimSpace(lastEventType),
+				"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 			}),
-			CreatedAt: time.Now(),
-		}).WithEntityID(entityID), []string{managerID}); err != nil {
-			RuntimeWarn("agent-manager", "ops.agent_failed publish failed agent=%s manager=%s err=%v", agent.ID(), managerID, err)
-		}
+			CreatedAt: time.Now().UTC(),
+		}).WithEntityID(entityID)); err != nil {
+		RuntimeWarn("agent-manager", "platform.agent_failed publish failed agent=%s err=%v", agent.ID(), err)
 	}
 }

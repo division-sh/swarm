@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	builderpkg "empireai/internal/builder"
 	runtimepkg "empireai/internal/runtime"
 	runtimebus "empireai/internal/runtime/bus"
 	runtimeactors "empireai/internal/runtime/core/actors"
@@ -19,6 +20,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/websocket"
 )
+
+type builderRPCResponse = builderpkg.RPCResponse
+type builderWSEventFrame = builderpkg.WSEventFrame
 
 type stubAgents struct {
 	rows []runtimemanager.PersistedAgent
@@ -115,11 +119,11 @@ func (s *stubRuntimeControl) ResetState() error {
 }
 
 type stubProjectControl struct {
-	current BuilderProjectStatus
+	current builderpkg.ProjectStatus
 }
 
-func (s *stubProjectControl) OpenProject(_ context.Context, projectDir string) (BuilderProjectStatus, error) {
-	s.current = BuilderProjectStatus{
+func (s *stubProjectControl) OpenProject(_ context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
+	s.current = builderpkg.ProjectStatus{
 		ProjectDir:      strings.TrimSpace(projectDir),
 		Loaded:          true,
 		WorkflowName:    "sample",
@@ -128,7 +132,7 @@ func (s *stubProjectControl) OpenProject(_ context.Context, projectDir string) (
 	return s.current, nil
 }
 
-func (s *stubProjectControl) ReloadProject(_ context.Context, projectDir string) (BuilderProjectStatus, error) {
+func (s *stubProjectControl) ReloadProject(_ context.Context, projectDir string) (builderpkg.ProjectStatus, error) {
 	if strings.TrimSpace(projectDir) != "" {
 		s.current.ProjectDir = strings.TrimSpace(projectDir)
 	}
@@ -136,13 +140,35 @@ func (s *stubProjectControl) ReloadProject(_ context.Context, projectDir string)
 	return s.current, nil
 }
 
-func (s *stubProjectControl) CloseProject(context.Context) (BuilderProjectStatus, error) {
-	s.current = BuilderProjectStatus{}
+func (s *stubProjectControl) CloseProject(context.Context) (builderpkg.ProjectStatus, error) {
+	s.current = builderpkg.ProjectStatus{}
 	return s.current, nil
 }
 
-func (s *stubProjectControl) CurrentProject() BuilderProjectStatus {
+func (s *stubProjectControl) CurrentProject() builderpkg.ProjectStatus {
 	return s.current
+}
+
+func newBuilderHandlerForTest(
+	health HealthChecker,
+	instances InstanceReader,
+	version string,
+	runtimeCtl RuntimeController,
+	rt *runtimepkg.Runtime,
+	projectCtl builderpkg.ProjectController,
+) http.Handler {
+	var runtimeProvider builderpkg.RuntimeProvider
+	if rt != nil {
+		runtimeProvider = func() *runtimepkg.Runtime { return rt }
+	}
+	return builderpkg.NewHandler(builderpkg.Options{
+		Health:         builderpkg.HealthChecker(health),
+		Instances:      instances,
+		Runtime:        runtimeCtl,
+		Version:        version,
+		CurrentRuntime: runtimeProvider,
+		ProjectControl: projectCtl,
+	})
 }
 
 func TestHandler_ConversationsAndAggregates(t *testing.T) {
@@ -408,32 +434,34 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 
 func TestHandler_BuilderRPC(t *testing.T) {
 	projectCtl := &stubProjectControl{}
-	handler := NewHandler(Options{
-		Health: func(context.Context) (map[string]any, error) {
-			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+	instances := stubInstances{
+		rows: []runtimepipeline.WorkflowInstance{
+			{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active"},
 		},
-		Instances: stubInstances{
-			rows: []runtimepipeline.WorkflowInstance{
-				{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active"},
-			},
-			byID: map[string]runtimepipeline.WorkflowInstance{
-				"wf-1": {
-					InstanceID:   "wf-1",
-					WorkflowName: "order",
-					CurrentState: "active",
-					Metadata: map[string]any{
-						"score": 3.7,
-						"gates": map[string]any{"review_gate": true},
-						"slug":  "order-1",
-					},
-					StateBuckets: map[string]any{
-						"accumulator": map[string]any{"count": 2},
-					},
+		byID: map[string]runtimepipeline.WorkflowInstance{
+			"wf-1": {
+				InstanceID:   "wf-1",
+				WorkflowName: "order",
+				CurrentState: "active",
+				Metadata: map[string]any{
+					"score": 3.7,
+					"gates": map[string]any{"review_gate": true},
+					"slug":  "order-1",
+				},
+				StateBuckets: map[string]any{
+					"accumulator": map[string]any{"count": 2},
 				},
 			},
 		},
-		Version:        "mas-test",
-		ProjectControl: projectCtl,
+	}
+	health := func(context.Context) (map[string]any, error) {
+		return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+	}
+	handler := NewHandler(Options{
+		Health:    health,
+		Instances: instances,
+		Version:   "mas-test",
+		Builder:   newBuilderHandlerForTest(health, instances, "mas-test", nil, nil, projectCtl),
 	})
 
 	rec := httptest.NewRecorder()
@@ -442,7 +470,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("engine.ping status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var pingResp builderRPCResponse
+	var pingResp builderpkg.RPCResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &pingResp); err != nil {
 		t.Fatalf("unmarshal ping response: %v", err)
 	}
@@ -460,7 +488,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("state.list_instances status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var instancesResp builderRPCResponse
+	var instancesResp builderpkg.RPCResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &instancesResp); err != nil {
 		t.Fatalf("unmarshal instances response: %v", err)
 	}
@@ -468,8 +496,8 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected instances result: %#v", instancesResp.Result)
 	}
-	instances, ok := result["instances"].([]any)
-	if !ok || len(instances) != 1 {
+	instanceRows, ok := result["instances"].([]any)
+	if !ok || len(instanceRows) != 1 {
 		t.Fatalf("unexpected instances payload: %#v", result)
 	}
 
@@ -486,7 +514,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("state.get_entity status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var entityResp builderRPCResponse
+	var entityResp builderpkg.RPCResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &entityResp); err != nil {
 		t.Fatalf("unmarshal entity response: %v", err)
 	}
@@ -520,7 +548,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("project.open status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var projectResp builderRPCResponse
+	var projectResp builderpkg.RPCResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &projectResp); err != nil {
 		t.Fatalf("unmarshal project.open response: %v", err)
 	}
@@ -535,7 +563,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/api/rpc engine.ping status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var apiPingResp builderRPCResponse
+	var apiPingResp builderpkg.RPCResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &apiPingResp); err != nil {
 		t.Fatalf("unmarshal /api/rpc response: %v", err)
 	}
@@ -546,17 +574,15 @@ func TestHandler_BuilderRPC(t *testing.T) {
 }
 
 func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
-	oldInterval := builderHealthHeartbeatInterval
-	builderHealthHeartbeatInterval = 20 * time.Millisecond
-	defer func() {
-		builderHealthHeartbeatInterval = oldInterval
-	}()
-
+	restore := builderpkg.SetHealthHeartbeatIntervalForTest(20 * time.Millisecond)
+	defer restore()
+	health := func(context.Context) (map[string]any, error) {
+		return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+	}
 	ts := httptest.NewServer(NewHandler(Options{
-		Health: func(context.Context) (map[string]any, error) {
-			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
-		},
+		Health:  health,
 		Version: "mas-test",
+		Builder: newBuilderHandlerForTest(health, nil, "mas-test", nil, nil, nil),
 	}))
 	defer ts.Close()
 
@@ -571,7 +597,7 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 		t.Fatalf("subscribe write: %v", err)
 	}
 
-	var frame builderWSEventFrame
+	var frame builderpkg.WSEventFrame
 	if err := conn.ReadJSON(&frame); err != nil {
 		t.Fatalf("read first event: %v", err)
 	}
@@ -588,17 +614,15 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 }
 
 func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
-	oldInterval := builderHealthHeartbeatInterval
-	builderHealthHeartbeatInterval = 20 * time.Millisecond
-	defer func() {
-		builderHealthHeartbeatInterval = oldInterval
-	}()
-
+	restore := builderpkg.SetHealthHeartbeatIntervalForTest(20 * time.Millisecond)
+	defer restore()
+	health := func(context.Context) (map[string]any, error) {
+		return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+	}
 	ts := httptest.NewServer(NewHandler(Options{
-		Health: func(context.Context) (map[string]any, error) {
-			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
-		},
+		Health:  health,
 		Version: "mas-test",
+		Builder: newBuilderHandlerForTest(health, nil, "mas-test", nil, nil, nil),
 	}))
 	defer ts.Close()
 
@@ -616,7 +640,7 @@ func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
 		t.Fatalf("subscribe health alias: %v", err)
 	}
 
-	var frame builderWSEventFrame
+	var frame builderpkg.WSEventFrame
 	if err := conn.ReadJSON(&frame); err != nil {
 		t.Fatalf("read health alias frame: %v", err)
 	}
@@ -668,9 +692,18 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -753,9 +786,18 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -827,9 +869,18 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -918,9 +969,18 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -1030,9 +1090,18 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -1064,18 +1133,16 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 	}
 
 	typedHandler, ok := handler.(*Handler)
-	if !ok || typedHandler.runHub == nil {
-		t.Fatalf("expected typed handler with run hub")
-	}
-
-	typedHandler.runHub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+	if !ok || !builderpkg.HandleRuntimeLogForTest(typedHandler.builder, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Component: "pipeline",
 		Action:    "handled",
 		AgentID:   "agent-source",
 		EntityID:  runID,
 		EventID:   "evt-breakpoint",
-	})
+	}) {
+		t.Fatalf("expected typed handler with builder runtime-log hook")
+	}
 
 	deadline := time.After(1 * time.Second)
 	for {
@@ -1124,9 +1191,18 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -1158,11 +1234,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	}
 
 	typedHandler, ok := handler.(*Handler)
-	if !ok || typedHandler.runHub == nil {
-		t.Fatalf("expected typed handler with run hub")
-	}
-
-	typedHandler.runHub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+	if !ok || !builderpkg.HandleRuntimeLogForTest(typedHandler.builder, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Component: "eventbus",
 		Action:    "published",
@@ -1174,7 +1246,9 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 			"type":   "human_task.requested",
 			"source": "agent-source",
 		},
-	})
+	}) {
+		t.Fatalf("expected typed handler with builder runtime-log hook")
+	}
 
 	receivedWaiting := false
 	deadline := time.After(1 * time.Second)
@@ -1261,9 +1335,18 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -1306,18 +1389,16 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 	}
 
 	typedHandler, ok := handler.(*Handler)
-	if !ok || typedHandler.runHub == nil {
-		t.Fatalf("expected typed handler with run hub")
-	}
-
-	typedHandler.runHub.handleRuntimeLog(runtimepkg.RuntimeLogEntry{
+	if !ok || !builderpkg.HandleRuntimeLogForTest(typedHandler.builder, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Component: "pipeline",
 		Action:    "handled",
 		AgentID:   "agent-source",
 		EntityID:  runID,
 		EventID:   "evt-step",
-	})
+	}) {
+		t.Fatalf("expected typed handler with builder runtime-log hook")
+	}
 
 	receivedResumed := false
 	receivedPaused := false
@@ -1372,9 +1453,18 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()
@@ -1464,9 +1554,18 @@ func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version:    "mas-test",
-		RuntimeRef: rt,
-		Runtime:    runtimeCtl,
+		Version: "mas-test",
+		Runtime: runtimeCtl,
+		Builder: newBuilderHandlerForTest(
+			func(context.Context) (map[string]any, error) {
+				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
+			},
+			nil,
+			"mas-test",
+			runtimeCtl,
+			rt,
+			nil,
+		),
 	})
 	ts := httptest.NewServer(handler)
 	defer ts.Close()

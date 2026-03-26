@@ -704,7 +704,7 @@ timeout_hours: 48    ← overrides parent
 ### Handler Failures
 
 - 3 retries with exponential backoff (1s, 2s, 4s)
-- After exhaustion → `pipeline.dead_letter` event with full context
+- After exhaustion → `platform.dead_letter` event with full context
 - Transient errors retry. Business logic failures don't.
 
 ### Guard Failures

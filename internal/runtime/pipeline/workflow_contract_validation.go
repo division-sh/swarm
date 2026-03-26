@@ -558,6 +558,9 @@ func workflowEventExists(source semanticview.Source, eventType string) bool {
 	if eventType == "" {
 		return false
 	}
+	if strings.HasPrefix(eventType, "platform.") {
+		return true
+	}
 	if _, ok := source.ResolvedEventCatalog()[eventType]; ok {
 		return true
 	}
@@ -1539,7 +1542,7 @@ func workflowEventCatalogWarnings(source semanticview.Source) []WorkflowContract
 	for _, eventType := range sortedWorkflowValidationSetKeys(eventsEmitted) {
 		entry, ok := source.EventEntry(eventType)
 		if !ok {
-			if strings.HasPrefix(eventType, "timer.") || eventType == "pipeline.dead_letter" {
+			if strings.HasPrefix(eventType, "timer.") || strings.HasPrefix(eventType, "platform.") {
 				continue
 			}
 			warnings = append(warnings, WorkflowContractWarning{

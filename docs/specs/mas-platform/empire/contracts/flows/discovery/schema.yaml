@@ -9,7 +9,7 @@ pins:
     events:
     - campaign.completed
     - dedup.ambiguous
-    - pipeline.dead_letter
+    - platform.dead_letter
     - scan.completed
     - synthesis.needed
     - vertical.discovered

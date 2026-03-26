@@ -5,7 +5,7 @@ portfolio-node:
   description: Cross-flow monitoring. Compiles status, handles runtime reset.
   subscribes_to:
   - timer.portfolio_digest
-  - runtime.reset
+  - platform.reset
   - budget.threshold_crossed
   - system.directive
   - opco.spinup_requested
@@ -31,7 +31,7 @@ portfolio-node:
         count: true
         store_as: digest.opcos_by_state
       emits: portfolio.digest_compiled
-    runtime.reset:
+    platform.reset:
       description: Clear all in-flight pipeline state
       clear:
         targets:

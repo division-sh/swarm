@@ -2,6 +2,17 @@
 
 ## v1.3.0 (2026-03-25)
 
+### pipeline.dead_letter → platform.dead_letter
+Renamed to complete the platform.* namespace unification. All platform events now use the platform.* prefix with no exceptions.
+
+### New: platform_events catalog (section 15)
+Platform-owned operational events now have an authoritative catalog in the platform spec:
+- `platform.dead_letter` (reference — schema in §engine.error_model)
+- `platform.runtime_log` (reference — schema in §platform_tables.diagnostics_encoding)
+- `platform.agent_failed`, `platform.agent_panic`, `platform.event_quarantined`, `platform.dead_letter_escalation`, `platform.reset`, `platform.auth_required`, `platform.paused` — new, with full payload schemas
+- `platform.*` namespace reserved — boot error if products define events with this prefix
+- Go source rule: every hardcoded event name must appear in catalog or be loaded from contracts
+
 ### Breaking: permission_scoping added, message_all/message_domain removed
 - Removed `message_all` and `message_domain` from platform permission list
 - Added `message_flow` — scoped to same flow instance
@@ -231,7 +242,7 @@ When an entity reaches a terminal state, ALL subsequent events for that entity a
 New sub-field on `accumulate`. Default: sender (session ID). Override with payload field path (e.g., `payload.dimension`) for content-identified accumulation.
 
 ### Dead letter structured schema
-10-field schema for pipeline.dead_letter events: original_event, original_payload, entity_id, flow_instance, failure_type, error_message, retry_count, chain_depth, handler_node, timestamp.
+10-field schema for platform.dead_letter events: original_event, original_payload, entity_id, flow_instance, failure_type, error_message, retry_count, chain_depth, handler_node, timestamp.
 
 ### Payload shaping semantics
 Specified as engine contract. Default: trigger payload merged with entity state fields. payload_transform for explicit override.

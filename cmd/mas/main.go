@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"empireai/internal/config"
+	builderpkg "empireai/internal/builder"
 	dashboardserver "empireai/internal/dashboard/server"
 	"empireai/internal/runtime"
 	runtimebus "empireai/internal/runtime/bus"
@@ -520,37 +521,55 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		agentControl = dashboardDynamicAgentControl{supervisor: supervisor}
 		runtimeCtl = dashboardDynamicRuntimeControl{supervisor: supervisor}
 	}
+	healthFn := func(ctx context.Context) (map[string]any, error) {
+		source := semanticview.Source(nil)
+		if supervisor != nil {
+			source = supervisor.CurrentSource()
+		}
+		checks := map[string]any{
+			"runtime": map[string]any{
+				"ready": ready != nil && ready.Load(),
+			},
+		}
+		if source != nil {
+			checks["runtime"] = map[string]any{
+				"ready":  ready != nil && ready.Load(),
+				"flows":  len(source.FlowSchemaEntries()),
+				"nodes":  len(source.NodeEntries()),
+				"agents": len(source.AgentEntries()),
+				"events": len(source.ResolvedEventCatalog()),
+			}
+		}
+		if stores.Postgres != nil {
+			dbErr := stores.Postgres.Ping(ctx)
+			checks["database"] = map[string]any{
+				"ok": dbErr == nil,
+			}
+			if dbErr != nil {
+				checks["database_error"] = dbErr.Error()
+			}
+		}
+		return checks, nil
+	}
+	var sourceProvider builderpkg.SourceProvider
+	var runtimeProvider builderpkg.RuntimeProvider
+	var projectControl builderpkg.ProjectController
+	if supervisor != nil {
+		sourceProvider = supervisor.CurrentSource
+		runtimeProvider = supervisor.CurrentRuntime
+		projectControl = supervisor
+	}
+	builderHandler := builderpkg.NewHandler(builderpkg.Options{
+		Health:         healthFn,
+		Instances:      runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
+		Runtime:        runtimeCtl,
+		Version:        "mas-dev",
+		CurrentSource:  sourceProvider,
+		CurrentRuntime: runtimeProvider,
+		ProjectControl: projectControl,
+	})
 	return dashboardserver.Options{
-		Health: func(ctx context.Context) (map[string]any, error) {
-			source := semanticview.Source(nil)
-			if supervisor != nil {
-				source = supervisor.CurrentSource()
-			}
-			checks := map[string]any{
-				"runtime": map[string]any{
-					"ready": ready != nil && ready.Load(),
-				},
-			}
-			if source != nil {
-				checks["runtime"] = map[string]any{
-					"ready":  ready != nil && ready.Load(),
-					"flows":  len(source.FlowSchemaEntries()),
-					"nodes":  len(source.NodeEntries()),
-					"agents": len(source.AgentEntries()),
-					"events": len(source.ResolvedEventCatalog()),
-				}
-			}
-			if stores.Postgres != nil {
-				dbErr := stores.Postgres.Ping(ctx)
-				checks["database"] = map[string]any{
-					"ok": dbErr == nil,
-				}
-				if dbErr != nil {
-					checks["database_error"] = dbErr.Error()
-				}
-			}
-			return checks, nil
-		},
+		Health:        healthFn,
 		Agents:         agents,
 		AgentControl:   agentControl,
 		Mailbox:        mailbox,
@@ -559,9 +578,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		Observability:  observability,
 		Runtime:        runtimeCtl,
 		Version:        "mas-dev",
-		CurrentSource:  supervisor.CurrentSource,
-		CurrentRuntime: supervisor.CurrentRuntime,
-		ProjectControl: supervisor,
+		Builder:        builderHandler,
 	}
 }
 

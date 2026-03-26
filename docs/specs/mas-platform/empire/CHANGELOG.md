@@ -1,5 +1,20 @@
 # EmpireAI Changelog
 
+## v4.2.0 (2026-03-26)
+
+### pipeline.dead_letter → platform.dead_letter
+- Renamed to align with platform.* namespace convention
+- Updated in: 4 flow schemas (output pins), operations-analyst subscription + prompt, events.yaml (removed — platform-owned)
+- Event count: 189 (was 190, 1 more moved to platform catalog)
+
+## v4.1.0 (2026-03-26)
+
+### Platform events migrated out of Empire
+- Removed `ops.agent_failed`, `ops.agent_panic`, `runtime.reset` from events.yaml — these are now platform-owned events defined in platform-spec.yaml §platform_events
+- holding-devops subscription: `ops.agent_failed` → `platform.agent_failed`
+- portfolio-node: `runtime.reset` → `platform.reset` (subscribes_to + event_handler key)
+- Event count: 190 (was 193, 3 moved to platform catalog)
+
 ## v4.0.0 (2026-03-26)
 
 ### Breaking: messaging permissions renamed

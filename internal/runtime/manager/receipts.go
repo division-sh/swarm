@@ -209,16 +209,13 @@ func isClaudeCreditExhaustedError(err error) bool {
 
 func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err error) {
 	reason := ""
-	eventType := events.EventType("runtime.paused")
-	instruction := ""
+	authRequired := false
 	switch {
 	case isClaudeAuthError(err):
 		reason = "claude_auth_required"
-		eventType = events.EventType("runtime.auth_required")
-		instruction = "Claude authentication is required. Runtime paused to prevent retry storm."
+		authRequired = true
 	case isClaudeCreditExhaustedError(err):
 		reason = "claude_credit_exhausted"
-		instruction = "Claude usage limit reached. Runtime paused globally until credits reset or billing is updated."
 	default:
 		return
 	}
@@ -233,21 +230,36 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 
 	runtimebus.PauseRuntimeIngress()
 	log.Printf("runtime pause breaker tripped: reason=%s agent=%s event=%s err=%v", reason, agentID, eventID, err)
-	payload := mustJSON(map[string]any{
-		"agent_id":     strings.TrimSpace(agentID),
-		"event_id":     strings.TrimSpace(eventID),
-		"reason":       reason,
-		"instruction":  instruction,
-		"spec_version": runtimeSpecVersion,
-	})
+	now := time.Now().UTC()
+	if authRequired {
+		if err := am.bus.Publish(am.runtimeContext(), events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("platform.auth_required"),
+			SourceAgent: "runtime",
+			Payload: mustJSON(map[string]any{
+				"agent_id":  strings.TrimSpace(agentID),
+				"tool_name": nil,
+				"action":    "llm_call",
+				"reason":    reason,
+				"timestamp": now.Format(time.RFC3339Nano),
+			}),
+			CreatedAt: now,
+		}); err != nil {
+			RuntimeWarn("agent-manager", "platform.auth_required publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
+		}
+	}
 	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
-		Type:        eventType,
+		Type:        events.EventType("platform.paused"),
 		SourceAgent: "runtime",
-		Payload:     payload,
-		CreatedAt:   time.Now(),
+		Payload: mustJSON(map[string]any{
+			"reason":    reason,
+			"paused_by": "runtime",
+			"timestamp": now.Format(time.RFC3339Nano),
+		}),
+		CreatedAt:   now,
 	}); err != nil {
-		RuntimeWarn("agent-manager", "%s publish failed agent=%s event=%s err=%v", eventType, strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
+		RuntimeWarn("agent-manager", "platform.paused publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
 	}
 	if running {
 		_ = am.Shutdown()
@@ -316,50 +328,36 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		})
 	}
 
-	managerID := am.resolveManagerAgentID(agentID)
-	if strings.TrimSpace(managerID) == "" || managerID == agentID {
-		am.mu.RLock()
-		cfg := am.agentCfg[agentID]
-		am.mu.RUnlock()
-		managerID = am.defaultManagerAgentID(cfg)
-	}
-	if strings.TrimSpace(managerID) == "" {
-		log.Printf("dead-letter escalation skipped without manager agent=%s event=%s", agentID, eventID)
-		return
-	}
-	if managerID == agentID {
-		// Prevent infinite self-escalation chains.
-		log.Printf("dead-letter escalation suppressed for self-managed agent=%s event=%s", agentID, eventID)
-		return
-	}
-
 	am.mu.RLock()
 	cfg, cfgOK := am.agentCfg[agentID]
 	am.mu.RUnlock()
 	entityID := ""
+	flowInstance := ""
 	if cfgOK {
 		entityID = cfg.EffectiveEntityID()
+		flowInstance = flowPathFromAgentConfig(cfg)
 	}
 
-	payload := mustJSON(map[string]any{
-		"event_id":     eventID,
-		"agent_id":     agentID,
-		"manager_id":   managerID,
-		"entity_id":    entityID,
-		"retry_count":  receipt.RetryCount,
-		"error":        strings.TrimSpace(receipt.Error),
-		"instruction":  "Event delivery dead-lettered after 3 retries. Decide: retry (requeue), skip, or escalate.",
-		"spec_version": runtimeSpecVersion,
-	})
-
-	if err := am.bus.PublishDirect(am.runtimeContext(), (events.Event{
+	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
-		Type:        events.EventType("ops.dead_letter_escalation"),
+		Type:        events.EventType("platform.dead_letter_escalation"),
 		SourceAgent: "runtime",
-		Payload:     payload,
-		CreatedAt:   time.Now(),
-	}).WithEntityID(entityID), []string{managerID}); err != nil {
-		RuntimeWarn("agent-manager", "ops.dead_letter_escalation publish failed agent=%s manager=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(managerID), strings.TrimSpace(eventID), err)
+		Payload: mustJSON(map[string]any{
+			"flow_instance":     flowInstance,
+			"dead_letter_count": 1,
+			"window_minutes":    0,
+			"sample_events": []map[string]any{{
+				"event_id":    strings.TrimSpace(eventID),
+				"agent_id":    strings.TrimSpace(agentID),
+				"entity_id":   entityID,
+				"retry_count": receipt.RetryCount,
+				"error":       strings.TrimSpace(receipt.Error),
+			}},
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		}),
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		RuntimeWarn("agent-manager", "platform.dead_letter_escalation publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
 	}
 }
 

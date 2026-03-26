@@ -980,7 +980,7 @@ engine:
         backoff: exponential (1s, 2s, 4s)
         retry_on: transient errors (DB timeout, lock contention)
         no_retry_on: guard failures, validation errors, business logic failures
-      dead_letter: After max_retries exhausted, emit pipeline.dead_letter with original event, error details, and retry history.
+      dead_letter: After max_retries exhausted, emit platform.dead_letter with original event, error details, and retry history.
         Dead letter events are root-scoped.
     agent_session_failure:
       behavior: Agent exceeds turn budget or crashes. Session terminated.
@@ -993,10 +993,10 @@ engine:
       description: Maximum number of chained event emissions in a single causal chain. Prevents A→B→A→B infinite loops.
       max_depth: 50
       behavior: Each event carries a chain_depth counter (starting at 0). When a handler emits a new event, chain_depth increments.
-        If chain_depth exceeds max_depth, the event is routed to pipeline.dead_letter instead of being delivered. The chain
+        If chain_depth exceeds max_depth, the event is routed to platform.dead_letter instead of being delivered. The chain
         is broken.
     dead_letter_schema:
-      description: Structured payload for pipeline.dead_letter events.
+      description: Structured payload for platform.dead_letter events.
       fields:
         original_event: string — the event name that failed
         original_payload: object — full payload of the failed event
@@ -1190,7 +1190,7 @@ permissions_model:
         to the agent, and it does NOT allow messaging across flow boundaries even when the fallback target is in a different
         flow.
       cross_flow_fallback: When manager_fallback references an agent in a parent flow (e.g., an operating agent falls back to
-        a root-level coordinator), escalation produces an event (pipeline.dead_letter or equivalent), not a direct message.
+        a root-level coordinator), escalation produces an event (platform.dead_letter or equivalent), not a direct message.
         The platform routes the escalation event through the normal event loop.
 tool_model:
   description: The platform owns ALL tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates
@@ -1632,14 +1632,13 @@ platform_tables:
       as opaque JSONB. Products own their secrets.
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
-    the engine. All platform events use the platform.* namespace, with the sole exception of pipeline.dead_letter (legacy name,
-    retained for clarity). Products MUST NOT define events with reserved prefixes.
+    the engine. All platform events use the platform.* namespace. Products MUST NOT define events with reserved prefixes.
   namespace_reservation:
     reserved_prefixes:
     - platform.
     rule: Boot error if any product events.yaml contains an event name starting with a reserved prefix.
   catalog:
-    pipeline.dead_letter:
+    platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
       defined_in: engine.error_model.dead_letter_schema
       note: Full payload schema defined in engine.error_model. Not duplicated here.

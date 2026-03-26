@@ -89,7 +89,7 @@ spend.approved / spend.rejected:
   → On approved: proceed with the provisioning action.
   → On rejected: message the requesting agent with rejection reason. STOP.
 
-ops.agent_failed:
+platform.agent_failed:
   → An agent crashed or became unresponsive.
   → Check if the failure is infrastructure-related (OOM, disk full,
     connection pool exhausted). If so, remediate and call

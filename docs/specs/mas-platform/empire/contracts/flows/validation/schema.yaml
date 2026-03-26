@@ -20,7 +20,7 @@ pins:
     - brand.requested
     - brand.revision_needed
     - cto.spec_review_requested
-    - pipeline.dead_letter
+    - platform.dead_letter
     - spec.revision_requested
     - validation.package_ready
     - validation.started

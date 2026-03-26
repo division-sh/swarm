@@ -8,7 +8,7 @@ pins:
     reads: []
   outputs:
     events:
-    - pipeline.dead_letter
+    - platform.dead_letter
     - scoring.requested
     - vertical.marginal
     - vertical.rejected
