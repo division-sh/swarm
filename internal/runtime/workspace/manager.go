@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 type Target struct {
@@ -67,24 +67,24 @@ type DockerConfig struct {
 func DefaultDockerConfig() DockerConfig {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	return DockerConfig{
-		DockerBin:             EnvOrDefault("MAS_DOCKER_BIN", "docker"),
-		WorkspaceImage:        EnvOrDefault("MAS_WORKSPACE_IMAGE", "mas-workspace:latest"),
-		WorkspaceNetwork:      EnvOrDefault("MAS_WORKSPACE_NETWORK", "mas_default"),
-		WorkspaceVolumesFrom:  EnvOrDefault("MAS_WORKSPACE_VOLUMES_FROM", ""),
-		SharedDataSource:      EnvOrDefault("MAS_WORKSPACE_DATA_SOURCE", filepath.Join(repoRoot, "data")),
-		DataMountPoint:        EnvOrDefault("MAS_WORKSPACE_DATA_MOUNT", "/data"),
-		ContractsSource:       EnvOrDefault("MAS_WORKSPACE_CONTRACTS_SOURCE", runtimecontracts.DefaultWorkflowContractsDir(repoRoot)),
-		ContractsMountPoint:   EnvOrDefault("MAS_WORKSPACE_CONTRACTS_MOUNT", "/opt/mas/contracts"),
-		ScaffoldContainer:     EnvOrDefault("MAS_SCAFFOLD_CONTAINER", "mas-scaffold"),
-		ScaffoldWorkdir:       EnvOrDefault("MAS_SCAFFOLD_WORKDIR", "/opt/mas/scaffold"),
-		ScaffoldVolume:        EnvOrDefault("MAS_SCAFFOLD_VOLUME", "scaffold"),
-		SystemContainer:       EnvOrDefault("MAS_SYSTEM_CONTAINER", "mas-system"),
-		SystemWorkdir:         EnvOrDefault("MAS_SYSTEM_WORKDIR", "/opt/mas"),
-		SystemEntitiesVolume:  EnvOrDefault("MAS_SYSTEM_ENTITIES_VOLUME", "entities"),
-		SystemNginxVolume:     EnvOrDefault("MAS_SYSTEM_NGINX_VOLUME", "nginx"),
-		SystemSystemdVolume:   EnvOrDefault("MAS_SYSTEM_SYSTEMD_VOLUME", "systemd"),
-		EntityContainerPrefix: EnvOrDefault("MAS_ENTITY_CONTAINER_PREFIX", "mas-"),
-		EntityWorkdir:         EnvOrDefault("MAS_ENTITY_WORKDIR", "/workspace"),
+		DockerBin:             EnvOrDefault("SWARM_DOCKER_BIN", "docker"),
+		WorkspaceImage:        EnvOrDefault("SWARM_WORKSPACE_IMAGE", "swarm-workspace:latest"),
+		WorkspaceNetwork:      EnvOrDefault("SWARM_WORKSPACE_NETWORK", "mas_default"),
+		WorkspaceVolumesFrom:  EnvOrDefault("SWARM_WORKSPACE_VOLUMES_FROM", ""),
+		SharedDataSource:      EnvOrDefault("SWARM_WORKSPACE_DATA_SOURCE", filepath.Join(repoRoot, "data")),
+		DataMountPoint:        EnvOrDefault("SWARM_WORKSPACE_DATA_MOUNT", "/data"),
+		ContractsSource:       EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_SOURCE", runtimecontracts.DefaultWorkflowContractsDir(repoRoot)),
+		ContractsMountPoint:   EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_MOUNT", "/opt/swarm/contracts"),
+		ScaffoldContainer:     EnvOrDefault("SWARM_SCAFFOLD_CONTAINER", "swarm-scaffold"),
+		ScaffoldWorkdir:       EnvOrDefault("SWARM_SCAFFOLD_WORKDIR", "/opt/swarm/scaffold"),
+		ScaffoldVolume:        EnvOrDefault("SWARM_SCAFFOLD_VOLUME", "scaffold"),
+		SystemContainer:       EnvOrDefault("SWARM_SYSTEM_CONTAINER", "swarm-system"),
+		SystemWorkdir:         EnvOrDefault("SWARM_SYSTEM_WORKDIR", "/opt/swarm"),
+		SystemEntitiesVolume:  EnvOrDefault("SWARM_SYSTEM_ENTITIES_VOLUME", "entities"),
+		SystemNginxVolume:     EnvOrDefault("SWARM_SYSTEM_NGINX_VOLUME", "nginx"),
+		SystemSystemdVolume:   EnvOrDefault("SWARM_SYSTEM_SYSTEMD_VOLUME", "systemd"),
+		EntityContainerPrefix: EnvOrDefault("SWARM_ENTITY_CONTAINER_PREFIX", "swarm-"),
+		EntityWorkdir:         EnvOrDefault("SWARM_ENTITY_WORKDIR", "/workspace"),
 	}
 }
 
@@ -155,8 +155,8 @@ func (m *DockerManager) EnsureSystemWorkspaces(ctx context.Context) error {
 	if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, append(m.standardMountArgs(),
 		[]string{
 			"--privileged",
-			"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.SystemEntitiesVolume),
-			"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.SystemNginxVolume),
+			"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
+			"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
 			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
 			"-w", m.cfg.SystemWorkdir,
 			m.cfg.WorkspaceImage,
@@ -323,8 +323,8 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	case "system":
 		if err := m.EnsureContainerRunning(ctx, m.cfg.SystemContainer, []string{
 			"--privileged",
-			"-v", fmt.Sprintf("%s:/opt/mas/entities", m.cfg.SystemEntitiesVolume),
-			"-v", fmt.Sprintf("%s:/opt/mas/nginx", m.cfg.SystemNginxVolume),
+			"-v", fmt.Sprintf("%s:/opt/swarm/entities", m.cfg.SystemEntitiesVolume),
+			"-v", fmt.Sprintf("%s:/opt/swarm/nginx", m.cfg.SystemNginxVolume),
 			"-v", fmt.Sprintf("%s:/etc/systemd/system", m.cfg.SystemSystemdVolume),
 			"-w", m.cfg.SystemWorkdir,
 			m.cfg.WorkspaceImage,
@@ -445,9 +445,9 @@ func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string) (str
 	scopeKey = SanitizeSlug(scopeKey)
 	switch scope {
 	case "per-flow-instance":
-		return "mas-flow-" + scopeKey, "workspaces_flow_" + scopeKey
+		return "swarm-flow-" + scopeKey, "workspaces_flow_" + scopeKey
 	default:
-		return "mas-agent-" + scopeKey, "workspaces_agent_" + scopeKey
+		return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey
 	}
 }
 
@@ -487,7 +487,7 @@ func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
 	if err := validateReadableDir(strings.TrimSpace(m.cfg.SharedDataSource), "workspace validation failed: /data source"); err != nil {
 		return err
 	}
-	if err := validateReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/mas/contracts source"); err != nil {
+	if err := validateReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source"); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(strings.TrimSpace(m.cfg.ContractsSource), "package.yaml")); err != nil {

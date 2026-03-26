@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/paths"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/paths"
 )
 
 func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	models "empireai/internal/runtime/core/actors"
+	models "swarm/internal/runtime/core/actors"
 )
 
 func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

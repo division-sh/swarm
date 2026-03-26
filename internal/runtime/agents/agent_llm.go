@@ -9,16 +9,16 @@ import (
 	"strings"
 	"sync"
 
-	"empireai/internal/events"
-	runtimeauthority "empireai/internal/runtime/authority"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	llm "empireai/internal/runtime/llm"
-	runtimemanager "empireai/internal/runtime/manager"
-	"empireai/internal/runtime/sessions"
-	"empireai/internal/runtime/sharedjson"
-	runtimetools "empireai/internal/runtime/tools"
+	"swarm/internal/events"
+	runtimeauthority "swarm/internal/runtime/authority"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
+	runtimemanager "swarm/internal/runtime/manager"
+	"swarm/internal/runtime/sessions"
+	"swarm/internal/runtime/sharedjson"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 type LLMAgent struct {

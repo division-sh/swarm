@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catalogExpectedDocument) {

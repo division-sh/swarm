@@ -3,8 +3,8 @@ package semanticview
 import (
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/flowmodel"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/flowmodel"
 )
 
 func CloneBundleForPreview(bundle *runtimecontracts.WorkflowContractBundle, policyOverrides map[string]any) *runtimecontracts.WorkflowContractBundle {

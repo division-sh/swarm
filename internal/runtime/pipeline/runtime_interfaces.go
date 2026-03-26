@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"empireai/internal/events"
-	"empireai/internal/runtime/core/identity"
-	runtimeregistry "empireai/internal/runtime/core/registry"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	"swarm/internal/runtime/core/identity"
+	runtimeregistry "swarm/internal/runtime/core/registry"
+	"swarm/internal/runtime/semanticview"
 )
 
 const runtimeWorkflowID = "workflow-runtime"

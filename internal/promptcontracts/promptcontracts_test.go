@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
 

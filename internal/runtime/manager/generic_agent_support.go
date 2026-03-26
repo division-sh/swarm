@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/core/actors"
-	workspace "empireai/internal/runtime/workspace"
+	"swarm/internal/events"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type genericAgent struct {

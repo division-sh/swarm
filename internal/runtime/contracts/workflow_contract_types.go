@@ -1,8 +1,8 @@
 package contracts
 
 import (
-	"empireai/internal/runtime/core/paths"
-	flowmodel "empireai/internal/runtime/flowmodel"
+	"swarm/internal/runtime/core/paths"
+	flowmodel "swarm/internal/runtime/flowmodel"
 	"gopkg.in/yaml.v3"
 	"strings"
 )

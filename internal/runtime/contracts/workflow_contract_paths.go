@@ -34,7 +34,7 @@ func ResolveWorkflowContractPaths(repoRoot string) ContractPaths {
 	return ResolveWorkflowContractPathsWithOverrides(repoRoot, "", "")
 }
 func DefaultPlatformContractsDir(repoRoot string) string {
-	return filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts")
+	return filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts")
 }
 func DefaultPlatformSpecFile(repoRoot string) string {
 	return filepath.Join(DefaultPlatformContractsDir(repoRoot), "platform-spec.yaml")
@@ -46,7 +46,7 @@ func defaultMASAuxFile(repoRoot, envKey string, pathParts ...string) string {
 	return filepath.Join(append([]string{repoRoot}, pathParts...)...)
 }
 func DefaultWorkflowContractsDir(repoRoot string) string {
-	if env := strings.TrimSpace(os.Getenv("MAS_CONTRACTS_DIR")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("SWARM_CONTRACTS_DIR")); env != "" {
 		return env
 	}
 	dir := filepath.Join(repoRoot, "contracts")
@@ -80,10 +80,10 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		ProjectPolicyFile:     existingFile(filepath.Join(workflowDir, "policy.yaml")),
 		ProjectPromptsDir:     existingDir(filepath.Join(workflowDir, "prompts")),
 		PlatformSpecFile:      platformSpecFile,
-		VerificationGatesFile: defaultMASAuxFile(repoRoot, "MAS_VERIFICATION_GATES_FILE", "docs", "specs", "mas-platform", "verification-gates.yaml"),
-		ToolingLockFile:       defaultMASAuxFile(repoRoot, "MAS_TOOLING_LOCK_FILE", "docs", "specs", "mas-platform", "tooling.lock"),
+		VerificationGatesFile: defaultMASAuxFile(repoRoot, "SWARM_VERIFICATION_GATES_FILE", "docs", "specs", "swarm-platform", "verification-gates.yaml"),
+		ToolingLockFile:       defaultMASAuxFile(repoRoot, "SWARM_TOOLING_LOCK_FILE", "docs", "specs", "swarm-platform", "tooling.lock"),
 		DDLFile:               "",
-		AgentConfigMapFile:    defaultMASAuxFile(repoRoot, "MAS_AGENT_CONFIG_MAP_FILE", "docs", "specs", "mas-platform", "agent-config-map.yaml"),
+		AgentConfigMapFile:    defaultMASAuxFile(repoRoot, "SWARM_AGENT_CONFIG_MAP_FILE", "docs", "specs", "swarm-platform", "agent-config-map.yaml"),
 	}
 	if paths.ProjectPackageFile != "" {
 		paths.ProjectPackages = discoverProjectPackagePaths(paths.ProjectPackageFile, workflowDir)

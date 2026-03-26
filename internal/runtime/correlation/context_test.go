@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"empireai/internal/events"
+	"swarm/internal/events"
 )
 
 func TestCorrelateEvent_InheritsInboundTraceAndParent(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 )
 
 func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	runtimeactors "empireai/internal/runtime/core/actors"
-	runtimemanager "empireai/internal/runtime/manager"
-	runtimesessions "empireai/internal/runtime/sessions"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
+	runtimesessions "swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 

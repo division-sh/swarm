@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
 )
 
 func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, input any) (any, error) {

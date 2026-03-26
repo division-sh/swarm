@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	models "empireai/internal/runtime/core/actors"
+	models "swarm/internal/runtime/core/actors"
 	"gopkg.in/yaml.v3"
 )
 

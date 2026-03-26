@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/semanticview"
 )
 
 type HandlerPreview struct {

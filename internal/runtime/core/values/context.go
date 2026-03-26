@@ -1,6 +1,6 @@
 package values
 
-import "empireai/internal/runtime/core/paths"
+import "swarm/internal/runtime/core/paths"
 
 type Context struct {
 	Entity      Bucket

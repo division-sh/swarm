@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 )
 
 type genericTestModule struct {
@@ -25,8 +25,8 @@ func NewGenericTestWorkflowModule() WorkflowModule {
 func (m *genericTestModule) init() {
 	m.once.Do(func() {
 		repoRoot := WorkflowRepoRoot()
-		contractsDir := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-mas-bundle")
-		platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+		contractsDir := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
+		platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 		m.contractBundle, m.loadErr = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsDir, platformSpec)
 		if m.loadErr != nil {
 			return

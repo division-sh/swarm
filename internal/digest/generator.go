@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"empireai/internal/runtime"
-	runtimetools "empireai/internal/runtime/tools"
+	"swarm/internal/runtime"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 type Snapshot struct {

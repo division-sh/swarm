@@ -10,13 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/config"
-	"empireai/internal/events"
-	runtimeauthority "empireai/internal/runtime/authority"
-	models "empireai/internal/runtime/core/actors"
-	llm "empireai/internal/runtime/llm"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/config"
+	"swarm/internal/events"
+	runtimeauthority "swarm/internal/runtime/authority"
+	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 

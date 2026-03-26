@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
-	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
 )
 

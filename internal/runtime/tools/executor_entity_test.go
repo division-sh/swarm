@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/semanticview"
-	runtimetools "empireai/internal/runtime/tools"
-	"empireai/internal/store"
-	"empireai/internal/testutil"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
+	"swarm/internal/store"
+	"swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 

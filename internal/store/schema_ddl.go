@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 type SchemaTableDDL struct {

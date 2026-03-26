@@ -3,8 +3,8 @@ package registry
 import (
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
 )
 
 func TestGuardFromContract_PreservesTypedKeyAndKind(t *testing.T) {

@@ -1,9 +1,9 @@
 package engine
 
 import (
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/values"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/values"
+	"swarm/internal/runtime/semanticview"
 )
 
 type BaseContext = values.Context

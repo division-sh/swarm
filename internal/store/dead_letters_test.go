@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimedeadletters "empireai/internal/runtime/deadletters"
-	"empireai/internal/testutil"
+	"swarm/internal/events"
+	runtimedeadletters "swarm/internal/runtime/deadletters"
+	"swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 

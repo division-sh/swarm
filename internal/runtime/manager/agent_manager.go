@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	llm "empireai/internal/runtime/llm"
-	"empireai/internal/runtime/sessions"
-	workspace "empireai/internal/runtime/workspace"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
+	"swarm/internal/runtime/sessions"
+	workspace "swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
 

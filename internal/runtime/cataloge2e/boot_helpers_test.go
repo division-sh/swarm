@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 func runBootCatalogFixture(t *testing.T, fixtureRoot string) {

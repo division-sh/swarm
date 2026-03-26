@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
-	runtimeengine "empireai/internal/runtime/engine"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
+	runtimeengine "swarm/internal/runtime/engine"
 )
 
 type Event = events.Event

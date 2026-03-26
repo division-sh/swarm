@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func TestSchemaFieldTypeToDDL(t *testing.T) {

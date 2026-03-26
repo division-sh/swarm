@@ -6,17 +6,17 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/semanticview"
-	"empireai/internal/testutil"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/semanticview"
+	"swarm/internal/testutil"
 )
 
 func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-timeout")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)

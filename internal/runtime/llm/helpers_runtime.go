@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	models "empireai/internal/runtime/core/actors"
-	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	models "swarm/internal/runtime/core/actors"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 func budgetExecutionScopeKey(actor models.AgentConfig) string {

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	models "empireai/internal/runtime/core/actors"
+	models "swarm/internal/runtime/core/actors"
 )
 
 func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) {

@@ -133,7 +133,7 @@ func TestPopulateScopedURIs_RegistersKindsByFlowScope(t *testing.T) {
 		Events: map[string]struct{}{"evt.created": {}},
 	}
 	registry := &URIRegistry{
-		Scheme: "mas",
+		Scheme: "swarm",
 		Nodes:  map[string]URIRef{},
 		Agents: map[string]URIRef{},
 		Events: map[string]URIRef{},
@@ -153,13 +153,13 @@ func TestPopulateScopedURIs_RegistersKindsByFlowScope(t *testing.T) {
 		func(node *scopedNode) *map[string]string { return &node.EventURIs },
 	)
 
-	if got := node.NodeURIs["n1"]; got != "mas://root/child/n1" {
+	if got := node.NodeURIs["n1"]; got != "swarm://root/child/n1" {
 		t.Fatalf("expected node URI, got %q", got)
 	}
-	if got := node.AgentURIs["a1"]; got != "mas://root/child/a1" {
+	if got := node.AgentURIs["a1"]; got != "swarm://root/child/a1" {
 		t.Fatalf("expected agent URI, got %q", got)
 	}
-	if got := node.EventURIs["evt.created"]; got != "mas://root/child/evt.created" {
+	if got := node.EventURIs["evt.created"]; got != "swarm://root/child/evt.created" {
 		t.Fatalf("expected event URI, got %q", got)
 	}
 	if _, ok := registry.Nodes["child/n1"]; !ok {
@@ -215,7 +215,7 @@ func TestIndexAndPopulateScopedURIs_AssignsTreeAndScopedURIs(t *testing.T) {
 	}
 	tree := &Tree[scopedTreeNode]{}
 	registry := &URIRegistry{
-		Scheme: "mas",
+		Scheme: "swarm",
 		Nodes:  map[string]URIRef{},
 		Agents: map[string]URIRef{},
 		Events: map[string]URIRef{},
@@ -253,13 +253,13 @@ func TestIndexAndPopulateScopedURIs_AssignsTreeAndScopedURIs(t *testing.T) {
 	if parent.Path != "parent" || child.Path != "parent/child" {
 		t.Fatalf("unexpected indexed paths parent=%q child=%q", parent.Path, child.Path)
 	}
-	if child.URI != "mas://parent/child" {
+	if child.URI != "swarm://parent/child" {
 		t.Fatalf("expected child URI, got %q", child.URI)
 	}
-	if got := parent.NodeURIs["n1"]; got != "mas://parent/n1" {
+	if got := parent.NodeURIs["n1"]; got != "swarm://parent/n1" {
 		t.Fatalf("expected parent node URI, got %q", got)
 	}
-	if got := child.EventURIs["evt.child"]; got != "mas://parent/child/evt.child" {
+	if got := child.EventURIs["evt.child"]; got != "swarm://parent/child/evt.child" {
 		t.Fatalf("expected child event URI, got %q", got)
 	}
 	if tree.ByID["child"] != child {
@@ -278,7 +278,7 @@ func TestIndexTree_AssignsPathsAndNearestEligibleParent(t *testing.T) {
 	}
 	tree := &Tree[testNode]{}
 	registry := &URIRegistry{
-		Scheme: "mas",
+		Scheme: "swarm",
 		Nodes:  map[string]URIRef{},
 		Agents: map[string]URIRef{},
 		Events: map[string]URIRef{},
@@ -320,8 +320,8 @@ func TestIndexTree_AssignsPathsAndNearestEligibleParent(t *testing.T) {
 	if child.Parent != parent {
 		t.Fatal("expected child parent to resolve to nearest eligible ancestor")
 	}
-	if got := child.URI; got != "mas://parent/child" {
-		t.Fatalf("expected child URI %q, got %q", "mas://parent/child", got)
+	if got := child.URI; got != "swarm://parent/child" {
+		t.Fatalf("expected child URI %q, got %q", "swarm://parent/child", got)
 	}
 }
 
@@ -334,7 +334,7 @@ func TestCloneViewTree_ClonesIndexesPolicyAndParents(t *testing.T) {
 	root := &previewView{
 		Paths:    previewPaths{ID: "root"},
 		Path:     "root",
-		NodeURIs: map[string]string{"n1": "mas://root/n1"},
+		NodeURIs: map[string]string{"n1": "swarm://root/n1"},
 		Policy: PolicyDocument{Values: map[string]PolicyValue{
 			"shared": {Value: "root"},
 		}},
@@ -377,9 +377,9 @@ func TestCloneViewTree_ClonesIndexesPolicyAndParents(t *testing.T) {
 	if byID["root"] != cloned || byID["child"] != child {
 		t.Fatal("expected cloned nodes to be indexed by id")
 	}
-	child.NodeURIs = map[string]string{"n2": "mas://root/child/n2"}
+	child.NodeURIs = map[string]string{"n2": "swarm://root/child/n2"}
 	cloned.NodeURIs["n1"] = "changed"
-	if got := root.NodeURIs["n1"]; got != "mas://root/n1" {
+	if got := root.NodeURIs["n1"]; got != "swarm://root/n1" {
 		t.Fatalf("expected original URI map unchanged, got %q", got)
 	}
 }

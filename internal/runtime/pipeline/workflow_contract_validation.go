@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/semanticview"
 )
 
 type WorkflowContractWarning struct {

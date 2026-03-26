@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func parseExpr(t *testing.T, src string) ast.Expr {
@@ -264,7 +264,7 @@ func TestReportAndMiscHelpers(t *testing.T) {
 		guaranteed:     []string{"entity_id"},
 		missing:        []string{"geography"},
 	}}
-	report := buildReport(contracts, findings, "internal/runtime", "docs/specs/mas-platform/empire/contracts")
+	report := buildReport(contracts, findings, "internal/runtime", "internal/runtime/testdata/generic-swarm-bundle")
 	if !strings.Contains(report, "# Runtime Payload Completeness Audit") {
 		t.Fatalf("unexpected report header: %s", report)
 	}

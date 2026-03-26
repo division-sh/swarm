@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	llm "empireai/internal/runtime/llm"
-	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	llm "swarm/internal/runtime/llm"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 type EmitSchema = runtimecontracts.EventSchema

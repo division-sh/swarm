@@ -68,7 +68,7 @@ func dbQueryRowContext(ctx context.Context, db *sql.DB, query string, args ...an
 }
 
 func shouldSQLDebugLog() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_SQL_DEBUG")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_SQL_DEBUG")))
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 

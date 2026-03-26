@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"empireai/internal/events"
-	runtimecorrelation "empireai/internal/runtime/correlation"
+	"swarm/internal/events"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 type emittedEventsContextKey struct{}

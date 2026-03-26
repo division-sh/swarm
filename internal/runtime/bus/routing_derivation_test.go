@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {

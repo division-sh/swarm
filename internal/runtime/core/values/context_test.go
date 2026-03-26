@@ -3,7 +3,7 @@ package values
 import (
 	"testing"
 
-	"empireai/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/paths"
 )
 
 func TestBucketLookupAndSetPath(t *testing.T) {

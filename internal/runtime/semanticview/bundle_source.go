@@ -3,8 +3,8 @@ package semanticview
 import (
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeregistry "empireai/internal/runtime/core/registry"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeregistry "swarm/internal/runtime/core/registry"
 )
 
 type bundleSource struct {

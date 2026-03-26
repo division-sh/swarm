@@ -6,9 +6,9 @@ import (
 	"log/slog"
 	"strings"
 
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {

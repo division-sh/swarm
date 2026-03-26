@@ -3,7 +3,7 @@ package values
 import (
 	"strings"
 
-	"empireai/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/paths"
 )
 
 type Bucket struct {

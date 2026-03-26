@@ -6,12 +6,12 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/sessions"
-	workspace "empireai/internal/runtime/workspace"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/sessions"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type Agent interface {

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/events"
-	runtimepkg "empireai/internal/runtime"
-	runtimebus "empireai/internal/runtime/bus"
+	"swarm/internal/events"
+	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
 	"github.com/google/uuid"
 )
 

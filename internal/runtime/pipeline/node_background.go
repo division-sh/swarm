@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"empireai/internal/events"
+	"swarm/internal/events"
 )
 
 type backgroundWorkflowNode struct {

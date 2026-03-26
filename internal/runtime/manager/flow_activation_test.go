@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 type flowActivationTestBus struct {

@@ -3,8 +3,8 @@ package tools
 import (
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {

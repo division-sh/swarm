@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 )
 
 type sweeperTestStore struct {

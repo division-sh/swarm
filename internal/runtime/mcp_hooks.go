@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	runtimebus "empireai/internal/runtime/bus"
-	runtimeactors "empireai/internal/runtime/core/actors"
-	llm "empireai/internal/runtime/llm"
-	runtimemcp "empireai/internal/runtime/mcp"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
+	runtimemcp "swarm/internal/runtime/mcp"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 type mcpTurnContext = runtimemcp.TurnContext

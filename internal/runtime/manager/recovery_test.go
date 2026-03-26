@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 type recoveryTestBus struct {

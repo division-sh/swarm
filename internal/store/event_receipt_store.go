@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimecorrelation "empireai/internal/runtime/correlation"
-	runtimemanager "empireai/internal/runtime/manager"
+	"swarm/internal/events"
+	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimemanager "swarm/internal/runtime/manager"
 )
 
 func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {

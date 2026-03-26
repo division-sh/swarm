@@ -1,15 +1,15 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
-	lint postgres-up postgres-reset mas-local \
+	lint postgres-up postgres-reset swarm-local \
 	sync-current-spec
 
 COMPOSE ?= docker compose
-MAS_HEALTH_PORT ?= 18082
-MAS_DB_HOST ?= 127.0.0.1
-MAS_DB_PORT ?= 5432
-MAS_DB_NAME ?= mas
-MAS_DB_USER ?= postgres
-MAS_DB_PASSWORD ?= postgres
-MAS_DB_SSLMODE ?= disable
+SWARM_HEALTH_PORT ?= 18082
+SWARM_DB_HOST ?= 127.0.0.1
+SWARM_DB_PORT ?= 5432
+SWARM_DB_NAME ?= swarm
+SWARM_DB_USER ?= postgres
+SWARM_DB_PASSWORD ?= postgres
+SWARM_DB_SSLMODE ?= disable
 
 COVER_DIR ?= coverage
 MIN_RUNTIME_COVER ?= 32
@@ -59,15 +59,15 @@ postgres-up:
 	$(COMPOSE) up -d postgres
 
 postgres-reset: postgres-up
-	PGPASSWORD=$(MAS_DB_PASSWORD) psql -h $(MAS_DB_HOST) -p $(MAS_DB_PORT) -U $(MAS_DB_USER) -d $(MAS_DB_NAME) -v ON_ERROR_STOP=1 \
+	PGPASSWORD=$(SWARM_DB_PASSWORD) psql -h $(SWARM_DB_HOST) -p $(SWARM_DB_PORT) -U $(SWARM_DB_USER) -d $(SWARM_DB_NAME) -v ON_ERROR_STOP=1 \
 		-c "DROP SCHEMA IF EXISTS public CASCADE;" \
 		-c "CREATE SCHEMA public;" \
-		-c "GRANT ALL ON SCHEMA public TO $(MAS_DB_USER);" \
+		-c "GRANT ALL ON SCHEMA public TO $(SWARM_DB_USER);" \
 		-c "GRANT ALL ON SCHEMA public TO public;"
 
-mas-local: postgres-up
-	MAS_DB_HOST=$(MAS_DB_HOST) MAS_DB_PORT=$(MAS_DB_PORT) MAS_DB_NAME=$(MAS_DB_NAME) MAS_DB_USER=$(MAS_DB_USER) MAS_DB_PASSWORD=$(MAS_DB_PASSWORD) MAS_DB_SSLMODE=$(MAS_DB_SSLMODE) \
-		go run ./cmd/mas -store postgres -health-addr 127.0.0.1:$(MAS_HEALTH_PORT)
+swarm-local: postgres-up
+	SWARM_DB_HOST=$(SWARM_DB_HOST) SWARM_DB_PORT=$(SWARM_DB_PORT) SWARM_DB_NAME=$(SWARM_DB_NAME) SWARM_DB_USER=$(SWARM_DB_USER) SWARM_DB_PASSWORD=$(SWARM_DB_PASSWORD) SWARM_DB_SSLMODE=$(SWARM_DB_SSLMODE) \
+		go run ./cmd/swarm -store postgres -health-addr 127.0.0.1:$(SWARM_HEALTH_PORT)
 
 sync-current-spec:
 	./scripts/sync_current_spec.sh

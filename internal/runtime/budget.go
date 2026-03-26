@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/config"
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	models "empireai/internal/runtime/core/actors"
-	llm "empireai/internal/runtime/llm"
-	runtimetools "empireai/internal/runtime/tools"
+	"swarm/internal/config"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
+	runtimetools "swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/config"
-	runtimeactors "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/sessions"
-	workspace "empireai/internal/runtime/workspace"
+	"swarm/internal/config"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/sessions"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type ClaudeCLIRuntime struct {

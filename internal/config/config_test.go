@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	runtimesharding "empireai/internal/runtime/core/sharding"
+	runtimesharding "swarm/internal/runtime/core/sharding"
 )
 
 func TestLoadAndValidate_CLI_TestMode(t *testing.T) {

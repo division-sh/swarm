@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"empireai/internal/config"
-	"empireai/internal/runtime/sessions"
-	workspace "empireai/internal/runtime/workspace"
+	"swarm/internal/config"
+	"swarm/internal/runtime/sessions"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type RuntimeFactory struct {

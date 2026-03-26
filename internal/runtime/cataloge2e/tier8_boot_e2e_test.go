@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	runtime "empireai/internal/runtime"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtime "swarm/internal/runtime"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 type tier8ExpectedDocument struct {
@@ -63,7 +63,7 @@ var tier8SupportedFixtures = []string{
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{}
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
-	t.Setenv("MAS_EMIT_SCHEMA_STRICT", "false")
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
 
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier8SupportedFixtures {

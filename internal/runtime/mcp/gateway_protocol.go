@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	models "empireai/internal/runtime/core/actors"
+	models "swarm/internal/runtime/core/actors"
 )
 
 const (
@@ -79,7 +79,7 @@ type ToolDef struct {
 }
 
 func RequireContextToken() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_MCP_REQUIRE_CONTEXT_TOKEN")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_MCP_REQUIRE_CONTEXT_TOKEN")))
 	if v == "" {
 		return true
 	}
@@ -87,7 +87,7 @@ func RequireContextToken() bool {
 }
 
 func AllowContextFallbackOnMiss() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_MCP_CONTEXT_FALLBACK_ON_MISS")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_MCP_CONTEXT_FALLBACK_ON_MISS")))
 	if v == "" {
 		return true
 	}

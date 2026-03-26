@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"empireai/internal/events"
-	runtimeengine "empireai/internal/runtime/engine"
+	"swarm/internal/events"
+	runtimeengine "swarm/internal/runtime/engine"
 )
 
 type pipelineTestBus struct{}

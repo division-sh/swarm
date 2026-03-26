@@ -3,7 +3,7 @@ package testcases
 import (
 	"testing"
 
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {

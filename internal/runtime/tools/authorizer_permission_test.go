@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
@@ -145,7 +145,7 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 
 func TestValidateAgentPermissions_EmpireBundleDoesNotReportUnknownBundles(t *testing.T) {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "empire", "contracts"), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}

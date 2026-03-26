@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/core/actors"
-	runtimemanager "empireai/internal/runtime/manager"
-	runtimetools "empireai/internal/runtime/tools"
-	"empireai/internal/testutil"
+	"swarm/internal/events"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
+	runtimetools "swarm/internal/runtime/tools"
+	"swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 

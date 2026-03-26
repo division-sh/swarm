@@ -1,7 +1,7 @@
 package contracts
 
 import (
-	flowmodel "empireai/internal/runtime/flowmodel"
+	flowmodel "swarm/internal/runtime/flowmodel"
 	"sort"
 	"strings"
 )

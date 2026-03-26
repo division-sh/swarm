@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {

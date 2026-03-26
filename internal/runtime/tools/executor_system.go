@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	models "empireai/internal/runtime/core/actors"
+	models "swarm/internal/runtime/core/actors"
 )
 
 func (e *Executor) execNginxReload(ctx context.Context, _ models.AgentConfig, _ any) (any, error) {
@@ -38,8 +38,8 @@ func (e *Executor) execSystemdControl(ctx context.Context, _ models.AgentConfig,
 	default:
 		return nil, fmt.Errorf("unsupported systemd action: %s", action)
 	}
-	if !strings.HasPrefix(unit, "mas-") {
-		return nil, fmt.Errorf("systemd unit must start with mas-")
+	if !strings.HasPrefix(unit, "swarm-") {
+		return nil, fmt.Errorf("systemd unit must start with swarm-")
 	}
 	if action == "status" {
 		out, err := exec.CommandContext(ctx, "systemctl", "is-active", unit).CombinedOutput()

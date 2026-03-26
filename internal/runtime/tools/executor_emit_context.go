@@ -3,8 +3,8 @@ package tools
 import (
 	"strings"
 
-	"empireai/internal/events"
-	models "empireai/internal/runtime/core/actors"
+	"swarm/internal/events"
+	models "swarm/internal/runtime/core/actors"
 )
 
 func (e *Executor) enrichEmitPayloadContext(actor models.AgentConfig, inbound events.Event, eventType string, payload map[string]any) map[string]any {

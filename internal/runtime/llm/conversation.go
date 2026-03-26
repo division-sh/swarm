@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"empireai/internal/runtime/sessions"
+	"swarm/internal/runtime/sessions"
 	"strings"
 )
 

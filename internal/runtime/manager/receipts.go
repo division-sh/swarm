@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimedeadletters "empireai/internal/runtime/deadletters"
-	runtimerterr "empireai/internal/runtime/rterrors"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimerterr "swarm/internal/runtime/rterrors"
 	"github.com/google/uuid"
 )
 

@@ -6,7 +6,7 @@ import (
 	"log"
 	"strings"
 
-	"empireai/internal/runtime/sessions"
+	"swarm/internal/runtime/sessions"
 )
 
 func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode string, registry sessions.Registry, lockOwner string, rotateAfter int) (*sessions.Lease, error) {

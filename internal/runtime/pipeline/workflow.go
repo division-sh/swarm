@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeregistry "empireai/internal/runtime/core/registry"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeregistry "swarm/internal/runtime/core/registry"
+	"swarm/internal/runtime/semanticview"
 )
 
 type WorkflowStage struct {

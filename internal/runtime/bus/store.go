@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"empireai/internal/events"
+	"swarm/internal/events"
 )
 
 type EventStore interface {

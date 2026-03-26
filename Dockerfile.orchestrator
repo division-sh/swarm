@@ -1,6 +1,6 @@
 FROM golang:1.23-bookworm AS build
 
-ARG CMD_PATH=./cmd/mas
+ARG CMD_PATH=./cmd/swarm
 
 WORKDIR /app
 COPY go.mod go.sum ./

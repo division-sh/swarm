@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	runtimepkg "empireai/internal/runtime"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtimepkg "swarm/internal/runtime"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)

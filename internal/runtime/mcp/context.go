@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	models "empireai/internal/runtime/core/actors"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	models "swarm/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
 

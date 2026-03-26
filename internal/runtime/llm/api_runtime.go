@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/config"
-	runtimeactors "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/sessions"
+	"swarm/internal/config"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/sessions"
 )
 
 // AnthropicAPIRuntime provides production API-backed LLM execution.

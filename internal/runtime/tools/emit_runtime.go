@@ -7,12 +7,12 @@ import (
 	"strings"
 	"sync"
 
-	"empireai/internal/events"
-	runtimeauthority "empireai/internal/runtime/authority"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	llm "empireai/internal/runtime/llm"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	runtimeauthority "swarm/internal/runtime/authority"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	llm "swarm/internal/runtime/llm"
+	"swarm/internal/runtime/semanticview"
 )
 
 var (

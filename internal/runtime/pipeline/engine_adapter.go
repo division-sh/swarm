@@ -8,12 +8,12 @@ import (
 	"path"
 	"strings"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
-	runtimeregistry "empireai/internal/runtime/core/registry"
-	runtimeengine "empireai/internal/runtime/engine"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
+	runtimeregistry "swarm/internal/runtime/core/registry"
+	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/semanticview"
 )
 
 type pipelineEngineEvaluator struct {

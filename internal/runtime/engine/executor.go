@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
-	"empireai/internal/runtime/core/paths"
-	"empireai/internal/runtime/core/values"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
+	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/values"
 )
 
 type Step string

@@ -3,10 +3,10 @@ package engine
 import (
 	"testing"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/paths"
-	"empireai/internal/runtime/core/values"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/values"
 )
 
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {

@@ -3,7 +3,7 @@ package semanticview
 import (
 	"strings"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func PolicyValueForFlow(source Source, flowID, key string) (runtimecontracts.PolicyValue, bool) {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	models "empireai/internal/runtime/core/actors"
+	"swarm/internal/events"
+	models "swarm/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
 

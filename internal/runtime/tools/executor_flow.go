@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	"swarm/internal/events"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 

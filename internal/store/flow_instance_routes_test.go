@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/testutil"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/testutil"
 )
 
 func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {

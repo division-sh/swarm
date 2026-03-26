@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	builderpkg "empireai/internal/builder"
-	runtimepkg "empireai/internal/runtime"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimeactors "empireai/internal/runtime/core/actors"
-	runtimemanager "empireai/internal/runtime/manager"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimetools "empireai/internal/runtime/tools"
+	builderpkg "swarm/internal/builder"
+	runtimepkg "swarm/internal/runtime"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimemanager "swarm/internal/runtime/manager"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimetools "swarm/internal/runtime/tools"
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gorilla/websocket"
 )
@@ -460,8 +460,8 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	handler := NewHandler(Options{
 		Health:    health,
 		Instances: instances,
-		Version:   "mas-test",
-		Builder:   newBuilderHandlerForTest(health, instances, "mas-test", nil, nil, projectCtl),
+		Version:   "swarm-test",
+		Builder:   newBuilderHandlerForTest(health, instances, "swarm-test", nil, nil, projectCtl),
 	})
 
 	rec := httptest.NewRecorder()
@@ -478,7 +478,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected ping result: %#v", pingResp.Result)
 	}
-	if result["status"] != "ok" || result["version"] != "mas-test" {
+	if result["status"] != "ok" || result["version"] != "swarm-test" {
 		t.Fatalf("unexpected ping result: %#v", result)
 	}
 
@@ -568,7 +568,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 		t.Fatalf("unmarshal /api/rpc response: %v", err)
 	}
 	result, ok = apiPingResp.Result.(map[string]any)
-	if !ok || result["status"] != "ok" || result["version"] != "mas-test" {
+	if !ok || result["status"] != "ok" || result["version"] != "swarm-test" {
 		t.Fatalf("unexpected /api/rpc result: %#v", apiPingResp.Result)
 	}
 }
@@ -581,8 +581,8 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 	}
 	ts := httptest.NewServer(NewHandler(Options{
 		Health:  health,
-		Version: "mas-test",
-		Builder: newBuilderHandlerForTest(health, nil, "mas-test", nil, nil, nil),
+		Version: "swarm-test",
+		Builder: newBuilderHandlerForTest(health, nil, "swarm-test", nil, nil, nil),
 	}))
 	defer ts.Close()
 
@@ -608,7 +608,7 @@ func TestHandler_BuilderWSHealthHeartbeat(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected event payload: %#v", frame.Data)
 	}
-	if data["status"] != "ok" || data["version"] != "mas-test" {
+	if data["status"] != "ok" || data["version"] != "swarm-test" {
 		t.Fatalf("unexpected health payload: %#v", data)
 	}
 }
@@ -621,8 +621,8 @@ func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
 	}
 	ts := httptest.NewServer(NewHandler(Options{
 		Health:  health,
-		Version: "mas-test",
-		Builder: newBuilderHandlerForTest(health, nil, "mas-test", nil, nil, nil),
+		Version: "swarm-test",
+		Builder: newBuilderHandlerForTest(health, nil, "swarm-test", nil, nil, nil),
 	}))
 	defer ts.Close()
 
@@ -651,7 +651,7 @@ func TestHandler_BuilderWSHealthHeartbeat_APIAlias(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected alias payload: %#v", frame.Data)
 	}
-	if payload["version"] != "mas-test" {
+	if payload["version"] != "swarm-test" {
 		t.Fatalf("unexpected alias payload: %#v", payload)
 	}
 }
@@ -661,7 +661,7 @@ func TestHandler_HealthzAliases(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 	})
 
 	for _, path := range []string{"/healthz", "/api/healthz"} {
@@ -692,14 +692,14 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -786,14 +786,14 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -869,14 +869,14 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -969,14 +969,14 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -1090,14 +1090,14 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -1191,14 +1191,14 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -1335,14 +1335,14 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -1453,14 +1453,14 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,
@@ -1554,14 +1554,14 @@ func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
-		Version: "mas-test",
+		Version: "swarm-test",
 		Runtime: runtimeCtl,
 		Builder: newBuilderHandlerForTest(
 			func(context.Context) (map[string]any, error) {
 				return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 			},
 			nil,
-			"mas-test",
+			"swarm-test",
 			runtimeCtl,
 			rt,
 			nil,

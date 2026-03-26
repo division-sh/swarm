@@ -3,7 +3,7 @@ package llm
 import (
 	"strings"
 
-	"empireai/internal/runtime/sessions"
+	"swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 

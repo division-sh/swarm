@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
 	"github.com/gorilla/websocket"
 )
 

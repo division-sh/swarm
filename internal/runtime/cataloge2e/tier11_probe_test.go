@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestTier11Probe(t *testing.T) {

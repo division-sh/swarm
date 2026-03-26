@@ -3,7 +3,7 @@ package config
 import (
 	"strings"
 
-	runtimesharding "empireai/internal/runtime/core/sharding"
+	runtimesharding "swarm/internal/runtime/core/sharding"
 )
 
 type ExtensionsConfig struct {

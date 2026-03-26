@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimetools "empireai/internal/runtime/tools"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 func TestCreateFlowInstanceTool_ExecutesWithPermission(t *testing.T) {

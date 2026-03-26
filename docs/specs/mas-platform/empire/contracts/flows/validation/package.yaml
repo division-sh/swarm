@@ -1,4 +1,0 @@
-name: validation
-version: 3.0.0
-description: '4-gate validation pipeline: research, spec, CTO review, brand'
-flows: []

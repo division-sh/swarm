@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/config"
+	"swarm/internal/config"
 	_ "github.com/lib/pq"
 )
 

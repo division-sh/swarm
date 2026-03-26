@@ -97,7 +97,7 @@ func firstLoadedWorkflowHandler(bundle *WorkflowContractBundle) (string, string,
 
 func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 	cases := []struct {
 		name     string
 		fixture  string

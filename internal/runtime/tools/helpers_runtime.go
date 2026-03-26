@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 func canonicalRuntimeRole(role string) string {

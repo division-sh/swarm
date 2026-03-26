@@ -112,7 +112,83 @@ func repoRootForContractsTest(t *testing.T) string {
 
 func currentWorkflowContractsDirForTest(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(repoRootForContractsTest(t), "docs", "specs", "mas-platform", "empire", "contracts")
+	root := t.TempDir()
+
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: contract-test-bundle
+version: "1.0.0"
+platform_version: ">=1.0.0"
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+          primary: true
+        - name: status
+          type: string
+flows: []
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+initial_state: idle
+terminal_states:
+  - done
+states:
+  - idle
+  - done
+pins:
+  inputs:
+    events:
+      - item.created
+  outputs:
+    events:
+      - evidence.recorded
+`)
+	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+control-plane:
+  id: control-plane
+  role: control-plane
+  subscriptions:
+    - evidence.recorded
+`)
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
+item.created:
+  payload:
+    properties:
+      entity_id:
+        type: string
+      item_id:
+        type: string
+    required:
+      - entity_id
+      - item_id
+evidence.recorded:
+  payload:
+    properties:
+      entity_id:
+        type: string
+      note:
+        type: string
+    required:
+      - entity_id
+`)
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+audit-node:
+  id: audit-node
+  execution_type: workflow_node
+  subscribes_to:
+    - item.created
+  produces:
+    - evidence.recorded
+  event_handlers:
+    item.created:
+      action: record_evidence
+      evidence_target: item.audit
+      emits: evidence.recorded
+`)
+	return root
 }
 
 func writeLayer3FlowTreeFixture(t *testing.T) string {

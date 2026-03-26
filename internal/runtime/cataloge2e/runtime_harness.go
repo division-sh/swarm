@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtime "empireai/internal/runtime"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
-	"empireai/internal/runtime/sessions"
-	"empireai/internal/store"
-	"empireai/internal/testutil"
+	"swarm/internal/events"
+	runtime "swarm/internal/runtime"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+	"swarm/internal/runtime/sessions"
+	"swarm/internal/store"
+	"swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
-	runtimecorrelation "empireai/internal/runtime/correlation"
-	runtimeengine "empireai/internal/runtime/engine"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
+	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimeengine "swarm/internal/runtime/engine"
 )
 
 type HandlerOutcomeStatus string

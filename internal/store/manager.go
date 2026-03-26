@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"strings"
 
-	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/core/actors"
+	"swarm/internal/events"
+	runtimeactors "swarm/internal/runtime/core/actors"
 )
 
 func mergeAgentConfigJSON(cfg runtimeactors.AgentConfig) ([]byte, error) {

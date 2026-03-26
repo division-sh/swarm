@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
+	"swarm/internal/events"
 )
 
 type missingPipelineReceiptReader interface {

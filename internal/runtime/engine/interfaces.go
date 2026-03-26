@@ -3,10 +3,10 @@ package engine
 import (
 	"context"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
-	runtimeregistry "empireai/internal/runtime/core/registry"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
+	runtimeregistry "swarm/internal/runtime/core/registry"
+	"swarm/internal/runtime/semanticview"
 )
 
 type SemanticSourceProvider interface {

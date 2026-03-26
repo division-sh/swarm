@@ -42,7 +42,7 @@ type fileMonitorTurnWriter struct {
 }
 
 func DefaultMonitorDir() string {
-	if raw := strings.TrimSpace(os.Getenv("MAS_MONITOR_DIR")); raw != "" {
+	if raw := strings.TrimSpace(os.Getenv("SWARM_MONITOR_DIR")); raw != "" {
 		return raw
 	}
 	return defaultMonitorDir

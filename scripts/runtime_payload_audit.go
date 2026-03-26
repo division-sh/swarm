@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 type fieldSet struct {

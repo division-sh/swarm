@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestValidateWorkflowContractsRejectsOnCompleteAndRulesInSameHandler(t *testing.T) {

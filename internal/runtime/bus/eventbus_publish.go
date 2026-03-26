@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimecorrelation "empireai/internal/runtime/correlation"
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	"swarm/internal/events"
+	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 

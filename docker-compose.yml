@@ -1,14 +1,14 @@
-name: mas
+name: swarm
 
 services:
   postgres:
     image: postgres:16
-    container_name: mas-postgres
+    container_name: swarm-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: mas
+      POSTGRES_DB: swarm
     ports:
       - "5432:5432"
     volumes:
@@ -18,31 +18,31 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.orchestrator
-    container_name: mas-orchestrator
+    container_name: swarm-orchestrator
     restart: unless-stopped
     depends_on:
       - postgres
     environment:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      MAS_TOOL_GATEWAY_TOKEN: ${MAS_TOOL_GATEWAY_TOKEN:-}
-      MAS_DB_HOST: postgres
-      MAS_DB_PORT: "5432"
-      MAS_DB_NAME: mas
-      MAS_DB_USER: postgres
-      MAS_DB_PASSWORD: postgres
-      MAS_DB_SSLMODE: disable
-      MAS_LLM_RUNTIME_MODE: cli_test
-      MAS_CLAUDE_USE_MCP: ${MAS_CLAUDE_USE_MCP:-true}
-      MAS_CLAUDE_PERMISSION_MODE: ${MAS_CLAUDE_PERMISSION_MODE:-bypassPermissions}
-      MAS_CLAUDE_BYPASS_PERMISSIONS: ${MAS_CLAUDE_BYPASS_PERMISSIONS:-true}
-      MAS_CLAUDE_TIMEOUT_SECONDS: ${MAS_CLAUDE_TIMEOUT_SECONDS:-900}
-      MAS_CLAUDE_CLI_COMMAND: claude
-      MAS_CLAUDE_CLI_OUTPUT_FORMAT: stream-json
-      MAS_WORKSPACE_IMAGE: mas-workspace:latest
-      MAS_WORKSPACE_VOLUMES_FROM: mas-orchestrator
+      SWARM_TOOL_GATEWAY_TOKEN: ${SWARM_TOOL_GATEWAY_TOKEN:-}
+      SWARM_DB_HOST: postgres
+      SWARM_DB_PORT: "5432"
+      SWARM_DB_NAME: swarm
+      SWARM_DB_USER: postgres
+      SWARM_DB_PASSWORD: postgres
+      SWARM_DB_SSLMODE: disable
+      SWARM_LLM_RUNTIME_MODE: cli_test
+      SWARM_CLAUDE_USE_MCP: ${SWARM_CLAUDE_USE_MCP:-true}
+      SWARM_CLAUDE_PERMISSION_MODE: ${SWARM_CLAUDE_PERMISSION_MODE:-bypassPermissions}
+      SWARM_CLAUDE_BYPASS_PERMISSIONS: ${SWARM_CLAUDE_BYPASS_PERMISSIONS:-true}
+      SWARM_CLAUDE_TIMEOUT_SECONDS: ${SWARM_CLAUDE_TIMEOUT_SECONDS:-900}
+      SWARM_CLAUDE_CLI_COMMAND: claude
+      SWARM_CLAUDE_CLI_OUTPUT_FORMAT: stream-json
+      SWARM_WORKSPACE_IMAGE: swarm-workspace:latest
+      SWARM_WORKSPACE_VOLUMES_FROM: swarm-orchestrator
     volumes:
       - ./docs:/app/docs
-      - ${MAS_CONTRACTS_HOST_DIR:?MAS_CONTRACTS_HOST_DIR must point to a contract bundle}:/opt/mas/contracts:ro
+      - ${SWARM_CONTRACTS_HOST_DIR:?SWARM_CONTRACTS_HOST_DIR must point to a contract bundle}:/opt/swarm/contracts:ro
       - ./migrations:/app/migrations
       - ./contracts:/app/contracts
       - ./internal:/app/internal
@@ -56,7 +56,7 @@ services:
       - -store
       - postgres
       - -contracts
-      - /opt/mas/contracts
+      - /opt/swarm/contracts
       - -health-addr
       - :8070
       - -self-check=false
@@ -70,7 +70,7 @@ services:
       args:
         INSTALL_CLAUDE_CLI: "true"
         INSTALL_CODEX_CLI: "true"
-    image: mas-workspace:latest
+    image: swarm-workspace:latest
     profiles:
       - workspace
 

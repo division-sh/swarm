@@ -2,17 +2,18 @@ package agents
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	llm "empireai/internal/runtime/llm"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
-	runtimetools "empireai/internal/runtime/tools"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
@@ -71,9 +72,10 @@ func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 
 func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundleRoot := writeAgentPromptTestBundle(t, repoRoot)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
-		filepath.Join(repoRoot, "docs", "specs", "mas-platform", "empire", "contracts"),
+		bundleRoot,
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	)
 	if err != nil {
@@ -99,6 +101,69 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	}
 	if strings.Contains(got, "{{vertical_name}}") {
 		t.Fatalf("expected resolved prompt to expand vertical_name token, got %q", got)
+	}
+}
+
+func writeAgentPromptTestBundle(t *testing.T, repoRoot string) string {
+	t.Helper()
+	srcRoot := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
+	dstRoot := filepath.Join(t.TempDir(), "agent-prompt-test-bundle")
+	copyBundleTree(t, srcRoot, dstRoot)
+
+	agentsPath := filepath.Join(dstRoot, "agents.yaml")
+	agentsRaw, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", agentsPath, err)
+	}
+	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
+chief-of-staff:
+  id: chief-of-staff
+  role: chief_of_staff
+  manager_fallback: control-plane
+  emit_events:
+    - item.created
+`, "\n"))...)
+	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
+		t.Fatalf("write %s: %v", agentsPath, err)
+	}
+
+	promptsDir := filepath.Join(dstRoot, "prompts")
+	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", promptsDir, err)
+	}
+	prompt := strings.TrimSpace(`
+You are the chief of staff for {{vertical_name}}.
+`)
+	if err := os.WriteFile(filepath.Join(promptsDir, "chief-of-staff.md"), []byte(prompt+"\n"), 0o644); err != nil {
+		t.Fatalf("write prompt fixture: %v", err)
+	}
+	return dstRoot
+}
+
+func copyBundleTree(t *testing.T, srcRoot, dstRoot string) {
+	t.Helper()
+	if err := filepath.Walk(srcRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcRoot, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dstRoot, rel)
+		if info.IsDir() {
+			return os.MkdirAll(target, info.Mode())
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, info.Mode())
+	}); err != nil {
+		t.Fatalf("copy %s -> %s: %v", srcRoot, dstRoot, err)
 	}
 }
 

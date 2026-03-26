@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	llm "empireai/internal/runtime/llm"
-	runtimetools "empireai/internal/runtime/tools"
+	llm "swarm/internal/runtime/llm"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 type scriptedLLMRuntime struct {

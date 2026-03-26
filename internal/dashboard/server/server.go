@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	runtimemanager "empireai/internal/runtime/manager"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimemanager "swarm/internal/runtime/manager"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)

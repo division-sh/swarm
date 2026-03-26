@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"empireai/internal/events"
-	runtimeactors "empireai/internal/runtime/core/actors"
+	"swarm/internal/events"
+	runtimeactors "swarm/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
 

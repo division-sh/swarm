@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"empireai/internal/events"
-	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	"swarm/internal/events"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 func transitionContextKey(primary events.Event, fallback events.Event) string {

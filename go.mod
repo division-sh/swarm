@@ -1,4 +1,4 @@
-module empireai
+module swarm
 
 go 1.23.0
 

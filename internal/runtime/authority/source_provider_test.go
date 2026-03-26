@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestNewSourceProvider_UsesDeclaredAgentEmitEventsOnly(t *testing.T) {

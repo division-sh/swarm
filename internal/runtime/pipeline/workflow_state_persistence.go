@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/runtime/semanticview"
 )
 
 func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {

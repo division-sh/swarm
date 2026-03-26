@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"empireai/internal/events"
-	runtimedeadletters "empireai/internal/runtime/deadletters"
+	"swarm/internal/events"
+	runtimedeadletters "swarm/internal/runtime/deadletters"
 	"github.com/google/uuid"
 )
 

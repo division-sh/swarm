@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	models "empireai/internal/runtime/core/actors"
-	workspace "empireai/internal/runtime/workspace"
+	models "swarm/internal/runtime/core/actors"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 const (
@@ -56,7 +56,7 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 		return "", "", false, nil
 	}
 
-	gatewayURL := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_URL"))
+	gatewayURL := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
 	if gatewayURL == "" {
 		gatewayURL = "http://orchestrator:8090"
 	}
@@ -74,7 +74,7 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	if mode := strings.TrimSpace(actor.Mode); mode != "" {
 		headers[mcpActorModeHeader] = mode
 	}
-	if token := strings.TrimSpace(os.Getenv("MAS_TOOL_GATEWAY_TOKEN")); token != "" {
+	if token := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
 	}
 	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
@@ -126,7 +126,7 @@ func (r *ClaudeCLIRuntime) mcpContextTokenTTL(ctx context.Context) time.Duration
 }
 
 func shouldUseMCPBridge() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_CLAUDE_USE_MCP")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_CLAUDE_USE_MCP")))
 	return v == "1" || v == "true" || v == "yes"
 }
 

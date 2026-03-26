@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"empireai/internal/runtime/core/paths"
-	"empireai/internal/runtime/core/values"
+	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/values"
 )
 
 func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {

@@ -3,7 +3,7 @@ package testutil
 import (
 	"context"
 	"database/sql"
-	runtimecontracts "empireai/internal/runtime/contracts"
+	runtimecontracts "swarm/internal/runtime/contracts"
 	"fmt"
 	_ "github.com/lib/pq"
 	"gopkg.in/yaml.v3"
@@ -111,12 +111,12 @@ func (s *sharedPostgresState) startLocked() error {
 		return err
 	}
 
-	name := fmt.Sprintf("mas-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("swarm-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
 	runArgs := []string{
 		"run", "-d", "--rm",
 		"--name", name,
 		"-e", "POSTGRES_PASSWORD=postgres",
-		"-e", "POSTGRES_DB=mas",
+		"-e", "POSTGRES_DB=swarm",
 		"-p", "127.0.0.1::5432",
 		"postgres:16",
 		"-c", "max_connections=300",
@@ -187,10 +187,10 @@ func cleanupStaleTestContainers(dockerBin string) error {
 		return fmt.Errorf("list docker containers: %v output=%s", err, strings.TrimSpace(string(out)))
 	}
 	for _, name := range strings.Fields(string(out)) {
-		if !strings.HasPrefix(name, "mas-test-pg-") {
+		if !strings.HasPrefix(name, "swarm-test-pg-") {
 			continue
 		}
-		rest := strings.TrimPrefix(name, "mas-test-pg-")
+		rest := strings.TrimPrefix(name, "swarm-test-pg-")
 		pidPart := rest
 		if idx := strings.Index(pidPart, "-"); idx >= 0 {
 			pidPart = pidPart[:idx]

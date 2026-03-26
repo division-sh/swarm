@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecorrelation "empireai/internal/runtime/correlation"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 type waitInterceptor struct {

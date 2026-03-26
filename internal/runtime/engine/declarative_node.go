@@ -4,8 +4,8 @@ import (
 	"context"
 	"reflect"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
 )
 
 type DeclarativeNode struct {

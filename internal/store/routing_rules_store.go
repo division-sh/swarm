@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	runtimemanager "empireai/internal/runtime/manager"
+	runtimemanager "swarm/internal/runtime/manager"
 )
 
 func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule runtimemanager.PersistedRoutingRule) error {

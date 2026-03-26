@@ -1,6 +1,6 @@
 package runtime
 
-import runtimerterr "empireai/internal/runtime/rterrors"
+import runtimerterr "swarm/internal/runtime/rterrors"
 
 func WrapRuntimeError(code, component, operation string, retryable bool, cause error, format string, args ...any) error {
 	return runtimerterr.WrapRuntimeError(code, component, operation, retryable, cause, format, args...)

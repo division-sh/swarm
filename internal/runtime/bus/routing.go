@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"empireai/internal/events"
+	"swarm/internal/events"
 )
 
 var eventTypeTokenPattern = regexp.MustCompile(`^[a-z0-9_]+$`)

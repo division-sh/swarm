@@ -1,7 +1,7 @@
 package contracts
 
 import (
-	flowmodel "empireai/internal/runtime/flowmodel"
+	flowmodel "swarm/internal/runtime/flowmodel"
 	"fmt"
 	"strings"
 )
@@ -226,7 +226,7 @@ func materializeFlowTree(node *flowmodel.BuildNode[FlowContractView]) FlowContra
 }
 func flowTreeURIScheme(bundle *WorkflowContractBundle) string {
 	if bundle == nil {
-		return "mas"
+		return "swarm"
 	}
 	for _, candidate := range []string{bundle.Package.Name, bundle.Semantics.Name} {
 		candidate = strings.TrimSpace(candidate)
@@ -234,7 +234,7 @@ func flowTreeURIScheme(bundle *WorkflowContractBundle) string {
 			return candidate
 		}
 	}
-	return "mas"
+	return "swarm"
 }
 func nearestFlowTreeAncestor(node *FlowContractView) *FlowContractView {
 	return flowmodel.NearestAncestor(

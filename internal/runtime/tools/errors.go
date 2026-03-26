@@ -3,7 +3,7 @@ package tools
 import (
 	"errors"
 
-	runtimerterr "empireai/internal/runtime/rterrors"
+	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
 type RuntimeError = runtimerterr.RuntimeError

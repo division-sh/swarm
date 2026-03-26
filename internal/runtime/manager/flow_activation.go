@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
-	runtimetools "empireai/internal/runtime/tools"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+	runtimetools "swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
 

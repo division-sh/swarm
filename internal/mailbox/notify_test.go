@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	runtimetools "empireai/internal/runtime/tools"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 func TestWebhookNotifier(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	"swarm/internal/events"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 

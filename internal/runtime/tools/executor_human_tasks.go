@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimeauthority "empireai/internal/runtime/authority"
-	models "empireai/internal/runtime/core/actors"
+	"swarm/internal/events"
+	runtimeauthority "swarm/internal/runtime/authority"
+	models "swarm/internal/runtime/core/actors"
 	"github.com/google/uuid"
 )
 

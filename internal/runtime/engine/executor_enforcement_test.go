@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/identity"
-	runtimeregistry "empireai/internal/runtime/core/registry"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/identity"
+	runtimeregistry "swarm/internal/runtime/core/registry"
 )
 
 type persistentStateRepo struct {

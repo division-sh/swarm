@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	models "empireai/internal/runtime/core/actors"
-	runtimecorrelation "empireai/internal/runtime/correlation"
-	llm "empireai/internal/runtime/llm"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
+	llm "swarm/internal/runtime/llm"
 )
 
 type GatewayHooks struct {

@@ -3,7 +3,7 @@ package mailbox
 import (
 	"bytes"
 	"context"
-	runtimetools "empireai/internal/runtime/tools"
+	runtimetools "swarm/internal/runtime/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	coreidentity "empireai/internal/runtime/core/identity"
+	coreidentity "swarm/internal/runtime/core/identity"
 )
 
 // Instance is the platform-owned workflow instance record defined by the MAS

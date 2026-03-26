@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	models "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/semanticview"
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/semanticview"
 )
 
 type sourceProvider struct {

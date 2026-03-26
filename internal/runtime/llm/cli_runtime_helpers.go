@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"empireai/internal/config"
-	models "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/sessions"
-	runtimesharedjson "empireai/internal/runtime/sharedjson"
+	"swarm/internal/config"
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/sessions"
+	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
 func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord) {
@@ -317,10 +317,10 @@ func appendClaudePrintModeArgs(args []string, cfg *config.Config) []string {
 
 func permissionModeArgs() []string {
 	args := make([]string, 0, 3)
-	if mode := strings.TrimSpace(os.Getenv("MAS_CLAUDE_PERMISSION_MODE")); mode != "" {
+	if mode := strings.TrimSpace(os.Getenv("SWARM_CLAUDE_PERMISSION_MODE")); mode != "" {
 		args = append(args, "--permission-mode", mode)
 	}
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("MAS_CLAUDE_BYPASS_PERMISSIONS")))
+	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_CLAUDE_BYPASS_PERMISSIONS")))
 	if v == "1" || v == "true" || v == "yes" {
 		args = append(args, "--dangerously-skip-permissions")
 	}

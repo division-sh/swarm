@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecorrelation "empireai/internal/runtime/correlation"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
 )
 

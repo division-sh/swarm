@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimeengine "empireai/internal/runtime/engine"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/store"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimeengine "swarm/internal/runtime/engine"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/store"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 

@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestValidateWorkflowContractsDetailed_Tier8SemanticFixtures(t *testing.T) {
 	repoRoot := contractComplianceRepoRoot(t)
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 	cases := []struct {
 		name         string
 		fixture      string
@@ -200,7 +200,7 @@ func newRequiredAgentValidationBundle() *runtimecontracts.WorkflowContractBundle
 			},
 		},
 	}
-	bundle.Platform.Platform.Name = "MAS Platform"
+	bundle.Platform.Platform.Name = "Swarm Platform"
 	bundle.Platform.Platform.Version = "1.0.0"
 	return bundle
 }
@@ -266,7 +266,7 @@ func newNodeProducesOptionalValidationBundle() *runtimecontracts.WorkflowContrac
 			},
 		},
 	}
-	bundle.Platform.Platform.Name = "MAS Platform"
+	bundle.Platform.Platform.Name = "Swarm Platform"
 	bundle.Platform.Platform.Version = "1.2.0"
 	return bundle
 }
@@ -325,7 +325,7 @@ func newStatelessFlowValidationBundle() *runtimecontracts.WorkflowContractBundle
 			},
 		},
 	}
-	bundle.Platform.Platform.Name = "MAS Platform"
+	bundle.Platform.Platform.Name = "Swarm Platform"
 	bundle.Platform.Platform.Version = "1.2.0"
 	return bundle
 }

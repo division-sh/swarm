@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"testing"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestNewDeclarativeNode_RequiresExecutor(t *testing.T) {

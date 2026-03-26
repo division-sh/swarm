@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	llm "empireai/internal/runtime/llm"
-	"empireai/internal/runtime/semanticview"
+	llm "swarm/internal/runtime/llm"
+	"swarm/internal/runtime/semanticview"
 )
 
 type ContractSchemaEntry struct {

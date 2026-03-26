@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	"empireai/internal/runtime/core/paths"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/paths"
+	"swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 

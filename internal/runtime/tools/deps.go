@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 
-	"empireai/internal/config"
-	"empireai/internal/events"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/config"
+	"swarm/internal/events"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 )
 
 type Schedule = runtimepipeline.Schedule

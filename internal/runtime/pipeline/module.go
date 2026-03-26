@@ -1,6 +1,6 @@
 package pipeline
 
-import "empireai/internal/runtime/semanticview"
+import "swarm/internal/runtime/semanticview"
 
 type WorkflowModule interface {
 	SemanticSource() semanticview.Source

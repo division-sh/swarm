@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/events"
-	runtimebus "empireai/internal/runtime/bus"
+	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	"github.com/google/uuid"
 )
 

@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/config"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
+	"swarm/internal/config"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,7 +25,7 @@ func repoRootFromCatalogE2E(t testing.TB) string {
 
 func platformSpecPathFromCatalogE2E(t testing.TB) string {
 	t.Helper()
-	return filepath.Join(repoRootFromCatalogE2E(t), "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	return filepath.Join(repoRootFromCatalogE2E(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 }
 
 func loadFixtureBundle(t testing.TB, fixtureRoot string) *runtimecontracts.WorkflowContractBundle {
@@ -39,7 +39,7 @@ func loadFixtureBundle(t testing.TB, fixtureRoot string) *runtimecontracts.Workf
 
 func loadFixtureBundleMaybe(fixtureRoot string) (*runtimecontracts.WorkflowContractBundle, error) {
 	repoRoot := repoRootFromCatalogE2ENonFatal()
-	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml"))
+	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
 }
 
 func repoRootFromCatalogE2ENonFatal() string {

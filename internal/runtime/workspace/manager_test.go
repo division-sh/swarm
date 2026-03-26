@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	"empireai/internal/runtime/semanticview"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestWorkspaceClassesForSource(t *testing.T) {
@@ -114,13 +114,13 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "mas-agent-factory-agent" {
-		t.Fatalf("target = %#v, want mas-agent-factory-agent", target)
+	if target == nil || target.Container != "swarm-agent-factory-agent" {
+		t.Fatalf("target = %#v, want swarm-agent-factory-agent", target)
 	}
 	joined := strings.Join(created, " ")
 	for _, expected := range []string{
 		dataDir + ":/data:ro",
-		contractsDir + ":/opt/mas/contracts:ro",
+		contractsDir + ":/opt/swarm/contracts:ro",
 		"workspaces_agent_factory-agent:/workspace",
 	} {
 		if !strings.Contains(joined, expected) {
@@ -177,8 +177,8 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "mas-flow-operating-opco-001" {
-		t.Fatalf("target = %#v, want mas-flow-operating-opco-001", target)
+	if target == nil || target.Container != "swarm-flow-operating-opco-001" {
+		t.Fatalf("target = %#v, want swarm-flow-operating-opco-001", target)
 	}
 	joined := strings.Join(created, " ")
 	if !strings.Contains(joined, "workspaces_flow_operating-opco-001:/workspace") {

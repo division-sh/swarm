@@ -239,11 +239,11 @@ func unresolvedPromptTokens(promptText string) []string {
 }
 
 // ResolveDir discovers the default MAS prompt directory. It checks:
-// 1) MAS_PROMPTS_DIR
-// 2) any docs/specs/mas-platform/*/contracts/prompts walking up from CWD
-// 3) any docs/specs/mas-platform/*/contracts/prompts relative to this repo.
+// 1) SWARM_PROMPTS_DIR
+// 2) any docs/specs/swarm-platform/*/contracts/prompts walking up from CWD
+// 3) any docs/specs/swarm-platform/*/contracts/prompts relative to this repo.
 func ResolveDir() (string, bool) {
-	if env := strings.TrimSpace(os.Getenv("MAS_PROMPTS_DIR")); env != "" {
+	if env := strings.TrimSpace(os.Getenv("SWARM_PROMPTS_DIR")); env != "" {
 		if isDir(env) {
 			return filepath.Clean(env), true
 		}

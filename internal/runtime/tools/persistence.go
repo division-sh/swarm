@@ -3,7 +3,7 @@ package tools
 import (
 	"context"
 
-	corestate "empireai/internal/runtime/core/state"
+	corestate "swarm/internal/runtime/core/state"
 )
 
 type MailboxItem = corestate.MailboxItem

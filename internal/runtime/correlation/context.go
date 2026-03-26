@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"empireai/internal/events"
+	"swarm/internal/events"
 	"github.com/google/uuid"
 )
 

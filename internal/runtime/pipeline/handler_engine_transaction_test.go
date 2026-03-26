@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	runtimeengine "empireai/internal/runtime/engine"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeengine "swarm/internal/runtime/engine"
 )
 
 type recordingPipelineBus struct {

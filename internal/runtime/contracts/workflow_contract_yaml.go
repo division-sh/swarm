@@ -1,7 +1,7 @@
 package contracts
 
 import (
-	"empireai/internal/runtime/core/paths"
+	"swarm/internal/runtime/core/paths"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"regexp"

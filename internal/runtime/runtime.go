@@ -11,20 +11,20 @@ import (
 	"strings"
 	"time"
 
-	"empireai/internal/config"
-	"empireai/internal/events"
-	runtimeagents "empireai/internal/runtime/agents"
-	runtimeauthority "empireai/internal/runtime/authority"
-	runtimebus "empireai/internal/runtime/bus"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	llm "empireai/internal/runtime/llm"
-	runtimemanager "empireai/internal/runtime/manager"
-	runtimemcp "empireai/internal/runtime/mcp"
-	runtimepipeline "empireai/internal/runtime/pipeline"
-	"empireai/internal/runtime/semanticview"
-	"empireai/internal/runtime/sessions"
-	runtimetools "empireai/internal/runtime/tools"
-	workspace "empireai/internal/runtime/workspace"
+	"swarm/internal/config"
+	"swarm/internal/events"
+	runtimeagents "swarm/internal/runtime/agents"
+	runtimeauthority "swarm/internal/runtime/authority"
+	runtimebus "swarm/internal/runtime/bus"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	llm "swarm/internal/runtime/llm"
+	runtimemanager "swarm/internal/runtime/manager"
+	runtimemcp "swarm/internal/runtime/mcp"
+	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
+	"swarm/internal/runtime/sessions"
+	runtimetools "swarm/internal/runtime/tools"
+	workspace "swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
 
@@ -161,7 +161,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
 	}
-	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("MAS_STRICT_PAYLOAD_VALIDATION", false))
+	payloadValidator := newRuntimePayloadValidator(runtimeEnvBool("SWARM_STRICT_PAYLOAD_VALIDATION", false))
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
@@ -239,7 +239,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	}, stores.ScheduleStore)
 	runtimetools.InitEventSchemaRegistry(source)
 	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
-		if runtimeEnvBool("MAS_EMIT_SCHEMA_STRICT", true) {
+		if runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true) {
 			return nil, fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries", len(generated))
 		}
 		sample := generated

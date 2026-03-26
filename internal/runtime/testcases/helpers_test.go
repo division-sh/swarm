@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
-	models "empireai/internal/runtime/core/actors"
-	runtimepipeline "empireai/internal/runtime/pipeline"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 func loadGenericMASBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := repoRootFromTestcases(t)
-	bundleRoot := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-mas-bundle")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "mas-platform", "platform", "contracts", "platform-spec.yaml")
+	bundleRoot := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, bundleRoot, platformSpec)
 	if err != nil {
 		t.Fatalf("load generic MAS bundle: %v", err)

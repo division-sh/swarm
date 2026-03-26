@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"empireai/internal/events"
-	runtimecontracts "empireai/internal/runtime/contracts"
+	"swarm/internal/events"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {

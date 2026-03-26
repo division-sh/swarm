@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	runtimesharding "empireai/internal/runtime/core/sharding"
+	runtimesharding "swarm/internal/runtime/core/sharding"
 	"gopkg.in/yaml.v3"
 )
 

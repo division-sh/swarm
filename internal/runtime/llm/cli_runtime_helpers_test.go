@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"empireai/internal/config"
+	"swarm/internal/config"
 )
 
 func TestAppendClaudePrintModeArgs_AddsVerboseForStreamJSON(t *testing.T) {
