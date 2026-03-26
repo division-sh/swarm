@@ -1,5 +1,0 @@
-name: test-guard-pass
-version: 1.0.0
-description: Guard check passes, handler proceeds to advance state.
-platform_version: ">=1.1.0"
-flows: []

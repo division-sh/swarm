@@ -1,5 +1,0 @@
-name: test-accumulate-all
-version: 1.0.0
-description: Accumulate 3 items, fire on_complete when all arrive.
-platform_version: ">=1.1.0"
-flows: []
