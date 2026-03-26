@@ -211,3 +211,39 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 		t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)
 	}
 }
+
+func TestEventBusPublish_ZeroRecipientsDoesNotEmitContradiction(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:   "evt-zero",
+		Type: events.EventType("custom.no_subscribers"),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := store.eventTypes()
+	if len(got) != 1 || got[0] != "custom.no_subscribers" {
+		t.Fatalf("persisted event types = %v, want [custom.no_subscribers]", got)
+	}
+}
+
+func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := runtimebus.NewEventBus(store)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:   "evt-log",
+		Type: events.EventType("platform.runtime_log"),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := store.eventTypes()
+	if len(got) != 1 || got[0] != "platform.runtime_log" {
+		t.Fatalf("persisted event types = %v, want [platform.runtime_log]", got)
+	}
+}

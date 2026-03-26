@@ -205,9 +205,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			"--session-id", sessionToken(s),
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
-		if shouldIncludePartialMessages(r.cfg) {
-			args = append(args, "--include-partial-messages")
-		}
+		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
 		if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
 			args = append(args, "--system-prompt", sys)
@@ -223,9 +221,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			"-r", sessionToken(s),
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
-		if shouldIncludePartialMessages(r.cfg) {
-			args = append(args, "--include-partial-messages")
-		}
+		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
@@ -256,9 +252,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			"--session-id", sessionToken(s),
 			"--output-format", configuredCLIOutputFormat(r.cfg),
 		}
-		if shouldIncludePartialMessages(r.cfg) {
-			args = append(args, "--include-partial-messages")
-		}
+		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
@@ -297,9 +291,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 					"--session-id", sessionToken(s),
 					"--output-format", configuredCLIOutputFormat(r.cfg),
 				}
-				if shouldIncludePartialMessages(r.cfg) {
-					args = append(args, "--include-partial-messages")
-				}
+				args = appendClaudePrintModeArgs(args, r.cfg)
 				args = append(args, permissionModeArgs()...)
 				if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
 					args = append(args, "--system-prompt", sys)
@@ -319,9 +311,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 						"--session-id", sessionToken(s),
 						"--output-format", configuredCLIOutputFormat(r.cfg),
 					}
-					if shouldIncludePartialMessages(r.cfg) {
-						args = append(args, "--include-partial-messages")
-					}
+					args = appendClaudePrintModeArgs(args, r.cfg)
 					args = append(args, permissionModeArgs()...)
 					if mcpEnabled {
 						args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")

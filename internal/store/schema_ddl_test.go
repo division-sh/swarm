@@ -20,7 +20,13 @@ func TestSchemaFieldTypeToDDL(t *testing.T) {
 		{schemaType: "boolean", wantDDL: "BOOLEAN"},
 		{schemaType: "jsonb", wantDDL: "JSONB"},
 		{schemaType: "timestamp", wantDDL: "TIMESTAMPTZ"},
+		{schemaType: "timestamptz (set on marginal)", wantDDL: "TIMESTAMPTZ"},
 		{schemaType: "uuid", wantDDL: "UUID"},
+		{schemaType: "uuid (null for non-derived)", wantDDL: "UUID"},
+		{schemaType: "integer default 0", wantDDL: "BIGINT"},
+		{schemaType: "numeric(5,2) (computed by scoring-node weighted_average)", wantDDL: "NUMERIC(5,2)"},
+		{schemaType: "text[]", wantDDL: "TEXT[]"},
+		{schemaType: "text[] (scanner types dispatched)", wantDDL: "TEXT[]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.schemaType, func(t *testing.T) {
@@ -118,6 +124,37 @@ func TestGenerateEntityTableDDLs(t *testing.T) {
 	}
 	if len(plans[0].Statements) != 2 || !strings.Contains(plans[0].Statements[1], `CREATE INDEX IF NOT EXISTS "idx_items_status"`) {
 		t.Fatalf("expected indexed status column, got %#v", plans[0].Statements)
+	}
+}
+
+func TestGenerateEntityTableDDLs_IgnoresManagedTimestampDuplicates(t *testing.T) {
+	schema := runtimecontracts.EntitySchema{
+		Groups: []runtimecontracts.EntitySchemaGroup{{
+			Name: "metadata",
+			Fields: []runtimecontracts.EntitySchemaField{
+				{Name: "created_at", Type: "timestamptz"},
+				{Name: "updated_at", Type: "timestamptz"},
+				{Name: "human_notes", Type: "text"},
+			},
+		}},
+	}
+
+	plans, err := GenerateEntityTableDDLs(schema)
+	if err != nil {
+		t.Fatalf("GenerateEntityTableDDLs: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 entity DDL plan, got %d", len(plans))
+	}
+	createStmt := plans[0].Statements[0]
+	if strings.Count(createStmt, `"created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`) != 1 {
+		t.Fatalf("expected single managed created_at column, got %q", createStmt)
+	}
+	if strings.Count(createStmt, `"updated_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`) != 1 {
+		t.Fatalf("expected single managed updated_at column, got %q", createStmt)
+	}
+	if !strings.Contains(createStmt, `"human_notes" TEXT NOT NULL`) {
+		t.Fatalf("expected human_notes column, got %q", createStmt)
 	}
 }
 

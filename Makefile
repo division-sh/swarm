@@ -1,11 +1,20 @@
 .PHONY: test test-cover test-cover-runtime check-runtime-cover check-key-package-cover \
 	lint dashboard-build dashboard-redeploy dashboard-logs dashboard-ps \
 	dashboard-local dashboard-local-build dashboard-local-stop \
+	postgres-up postgres-reset empire-local \
 	sync-current-spec
 
 COMPOSE ?= docker compose
 DASHBOARD_LOCAL_PORT ?= 4173
 DASHBOARD_API_ORIGIN ?= http://127.0.0.1:8081
+EMPIRE_HEALTH_PORT ?= 18082
+EMPIRE_CONTRACTS ?= docs/specs/mas-platform/empire/contracts
+MAS_DB_HOST ?= 127.0.0.1
+MAS_DB_PORT ?= 5432
+MAS_DB_NAME ?= empireai
+MAS_DB_USER ?= postgres
+MAS_DB_PASSWORD ?= postgres
+MAS_DB_SSLMODE ?= disable
 
 COVER_DIR ?= coverage
 MIN_RUNTIME_COVER ?= 32
@@ -78,6 +87,20 @@ dashboard-local-stop:
 
 dashboard-local: dashboard-local-build dashboard-local-stop
 	cd internal/dashboard/ui && PLAYWRIGHT_DASHBOARD_PORT=$(DASHBOARD_LOCAL_PORT) DASHBOARD_API_ORIGIN=$(DASHBOARD_API_ORIGIN) node scripts/serve-smoke-dashboard.mjs
+
+postgres-up:
+	$(COMPOSE) up -d postgres
+
+postgres-reset: postgres-up
+	PGPASSWORD=$(MAS_DB_PASSWORD) psql -h $(MAS_DB_HOST) -p $(MAS_DB_PORT) -U $(MAS_DB_USER) -d $(MAS_DB_NAME) -v ON_ERROR_STOP=1 \
+		-c "DROP SCHEMA IF EXISTS public CASCADE;" \
+		-c "CREATE SCHEMA public;" \
+		-c "GRANT ALL ON SCHEMA public TO $(MAS_DB_USER);" \
+		-c "GRANT ALL ON SCHEMA public TO public;"
+
+empire-local: postgres-up
+	MAS_DB_HOST=$(MAS_DB_HOST) MAS_DB_PORT=$(MAS_DB_PORT) MAS_DB_NAME=$(MAS_DB_NAME) MAS_DB_USER=$(MAS_DB_USER) MAS_DB_PASSWORD=$(MAS_DB_PASSWORD) MAS_DB_SSLMODE=$(MAS_DB_SSLMODE) \
+		go run ./cmd/mas -contracts $(EMPIRE_CONTRACTS) -store postgres -health-addr 127.0.0.1:$(EMPIRE_HEALTH_PORT)
 
 sync-current-spec:
 	./scripts/sync_current_spec.sh

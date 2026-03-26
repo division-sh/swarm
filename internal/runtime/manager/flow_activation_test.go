@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"testing"
+	"time"
 
 	"empireai/internal/events"
 	runtimebus "empireai/internal/runtime/bus"
@@ -21,9 +22,31 @@ type flowActivationTestInstanceStore struct {
 	upserts []runtimepipeline.WorkflowInstance
 }
 
+type flowActivationTestStore struct {
+	upserts []PersistedAgent
+}
+
 func (s *flowActivationTestInstanceStore) Upsert(_ context.Context, instance runtimepipeline.WorkflowInstance) error {
 	s.upserts = append(s.upserts, instance)
 	return nil
+}
+
+func (s *flowActivationTestStore) UpsertAgent(_ context.Context, rec PersistedAgent) error {
+	s.upserts = append(s.upserts, rec)
+	return nil
+}
+
+func (*flowActivationTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) { return nil, nil }
+func (*flowActivationTestStore) MarkAgentTerminated(context.Context, string) error     { return nil }
+func (*flowActivationTestStore) EnsureEntitySchema(context.Context, string) error      { return nil }
+func (*flowActivationTestStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+	return nil
+}
+func (*flowActivationTestStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+func (*flowActivationTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
+	return nil, nil
 }
 
 func (b *flowActivationTestBus) Publish(_ context.Context, evt events.Event) error {
@@ -301,7 +324,8 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 
 func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := NewAgentManager(bus, nil)
+	store := &flowActivationTestStore{}
+	am := NewAgentManager(bus, nil, store)
 	bundle := testStaticFlowBundle()
 
 	if err := am.EnsureStaticFlowRequiredAgents(context.Background(), semanticview.Wrap(bundle)); err != nil {
@@ -316,6 +340,9 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	}
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
 		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
+	}
+	if len(store.upserts) != 1 || store.upserts[0].Config.ID != "analyzer" {
+		t.Fatalf("persisted agents = %#v, want analyzer", store.upserts)
 	}
 }
 

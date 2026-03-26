@@ -251,9 +251,6 @@ func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, 
 	if err := eb.store.AppendEvent(ctx, evt); err != nil {
 		return fmt.Errorf("persist contradiction event: %w", err)
 	}
-	eb.logRuntime(ctx, "warn", "guardrails", "violation", source.ID, string(source.Type), "", source.EntityID(), "", "", "", map[string]any{
-		"reason": reason,
-	}, "", 0)
 	return nil
 }
 

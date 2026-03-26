@@ -59,6 +59,9 @@ func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTa
 	if len(plans) == 0 {
 		return nil
 	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE EXTENSION IF NOT EXISTS pgcrypto`); err != nil {
+		return fmt.Errorf("ensure pgcrypto extension: %w", err)
+	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin schema ddl tx: %w", err)

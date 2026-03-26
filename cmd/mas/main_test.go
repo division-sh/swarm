@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	runtimebus "empireai/internal/runtime/bus"
+	"empireai/internal/runtime/sessions"
 )
 
 func TestDefaultContractsPathExists(t *testing.T) {
@@ -21,9 +24,9 @@ func TestRuntimeProjectSupervisor_RejectsInvalidBuilderProjectContracts(t *testi
 	if err != nil {
 		t.Fatalf("defaultRuntimeConfig: %v", err)
 	}
-	stores, err := buildStores(ctx, "inmemory", cfg)
-	if err != nil {
-		t.Fatalf("buildStores: %v", err)
+	stores := storeBundle{
+		EventStore:      runtimebus.InMemoryEventStore{},
+		SessionRegistry: sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
 	}
 
 	projectRoot := t.TempDir()

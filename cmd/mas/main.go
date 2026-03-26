@@ -67,7 +67,7 @@ func main() {
 	configPath := flag.String("config", "", "Optional path to MAS runtime config")
 	contractsPath := flag.String("contracts", defaultContractsPath, "Path to MAS contract bundle root")
 	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
-	storeMode := flag.String("store", "inmemory", "Store mode: inmemory|postgres")
+	storeMode := flag.String("store", "postgres", "Store mode: postgres")
 	healthAddr := flag.String("health-addr", defaultHealthAddr, "HTTP bind address for health checks")
 	selfCheck := flag.Bool("self-check", true, "Run runtime self-check during boot")
 	flag.Parse()
@@ -309,10 +309,7 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 			TurnStore:         pg,
 		}, nil
 	default:
-		return storeBundle{
-			EventStore:      runtimebus.InMemoryEventStore{},
-			SessionRegistry: sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
-		}, nil
+		return storeBundle{}, fmt.Errorf("store mode %q is unsupported; postgres is required", strings.TrimSpace(storeMode))
 	}
 }
 

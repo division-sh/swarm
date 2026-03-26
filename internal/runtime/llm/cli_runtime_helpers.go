@@ -308,6 +308,13 @@ func shouldIncludePartialMessages(cfg *config.Config) bool {
 	return configuredCLIOutputFormat(cfg) == "stream-json"
 }
 
+func appendClaudePrintModeArgs(args []string, cfg *config.Config) []string {
+	if shouldIncludePartialMessages(cfg) {
+		args = append(args, "--include-partial-messages", "--verbose")
+	}
+	return args
+}
+
 func permissionModeArgs() []string {
 	args := make([]string, 0, 3)
 	if mode := strings.TrimSpace(os.Getenv("MAS_CLAUDE_PERMISSION_MODE")); mode != "" {

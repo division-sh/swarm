@@ -29,16 +29,26 @@ func SchemaFieldTypeToDDL(schemaType string) (string, error) {
 		return "", fmt.Errorf("schema type is required")
 	}
 	normalized := strings.ToLower(schemaType)
+	if idx := strings.IndexAny(normalized, " \t\r\n"); idx >= 0 {
+		normalized = strings.TrimSpace(normalized[:idx])
+	}
+	if strings.HasSuffix(normalized, "[]") {
+		baseDDL, err := SchemaFieldTypeToDDL(strings.TrimSpace(strings.TrimSuffix(normalized, "[]")))
+		if err != nil {
+			return "", err
+		}
+		return baseDDL + "[]", nil
+	}
 	switch normalized {
 	case "text", "string":
 		return "TEXT", nil
-	case "integer":
+	case "integer", "int", "bigint":
 		return "BIGINT", nil
 	case "boolean":
 		return "BOOLEAN", nil
-	case "jsonb":
+	case "jsonb", "json":
 		return "JSONB", nil
-	case "timestamp":
+	case "timestamp", "timestamptz":
 		return "TIMESTAMPTZ", nil
 	case "uuid":
 		return "UUID", nil
@@ -130,6 +140,9 @@ func GenerateEntityTableDDLs(schema runtimecontracts.EntitySchema) ([]SchemaTabl
 				return nil, err
 			}
 			if _, exists := seenColumns[columnName]; exists {
+				if schemaDDLIsManagedEntityColumn(columnName) {
+					continue
+				}
 				return nil, fmt.Errorf("entity schema group %s declares duplicate column %s", tableName, columnName)
 			}
 			seenColumns[columnName] = struct{}{}
@@ -164,6 +177,15 @@ func GenerateEntityTableDDLs(schema runtimecontracts.EntitySchema) ([]SchemaTabl
 		})
 	}
 	return plans, nil
+}
+
+func schemaDDLIsManagedEntityColumn(columnName string) bool {
+	switch strings.TrimSpace(columnName) {
+	case "entity_id", "created_at", "updated_at":
+		return true
+	default:
+		return false
+	}
 }
 
 func GenerateNodeStateTableDDLs(nodes map[string]runtimecontracts.SystemNodeContract) ([]SchemaTableDDL, error) {

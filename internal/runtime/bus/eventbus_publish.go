@@ -384,6 +384,9 @@ func (eb *EventBus) routeAndDeliver(ctx context.Context, evt events.Event) error
 
 func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (eventDeliveryPlan, error) {
 	plan := eventDeliveryPlan{Event: evt}
+	if evt.Type == events.EventType("platform.runtime_log") {
+		return plan, nil
+	}
 	// Budget events are broadcast guardrails. Deliver via delivery manifest so
 	// active agents also receive them during backlog replay.
 	if strings.HasPrefix(string(evt.Type), "budget.") {
@@ -427,9 +430,6 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 		eb.resolveSubscribedRecipients(string(evt.Type))...,
 	))
 	plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
-	if len(plan.Recipients) == 0 {
-		plan.ContradictionReason = "contract route resolved zero recipients"
-	}
 	return plan, nil
 }
 

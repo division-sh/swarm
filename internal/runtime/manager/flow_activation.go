@@ -350,7 +350,7 @@ func (am *AgentManager) ensureStaticRequiredAgentsForScope(
 			HiredBy:         "static-flow-required-agent",
 			TemplateVersion: "",
 		}
-		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !strings.Contains(err.Error(), "already exists") {
+		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
 			return err
 		}
 	}
@@ -390,7 +390,7 @@ func (am *AgentManager) ensureStaticAgentsForScope(
 			HiredBy:         "static-flow-agent",
 			TemplateVersion: "",
 		}
-		if err := am.spawnAgentInternal(ctx, rec, false); err != nil && !strings.Contains(err.Error(), "already exists") {
+		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
 			return err
 		}
 	}
