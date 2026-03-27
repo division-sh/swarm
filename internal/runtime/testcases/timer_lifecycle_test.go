@@ -3,7 +3,7 @@ package testcases
 import "testing"
 
 func TestGenericBundle_TimerLifecyclePatterns(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	timer, ok := bundle.WorkflowTimerByID("item_timeout")
 	if !ok {
 		t.Fatal("expected item_timeout timer")

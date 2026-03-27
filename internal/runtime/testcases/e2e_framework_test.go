@@ -3,7 +3,7 @@ package testcases
 import "testing"
 
 func TestGenericBundle_E2EFrameworkShape(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	if bundle.WorkflowName() != "test-platform" || bundle.WorkflowVersion() != "1.0.0" {
 		t.Fatalf("unexpected workflow identity: %s %s", bundle.WorkflowName(), bundle.WorkflowVersion())
 	}

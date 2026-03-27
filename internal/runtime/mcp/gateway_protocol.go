@@ -11,13 +11,21 @@ import (
 )
 
 const (
-	actorIDHeader      = "X-MAS-Agent-Id"
-	actorRoleHeader    = "X-MAS-Agent-Role"
-	actorModeHeader    = "X-MAS-Agent-Mode"
-	entityIDHeader     = "X-MAS-Entity-Id"
-	allowedToolsHeader = "X-MAS-Allowed-Tools"
-	contextTokenHeader = "X-MAS-Context-Token"
-	traceIDHeader      = "X-MAS-Trace-Id"
+	actorIDHeader      = "X-SWARM-Agent-Id"
+	actorRoleHeader    = "X-SWARM-Agent-Role"
+	actorModeHeader    = "X-SWARM-Agent-Mode"
+	entityIDHeader     = "X-SWARM-Entity-Id"
+	allowedToolsHeader = "X-SWARM-Allowed-Tools"
+	contextTokenHeader = "X-SWARM-Context-Token"
+	traceIDHeader      = "X-SWARM-Trace-Id"
+
+	legacyActorIDHeader      = "X-MAS-Agent-Id"
+	legacyActorRoleHeader    = "X-MAS-Agent-Role"
+	legacyActorModeHeader    = "X-MAS-Agent-Mode"
+	legacyEntityIDHeader     = "X-MAS-Entity-Id"
+	legacyAllowedToolsHeader = "X-MAS-Allowed-Tools"
+	legacyContextTokenHeader = "X-MAS-Context-Token"
+	legacyTraceIDHeader      = "X-MAS-Trace-Id"
 
 	actorIDQuery      = "agent_id"
 	actorRoleQuery    = "agent_role"
@@ -99,13 +107,22 @@ func ActorFromRequest(r *http.Request) (models.AgentConfig, bool) {
 		return models.AgentConfig{}, false
 	}
 	actor := models.AgentConfig{
-		ID:   FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorIDHeader)), strings.TrimSpace(r.URL.Query().Get(actorIDQuery))),
-		Role: FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorRoleHeader)), strings.TrimSpace(r.URL.Query().Get(actorRoleQuery))),
+		ID: FirstNonEmpty(
+			headerValue(r, actorIDHeader, legacyActorIDHeader),
+			strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
+		),
+		Role: FirstNonEmpty(
+			headerValue(r, actorRoleHeader, legacyActorRoleHeader),
+			strings.TrimSpace(r.URL.Query().Get(actorRoleQuery)),
+		),
 		EntityID: FirstNonEmpty(
-			strings.TrimSpace(r.Header.Get(entityIDHeader)),
+			headerValue(r, entityIDHeader, legacyEntityIDHeader),
 			strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
 		),
-		Mode: FirstNonEmpty(strings.TrimSpace(r.Header.Get(actorModeHeader)), strings.TrimSpace(r.URL.Query().Get(actorModeQuery))),
+		Mode: FirstNonEmpty(
+			headerValue(r, actorModeHeader, legacyActorModeHeader),
+			strings.TrimSpace(r.URL.Query().Get(actorModeQuery)),
+		),
 	}
 	actor.NormalizeEntityID()
 	if strings.TrimSpace(actor.ID) == "" {
@@ -131,7 +148,7 @@ func ParseToolListHeader(raw string) map[string]struct{} {
 }
 
 func ParseAllowedToolsFromRequest(r *http.Request) map[string]struct{} {
-	allowed := ParseToolListHeader(strings.TrimSpace(r.Header.Get(allowedToolsHeader)))
+	allowed := ParseToolListHeader(headerValue(r, allowedToolsHeader, legacyAllowedToolsHeader))
 	if len(allowed) > 0 {
 		return allowed
 	}
@@ -139,7 +156,7 @@ func ParseAllowedToolsFromRequest(r *http.Request) map[string]struct{} {
 }
 
 func ContextTokenFromRequest(r *http.Request) string {
-	if token := strings.TrimSpace(r.Header.Get(contextTokenHeader)); token != "" {
+	if token := headerValue(r, contextTokenHeader, legacyContextTokenHeader); token != "" {
 		return token
 	}
 	return strings.TrimSpace(r.URL.Query().Get(contextTokenQuery))
@@ -165,10 +182,22 @@ func ToolResultText(v any) string {
 
 func TraceIDFromRequest(r *http.Request) string {
 	return FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get(traceIDHeader)),
+		headerValue(r, traceIDHeader, legacyTraceIDHeader),
 		strings.TrimSpace(r.URL.Query().Get(traceIDQuery)),
 		strings.TrimSpace(r.URL.Query().Get(contextTokenQuery)),
 	)
+}
+
+func headerValue(r *http.Request, primary string, legacy ...string) string {
+	if r == nil {
+		return ""
+	}
+	values := make([]string, 0, 1+len(legacy))
+	values = append(values, strings.TrimSpace(r.Header.Get(primary)))
+	for _, key := range legacy {
+		values = append(values, strings.TrimSpace(r.Header.Get(key)))
+	}
+	return FirstNonEmpty(values...)
 }
 
 func WriteJSON(w http.ResponseWriter, status int, payload ToolGatewayResponse) {

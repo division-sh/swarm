@@ -55,13 +55,13 @@ func TestParseWorkflowEntityQueryPredicate_ResolvesPayloadReference(t *testing.T
 
 func TestNormalizeWorkflowExpression_PreservesCelLambdaBindings(t *testing.T) {
 	got, _, err := normalizeWorkflowExpression(
-		`entity.composite_score >= policy.hard_gate_floor && accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`,
+		`entity.score >= policy.minimum_score && accumulated.filter(item, item.value >= 70 && item.level == 1).size() >= 2`,
 		workflowExpressionContext{},
 	)
 	if err != nil {
 		t.Fatalf("normalizeWorkflowExpression(...) error = %v", err)
 	}
-	want := `entity.composite_score >= policy.hard_gate_floor && vars.accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`
+	want := `entity.score >= policy.minimum_score && vars.accumulated.filter(item, item.value >= 70 && item.level == 1).size() >= 2`
 	if got != want {
 		t.Fatalf("normalizeWorkflowExpression(...) = %q, want %q", got, want)
 	}

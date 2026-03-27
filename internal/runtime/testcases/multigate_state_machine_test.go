@@ -3,7 +3,7 @@ package testcases
 import "testing"
 
 func TestGenericBundle_MultigateStateMachinePatterns(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	review := mustHandler(t, bundle, "processing-node", "item.review_requested")
 	if gateName(review.SetsGate) != "score_ready" {
 		t.Fatalf("expected score_ready gate, got %+v", review.SetsGate)

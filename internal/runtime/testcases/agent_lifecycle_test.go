@@ -5,7 +5,7 @@ import (
 )
 
 func TestGenericBundle_AgentLifecyclePatterns(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	workerEntry, ok := bundle.Agents["worker-a"]
 	if !ok {
 		t.Fatal("expected worker-a runtime agent entry")

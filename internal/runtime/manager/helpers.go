@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
-	"github.com/google/uuid"
 )
 
 func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
@@ -70,7 +70,7 @@ func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
 	return out, nil
 }
 
-func RenderMandateText(m runtimeactors.MandateDocument) string {
+func RenderFlowActivationText(m runtimeactors.FlowActivationPayload) string {
 	entityID := m.EffectiveEntityID()
 	obj := map[string]any{"entity_id": entityID}
 	if len(m.Metadata) > 0 {

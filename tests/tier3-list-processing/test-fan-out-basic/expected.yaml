@@ -11,8 +11,8 @@ expected:
   handler_outcome: success
   entity_state: scanning
   emitted_events:
-    - scan.assigned
-    - scan.assigned
-    - scan.assigned
+    - item.assigned
+    - item.assigned
+    - item.assigned
   entity_fields:
     fan_out_count: 3

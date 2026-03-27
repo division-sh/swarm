@@ -15,14 +15,14 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
-func loadGenericMASBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
+func loadGenericSwarmBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := repoRootFromTestcases(t)
 	bundleRoot := filepath.Join(repoRoot, "internal", "runtime", "testdata", "generic-swarm-bundle")
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, bundleRoot, platformSpec)
 	if err != nil {
-		t.Fatalf("load generic MAS bundle: %v", err)
+		t.Fatalf("load generic Swarm bundle: %v", err)
 	}
 	return bundle
 }

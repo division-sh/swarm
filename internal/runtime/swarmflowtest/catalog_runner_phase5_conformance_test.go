@@ -82,13 +82,13 @@ func TestCatalogRunner_TimerEventRequiresActiveNodeTimer(t *testing.T) {
 	}
 }
 
-func TestDiscoveredCatalogCaseDirs_ReturnsSortedMASCatalogPackages(t *testing.T) {
+func TestDiscoveredCatalogCaseDirs_ReturnsSortedSwarmCatalogPackages(t *testing.T) {
 	dirs := discoveredCatalogCaseDirs(t)
 	if len(dirs) == 0 {
-		t.Fatal("expected MAS catalog packages")
+		t.Fatal("expected Swarm catalog packages")
 	}
 	if !slices.IsSorted(dirs) {
-		t.Fatalf("expected discovered MAS catalog dirs to be sorted, got %v", dirs)
+		t.Fatalf("expected discovered Swarm catalog dirs to be sorted, got %v", dirs)
 	}
 	for _, dir := range dirs {
 		if dir == "" {
@@ -97,7 +97,7 @@ func TestDiscoveredCatalogCaseDirs_ReturnsSortedMASCatalogPackages(t *testing.T)
 	}
 }
 
-func TestCatalogRunner_SequenceOnlyTriggerUsesTrimmedMASEventName(t *testing.T) {
+func TestCatalogRunner_SequenceOnlyTriggerUsesTrimmedSwarmEventName(t *testing.T) {
 	dir := t.TempDir()
 	writeCatalogCaseFile(t, dir, "package.yaml", "name: sequence-only\n")
 	writeCatalogCaseFixture(t, dir,

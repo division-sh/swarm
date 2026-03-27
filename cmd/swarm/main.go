@@ -66,8 +66,8 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 
 func main() {
 	repo := repoRoot()
-	configPath := flag.String("config", "", "Optional path to MAS runtime config")
-	contractsPath := flag.String("contracts", "", "Path to MAS contract bundle root")
+	configPath := flag.String("config", "", "Optional path to Swarm runtime config")
+	contractsPath := flag.String("contracts", "", "Path to Swarm contract bundle root")
 	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := flag.String("store", "postgres", "Store mode: postgres")
 	healthAddr := flag.String("health-addr", defaultHealthAddr, "HTTP bind address for health checks")
@@ -89,9 +89,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("resolve contracts: %v", err)
 	}
-	module, bundle, err := newMASWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath)
+	module, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath)
 	if err != nil {
-		log.Fatalf("load MAS contracts: %v", err)
+		log.Fatalf("load Swarm contracts: %v", err)
 	}
 	if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
 		slog.Error("validate prompt schema guards", "error", err)
@@ -100,7 +100,7 @@ func main() {
 	source := semanticview.Wrap(bundle)
 	bootWarnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
 	if err != nil {
-		slog.Error("validate MAS contracts", "error", err)
+		slog.Error("validate Swarm contracts", "error", err)
 		os.Exit(1)
 	}
 	agentCount, permissionErrors := runtimetools.ValidateAgentPermissions(source)
@@ -372,7 +372,7 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	return fmt.Sprintf("verified %d generated tables (%s)", len(plans), strings.Join(tableNames, ", ")), nil
 }
 
-type masWorkflowModule struct {
+type swarmWorkflowModule struct {
 	bundle         *runtimecontracts.WorkflowContractBundle
 	source         semanticview.Source
 	workflow       *runtimepipeline.WorkflowDefinition
@@ -381,7 +381,7 @@ type masWorkflowModule struct {
 	actionRegistry runtimepipeline.ActionRegistry
 }
 
-func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+func newSwarmWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, platformSpecPath)
 	if err != nil {
 		return nil, nil, err
@@ -395,7 +395,7 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 	if err != nil {
 		return nil, nil, err
 	}
-	return &masWorkflowModule{
+	return &swarmWorkflowModule{
 		bundle:         bundle,
 		source:         source,
 		workflow:       workflow,
@@ -405,15 +405,17 @@ func newMASWorkflowModule(repoRoot, contractsRoot, platformSpecPath string) (run
 	}, bundle, nil
 }
 
-func (m *masWorkflowModule) SemanticSource() semanticview.Source { return m.source }
-func (m *masWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+func (m *swarmWorkflowModule) SemanticSource() semanticview.Source { return m.source }
+func (m *swarmWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
 	return m.workflow
 }
-func (m *masWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+func (m *swarmWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
 	return append([]runtimepipeline.WorkflowNode(nil), m.nodes...)
 }
-func (m *masWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return m.guardRegistry }
-func (m *masWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return m.actionRegistry }
+func (m *swarmWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry { return m.guardRegistry }
+func (m *swarmWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
+	return m.actionRegistry
+}
 
 func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning, permissionSummary, stateStoreSummary string) {
 	warningCounts := make(map[string]int, len(warnings))

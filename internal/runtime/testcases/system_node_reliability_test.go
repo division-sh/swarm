@@ -3,7 +3,7 @@ package testcases
 import "testing"
 
 func TestGenericBundle_SystemNodeReliabilityPatterns(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	for _, nodeID := range []string{"intake-router", "processing-node", "delivery-node"} {
 		node := bundle.Nodes[nodeID]
 		if node.IdempotencyTable == "" {

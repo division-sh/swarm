@@ -3,10 +3,10 @@ package mailbox
 import (
 	"bytes"
 	"context"
-	runtimetools "swarm/internal/runtime/tools"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	runtimetools "swarm/internal/runtime/tools"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,7 +223,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 	ctx := context.Background()
 	store := newFakeMailbox(runtimetools.MailboxItem{
 		ID:        "m1",
-		Type:      "spec_review",
+		Type:      "manual_review",
 		Priority:  "critical",
 		Status:    "pending",
 		FromAgent: "a",
@@ -258,7 +258,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 
 	_, _ = store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		ID:        "m2",
-		Type:      "deployment_review",
+		Type:      "ops_review",
 		Priority:  "normal",
 		Status:    "pending",
 		FromAgent: "a2",
@@ -267,10 +267,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 	})
 	buf.Reset()
 	if err := PrintPendingWithOptions(ctx, store, &buf, ListOptions{Limit: 10, ReviewsOnly: true}); err != nil {
-		t.Fatalf("PrintPending reviews: %v", err)
-	}
-	if !strings.Contains(buf.String(), "type=deployment_review") {
-		t.Fatalf("expected deployment_review in output, got %q", buf.String())
+		t.Fatalf("PrintPending with review filter: %v", err)
 	}
 
 	buf.Reset()
@@ -285,18 +282,15 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 func TestMailbox_FilterHelpers(t *testing.T) {
 	items := []runtimetools.MailboxItem{
 		{ID: "1", Priority: "critical", Type: "escalation"},
-		{ID: "2", Priority: "normal", Type: "spec_review"},
-		{ID: "3", Priority: "normal", Type: "deployment_review"},
+		{ID: "2", Priority: "normal", Type: "manual_review"},
+		{ID: "3", Priority: "normal", Type: "ops_review"},
 	}
 	out := filterPending(items, ListOptions{CriticalOnly: true})
 	if len(out) != 1 || out[0].ID != "1" {
 		t.Fatalf("CriticalOnly filter failed: %#v", out)
 	}
 	out = filterPending(items, ListOptions{ReviewsOnly: true})
-	if len(out) != 2 {
-		t.Fatalf("ReviewsOnly filter failed: %#v", out)
-	}
-	if !isReviewType("spec_review") || !isReviewType("deployment_review") || isReviewType("x") {
-		t.Fatalf("isReviewType unexpected behavior")
+	if len(out) != 3 {
+		t.Fatalf("ReviewsOnly should no longer filter mailbox types, got %#v", out)
 	}
 }

@@ -131,7 +131,6 @@ func (n *ChatNotifier) NotifyCritical(ctx context.Context, item runtimetools.Mai
 }
 
 // NotifyText sends an arbitrary text message to the configured Telegram chat.
-// This is used for portfolio digest pushes (not mailbox items).
 func (n *ChatNotifier) NotifyText(ctx context.Context, text string) error {
 	if strings.TrimSpace(n.BotToken) == "" || strings.TrimSpace(n.ChatID) == "" {
 		return fmt.Errorf("telegram token and chat id are required")

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
-	"github.com/google/uuid"
 )
 
 func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -252,7 +252,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 
 func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	_, _, _ = ctx, actor, input
-	return nil, errors.New("configure_routing is not part of the MAS runtime; routes derive from contracts")
+	return nil, errors.New("configure_routing is not part of the generic Swarm runtime; routes derive from contracts")
 }
 
 func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, error) {

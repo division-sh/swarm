@@ -1,7 +1,7 @@
 name: test-platform
 version: "1.0.0"
 platform_version: ">=1.0.0"
-description: Generic MAS bundle for contract-driven runtime tests.
+description: Generic Swarm bundle for contract-driven runtime tests.
 entity_schema:
   groups:
     - name: item

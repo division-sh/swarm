@@ -5,15 +5,15 @@ import (
 	"strings"
 )
 
-// MandateDocument is a generic handoff artifact carried as opaque metadata.
-type MandateDocument struct {
+// FlowActivationPayload is a generic handoff artifact carried as opaque metadata.
+type FlowActivationPayload struct {
 	EntityID string          `json:"entity_id,omitempty"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
-func (m MandateDocument) EffectiveEntityID() string { return strings.TrimSpace(m.EntityID) }
+func (m FlowActivationPayload) EffectiveEntityID() string { return strings.TrimSpace(m.EntityID) }
 
-func (m *MandateDocument) NormalizeEntityID() {
+func (m *FlowActivationPayload) NormalizeEntityID() {
 	if m == nil {
 		return
 	}

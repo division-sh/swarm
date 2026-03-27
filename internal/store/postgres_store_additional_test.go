@@ -488,13 +488,13 @@ func TestSubscriptionMatchPatterns(t *testing.T) {
 	if !subscriptionMatch("inbound.*", "inbound.a") {
 		t.Fatalf("prefix star should match")
 	}
-	if subscriptionMatch("inbound.*", "board.chat") {
+	if subscriptionMatch("inbound.*", "room.message") {
 		t.Fatalf("prefix star should not match other prefix")
 	}
-	if !subscriptionMatch("board.chat", "board.chat") {
+	if !subscriptionMatch("room.message", "room.message") {
 		t.Fatalf("exact should match")
 	}
-	if subscriptionMatch("board.chat", "board.chats") {
+	if subscriptionMatch("room.message", "room.messages") {
 		t.Fatalf("exact should not match different")
 	}
 	if !matchesAnySubscription("inbound.a", []events.EventType{"review.*", "inbound.*"}) {

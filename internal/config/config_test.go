@@ -19,7 +19,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"database:",
 		"  host: 127.0.0.1",
 		"  port: 5432",
-		"  name: empireai",
+		"  name: swarm_test",
 		"  user: postgres",
 		"  password: postgres",
 		"  sslmode: disable",
@@ -48,7 +48,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"    auto_expire_hours: 0",
 		"    categories_enabled: [verification]",
 	}, "\n") + "\n"
-	p := filepath.Join(t.TempDir(), "empire.yaml")
+	p := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -74,11 +74,11 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if ext.Budget.HumanTasks.BudgetReset != "monday" {
 		t.Fatalf("expected default budget_reset monday, got %q", ext.Budget.HumanTasks.BudgetReset)
 	}
-	if ext.Sharding.MaxShardsPerScan != 8 {
-		t.Fatalf("expected default sharding.max_shards_per_scan=8, got %d", ext.Sharding.MaxShardsPerScan)
+	if ext.Sharding.MaxShardsPerJob != 8 {
+		t.Fatalf("expected default sharding.max_shards_per_job=8, got %d", ext.Sharding.MaxShardsPerJob)
 	}
-	if ext.Sharding.Stages["primary"].TargetItemsPerShard != 13 {
-		t.Fatalf("expected default sharding.stages.primary.target_items_per_shard=13, got %d", ext.Sharding.Stages["primary"].TargetItemsPerShard)
+	if ext.Sharding.Stages["default"].TargetItemsPerShard != 10 {
+		t.Fatalf("expected default sharding.stages.default.target_items_per_shard=10, got %d", ext.Sharding.Stages["default"].TargetItemsPerShard)
 	}
 }
 
@@ -109,14 +109,14 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 
 func TestExtensionsConfig_ApplyDefaultsAndClamps(t *testing.T) {
 	c := &ExtensionsConfig{}
-	c.Sharding.MaxShardsPerScan = 6
+	c.Sharding.MaxShardsPerJob = 6
 	c.Sharding.MaxConcurrentShards = 0
 	c.Sharding.PerShardTimeout = 0
 	c.Sharding.PerShardBudgetCents = 0
 	c.Sharding.MaxRetriesPerShard = -1
 	c.Sharding.CircuitBreakerThreshold = 2.0
 	c.Sharding.Stages = map[string]runtimesharding.StageConfig{
-		"primary": {MaxShards: 99},
+		"default": {MaxShards: 99},
 	}
 
 	c.ApplyDefaults()
@@ -138,7 +138,7 @@ func TestExtensionsConfig_ApplyDefaultsAndClamps(t *testing.T) {
 	if c.Sharding.CircuitBreakerThreshold != 0.5 {
 		t.Fatalf("expected default circuit_breaker_threshold=0.5, got %f", c.Sharding.CircuitBreakerThreshold)
 	}
-	if c.Sharding.Stages["primary"].MaxShards != 6 {
-		t.Fatalf("expected primary.max_shards clamped to 6, got %d", c.Sharding.Stages["primary"].MaxShards)
+	if c.Sharding.Stages["default"].MaxShards != 6 {
+		t.Fatalf("expected default.max_shards clamped to 6, got %d", c.Sharding.Stages["default"].MaxShards)
 	}
 }

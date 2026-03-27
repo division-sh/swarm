@@ -20,7 +20,7 @@ func TestSchemaFieldTypeToDDL(t *testing.T) {
 		{schemaType: "boolean", wantDDL: "BOOLEAN"},
 		{schemaType: "jsonb", wantDDL: "JSONB"},
 		{schemaType: "timestamp", wantDDL: "TIMESTAMPTZ"},
-		{schemaType: "timestamptz (set on marginal)", wantDDL: "TIMESTAMPTZ"},
+		{schemaType: "timestamptz (set on state change)", wantDDL: "TIMESTAMPTZ"},
 		{schemaType: "uuid", wantDDL: "UUID"},
 		{schemaType: "uuid (null for non-derived)", wantDDL: "UUID"},
 		{schemaType: "integer default 0", wantDDL: "BIGINT"},

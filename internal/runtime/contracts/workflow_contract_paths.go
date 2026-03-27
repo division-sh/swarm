@@ -39,7 +39,7 @@ func DefaultPlatformContractsDir(repoRoot string) string {
 func DefaultPlatformSpecFile(repoRoot string) string {
 	return filepath.Join(DefaultPlatformContractsDir(repoRoot), "platform-spec.yaml")
 }
-func defaultMASAuxFile(repoRoot, envKey string, pathParts ...string) string {
+func defaultAuxFile(repoRoot, envKey string, pathParts ...string) string {
 	if env := strings.TrimSpace(os.Getenv(envKey)); env != "" {
 		return env
 	}
@@ -55,7 +55,7 @@ func DefaultWorkflowContractsDir(repoRoot string) string {
 	}
 	return ""
 }
-func RepoRootHasMASContracts(repoRoot string) bool {
+func RepoRootHasSwarmContracts(repoRoot string) bool {
 	return existingFile(filepath.Join(DefaultWorkflowContractsDir(repoRoot), "package.yaml")) != ""
 }
 func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, platformSpecFileOverride string) ContractPaths {
@@ -80,10 +80,10 @@ func ResolveWorkflowContractPathsWithOverrides(repoRoot, workflowDirOverride, pl
 		ProjectPolicyFile:     existingFile(filepath.Join(workflowDir, "policy.yaml")),
 		ProjectPromptsDir:     existingDir(filepath.Join(workflowDir, "prompts")),
 		PlatformSpecFile:      platformSpecFile,
-		VerificationGatesFile: defaultMASAuxFile(repoRoot, "SWARM_VERIFICATION_GATES_FILE", "docs", "specs", "swarm-platform", "verification-gates.yaml"),
-		ToolingLockFile:       defaultMASAuxFile(repoRoot, "SWARM_TOOLING_LOCK_FILE", "docs", "specs", "swarm-platform", "tooling.lock"),
+		VerificationGatesFile: defaultAuxFile(repoRoot, "SWARM_VERIFICATION_GATES_FILE", "docs", "specs", "swarm-platform", "verification-gates.yaml"),
+		ToolingLockFile:       defaultAuxFile(repoRoot, "SWARM_TOOLING_LOCK_FILE", "docs", "specs", "swarm-platform", "tooling.lock"),
 		DDLFile:               "",
-		AgentConfigMapFile:    defaultMASAuxFile(repoRoot, "SWARM_AGENT_CONFIG_MAP_FILE", "docs", "specs", "swarm-platform", "agent-config-map.yaml"),
+		AgentConfigMapFile:    defaultAuxFile(repoRoot, "SWARM_AGENT_CONFIG_MAP_FILE", "docs", "specs", "swarm-platform", "agent-config-map.yaml"),
 	}
 	if paths.ProjectPackageFile != "" {
 		paths.ProjectPackages = discoverProjectPackagePaths(paths.ProjectPackageFile, workflowDir)

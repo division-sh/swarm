@@ -238,7 +238,7 @@ func unresolvedPromptTokens(promptText string) []string {
 	return out
 }
 
-// ResolveDir discovers the default MAS prompt directory. It checks:
+// ResolveDir discovers the default Swarm prompt directory. It checks:
 // 1) SWARM_PROMPTS_DIR
 // 2) any docs/specs/swarm-platform/*/contracts/prompts walking up from CWD
 // 3) any docs/specs/swarm-platform/*/contracts/prompts relative to this repo.
@@ -263,6 +263,19 @@ func ResolveDir() (string, bool) {
 	}
 
 	return "", false
+}
+
+func allowedRuntimePromptTokens() map[string]struct{} {
+	return map[string]struct{}{
+		"current_date":       {},
+		"agent_id":           {},
+		"flow_instance_path": {},
+	}
+}
+
+func isAllowedRuntimePromptToken(token string) bool {
+	_, ok := allowedRuntimePromptTokens()[strings.TrimSpace(token)]
+	return ok
 }
 
 func findDirUp(start string, pathParts ...string) (string, bool) {

@@ -12,7 +12,7 @@ type bundleAgentRecord struct {
 	Source    ContractItemSource
 }
 
-// ResolveAgentRegistryEntry matches a runtime agent config back to the MAS
+// ResolveAgentRegistryEntry matches a runtime agent config back to the Swarm
 // contract registry entry that defined it when possible.
 func ResolveAgentRegistryEntry(bundle *WorkflowContractBundle, cfg models.AgentConfig) (string, AgentRegistryEntry, bool) {
 	if bundle == nil {

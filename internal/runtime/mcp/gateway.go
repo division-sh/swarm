@@ -330,7 +330,7 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 			}
 		}
 	}
-	role := strings.TrimSpace(r.Header.Get(actorRoleHeader))
+	role := headerValue(r, actorRoleHeader, legacyActorRoleHeader)
 	if role != "" && g.hooks.EmitTools != nil {
 		for _, def := range g.hooks.EmitTools(role) {
 			name := strings.TrimSpace(def.Name)
@@ -426,11 +426,11 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 		return
 	}
 	agentID := FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get(actorIDHeader)),
+		headerValue(r, actorIDHeader, legacyActorIDHeader),
 		strings.TrimSpace(r.URL.Query().Get(actorIDQuery)),
 	)
 	entityID := FirstNonEmpty(
-		strings.TrimSpace(r.Header.Get(entityIDHeader)),
+		headerValue(r, entityIDHeader, legacyEntityIDHeader),
 		strings.TrimSpace(r.URL.Query().Get(entityIDQuery)),
 	)
 	errText := ""

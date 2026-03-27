@@ -261,6 +261,33 @@ func loadPromptVarsForTest(t *testing.T, promptsDir string) map[string]any {
 			}
 		}
 	}
+	for _, candidate := range promptPackageSources(promptsDir) {
+		raw, err := os.ReadFile(candidate)
+		if err != nil {
+			t.Fatalf("read %s: %v", candidate, err)
+		}
+		var loaded struct {
+			EntitySchema struct {
+				Groups []struct {
+					Fields []struct {
+						Name string `yaml:"name"`
+					} `yaml:"fields"`
+				} `yaml:"groups"`
+			} `yaml:"entity_schema"`
+		}
+		if err := yaml.Unmarshal(raw, &loaded); err != nil {
+			t.Fatalf("parse %s: %v", candidate, err)
+		}
+		for _, group := range loaded.EntitySchema.Groups {
+			for _, field := range group.Fields {
+				key := strings.TrimSpace(field.Name)
+				if key == "" {
+					continue
+				}
+				vars[key] = true
+			}
+		}
+	}
 	return vars
 }
 
@@ -302,6 +329,17 @@ func promptAgentInputSources(promptsDir string) []string {
 	return out
 }
 
+func promptPackageSources(promptsDir string) []string {
+	var out []string
+	for _, dir := range promptContractAncestorDirs(promptsDir) {
+		candidate := filepath.Join(dir, "package.yaml")
+		if _, err := os.Stat(candidate); err == nil {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
 func hasAllowedRuntimePromptTokens(t *testing.T, path string) bool {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -314,23 +352,4 @@ func hasAllowedRuntimePromptTokens(t *testing.T, path string) bool {
 		}
 	}
 	return false
-}
-
-func isAllowedRuntimePromptToken(token string) bool {
-	switch strings.TrimSpace(token) {
-	case "name",
-		"type",
-		"entity_name",
-		"entity_description",
-		"geography",
-		"mandate_document",
-		"founder_directives",
-		"org_roster",
-		"monthly_api_cap",
-		"product_budget",
-		"growth_budget":
-		return true
-	default:
-		return false
-	}
 }

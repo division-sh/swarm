@@ -7,7 +7,7 @@ import (
 )
 
 func TestGenericBundle_BudgetSuppressionPatterns(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	allowed := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{
 		"entity_id": "item-123",
 		"score":     70.0,

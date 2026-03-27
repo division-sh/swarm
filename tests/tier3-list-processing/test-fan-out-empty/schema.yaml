@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [batch.submitted]
   outputs:
-    events: [scan.assigned]
+    events: [item.assigned]

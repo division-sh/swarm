@@ -7,7 +7,7 @@ import (
 	coreidentity "swarm/internal/runtime/core/identity"
 )
 
-// Instance is the platform-owned workflow instance record defined by the MAS
+// Instance is the platform-owned workflow instance record defined by the Swarm
 // platform spec. Product/domain data belongs in Metadata, not as top-level
 // platform fields.
 type Instance struct {

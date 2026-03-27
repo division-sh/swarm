@@ -7,7 +7,7 @@ import (
 )
 
 func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
-	bundle := loadGenericMASBundle(t)
+	bundle := loadGenericSwarmBundle(t)
 	created := mustHandler(t, bundle, "intake-router", "item.created")
 	if created.Guard == nil || created.Guard.ID != "accept_item" {
 		t.Fatalf("expected inline guard id on item.created, got %+v", created.Guard)

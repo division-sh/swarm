@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"swarm/internal/config"
 	builderpkg "swarm/internal/builder"
+	"swarm/internal/config"
 	"swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -118,7 +118,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	module, bundle, err := newMASWorkflowModule(s.repoRoot, resolvedRoot, s.platformSpecPath)
+	module, bundle, err := newSwarmWorkflowModule(s.repoRoot, resolvedRoot, s.platformSpecPath)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("load project: %w", err)
 	}

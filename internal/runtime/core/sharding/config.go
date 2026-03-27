@@ -3,7 +3,8 @@ package sharding
 import "time"
 
 type Config struct {
-	MaxShardsPerScan        int                    `yaml:"max_shards_per_scan"`
+	MaxShardsPerJob         int                    `yaml:"max_shards_per_job"`
+	LegacyMaxShards         int                    `yaml:"max_shards_per_scan"`
 	MaxConcurrentShards     int                    `yaml:"max_concurrent_shards"`
 	PerShardTimeout         time.Duration          `yaml:"per_shard_timeout"`
 	StartupGracePeriod      time.Duration          `yaml:"startup_grace_period"`
@@ -22,8 +23,12 @@ func (c *Config) ApplyDefaults() {
 	if c == nil {
 		return
 	}
-	if c.MaxShardsPerScan <= 0 {
-		c.MaxShardsPerScan = 8
+	if c.MaxShardsPerJob <= 0 {
+		if c.LegacyMaxShards > 0 {
+			c.MaxShardsPerJob = c.LegacyMaxShards
+		} else {
+			c.MaxShardsPerJob = 8
+		}
 	}
 	if c.MaxConcurrentShards <= 0 {
 		c.MaxConcurrentShards = 12
@@ -51,16 +56,16 @@ func (c *Config) ApplyDefaults() {
 		if stage.MaxShards <= 0 {
 			stage.MaxShards = maxShards
 		}
-		if stage.MaxShards > c.MaxShardsPerScan {
-			stage.MaxShards = c.MaxShardsPerScan
+		if stage.MaxShards > c.MaxShardsPerJob {
+			stage.MaxShards = c.MaxShardsPerJob
 		}
 	}
 	if c.Stages == nil {
 		c.Stages = map[string]StageConfig{}
 	}
 	defaultStages := map[string]StageConfig{
-		"primary":   {TargetItemsPerShard: 13, MaxShards: 8},
-		"secondary": {TargetItemsPerShard: 3, MaxShards: 4},
+		"default":  {TargetItemsPerShard: 10, MaxShards: 8},
+		"overflow": {TargetItemsPerShard: 4, MaxShards: 4},
 	}
 	for name, defaults := range defaultStages {
 		stage := c.Stages[name]

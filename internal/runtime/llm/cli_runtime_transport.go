@@ -15,13 +15,21 @@ import (
 )
 
 const (
-	mcpActorIDHeader      = "X-MAS-Agent-Id"
-	mcpActorRoleHeader    = "X-MAS-Agent-Role"
-	mcpActorModeHeader    = "X-MAS-Agent-Mode"
-	mcpEntityIDHeader     = "X-MAS-Entity-Id"
-	mcpAllowedToolsHeader = "X-MAS-Allowed-Tools"
-	mcpContextTokenHeader = "X-MAS-Context-Token"
-	mcpTraceIDHeader      = "X-MAS-Trace-Id"
+	mcpActorIDHeader      = "X-SWARM-Agent-Id"
+	mcpActorRoleHeader    = "X-SWARM-Agent-Role"
+	mcpActorModeHeader    = "X-SWARM-Agent-Mode"
+	mcpEntityIDHeader     = "X-SWARM-Entity-Id"
+	mcpAllowedToolsHeader = "X-SWARM-Allowed-Tools"
+	mcpContextTokenHeader = "X-SWARM-Context-Token"
+	mcpTraceIDHeader      = "X-SWARM-Trace-Id"
+
+	legacyMCPActorIDHeader      = "X-MAS-Agent-Id"
+	legacyMCPActorRoleHeader    = "X-MAS-Agent-Role"
+	legacyMCPActorModeHeader    = "X-MAS-Agent-Mode"
+	legacyMCPEntityIDHeader     = "X-MAS-Entity-Id"
+	legacyMCPAllowedToolsHeader = "X-MAS-Allowed-Tools"
+	legacyMCPContextTokenHeader = "X-MAS-Context-Token"
+	legacyMCPTraceIDHeader      = "X-MAS-Trace-Id"
 
 	mcpActorIDQuery      = "agent_id"
 	mcpActorRoleQuery    = "agent_role"
@@ -70,9 +78,14 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 		mcpActorRoleHeader:    strings.TrimSpace(actor.Role),
 		mcpEntityIDHeader:     strings.TrimSpace(actor.EffectiveEntityID()),
 		mcpAllowedToolsHeader: allowedTools,
+		legacyMCPActorIDHeader:      strings.TrimSpace(actor.ID),
+		legacyMCPActorRoleHeader:    strings.TrimSpace(actor.Role),
+		legacyMCPEntityIDHeader:     strings.TrimSpace(actor.EffectiveEntityID()),
+		legacyMCPAllowedToolsHeader: allowedTools,
 	}
 	if mode := strings.TrimSpace(actor.Mode); mode != "" {
 		headers[mcpActorModeHeader] = mode
+		headers[legacyMCPActorModeHeader] = mode
 	}
 	if token := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); token != "" {
 		headers["Authorization"] = "Bearer " + token
@@ -81,9 +94,11 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	traceID := strings.TrimSpace(contextToken)
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
+		headers[legacyMCPContextTokenHeader] = contextToken
 	}
 	if traceID != "" {
 		headers[mcpTraceIDHeader] = traceID
+		headers[legacyMCPTraceIDHeader] = traceID
 	}
 	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools, traceID)
 	cfg := map[string]any{

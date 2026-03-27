@@ -172,19 +172,7 @@ func filterPending(items []runtimetools.MailboxItem, opts ListOptions) []runtime
 		if opts.CriticalOnly && strings.TrimSpace(item.Priority) != "critical" {
 			continue
 		}
-		if opts.ReviewsOnly && !isReviewType(item.Type) {
-			continue
-		}
 		out = append(out, item)
 	}
 	return out
-}
-
-func isReviewType(t string) bool {
-	switch strings.TrimSpace(t) {
-	case "spec_review", "deployment_review":
-		return true
-	default:
-		return false
-	}
 }

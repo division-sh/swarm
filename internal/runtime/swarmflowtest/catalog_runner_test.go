@@ -490,11 +490,11 @@ func discoveredCatalogCaseDirs(t testing.TB) []string {
 		}
 		return nil
 	}); err != nil {
-		t.Fatalf("walk MAS test catalog root: %v", err)
+		t.Fatalf("walk Swarm test catalog root: %v", err)
 	}
 	sort.Strings(dirs)
 	if len(dirs) == 0 {
-		t.Fatal("no MAS test catalog packages discovered")
+		t.Fatal("no Swarm test catalog packages discovered")
 	}
 	return dirs
 }

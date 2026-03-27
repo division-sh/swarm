@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -143,9 +142,13 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 	}
 }
 
-func TestValidateAgentPermissions_EmpireBundleDoesNotReportUnknownBundles(t *testing.T) {
+func TestValidateAgentPermissions_DefaultWorkflowBundleDoesNotReportUnknownBundles(t *testing.T) {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "empire", "contracts"), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	contractsRoot := runtimecontracts.DefaultWorkflowContractsDir(repoRoot)
+	if strings.TrimSpace(contractsRoot) == "" {
+		t.Skip("no default workflow contracts dir")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
