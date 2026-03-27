@@ -1,5 +1,7 @@
 # Implementer Handoff: v2.6.0 Runtime → Platform v1.2.0 / Empire v3.0.3
 
+> **Note:** This document contains Empire-specific references. It is a product migration guide, not a platform document.
+
 **Date:** 2026-03-10
 **From:** Spec team
 **To:** Runtime implementer

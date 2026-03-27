@@ -35,7 +35,7 @@ type FlowInstanceDeactivationRequest struct {
 
 type FlowInstanceDeactivator func(context.Context, FlowInstanceDeactivationRequest) error
 
-func (pc *FactoryPipelineCoordinator) createFlowInstance(ctx context.Context, triggerCtx workflowTriggerContext, plan handlerExecutionPlan) bool {
+func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCtx workflowTriggerContext, plan handlerExecutionPlan) bool {
 	if pc == nil || pc.instanceActivator == nil {
 		return false
 	}
@@ -169,7 +169,7 @@ func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID s
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) handlerEmitPayload(_ context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
+func (pc *PipelineCoordinator) handlerEmitPayload(_ context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
 	// Only carry contract-visible entity fields into emitted payloads; internal
 	// workflow metadata such as gates, evidence, and runtime bookkeeping should

@@ -28,7 +28,7 @@ type HandlerExecutionEngine interface {
 
 type declarativeWorkflowNode struct {
 	nodeID      string
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 type DeclarativeNode struct {
@@ -214,13 +214,13 @@ func (r *ProductHookRegistry) Get(actionID string) (ActionHandler, bool) {
 
 type coordinatorHandlerExecutionEngine struct {
 	nodeID      string
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 	executor    *runtimeengine.Executor
 	node        *runtimeengine.DeclarativeNode
 	err         error
 }
 
-func newCoordinatorHandlerExecutionEngine(pc *FactoryPipelineCoordinator, nodeID string) HandlerExecutionEngine {
+func newCoordinatorHandlerExecutionEngine(pc *PipelineCoordinator, nodeID string) HandlerExecutionEngine {
 	if pc == nil {
 		return nil
 	}

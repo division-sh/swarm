@@ -41,7 +41,6 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  global_monthly_cap: 50000",
 		"  per_entity_monthly_cap: 20000",
 		"  system_monthly_cap: 100000",
-		"  auto_approve_spend_below: 1500",
 		"  human_tasks:",
 		"    max_tasks_per_week: 3",
 		"    budget_reset: ''",

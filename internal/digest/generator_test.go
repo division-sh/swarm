@@ -15,13 +15,10 @@ func (fakePortfolio) CountActiveInstances(context.Context) (int, error) { return
 func (fakePortfolio) ListInstanceDigestRows(context.Context, int) ([]runtime.InstanceDigestRow, error) {
 	return []runtime.InstanceDigestRow{
 		{
-			EntityID:       "v1",
-			Name:           "V1",
-			Stage:          "active",
-			UsersTotal:     12,
-			MRRCents:       5000,
-			SpendCents30d:  1000,
-			LastMetricDate: time.Now(),
+			EntityID:  "v1",
+			Name:      "V1",
+			Stage:     "active",
+			UpdatedAt: time.Now(),
 		},
 	}, nil
 }

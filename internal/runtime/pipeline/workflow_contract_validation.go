@@ -32,7 +32,7 @@ func ValidateDefaultWorkflowContracts() error {
 	return ValidateWorkflowContracts(defaultWorkflowModule().SemanticSource())
 }
 
-func (pc *FactoryPipelineCoordinator) ValidateWorkflowContracts() error {
+func (pc *PipelineCoordinator) ValidateWorkflowContracts() error {
 	return ValidateWorkflowContracts(pc.SemanticSource())
 }
 

@@ -18,7 +18,7 @@ import (
 
 type pipelineEngineEvaluator struct {
 	evaluator   *workflowExpressionEvaluator
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.BaseContext) (bool, error) {
@@ -78,7 +78,7 @@ func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.T
 }
 
 type pipelineEngineLocker struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (l pipelineEngineLocker) WithEntityLock(ctx context.Context, entityID identity.EntityID, fn func(context.Context) error) error {
@@ -91,7 +91,7 @@ func (l pipelineEngineLocker) WithEntityLock(ctx context.Context, entityID ident
 }
 
 type pipelineEngineStateRepo struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identity.EntityID) (runtimeengine.StateSnapshot, bool, error) {
@@ -174,7 +174,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 }
 
 type pipelineEngineTimerApplier struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (a pipelineEngineTimerApplier) ApplyTimerIntents(ctx context.Context, entityID identity.EntityID, intents []runtimeengine.TimerIntent) error {
@@ -212,7 +212,7 @@ func (a pipelineEngineTimerApplier) ApplyTimerIntents(ctx context.Context, entit
 	return nil
 }
 
-func newCoordinatorEngineEvaluator(pc *FactoryPipelineCoordinator) runtimeengine.Evaluator {
+func newCoordinatorEngineEvaluator(pc *PipelineCoordinator) runtimeengine.Evaluator {
 	if pc == nil {
 		return nil
 	}
@@ -269,7 +269,7 @@ func sqlComparisonOperator(op string) (string, error) {
 	}
 }
 
-func coordinatorEngineDependencies(pc *FactoryPipelineCoordinator) runtimeengine.RuntimeDependencies {
+func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.RuntimeDependencies {
 	if pc == nil {
 		return runtimeengine.RuntimeDependencies{}
 	}
@@ -314,7 +314,7 @@ func workflowMaxChainDepthPolicy(source semanticview.Source) int {
 }
 
 type pipelineEngineTransitionValidator struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (v pipelineEngineTransitionValidator) ValidateTransition(currentState, nextState string) error {
@@ -379,7 +379,7 @@ func (r pipelineEngineActionRegistry) Action(id identity.ActionKey) (runtimeregi
 }
 
 type pipelineEngineGuardRunner struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identity.GuardKey, entry runtimeregistry.GuardInstruction, execCtx runtimeengine.ExecutionContext) (bool, bool, error) {
@@ -467,7 +467,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 }
 
 type pipelineEngineActionRunner struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
@@ -516,7 +516,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) evidenceTargetForHandler(nodeID, eventType string) string {
+func (pc *PipelineCoordinator) evidenceTargetForHandler(nodeID, eventType string) string {
 	if pc == nil {
 		return ""
 	}
@@ -532,7 +532,7 @@ func (pc *FactoryPipelineCoordinator) evidenceTargetForHandler(nodeID, eventType
 }
 
 type pipelineEnginePayloadShaper struct {
-	coordinator *FactoryPipelineCoordinator
+	coordinator *PipelineCoordinator
 }
 
 func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req runtimeengine.ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
@@ -618,7 +618,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, entityID, nextState string) error {
+func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, entityID, nextState string) error {
 	if pc == nil || pc.instanceDeactivator == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return nil
 	}
@@ -656,7 +656,7 @@ func (pc *FactoryPipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx co
 	})
 }
 
-func (pc *FactoryPipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
+func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 	if pc == nil {
 		return false
 	}

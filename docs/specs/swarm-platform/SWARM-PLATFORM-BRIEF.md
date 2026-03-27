@@ -11,7 +11,7 @@ Current AI agent frameworks (CrewAI, AutoGen, LangGraph) let LLMs manage their o
 - **Non-deterministic routing.** An LLM "manager agent" decides who acts next. Run it twice, get different results. Can't debug, can't audit, can't reproduce.
 - **No crash recovery.** Process dies mid-agent-turn. State is gone. Start over.
 - **Context window exhaustion.** Add 10 agents to a shared chat. The LLM loses the plot by agent 5.
-- **No composition.** Want to reuse a scoring pipeline in a different project? Refactor all the Python.
+- **No composition.** Want to reuse a processing pipeline in a different project? Refactor all the Python.
 - **No separation of concerns.** Business logic, orchestration logic, and agent reasoning are tangled in the same code.
 
 ## The Solution
@@ -22,9 +22,9 @@ Swarm Platform separates what agents DO (reason) from what the system does (orch
 
 **Deterministic orchestration.** System nodes route events, advance state, set gates, accumulate data, fan out work, and enforce guards — all via a dependency-graph execution model with atomic transactions. Same input, same output, every time.
 
-**Flow composition.** Workflows are self-contained packages with typed inputs and outputs (pins). Plug a scoring flow into any project. Swap it for a better version. No code changes.
+**Flow composition.** Workflows are self-contained packages with typed inputs and outputs (pins). Plug a processing flow into any project. Swap it for a better version. No code changes.
 
-**Agent isolation.** Agents operate in scoped sessions. They see only their subscribed events. They communicate only through validated event emission. A CEO agent talks to VP agents. VPs talk to workers. Workers never talk to each other. Managerial hierarchy as context management.
+**Agent isolation.** Agents operate in scoped sessions. They see only their subscribed events. They communicate only through validated event emission. A coordinator agent talks to team-lead agents. Team leads talk to workers. Workers never talk to each other. Managerial hierarchy as context management.
 
 ## How It Works
 
@@ -32,12 +32,12 @@ Swarm Platform separates what agents DO (reason) from what the system does (orch
 
 ```yaml
 # A system node handler — no code, just YAML
-research.completed:
-  sets_gate: g1_research
+ticket.validated:
+  sets_gate: g1_validation
   data_accumulation:
-    writes: [business_brief, research_context]
-  advances_to: mvp_speccing
-  emits: spec.requested
+    writes: [order_summary, validation_context]
+  advances_to: processing
+  emits: work.assigned
 ```
 
 The engine reads this and executes: set the gate, write data, advance state, emit the next event. All in one atomic transaction. If anything fails, everything rolls back.
@@ -76,16 +76,16 @@ Static flows exist at boot. Template flows create instances at runtime:
 
 ```yaml
 flows:
-  - id: scoring
-    flow: scoring
+  - id: intake
+    flow: intake
     mode: static       # always one instance
 
-  - id: operating
-    flow: operating
+  - id: fulfillment
+    flow: fulfillment
     mode: template     # created on demand
 ```
 
-When a vertical gets approved, the platform creates a new operating flow instance with its own agents, nodes, and state. Wildcard subscriptions (`operating/*/event`) observe all instances.
+When an order gets approved, the platform creates a new fulfillment flow instance with its own agents, nodes, and state. Wildcard subscriptions (`fulfillment/*/event`) observe all instances.
 
 ## Platform Capabilities
 
@@ -129,7 +129,7 @@ Task mode (stateless), session mode (persistent), session-per-entity mode. Emit-
 | Expression language | N/A | Python | CEL |
 | Audit trail | Logs | Logs | Event store + entity state history |
 
-## Numbers (EmpireAI — first application)
+## Example Deployment
 
 - 7 system nodes, 62 handlers, all declarative
 - 29 agents across 4 flows + root
@@ -140,9 +140,9 @@ Task mode (stateless), session mode (persistent), session-per-entity mode. Emit-
 
 ## Target Users
 
-**Phase 1 (now):** Internal — powering EmpireAI, an autonomous AI venture studio.
+**Phase 1 (now):** Internal — powering autonomous multi-agent workflows.
 
-**Phase 2 (after first end-to-end vertical):** Open-source core orchestrator. Self-hosted via GitHub. Enterprise teams that find CrewAI/AutoGen too "magical and flaky" for production.
+**Phase 2 (after first end-to-end order):** Open-source core orchestrator. Self-hosted via GitHub. Enterprise teams that find CrewAI/AutoGen too "magical and flaky" for production.
 
 **Phase 3:** Hosted platform with visual workflow canvas (Tauri + React Flow). Flow marketplace with building-block packages. ~20-30% platform cut.
 

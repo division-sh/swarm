@@ -62,13 +62,11 @@ func RenderText(s Snapshot) string {
 	b.WriteString(fmt.Sprintf("mailbox_critical: %d\n", s.MailboxCritical))
 	b.WriteString("top_instances:\n")
 	for _, v := range s.TopInstances {
-		b.WriteString(fmt.Sprintf("- %s (%s): users=%d mrr=$%.2f spend_30d=$%.2f\n",
-			v.Name,
-			v.Stage,
-			v.UsersTotal,
-			float64(v.MRRCents)/100.0,
-			float64(v.SpendCents30d)/100.0,
-		))
+		line := fmt.Sprintf("- %s (%s)", v.Name, v.Stage)
+		if !v.UpdatedAt.IsZero() {
+			line += fmt.Sprintf(": updated=%s", v.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"))
+		}
+		b.WriteString(line + "\n")
 	}
 	return b.String()
 }

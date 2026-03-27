@@ -71,7 +71,7 @@ func (b *recordingPipelineBus) publishedEvent(i int) events.Event {
 
 func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -104,7 +104,7 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 
 func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollector(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -129,7 +129,7 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 
 func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -180,7 +180,7 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 
 func TestExecuteNodeContractHandlerRuleMatchOverridesDefaultEmit(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		bus:            bus,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -211,7 +211,7 @@ func TestExecuteNodeContractHandlerRuleMatchOverridesDefaultEmit(t *testing.T) {
 
 func TestExecuteNodeContractHandlerExecutesHandlerActionInsideEngine(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := NewFactoryPipelineCoordinatorWithOptions(bus, nil, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
 	entityID := "ent-1"

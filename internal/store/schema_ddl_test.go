@@ -24,7 +24,7 @@ func TestSchemaFieldTypeToDDL(t *testing.T) {
 		{schemaType: "uuid", wantDDL: "UUID"},
 		{schemaType: "uuid (null for non-derived)", wantDDL: "UUID"},
 		{schemaType: "integer default 0", wantDDL: "BIGINT"},
-		{schemaType: "numeric(5,2) (computed by scoring-node weighted_average)", wantDDL: "NUMERIC(5,2)"},
+		{schemaType: "numeric(5,2) (computed by node weighted_average)", wantDDL: "NUMERIC(5,2)"},
 		{schemaType: "text[]", wantDDL: "TEXT[]"},
 		{schemaType: "text[] (scanner types dispatched)", wantDDL: "TEXT[]"},
 	}

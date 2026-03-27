@@ -10,7 +10,7 @@ import (
 
 func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := NewFactoryPipelineCoordinatorWithOptions(bus, nil, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
 

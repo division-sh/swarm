@@ -108,7 +108,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		guardRegistry:  NewContractGuardRegistry(semanticview.Wrap(previewBundle)),
 		actionRegistry: NewContractActionRegistry(semanticview.Wrap(previewBundle)),
 	}
-	pc := NewFactoryPipelineCoordinatorWithOptions(previewBus{}, nil, FactoryPipelineCoordinatorOptions{Module: module})
+	pc := NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{Module: module})
 	if pc == nil {
 		return HandlerPreview{}, fmt.Errorf("preview coordinator is nil")
 	}

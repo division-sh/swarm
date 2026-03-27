@@ -2,12 +2,32 @@
 """
 Swarm Platform Specification Verifier
 Boot-time compliance checks. Reference implementation for platform boot_verification.
+Usage: python3 verify.py [contracts_dir]
+  If contracts_dir is omitted, looks for a contracts directory with package.yaml
+  adjacent to this script or in common locations.
 """
 import yaml, os, sys, re
 from collections import defaultdict
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-EC = os.path.join(BASE, 'empire', 'contracts')
+
+# Resolve contracts directory
+if len(sys.argv) > 1:
+    EC = os.path.abspath(sys.argv[1])
+else:
+    # Try common locations relative to script
+    candidates = [
+        os.path.join(BASE, 'contracts'),
+        os.path.join(BASE, 'empire', 'contracts'),  # legacy fallback
+    ]
+    EC = next((c for c in candidates if os.path.exists(os.path.join(c, 'package.yaml'))), None)
+    if EC is None:
+        print("ERROR: No contracts directory found. Pass path as argument: python3 verify.py <contracts_dir>")
+        sys.exit(1)
+
+if not os.path.exists(os.path.join(EC, 'package.yaml')):
+    print("ERROR: No package.yaml found in %s" % EC)
+    sys.exit(1)
 
 errors = []
 warnings = []
@@ -20,31 +40,36 @@ def load(path):
     with open(path) as f:
         return yaml.safe_load(f) or {}
 
-# ============================================================
-# 1. Load everything
-# ============================================================
-FLOWS = ['discovery', 'scoring', 'validation', 'operating']
+def load_if_exists(path):
+    return load(path) if os.path.exists(path) else {}
 
-root_agents = load(os.path.join(EC, 'agents.yaml'))
-root_nodes = load(os.path.join(EC, 'nodes.yaml'))
-root_events = load(os.path.join(EC, 'events.yaml'))
-root_tools = load(os.path.join(EC, 'tools.yaml'))
-root_policy = load(os.path.join(EC, 'policy.yaml'))
+# ============================================================
+# 1. Load everything — discover flows from package.yaml
+# ============================================================
+root_package = load(os.path.join(EC, 'package.yaml'))
+FLOWS = [f['flow'] for f in root_package.get('flows', []) if isinstance(f, dict) and 'flow' in f]
+
+root_agents = load_if_exists(os.path.join(EC, 'agents.yaml'))
+root_nodes = load_if_exists(os.path.join(EC, 'nodes.yaml'))
+root_events = load_if_exists(os.path.join(EC, 'events.yaml'))
+root_tools = load_if_exists(os.path.join(EC, 'tools.yaml'))
+root_policy = load_if_exists(os.path.join(EC, 'policy.yaml'))
 
 flow_data = {}
 for flow in FLOWS:
     fd = os.path.join(EC, 'flows', flow)
+    if not os.path.isdir(fd):
+        warn("FLOW-MISSING", "Flow '%s' declared in package.yaml but directory not found: %s" % (flow, fd))
+        continue
     flow_data[flow] = {
-        'agents': load(os.path.join(fd, 'agents.yaml')),
-        'nodes': load(os.path.join(fd, 'nodes.yaml')),
-        'events': load(os.path.join(fd, 'events.yaml')),
-        'schema': load(os.path.join(fd, 'schema.yaml')),
-        'package': load(os.path.join(fd, 'package.yaml')),
+        'agents': load_if_exists(os.path.join(fd, 'agents.yaml')),
+        'nodes': load_if_exists(os.path.join(fd, 'nodes.yaml')),
+        'events': load_if_exists(os.path.join(fd, 'events.yaml')),
+        'schema': load_if_exists(os.path.join(fd, 'schema.yaml')),
+        'package': load_if_exists(os.path.join(fd, 'package.yaml')),
+        'tools': load_if_exists(os.path.join(fd, 'tools.yaml')),
+        'policy': load_if_exists(os.path.join(fd, 'policy.yaml')),
     }
-    tp = os.path.join(fd, 'tools.yaml')
-    flow_data[flow]['tools'] = load(tp) if os.path.exists(tp) else {}
-    pp = os.path.join(fd, 'policy.yaml')
-    flow_data[flow]['policy'] = load(pp) if os.path.exists(pp) else {}
 
 # Merge all
 all_agents, all_nodes, all_events, all_tools, all_policy = {}, {}, {}, {}, {}
@@ -54,6 +79,7 @@ all_events.update(root_events)
 all_tools.update(root_tools)
 all_policy.update(root_policy)
 for flow in FLOWS:
+    if flow not in flow_data: continue
     all_agents.update(flow_data[flow]['agents'])
     all_nodes.update(flow_data[flow]['nodes'])
     all_events.update(flow_data[flow]['events'])
@@ -163,7 +189,7 @@ for ev in events_emitted:
 
 # Events emitted without consumer (suppressed if external/mailbox/planned)
 for ev in events_emitted:
-    if ev and ev in events_defined and ev not in events_subscribed and not ev.startswith('pipeline.'):
+    if ev and ev in events_defined and ev not in events_subscribed and not ev.startswith('platform.'):
         if not is_suppressed(ev):
             warn("EVENT-NO-CONSUMER", "'%s' emitted but nobody subscribes" % ev)
 
@@ -665,7 +691,7 @@ for flow in ['root'] + FLOWS:
 # Report
 # ============================================================
 print("=" * 70)
-print("MAS PLATFORM VERIFICATION REPORT")
+print("SWARM PLATFORM VERIFICATION REPORT")
 print("=" * 70)
 
 print("\nERRORS: %d" % len(errors))
@@ -683,7 +709,7 @@ t = sum(1 for v in all_tools.values() if isinstance(v, dict))
 
 # Deferred prompts
 deferred = 0
-for root, dirs, files in os.walk(os.path.join(BASE, 'empire', 'contracts')):
+for root, dirs, files in os.walk(EC):
     for f in files:
         if f.endswith('.md') and 'prompts' in root:
             with open(os.path.join(root, f)) as fh:

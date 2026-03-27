@@ -39,7 +39,7 @@ vocabulary:
     types:
       system_node:
         description: 'Deterministic code. No LLM. Subscribes to events, executes fixed logic, emits events. Owns workflow
-          transitions. Examples: scoring-node, validation-orchestrator.
+          transitions. Examples: order-orchestrator, ticket-router.
 
           '
         execution: deterministic
@@ -68,7 +68,7 @@ vocabulary:
     - events.yaml
     - schema.yaml
   state:
-    description: 'A named state in a workflow. An entity (e.g. a vertical, a ticket, a document) is always in exactly one
+    description: 'A named state in a workflow. An entity (e.g. a ticket, an order, a document) is always in exactly one
       state. States belong to phases for grouping. Some states are terminal (no outgoing transitions).
 
       '
@@ -81,13 +81,13 @@ contract_formats:
   description: Canonical format for all flow contract files.
   loader_defaults:
     description: Fields that are optional in contract YAML because the loader derives them from context.
-    schema_name: Optional. If omitted, derived from the directory name of the flow package. A flow at flows/scoring/ gets
-      name "scoring" automatically.
-    schema_namespace: Optional. If omitted, derived from the flow path relative to root. A flow at flows/scoring/ gets namespace
-      "scoring". Root flow gets empty namespace.
+    schema_name: Optional. If omitted, derived from the directory name of the flow package. A flow at flows/intake/ gets
+      name "intake" automatically.
+    schema_namespace: Optional. If omitted, derived from the flow path relative to root. A flow at flows/intake/ gets namespace
+      "intake". Root flow gets empty namespace.
     agent_id: 'Optional. If omitted, the YAML map key IS the agent ID. agents.yaml uses map keys as canonical identifiers:
-      {"opco-ceo": {model_tier: sonnet, ...}} means agent_id = "opco-ceo". Explicit id field overrides the map key if present,
-      but this is discouraged.'
+      {"classifier-agent": {model_tier: sonnet, ...}} means agent_id = "classifier-agent". Explicit id field overrides the
+      map key if present, but this is discouraged.'
     agent_emit_events: Optional. If omitted, defaults to empty list []. An agent that only observes (subscribes but never
       emits) may omit emit_events entirely.
   file_layout:
@@ -123,12 +123,12 @@ contract_formats:
     description: entity_schema in package.yaml declares the persistent fields for entities managed by this flow. The platform
       derives database DDL from this schema at boot.
     format:
-      groups: Schema is organized into named groups (e.g., discovery_phase, scoring_phase).
+      groups: Schema is organized into named groups (e.g., intake_phase, processing_phase).
       fields: 'Each field is declared as: field_name: type_description'
       types: text, integer, numeric(precision,scale), boolean, jsonb, timestamp, uuid
       annotations: Parenthetical notes after the type are human-readable, not machine-parsed.
-    example: "entity_schema:\n  identity:\n    vertical_id: uuid (primary key)\n    name: text\n  scoring_phase:\n    composite_score:\
-      \ numeric(5,2)\n    discovery_mode: text"
+    example: "entity_schema:\n  identity:\n    order_id: uuid (primary key)\n    name: text\n  processing_phase:\n    total_amount:\
+      \ numeric(10,2)\n    order_type: text"
   event_schema:
     description: Each workflow defines event payload schemas in events.yaml. Events are keyed by event name. Each entry contains
       a payload object mapping field names to types (string, integer, object, array, boolean). The platform uses these schemas
@@ -417,15 +417,15 @@ handler_specification:
         entity state, incoming event payload, and computed values.
       sub_fields:
         fields: map of output_field_name → source expression (CEL)
-      example: "payload_transform:\n  fields:\n    vertical_id: payload.vertical_id\n    brand_choice: entity.brand\n    mandate:\
-        \ entity.mvp_spec\n    founder_directives: payload.notes"
+      example: "payload_transform:\n  fields:\n    order_id: payload.order_id\n    customer_name: entity.name\n    total:\
+        \ entity.total_amount\n    notes: payload.notes"
     clear_gates:
       field: clear_gates
       type: boolean
       purpose: Reset all entity gates to false. Used before re-entering a validation cycle.
       scope: 'Clears all gates on the ENTITY, not scoped to flow schema or node. An entity has one flat gate map. clear_gates:
         true resets every key in that map to false. Rationale: gates are entity-level state. A flow that resets an entity
-        to an earlier phase (e.g., vertical.needs_more_data returning to researching) must clear all gates, not just the ones
+        to an earlier phase (e.g., review.rejected returning to draft) must clear all gates, not just the ones
         its node declared.'
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
     evidence_target:
@@ -499,8 +499,8 @@ handler_specification:
       supplements rule-level writes, does not replace them. Both write to the entity in the same atomic transaction. 3. Handler-level
       emits executes AFTER rules — rule-level emits AND handler-level emits BOTH fire. Handler-level emits are unconditional;
       rule-level emits are conditional on the matched rule.
-    example: 'vertical.discovered has handler-level data_accumulation (6 fields) + rules with per-rule data_accumulation (scoring_rubric).
-      Result: all 6 handler-level fields are written, PLUS the matching rule writes scoring_rubric. Handler-level emits (scoring.requested)
+    example: 'order.received has handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
+      Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Handler-level emits (order.processing_requested)
       fires regardless of which rule matched.'
     precedence: Handler-level advances_to, sets_gate, data_accumulation, and emits are defaults. If the matched rule specifies
       any of these, the rule value OVERRIDES the handler-level value for that field only. Fields not specified in the rule
@@ -545,17 +545,17 @@ engine:
         format: '{name}'
         meaning: Entity in the current flow instance.
         examples:
-        - scoring.requested
-        - analysis-agent
-        - scoring-node
+        - order.processing_requested
+        - classifier-agent
+        - ticket-router
       absolute:
         format: '{flow_id}/{flow_id}/.../{name}'
         meaning: Entity in a specific flow instance. Path navigates from root.
         examples:
-        - scoring/entity.shortlisted — scoring flow's event
-        - validation/research/research.completed — nested sub-flow event
-        - operating/opco-ceo — agent in operating flow
-        - portfolio-node — root flow's node (no slash = root-local)
+        - intake/order.ready — intake flow's event
+        - processing/review/review.completed — nested sub-flow event
+        - fulfillment/shipper-agent — agent in fulfillment flow
+        - dashboard-node — root flow's node (no slash = root-local)
     resolution: Slash presence determines scope. No slash = local to current flow. Slash present = absolute path from root.
       Local names never contain slashes. The platform resolves all references to full internal paths at boot.
     type_inference: 'No type suffix needed. The context determines the type: subscriptions and emit_events contain events.
@@ -565,13 +565,13 @@ engine:
       description: 'For cross-root references (future — multiple root flows on one platform), full URI format is available:
         {root}://{path}/{name}. Within a single root flow, absolute paths are sufficient.'
       format: '{root}://{path}/{name}'
-      example: empire://scoring/entity.shortlisted
+      example: myapp://intake/order.ready
       when: Only needed when multiple root flows run on the same platform instance.
     wildcards:
       description: Pattern matching for subscriptions across flow instances.
       patterns:
-        '*/entity.shortlisted': Any direct child flow's entity.shortlisted event
-        '**/entity.completed': Any flow at any depth
+        '*/order.completed': Any direct child flow's order.completed event
+        '**/item.processed': Any flow at any depth
   contract_merger:
     description: After the flow tree walker collects all flows, the merger builds the runtime registry. Every node, agent,
       and event gets a full URI. No global merge — everything is scoped by flow instance.
@@ -583,8 +583,8 @@ engine:
     - '5. For each tool in flow''s tools.yaml: register as shared (tools are not URI-scoped)'
     - '6. For each policy key in flow''s policy.yaml: register scoped to flow instance'
     - 7. Root flow's tools and policy are inherited by all children unless overridden.
-    no_conflicts: URI scoping eliminates all conflicts. Two flows with a node called "orchestrator" become empire://discovery/orchestrator
-      and empire://validation/orchestrator. No merge logic needed. No collision possible.
+    no_conflicts: URI scoping eliminates all conflicts. Two flows with a node called "orchestrator" become myapp://intake/orchestrator
+      and myapp://processing/orchestrator. No merge logic needed. No collision possible.
     subscription_resolution: After all URIs are constructed, resolve agent subscriptions. Local subscriptions (no :// prefix)
       resolve within the same flow instance. Full URI subscriptions resolve globally. Wildcard subscriptions expand to matching
       URIs.
@@ -814,8 +814,8 @@ engine:
     terminal_state_behavior:
       description: When an entity reaches a terminal state (from schema.yaml terminal_states), all state is preserved. Entity
         state, accumulator state, gate state, and event history remain queryable indefinitely.
-      no_cleanup: The platform does NOT clear entity data on terminal state. Killed verticals retain all scores, signals,
-        research briefs, and decision history for post-mortem analysis and pattern learning.
+      no_cleanup: The platform does NOT clear entity data on terminal state. Terminated entities retain all accumulated data
+        and decision history for post-mortem analysis.
       behavior:
       - Entity stops accepting new events (handlers reject events for terminal entities)
       - Timers are cancelled
@@ -831,8 +831,8 @@ engine:
       no_reopen_mechanism: There is no opt-in mechanism to reopen a terminal entity. If a business process needs to "reopen"
         a killed/closed entity, the correct pattern is to create a NEW entity (new entity_id) with data copied from the old
         one. The old entity remains terminal. This preserves audit trail integrity.
-      backward_transitions: Backward transitions (e.g., cto_review → mvp_speccing) are allowed for NON-terminal states. The
-        prohibition is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-researching,
+      backward_transitions: Backward transitions (e.g., review → draft) are allowed for NON-terminal states. The prohibition
+        is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-earlier-state,
         and similar patterns are valid.
     entity_field_resolution:
       description: 'In CEL expressions, entity.X resolves against a unified namespace that includes: entity_state.fields (from
@@ -927,10 +927,10 @@ engine:
       fields:
         id: Unique timer name
         event: Event name to fire when timer expires (e.g., timer.scan_timeout)
-        delay: Duration string (e.g., 72h, 30m, 7d) or policy reference (e.g., policy.validation_gate_timeout)
+        delay: Duration string (e.g., 72h, 30m, 7d) or policy reference (e.g., policy.sla_timeout)
         recurring: Boolean — if true, timer re-fires at the interval until cancelled
-        start_on: State or event that starts the timer (e.g., state:mvp_speccing or event:validation.started)
-        cancel_on: State or event that cancels the timer (e.g., state:ready_for_review or event:spec.approved)
+        start_on: State or event that starts the timer (e.g., state:assigned or event:ticket.opened)
+        cancel_on: State or event that cancels the timer (e.g., state:resolved or event:ticket.closed)
     lifecycle:
     - 1. Timer starts when the entity enters the start_on state or the start_on event fires.
     - 2. Platform persists the timer (entity_id, timer_id, fire_at timestamp).
@@ -939,9 +939,9 @@ engine:
     - 5. If cancel_on state is reached or cancel_on event fires before fire_at, timer is cancelled.
     - 6. Recurring timers restart after firing unless cancelled.
     crash_recovery: Timers are persisted. On restart, platform checks for expired timers and fires them.
-    example: "timers:\n  - id: validation_gate_timeout\n    event: timer.validation_timeout\n    delay: \"{{validation_gate_timeout_hours}}h\"\
-      \n    start_on: state:researching\n    cancel_on: state:ready_for_review\n    recurring: false\n  - id: portfolio_digest\n\
-      \    event: timer.portfolio_digest\n    delay: \"{{digest_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
+    example: "timers:\n  - id: sla_timeout\n    event: timer.sla_breach\n    delay: \"{{sla_timeout_hours}}h\"\
+      \n    start_on: state:assigned\n    cancel_on: state:resolved\n    recurring: false\n  - id: daily_report\n\
+      \    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
   expression_language:
     description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
@@ -961,13 +961,13 @@ engine:
     - 'String: startsWith, endsWith, matches'
     - 'List: size, exists, all, filter, map'
     examples:
-    - entity.generation_depth <= policy.max_derivation_depth
-    - payload.mode == "saas_gap"
-    - entity.scores.icp_crispness >= policy.min_icp_score
-    - entity.red_flag_count == 0
+    - entity.retry_count <= policy.max_retries
+    - payload.category == "billing"
+    - entity.priority_score >= policy.min_priority
+    - entity.error_count == 0
     - payload.decision == "approve"
-    - entity.revision_count < policy.inner_revision_max
-    - entity.composite_score >= policy.composite_shortlist
+    - entity.revision_count < policy.max_revisions
+    - entity.total_amount >= policy.approval_threshold
   error_model:
     description: How the platform handles failures at each layer.
     event_validation_failure:
@@ -1081,7 +1081,7 @@ compliance:
     - Events validated against payload schema before publish
     - Accumulation is idempotent — duplicate events do not double-count
     - Permission checks read from agent.permissions, not hardcoded policy functions
-    - Scan mode behavior read from policy.scan_modes, not hardcoded
+    - Product behavior read from policy configuration, not hardcoded
     - Manager fallback read from agent.manager_fallback, not hardcoded role mapping
     - Workspace class read from agent.workspace_class, not hardcoded
   testing:
@@ -1189,7 +1189,7 @@ permissions_model:
         agent sessions route to and defines the management hierarchy. It does NOT grant the fallback target messaging access
         to the agent, and it does NOT allow messaging across flow boundaries even when the fallback target is in a different
         flow.
-      cross_flow_fallback: When manager_fallback references an agent in a parent flow (e.g., an operating agent falls back to
+      cross_flow_fallback: When manager_fallback references an agent in a parent flow (e.g., a child flow agent falls back to
         a root-level coordinator), escalation produces an event (platform.dead_letter or equivalent), not a direct message.
         The platform routes the escalation event through the normal event loop.
 tool_model:
@@ -1337,24 +1337,53 @@ tool_model:
       \ \"{{response.body.status[0].summary}}\"\n  credentials:\n    - domainr_api_key"
   credential_store:
     description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
-      platform provides a typed interface — the storage backend is deployment-specific.
+      platform provides a typed interface with a layered resolution model.
     interface:
-      get: Retrieve a credential value by key.
-      set: Store a credential value by key. Encrypted at rest.
-      list: List credential keys (not values). For UI display and boot validation.
-      delete: Remove a credential by key.
+      get: Retrieve a credential value by key. Runtime-only — never exposed via builder API.
+      set: Store a credential value by key to the writable store layer.
+      list: List credential keys with metadata (source, writable, present, updated_at). Never returns values.
+      delete: Remove a credential by key from the writable store layer. Cannot delete env-sourced credentials.
+    resolution_model:
+      description: Credentials are resolved through a two-tier overlay. Environment variables take precedence over the local
+        file store. Writes go to the file store only. This gives deterministic resolution across deployment modes.
+      tiers:
+      - tier: env
+        description: Environment variables. Read-only. Highest precedence. Used for CI, Docker, and production deployments.
+          Credential key "sendgrid_api_key" resolves to env var SWARM_CRED_SENDGRID_API_KEY (uppercased, prefixed with SWARM_CRED_).
+        writable: false
+        precedence: 1 (highest)
+      - tier: file
+        description: Local file store. Writable. Used for local development and builder-managed credentials. Stored at
+          ~/.config/swarm/credentials.json with mode 0600. Atomic writes. Per-entry updated_at timestamp.
+        writable: true
+        precedence: 2
+      resolution_rule: On get, check env tier first. If present, return env value. Otherwise, check file tier. If present,
+        return file value. Otherwise, credential is missing.
+      list_rule: List returns merged keys from both tiers. Each entry includes the source tier (env or file) and whether
+        it is writable (env = false, file = true). If a key exists in both tiers, source shows "env" (effective source).
+    metadata:
+      description: The list interface returns metadata about each credential, never the value itself. This is what the builder
+        displays.
+      fields:
+        key: string — credential key name
+        source: string — env | file (which tier the effective value comes from)
+        writable: boolean — true if the credential can be modified (false for env-sourced)
+        present: boolean — true if the credential has a value in any tier
+        updated_at: string — ISO 8601 timestamp of last write (file-sourced only, null for env)
     storage_backends:
-      local_dev: Encrypted file in the platform data directory.
-      docker: Environment variables or Docker secrets mounted into the container.
-      production: External secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager). Platform reads via the configured
-        backend.
+      local_dev: JSON file at ~/.config/swarm/credentials.json, mode 0600, atomic writes. Plaintext for simplicity — encryption
+        is a future enhancement. File contains a map of key → value with per-entry updated_at.
+      docker: Environment variables (env tier). File store optionally mounted as a volume for builder access.
+      production: Environment variables for secrets, or external secrets manager (Vault, AWS Secrets Manager) via a custom
+        store tier implementation. The overlay model supports additional tiers — the platform resolves top-down.
     contract_reference: Tools and MCP servers reference credentials by key name, never by value. The key name appears in
       tools.yaml (credentials field) and policy.yaml (mcp_servers.*.credentials_key). The platform resolves the key to the
       secret value at call time only.
     boot_validation: At boot, the platform checks that every credential key referenced by tools and MCP servers exists in the
-      credential store. Missing keys log a warning — the tool may be unconfigured in this deployment.
+      credential store (any tier). Missing keys log a warning — the tool may be unconfigured in this deployment.
     platform_guarantee: The platform never logs, indexes, or persists credential values in the event store, dead letters, or
-      any platform table. Credentials exist only in the credential store and in-flight tool requests.
+      any platform table. Credentials exist only in the credential store and in-flight tool requests. The builder API never
+      returns credential values after write — only metadata.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.
@@ -1387,13 +1416,13 @@ prompt_templating:
     resolution_order:
     - source: instance_variables (schema.yaml)
       description: Variables declared in the flow schema. Populated at flow instance creation via config_from.
-      example: vertical_name, mandate_document, geography
+      example: customer_name, order_type, region
     - source: policy (policy.yaml)
       description: Policy values from flow and root policy files.
-      example: monthly_api_cap, growth_budget, max_escalations
+      example: max_retries, sla_hours, approval_threshold
     - source: entity_state fields
       description: Entity fields written by data_accumulation. Available at render time from entity context.
-      example: composite_score, business_brief
+      example: total_amount, resolution_summary
     - source: runtime tokens
       description: Platform-injected tokens not declared in contracts. Hardcoded allowlist.
       example: current_date, agent_id, flow_instance_path
@@ -1426,15 +1455,15 @@ flow_model:
       package.yaml and repeat from step 1. 5. Stop when a flow has no flows: list or the directory doesn''t exist.'
     root_flow: The root flow is the entry point. It has flow-level agents, nodes, events, policy. It declares the top-level
       child flows. It is structurally identical to any other flow.
-    example: "\nproduct/                          # root flow\n  package.yaml                   # name: product, flows: [discovery,\
-      \ scoring, ...]\n  nodes.yaml                     # portfolio-node\n  events.yaml                    # cross-flow events\
-      \  \n  agents.yaml                    # 3 root-level agents\n  schema.yaml                   # root flow pins\n  flows/\n\
-      \    discovery/                   # child flow\n      package.yaml               # name: discovery, flows: [] (leaf)\n\
-      \      nodes.yaml\n      events.yaml\n      schema.yaml\n      agents.yaml\n      prompts/\n    validation/        \
-      \          # child flow with sub-flows\n      package.yaml               # name: validation, flows: [research, speccing,\
-      \ ...]\n      nodes.yaml                 # gate orchestrator\n      schema.yaml\n      flows/\n        research/   \
-      \             # grandchild flow\n          package.yaml\n          nodes.yaml\n          agents.yaml\n          prompts/\n\
-      \        speccing/\n          ...\n"
+    example: "\nmy-project/                       # root flow\n  package.yaml                   # name: my-project, flows: [intake,\
+      \ processing, ...]\n  nodes.yaml                     # dashboard-node\n  events.yaml                    # cross-flow events\
+      \  \n  agents.yaml                    # root-level agents\n  schema.yaml                   # root flow pins\n  flows/\n\
+      \    intake/                      # child flow\n      package.yaml               # name: intake, flows: [] (leaf)\n\
+      \      nodes.yaml\n      events.yaml\n      schema.yaml\n      agents.yaml\n      prompts/\n    processing/        \
+      \          # child flow with sub-flows\n      package.yaml               # name: processing, flows: [review, fulfillment,\
+      \ ...]\n      nodes.yaml                 # gate orchestrator\n      schema.yaml\n      flows/\n        review/   \
+      \                # grandchild flow\n          package.yaml\n          nodes.yaml\n          agents.yaml\n          prompts/\n\
+      \        fulfillment/\n          ...\n"
   pins:
     description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
     input_event_pins:
@@ -1477,8 +1506,8 @@ flow_model:
     enforcement: At boot, if the same event name appears in multiple flow event files, the platform logs a warning. The emitter
       flow's definition is authoritative.
   stateless_flows:
-    description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. Discovery is
-      an example: it scans, filters, and emits verticals without maintaining per-entity state.'
+    description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
+      flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'
     schema_for_stateless: 'A stateless flow still has schema.yaml but may set initial_state: null and states: []. Events pass
       through system nodes which accumulate, filter, and emit — but no entity state machine is maintained. The accumulator
       state is flow-scoped, not entity-scoped.'
@@ -1491,13 +1520,13 @@ flow_model:
     description: How flow-level state machines compose into the entity lifecycle.
     per_flow_states: Each flow defines its own state space. An entity in the scoring flow has scoring states. The same entity
       in the validation flow has validation states. These are SEPARATE state machines — not one unified enum.
-    cross_flow_transitions: 'When an entity moves from one flow to another (scoring → validation), the transition is: 1. Scoring
-      flow handler emits a cross-flow event (e.g., vertical.shortlisted). 2. Validation flow node handles it, advances entity
-      to validation initial state (researching). 3. The entity now has a validation flow state. Its scoring flow state is
-      terminal (shortlisted). There is no "global state" — each flow tracks its own state for the entity.'
-    killed_across_flows: killed is a terminal state in every flow. When validation kills an entity, it emits vertical.killed
-      + vertical.killed_backprop. The scoring flow handles killed_backprop and advances the entity to killed in the scoring
-      state machine too.
+    cross_flow_transitions: 'When an entity moves from one flow to another (intake → processing), the transition is: 1. Intake
+      flow handler emits a cross-flow event (e.g., order.ready). 2. Processing flow node handles it, advances entity to
+      processing initial state (queued). 3. The entity now has a processing flow state. Its intake flow state is terminal
+      (dispatched). There is no "global state" — each flow tracks its own state for the entity.'
+    killed_across_flows: killed is a terminal state in every flow. When a downstream flow kills an entity, it emits entity.killed
+      + entity.killed_backprop. Upstream flows handle killed_backprop and advance the entity to killed in their state machines
+      too.
 versioning:
   description: Platform and products version independently.
   platform_versioning:
@@ -1561,7 +1590,7 @@ platform_tables:
     entity_state:
       description: Current state of every entity. This IS the entity registry — no separate registry table. slug and name
         are top-level columns for fast lookup/display without JSONB queries. entity_type distinguishes entity kinds within
-        a flow (e.g., vertical, opco, ticket). fields JSONB holds all contract-driven entity fields. Generic store reads use
+        a flow (e.g., order, ticket, customer). fields JSONB holds all contract-driven entity fields. Generic store reads use
         entity_state for listing, filtering, and lookup.
       ddl: "CREATE TABLE entity_state (\n    entity_id         UUID PRIMARY KEY,\n    flow_instance     TEXT NOT NULL,\n \
         \   entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n    name              TEXT,\n\
@@ -1763,7 +1792,7 @@ platform_tables:
     generic_store_tests: Generic store tests (postgres_smoke_test.go, etc.) bootstrap using platform_tables only. They create
       entities in entity_state, events in events, sessions in agent_sessions. No product contracts needed. No legacy SQL files.
       No migrations/ directory.
-    product_integration_tests: Tests that need Empire-specific entity tables load Empire contracts and generate DDL from entity_schema.
+    product_integration_tests: Tests that need product-specific entity tables load product contracts and generate DDL from entity_schema.
       These tests are product tests, not platform tests.
     bootstrap_function: BootstrapPlatformTables(spec PlatformSpec) — reads platform_tables.tables, generates DDL, executes.
       Called by both production boot and test setup. Single code path.

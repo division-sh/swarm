@@ -28,7 +28,7 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {

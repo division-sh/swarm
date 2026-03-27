@@ -440,7 +440,7 @@ func TestCatalogRunner_ValidatesCurrentCatalogPackages(t *testing.T) {
 	for _, dir := range discoveredCatalogCaseDirs(t) {
 		dir := dir
 		t.Run(dir, func(t *testing.T) {
-			root := filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir))
+			root := filepath.Join(repoRootForTest(t), "tests", filepath.FromSlash(dir))
 			var expected catalogExpectedDocument
 			loadExpectedYAMLForCatalogTest(t, filepath.Join(root, "expected.yaml"), &expected)
 			if err := validateCatalogExpectedDocument(dir, expected); err != nil {
@@ -454,7 +454,7 @@ func TestCatalogRunner_IdentifiesSimpleHarnessEligiblePackages(t *testing.T) {
 	eligible := 0
 	for _, dir := range discoveredCatalogCaseDirs(t) {
 		var expected catalogExpectedDocument
-		root := filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir))
+		root := filepath.Join(repoRootForTest(t), "tests", filepath.FromSlash(dir))
 		loadExpectedYAMLForCatalogTest(t, filepath.Join(root, "expected.yaml"), &expected)
 		if !catalogCaseSimpleHarnessEligible(expected) {
 			continue
@@ -468,7 +468,7 @@ func TestCatalogRunner_IdentifiesSimpleHarnessEligiblePackages(t *testing.T) {
 
 func discoveredCatalogCaseDirs(t testing.TB) []string {
 	t.Helper()
-	root := filepath.Join(repoRootFromMASTest(t), "tests")
+	root := filepath.Join(repoRootForTest(t), "tests")
 	dirs := make([]string, 0, 128)
 	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -3342,7 +3342,7 @@ func loadExpectedYAMLForCatalogTest(t testing.TB, path string, target any) {
 	}
 }
 
-func repoRootFromMASTest(t testing.TB) string {
+func repoRootForTest(t testing.TB) string {
 	t.Helper()
 	wd, err := os.Getwd()
 	if err != nil {

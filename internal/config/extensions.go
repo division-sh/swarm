@@ -12,11 +12,10 @@ type ExtensionsConfig struct {
 }
 
 type BudgetConfig struct {
-	GlobalMonthlyCap      int              `yaml:"global_monthly_cap"`
-	PerEntityMonthlyCap   int              `yaml:"per_entity_monthly_cap"`
-	SystemMonthlyCap      int              `yaml:"system_monthly_cap"`
-	AutoApproveSpendBelow int              `yaml:"auto_approve_spend_below"`
-	HumanTasks            HumanTasksConfig `yaml:"human_tasks"`
+	GlobalMonthlyCap    int              `yaml:"global_monthly_cap"`
+	PerEntityMonthlyCap int              `yaml:"per_entity_monthly_cap"`
+	SystemMonthlyCap    int              `yaml:"system_monthly_cap"`
+	HumanTasks          HumanTasksConfig `yaml:"human_tasks"`
 }
 
 type HumanTasksConfig struct {

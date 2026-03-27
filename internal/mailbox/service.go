@@ -149,15 +149,11 @@ func NormalizeDecisionAction(action string) (DecisionOutcome, error) {
 	a := strings.ToLower(strings.TrimSpace(action))
 	a = strings.ReplaceAll(a, "_", "-")
 	switch a {
-	case "approve", "approved", "approve-spend", "respond":
+	case "approve", "approved":
 		return DecisionOutcome{Status: "approved", Decision: "approve"}, nil
-	case "reject", "rejected", "reject-spend":
+	case "reject", "rejected":
 		return DecisionOutcome{Status: "rejected", Decision: "reject"}, nil
-	case "kill":
-		return DecisionOutcome{Status: "rejected", Decision: "kill"}, nil
-	case "revise":
-		return DecisionOutcome{Status: "rejected", Decision: "revise"}, nil
-	case "more-data", "defer":
+	case "more-data", "defer", "deferred":
 		return DecisionOutcome{Status: "more_data", Decision: "more_data"}, nil
 	case "skip", "timed-out", "timeout":
 		return DecisionOutcome{Status: "timed_out", Decision: "timed_out"}, nil

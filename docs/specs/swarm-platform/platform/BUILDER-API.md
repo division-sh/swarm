@@ -1,4 +1,4 @@
-# MAS Builder API Reference
+# Swarm Builder API Reference
 
 **Version:** 0.1.0
 **Status:** Draft — existing methods documented from source, proposed methods marked [PROPOSED]
@@ -308,13 +308,13 @@ Get entity state, gates, and accumulator data.
 ```json
 {
   "entity": {
-    "state": "shortlisted",
-    "composite_score": 82.5,
+    "state": "assigned",
+    "priority_score": 82.5,
     "...": "..."
   },
   "gates": {
-    "g1_research": true,
-    "g2_spec": false
+    "g_reviewed": true,
+    "g_approved": false
   },
   "accumulated": {
     "dimensions_received": { "...": "..." }
@@ -341,7 +341,7 @@ Query events for an entity or flow instance.
   "events": [
     {
       "event_id": "...",
-      "event_name": "vertical.discovered",
+      "event_name": "order.created",
       "entity_id": "...",
       "flow_instance": "...",
       "payload": { "..." },
@@ -424,14 +424,14 @@ Query dead-lettered events.
   "dead_letters": [
     {
       "dead_letter_id": "...",
-      "original_event": "score.dimension_complete",
+      "original_event": "review.completed",
       "original_payload": { "..." },
       "entity_id": "...",
-      "flow_instance": "scoring",
+      "flow_instance": "processing",
       "failure_type": "retry_exhausted",
       "error_message": "...",
       "retry_count": 3,
-      "handler_node": "scoring-node",
+      "handler_node": "ticket-router",
       "created_at": "2026-03-26T..."
     }
   ]
@@ -455,9 +455,9 @@ List active timers.
   "timers": [
     {
       "timer_id": "...",
-      "timer_name": "validation_gate_timeout",
+      "timer_name": "sla_timeout",
       "entity_id": "...",
-      "fire_event": "timer.validation_timeout",
+      "fire_event": "timer.sla_breach",
       "fire_at": "2026-03-27T...",
       "recurring": false,
       "status": "active"
@@ -483,10 +483,10 @@ Query materialized routing rules.
   "rules": [
     {
       "rule_id": "...",
-      "event_pattern": "vertical.discovered",
+      "event_pattern": "order.created",
       "subscriber_type": "node",
-      "subscriber_id": "scoring-node",
-      "flow_instance": "scoring",
+      "subscriber_id": "ticket-router",
+      "flow_instance": "processing",
       "is_wildcard": false,
       "status": "active"
     }
@@ -512,8 +512,8 @@ Query pending mailbox items.
     {
       "item_id": "...",
       "entity_id": "...",
-      "item_type": "vertical_approval",
-      "from_agent": "validation-coordinator",
+      "item_type": "order_approval",
+      "from_agent": "review-coordinator",
       "severity": "normal",
       "summary": "Vertical X ready for review",
       "payload": { "..." },
@@ -538,8 +538,8 @@ List all loaded flows with hierarchy.
 {
   "flows": [
     {
-      "flow_id": "discovery",
-      "path": "flows/discovery",
+      "flow_id": "intake",
+      "path": "flows/intake",
       "mode": "static",
       "parent": null,
       "initial_state": null,
@@ -566,7 +566,7 @@ Get a system node's full declaration.
 **Returns:**
 ```json
 {
-  "id": "scoring-node",
+  "id": "ticket-router",
   "execution_type": "system_node",
   "subscribes_to": ["..."],
   "produces": ["..."],
@@ -619,17 +619,121 @@ List event schemas for a flow (or all).
 {
   "events": [
     {
-      "event_name": "vertical.discovered",
-      "flow": "discovery",
+      "event_name": "order.created",
+      "flow": "intake",
       "payload": {
-        "vertical_name": "string",
-        "geography": "string",
+        "customer_name": "string",
+        "region": "string",
         "...": "..."
       }
     }
   ]
 }
 ```
+
+---
+
+### Credential Management
+
+Credentials are write-only in the builder. The API never returns secret values after write — only metadata.
+
+#### `credentials.list`
+
+List all credential keys with metadata.
+
+**Params:** none
+**Returns:**
+```json
+{
+  "credentials": [
+    {
+      "key": "sendgrid_api_key",
+      "source": "file",
+      "writable": true,
+      "present": true,
+      "updated_at": "2026-03-27T14:30:00Z"
+    },
+    {
+      "key": "meta_graph_token",
+      "source": "env",
+      "writable": false,
+      "present": true,
+      "updated_at": null
+    },
+    {
+      "key": "whois_api_key",
+      "source": null,
+      "writable": true,
+      "present": false,
+      "updated_at": null
+    }
+  ],
+  "required_by": {
+    "sendgrid_api_key": ["email_api"],
+    "meta_graph_token": ["instagram_handle_check", "whatsapp_name_check", "instagram_api"],
+    "whois_api_key": ["domain_availability_check"]
+  }
+}
+```
+
+`required_by` maps each credential key to the tools and MCP servers that reference it. Derived from tools.yaml `credentials` fields and policy.yaml `mcp_servers.*.credentials_key`.
+
+#### `credentials.set`
+
+Store a credential value. Writes to the file store only. Cannot overwrite env-sourced credentials (use env vars directly).
+
+**Params:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `key` | string | yes | Credential key name |
+| `value` | string | yes | Secret value (transmitted once, never returned) |
+
+**Returns:**
+```json
+{
+  "key": "sendgrid_api_key",
+  "source": "file",
+  "writable": true,
+  "present": true,
+  "updated_at": "2026-03-27T14:35:00Z"
+}
+```
+
+**Error:** If the key exists in the env tier, returns error: "Credential 'sendgrid_api_key' is sourced from environment variable. Update the env var directly."
+
+#### `credentials.delete`
+
+Remove a credential from the file store. Cannot delete env-sourced credentials.
+
+**Params:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `key` | string | yes | Credential key to delete |
+
+**Returns:** `{key, deleted: true}`
+
+**Error:** If the key exists only in the env tier: "Cannot delete env-sourced credential."
+
+#### [PROPOSED] `credentials.test`
+
+Test a credential by attempting a lightweight operation with the tool or MCP server that uses it.
+
+**Params:**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `key` | string | yes | Credential key to test |
+
+**Returns:**
+```json
+{
+  "key": "sendgrid_api_key",
+  "status": "ok",
+  "tested_via": "email_api",
+  "latency_ms": 230
+}
+```
+
+**Behavior:** For MCP server credentials, calls `tools/list` on the server. For HTTP tool credentials, makes a HEAD or GET request to the tool's URL. Returns status and latency.
 
 ---
 
@@ -649,9 +753,9 @@ Run full contract validation (same checks as boot).
     {
       "check_id": "gate_info",
       "severity": "warning",
-      "message": "sets_gate 'g1_research' but no guard reads entity.gates.g1_research",
-      "flow_path": "validation",
-      "node_id": "validation-orchestrator",
+      "message": "sets_gate 'g_reviewed' but no guard reads entity.gates.g_reviewed",
+      "flow_path": "processing",
+      "node_id": "order-orchestrator",
       "suggestion": "Add a guard checking this gate, or remove the sets_gate"
     }
   ],
@@ -746,7 +850,7 @@ Cancel an active timer.
   "project": {
     "project_dir": "/path/to/contracts",
     "loaded": true,
-    "workflow_name": "empire",
+    "workflow_name": "my-project",
     "workflow_version": "4.2.0"
   }
 }
@@ -799,7 +903,7 @@ Every run event has:
   "id": "uuid",
   "type": "event.fired",
   "timestamp": "2026-03-26T...",
-  "node_id": "scoring-node",
+  "node_id": "ticket-router",
   "instance_id": "entity-uuid",
   "payload": { "..." }
 }

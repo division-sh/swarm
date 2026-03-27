@@ -60,7 +60,7 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -122,7 +122,7 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -188,7 +188,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -255,7 +255,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutRegistersSchedule(t *testing.T)
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -326,7 +326,7 @@ func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -396,7 +396,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {
@@ -494,7 +494,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	bus := &recordingPipelineBus{}
-	pc := NewFactoryPipelineCoordinatorWithOptions(bus, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 	if pc == nil {

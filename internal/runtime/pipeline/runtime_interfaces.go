@@ -69,46 +69,46 @@ type ActionRegistry interface {
 	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
 }
 
-func (pc *FactoryPipelineCoordinator) SemanticSource() semanticview.Source {
+func (pc *PipelineCoordinator) SemanticSource() semanticview.Source {
 	if pc == nil || pc.module == nil {
 		return nil
 	}
 	return pc.module.SemanticSource()
 }
 
-func (pc *FactoryPipelineCoordinator) WorkflowDefinition() *WorkflowDefinition {
+func (pc *PipelineCoordinator) WorkflowDefinition() *WorkflowDefinition {
 	if pc == nil || pc.module == nil {
 		return nil
 	}
 	return pc.module.WorkflowDefinition()
 }
 
-func (pc *FactoryPipelineCoordinator) WorkflowNodes() []WorkflowNode {
+func (pc *PipelineCoordinator) WorkflowNodes() []WorkflowNode {
 	if pc == nil || pc.module == nil {
 		return nil
 	}
 	return pc.module.WorkflowNodes()
 }
 
-func (pc *FactoryPipelineCoordinator) WorkflowInstanceStore() WorkflowInstancePersistence {
+func (pc *PipelineCoordinator) WorkflowInstanceStore() WorkflowInstancePersistence {
 	if pc == nil {
 		return nil
 	}
 	return pc.workflowStore
 }
 
-func (pc *FactoryPipelineCoordinator) TransitionEvaluator() TransitionEvaluator {
+func (pc *PipelineCoordinator) TransitionEvaluator() TransitionEvaluator {
 	return pc.WorkflowDefinition()
 }
 
-func (pc *FactoryPipelineCoordinator) GuardRegistry() GuardRegistry {
+func (pc *PipelineCoordinator) GuardRegistry() GuardRegistry {
 	if pc == nil || pc.module == nil {
 		return nil
 	}
 	return pc.module.GuardRegistry()
 }
 
-func (pc *FactoryPipelineCoordinator) ActionRegistry() ActionRegistry {
+func (pc *PipelineCoordinator) ActionRegistry() ActionRegistry {
 	if pc == nil || pc.module == nil {
 		return nil
 	}

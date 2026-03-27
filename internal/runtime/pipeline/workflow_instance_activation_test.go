@@ -11,7 +11,7 @@ import (
 
 func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	var captured FlowInstanceActivationRequest
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
 			captured = req
 			return nil
@@ -37,7 +37,7 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 
 func TestCreateFlowInstanceResolvesConfigFromBindings(t *testing.T) {
 	var captured FlowInstanceActivationRequest
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		instanceActivator: func(_ context.Context, req FlowInstanceActivationRequest) error {
 			captured = req
 			return nil

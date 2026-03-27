@@ -47,13 +47,10 @@ type RuntimeLogger struct {
 }
 
 type InstanceDigestRow struct {
-	EntityID       string
-	Name           string
-	Stage          string
-	UsersTotal     int
-	MRRCents       int
-	SpendCents30d  int
-	LastMetricDate time.Time
+	EntityID  string
+	Name      string
+	Stage     string
+	UpdatedAt time.Time
 }
 
 type DigestPersistence interface {

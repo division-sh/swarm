@@ -30,9 +30,6 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 			es.entity_id::text,
 			COALESCE(NULLIF(es.name, ''), NULLIF(es.fields->>'name', ''), es.entity_id::text),
 			es.current_state,
-			0,
-			0,
-			0,
 			es.updated_at
 		FROM entity_state es
 		WHERE NOT (es.current_state = ANY($2::text[]))
@@ -53,10 +50,7 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 			&r.EntityID,
 			&r.Name,
 			&r.Stage,
-			&r.UsersTotal,
-			&r.MRRCents,
-			&r.SpendCents30d,
-			&r.LastMetricDate,
+			&r.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan digest row: %w", err)
 		}

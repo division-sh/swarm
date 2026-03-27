@@ -104,7 +104,7 @@ func TestCatalogGuardPasses_SupportsStrictComparisonOperators(t *testing.T) {
 }
 
 func TestCatalogRunner_BootPermissionMismatchUsesToolRequiredPermission(t *testing.T) {
-	dir := filepath.Join(repoRootFromMASTest(t), "tests", "tier8-boot-verification", "test-boot-permission-tool-mismatch")
+	dir := filepath.Join(repoRootForTest(t), "tests", "tier8-boot-verification", "test-boot-permission-tool-mismatch")
 	result, expected := runSimpleCatalogCase(t, dir)
 	if got, want := result.bootResult, expected.Expected.BootResult; got != want {
 		t.Fatalf("boot result = %q, want %q", got, want)
@@ -115,7 +115,7 @@ func TestCatalogRunner_BootPermissionMismatchUsesToolRequiredPermission(t *testi
 }
 
 func TestCatalogRunner_TerminalFollowUpPreservesPriorEmits(t *testing.T) {
-	dir := filepath.Join(repoRootFromMASTest(t), "tests", "tier5-flow-lifecycle", "test-terminal-state-preserves")
+	dir := filepath.Join(repoRootForTest(t), "tests", "tier5-flow-lifecycle", "test-terminal-state-preserves")
 	result, expected := runSimpleCatalogCase(t, dir)
 	if got, want := result.handlerOutcome, expected.Expected.HandlerOutcome; got != want {
 		t.Fatalf("handler outcome = %q, want %q", got, want)
@@ -126,7 +126,7 @@ func TestCatalogRunner_TerminalFollowUpPreservesPriorEmits(t *testing.T) {
 }
 
 func TestCatalogRunner_AgentEmitsRecordedEvenWhenConsumed(t *testing.T) {
-	dir := filepath.Join(repoRootFromMASTest(t), "tests", "tier7-composition", "test-agent-emits-to-node")
+	dir := filepath.Join(repoRootForTest(t), "tests", "tier7-composition", "test-agent-emits-to-node")
 	result, expected := runSimpleCatalogCase(t, dir)
 	if got, want := result.handlerOutcome, expected.Expected.HandlerOutcome; got != want {
 		t.Fatalf("handler outcome = %q, want %q", got, want)

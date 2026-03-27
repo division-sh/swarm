@@ -75,7 +75,7 @@ A **state** always belongs to a workflow. An entity is always in exactly one sta
 
 ## 2. The Core Mental Model
 
-The easiest way to understand the MAS platform is to think in layers. At the bottom are contract files that define what a flow does. On top of those, the engine loads, validates, and runs everything.
+The easiest way to understand the Swarm platform is to think in layers. At the bottom are contract files that define what a flow does. On top of those, the engine loads, validates, and runs everything.
 
 The contract layer has these files:
 
@@ -158,7 +158,7 @@ Several fields are optional in contract YAML because the loader derives them fro
 
 - `schema_name` — derived from the directory name if omitted. A flow at `flows/scoring/` gets name `"scoring"`.
 - `schema_namespace` — derived from the flow path relative to root.
-- `agent_id` — derived from the YAML map key. In `agents.yaml`, `{"opco-ceo": {model_tier: sonnet, ...}}` means `agent_id = "opco-ceo"`. An explicit `id` field overrides the map key if present, but this is discouraged.
+- `agent_id` — derived from the YAML map key. In `agents.yaml`, `{"coordinator-agent": {model_tier: sonnet, ...}}` means `agent_id = "coordinator-agent"`. An explicit `id` field overrides the map key if present, but this is discouraged.
 - `agent_emit_events` — defaults to an empty list. An agent that only observes may omit `emit_events` entirely.
 
 ### Entity Schema And Event Schema
@@ -464,7 +464,7 @@ The engine gives every addressable runtime entity — every node, agent, and eve
 - **Local:** `{name}` — means "the thing called this in the current flow."
 - **Absolute:** `{flow_id}/{flow_id}/.../{name}` — means "the thing at this specific location from the root."
 
-The rule is simple: no slash means local, slash means absolute. So `portfolio-node` is "the node in my flow," while `validation/research/research.completed` is "the `research.completed` event inside the `research` flow inside the `validation` flow."
+The rule is simple: no slash means local, slash means absolute. So `dashboard-node` is "the node in my flow," while `review/analysis/analysis.completed` is "the `analysis.completed` event inside the `analysis` flow inside the `review` flow."
 
 The path is not decoration. It is how the platform avoids global name collisions. Two flows can each have a node called `orchestrator` and there is no conflict — they live at different paths.
 

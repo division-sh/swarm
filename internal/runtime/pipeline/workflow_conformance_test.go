@@ -28,7 +28,7 @@ func (pipelineTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 }
 
 func TestWorkflowRuntime_NodesOwnRegisteredPolicies(t *testing.T) {
-	pc := NewFactoryPipelineCoordinator(pipelineTestBus{}, nil)
+	pc := NewPipelineCoordinator(pipelineTestBus{}, nil)
 	nodes := pc.WorkflowNodes()
 	if len(nodes) == 0 {
 		t.Fatal("expected workflow nodes")

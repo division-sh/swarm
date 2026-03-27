@@ -9,7 +9,7 @@ import (
 	"swarm/internal/runtime/semanticview"
 )
 
-func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {
+func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {
 	entityID = strings.TrimSpace(entityID)
 	state := WorkflowState{
 		EntityID: entityID,
@@ -29,7 +29,7 @@ func (pc *FactoryPipelineCoordinator) currentWorkflowState(ctx context.Context, 
 	return state
 }
 
-func (pc *FactoryPipelineCoordinator) updateEntityState(ctx context.Context, entityID, nextState, sourceEvent string) {
+func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, nextState, sourceEvent string) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
 	}
@@ -77,7 +77,7 @@ func (pc *FactoryPipelineCoordinator) updateEntityState(ctx context.Context, ent
 	pc.reconcileWorkflowStageTimers(ctx, entityID, currentState, nextState, sourceEvent)
 }
 
-func (pc *FactoryPipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) {
+func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
 	}
@@ -106,7 +106,7 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowGateMutation(ctx context.Cont
 	})
 }
 
-func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) bool {
+func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) bool {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return false
 	}
@@ -123,7 +123,7 @@ func (pc *FactoryPipelineCoordinator) recordWorkflowEvidence(ctx context.Context
 	return true
 }
 
-func (pc *FactoryPipelineCoordinator) lockWorkflowEntity(entityID string) func() {
+func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {
 	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
 		return func() {}

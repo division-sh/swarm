@@ -37,7 +37,7 @@ func TestLoadFromDir_DefaultAndModeVariant(t *testing.T) {
 		t.Fatalf("expected mode prompt, found=%v got=%q", found, got)
 	}
 
-	got, found, err = LoadFromDir(dir, "generic-agent", "saas_gap")
+	got, found, err = LoadFromDir(dir, "generic-agent", "variant_a")
 	if err != nil {
 		t.Fatalf("load fallback prompt: %v", err)
 	}
@@ -64,9 +64,9 @@ func TestLoadFromDir_RendersPromptVariables(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(root, "prompt-variables.yaml"), []byte(`
 signal_threshold: 55
-blocking_red_flags:
-  - complex_integration
-  - high_feature_count
+feature_flags:
+  - alpha
+  - beta
 tier2_capabilities:
   - name: Email sending
     status: planned
@@ -76,7 +76,7 @@ tier2_capabilities:
 	prompt := `
 Threshold: {{signal_threshold}}
 Blocking:
-  {{blocking_red_flags}}
+  {{feature_flags}}
 Tier2:
   {{tier2_capabilities}}
 `
@@ -96,8 +96,8 @@ Tier2:
 	}
 	wantSnippets := []string{
 		"Threshold: 55",
-		"  - complex_integration",
-		"  - high_feature_count",
+		"  - alpha",
+		"  - beta",
 		"  - name: Email sending",
 		"    status: planned",
 	}

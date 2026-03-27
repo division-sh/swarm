@@ -47,7 +47,7 @@ type contractHandlerExecutionResult struct {
 	Handled         bool
 }
 
-func (pc *FactoryPipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
+func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
 	source := pc.SemanticSource()
 	if pc == nil || source == nil {
 		return contractHandlerExecutionResult{}, nil
@@ -172,7 +172,7 @@ func findAccumulationTimeoutHandlerForNode(source interface {
 	return runtimecontracts.SystemNodeEventHandler{}, false
 }
 
-func (pc *FactoryPipelineCoordinator) executeNodeContractHandler(
+func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx context.Context,
 	nodeID string,
 	handler runtimecontracts.SystemNodeEventHandler,
@@ -315,7 +315,7 @@ func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerO
 	}
 }
 
-func terminalStateHandlerRejected(pc *FactoryPipelineCoordinator, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
+func terminalStateHandlerRejected(pc *PipelineCoordinator, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
 	if pc == nil {
 		return false
 	}

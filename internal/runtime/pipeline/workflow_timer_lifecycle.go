@@ -10,7 +10,7 @@ import (
 	"swarm/internal/runtime/semanticview"
 )
 
-func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
+func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return nil
 	}
@@ -77,13 +77,13 @@ func (pc *FactoryPipelineCoordinator) applyWorkflowTimerIntents(ctx context.Cont
 	return nil
 }
 
-func (pc *FactoryPipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) {
+func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) {
 	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
 		runtimeWarn(runtimeWorkflowID, "workflow timer projection failed entity_id=%s stage=%s: %v", entityID, nextStage, err)
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context, entityID, sourceEvent string) {
+func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context, entityID, sourceEvent string) {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return
 	}
@@ -154,7 +154,7 @@ func (pc *FactoryPipelineCoordinator) reconcileWorkflowEventTimers(ctx context.C
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) reconcileAccumulationTimeoutSchedule(
+func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	ctx context.Context,
 	entityID, nodeID string,
 	handler runtimecontracts.SystemNodeEventHandler,
@@ -372,7 +372,7 @@ func workflowTimerRecurringSpec(timer runtimecontracts.WorkflowTimerContract, po
 	return "@every " + interval.String(), true
 }
 
-func (pc *FactoryPipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
+func (pc *PipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
 	if pc == nil {
 		return
 	}
@@ -388,7 +388,7 @@ func (pc *FactoryPipelineCoordinator) registerWorkflowTimerSchedule(ctx context.
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
+func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
 	if pc == nil {
 		return
 	}
@@ -411,7 +411,7 @@ func (pc *FactoryPipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Co
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
+func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
 	if pc == nil {
 		return
 	}
@@ -432,7 +432,7 @@ func (pc *FactoryPipelineCoordinator) persistWorkflowTimerSchedule(ctx context.C
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Context, sc Schedule) {
+func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Context, sc Schedule) {
 	if pc == nil {
 		return
 	}

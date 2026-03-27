@@ -84,7 +84,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	pc := NewFactoryPipelineCoordinatorWithOptions(noopPipelineBus{}, db, FactoryPipelineCoordinatorOptions{
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
 

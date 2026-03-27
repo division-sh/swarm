@@ -36,7 +36,7 @@ func pipelineSourceAgent(ctx context.Context) string {
 	return ""
 }
 
-type FactoryPipelineCoordinator struct {
+type PipelineCoordinator struct {
 	bus Bus
 	db  *sql.DB
 
@@ -57,17 +57,14 @@ type FactoryPipelineCoordinator struct {
 	testEntityStateHook func(entityID, state string)
 }
 
-type FactoryPipelineCoordinatorOptions struct {
+type PipelineCoordinatorOptions struct {
 	ShardPlanner        any
 	Module              WorkflowModule
 	InstanceActivator   FlowInstanceActivator
 	InstanceDeactivator FlowInstanceDeactivator
 }
 
-type PipelineCoordinator = FactoryPipelineCoordinator
-type PipelineCoordinatorOptions = FactoryPipelineCoordinatorOptions
-
-func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryPipelineCoordinatorOptions) *FactoryPipelineCoordinator {
+func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
 	if bus == nil {
 		return nil
 	}
@@ -75,7 +72,7 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	if module == nil {
 		module = defaultWorkflowModule()
 	}
-	return &FactoryPipelineCoordinator{
+	return &PipelineCoordinator{
 		bus:                 bus,
 		db:                  db,
 		module:              module,
@@ -87,19 +84,11 @@ func NewFactoryPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts FactoryP
 	}
 }
 
-func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return NewFactoryPipelineCoordinatorWithOptions(bus, db, opts)
-}
-
-func NewFactoryPipelineCoordinator(bus Bus, db *sql.DB) *FactoryPipelineCoordinator {
-	return NewFactoryPipelineCoordinatorWithOptions(bus, db, FactoryPipelineCoordinatorOptions{Module: defaultWorkflowModule()})
-}
-
 func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
-	return NewFactoryPipelineCoordinator(bus, db)
+	return NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: defaultWorkflowModule()})
 }
 
-func (pc *FactoryPipelineCoordinator) SetTestSubscribeHook(fn func()) {
+func (pc *PipelineCoordinator) SetTestSubscribeHook(fn func()) {
 	if pc == nil {
 		return
 	}
@@ -108,7 +97,7 @@ func (pc *FactoryPipelineCoordinator) SetTestSubscribeHook(fn func()) {
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) SetTestEntityStateHook(fn func(entityID, state string)) {
+func (pc *PipelineCoordinator) SetTestEntityStateHook(fn func(entityID, state string)) {
 	if pc == nil {
 		return
 	}
@@ -117,7 +106,7 @@ func (pc *FactoryPipelineCoordinator) SetTestEntityStateHook(fn func(entityID, s
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) SetInstanceActivator(activator FlowInstanceActivator) {
+func (pc *PipelineCoordinator) SetInstanceActivator(activator FlowInstanceActivator) {
 	if pc == nil {
 		return
 	}
@@ -126,7 +115,7 @@ func (pc *FactoryPipelineCoordinator) SetInstanceActivator(activator FlowInstanc
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) SetInstanceDeactivator(deactivator FlowInstanceDeactivator) {
+func (pc *PipelineCoordinator) SetInstanceDeactivator(deactivator FlowInstanceDeactivator) {
 	if pc == nil {
 		return
 	}
@@ -135,7 +124,7 @@ func (pc *FactoryPipelineCoordinator) SetInstanceDeactivator(deactivator FlowIns
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) SetTimerScheduling(scheduler *Scheduler, store SchedulePersistence) {
+func (pc *PipelineCoordinator) SetTimerScheduling(scheduler *Scheduler, store SchedulePersistence) {
 	if pc == nil {
 		return
 	}
@@ -145,7 +134,7 @@ func (pc *FactoryPipelineCoordinator) SetTimerScheduling(scheduler *Scheduler, s
 	pc.mu.Unlock()
 }
 
-func (pc *FactoryPipelineCoordinator) Run(ctx context.Context) {
+func (pc *PipelineCoordinator) Run(ctx context.Context) {
 	if pc == nil || pc.bus == nil {
 		return
 	}
@@ -166,9 +155,9 @@ func (pc *FactoryPipelineCoordinator) Run(ctx context.Context) {
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) RunMaintenance(context.Context) {}
+func (pc *PipelineCoordinator) RunMaintenance(context.Context) {}
 
-func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
 	if pc == nil {
 		return true, nil, nil
 	}
@@ -188,22 +177,22 @@ func (pc *FactoryPipelineCoordinator) Intercept(ctx context.Context, evt events.
 	return !consume, emitted, nil
 }
 
-func (pc *FactoryPipelineCoordinator) interceptPolicy(eventType string, evt events.Event) (consume bool, handled bool) {
+func (pc *PipelineCoordinator) interceptPolicy(eventType string, evt events.Event) (consume bool, handled bool) {
 	if strings.TrimSpace(eventType) == "" {
 		return false, false
 	}
 	return pc.workflowNodeInterceptPolicy(eventType, evt)
 }
 
-func (pc *FactoryPipelineCoordinator) subscribe() <-chan events.Event {
+func (pc *PipelineCoordinator) subscribe() <-chan events.Event {
 	return pc.bus.Subscribe(runtimeWorkflowID, workflowSubscriptions(pc.WorkflowNodes())...)
 }
 
-func (pc *FactoryPipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
+func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
 	return pc.dispatchWorkflowNodeEvent(ctx, evt)
 }
 
-func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
+func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
 	if pc == nil {
 		return false
 	}
@@ -251,7 +240,7 @@ func (pc *FactoryPipelineCoordinator) executeNodeHandlerPlan(ctx context.Context
 	return result.Handled
 }
 
-func (pc *FactoryPipelineCoordinator) notifyTestSubscribed() {
+func (pc *PipelineCoordinator) notifyTestSubscribed() {
 	if pc == nil {
 		return
 	}
@@ -263,7 +252,7 @@ func (pc *FactoryPipelineCoordinator) notifyTestSubscribed() {
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) notifyTestEntityStateUpdated(entityID, state string) {
+func (pc *PipelineCoordinator) notifyTestEntityStateUpdated(entityID, state string) {
 	if pc == nil {
 		return
 	}
@@ -275,7 +264,7 @@ func (pc *FactoryPipelineCoordinator) notifyTestEntityStateUpdated(entityID, sta
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, entityID string, payload map[string]any) {
+func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID string, payload map[string]any) {
 	if pc == nil {
 		return
 	}
@@ -302,7 +291,7 @@ func (pc *FactoryPipelineCoordinator) publish(ctx context.Context, eventType, en
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) publishDirect(ctx context.Context, eventType, entityID string, payload map[string]any, recipients []string) {
+func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, entityID string, payload map[string]any, recipients []string) {
 	if pc == nil {
 		return
 	}

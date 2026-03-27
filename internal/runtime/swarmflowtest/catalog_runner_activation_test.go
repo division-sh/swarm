@@ -10,7 +10,7 @@ func TestCatalogRunner_ExecutesCurrentlySupportedCatalogCases(t *testing.T) {
 	perTier := map[string]int{}
 	total := 0
 	for _, dir := range discoveredCatalogCaseDirs(t) {
-		root := filepath.Join(repoRootFromMASTest(t), "tests", filepath.FromSlash(dir))
+		root := filepath.Join(repoRootForTest(t), "tests", filepath.FromSlash(dir))
 		var expected catalogExpectedDocument
 		loadExpectedYAMLForCatalogTest(t, filepath.Join(root, "expected.yaml"), &expected)
 		if !catalogCaseExecutableNow(t, dir, expected) {

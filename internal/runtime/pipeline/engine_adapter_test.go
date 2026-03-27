@@ -146,7 +146,7 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 	store := &recordingScheduleStore{}
 	scheduler := NewScheduler()
 	defer scheduler.Stop()
-	pc := &FactoryPipelineCoordinator{
+	pc := &PipelineCoordinator{
 		timerScheduler:     scheduler,
 		timerScheduleStore: store,
 	}

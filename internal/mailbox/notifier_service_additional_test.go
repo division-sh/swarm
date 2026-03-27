@@ -199,11 +199,9 @@ func TestMailbox_NormalizeDecisionAction(t *testing.T) {
 		dec    string
 	}{
 		{"approve", "approved", "approve"},
-		{"APPROVE_SPEND", "approved", "approve"},
 		{"reject", "rejected", "reject"},
-		{"kill", "rejected", "kill"},
-		{"revise", "rejected", "revise"},
 		{"more-data", "more_data", "more_data"},
+		{"deferred", "more_data", "more_data"},
 		{"timeout", "timed_out", "timed_out"},
 	} {
 		out, err := NormalizeDecisionAction(tc.in)

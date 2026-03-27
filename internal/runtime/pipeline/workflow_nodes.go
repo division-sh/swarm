@@ -546,7 +546,7 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	}
 }
 
-func (pc *FactoryPipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []BackgroundNode {
+func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []BackgroundNode {
 	if pc == nil || bus == nil {
 		return nil
 	}
@@ -564,7 +564,7 @@ func (pc *FactoryPipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {
+func (pc *PipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {
 	if pc == nil {
 		return nil
 	}
@@ -582,7 +582,7 @@ func (pc *FactoryPipelineCoordinator) backgroundWorkflowExecutor(nodeID string) 
 	return nil
 }
 
-func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
+func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 	if pc == nil {
 		return nil
 	}
@@ -610,7 +610,7 @@ func (pc *FactoryPipelineCoordinator) workflowNodeExecutors() []workflowNodeExec
 	return out
 }
 
-func (pc *FactoryPipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
+func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
 	eventType = strings.TrimSpace(eventType)
 	for _, node := range pc.WorkflowNodes() {
 		var (
@@ -642,7 +642,7 @@ func (pc *FactoryPipelineCoordinator) workflowNodeInterceptPolicy(eventType stri
 	return false, false
 }
 
-func (pc *FactoryPipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, evt events.Event) bool {
+func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, evt events.Event) bool {
 	eventType := strings.TrimSpace(string(evt.Type))
 	if eventType == "" {
 		return false
