@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/gorilla/websocket"
 	builderpkg "swarm/internal/builder"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
@@ -17,8 +19,6 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimetools "swarm/internal/runtime/tools"
-	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/gorilla/websocket"
 )
 
 type builderRPCResponse = builderpkg.RPCResponse
@@ -106,8 +106,8 @@ func (stubAgentControl) ChatWithAgent(context.Context, string, string) (string, 
 }
 
 type stubRuntimeControl struct {
-	resetCalls int
-	pauseCalls int
+	resetCalls  int
+	pauseCalls  int
 	resumeCalls int
 }
 
@@ -721,7 +721,7 @@ func TestHandler_RunStartStreamsRunEvents(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`))
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_001","inputs":{"intake.requested":{"topic":"sample"}}}}`))
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
@@ -815,7 +815,7 @@ func TestHandler_RunStopResetsRuntimeAndStreamsStopped(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_stop_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`))
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_stop_001","inputs":{"intake.requested":{"topic":"sample"}}}}`))
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
@@ -898,7 +898,7 @@ func TestHandler_RunPauseAndContinueStreamStateChanges(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_pause_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`))
+	req := httptest.NewRequest(http.MethodPost, "/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_pause_001","inputs":{"intake.requested":{"topic":"sample"}}}}`))
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("run.start status=%d body=%s", rec.Code, rec.Body.String())
@@ -1004,7 +1004,7 @@ func TestHandler_RunLifecycleOverAPIAliases(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_api_alias_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_api_alias_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
 	)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1125,7 +1125,7 @@ func TestHandler_RunBreakpointHitPausesRuntime(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_breakpoint_001","inputs":{"scan.requested":{"topic":"fusion"}},"breakpoints":["agent-source"]}}`),
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_breakpoint_001","inputs":{"intake.requested":{"topic":"sample"}},"breakpoints":["agent-source"]}}`),
 	)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1226,7 +1226,7 @@ func TestHandler_HumanTaskWaitingAndDecisionResume(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_human_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_human_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
 	)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1370,7 +1370,7 @@ func TestHandler_RunStepPausesAfterNextRuntimeEvent(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_step_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_step_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
 	)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1488,7 +1488,7 @@ func TestHandler_RunRetryEmitsRetriedAndResumed(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_retry_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_retry_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
 	)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1589,7 +1589,7 @@ func TestHandler_RunSkipEmitsSkippedAndResumed(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/rpc",
-		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_skip_001","inputs":{"scan.requested":{"topic":"fusion"}}}}`),
+		strings.NewReader(`{"jsonrpc":"2.0","id":"10","method":"run.start","params":{"run_id":"run_test_skip_001","inputs":{"intake.requested":{"topic":"sample"}}}}`),
 	)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

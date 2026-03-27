@@ -19,8 +19,8 @@ func TestWorkspaceClassesForSource(t *testing.T) {
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
 				Value: map[string]any{
-					"factory": map[string]any{"workspace_scope": "per-agent"},
-					"opco":    map[string]any{"workspace_scope": "per-flow-instance"},
+					"dedicated":   map[string]any{"workspace_scope": "per-agent"},
+					"shared_flow": map[string]any{"workspace_scope": "per-flow-instance"},
 				},
 			},
 		}},
@@ -29,11 +29,11 @@ func TestWorkspaceClassesForSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("workspaceClassesForSource: %v", err)
 	}
-	if got := classes["factory"]; got != "per-agent" {
-		t.Fatalf("factory scope = %q, want per-agent", got)
+	if got := classes["dedicated"]; got != "per-agent" {
+		t.Fatalf("dedicated scope = %q, want per-agent", got)
 	}
-	if got := classes["opco"]; got != "per-flow-instance" {
-		t.Fatalf("opco scope = %q, want per-flow-instance", got)
+	if got := classes["shared_flow"]; got != "per-flow-instance" {
+		t.Fatalf("shared_flow scope = %q, want per-flow-instance", got)
 	}
 }
 
@@ -55,7 +55,7 @@ func TestValidateSource_RejectsUndefinedWorkspaceClass(t *testing.T) {
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
 				Value: map[string]any{
-					"factory": map[string]any{"workspace_scope": "per-agent"},
+					"dedicated": map[string]any{"workspace_scope": "per-agent"},
 				},
 			},
 		}},
@@ -86,7 +86,7 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
 				Value: map[string]any{
-					"factory": map[string]any{"workspace_scope": "per-agent"},
+					"dedicated": map[string]any{"workspace_scope": "per-agent"},
 				},
 			},
 		}},
@@ -106,22 +106,22 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 			return "", nil
 		}
 	})
-	raw, _ := json.Marshal(map[string]any{"workspace_class": "factory"})
+	raw, _ := json.Marshal(map[string]any{"workspace_class": "dedicated"})
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
-		ID:     "factory-agent",
+		ID:     "dedicated-agent",
 		Config: raw,
 	})
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "swarm-agent-factory-agent" {
-		t.Fatalf("target = %#v, want swarm-agent-factory-agent", target)
+	if target == nil || target.Container != "swarm-agent-dedicated-agent" {
+		t.Fatalf("target = %#v, want swarm-agent-dedicated-agent", target)
 	}
 	joined := strings.Join(created, " ")
 	for _, expected := range []string{
 		dataDir + ":/data:ro",
 		contractsDir + ":/opt/swarm/contracts:ro",
-		"workspaces_agent_factory-agent:/workspace",
+		"workspaces_agent_dedicated-agent:/workspace",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("create args missing %q: %v", expected, created)
@@ -146,7 +146,7 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
 				Value: map[string]any{
-					"opco": map[string]any{"workspace_scope": "per-flow-instance"},
+					"shared_flow": map[string]any{"workspace_scope": "per-flow-instance"},
 				},
 			},
 		}},
@@ -167,21 +167,21 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 		}
 	})
 	raw, _ := json.Marshal(map[string]any{
-		"workspace_class": "opco",
-		"flow_path":       "operating/opco-001",
+		"workspace_class": "shared_flow",
+		"flow_path":       "shared/work-001",
 	})
 	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
-		ID:     "opco-ceo",
+		ID:     "shared-work-lead",
 		Config: raw,
 	})
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "swarm-flow-operating-opco-001" {
-		t.Fatalf("target = %#v, want swarm-flow-operating-opco-001", target)
+	if target == nil || target.Container != "swarm-flow-shared-work-001" {
+		t.Fatalf("target = %#v, want swarm-flow-shared-work-001", target)
 	}
 	joined := strings.Join(created, " ")
-	if !strings.Contains(joined, "workspaces_flow_operating-opco-001:/workspace") {
+	if !strings.Contains(joined, "workspaces_flow_shared-work-001:/workspace") {
 		t.Fatalf("expected shared flow workspace volume, got %v", created)
 	}
 }

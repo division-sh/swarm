@@ -279,20 +279,20 @@ func newStatelessFlowValidationBundle() *runtimecontracts.WorkflowContractBundle
 		States:       []string{},
 		Pins: runtimecontracts.FlowPins{
 			Inputs: runtimecontracts.FlowInputPins{
-				Events: []string{"scan.requested"},
+				Events: []string{"intake.requested"},
 			},
 			Outputs: runtimecontracts.FlowOutputPins{
-				Events: []string{"scan.completed"},
+				Events: []string{"intake.completed"},
 			},
 		},
 	}
 	node := runtimecontracts.SystemNodeContract{
 		ID:            "scan-node",
 		ExecutionType: "system",
-		SubscribesTo:  []string{"scan.requested"},
+		SubscribesTo:  []string{"intake.requested"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"scan.requested": {
-				Emits: runtimecontracts.EventEmission{Single: "scan.completed"},
+			"intake.requested": {
+				Emits: runtimecontracts.EventEmission{Single: "intake.completed"},
 			},
 		},
 	}
@@ -302,8 +302,8 @@ func newStatelessFlowValidationBundle() *runtimecontracts.WorkflowContractBundle
 			flowID: schema,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"scan.requested": {},
-			"scan.completed": {},
+			"intake.requested": {},
+			"intake.completed": {},
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{

@@ -11,7 +11,7 @@ func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) 
 	SetActivePromptBundle(loadPromptTestBundle(t, repoRoot(t)))
 	prompt, found, err := LoadPromptForAgent(models.AgentConfig{
 		ID:   "cos-entity-1",
-		Role: "chief_of_staff",
+		Role: "ops_lead",
 	}, "")
 	if err != nil {
 		t.Fatalf("LoadPromptForAgent: %v", err)
@@ -19,7 +19,7 @@ func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) 
 	if !found {
 		t.Fatal("expected prompt to be found")
 	}
-	if !strings.Contains(prompt, "{{vertical_name}}") {
-		t.Fatalf("expected operating CoS prompt template, got %q", prompt)
+	if !strings.Contains(prompt, "{{team_name}}") {
+		t.Fatalf("expected generic operations prompt template, got %q", prompt)
 	}
 }

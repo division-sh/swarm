@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [scan.requested]
+    events: [intake.requested]
   outputs:
-    events: [scan.completed]
+    events: [intake.completed]

@@ -4,4 +4,4 @@ trigger:
 expected:
   boot_result: error
   error_category: DIALECT-BARE-COND
-  error_contains: "type == scan"
+  error_contains: "type == intake"

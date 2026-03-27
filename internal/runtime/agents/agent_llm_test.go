@@ -86,9 +86,9 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	agent := &LLMAgent{
 		cfg: models.AgentConfig{
 			ID:   "cos-entity-1",
-			Role: "chief_of_staff",
+			Role: "ops_lead",
 			Config: mustAgentConfigJSON(t, map[string]any{
-				"vertical_name": "Acme Ops",
+				"team_name": "Acme Ops",
 			}),
 		},
 		conversation: llm.NewConversation("cos-entity-1", "", "", nil, llm.SessionScoped, 10, nil),
@@ -97,10 +97,10 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 
 	got := agent.resolvePromptForMode("")
 	if !strings.Contains(got, "Acme Ops") {
-		t.Fatalf("expected resolved prompt to include config-expanded vertical name, got %q", got)
+		t.Fatalf("expected resolved prompt to include config-expanded team name, got %q", got)
 	}
-	if strings.Contains(got, "{{vertical_name}}") {
-		t.Fatalf("expected resolved prompt to expand vertical_name token, got %q", got)
+	if strings.Contains(got, "{{team_name}}") {
+		t.Fatalf("expected resolved prompt to expand team_name token, got %q", got)
 	}
 }
 
@@ -116,9 +116,9 @@ func writeAgentPromptTestBundle(t *testing.T, repoRoot string) string {
 		t.Fatalf("read %s: %v", agentsPath, err)
 	}
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
-chief-of-staff:
-  id: chief-of-staff
-  role: chief_of_staff
+ops-lead:
+  id: ops-lead
+  role: ops_lead
   manager_fallback: control-plane
   emit_events:
     - item.created
@@ -132,9 +132,9 @@ chief-of-staff:
 		t.Fatalf("mkdir %s: %v", promptsDir, err)
 	}
 	prompt := strings.TrimSpace(`
-You are the chief of staff for {{vertical_name}}.
+You are the operations lead for {{team_name}}.
 `)
-	if err := os.WriteFile(filepath.Join(promptsDir, "chief-of-staff.md"), []byte(prompt+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(promptsDir, "ops-lead.md"), []byte(prompt+"\n"), 0o644); err != nil {
 		t.Fatalf("write prompt fixture: %v", err)
 	}
 	return dstRoot

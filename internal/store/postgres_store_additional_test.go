@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"github.com/google/uuid"
+	"strings"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
@@ -12,9 +15,6 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/testutil"
-	"encoding/json"
-	"github.com/google/uuid"
-	"strings"
 	"testing"
 	"time"
 )
@@ -1028,7 +1028,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		Config: runtimeactors.AgentConfig{
 			ID:       "ephemeral-shard-1",
 			Role:     "worker",
-			Mode:     "factory",
+			Mode:     "worker",
 			Type:     "sonnet",
 			EntityID: "",
 			Config:   json.RawMessage(`{"system_prompt":"x","subscriptions":["review.ready"]}`),
@@ -1181,7 +1181,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 		Config: runtimeactors.AgentConfig{
 			ID:   "agent-cleanup-1",
 			Role: "worker",
-			Mode: "factory",
+			Mode: "worker",
 			Type: "sonnet",
 			Config: json.RawMessage(`{
 			"system_prompt":"x",

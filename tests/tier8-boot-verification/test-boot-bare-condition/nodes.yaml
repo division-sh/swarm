@@ -1,12 +1,12 @@
 test-node:
   id: test-node
   execution_type: system_node
-  subscribes_to: [scan.requested]
-  produces: [scan.completed]
+  subscribes_to: [intake.requested]
+  produces: [intake.completed]
   event_handlers:
-    scan.requested:
+    intake.requested:
       guard:
         id: bare_cond_guard
-        check: "type == scan"
+        check: "type == intake"
       advances_to: done
-      emits: scan.completed
+      emits: intake.completed

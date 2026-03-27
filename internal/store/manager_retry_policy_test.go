@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
@@ -276,7 +276,7 @@ func seedEntityAndAgent(t *testing.T, ctx context.Context, pg *store.PostgresSto
 			ID:       agentID,
 			Type:     "test",
 			Role:     "test",
-			Mode:     "factory",
+			Mode:     "worker",
 			EntityID: entityID,
 			Config:   []byte(`{"system_prompt":"x"}`),
 		},
