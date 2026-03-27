@@ -13,7 +13,6 @@ func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 	e.registerEntityHandlers(handlers)
 	e.registerMailboxHandlers(handlers)
 	e.registerHumanTaskHandlers(handlers)
-	e.registerInfraHandlers(handlers)
 	return handlers
 }
 
@@ -51,10 +50,4 @@ func (e *Executor) registerFlowHandlers(handlers map[string]ToolHandler) {
 func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {
 	handlers["human_task_request"] = e.execHumanTaskRequest
 	handlers["human_task_decide"] = e.execHumanTaskDecide
-}
-
-func (e *Executor) registerInfraHandlers(handlers map[string]ToolHandler) {
-	handlers["nginx_reload"] = e.execNginxReload
-	handlers["systemd_control"] = e.execSystemdControl
-	handlers["certbot_execute"] = e.execCertbotExecute
 }

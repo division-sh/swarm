@@ -36,9 +36,6 @@ var toolPermissionRequirements = map[string]string{
 	"human_task_request":   "human_task_request",
 	"human_task_decide":    "human_task_decide",
 	"schedule":             "schedule",
-	"nginx_reload":         systemAdminPermission,
-	"systemd_control":      systemAdminPermission,
-	"certbot_execute":      systemAdminPermission,
 }
 
 func agentHasPermission(agent models.AgentConfig, perm string) bool {

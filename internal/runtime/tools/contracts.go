@@ -2,8 +2,6 @@ package tools
 
 import (
 	"encoding/json"
-	"sort"
-	"strings"
 
 	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
@@ -31,66 +29,29 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"mailbox_send":         {},
 	"human_task_request":   {},
 	"human_task_decide":    {},
-	"nginx_reload":         {},
-	"systemd_control":      {},
-	"certbot_execute":      {},
 }
 
 func LoadContractSchemasForSource(source semanticview.Source) (map[string]ContractSchemaEntry, error) {
-	parsed := map[string]ContractSchemaEntry{}
-	if source == nil {
-		return parsed, nil
+	defs, err := registeredToolsForRuntime(source, nil)
+	if err != nil {
+		return nil, err
 	}
-	for name, entry := range source.ToolEntries() {
-		name = strings.TrimSpace(name)
-		if _, ok := supportedRuntimeToolNames[name]; !ok {
+	parsed := make(map[string]ContractSchemaEntry, len(defs))
+	for name, entry := range defs {
+		if entry.HandlerType == implementationMCP {
 			continue
-		}
-		schema := map[string]any{}
-		raw, marshalErr := json.Marshal(entry.InputSchema)
-		if marshalErr != nil {
-			return nil, marshalErr
-		}
-		if unmarshalErr := json.Unmarshal(raw, &schema); unmarshalErr != nil {
-			return nil, unmarshalErr
 		}
 		parsed[name] = ContractSchemaEntry{
 			Category:    entry.Category,
 			Description: entry.Description,
-			InputSchema: schema,
+			InputSchema: deepCloneMap(entry.InputSchema),
 		}
 	}
 	return parsed, nil
 }
 
 func ContractDefinitionsForSource(source semanticview.Source) ([]llm.ToolDefinition, error) {
-	entries, err := LoadContractSchemasForSource(source)
-	if err != nil {
-		return nil, err
-	}
-	for name, entry := range builtinRuntimeContractSchemas() {
-		entries[name] = entry
-	}
-	names := make([]string, 0, len(entries))
-	for name := range entries {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	defs := make([]llm.ToolDefinition, 0, len(names))
-	for _, name := range names {
-		entry := entries[name]
-		defs = append(defs, llm.ToolDefinition{
-			Name:        name,
-			Description: strings.TrimSpace(entry.Description),
-			Schema:      deepCloneJSONValue(entry.InputSchema),
-		})
-	}
-	return defs, nil
+	return toolDefinitionsForRuntime(source, nil)
 }
 
 func ObjectSchema(properties map[string]any, required ...string) map[string]any {

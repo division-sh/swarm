@@ -258,17 +258,6 @@ func validatorNormalizeRuntimeToolInput(name string, input any) any {
 		case "defer":
 			payload["decision"] = "deferred"
 		}
-	case "systemd_control":
-		if strings.TrimSpace(asString(payload["service"])) == "" {
-			if unit := strings.TrimSpace(asString(payload["unit"])); unit != "" {
-				payload["service"] = unit
-			}
-		}
-		if strings.TrimSpace(asString(payload["unit"])) == "" {
-			if service := strings.TrimSpace(asString(payload["service"])); service != "" {
-				payload["unit"] = service
-			}
-		}
 	}
 	return payload
 }

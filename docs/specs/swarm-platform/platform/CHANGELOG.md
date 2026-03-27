@@ -1,5 +1,28 @@
 # Swarm Platform Changelog
 
+## v1.4.0 (2026-03-27)
+
+### Rewritten: tool_model — three-layer implementation model
+Replaced the vague `workflow_registered` / `api_call` handler types with three explicit implementation classes:
+
+- **platform_builtin** — tools the platform ships (agent_message, query_entities, etc.). Always available. List is exhaustive.
+- **mcp** — tools from external MCP servers. Platform connects as MCP client, discovers via tools/list, forwards via tools/call. No per-tool handler code.
+- **http** — tools defined declaratively as HTTP request templates in tools.yaml. Platform ships one generic HTTP executor. No per-tool handler code.
+
+Key rule: the generic runtime ships platform_builtin handlers ONLY. All other tools are executed via the MCP client or HTTP executor.
+
+### New: mcp_client — MCP server registration and tool discovery
+Products register MCP servers in policy.yaml under `mcp_servers`. Each server gets a namespace prefix (e.g., `pg.list_tables`). Platform discovers tools at boot and routes calls at runtime. Agents only see MCP tools listed in their tools_tier2 — the full server catalog is never injected into agent context.
+
+### New: http_tool_definition — declarative HTTP tools
+Tools defined as URL + method + headers + body templates with `{{input.field}}` and `{{credentials.key}}` variable substitution. Products add API integrations without writing handler code.
+
+### New: credential_store — secure credential management
+Platform-provided interface for storing and retrieving secrets (API keys, tokens). Tools and MCP servers reference credentials by key name. The platform resolves to values at call time only. Never logged or persisted in event store.
+
+### Deprecated: workflow_registered, api_call handler types
+Accepted by the loader for backward compatibility. Normalized to http if an http block is present, otherwise boot warning.
+
 ## v1.3.0 (2026-03-25)
 
 ### pipeline.dead_letter → platform.dead_letter

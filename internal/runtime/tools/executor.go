@@ -6,18 +6,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
+	runtimecredentials "swarm/internal/runtime/credentials"
 	llm "swarm/internal/runtime/llm"
+	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type Executor struct {
@@ -30,6 +33,9 @@ type Executor struct {
 	scheduleStore   SchedulePersistence
 	mailboxStore    MailboxPersistence
 	cfg             *config.Config
+	credentials     runtimecredentials.Store
+	httpClient      *http.Client
+	mcpClient       *runtimemcp.Client
 	workflowSource  semanticview.Source
 	flowActivator   runtimepipeline.FlowInstanceActivator
 	authorizer      *ToolAuthorizer
@@ -57,15 +63,38 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		mailboxStore:    opts.MailboxStore,
 		sqlDB:           opts.SQLDB,
 		cfg:             opts.Config,
+		credentials:     opts.Credentials,
+		httpClient:      &http.Client{Timeout: 30 * time.Second},
+		mcpClient:       opts.MCPClient,
 		workflowSource:  opts.WorkflowSource,
 		flowActivator:   opts.FlowActivator,
 		oneShotEmits:    make(map[string]struct{}),
+	}
+	if exec.credentials == nil {
+		exec.credentials = runtimecredentials.NewEnvStore()
+	}
+	if exec.mcpClient == nil {
+		exec.mcpClient = runtimemcp.NewClient(exec.credentials)
+	}
+	if exec.mcpClient != nil {
+		for _, err := range exec.mcpClient.Refresh(context.Background(), exec.workflowSource) {
+			runtimeWarn("tool-executor", "mcp discovery warning: %v", err)
+		}
 	}
 	exec.authorizer = NewToolAuthorizer(bus)
 	exec.validator = NewToolInputValidator(exec.contractDefinitions)
 	exec.dispatcher = NewToolDispatcher(
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 			return exec.handleEmitTool(ctx, actor, name, input)
+		},
+		func(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
+			return exec.resolveRegisteredTool(actor, name)
+		},
+		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+			return exec.execHTTPTool(ctx, actor, tool, input)
+		},
+		func(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+			return exec.execMCPTool(ctx, actor, tool, input)
 		},
 		exec.buildToolHandlers(),
 	)
@@ -75,14 +104,25 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {
 	e.mu.RLock()
 	source := e.workflowSource
+	client := e.mcpClient
 	e.mu.RUnlock()
-	return ContractDefinitionsForSource(source)
+	var discovered map[string]runtimemcp.DiscoveredTool
+	if client != nil {
+		discovered = client.DiscoveredTools()
+	}
+	return toolDefinitionsForRuntime(source, discovered)
 }
 
 func (e *Executor) SetWorkflowSource(source semanticview.Source) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	e.workflowSource = source
+	client := e.mcpClient
+	e.mu.Unlock()
+	if client != nil {
+		for _, err := range client.Refresh(context.Background(), source) {
+			runtimeWarn("tool-executor", "mcp discovery warning: %v", err)
+		}
+	}
 }
 
 func (e *Executor) SetManager(manager Manager) {
@@ -106,6 +146,18 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.cfg = cfg
+}
+
+func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
+	e.mu.RLock()
+	source := e.workflowSource
+	client := e.mcpClient
+	e.mu.RUnlock()
+	var discovered map[string]runtimemcp.DiscoveredTool
+	if client != nil {
+		discovered = client.DiscoveredTools()
+	}
+	return resolveRegisteredToolForActor(source, actor.ID, name, discovered)
 }
 
 func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
@@ -212,8 +264,7 @@ func toolAllowsLegacySubsetFallback(name string) bool {
 		"agent_fire",
 		"mailbox_send",
 		"human_task_request",
-		"human_task_decide",
-		"systemd_control":
+		"human_task_decide":
 		return true
 	default:
 		return false
@@ -408,17 +459,6 @@ func normalizeRuntimeToolInput(name string, input any) any {
 		case "defer":
 			payload["decision"] = "deferred"
 		}
-	case "systemd_control":
-		if strings.TrimSpace(asString(payload["service"])) == "" {
-			if unit := strings.TrimSpace(asString(payload["unit"])); unit != "" {
-				payload["service"] = unit
-			}
-		}
-		if strings.TrimSpace(asString(payload["unit"])) == "" {
-			if service := strings.TrimSpace(asString(payload["service"])); service != "" {
-				payload["unit"] = service
-			}
-		}
 	}
 	return payload
 }
@@ -591,18 +631,6 @@ func (e *Executor) ExecHumanTaskRequestDirect(ctx context.Context, actor models.
 
 func (e *Executor) ExecHumanTaskDecideDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execHumanTaskDecide(ctx, actor, input)
-}
-
-func (e *Executor) ExecNginxReloadDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execNginxReload(ctx, actor, input)
-}
-
-func (e *Executor) ExecSystemdControlDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execSystemdControl(ctx, actor, input)
-}
-
-func (e *Executor) ExecCertbotExecuteDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execCertbotExecute(ctx, actor, input)
 }
 
 func authorizeRouting(actor, target models.AgentConfig, status string) error {

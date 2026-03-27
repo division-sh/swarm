@@ -204,7 +204,7 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 		nil,
 		[]llm.ToolDefinition{
 			{Name: "schedule"},
-			{Name: "systemd_control"},
+			{Name: "check_status"},
 			{Name: "agent_message"},
 		},
 	)
@@ -221,7 +221,7 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	if !containsString(names, "emit_coord_done") {
 		t.Fatalf("expected explicit emit tool in session, got %v", names)
 	}
-	if containsString(names, "systemd_control") {
+	if containsString(names, "check_status") {
 		t.Fatalf("expected unconstrained non-universal tool to be filtered out, got %v", names)
 	}
 }

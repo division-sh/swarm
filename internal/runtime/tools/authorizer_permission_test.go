@@ -34,22 +34,22 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		}
 	})
 
-	t.Run("system admin allows infra tools", func(t *testing.T) {
+	t.Run("schedule allowed with permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
 			ID:          "ops-3",
-			Permissions: []string{systemAdminPermission},
-		}, "nginx_reload")
+			Permissions: []string{"schedule"},
+		}, "schedule")
 		if err != nil {
-			t.Fatalf("expected nginx_reload to be allowed: %v", err)
+			t.Fatalf("expected schedule to be allowed: %v", err)
 		}
 	})
 
-	t.Run("infra tool denied without system admin", func(t *testing.T) {
+	t.Run("schedule denied without permission", func(t *testing.T) {
 		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-4",
-		}, "nginx_reload")
+		}, "schedule")
 		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
-			t.Fatalf("expected denial for nginx_reload without permission, got %v", err)
+			t.Fatalf("expected denial for schedule without permission, got %v", err)
 		}
 	})
 

@@ -1,10 +1,10 @@
 package contracts
 
 import (
-	"swarm/internal/runtime/core/paths"
-	flowmodel "swarm/internal/runtime/flowmodel"
 	"gopkg.in/yaml.v3"
 	"strings"
+	"swarm/internal/runtime/core/paths"
+	flowmodel "swarm/internal/runtime/flowmodel"
 )
 
 type ContractPaths struct {
@@ -393,6 +393,18 @@ type ToolAdditionalProperties struct {
 	Allowed *bool
 	Schema  *ToolInputSchema
 }
+type HTTPToolRetrySpec struct {
+	MaxRetries int    `yaml:"max_retries"`
+	Backoff    string `yaml:"backoff"`
+}
+type HTTPToolSpec struct {
+	Method         string            `yaml:"method"`
+	URL            string            `yaml:"url"`
+	Headers        map[string]string `yaml:"headers"`
+	Body           any               `yaml:"body"`
+	TimeoutSeconds int               `yaml:"timeout_seconds"`
+	Retry          HTTPToolRetrySpec `yaml:"retry"`
+}
 type ToolInputSchema struct {
 	Type                 string                     `yaml:"type"`
 	Description          string                     `yaml:"description"`
@@ -739,9 +751,14 @@ type AgentRegistryEntry struct {
 type ToolSchemaEntry struct {
 	Category           string          `yaml:"category"`
 	Description        string          `yaml:"description"`
+	HandlerType        string          `yaml:"handler_type"`
 	Permission         string          `yaml:"permission"`
 	RequiredPermission string          `yaml:"required_permission"`
 	InputSchema        ToolInputSchema `yaml:"input_schema"`
+	OutputSchema       ToolInputSchema `yaml:"output_schema"`
+	HTTP               *HTTPToolSpec   `yaml:"http"`
+	ResponseMapping    map[string]any  `yaml:"response_mapping"`
+	Credentials        []string        `yaml:"credentials"`
 }
 type PlatformSpecDocument struct {
 	Platform struct {

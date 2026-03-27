@@ -7,6 +7,8 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
+	runtimecredentials "swarm/internal/runtime/credentials"
+	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -38,7 +40,9 @@ type ExecutorOptions struct {
 	Manager         Manager
 	ManagerProvider ManagerProvider
 	Config          *config.Config
+	Credentials     runtimecredentials.Store
 	MailboxStore    MailboxPersistence
+	MCPClient       *runtimemcp.Client
 	SQLDB           *sql.DB
 	WorkflowSource  semanticview.Source
 	FlowActivator   runtimepipeline.FlowInstanceActivator

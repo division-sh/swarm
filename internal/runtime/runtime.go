@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimeagents "swarm/internal/runtime/agents"
@@ -25,7 +26,6 @@ import (
 	"swarm/internal/runtime/sessions"
 	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 type Stores struct {
@@ -68,8 +68,7 @@ type Runtime struct {
 	ToolGateway    *runtimemcp.Gateway
 }
 
-var (
-)
+var ()
 
 func runtimeControlPlaneRecipient() string {
 	if recipient := controlPlaneRecipientFromSource(runtimepipeline.DefaultWorkflowSemanticSourceOrNil()); recipient != "" {
@@ -150,6 +149,13 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		runtimecontracts.SetActivePromptBundle(nil)
 	}
 	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(source))
+	if warnings, err := runtimetools.ValidateToolImplementations(source); err != nil {
+		return nil, fmt.Errorf("tool implementation validation failed: %w", err)
+	} else {
+		for _, warning := range warnings {
+			slog.Warn("tool implementation validation warning", "warning", warning.Error())
+		}
+	}
 
 	rt := &Runtime{
 		Config:    cfg,

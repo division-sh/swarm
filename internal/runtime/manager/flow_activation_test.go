@@ -415,7 +415,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 			ID:              "reviewer-{instance_id}",
 			Type:            "generic",
 			Role:            "reviewer",
-			ToolsTier2:      []string{"schedule", "systemd_control"},
+			ToolsTier2:      []string{"schedule", "check_status"},
 			EmitEvents:      []string{"task.completed", "task.completed", "review.failed"},
 			MaxTurnsPerTask: 7,
 		},
@@ -433,8 +433,8 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	if got := payload["max_turns_per_task"]; got != float64(7) {
 		t.Fatalf("max_turns_per_task = %#v, want 7", got)
 	}
-	if got := anySliceToStrings(payload["allowed_tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "systemd_control" {
-		t.Fatalf("allowed_tools = %#v, want [schedule systemd_control]", got)
+	if got := anySliceToStrings(payload["allowed_tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "check_status" {
+		t.Fatalf("allowed_tools = %#v, want [schedule check_status]", got)
 	}
 	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "task.completed" || got[1] != "review.failed" {
 		t.Fatalf("emit_events = %#v, want [task.completed review.failed]", got)

@@ -1,11 +1,11 @@
 package contracts
 
 import (
-	"swarm/internal/runtime/core/paths"
 	"fmt"
 	"gopkg.in/yaml.v3"
 	"regexp"
 	"strings"
+	"swarm/internal/runtime/core/paths"
 )
 
 var legacyComputeExpressionPattern = regexp.MustCompile(`^\s*weighted_average\s*\(\s*accumulated\.([a-zA-Z0-9_]+)\s*,\s*accumulated\.([a-zA-Z0-9_]+)\s*\)\s*$`)
@@ -933,6 +933,46 @@ func (s *ToolInputSchema) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*s = ToolInputSchema(aux)
+	return nil
+}
+func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
+	if t == nil {
+		return nil
+	}
+	type alias ToolSchemaEntry
+	var aux struct {
+		alias      `yaml:",inline"`
+		Parameters *ToolInputSchema `yaml:"parameters"`
+		Returns    *ToolInputSchema `yaml:"returns"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*t = ToolSchemaEntry(aux.alias)
+	if aux.Parameters != nil && t.InputSchema.Type == "" && len(t.InputSchema.Properties) == 0 && len(t.InputSchema.Required) == 0 {
+		t.InputSchema = *aux.Parameters
+	}
+	if aux.Returns != nil && t.OutputSchema.Type == "" && len(t.OutputSchema.Properties) == 0 && len(t.OutputSchema.Required) == 0 {
+		t.OutputSchema = *aux.Returns
+	}
+	t.HandlerType = strings.TrimSpace(t.HandlerType)
+	t.Permission = strings.TrimSpace(t.Permission)
+	t.RequiredPermission = strings.TrimSpace(t.RequiredPermission)
+	t.Credentials = normalizeStrings(t.Credentials)
+	if t.HTTP != nil {
+		t.HTTP.Method = strings.TrimSpace(t.HTTP.Method)
+		t.HTTP.URL = strings.TrimSpace(t.HTTP.URL)
+		t.HTTP.Retry.Backoff = strings.TrimSpace(t.HTTP.Retry.Backoff)
+		headers := make(map[string]string, len(t.HTTP.Headers))
+		for key, value := range t.HTTP.Headers {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			headers[key] = value
+		}
+		t.HTTP.Headers = headers
+	}
 	return nil
 }
 func (t *WorkflowTimerContract) UnmarshalYAML(node *yaml.Node) error {

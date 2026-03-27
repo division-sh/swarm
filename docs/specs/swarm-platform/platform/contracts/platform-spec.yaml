@@ -1,6 +1,6 @@
 platform:
   name: swarm-orchestrator
-  version: 1.3.0
+  version: 1.4.0
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
@@ -1193,10 +1193,43 @@ permissions_model:
         a root-level coordinator), escalation produces an event (platform.dead_letter or equivalent), not a direct message.
         The platform routes the escalation event through the normal event loop.
 tool_model:
-  description: The platform owns ALL tool schema serving. It reads tool definition YAML, generates MCP tool definitions, validates
-    calls against schemas, and routes to handlers. Tool handlers are either platform-builtin or workflow-registered.
+  description: The platform owns all tool schema serving, call validation, and execution routing. Every tool has an implementation
+    class that determines how the platform executes it. Three classes exist. The generic runtime ships executors for all three.
+    No product-specific tool handler code is compiled into the generic runtime.
+  tool_implementation_classes:
+    description: Every tool falls into exactly one implementation class. The class determines where the execution logic lives,
+      what the boot validation rules are, and what the portability guarantees are.
+    platform_builtin:
+      description: Tools the platform ships. Always available on every deployment. The platform owns the handler code. The list
+        in platform_builtin_tools is exhaustive — no other tools may use this class.
+      handler_type_value: platform_builtin
+      boot_rule: Must exist. Boot error if a platform_builtin handler is missing. This should never happen.
+      portability: Guaranteed on every platform instance.
+    mcp:
+      description: Tools provided by external MCP servers. The platform connects as an MCP client, discovers tools via tools/list,
+        and forwards agent calls via tools/call. The platform ships one generic MCP client executor — no per-tool handler code.
+      handler_type_value: mcp
+      boot_rule: If an MCP server is unreachable at boot, log warning. Tools from that server are marked unavailable. Agents
+        with those tools in tools_tier2 get a boot warning (not error — the agent may not be invoked in this run). If the agent
+        IS invoked and calls the tool, the platform returns a tool error to the agent.
+      portability: Works anywhere the MCP server is reachable. Pre-built MCP servers exist for common services (databases,
+        APIs, cloud providers). Products can ship custom MCP servers as sidecars for infrastructure-specific tools.
+    http:
+      description: Tools defined declaratively in tools.yaml as HTTP request templates. The platform ships one generic HTTP
+        executor that reads the template, resolves variables, makes the HTTP call, and maps the response. No per-tool handler
+        code. This is the primary mechanism for adding API-based tools without writing code.
+      handler_type_value: http
+      boot_rule: Tool definition must have a valid http block with at least url and method. Credential references are validated
+        against the credential store — warning if missing (tool may be unconfigured in this deployment but should not block
+        boot for other tools).
+      portability: Works anywhere with network access to the target URL.
+    deprecated:
+      workflow_registered: 'Accepted by the loader for backward compatibility. Normalized to http if an http block is present,
+        otherwise logs a boot warning: "Tool {name} uses deprecated handler_type workflow_registered with no http block. Migrate
+        to handler_type: http with an http block, or provide the tool via an MCP server."'
+      api_call: Same as workflow_registered — deprecated, accepted, warns.
   platform_builtin_tools:
-    description: Authoritative list of platform-provided tools. Defined here only.
+    description: Authoritative list of platform-provided tools. Defined here only. This list is exhaustive.
     tools:
       create_flow_instance: Create a new dynamic flow instance from a template. Handler action only.
       record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler specifying which
@@ -1207,21 +1240,129 @@ tool_model:
       mailbox_send: Send an item to the human mailbox (auto-granted to all agents).
     note: 'create_flow_instance is a handler ACTION field value, not a tool agents can call. It is listed here for completeness
       but invoked via action: create_flow_instance in node handlers.'
-  handler_registration: At bootstrap, the workflow module registers handlers for its tools. The platform provides the MCP
-    gateway and schema validation. One tools file per workflow containing all tool schemas (universal + workflow-specific).
-    The platform does not need separate tool files.
+    generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
+      any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
+  agent_tool_filtering:
+    description: Agents only see tools listed in their tools_tier2 contract field. The platform never injects the full tool
+      catalog from any source into an agent session. This controls LLM context cost.
+    rule: When constructing an agent session, the platform resolves tools_tier2 entries against the merged tool registry
+      (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable entries
+      log a warning per the tool_resolution boot check.
+    universal_tools: agent_message and mailbox_send are included in every agent session without listing in tools_tier2. Emit
+      tools (emit_{event_name}) are auto-generated from emit_events. Neither requires explicit tools_tier2 entry.
+    context_cost: An agent with 4 tools in tools_tier2 pays for 4 tool schemas in LLM context, regardless of how many tools
+      exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
+  mcp_client:
+    description: The platform acts as an MCP client, connecting to external MCP servers to discover and invoke tools. MCP
+      servers are registered in the product's policy.yaml under mcp_servers.
+    protocol: JSON-RPC 2.0 per MCP specification (tools/list for discovery, tools/call for execution).
+    registration:
+      location: policy.yaml under mcp_servers key
+      format:
+        mcp_servers:
+          server_name:
+            description: string — human-readable description of what this server provides
+            transport: string — http | stdio
+            url: string — server endpoint (for http transport). Supports policy variable substitution.
+            command: string — command to spawn (for stdio transport)
+            args: list — command arguments (for stdio transport)
+            prefix: string — namespace prefix for this server's tools. Required. Must be unique across all registered servers.
+            credentials_key: string — optional reference to credential store entry for server authentication
+      example: "mcp_servers:\n  postgres:\n    description: PostgreSQL database access\n    transport: http\n    url: \"{{postgres_mcp_url}}\"\
+        \n    prefix: pg\n    credentials_key: postgres_mcp\n  sendgrid:\n    description: Email delivery via SendGrid\n   \
+        \ transport: stdio\n    command: npx\n    args: [\"@sendgrid/mcp-server\"]\n    prefix: email"
+    namespacing:
+      description: MCP tools are prefixed with the server's configured prefix to avoid name collisions across servers and
+        with platform builtins.
+      rule: 'Server with prefix "pg" exposing tool "list_tables" registers as "pg.list_tables" in the platform tool registry.
+        Agents reference the prefixed name in tools_tier2: tools_tier2: [pg.list_tables].'
+      resolution: 'When an agent calls "pg.list_tables", the platform splits on the first dot: prefix "pg" → server "postgres"
+        → tool "list_tables". Forwards tools/call with name "list_tables" to the postgres server.'
+    boot_sequence:
+    - 1. For each server in mcp_servers, establish connection (HTTP client or spawn stdio process).
+    - 2. Call tools/list. Cache the response as the server's tool catalog.
+    - 3. For each tool in the catalog, register in the platform tool registry with the prefixed name.
+    - 4. Log server name, tool count, and tool names at info level.
+    - 5. If connection fails, log warning with server name and error. Skip this server. Do not abort boot.
+    lifecycle:
+      http: Connection maintained for platform lifetime. Reconnect on failure with exponential backoff (1s, 2s, 4s, max 30s).
+      stdio: Process spawned at boot, killed on platform shutdown. If process exits unexpectedly, respawn with backoff.
+  http_tool_definition:
+    description: Tools defined as HTTP request templates in tools.yaml. The platform ships a generic HTTP executor that reads
+      the template, resolves variables, makes the HTTP call, and maps the response. This is the primary mechanism for products
+      to add API-based tool integrations without writing handler code.
+    schema:
+      required_fields:
+        description: string — what the tool does
+        handler_type: http
+        input_schema: object — JSON Schema for tool arguments (same format as platform tools)
+        http: object — HTTP request template (see http_block below)
+      http_block:
+        required:
+          method: string — GET | POST | PUT | PATCH | DELETE
+          url: string — URL template. Supports {{input.field_name}} substitution.
+        optional:
+          headers: object — header name to value template. Supports {{credentials.key}} and {{input.field_name}} substitution.
+          body: object — request body template. Same substitution. Sent as JSON.
+          timeout_seconds: integer — request timeout. Default 30.
+          retry: 'object — max_retries: integer (default 0), backoff: string (exponential)'
+      optional_fields:
+        output_schema: object — field names and types the tool returns (for documentation and LLM context)
+        response_mapping: object — maps response body fields to tool output fields. If omitted, the entire response body is
+          returned as the tool result.
+        credentials: list of strings — credential store key names this tool needs. The platform resolves them from the credential
+          store at call time and makes them available as {{credentials.key}} in templates.
+    template_resolution:
+      description: Template variables in url, headers, body, and response_mapping are resolved at tool call time.
+      variables:
+        input: Tool call arguments from the agent. Accessed as {{input.field_name}}.
+        credentials: Values from the credential store for keys listed in the tool's credentials field. Accessed as {{credentials.key_name}}.
+        response: HTTP response data. Available only in response_mapping. Accessed as {{response.body}}, {{response.status}},
+          {{response.headers.header_name}}.
+      missing_variable: If a required template variable cannot be resolved (missing input field, missing credential), the tool
+        call fails with an error returned to the agent. The platform does not make the HTTP request.
+    example: "check_domain:\n  description: Check if a domain name is available for registration\n  handler_type: http\n  input_schema:\n\
+      \    type: object\n    required: [domain]\n    properties:\n      domain:\n        type: string\n        description:\
+      \ Domain to check (e.g., example.com)\n  http:\n    method: GET\n    url: \"https://api.domainr.com/v2/status?domain={{input.domain}}\"\
+      \n    headers:\n      Authorization: \"Bearer {{credentials.domainr_api_key}}\"\n  response_mapping:\n    available:\
+      \ \"{{response.body.status[0].summary}}\"\n  credentials:\n    - domainr_api_key"
+  credential_store:
+    description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
+      platform provides a typed interface — the storage backend is deployment-specific.
+    interface:
+      get: Retrieve a credential value by key.
+      set: Store a credential value by key. Encrypted at rest.
+      list: List credential keys (not values). For UI display and boot validation.
+      delete: Remove a credential by key.
+    storage_backends:
+      local_dev: Encrypted file in the platform data directory.
+      docker: Environment variables or Docker secrets mounted into the container.
+      production: External secrets manager (Vault, AWS Secrets Manager, GCP Secret Manager). Platform reads via the configured
+        backend.
+    contract_reference: Tools and MCP servers reference credentials by key name, never by value. The key name appears in
+      tools.yaml (credentials field) and policy.yaml (mcp_servers.*.credentials_key). The platform resolves the key to the
+      secret value at call time only.
+    boot_validation: At boot, the platform checks that every credential key referenced by tools and MCP servers exists in the
+      credential store. Missing keys log a warning — the tool may be unconfigured in this deployment.
+    platform_guarantee: The platform never logs, indexes, or persists credential values in the event store, dead letters, or
+      any platform table. Credentials exist only in the credential store and in-flight tool requests.
   custom_tool_schema:
-    description: Accepted fields for tool definitions in tools.yaml.
+    description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
+      classes.
     required_fields:
       description: string — human-readable description of what the tool does
-    optional_fields:
-      handler_type: string — workflow_registered (default), api_call, builtin
+    common_optional_fields:
+      handler_type: string — platform_builtin | mcp | http. Default http.
       input_schema: object — parameter names and types the tool accepts
       output_schema: object — field names and types the tool returns
       parameters: object — alias for input_schema (accepted by loader)
       returns: object — alias for output_schema (accepted by loader)
+    http_fields:
+      http: object — HTTP request template (see http_tool_definition.schema.http_block)
+      response_mapping: object — maps response fields to output fields
+      credentials: list of strings — credential store keys
     not_accepted:
-      endpoint: NOT a valid field. API endpoint configuration belongs in agent config or environment, not tool schema.
+      endpoint: NOT a valid field. Use http.url instead.
       type: NOT a valid field. Use handler_type instead.
 prompt_templating:
   description: Agent prompts are markdown files in the prompts/ directory. They may contain {{variable}} placeholders that
