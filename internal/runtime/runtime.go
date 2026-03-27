@@ -213,7 +213,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	})
 
 	if stores.SQLDB != nil {
-		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore)
+		rt.Budget = NewBudgetTracker(stores.SQLDB, rt.Bus, cfg, stores.MailboxStore, source)
 	}
 
 	modelRuntime := opts.LLMRuntime

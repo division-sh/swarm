@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"swarm/internal/runtime"
 	"github.com/lib/pq"
+	"swarm/internal/runtime"
 )
 
 func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
@@ -13,8 +13,8 @@ func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 	err := s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_state
-		WHERE current_state = ANY($1::text[])
-	`, pq.Array(runtime.ActiveInstanceStates())).Scan(&n)
+		WHERE NOT (current_state = ANY($1::text[]))
+	`, pq.Array(runtime.TerminalInstanceStates())).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
@@ -35,12 +35,12 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 			0,
 			es.updated_at
 		FROM entity_state es
-		WHERE es.current_state = ANY($2::text[])
+		WHERE NOT (es.current_state = ANY($2::text[]))
 		ORDER BY es.updated_at DESC, es.created_at ASC
 		LIMIT $1
 	`
 
-	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(runtime.ActiveInstanceStates()))
+	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(runtime.TerminalInstanceStates()))
 	if err != nil {
 		return nil, fmt.Errorf("list digest rows: %w", err)
 	}

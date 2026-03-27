@@ -1229,17 +1229,26 @@ tool_model:
         to handler_type: http with an http block, or provide the tool via an MCP server."'
       api_call: Same as workflow_registered — deprecated, accepted, warns.
   platform_builtin_tools:
-    description: Authoritative list of platform-provided tools. Defined here only. This list is exhaustive.
+    description: Authoritative list of platform-provided tools. Defined here only. This list is exhaustive. The runtime MUST
+      ship a Go handler for each of these. Any tool not on this list MUST NOT have a Go handler in the generic runtime.
     tools:
+      agent_message: Send a message to another agent. Auto-granted to all agents (universal tool).
+      agent_fire: Terminate an agent session. Requires agent_fire permission.
+      agent_hire: Spawn a new agent session. Requires agent_hire permission.
+      agent_reconfigure: Modify an agent's prompt, tools, or subscriptions. Requires agent_reconfigure permission.
+      configure_routing: Add, remove, or modify event routing rules. Requires configure_routing permission.
+      create_entity: Create a new entity row in entity_state.
       create_flow_instance: Create a new dynamic flow instance from a template. Handler action only.
+      human_task_decide: Record a human decision on a pending task. Requires human_task_decide permission.
+      human_task_request: Create a task for human execution. Requires human_task_request permission.
+      mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
+      query_entities: Query entities by state, fields, or aggregation.
       record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler specifying which
         accumulator key to write to.
-      create_entity: Create a new entity row in entity_state.
-      query_entities: Query entities by state, fields, or aggregation.
-      agent_message: Send a message to another agent (auto-granted to all agents).
-      mailbox_send: Send an item to the human mailbox (auto-granted to all agents).
-    note: 'create_flow_instance is a handler ACTION field value, not a tool agents can call. It is listed here for completeness
-      but invoked via action: create_flow_instance in node handlers.'
+      schedule: Schedule a future action or timer. Requires schedule permission.
+    note: 'create_flow_instance and record_evidence are handler ACTION field values, not tools agents call directly. They are
+      listed here because the platform ships the handler code. They are invoked via action: create_flow_instance or action:
+      record_evidence in node handlers.'
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
   agent_tool_filtering:
@@ -1849,6 +1858,25 @@ platform_events:
         reason: string
         timestamp: string (ISO 8601)
       produced_by_type: platform
+    platform.budget_threshold_crossed:
+      description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
+        and emits this event when a boundary is crossed. One event with a level field — no separate events per level.
+      scope: global
+      payload:
+        level: string (warning | throttle | emergency | ok)
+        current_spend: number (total spend in USD for the current period)
+        budget_cap: number (configured budget cap in USD)
+        percentage: number (current_spend / budget_cap * 100)
+        period: string (budget period identifier)
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+      threshold_source: policy.yaml keys budget_warning_percent, budget_throttle_percent, budget_emergency_percent. The platform
+        reads these at boot. If not present, budget monitoring is disabled.
+      level_semantics:
+        warning: Spend crossed warning threshold. Informational. No automatic action.
+        throttle: Spend crossed throttle threshold. Platform may reduce agent concurrency or defer non-critical work.
+        emergency: Spend crossed emergency threshold. Platform pauses all agent sessions until human intervention.
+        ok: Spend dropped below warning threshold (after a period boundary reset or budget increase). Resume normal operations.
     platform.paused:
       description: Platform entered paused state. No new events processed until resumed.
       scope: global

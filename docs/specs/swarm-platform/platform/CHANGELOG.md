@@ -2,6 +2,12 @@
 
 ## v1.4.0 (2026-03-27)
 
+### New: platform.budget_threshold_crossed event
+Budget monitoring is a platform concern — the platform owns spend_ledger and knows the spend. New event in the platform event catalog with level field (warning/throttle/emergency/ok). Thresholds read from policy.yaml. One event, no separate events per level.
+
+### Fixed: platform_builtin_tools list was incomplete
+Added 7 missing builtins: agent_fire, agent_hire, agent_reconfigure, configure_routing, human_task_decide, human_task_request, schedule. List is now 13 tools total. These operate on platform tables and work on every deployment — they were always builtins, the spec just didn't list them.
+
 ### Rewritten: tool_model — three-layer implementation model
 Replaced the vague `workflow_registered` / `api_call` handler types with three explicit implementation classes:
 

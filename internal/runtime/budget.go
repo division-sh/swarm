@@ -9,14 +9,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
+	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
-	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 // budgetExecutionScopeKey controls intra-process serialization for LLM budget
@@ -45,27 +46,47 @@ type BudgetTracker struct {
 	cfg         *config.Config
 	mailbox     runtimetools.MailboxPersistence
 	mailboxFrom string
+	thresholds  budgetThresholds
 
 	mu        sync.Mutex
 	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
 	scopeMu   sync.Map          // key(scope) => *sync.Mutex
 }
 
-var activeInstanceStates = []string{"approved", "building", "pre_launch", "launched", "active", "expanding"}
+type budgetThresholds struct {
+	Warning   float64
+	Throttle  float64
+	Emergency float64
+}
 
-func ActiveInstanceStates() []string {
-	out := make([]string, len(activeInstanceStates))
-	copy(out, activeInstanceStates)
+var (
+	terminalInstanceStatesMu sync.RWMutex
+	terminalInstanceStates   []string
+)
+
+func SetTerminalInstanceStates(states []string) {
+	terminalInstanceStatesMu.Lock()
+	defer terminalInstanceStatesMu.Unlock()
+	terminalInstanceStates = normalizeBudgetStateList(states)
+}
+
+func TerminalInstanceStates() []string {
+	terminalInstanceStatesMu.RLock()
+	defer terminalInstanceStatesMu.RUnlock()
+	out := make([]string, len(terminalInstanceStates))
+	copy(out, terminalInstanceStates)
 	return out
 }
 
-func NewBudgetTracker(db *sql.DB, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence) *BudgetTracker {
+func NewBudgetTracker(db *sql.DB, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, source semanticview.Source) *BudgetTracker {
+	SetTerminalInstanceStates(source.WorkflowTerminalStages())
 	return &BudgetTracker{
 		db:          db,
 		bus:         bus,
 		cfg:         cfg,
 		mailbox:     mailbox,
 		mailboxFrom: "runtime",
+		thresholds:  budgetThresholdsFromSource(source),
 		lastState:   make(map[string]string),
 	}
 }
@@ -162,9 +183,9 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	rows, err := t.db.QueryContext(ctx, `
 		SELECT entity_id::text
 		FROM entity_state
-		WHERE current_state = ANY($1::text[])
+		WHERE NOT (current_state = ANY($1::text[]))
 		ORDER BY created_at ASC
-	`, pq.Array(activeInstanceStates))
+	`, pq.Array(TerminalInstanceStates()))
 	if err != nil {
 		return
 	}
@@ -416,13 +437,14 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	}
 
 	ratio := float64(spent) / float64(capCents)
+	thresholds := t.thresholds.withDefaults()
 	state := "ok"
 	switch {
-	case ratio >= 1.0:
+	case ratio >= thresholds.Emergency:
 		state = "emergency"
-	case ratio >= 0.9:
+	case ratio >= thresholds.Throttle:
 		state = "throttle"
-	case ratio >= 0.8:
+	case ratio >= thresholds.Warning:
 		state = "warning"
 	default:
 		state = "ok"
@@ -448,32 +470,20 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	}
 
 	payload := map[string]any{
-		"scope":        scope,
-		"entity_id":    entityID,
-		"cap_cents":    capCents,
-		"spent_cents":  spent,
-		"month_start":  start.Format(time.RFC3339),
-		"ratio":        ratio,
-		"state":        state,
-		"evaluated_at": now.Format(time.RFC3339),
+		"level":         state,
+		"current_spend": spent,
+		"budget_cap":    capCents,
+		"percentage":    ratio * 100.0,
+		"period":        start.Format("2006-01"),
+		"timestamp":     now.Format(time.RFC3339),
 	}
 	evtID := uuid.NewString()
 	evt := (events.Event{
 		ID:          evtID,
-		Type:        events.EventType("budget.threshold_crossed"),
+		Type:        events.EventType("platform.budget_threshold_crossed"),
 		SourceAgent: "runtime",
-		Payload: mustJSON(map[string]any{
-			"scope":           scope,
-			"entity_id":       entityID,
-			"cap_cents":       capCents,
-			"spent_cents":     spent,
-			"month_start":     start.Format(time.RFC3339),
-			"ratio":           ratio,
-			"state":           state,
-			"next_event_type": string(budgetEventTypeForState(state)),
-			"evaluated_at":    now.Format(time.RFC3339),
-		}),
-		CreatedAt: time.Now(),
+		Payload:     mustJSON(payload),
+		CreatedAt:   time.Now(),
 	}).WithEntityID(entityID)
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err
@@ -488,7 +498,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 			EventID:   evtID,
 			EntityID:  entityID,
 			FromAgent: t.mailboxFrom,
-			Type:      "budget_increase",
+			Type:      "alert",
 			Priority:  "critical",
 			Status:    "pending",
 			Context:   mustJSON(payload),
@@ -500,15 +510,72 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	return nil
 }
 
-func budgetEventTypeForState(state string) events.EventType {
-	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "emergency":
-		return events.EventType("budget.emergency")
-	case "throttle":
-		return events.EventType("budget.throttle")
-	case "warning":
-		return events.EventType("budget.warning")
-	default:
-		return events.EventType("budget.resumed")
+func budgetThresholdsFromSource(source semanticview.Source) budgetThresholds {
+	return budgetThresholds{
+		Warning:   percentPolicyValue(source, "budget_warning_percent", 80),
+		Throttle:  percentPolicyValue(source, "budget_throttle_percent", 90),
+		Emergency: percentPolicyValue(source, "budget_emergency_percent", 100),
+	}.withDefaults()
+}
+
+func (t budgetThresholds) withDefaults() budgetThresholds {
+	if t.Warning <= 0 {
+		t.Warning = 0.80
 	}
+	if t.Throttle <= 0 {
+		t.Throttle = 0.90
+	}
+	if t.Emergency <= 0 {
+		t.Emergency = 1.00
+	}
+	return t
+}
+
+func percentPolicyValue(source semanticview.Source, key string, fallback float64) float64 {
+	value, ok := semanticview.PolicyValueForFlow(source, "", key)
+	if !ok {
+		return fallback / 100.0
+	}
+	switch typed := value.Value.(type) {
+	case int:
+		return normalizePercentValue(float64(typed), fallback)
+	case int64:
+		return normalizePercentValue(float64(typed), fallback)
+	case float64:
+		return normalizePercentValue(typed, fallback)
+	case float32:
+		return normalizePercentValue(float64(typed), fallback)
+	default:
+		return fallback / 100.0
+	}
+}
+
+func normalizePercentValue(value float64, fallback float64) float64 {
+	if value <= 0 {
+		return fallback / 100.0
+	}
+	if value > 1.0 {
+		return value / 100.0
+	}
+	return value
+}
+
+func normalizeBudgetStateList(states []string) []string {
+	if len(states) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(states))
+	seen := make(map[string]struct{}, len(states))
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		if _, ok := seen[state]; ok {
+			continue
+		}
+		seen[state] = struct{}{}
+		out = append(out, state)
+	}
+	return out
 }
