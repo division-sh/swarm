@@ -9,16 +9,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
-	"github.com/gorilla/websocket"
 )
 
 type handler struct {
 	health         HealthChecker
 	instances      InstanceReader
 	runtime        RuntimeController
+	credentials    runtimecredentials.Store
 	version        string
 	semanticSource semanticview.Source
 	currentSource  SourceProvider
@@ -231,6 +233,51 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 			"gates":       entityGates(instance),
 			"accumulated": entityAccumulated(instance),
 		}, nil
+	case "credentials.list":
+		if h.credentials == nil {
+			return nil, methodUnavailable("credential store is not configured")
+		}
+		items, err := runtimecredentials.ListDescriptors(ctx, h.credentials, h.currentSemanticSource())
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"credentials": credentialRecords(items)}, nil
+	case "credentials.set":
+		if h.credentials == nil {
+			return nil, methodUnavailable("credential store is not configured")
+		}
+		key := strings.TrimSpace(asString(params["key"]))
+		if key == "" {
+			return nil, &RPCError{Code: -32602, Message: "key is required"}
+		}
+		rawValue, ok := params["value"]
+		if !ok {
+			return nil, &RPCError{Code: -32602, Message: "value is required"}
+		}
+		if err := h.credentials.Set(ctx, key, asString(rawValue)); err != nil {
+			return nil, internalError(err)
+		}
+		record, err := runtimecredentials.Describe(ctx, h.credentials, h.currentSemanticSource(), key)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"credential": credentialRecord(record)}, nil
+	case "credentials.delete":
+		if h.credentials == nil {
+			return nil, methodUnavailable("credential store is not configured")
+		}
+		key := strings.TrimSpace(asString(params["key"]))
+		if key == "" {
+			return nil, &RPCError{Code: -32602, Message: "key is required"}
+		}
+		if err := h.credentials.Delete(ctx, key); err != nil {
+			return nil, internalError(err)
+		}
+		record, err := runtimecredentials.Describe(ctx, h.credentials, h.currentSemanticSource(), key)
+		if err != nil {
+			return nil, internalError(err)
+		}
+		return map[string]any{"credential": credentialRecord(record)}, nil
 	case "validate.full":
 		return h.runFullValidation(ctx), nil
 	default:
@@ -330,6 +377,29 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 			Severity: "warning",
 			Message:  strings.TrimSpace(warning.Message),
 		})
+	}
+	if h.credentials != nil {
+		missing, err := runtimecredentials.MissingRequired(context.Background(), h.credentials, source)
+		if err != nil {
+			result.Errors = append(result.Errors, ValidationIssue{
+				CheckID:  "credential_validation",
+				Severity: "error",
+				Message:  strings.TrimSpace(err.Error()),
+			})
+		} else {
+			for _, item := range missing {
+				requiredBy := make([]string, 0, len(item.RequiredBy))
+				for _, ref := range item.RequiredBy {
+					requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
+				}
+				result.Warnings = append(result.Warnings, ValidationIssue{
+					CheckID:    "credential_requirements",
+					Severity:   "warning",
+					Message:    fmtCredentialWarning(item.Key, requiredBy),
+					Suggestion: "set the credential with credentials.set before executing dependent tools",
+				})
+			}
+		}
 	}
 	if len(result.Errors) > 0 {
 		result.Status = "fail"
@@ -550,6 +620,13 @@ func internalError(err error) *RPCError {
 
 func errUnavailable(message string) error { return errors.New(strings.TrimSpace(message)) }
 
+func fmtCredentialWarning(key string, requiredBy []string) string {
+	if len(requiredBy) == 0 {
+		return "missing credential " + strconvQuote(key)
+	}
+	return "missing credential " + strconvQuote(key) + " required by " + strings.Join(requiredBy, ", ")
+}
+
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(status)
@@ -588,4 +665,39 @@ func asStringSlice(v any) []string {
 		}
 	}
 	return out
+}
+
+func credentialRecords(items []runtimecredentials.Descriptor) []CredentialRecord {
+	out := make([]CredentialRecord, 0, len(items))
+	for _, item := range items {
+		out = append(out, credentialRecord(item))
+	}
+	return out
+}
+
+func credentialRecord(item runtimecredentials.Descriptor) CredentialRecord {
+	record := CredentialRecord{
+		Key:      item.Key,
+		Present:  item.Present,
+		Source:   item.Source,
+		Writable: item.Writable,
+	}
+	if item.UpdatedAt != nil && !item.UpdatedAt.IsZero() {
+		record.UpdatedAt = item.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	for _, ref := range item.RequiredBy {
+		record.RequiredBy = append(record.RequiredBy, CredentialRequirement{
+			Kind: ref.Kind,
+			Name: ref.Name,
+		})
+	}
+	return record
+}
+
+func strconvQuote(value string) string {
+	raw, err := json.Marshal(strings.TrimSpace(value))
+	if err != nil {
+		return `""`
+	}
+	return string(raw)
 }

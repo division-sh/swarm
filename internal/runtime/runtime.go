@@ -18,6 +18,7 @@ import (
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecredentials "swarm/internal/runtime/credentials"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -48,6 +49,7 @@ type RuntimeOptions struct {
 	ToolGatewayToken   string
 	WorkflowModule     runtimepipeline.WorkflowModule
 	LLMRuntime         llm.Runtime
+	Credentials        runtimecredentials.Store
 }
 
 type Runtime struct {
@@ -61,6 +63,7 @@ type Runtime struct {
 	Scheduler      *runtimepipeline.Scheduler
 	Workspace      workspace.Lifecycle
 	Budget         *BudgetTracker
+	Credentials    runtimecredentials.Store
 	LLM            llm.Runtime
 	ToolExecutor   *runtimetools.Executor
 	Manager        *runtimemanager.AgentManager
@@ -163,6 +166,11 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		Options:   opts,
 		Workspace: opts.WorkspaceLifecycle,
 	}
+	if opts.Credentials != nil {
+		rt.Credentials = opts.Credentials
+	} else {
+		rt.Credentials = runtimecredentials.NewEnvStore()
+	}
 
 	if stores.SQLDB != nil {
 		rt.Logger = NewRuntimeLogger(stores.SQLDB)
@@ -235,6 +243,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	var managerRef *runtimemanager.AgentManager
 	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
 		Config:         cfg,
+		Credentials:    rt.Credentials,
 		MailboxStore:   stores.MailboxStore,
 		SQLDB:          stores.SQLDB,
 		WorkflowSource: source,
@@ -243,6 +252,17 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			return managerRef
 		},
 	}, stores.ScheduleStore)
+	if missing, err := runtimecredentials.MissingRequired(ctx, rt.Credentials, source); err != nil {
+		return nil, fmt.Errorf("credential validation failed: %w", err)
+	} else {
+		for _, item := range missing {
+			requiredBy := make([]string, 0, len(item.RequiredBy))
+			for _, ref := range item.RequiredBy {
+				requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+":"+strings.TrimSpace(ref.Name))
+			}
+			slog.Warn("credential requirement warning", "key", item.Key, "required_by", strings.Join(requiredBy, ", "))
+		}
+	}
 	runtimetools.InitEventSchemaRegistry(source)
 	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 {
 		if runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true) {

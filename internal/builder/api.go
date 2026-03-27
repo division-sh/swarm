@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimepkg "swarm/internal/runtime"
+	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -46,6 +47,7 @@ type Options struct {
 	Health         HealthChecker
 	Instances      InstanceReader
 	Runtime        RuntimeController
+	Credentials    runtimecredentials.Store
 	Version        string
 	SemanticSource semanticview.Source
 	RuntimeRef     *runtimepkg.Runtime
@@ -114,15 +116,29 @@ type ValidationResult struct {
 	Summary  ValidationSummary `json:"summary"`
 }
 
+type CredentialRequirement struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+
+type CredentialRecord struct {
+	Key        string                  `json:"key"`
+	Present    bool                    `json:"present"`
+	Source     string                  `json:"source,omitempty"`
+	Writable   bool                    `json:"writable"`
+	UpdatedAt  string                  `json:"updated_at,omitempty"`
+	RequiredBy []CredentialRequirement `json:"required_by,omitempty"`
+}
+
 type EngineHealth struct {
-	Status      string        `json:"status"`
-	Version     string        `json:"version"`
-	Timestamp   string        `json:"timestamp"`
-	Ready       bool          `json:"ready,omitempty"`
+	Status      string         `json:"status"`
+	Version     string         `json:"version"`
+	Timestamp   string         `json:"timestamp"`
+	Ready       bool           `json:"ready,omitempty"`
 	Runtime     map[string]any `json:"runtime,omitempty"`
 	Database    map[string]any `json:"database,omitempty"`
-	DatabaseErr string        `json:"database_error,omitempty"`
-	Project     ProjectStatus `json:"project,omitempty"`
+	DatabaseErr string         `json:"database_error,omitempty"`
+	Project     ProjectStatus  `json:"project,omitempty"`
 }
 
 func NewHandler(opts Options) http.Handler {
@@ -130,6 +146,7 @@ func NewHandler(opts Options) http.Handler {
 		health:         opts.Health,
 		instances:      opts.Instances,
 		runtime:        opts.Runtime,
+		credentials:    opts.Credentials,
 		version:        strings.TrimSpace(opts.Version),
 		semanticSource: opts.SemanticSource,
 		currentSource:  opts.CurrentSource,

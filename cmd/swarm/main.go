@@ -19,12 +19,13 @@ import (
 	"syscall"
 	"time"
 
-	"swarm/internal/config"
 	builderpkg "swarm/internal/builder"
+	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -126,11 +127,17 @@ func main() {
 		slog.Error("validate workspaces", "error", err)
 		os.Exit(1)
 	}
+	credentialStore, err := buildCredentialStore()
+	if err != nil {
+		slog.Error("configure credentials", "error", err)
+		os.Exit(1)
+	}
 
 	rt, err := runtime.NewRuntime(ctx, cfg, stores.runtimeStores(), runtime.RuntimeOptions{
 		SelfCheck:          *selfCheck,
 		WorkflowModule:     module,
 		WorkspaceLifecycle: workspaces,
+		Credentials:        credentialStore,
 	})
 	if err != nil {
 		log.Fatalf("init runtime: %v", err)
@@ -143,7 +150,7 @@ func main() {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
-	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns))
+	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns, credentialStore))
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -502,7 +509,7 @@ func logReadySummary(source semanticview.Source, contractsRoot, healthAddr strin
 	)
 }
 
-func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int) dashboardserver.Options {
+func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBundle, ready *atomic.Bool, rotateAfterTurns int, credentialStore runtimecredentials.Store) dashboardserver.Options {
 	var (
 		agents        dashboardserver.AgentReader
 		mailbox       dashboardserver.MailboxReader
@@ -563,6 +570,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 		Health:         healthFn,
 		Instances:      runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
 		Runtime:        runtimeCtl,
+		Credentials:    credentialStore,
 		Version:        "swarm-dev",
 		CurrentSource:  sourceProvider,
 		CurrentRuntime: runtimeProvider,
@@ -570,16 +578,32 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 	})
 	return dashboardserver.Options{
 		Health:        healthFn,
-		Agents:         agents,
-		AgentControl:   agentControl,
-		Mailbox:        mailbox,
-		Instances:      runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
-		Conversations:  conversations,
-		Observability:  observability,
-		Runtime:        runtimeCtl,
-		Version:        "swarm-dev",
-		Builder:        builderHandler,
+		Agents:        agents,
+		AgentControl:  agentControl,
+		Mailbox:       mailbox,
+		Instances:     runtimepipeline.NewWorkflowInstanceStore(stores.SQLDB),
+		Conversations: conversations,
+		Observability: observability,
+		Runtime:       runtimeCtl,
+		Version:       "swarm-dev",
+		Builder:       builderHandler,
 	}
+}
+
+func buildCredentialStore() (runtimecredentials.Store, error) {
+	path := strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE"))
+	if path == "" {
+		var err error
+		path, err = runtimecredentials.DefaultFilePath()
+		if err != nil {
+			return nil, err
+		}
+	}
+	fileStore, err := runtimecredentials.NewFileStore(path)
+	if err != nil {
+		return nil, err
+	}
+	return runtimecredentials.NewOverlayStore(runtimecredentials.NewEnvStore(), fileStore), nil
 }
 
 func configuredWorkspaceLifecycle(db *sql.DB, repoRoot, contractsRoot string, source semanticview.Source) *workspace.DockerManager {

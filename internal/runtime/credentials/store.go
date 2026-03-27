@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
+	"time"
 )
 
 type Store interface {
@@ -14,6 +14,24 @@ type Store interface {
 	List(ctx context.Context) ([]string, error)
 	Delete(ctx context.Context, key string) error
 }
+
+type Inspector interface {
+	Store
+	Inspect(ctx context.Context, key string) (Metadata, error)
+}
+
+type Metadata struct {
+	Key       string
+	Present   bool
+	Source    string
+	Writable  bool
+	UpdatedAt *time.Time
+}
+
+const (
+	SourceEnv  = "env"
+	SourceFile = "file"
+)
 
 type EnvStore struct{}
 
@@ -37,25 +55,27 @@ func (EnvStore) Set(_ context.Context, _, _ string) error {
 }
 
 func (EnvStore) List(_ context.Context) ([]string, error) {
-	env := os.Environ()
-	keys := make([]string, 0, len(env))
-	for _, entry := range env {
-		parts := strings.SplitN(entry, "=", 2)
-		if len(parts) == 0 {
-			continue
-		}
-		key := strings.TrimSpace(parts[0])
-		if key == "" {
-			continue
-		}
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys, nil
+	return nil, nil
 }
 
 func (EnvStore) Delete(_ context.Context, _ string) error {
 	return fmt.Errorf("env credential store is read-only")
+}
+
+func (EnvStore) Inspect(ctx context.Context, key string) (Metadata, error) {
+	_, ok, err := EnvStore{}.Get(ctx, key)
+	if err != nil {
+		return Metadata{}, err
+	}
+	meta := Metadata{
+		Key:      strings.TrimSpace(key),
+		Present:  ok,
+		Writable: false,
+	}
+	if ok {
+		meta.Source = SourceEnv
+	}
+	return meta, nil
 }
 
 func credentialEnvCandidates(key string) []string {
