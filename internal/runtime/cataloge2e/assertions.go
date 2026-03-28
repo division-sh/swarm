@@ -416,13 +416,18 @@ func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string
 	var count int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
-		FROM event_receipts r
-		JOIN events e ON e.event_id = r.event_id
-		WHERE r.processed_at >= $1
-		  AND r.outcome = 'dead_letter'
-		  AND COALESCE(e.payload->>'entity_id', '') = $2
-	`, since, strings.TrimSpace(entityID)).Scan(&count); err != nil {
-		t.Fatalf("query dead_letter receipts: %v", err)
+		FROM (
+			SELECT 1
+			FROM dead_letters dl
+			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
+			UNION ALL
+			SELECT 1
+			FROM events e
+			WHERE e.event_name = 'platform.dead_letter'
+			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
+		) hits
+	`, strings.TrimSpace(entityID)).Scan(&count); err != nil {
+		t.Fatalf("query dead_letters: %v", err)
 	}
 	got := count > 0
 	if got != want {
@@ -664,15 +669,18 @@ func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, en
 	var count int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
-		FROM event_receipts r
-		JOIN events e ON e.event_id = r.event_id
-		WHERE r.processed_at >= $1
-		  AND r.subscriber_type = 'platform'
-		  AND r.subscriber_id = 'pipeline'
-		  AND r.outcome = 'dead_letter'
-		  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $2
-	`, since, entityID).Scan(&count); err != nil {
-		t.Fatalf("query dead_letter outcome receipts: %v", err)
+		FROM (
+			SELECT 1
+			FROM dead_letters dl
+			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
+			UNION ALL
+			SELECT 1
+			FROM events e
+			WHERE e.event_name = 'platform.dead_letter'
+			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
+		) hits
+	`, entityID).Scan(&count); err != nil {
+		t.Fatalf("query dead_letter outcomes: %v", err)
 	}
 	return count > 0
 }
@@ -689,16 +697,20 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityI
 	var count int
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COUNT(*)
-		FROM event_receipts r
-		JOIN events e ON e.event_id = r.event_id
-		WHERE r.processed_at >= $1
-		  AND r.subscriber_type = 'platform'
-		  AND r.subscriber_id = 'pipeline'
-		  AND r.outcome = 'dead_letter'
-		  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $2
-		  AND LOWER(COALESCE(r.side_effects->>'error', '')) LIKE '%chain depth exceeded%'
-	`, since, entityID).Scan(&count); err != nil {
-		t.Fatalf("query chain_depth_exceeded receipts: %v", err)
+		FROM (
+			SELECT 1
+			FROM dead_letters dl
+			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
+			  AND dl.failure_type = 'chain_depth_exceeded'
+			UNION ALL
+			SELECT 1
+			FROM events e
+			WHERE e.event_name = 'platform.dead_letter'
+			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
+			  AND COALESCE(e.payload->>'failure_type', '') = 'chain_depth_exceeded'
+		) hits
+	`, entityID).Scan(&count); err != nil {
+		t.Fatalf("query chain_depth_exceeded dead_letters: %v", err)
 	}
 	got := count > 0
 	if got != want {

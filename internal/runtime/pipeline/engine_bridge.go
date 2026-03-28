@@ -37,6 +37,7 @@ type handlerExecutionOutcome struct {
 	RuleID           string
 	FanOutCount      int
 	Computed         map[string]any
+	InterceptedEmits []runtimeengine.EmitIntent
 }
 
 type contractHandlerExecutionResult struct {
@@ -239,6 +240,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	if !preview {
+		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
+	}
 	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, entityID, nodeID, handler, triggerCtx.Event, result.StateMutation.StateBuckets, result.Status == runtimeengine.OutcomeWaiting); err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
@@ -280,6 +284,7 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		RuleID:           strings.TrimSpace(result.RuleID),
 		FanOutCount:      result.FanOutCount,
 		Computed:         cloneStringAnyMap(result.Computed),
+		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
 	}
 	if len(result.EmitIntents) > 0 {
 		out.Emits = make([]string, 0, len(result.EmitIntents))

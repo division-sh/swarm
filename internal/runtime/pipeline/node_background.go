@@ -15,16 +15,20 @@ type backgroundWorkflowNode struct {
 }
 
 func newBackgroundWorkflowNode(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB) *backgroundWorkflowNode {
+	return newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, 0)
+}
+
+func newBackgroundWorkflowNodeWithRetryBase(executor WorkflowNodeExecutor, bus systemNodeBus, db *sql.DB, retryBase time.Duration) *backgroundWorkflowNode {
 	if executor == nil || bus == nil {
 		return nil
 	}
 	node := &backgroundWorkflowNode{executor: executor}
-	node.runner = newSystemNodeRunner(executor.NodeID(), bus, db, executor.Subscriptions, func(ctx context.Context, evt events.Event) error {
+	node.runner = newSystemNodeRunnerWithRetryBase(executor.NodeID(), bus, db, executor.Subscriptions, func(ctx context.Context, evt events.Event) error {
 		if handled := executor.Handle(ctx, evt); handled {
 			return nil
 		}
 		return fmt.Errorf("workflow executor %s did not handle subscribed event %s", executor.NodeID(), evt.Type)
-	})
+	}, retryBase)
 	return node
 }
 

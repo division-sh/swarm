@@ -178,7 +178,7 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 	}
 }
 
-func TestExecuteNodeContractHandlerRuleMatchOverridesDefaultEmit(t *testing.T) {
+func TestExecuteNodeContractHandlerRuleMatchAugmentsDefaultEmit(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -201,11 +201,14 @@ func TestExecuteNodeContractHandlerRuleMatchOverridesDefaultEmit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
-	if got := bus.publishedCount(); got != 1 {
-		t.Fatalf("bus published count = %d, want 1", got)
+	if got := bus.publishedCount(); got != 2 {
+		t.Fatalf("bus published count = %d, want 2", got)
 	}
-	if got := string(bus.publishedEvent(0).Type); got != "rule.emitted" {
-		t.Fatalf("published type = %q, want rule.emitted", got)
+	if got := string(bus.publishedEvent(0).Type); got != "default.emitted" {
+		t.Fatalf("published type[0] = %q, want default.emitted", got)
+	}
+	if got := string(bus.publishedEvent(1).Type); got != "rule.emitted" {
+		t.Fatalf("published type[1] = %q, want rule.emitted", got)
 	}
 }
 

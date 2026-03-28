@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -550,18 +551,50 @@ func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []
 	if pc == nil || bus == nil {
 		return nil
 	}
+	retryBase := workflowHandlerRetryBase(pc.SemanticSource())
 	out := make([]BackgroundNode, 0, 1)
 	for _, node := range pc.WorkflowNodes() {
 		if strings.TrimSpace(node.ExecutionType) != "workflow_node" {
 			continue
 		}
 		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
-			if bg := newBackgroundWorkflowNode(executor, bus, db); bg != nil {
+			if bg := newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, retryBase); bg != nil {
 				out = append(out, bg)
 			}
 		}
 	}
 	return out
+}
+
+func workflowHandlerRetryBase(source semanticview.Source) time.Duration {
+	if source == nil {
+		return time.Second
+	}
+	value, ok := semanticview.PolicyValueForFlow(source, "", "handler_retry_base_seconds")
+	if !ok {
+		return time.Second
+	}
+	switch typed := value.Value.(type) {
+	case int:
+		if typed > 0 {
+			return time.Duration(typed) * time.Second
+		}
+	case int64:
+		if typed > 0 {
+			return time.Duration(typed) * time.Second
+		}
+	case float64:
+		if typed > 0 {
+			return time.Duration(typed * float64(time.Second))
+		}
+	default:
+		if secs := strings.TrimSpace(asString(typed)); secs != "" {
+			if parsed, err := time.ParseDuration(secs + "s"); err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return time.Second
 }
 
 func (pc *PipelineCoordinator) backgroundWorkflowExecutor(nodeID string) WorkflowNodeExecutor {

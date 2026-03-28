@@ -3,15 +3,17 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimeengine "swarm/internal/runtime/engine"
-	"github.com/google/uuid"
 )
 
 type pipelineEmitCollectorKey struct{}
@@ -234,10 +236,80 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeI
 		}
 		return false
 	}
+	pc.recordInterceptedEmitDeadLetters(ctx, evt, nodeID, result.Outcome)
 	if result.Handled {
 		pc.reconcileWorkflowEventTimers(ctx, workflowEventEntityID(evt), trigger)
 	}
 	return result.Handled
+}
+
+func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Context, trigger events.Event, nodeID string, outcome *handlerExecutionOutcome) {
+	if pc == nil || outcome == nil || len(outcome.InterceptedEmits) == 0 {
+		return
+	}
+	entityID := workflowEventEntityID(trigger)
+	nodeID = strings.TrimSpace(nodeID)
+	for _, intercepted := range outcome.InterceptedEmits {
+		if strings.TrimSpace(intercepted.DeadLetterHint) != "chain_depth_exceeded" {
+			continue
+		}
+		eventType := strings.TrimSpace(string(intercepted.Event.Type))
+		errMsg := fmt.Sprintf("emit %s exceeded chain depth limit", eventType)
+		rec := runtimedeadletters.Record{
+			OriginalEventID: strings.TrimSpace(trigger.ID),
+			OriginalEvent:   eventType,
+			OriginalPayload: intercepted.Event.Payload,
+			EntityID:        entityID,
+			FlowInstance:    "runtime",
+			FailureType:     "chain_depth_exceeded",
+			ErrorMessage:    errMsg,
+			ChainDepth:      intercepted.ChainDepth,
+			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
+		}
+		recordDeadLetter := func() {
+			if pc.db == nil {
+				return
+			}
+			if err := runtimedeadletters.Insert(ctx, pc.db, rec); err != nil {
+				runtimeWarn("workflow-runtime", "intercepted emit dead letter persist failed event=%s entity_id=%s: %v", eventType, entityID, err)
+			}
+		}
+		if !queuePipelinePostCommitAction(ctx, recordDeadLetter) {
+			recordDeadLetter()
+		}
+		deadLetterPayload := map[string]any{
+			"original_event":   eventType,
+			"original_payload": json.RawMessage(intercepted.Event.Payload),
+			"entity_id":        entityID,
+			"flow_instance":    "runtime",
+			"failure_type":     "chain_depth_exceeded",
+			"error_message":    errMsg,
+			"retry_count":      0,
+			"chain_depth":      intercepted.ChainDepth,
+			"handler_node":     nodeID,
+			"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
+			sourceAgent := pipelineSourceAgent(ctx)
+			if sourceAgent == "" {
+				sourceAgent = runtimeWorkflowID
+			}
+			*collector = append(*collector, (events.Event{
+				ID:          uuid.NewString(),
+				Type:        events.EventType("platform.dead_letter"),
+				SourceAgent: sourceAgent,
+				Payload:     mustJSON(deadLetterPayload),
+				CreatedAt:   time.Now().UTC(),
+			}).WithEntityID(entityID))
+			continue
+		}
+		publishDeadLetter := func() {
+			pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload)
+		}
+		if !queuePipelinePostCommitAction(ctx, publishDeadLetter) {
+			publishDeadLetter()
+		}
+	}
 }
 
 func (pc *PipelineCoordinator) notifyTestSubscribed() {

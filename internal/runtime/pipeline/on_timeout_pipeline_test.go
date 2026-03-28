@@ -91,7 +91,7 @@ func TestExecuteAuthoritativeNodeHandler_OnTimeoutAdvancesPartial(t *testing.T) 
 	if result.Outcome.AdvancesTo != "partial" {
 		t.Fatalf("Outcome.AdvancesTo = %q", result.Outcome.AdvancesTo)
 	}
-	if len(result.Outcome.Emits) != 1 || result.Outcome.Emits[0] != "collection.partial" {
+	if len(result.Outcome.Emits) != 2 || result.Outcome.Emits[0] != "collection.done" || result.Outcome.Emits[1] != "collection.partial" {
 		t.Fatalf("Outcome.Emits = %#v", result.Outcome.Emits)
 	}
 }

@@ -42,8 +42,10 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	ictx, evt := runtimecorrelation.CorrelateEvent(ctx, evt)
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
+	postCommitActions := make([]func(), 0, 8)
 	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
 	ictx = runtimepipeline.WithPipelineTransitionCollector(ictx, &deferredTransitions)
+	ictx = runtimepipeline.WithPipelinePostCommitActions(ictx, &postCommitActions)
 	ictx = runtimepipeline.WithPipelineReceiptOverride(ictx, receiptOverride)
 	if txStore, ok := eb.store.(TransactionalEventStore); ok {
 		return eb.publishTransactional(ictx, evt, start, &deferredTransitions, txStore)
@@ -89,6 +91,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		persisted = true
 	}
 	eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	runtimepipeline.FlushDeferredPipelineTransitions(ictx, deferredTransitions)
 	for _, d := range deferred {
 		if err := eb.publishDeferred(ictx, d); err != nil {

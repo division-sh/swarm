@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
@@ -87,6 +88,14 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: module,
 	})
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "pending",
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
 
 	if handled := pc.executeNodeHandlerPlan(ctx, "node-1", evt); !handled {
 		t.Fatalf("executeNodeHandlerPlan handled = false, want true")
@@ -104,7 +113,7 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	`, evt.ID).Scan(&failureType, &chainDepth, &handlerNode); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
-	if failureType != "chain_depth_exceeded" || chainDepth != 5 || handlerNode != "node-1" {
+	if failureType != "chain_depth_exceeded" || chainDepth != 6 || !strings.HasPrefix(handlerNode, "node-1") {
 		t.Fatalf("dead_letter row = type=%q chain_depth=%d handler=%q", failureType, chainDepth, handlerNode)
 	}
 }

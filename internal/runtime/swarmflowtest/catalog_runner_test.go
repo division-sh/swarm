@@ -634,7 +634,10 @@ func runSimpleCatalogCase(t testing.TB, dir string) (catalogRunResult, catalogEx
 					result.entityFields = cloneStringAnyMapCatalog(entity)
 				}
 				applyCatalogCompute(accumulate.OnTimeout.Compute, entity)
+				applyCatalogDataAccumulation(handler.DataAccumulation, step.Payload, entity)
+				applyCatalogCompute(handler.Compute, entity)
 				result.entityFields = cloneStringAnyMapCatalog(entity)
+				result.emittedEvents = append(result.emittedEvents, handler.Emits.Values()...)
 				break
 			}
 			continue

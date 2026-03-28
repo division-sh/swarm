@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"swarm/internal/events"
@@ -117,7 +118,7 @@ func TestNewExecutor_DefaultsMaxChainDepth(t *testing.T) {
 	}
 }
 
-func TestExecutor_ValidateRequestChecksChainDepth(t *testing.T) {
+func TestExecutor_ValidateRequestAllowsDeepInboundChainDepth(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
@@ -131,8 +132,31 @@ func TestExecutor_ValidateRequestChecksChainDepth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
-	if err := exec.ValidateRequest(ExecutionRequest{ChainDepth: 3}); err != ErrChainDepthExceeded {
-		t.Fatalf("ValidateRequest error = %v, want %v", err, ErrChainDepthExceeded)
+	if err := exec.ValidateRequest(ExecutionRequest{ChainDepth: 3}); err != nil {
+		t.Fatalf("ValidateRequest error = %v, want nil", err)
+	}
+}
+
+func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "true"}},
+			Rules:      []runtimecontracts.HandlerRuleEntry{{Condition: "else"}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "declares both on_complete and rules") {
+		t.Fatalf("ValidateRequest error = %v, want conflicting completion error", err)
 	}
 }
 
@@ -477,6 +501,145 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	}
 	if result.NextState != "approved" {
 		t.Fatalf("NextState = %q", result.NextState)
+	}
+}
+
+func TestExecutor_RuleEmitsAugmentHandlerEmits(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emits: runtimecontracts.EventEmission{Single: "handler.emitted"},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+				Emits:     runtimecontracts.EventEmission{Single: "rule.emitted"},
+			}},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 2 {
+		t.Fatalf("EmitIntents count = %d, want 2", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type); got != "handler.emitted" {
+		t.Fatalf("first emit type = %q", got)
+	}
+	if got := string(result.EmitIntents[1].Event.Type); got != "rule.emitted" {
+		t.Fatalf("second emit type = %q", got)
+	}
+}
+
+func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{"score":9}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					TargetField: "metadata.final_source",
+					Value:       runtimecontracts.ExpressionValue{Literal: "handler"},
+				}},
+			},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				Condition: "payload.score > 5",
+				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+					Writes: []runtimecontracts.WorkflowDataWrite{{
+						TargetField: "metadata.final_source",
+						Value:       runtimecontracts.ExpressionValue{Literal: "rule"},
+					}, {
+						TargetField: "metadata.rule_only",
+						Value:       runtimecontracts.ExpressionValue{Literal: "applied"},
+					}},
+				},
+			}},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.StateMutation.Metadata["final_source"]; got != "handler" {
+		t.Fatalf("final_source = %#v, want handler", got)
+	}
+	if got := result.StateMutation.Metadata["rule_only"]; got != "applied" {
+		t.Fatalf("rule_only = %#v, want applied", got)
+	}
+}
+
+func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		MaxChainDepth: 1,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      events.Event{ID: "evt-1", Type: "task.completed", Payload: json.RawMessage(`{}`)},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			AdvancesTo: "done",
+			Emits:      runtimecontracts.EventEmission{Single: "task.followup"},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.Status; got != OutcomeCompleted {
+		t.Fatalf("Status = %q, want completed", got)
+	}
+	if got := result.NextState; got != "done" {
+		t.Fatalf("NextState = %q, want done", got)
+	}
+	if got := len(result.EmitIntents); got != 0 {
+		t.Fatalf("EmitIntents count = %d, want 0", got)
+	}
+	if got := len(result.DeadLetterIntents); got != 1 {
+		t.Fatalf("DeadLetterIntents count = %d, want 1", got)
+	}
+	if got := result.DeadLetterIntents[0].DeadLetterHint; got != "chain_depth_exceeded" {
+		t.Fatalf("DeadLetterHint = %q", got)
 	}
 }
 

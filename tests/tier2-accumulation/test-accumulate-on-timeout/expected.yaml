@@ -12,5 +12,6 @@ trigger:
 expected:
   entity_state: partial
   emitted_events:
+    - collection.done
     - collection.partial
   handler_outcome: success

@@ -1131,6 +1131,23 @@ func normalizeStrings(values []string) []string {
 	return out
 }
 
+func uniqueOrderedStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
 func truthy(raw any) bool {
 	switch typed := raw.(type) {
 	case bool:

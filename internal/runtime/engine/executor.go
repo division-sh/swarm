@@ -118,8 +118,8 @@ func (e *Executor) Steps() []Step {
 }
 
 func (e *Executor) ValidateRequest(req ExecutionRequest) error {
-	if req.ChainDepth > e.MaxChainDepth() {
-		return ErrChainDepthExceeded
+	if handlerDeclaresConflictingCompletion(req.Handler) {
+		return fmt.Errorf("%w: handler declares both on_complete and rules", ErrInvalidConfig)
 	}
 	return nil
 }
@@ -536,7 +536,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 }
 
 func (e *Executor) stepCompute(frame *executionFrame) error {
-	spec := frame.req.Handler.Compute
+	spec := e.selectedCompute(frame)
 	if spec == nil {
 		return nil
 	}
@@ -558,7 +558,7 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 }
 
 func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
-	spec := frame.req.Handler.FanOut
+	spec := e.selectedFanOut(frame)
 	if spec == nil {
 		return false, nil
 	}
@@ -571,11 +571,6 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	e.writeStepValue(frame, "entity.fan_out_count", len(items))
 	if len(items) == 0 {
 		return false, nil
-	}
-	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
-	if err != nil {
-		frame.result.FailureClass = FailureDeadLetter
-		return false, err
 	}
 	for _, item := range items {
 		eventType := fanOutEventType(spec, item)
@@ -594,16 +589,13 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		intent, err := e.newEmitIntent(frame, eventType, shaped, nextDepth)
-		if err != nil {
+		if _, err := e.queueEmitIntent(frame, eventType, shaped); err != nil {
 			return false, err
 		}
-		frame.result.EmitIntents = append(frame.result.EmitIntents, intent)
 	}
-	if len(frame.result.EmitIntents) == 0 {
+	if len(frame.result.EmitIntents) == 0 && len(frame.result.DeadLetterIntents) == 0 {
 		return false, nil
 	}
-	frame.result.ChainDepth = nextDepth
 	if err := e.stepAdvancesTo(frame); err != nil {
 		return false, err
 	}
@@ -740,14 +732,14 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 }
 
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
-	spec, isRuleSpecific := e.selectedDataAccumulation(frame)
-	if !isRuleSpecific && frame.topLevelDataWritesApplied {
-		return nil
+	ruleHasWrites := frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "")
+	if ruleHasWrites {
+		e.applyDataAccumulation(frame, frame.rule.DataAccumulation)
 	}
-	if !spec.HasWrites() && strings.TrimSpace(spec.SourceEvent) == "" {
-		return nil
+	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && (!frame.topLevelDataWritesApplied || ruleHasWrites) {
+		e.applyDataAccumulation(frame, frame.topLevelDataAccumulation)
+		frame.topLevelDataWritesApplied = true
 	}
-	e.applyDataAccumulation(frame, spec)
 	return nil
 }
 
@@ -761,17 +753,13 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 }
 
 func (e *Executor) stepEmits(frame *executionFrame) error {
-	eventTypes := frame.req.Handler.Emits.Values()
+	eventTypes := append([]string{}, frame.req.Handler.Emits.Values()...)
 	if frame.rule != nil && !frame.rule.Emits.Empty() {
-		eventTypes = frame.rule.Emits.Values()
+		eventTypes = append(eventTypes, frame.rule.Emits.Values()...)
 	}
+	eventTypes = uniqueOrderedStrings(eventTypes)
 	if len(eventTypes) == 0 {
 		return nil
-	}
-	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
-	if err != nil {
-		frame.result.FailureClass = FailureDeadLetter
-		return err
 	}
 	payload := frame.payload
 	if len(frame.state.Transformed) > 0 {
@@ -782,13 +770,10 @@ func (e *Executor) stepEmits(frame *executionFrame) error {
 		if err != nil {
 			return err
 		}
-		intent, err := e.newEmitIntent(frame, eventType, shaped, nextDepth)
-		if err != nil {
+		if _, err := e.queueEmitIntent(frame, eventType, shaped); err != nil {
 			return err
 		}
-		frame.result.EmitIntents = append(frame.result.EmitIntents, intent)
 	}
-	frame.result.ChainDepth = nextDepth
 	return nil
 }
 
@@ -807,17 +792,9 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 			if err != nil {
 				return err
 			}
-			nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
-			if err != nil {
-				frame.result.FailureClass = FailureDeadLetter
+			if _, err := e.queueEmitIntent(frame, entry.Emits, shaped); err != nil {
 				return err
 			}
-			intent, err := e.newEmitIntent(frame, entry.Emits, shaped, nextDepth)
-			if err != nil {
-				return err
-			}
-			frame.result.EmitIntents = append(frame.result.EmitIntents, intent)
-			frame.result.ChainDepth = nextDepth
 		}
 		if e.deps.ActionRunner != nil {
 			execCtx := e.executionContext(frame, StepAction)
@@ -939,6 +916,16 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
+	if len(handler.Rules) == 0 {
+		return false
+	}
+	if len(handler.OnComplete) > 0 {
+		return true
+	}
+	return handler.Accumulate != nil && len(handler.Accumulate.OnComplete) > 0
 }
 
 func mergeStateSnapshots(base, loaded StateSnapshot) StateSnapshot {
@@ -1143,28 +1130,6 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 	if id := strings.TrimSpace(rule.ID); id != "" {
 		frame.result.RuleID = id
 	}
-	if next := strings.TrimSpace(rule.AdvancesTo); next != "" {
-		frame.req.Handler.AdvancesTo = next
-	}
-	if !rule.Emits.Empty() {
-		frame.req.Handler.Emits = rule.Emits
-	}
-	if rule.DataAccumulation.HasWrites() || strings.TrimSpace(rule.DataAccumulation.SourceEvent) != "" {
-		frame.req.Handler.DataAccumulation = rule.DataAccumulation
-	}
-	if rule.Compute != nil {
-		frame.req.Handler.Compute = rule.Compute
-	}
-	if rule.FanOut != nil {
-		frame.req.Handler.FanOut = rule.FanOut
-	}
-}
-
-func (e *Executor) selectedDataAccumulation(frame *executionFrame) (runtimecontracts.WorkflowDataAccumulation, bool) {
-	if frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "") {
-		return frame.rule.DataAccumulation, true
-	}
-	return frame.topLevelDataAccumulation, false
 }
 
 func (e *Executor) ensureTopLevelDataWritesApplied(frame *executionFrame) {
@@ -1184,6 +1149,20 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 	frame.state.State.SetMetadata("last_data_accumulation_event", strings.TrimSpace(string(frame.req.Event.Type)))
 	frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
 	frame.result.StateMutation.DataAccumulation = spec
+}
+
+func (e *Executor) selectedCompute(frame *executionFrame) *runtimecontracts.ComputeSpec {
+	if frame.rule != nil && frame.rule.Compute != nil {
+		return frame.rule.Compute
+	}
+	return frame.req.Handler.Compute
+}
+
+func (e *Executor) selectedFanOut(frame *executionFrame) *runtimecontracts.FanOutSpec {
+	if frame.rule != nil && frame.rule.FanOut != nil {
+		return frame.rule.FanOut
+	}
+	return frame.req.Handler.FanOut
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
@@ -1216,6 +1195,29 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 		ChainDepth:    chainDepth,
 		ParentEventID: strings.TrimSpace(frame.req.Event.ID),
 	}, nil
+}
+
+func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payload map[string]any) (bool, error) {
+	nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
+	if err != nil {
+		if err != ErrChainDepthExceeded {
+			return false, err
+		}
+		intent, intentErr := e.newEmitIntent(frame, eventType, payload, nextDepth)
+		if intentErr != nil {
+			return false, intentErr
+		}
+		intent.DeadLetterHint = "chain_depth_exceeded"
+		frame.result.DeadLetterIntents = append(frame.result.DeadLetterIntents, intent)
+		return false, nil
+	}
+	intent, err := e.newEmitIntent(frame, eventType, payload, nextDepth)
+	if err != nil {
+		return false, err
+	}
+	frame.result.EmitIntents = append(frame.result.EmitIntents, intent)
+	frame.result.ChainDepth = nextDepth
+	return true, nil
 }
 
 func fanOutEventType(spec *runtimecontracts.FanOutSpec, item any) string {
@@ -1293,7 +1295,6 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 	frame.req.Handler.SetsGate = nil
 	frame.req.Handler.DataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
 	frame.topLevelDataAccumulation = runtimecontracts.WorkflowDataAccumulation{}
-	frame.topLevelDataWritesApplied = false
 	frame.req.Handler.Emits = runtimecontracts.EventEmission{}
 	switch parsed.Action {
 	case GuardFailureReject:
@@ -1319,23 +1320,15 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 		return nil
 	case GuardFailureEscalate:
 		eventType := parsed.EventType
-		nextDepth, err := nextChainDepth(frame.req.ChainDepth, e.MaxChainDepth())
-		if err != nil {
-			frame.result.FailureClass = FailureDeadLetter
-			return err
-		}
 		frame.result.Status = OutcomeEscalated
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "escalate:"+eventType)
 		shaped, err := e.shapeEmitPayload(frame, eventType, frame.payload)
 		if err != nil {
 			return err
 		}
-		intent, err := e.newEmitIntent(frame, eventType, shaped, nextDepth)
-		if err != nil {
+		if _, err := e.queueEmitIntent(frame, eventType, shaped); err != nil {
 			return err
 		}
-		frame.result.EmitIntents = append(frame.result.EmitIntents, intent)
-		frame.result.ChainDepth = nextDepth
 		return nil
 	default:
 		return fmt.Errorf("unsupported guard on_fail action %q", action)

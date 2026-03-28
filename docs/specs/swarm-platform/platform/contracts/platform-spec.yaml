@@ -2294,7 +2294,9 @@ platform_events:
         emergency: Spend crossed emergency threshold. Platform pauses all agent sessions until human intervention.
         ok: Spend dropped below warning threshold (after a period boundary reset or budget increase). Resume normal operations.
     platform.paused:
-      description: Platform entered paused state. No new events processed until resumed.
+      description: Platform entered paused state. External ingress blocked — no new events accepted from external sources (API,
+        webhooks, admin CLI, timer fires). In-flight events (already in the event loop) complete their handler execution and commit.
+        Agent sessions in progress complete their current turn. New agent invocations are deferred until resume.
       scope: global
       payload:
         reason: string
@@ -2340,11 +2342,16 @@ platform_events:
         timestamp: string (ISO 8601)
       produced_by_type: platform
   routing_rules:
-    description: Platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
-      them. They follow all standard routing, delivery, and persistence rules. The only special behavior is that platform events
-      are emitted by the engine, not by product handlers or agents.
-    no_special_path: Platform events are persisted to the events table, routed to subscribers, and delivered like any other event.
-      No bypass, no side channel.
+    description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
+      them. They follow standard routing, delivery, and persistence rules.
+    routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
+      platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.reset, platform.auth_required,
+      platform.paused, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed.
+      Products can subscribe to these.'
+    diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:
+      platform.runtime_log, platform.inbound_recorded. These are high-frequency diagnostic records. Routing them through the
+      event loop would cause recursive emission loops (a runtime_log about routing generates another runtime_log). They are
+      persisted for queryability but not routed to subscribers.'
   go_source_rule:
     description: Every hardcoded event name in Go runtime source must appear in this catalog. CI should enforce this — grep
       Go source for event name literals, verify each exists in platform_events.catalog or is a product event loaded from contracts.
@@ -2394,6 +2401,10 @@ observation_model:
       escalate: 'Guard failed with on_fail: escalate:{event}. Escalation event emitted instead.'
       dead_letter: Handler failed after retry exhaustion OR chain depth exceeded. Event moved to dead_letters.
       terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
+      waiting: Accumulation incomplete. Handler recorded the arrival but completion condition not yet met. No further steps
+        executed. Entity unchanged except for accumulator tracking update.
+      fanned_out: Fan-out dispatched. Handler emitted per-item events and is waiting for accumulation of results. Intermediate
+        state — final outcome determined when accumulation completes.
   agent_vs_node_observability: System node handler emissions are recorded in the entity emission chain and appear in emitted_events.
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The

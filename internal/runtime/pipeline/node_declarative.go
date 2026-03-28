@@ -290,6 +290,9 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
+	e.coordinator.recordInterceptedEmitDeadLetters(ctx, evt, e.nodeID, &handlerExecutionOutcome{
+		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
+	})
 	flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return &HandlerOutcome{Handled: false}, nil

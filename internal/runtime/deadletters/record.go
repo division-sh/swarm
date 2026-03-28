@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 type Record struct {
@@ -35,6 +37,11 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 	if rec.OriginalEventID == "" {
 		return fmt.Errorf("dead letter original event id is required")
 	}
+	if rec.EntityID != "" {
+		if _, err := uuid.Parse(rec.EntityID); err != nil {
+			rec.EntityID = ""
+		}
+	}
 	if rec.FailureType == "" {
 		return fmt.Errorf("dead letter failure type is required")
 	}
@@ -54,25 +61,23 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 			failure_type, error_message, retry_count, chain_depth, handler_node
 		)
 		SELECT
-			e.event_id,
-			COALESCE(NULLIF($2, ''), e.event_name),
-			COALESCE(NULLIF($3::jsonb, 'null'::jsonb), e.payload, '{}'::jsonb),
-			NULLIF(COALESCE(NULLIF($4, ''), COALESCE(e.entity_id::text, '')), '')::uuid,
-			COALESCE(NULLIF($5, ''), NULLIF(e.flow_instance, ''), 'runtime'),
+			$1::uuid,
+			COALESCE(NULLIF($2, ''), COALESCE((SELECT e.event_name FROM events e WHERE e.event_id = $1::uuid), '')),
+			COALESCE(NULLIF($3::jsonb, 'null'::jsonb), COALESCE((SELECT e.payload FROM events e WHERE e.event_id = $1::uuid), '{}'::jsonb)),
+			NULLIF($4, '')::uuid,
+			COALESCE(NULLIF($5, ''), COALESCE((SELECT NULLIF(e.flow_instance, '') FROM events e WHERE e.event_id = $1::uuid), 'runtime')),
 			$6,
 			NULLIF($7, ''),
 			$8,
 			$9,
 			NULLIF($10, '')
-		FROM events e
-		WHERE e.event_id = $1::uuid
-		  AND NOT EXISTS (
-				SELECT 1
-				FROM dead_letters dl
-				WHERE dl.original_event_id = e.event_id
-				  AND dl.failure_type = $6
-				  AND COALESCE(dl.handler_node, '') = COALESCE(NULLIF($10, ''), '')
-		  )
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM dead_letters dl
+			WHERE dl.original_event_id = $1::uuid
+			  AND dl.failure_type = $6
+			  AND COALESCE(dl.handler_node, '') = COALESCE(NULLIF($10, ''), '')
+		)
 	`
 	result, err := db.ExecContext(
 		ctx,
@@ -92,15 +97,8 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 		return fmt.Errorf("insert dead letter: %w", err)
 	}
 	rows, err := result.RowsAffected()
-	if err == nil && rows > 0 {
+	if err == nil && rows >= 0 {
 		return nil
-	}
-	var exists bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`, rec.OriginalEventID).Scan(&exists); err != nil {
-		return fmt.Errorf("verify dead letter source event: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("source event %s not found for dead letter", rec.OriginalEventID)
 	}
 	return nil
 }

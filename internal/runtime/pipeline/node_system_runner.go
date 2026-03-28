@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
-	"github.com/google/uuid"
 )
 
 type systemNodeBus interface {
@@ -38,16 +38,23 @@ type systemNodeRunner struct {
 }
 
 func newSystemNodeRunner(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error) *systemNodeRunner {
+	return newSystemNodeRunnerWithRetryBase(nodeID, bus, db, subscriptionsFn, handleFn, 0)
+}
+
+func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration) *systemNodeRunner {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" || bus == nil || handleFn == nil {
 		return nil
+	}
+	if retryBase <= 0 {
+		retryBase = time.Second
 	}
 	return &systemNodeRunner{
 		nodeID:          nodeID,
 		bus:             bus,
 		db:              db,
 		retryLimit:      DefaultSystemNodeRetryLimit,
-		backoffFn:       defaultSystemNodeBackoff,
+		backoffFn:       func(attempt int) time.Duration { return defaultSystemNodeBackoff(retryBase, attempt) },
 		subscriptionsFn: subscriptionsFn,
 		handleFn:        handleFn,
 	}
@@ -96,7 +103,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	}
 	backoffFn := n.backoffFn
 	if backoffFn == nil {
-		backoffFn = defaultSystemNodeBackoff
+		backoffFn = func(attempt int) time.Duration { return defaultSystemNodeBackoff(time.Second, attempt) }
 	}
 	for attempt := 1; attempt <= retryLimit; attempt++ {
 		if err := n.handle(ctx, evt); err == nil {
@@ -307,13 +314,23 @@ func (n *systemNodeRunner) String() string {
 	return n.nodeID
 }
 
-func defaultSystemNodeBackoff(attempt int) time.Duration {
+func defaultSystemNodeBackoff(base time.Duration, attempt int) time.Duration {
+	if base <= 0 {
+		base = time.Second
+	}
 	if attempt < 1 {
 		attempt = 1
 	}
-	d := time.Duration(attempt*attempt) * 50 * time.Millisecond
-	if d > 2*time.Second {
-		return 2 * time.Second
+	multiplier := time.Duration(30)
+	switch attempt {
+	case 1:
+		multiplier = 1
+	case 2:
+		multiplier = 5
+	}
+	d := base * multiplier
+	if d > 30*base {
+		return 30 * base
 	}
 	return d
 }

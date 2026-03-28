@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -142,5 +143,23 @@ func TestWorkflowMaxChainDepthPolicy_UsesFixturePolicy(t *testing.T) {
 	got := workflowMaxChainDepthPolicy(semanticview.Wrap(bundle))
 	if got != 5 {
 		t.Fatalf("workflowMaxChainDepthPolicy = %d, want 5", got)
+	}
+}
+
+func TestWorkflowHandlerRetryBase_UsesFixturePolicyDefault(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	if got := workflowHandlerRetryBase(source); got != time.Second {
+		t.Fatalf("workflowHandlerRetryBase default = %s, want 1s", got)
+	}
+
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{
+			Values: map[string]runtimecontracts.PolicyValue{
+				"handler_retry_base_seconds": {Value: 60},
+			},
+		},
+	}
+	if got := workflowHandlerRetryBase(semanticview.Wrap(bundle)); got != 60*time.Second {
+		t.Fatalf("workflowHandlerRetryBase policy = %s, want 1m0s", got)
 	}
 }
