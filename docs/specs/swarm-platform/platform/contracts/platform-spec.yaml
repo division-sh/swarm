@@ -1157,7 +1157,8 @@ engine:
       behavior: Rollback atomic boundary. Mark event as failed for this handler.
       retry_policy:
         max_retries: 3
-        backoff: exponential (1s, 2s, 4s)
+        backoff: exponential with configurable base. Default base 1s (delays 1s, 2s, 4s). Configurable via policy.yaml
+          handler_retry_base_seconds. Production deployments may use longer bases (e.g., 60s for 1min, 5min, 30min delays).
         retry_on: transient errors (DB timeout, lock contention)
         no_retry_on: guard failures, validation errors, business logic failures
       dead_letter: After max_retries exhausted, emit platform.dead_letter with original event, error details, and retry history.
@@ -1166,7 +1167,9 @@ engine:
       behavior: Agent exceeds turn budget or crashes. Session terminated.
       retry_policy:
         max_retries: 1
-        note: Agent sessions are expensive (LLM calls). Retry once, then dead-letter.
+        backoff: Same configurable base as handler retries.
+        note: Agent sessions are expensive (LLM calls). Retry once, then dead-letter. The 1-retry limit is separate from the
+          handler 3-retry limit.
     timer_failure:
       behavior: Timer event treated as regular event. Same retry policy as handler failures.
     chain_depth_limit:

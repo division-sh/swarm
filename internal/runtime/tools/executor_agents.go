@@ -120,37 +120,6 @@ func hasRoleMessageAuthority(actor, target models.AgentConfig) bool {
 	return runtimeauthority.Active().HasMessageAuthority(actor, target)
 }
 
-func isManagerAncestor(manager Manager, managerID, targetID string) bool {
-	managerID = strings.TrimSpace(managerID)
-	targetID = strings.TrimSpace(targetID)
-	if manager == nil || managerID == "" || targetID == "" || managerID == targetID {
-		return false
-	}
-	currentID := targetID
-	visited := map[string]struct{}{currentID: {}}
-	for {
-		cfg, ok := manager.GetAgentConfig(currentID)
-		if !ok {
-			return false
-		}
-		parent := strings.TrimSpace(cfg.ParentAgent)
-		if parent == "" {
-			parent = strings.TrimSpace(runtimeauthority.ManagerFallbackFromConfig(cfg.Config))
-		}
-		if parent == "" {
-			return false
-		}
-		if parent == managerID {
-			return true
-		}
-		if _, seen := visited[parent]; seen {
-			return false
-		}
-		visited[parent] = struct{}{}
-		currentID = parent
-	}
-}
-
 func uniqueNonEmptyStrings(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -280,6 +249,11 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
 		return nil, err
 	}
+	if cfg, ok := manager.GetAgentConfig(in.Config.ID); ok {
+		runtimeauthority.UpsertManagedAgent(cfg)
+	} else {
+		runtimeauthority.UpsertManagedAgent(in.Config)
+	}
 	return map[string]any{"status": "hired", "agent_id": in.Config.ID}, nil
 }
 
@@ -307,6 +281,7 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if err := manager.TeardownAgent(in.AgentID); err != nil {
 		return nil, err
 	}
+	runtimeauthority.RemoveManagedAgent(in.AgentID)
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
 
@@ -334,6 +309,12 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {
 		return nil, err
+	}
+	if cfg, ok := manager.GetAgentConfig(in.AgentID); ok {
+		runtimeauthority.UpsertManagedAgent(cfg)
+	} else {
+		in.Config.ID = in.AgentID
+		runtimeauthority.UpsertManagedAgent(in.Config)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
 }

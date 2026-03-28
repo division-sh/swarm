@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"strings"
 	"time"
@@ -160,21 +159,6 @@ func routeMatches(pattern, eventType string) bool {
 
 func isValidEventTypeName(raw string) bool {
 	return IsValidEventTypeName(raw)
-}
-
-func (eb *EventBus) resolveHumanTaskRecipients(evt events.Event) []string {
-	if len(evt.Payload) == 0 {
-		return nil
-	}
-	var payload struct {
-		RequestingAgent string `json:"requesting_agent"`
-	}
-	_ = json.Unmarshal(evt.Payload, &payload)
-	agentID := strings.TrimSpace(payload.RequestingAgent)
-	if agentID == "" {
-		return nil
-	}
-	return []string{agentID}
 }
 
 func uniqueStrings(in []string) []string {

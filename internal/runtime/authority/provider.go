@@ -19,6 +19,11 @@ type Provider interface {
 	CanDecideHumanTasks(role string) bool
 }
 
+type graphMutableProvider interface {
+	UpsertManagedAgent(cfg models.AgentConfig)
+	RemoveManagedAgent(agentID string)
+}
+
 type noopProvider struct{}
 
 func (noopProvider) CanonicalRole(role string) string {
@@ -75,4 +80,22 @@ func Active() Provider {
 		return noopProvider{}
 	}
 	return activeProvider
+}
+
+func UpsertManagedAgent(cfg models.AgentConfig) {
+	providerMu.RLock()
+	provider := activeProvider
+	providerMu.RUnlock()
+	if mutable, ok := provider.(graphMutableProvider); ok && mutable != nil {
+		mutable.UpsertManagedAgent(cfg)
+	}
+}
+
+func RemoveManagedAgent(agentID string) {
+	providerMu.RLock()
+	provider := activeProvider
+	providerMu.RUnlock()
+	if mutable, ok := provider.(graphMutableProvider); ok && mutable != nil {
+		mutable.RemoveManagedAgent(agentID)
+	}
 }

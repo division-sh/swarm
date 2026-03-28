@@ -387,26 +387,6 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 	if evt.Type == events.EventType("platform.runtime_log") {
 		return plan, nil
 	}
-	// Human task events must always reach the requesting agent (even if active
-	// and not subscribed) and should also be visible to subscribers like the
-	// control-plane roles. Treat them as global events, not entity-routed events.
-	if strings.HasPrefix(string(evt.Type), "human_task.") {
-		recipients := eb.resolveSubscribedRecipients(string(evt.Type))
-		// Only outcome/decision events are forced to the requesting agent; the
-		// initial request event is intended for control-plane review.
-		switch string(evt.Type) {
-		case "human_task.approved",
-			"human_task.rejected",
-			"human_task.deferred",
-			"human_task.completed",
-			"human_task.expired":
-			recipients = append(recipients, eb.resolveHumanTaskRecipients(evt)...)
-		}
-		plan.Recipients = uniqueStrings(recipients)
-		plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
-		return plan, nil
-	}
-
 	plan.Recipients = uniqueStrings(append(
 		eb.resolveRoutedRecipients(string(evt.Type)),
 		eb.resolveSubscribedRecipients(string(evt.Type))...,

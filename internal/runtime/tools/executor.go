@@ -613,19 +613,12 @@ func authorizeRouting(actor, target models.AgentConfig, status string) error {
 }
 
 func authorizeManage(actor, target models.AgentConfig, manager Manager) error {
+	_ = manager
 	if !runtimeauthority.SameFlowInstance(actor, target) {
 		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
 	}
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
 		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
-	}
-	if manager != nil {
-		if isManagerAncestor(manager, strings.TrimSpace(target.ID), strings.TrimSpace(actor.ID)) {
-			return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
-		}
-		if isManagerAncestor(manager, strings.TrimSpace(actor.ID), strings.TrimSpace(target.ID)) {
-			return nil
-		}
 	}
 	return runtimeauthority.Active().AuthorizeManagement(actor, target)
 }

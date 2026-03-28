@@ -37,8 +37,8 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"control-plane": {ID: "control-plane", Role: "control-plane"},
-			"reviewer":      {ID: "reviewer", Role: "reviewer"},
-			"worker":        {ID: "worker", Role: "worker"},
+			"reviewer":      {ID: "reviewer", Role: "reviewer", ManagerFallback: "control-plane"},
+			"worker":        {ID: "worker", Role: "worker", ManagerFallback: "reviewer"},
 		},
 	}))
 
@@ -90,6 +90,9 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	if err := provider.AuthorizeManagement(controlPlane, reviewer); err != nil {
 		t.Fatalf("expected control-plane to manage reviewer: %v", err)
 	}
+	if err := provider.AuthorizeManagement(controlPlane, worker); err != nil {
+		t.Fatalf("expected control-plane to manage nested worker: %v", err)
+	}
 	if err := provider.AuthorizeManagement(reviewer, controlPlane); err == nil {
 		t.Fatal("expected reviewer ancestor management to be denied")
 	}
@@ -111,6 +114,32 @@ func TestNewSourceProvider_UsesCanonicalToolsFieldForGrants(t *testing.T) {
 
 	if !provider.CanDecideHumanTasks("control-plane") {
 		t.Fatal("expected human_task_decide grant to be read from tools field")
+	}
+}
+
+func TestSourceProvider_ManagedAgentGraphUpdates(t *testing.T) {
+	provider, ok := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"control-plane": {ID: "control-plane", Role: "control-plane"},
+		},
+	})).(*sourceProvider)
+	if !ok {
+		t.Fatal("expected sourceProvider")
+	}
+
+	controlPlane := testAgentConfig("control-plane", "control-plane", []string{"agent_hire"}, "", "review/inst-1", "")
+	reviewer := testAgentConfig("reviewer", "reviewer", []string{}, "", "review/inst-1", "control-plane")
+	worker := testAgentConfig("worker", "worker", []string{}, "", "review/inst-1", "reviewer")
+
+	provider.UpsertManagedAgent(reviewer)
+	provider.UpsertManagedAgent(worker)
+	if err := provider.AuthorizeManagement(controlPlane, worker); err != nil {
+		t.Fatalf("expected dynamic managed descendant authorization, got %v", err)
+	}
+
+	provider.RemoveManagedAgent("reviewer")
+	if err := provider.AuthorizeManagement(controlPlane, worker); err == nil {
+		t.Fatal("expected descendant authorization to break after manager removal")
 	}
 }
 

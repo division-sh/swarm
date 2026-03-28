@@ -6,16 +6,19 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/semanticview"
 )
 
 type sourceProvider struct {
+	mu               sync.RWMutex
 	humanTaskRoles   []string
 	mailboxSendRoles []string
 	producerRoles    []string
 	agentEvents      map[string][]string
+	parentByAgent    map[string]string
 }
 
 func NewSourceProvider(source semanticview.Source) Provider {
@@ -44,23 +47,24 @@ func buildSourceProvider(source semanticview.Source) Provider {
 	}
 	sort.Strings(producerRoles)
 
-	return sourceProvider{
+	return &sourceProvider{
 		humanTaskRoles:   cloneRoles(humanTaskRoles),
 		mailboxSendRoles: cloneRoles(mailboxSendRoles),
 		producerRoles:    producerRoles,
 		agentEvents:      agentEvents,
+		parentByAgent:    buildManagerFallbackGraph(source),
 	}
 }
 
-func (p sourceProvider) CanonicalRole(role string) string {
+func (p *sourceProvider) CanonicalRole(role string) string {
 	return canonicalRole(role)
 }
 
-func (p sourceProvider) ProducerRoles() []string {
+func (p *sourceProvider) ProducerRoles() []string {
 	return append([]string(nil), p.producerRoles...)
 }
 
-func (p sourceProvider) ProducerEventsForRole(role string) []string {
+func (p *sourceProvider) ProducerEventsForRole(role string) []string {
 	role = canonicalRole(role)
 	if role == "" {
 		return nil
@@ -83,7 +87,7 @@ func (p sourceProvider) ProducerEventsForRole(role string) []string {
 	return out
 }
 
-func (p sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
+func (p *sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
 	sender := canonicalRole(actor.Role)
 	recipient := canonicalRole(target.Role)
 	if sender == "" || recipient == "" {
@@ -105,7 +109,7 @@ func (p sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) bo
 	}
 }
 
-func (p sourceProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
+func (p *sourceProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
 	_ = strings.TrimSpace(strings.ToLower(status))
 	if !hasToolGrant(permissionSet(actor.Permissions), "configure_routing") {
 		return fmt.Errorf("role %s is not authorized to configure routing", actor.Role)
@@ -119,7 +123,7 @@ func (p sourceProvider) AuthorizeRouting(actor, target models.AgentConfig, statu
 	return nil
 }
 
-func (p sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) error {
+func (p *sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) error {
 	if !hasAnyToolGrant(permissionSet(actor.Permissions), "agent_hire", "agent_fire", "agent_reconfigure") {
 		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
 	}
@@ -132,20 +136,54 @@ func (p sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) er
 	if !SameFlowInstance(actor, target) {
 		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
 	}
-	if strings.TrimSpace(target.ParentAgent) == strings.TrimSpace(actor.ID) || ManagerFallbackFromConfig(target.Config) == strings.TrimSpace(actor.ID) {
+	if p.isManagedDescendant(actor, target) {
 		return nil
 	}
 	return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
 }
 
-func (p sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
+func (p *sourceProvider) UpsertManagedAgent(cfg models.AgentConfig) {
+	if p == nil {
+		return
+	}
+	agentID := strings.TrimSpace(cfg.ID)
+	if agentID == "" {
+		return
+	}
+	parent := strings.TrimSpace(cfg.ParentAgent)
+	if parent == "" {
+		parent = ManagerFallbackFromConfig(cfg.Config)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if parent == "" || parent == agentID {
+		delete(p.parentByAgent, agentID)
+		return
+	}
+	p.parentByAgent[agentID] = parent
+}
+
+func (p *sourceProvider) RemoveManagedAgent(agentID string) {
+	if p == nil {
+		return
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.parentByAgent, agentID)
+}
+
+func (p *sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	if containsCanonical(p.mailboxSendRoles, actor.Role) {
 		return nil
 	}
 	return fmt.Errorf("role %s is not authorized to send mailbox items", actor.Role)
 }
 
-func (p sourceProvider) CanDecideHumanTasks(role string) bool {
+func (p *sourceProvider) CanDecideHumanTasks(role string) bool {
 	role = canonicalRole(role)
 	if role == "" {
 		return false
@@ -212,6 +250,86 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 		_ = strings.TrimSpace(timer.Event)
 	}
 	return agentEvents
+}
+
+func buildManagerFallbackGraph(source semanticview.Source) map[string]string {
+	if source == nil {
+		return map[string]string{}
+	}
+	graph := make(map[string]string)
+	for key, entry := range source.AgentEntries() {
+		agentID := strings.TrimSpace(firstNonEmpty(entry.ID, key))
+		if agentID == "" {
+			continue
+		}
+		parent := strings.TrimSpace(entry.ManagerFallback)
+		if parent == "" || parent == agentID {
+			continue
+		}
+		graph[agentID] = parent
+		agentRole := canonicalRole(firstNonEmpty(entry.Role, key))
+		parentRole := canonicalRole(parent)
+		if agentRole != "" && parentRole != "" && agentRole != parentRole {
+			graph[agentRole] = parentRole
+		}
+	}
+	return graph
+}
+
+func (p *sourceProvider) isManagedDescendant(actor, target models.AgentConfig) bool {
+	actorIDs := uniqueGraphCandidates(strings.TrimSpace(actor.ID), canonicalRole(actor.Role))
+	targetIDs := uniqueGraphCandidates(strings.TrimSpace(target.ID), canonicalRole(target.Role))
+	if len(actorIDs) == 0 || len(targetIDs) == 0 {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	actorSet := make(map[string]struct{}, len(actorIDs))
+	for _, actorID := range actorIDs {
+		if actorID == "" {
+			continue
+		}
+		actorSet[actorID] = struct{}{}
+	}
+	for _, targetID := range targetIDs {
+		if targetID == "" {
+			continue
+		}
+		current := targetID
+		visited := map[string]struct{}{current: {}}
+		for {
+			parent := strings.TrimSpace(p.parentByAgent[current])
+			if parent == "" {
+				break
+			}
+			if _, ok := actorSet[parent]; ok {
+				return true
+			}
+			if _, seen := visited[parent]; seen {
+				break
+			}
+			visited[parent] = struct{}{}
+			current = parent
+		}
+	}
+	return false
+}
+
+func uniqueGraphCandidates(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func strongestMessagePermission(grants map[string]struct{}) string {

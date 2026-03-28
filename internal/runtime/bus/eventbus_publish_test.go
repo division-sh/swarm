@@ -247,3 +247,25 @@ func TestEventBusPublish_RuntimeLogBypassesContradictionRouting(t *testing.T) {
 		t.Fatalf("persisted event types = %v, want [platform.runtime_log]", got)
 	}
 }
+
+func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.Subscribe("requester")
+	defer eb.Unsubscribe("requester")
+
+	if err := eb.Publish(context.Background(), events.Event{
+		Type:    events.EventType("human_task.approved"),
+		Payload: []byte(`{"requesting_agent":"requester"}`),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case evt := <-ch:
+		t.Fatalf("unexpected delivery without subscription: %#v", evt)
+	case <-time.After(50 * time.Millisecond):
+	}
+}

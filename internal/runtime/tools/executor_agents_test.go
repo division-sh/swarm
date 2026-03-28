@@ -36,6 +36,26 @@ func (b *publishDirectBusStub) PublishDirect(_ context.Context, _ events.Event, 
 }
 
 func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
+	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"control": {
+				ID:   "control",
+				Role: "control",
+			},
+			"reviewer": {
+				ID:              "reviewer",
+				Role:            "reviewer",
+				ManagerFallback: "control",
+			},
+			"worker": {
+				ID:              "worker",
+				Role:            "worker",
+				ManagerFallback: "reviewer",
+			},
+		},
+	})))
+	defer runtimeauthority.SetProvider(nil)
+
 	manager := managerStub{
 		agents: map[string]models.AgentConfig{
 			"control": {ID: "control"},
