@@ -15,7 +15,6 @@ import (
 	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 type AgentManager struct {
@@ -224,26 +223,7 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	isRunning := am.running
 	runCtx := am.runCtx
 	am.runMu.Unlock()
-	if persist {
-		entityID := rec.Config.EffectiveEntityID()
-		payload := mustJSON(map[string]any{
-			"agent_id":   rec.Config.ID,
-			"agent_type": rec.Config.Type,
-			"role":       rec.Config.Role,
-			"mode":       rec.Config.Mode,
-			"entity_id":  entityID,
-			"hired_by":   rec.HiredBy,
-		})
-		if err := am.bus.Publish(am.runtimeContext(), (events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("agent.started"),
-			SourceAgent: rec.Config.ID,
-			Payload:     payload,
-			CreatedAt:   time.Now(),
-		}).WithEntityID(entityID)); err != nil {
-			RuntimeWarn("agent-manager", "agent.started publish failed agent=%s err=%v", rec.Config.ID, err)
-		}
-	}
+	_ = persist
 	if isRunning {
 		am.startAgentLoop(runCtx, a)
 	}

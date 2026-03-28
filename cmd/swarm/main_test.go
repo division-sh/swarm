@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"swarm/internal/events"
 	"swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -87,16 +87,11 @@ func TestRuntimeProjectSupervisor_RejectsInvalidBuilderProjectContracts(t *testi
 }
 
 func TestDashboardDynamicRuntimeControl_ResetStatePublishesPlatformReset(t *testing.T) {
-	bus, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	ch := bus.Subscribe("reset-test", events.EventType("platform.reset"))
+	bus := &recordingManagerBus{}
 	control := dashboardDynamicRuntimeControl{
 		supervisor: &runtimeProjectSupervisor{
 			currentRT: &runtime.Runtime{
-				Bus:     bus,
-				Manager: &runtimemanager.AgentManager{},
+				Manager: runtimemanager.NewAgentManager(bus, nil),
 			},
 		},
 	}
@@ -105,15 +100,29 @@ func TestDashboardDynamicRuntimeControl_ResetStatePublishesPlatformReset(t *test
 		t.Fatalf("ResetState: %v", err)
 	}
 
-	select {
-	case evt := <-ch:
-		if evt.Type != events.EventType("platform.reset") {
-			t.Fatalf("event type = %s, want platform.reset", evt.Type)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected platform.reset event")
+	if len(bus.published) != 1 {
+		t.Fatalf("expected 1 published event, got %d", len(bus.published))
+	}
+	if evt := bus.published[0]; evt.Type != events.EventType("platform.reset") {
+		t.Fatalf("event type = %s, want platform.reset", evt.Type)
 	}
 }
+
+type recordingManagerBus struct {
+	published []events.Event
+}
+
+func (b *recordingManagerBus) Publish(_ context.Context, evt events.Event) error {
+	b.published = append(b.published, evt)
+	return nil
+}
+
+func (*recordingManagerBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
+func (*recordingManagerBus) Subscribe(string, ...events.EventType) <-chan events.Event   { return make(chan events.Event) }
+func (*recordingManagerBus) Unsubscribe(string)                                           {}
+func (*recordingManagerBus) Store() runtimebus.EventStore                                 { return runtimebus.InMemoryEventStore{} }
+func (*recordingManagerBus) ResetInMemoryState() error                                    { return nil }
+func (*recordingManagerBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry)   {}
 
 func writeTempProjectFile(t *testing.T, root string, relativePath string, contents string) {
 	t.Helper()

@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
-	runtimemcp "swarm/internal/runtime/mcp"
 	runtimeengine "swarm/internal/runtime/engine"
+	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -155,11 +155,7 @@ var bootCheckRegistry = []Check{
 	{ID: "platform_namespace_violation", Severity: "error", Run: checkPlatformNamespaceViolation},
 	{ID: "workspace_class_exists", Severity: "error", Run: checkWorkspaceClassExists},
 	{ID: "credential_key_exists", Severity: "warning", Run: checkCredentialKeyExists},
-}
-
-var supplementalChecks = []Check{
 	{ID: "agent_permission_validation", Severity: "error", Run: checkAgentPermissionValidation},
-	{ID: "platform_metadata_validation", Severity: "error", Run: checkPlatformMetadataValidation},
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
@@ -167,7 +163,11 @@ var supplementalChecks = []Check{
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
-	{ID: "deprecated_contract_alias", Severity: "warning", Run: checkDeprecatedContractAlias},
+}
+
+var supplementalChecks = []Check{
+	{ID: "impl.platform_metadata_validation", Severity: "error", Run: checkPlatformMetadataValidation},
+	{ID: "impl.deprecated_contract_alias", Severity: "warning", Run: checkDeprecatedContractAlias},
 }
 
 func newCheckerContext(ctx context.Context, source semanticview.Source, opts Options) *checkerContext {
@@ -178,40 +178,52 @@ func newCheckerContext(ctx context.Context, source semanticview.Source, opts Opt
 	}
 }
 
-func checkEventChainIntegrity(c *checkerContext) []Finding       { return c.eventWarningsByCheck("event_chain_integrity") }
-func checkEventConsumerExists(c *checkerContext) []Finding       { return c.eventWarningsByCheck("event_consumer_exists") }
-func checkEventProducerExists(c *checkerContext) []Finding       { return c.eventWarningsByCheck("event_producer_exists") }
-func checkPayloadFieldCoverage(c *checkerContext) []Finding      { return c.payloadFieldCoverage() }
-func checkConditionPayloadAlignment(c *checkerContext) []Finding { return c.conditionPayloadAlignment() }
-func checkConditionPolicyAlignment(c *checkerContext) []Finding  { return c.conditionPolicyAlignment() }
-func checkStateMachineCoherence(c *checkerContext) []Finding     { return c.stateMachineCoherence() }
-func checkRequiredAgentsMatch(c *checkerContext) []Finding       { return c.requiredAgentsMatch() }
-func checkHandlerFieldCompliance(c *checkerContext) []Finding    { return c.handlerFieldCompliance() }
-func checkToolResolution(c *checkerContext) []Finding            { return c.toolResolution() }
-func checkPromptExists(c *checkerContext) []Finding              { return c.promptExists() }
-func checkProducesDrift(c *checkerContext) []Finding             { return c.producesDrift() }
-func checkInvalidFieldDetection(c *checkerContext) []Finding     { return c.invalidFieldDetection() }
-func checkPolicyConflictDetection(c *checkerContext) []Finding   { return c.policyConflicts() }
-func checkEventCycleDetection(c *checkerContext) []Finding       { return c.eventCycleDetection() }
-func checkDialectCompliance(c *checkerContext) []Finding         { return c.dialectCompliance() }
-func checkConfigFromPayloadAlignment(c *checkerContext) []Finding { return c.configFromPayloadAlignment() }
-func checkNativeToolsValid(c *checkerContext) []Finding         { return c.nativeTools() }
+func checkEventChainIntegrity(c *checkerContext) []Finding {
+	return c.eventWarningsByCheck("event_chain_integrity")
+}
+func checkEventConsumerExists(c *checkerContext) []Finding {
+	return c.eventWarningsByCheck("event_consumer_exists")
+}
+func checkEventProducerExists(c *checkerContext) []Finding {
+	return c.eventWarningsByCheck("event_producer_exists")
+}
+func checkPayloadFieldCoverage(c *checkerContext) []Finding { return c.payloadFieldCoverage() }
+func checkConditionPayloadAlignment(c *checkerContext) []Finding {
+	return c.conditionPayloadAlignment()
+}
+func checkConditionPolicyAlignment(c *checkerContext) []Finding { return c.conditionPolicyAlignment() }
+func checkStateMachineCoherence(c *checkerContext) []Finding    { return c.stateMachineCoherence() }
+func checkRequiredAgentsMatch(c *checkerContext) []Finding      { return c.requiredAgentsMatch() }
+func checkHandlerFieldCompliance(c *checkerContext) []Finding   { return c.handlerFieldCompliance() }
+func checkToolResolution(c *checkerContext) []Finding           { return c.toolResolution() }
+func checkPromptExists(c *checkerContext) []Finding             { return c.promptExists() }
+func checkProducesDrift(c *checkerContext) []Finding            { return c.producesDrift() }
+func checkInvalidFieldDetection(c *checkerContext) []Finding    { return c.invalidFieldDetection() }
+func checkPolicyConflictDetection(c *checkerContext) []Finding  { return c.policyConflicts() }
+func checkEventCycleDetection(c *checkerContext) []Finding      { return c.eventCycleDetection() }
+func checkDialectCompliance(c *checkerContext) []Finding        { return c.dialectCompliance() }
+func checkConfigFromPayloadAlignment(c *checkerContext) []Finding {
+	return c.configFromPayloadAlignment()
+}
+func checkNativeToolsValid(c *checkerContext) []Finding           { return c.nativeTools() }
 func checkPlatformNamespaceViolation(c *checkerContext) []Finding { return c.platformNamespace() }
-func checkWorkspaceClassExists(c *checkerContext) []Finding     { return c.workspace() }
-func checkCredentialKeyExists(c *checkerContext) []Finding      { return c.credentials() }
-func checkMCPServerReachable(c *checkerContext) []Finding       { return c.mcp() }
-func checkAgentPermissionValidation(c *checkerContext) []Finding { return uniqueFindings(append(c.permissions(), c.permissionWarnings()...)) }
-func checkPhantomProduces(c *checkerContext) []Finding          { return c.phantomProduces() }
-func checkSingleNodePerEvent(c *checkerContext) []Finding       { return c.singleNodePerEvent() }
-func checkPlatformMetadataValidation(c *checkerContext) []Finding { return c.platformMetadata() }
+func checkWorkspaceClassExists(c *checkerContext) []Finding       { return c.workspace() }
+func checkCredentialKeyExists(c *checkerContext) []Finding        { return c.credentials() }
+func checkMCPServerReachable(c *checkerContext) []Finding         { return c.mcp() }
+func checkAgentPermissionValidation(c *checkerContext) []Finding {
+	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
+}
+func checkPhantomProduces(c *checkerContext) []Finding               { return c.phantomProduces() }
+func checkSingleNodePerEvent(c *checkerContext) []Finding            { return c.singleNodePerEvent() }
+func checkPlatformMetadataValidation(c *checkerContext) []Finding    { return c.platformMetadata() }
 func checkTransitionReferenceValidation(c *checkerContext) []Finding { return c.transitionReferences() }
 func checkConditionExpressionValidation(c *checkerContext) []Finding { return c.conditionExpressions() }
 func checkTransitionOwnershipValidation(c *checkerContext) []Finding { return c.transitionOwnership() }
-func checkEventRuntimeWiringValidation(c *checkerContext) []Finding { return c.eventRuntimeWiring() }
-func checkTimerValidation(c *checkerContext) []Finding { return c.timerValidation() }
-func checkWritePinOwnershipValidation(c *checkerContext) []Finding { return c.writePinOwnership() }
-func checkGateSchemaValidation(c *checkerContext) []Finding { return c.gateSchemaValidation() }
-func checkDeprecatedContractAlias(c *checkerContext) []Finding { return c.deprecatedAliases() }
+func checkEventRuntimeWiringValidation(c *checkerContext) []Finding  { return c.eventRuntimeWiring() }
+func checkTimerValidation(c *checkerContext) []Finding               { return c.timerValidation() }
+func checkWritePinOwnershipValidation(c *checkerContext) []Finding   { return c.writePinOwnership() }
+func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
+func checkDeprecatedContractAlias(c *checkerContext) []Finding       { return c.deprecatedAliases() }
 
 func (c *checkerContext) eventWarningsByCheck(checkID string) []Finding {
 	items := c.eventWarnings()
@@ -265,7 +277,7 @@ func (c *checkerContext) platformMetadata() []Finding {
 	c.platformMetaLoaded = true
 	if strings.TrimSpace(c.source.PlatformSpec().Platform.Name) == "" {
 		c.platformMetaFindings = append(c.platformMetaFindings, Finding{
-			CheckID:  "platform_metadata_validation",
+			CheckID:  "impl.platform_metadata_validation",
 			Severity: "error",
 			Message:  "platform.name missing",
 			Location: "global",
@@ -273,7 +285,7 @@ func (c *checkerContext) platformMetadata() []Finding {
 	}
 	if strings.TrimSpace(c.source.PlatformSpec().Platform.Version) == "" {
 		c.platformMetaFindings = append(c.platformMetaFindings, Finding{
-			CheckID:  "platform_metadata_validation",
+			CheckID:  "impl.platform_metadata_validation",
 			Severity: "error",
 			Message:  "platform.version missing",
 			Location: "global",
@@ -619,7 +631,7 @@ func (c *checkerContext) deprecatedAliases() []Finding {
 		agentID = strings.TrimSpace(agentID)
 		if len(agent.Tools) == 0 && len(agent.ToolsTier2) > 0 {
 			c.deprecatedFindings = append(c.deprecatedFindings, Finding{
-				CheckID:  "deprecated_contract_alias",
+				CheckID:  "impl.deprecated_contract_alias",
 				Severity: "warning",
 				Message:  fmt.Sprintf("agent %s uses deprecated tools_tier2; rename to tools", agentID),
 				Location: agentID,

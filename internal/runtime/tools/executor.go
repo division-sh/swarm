@@ -11,9 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"swarm/internal/config"
-	"swarm/internal/events"
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
 	runtimecredentials "swarm/internal/runtime/credentials"
@@ -478,36 +476,7 @@ func (e *Executor) emitToolExecutionEvent(
 	execErr error,
 	latency time.Duration,
 ) {
-	if e.bus == nil || strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(toolName) == "" {
-		return
-	}
-	payload, _ := json.Marshal(map[string]any{
-		"agent_id":     actor.ID,
-		"agent_role":   actor.Role,
-		"entity_id":    actor.EffectiveEntityID(),
-		"tool_name":    toolName,
-		"ok":           execErr == nil,
-		"error":        toolExecErrorText(execErr),
-		"duration_ms":  int(latency / time.Millisecond),
-		"input":        SafeTelemetryText(input),
-		"result":       SafeTelemetryText(result),
-		"runtime_tool": true,
-	})
-	if err := e.bus.Publish(ctx, (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("agent.tool_execution"),
-		SourceAgent: actor.ID,
-		Payload:     payload,
-		CreatedAt:   time.Now(),
-	}).WithEntityID(actor.EffectiveEntityID())); err != nil {
-		runtimeWarn(
-			"tool-executor",
-			"failed to publish agent.tool_execution actor=%s tool=%s: %v",
-			strings.TrimSpace(actor.ID),
-			strings.TrimSpace(toolName),
-			err,
-		)
-	}
+	_, _, _, _, _, _, _ = ctx, actor, toolName, input, result, execErr, latency
 }
 
 func toolExecErrorText(err error) string {

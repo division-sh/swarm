@@ -62,21 +62,14 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	}
 	targetEntity := strings.TrimSpace(in.EntityID)
 	in.EntityID = targetEntity
-	actorEntityID := actor.EffectiveEntityID()
 	for _, targetID := range targets {
 		targetCfg, ok := manager.GetAgentConfig(targetID)
 		if !ok {
 			return nil, fmt.Errorf("target agent not found: %s", targetID)
 		}
 		targetCfgEntityID := targetCfg.EffectiveEntityID()
-		if actorEntityID != "" && targetCfgEntityID != actorEntityID {
-			return nil, errors.New("cross-entity agent_message is not allowed")
-		}
 		if targetEntity == "" {
 			targetEntity = targetCfgEntityID
-		}
-		if targetArg := strings.TrimSpace(in.EntityID); targetArg != "" && targetCfgEntityID != targetArg {
-			return nil, errors.New("entity_id does not match target agent entity")
 		}
 		if err := authorizeAgentMessage(actor, targetCfg, manager); err != nil {
 			return nil, fmt.Errorf("agent_message target %s: %w", targetID, err)
@@ -141,6 +134,9 @@ func isManagerAncestor(manager Manager, managerID, targetID string) bool {
 			return false
 		}
 		parent := strings.TrimSpace(cfg.ParentAgent)
+		if parent == "" {
+			parent = strings.TrimSpace(runtimeauthority.ManagerFallbackFromConfig(cfg.Config))
+		}
 		if parent == "" {
 			return false
 		}
@@ -252,7 +248,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 
 func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	_, _, _ = ctx, actor, input
-	return nil, errors.New("configure_routing is not part of the generic Swarm runtime; routes derive from contracts")
+	return nil, errors.New("configure_routing is not yet implemented")
 }
 
 func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, error) {

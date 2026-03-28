@@ -220,8 +220,8 @@ func TestRun_MapsInvalidFieldDetectionToNamedError(t *testing.T) {
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{},
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{},
+		Tools:  map[string]runtimecontracts.ToolSchemaEntry{},
 	}
 	bundle.Platform.Platform.Name = "Swarm Platform"
 	bundle.Platform.Platform.Version = "1.0.0"
@@ -355,11 +355,11 @@ func TestRun_MapsProducesDriftToNamedWarning(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 24 {
-		t.Fatalf("bootCheckRegistry count = %d, want 24", got)
+	if got := len(bootCheckRegistry); got != 32 {
+		t.Fatalf("bootCheckRegistry count = %d, want 32", got)
 	}
-	if got := len(supplementalChecks); got != 10 {
-		t.Fatalf("supplementalChecks count = %d, want 10", got)
+	if got := len(supplementalChecks); got != 2 {
+		t.Fatalf("supplementalChecks count = %d, want 2", got)
 	}
 }
 

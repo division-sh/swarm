@@ -456,6 +456,14 @@ func (am *AgentManager) pendingEventsForAgent(
 }
 
 func (am *AgentManager) ResetRuntimeState() error {
+	return am.resetRuntimeState("")
+}
+
+func (am *AgentManager) ResetRuntimeStateWithSource(source string) error {
+	return am.resetRuntimeState(source)
+}
+
+func (am *AgentManager) resetRuntimeState(source string) error {
 	if err := am.Shutdown(); err != nil {
 		return err
 	}
@@ -495,6 +503,25 @@ func (am *AgentManager) ResetRuntimeState() error {
 	for entityID := range entities {
 		if am.workspaces != nil {
 			_ = am.workspaces.StopEntityWorkspace(am.runtimeContext(), entityID)
+		}
+	}
+	source = strings.TrimSpace(source)
+	if source != "" && am.bus != nil {
+		payload, err := json.Marshal(map[string]any{
+			"source":    source,
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return fmt.Errorf("marshal platform.reset payload: %w", err)
+		}
+		if err := am.bus.Publish(am.runtimeContext(), events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("platform.reset"),
+			SourceAgent: "runtime",
+			Payload:     payload,
+			CreatedAt:   time.Now(),
+		}); err != nil {
+			return fmt.Errorf("publish platform.reset: %w", err)
 		}
 	}
 	return nil

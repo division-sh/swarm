@@ -173,7 +173,7 @@ func sourceRolesAndToolGrants(source semanticview.Source) ([]string, map[string]
 			roles = append(roles, role)
 			grants[role] = map[string]struct{}{}
 		}
-		for _, toolName := range entry.ToolsTier2 {
+		for _, toolName := range entry.ConfiguredTools() {
 			toolName = strings.TrimSpace(toolName)
 			if toolName == "" {
 				continue

@@ -1340,10 +1340,58 @@ engine:
       trigger: A tool's credentials field or an MCP server's credentials_key references a credential key that does not exist
         in the credential store (any tier). The tool may be unconfigured in this deployment.
       when: boot-only
+    - id: agent_permission_validation
+      severity: error
+      scope: per-agent
+      trigger: An agent declares an unknown permission (not in the platform permissions list and not in workflow_extension_permissions).
+        Or an agent's tools list includes a platform builtin tool whose required permission is not in the agent's permissions
+        or permission bundle.
+      when: boot-only
+    - id: transition_reference_validation
+      severity: error
+      scope: per-flow
+      trigger: A state transition (advances_to, on_complete branch) references a trigger event not in events.yaml. Or a flow's
+        input/output event pins reference events not defined in any events.yaml in the flow tree.
+      when: boot-only
+    - id: condition_expression_validation
+      severity: error
+      scope: per-node
+      trigger: A guard on_fail value is not one of reject, kill, discard, or escalate. Or a CEL condition is syntactically
+        invalid (parse failure). Or a condition string lacks a required context prefix (entity., payload., policy., accumulated.,
+        fan_out.).
+      when: boot-only
+    - id: transition_ownership_validation
+      severity: error
+      scope: per-flow
+      trigger: A system node declares ownership of a transition but the flow schema does not include the transition's target
+        state. Or a node owns a transition whose trigger event is not in its subscribes_to list.
+      when: boot-only
+    - id: event_runtime_wiring_validation
+      severity: error
+      scope: per-flow
+      trigger: An event that requires system node handling (has node-owned state transitions) has no owning node registered. Or
+        the owning node exists but has no handler for the event.
+      when: boot-only
+    - id: timer_validation
+      severity: error
+      scope: per-node
+      trigger: A timer declaration is missing its owner (owner_node or owner_agent). Or the timer's owner is not a registered
+        participant in the flow. Or the timer's fire_event is not in events.yaml.
+      when: boot-only
+    - id: write_pin_ownership_validation
+      severity: error
+      scope: per-flow
+      trigger: Two flows declare writes to the same entity field (output data pin). Only one flow may write a given field.
+      when: boot-only
+    - id: gate_schema_validation
+      severity: error
+      scope: per-node
+      trigger: A handler's sets_gate references a gate name not declared in the node's gate_state schema.
+      when: boot-only
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
-    check_count: 24 checks (13 error, 11 warning)
+    check_count: 32 checks (21 error, 11 warning)
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, and location (flow, node, agent, or event name). The boot sequence runs
