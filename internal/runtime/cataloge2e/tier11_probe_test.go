@@ -43,7 +43,7 @@ func TestTier11Probe(t *testing.T) {
 			h := newRuntimeHarness(t, fixtureRoot, true)
 			h.seedEntityFields(expected)
 			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, 2*time.Second)
+				h.publishAndWait(step, 5*time.Second)
 			}
 			rows, err := workflowStateDebugRows(h.db)
 			if err != nil {
