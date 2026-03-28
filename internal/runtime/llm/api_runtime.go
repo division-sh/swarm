@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"swarm/internal/config"
+	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/sessions"
 )
@@ -29,9 +30,10 @@ type AnthropicAPIRuntime struct {
 	httpClient    *http.Client
 	apiURL        string
 	apiKey        string
+	events        EventPublisher
 }
 
-func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard) *AnthropicAPIRuntime {
+func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *AnthropicAPIRuntime {
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
@@ -44,6 +46,7 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lock
 		},
 		apiURL: "https://api.anthropic.com/v1/messages",
 		apiKey: os.Getenv("ANTHROPIC_API_KEY"),
+		events: publisher,
 	}
 }
 
@@ -121,6 +124,7 @@ func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemP
 			s.TurnCount = rec.TurnCount
 		}
 	}
+	publishAgentStarted(ctx, r.events, s, events.EventType("platform.agent_started"))
 	return s, nil
 }
 

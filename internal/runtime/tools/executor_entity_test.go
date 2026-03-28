@@ -215,7 +215,13 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 
 func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Executor) {
 	t.Helper()
-	return newEntityToolTestExecutorWithActor(t, models.AgentConfig{ID: "tester", Role: "operator"})
+	return newEntityToolTestExecutorWithActor(t, models.AgentConfig{
+		ID:   "tester",
+		Role: "operator",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "get_entity", "save_entity_field", "search_entities", "query_entities", "query_metrics"},
+		}),
+	})
 }
 
 func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {

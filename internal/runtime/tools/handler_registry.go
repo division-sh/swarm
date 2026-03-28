@@ -9,7 +9,6 @@ import (
 func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 	handlers := map[string]ToolHandler{}
 	e.registerAgentHandlers(handlers)
-	e.registerFlowHandlers(handlers)
 	e.registerEntityHandlers(handlers)
 	e.registerMailboxHandlers(handlers)
 	e.registerHumanTaskHandlers(handlers)
@@ -43,10 +42,6 @@ func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
 	handlers["query_entities"] = e.execQueryEntities
 	handlers["search_entities"] = e.execSearchEntities
 	handlers["query_metrics"] = e.execQueryMetrics
-}
-
-func (e *Executor) registerFlowHandlers(handlers map[string]ToolHandler) {
-	handlers["create_flow_instance"] = e.execCreateFlowInstance
 }
 
 func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {

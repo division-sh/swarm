@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"swarm/internal/config"
+	"swarm/internal/events"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -19,6 +20,7 @@ type RuntimeFactory struct {
 	Budget        BudgetGuard
 	LockOwner     string
 	Workspaces    workspace.Resolver
+	Events        EventPublisher
 }
 
 func (f RuntimeFactory) Build() (Runtime, error) {
@@ -31,9 +33,9 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 
 	switch f.Cfg.LLM.RuntimeMode {
 	case "api":
-		return NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget), nil
+		return NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events), nil
 	case "cli_test":
-		return NewClaudeCLIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations), nil
+		return NewClaudeCLIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events), nil
 	default:
 		return nil, fmt.Errorf("unsupported llm runtime mode: %s", f.Cfg.LLM.RuntimeMode)
 	}
@@ -51,6 +53,10 @@ func (NoopRuntime) ContinueSession(_ context.Context, _ *Session, message Messag
 }
 
 func (NoopRuntime) PersistConversationSnapshot(context.Context, *Session) error { return nil }
+
+type EventPublisher interface {
+	Publish(ctx context.Context, evt events.Event) error
+}
 
 func defaultLockOwner() string {
 	host, _ := os.Hostname()

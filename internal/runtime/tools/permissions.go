@@ -32,7 +32,6 @@ var toolPermissionRequirements = map[string]string{
 	"agent_hire":           "agent_hire",
 	"agent_reconfigure":    "agent_reconfigure",
 	"configure_routing":    "configure_routing",
-	"create_flow_instance": "create_flow_instance",
 	"human_task_request":   "human_task_request",
 	"human_task_decide":    "human_task_decide",
 	"schedule":             "schedule",

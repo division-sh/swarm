@@ -101,11 +101,6 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 	}
 	allowed, constrained := extractAllowedToolsFromConfig(actor)
 	decision.constrained = constrained
-	if !constrained {
-		decision.class = toolAuthorizationActorConfig
-		decision.allowed = true
-		return decision
-	}
 	if _, ok := allowed[toolName]; ok {
 		decision.class = toolAuthorizationActorConfig
 		decision.allowed = true

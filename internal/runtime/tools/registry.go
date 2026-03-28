@@ -200,9 +200,6 @@ func toolRequiredPermission(toolID string, entry runtimecontracts.ToolSchemaEntr
 	if perm := strings.TrimSpace(entry.RequiredPermission); perm != "" {
 		return perm
 	}
-	if strings.TrimSpace(toolID) == "create_flow_instance" {
-		return "create_flow_instance"
-	}
 	return ""
 }
 

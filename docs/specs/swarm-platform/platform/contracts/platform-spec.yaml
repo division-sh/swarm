@@ -621,8 +621,9 @@ engine:
     description: 'Flow instances can be created at runtime by system nodes calling create_flow_instance. The flow template
       must be declared as mode: template in the parent package.yaml.'
     creation:
-      trigger: A system node handler calls create_flow_instance (platform builtin tool). The node decides when to create instances
-        based on its product logic. Same pattern as agent sharding — nodes orchestrate instance creation.
+      trigger: A system node handler declares action create_flow_instance (handler action, not an agent-callable tool). The node
+        decides when to create instances based on its product logic. Same pattern as agent sharding — nodes orchestrate instance
+        creation.
       instance_id: Supplied by the node (from event payload or generated). Must be unique within the template scope. If already
         exists, creation fails with error.
       process:

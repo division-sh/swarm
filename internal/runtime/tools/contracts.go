@@ -17,7 +17,6 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"agent_message":        {},
 	"schedule":             {},
 	"configure_routing":    {},
-	"create_flow_instance": {},
 	"agent_hire":           {},
 	"agent_fire":           {},
 	"agent_reconfigure":    {},
@@ -85,19 +84,6 @@ func deepCloneJSONValue(v any) any {
 func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 	anyValueSchema := map[string]any{}
 	return map[string]ContractSchemaEntry{
-		"create_flow_instance": {
-			Category:    "workflow_control",
-			Description: "Create a new instance of a template flow at runtime.",
-			InputSchema: ObjectSchema(map[string]any{
-				"template":    map[string]any{"type": "string"},
-				"instance_id": map[string]any{"type": "string"},
-				"config": map[string]any{
-					"type":                 "object",
-					"properties":           map[string]any{},
-					"additionalProperties": true,
-				},
-			}, "template"),
-		},
 		"get_entity": {
 			Category:    "entity_persistence",
 			Description: "Read a typed entity row by entity type and entity id.",

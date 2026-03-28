@@ -58,7 +58,12 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 	})
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID: "agent-1",
+		Config: mustToolConfigJSON(t, map[string]any{
+			"tools": []string{"check_domain"},
+		}),
+	})
 	out, err := exec.Execute(ctx, "check_domain", map[string]any{"domain": "example.com"})
 	if err != nil {
 		t.Fatalf("Execute(check_domain): %v", err)
@@ -129,7 +134,12 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 	})
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
-	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1"})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID: "agent-1",
+		Config: mustToolConfigJSON(t, map[string]any{
+			"tools": []string{"infra.ping"},
+		}),
+	})
 	out, err := exec.Execute(ctx, "infra.ping", map[string]any{"target": "svc"})
 	if err != nil {
 		t.Fatalf("Execute(infra.ping): %v", err)
@@ -176,4 +186,13 @@ func writeMCPResult(t *testing.T, w http.ResponseWriter, id any, result any) {
 		"id":      id,
 		"result":  result,
 	})
+}
+
+func mustToolConfigJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	return raw
 }

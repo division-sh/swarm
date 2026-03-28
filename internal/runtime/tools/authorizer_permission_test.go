@@ -65,8 +65,24 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-6",
 		}, "workflow_custom_tool")
+		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
+			t.Fatalf("expected unconstrained non-gated tool to be denied, got %v", err)
+		}
+	})
+
+	t.Run("actor config still allows explicitly listed workflow tool", func(t *testing.T) {
+		raw, err := json.Marshal(map[string]any{
+			"tools": []string{"workflow_custom_tool"},
+		})
 		if err != nil {
-			t.Fatalf("expected non-gated tool to fall through to existing tiers: %v", err)
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID: "ops-7",
+			Config: raw,
+		}, "workflow_custom_tool")
+		if authErr != nil {
+			t.Fatalf("expected listed workflow tool to be allowed: %v", authErr)
 		}
 	})
 }
@@ -161,6 +177,17 @@ func TestValidateAgentPermissions_DefaultWorkflowBundleDoesNotReportUnknownBundl
 }
 
 func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
+	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"coord.done": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+	}))
 	raw, err := json.Marshal(map[string]any{
 		"emit_events": []string{"coord.done"},
 	})

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"swarm/internal/config"
+	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
@@ -23,6 +24,7 @@ type ClaudeCLIRuntime struct {
 	lockOwner     string
 	workspaces    workspace.Resolver
 	monitor       MonitorSink
+	events        EventPublisher
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
@@ -40,6 +42,7 @@ func NewClaudeCLIRuntime(
 	budget BudgetGuard,
 	workspaces workspace.Resolver,
 	conversations ConversationPersistence,
+	publisher EventPublisher,
 ) *ClaudeCLIRuntime {
 	return &ClaudeCLIRuntime{
 		cfg:           cfg,
@@ -50,6 +53,7 @@ func NewClaudeCLIRuntime(
 		lockOwner:     lockOwner,
 		workspaces:    workspaces,
 		monitor:       NewFileMonitorSink(DefaultMonitorDir()),
+		events:        publisher,
 	}
 }
 
@@ -139,6 +143,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 			s.TurnCount = rec.TurnCount
 		}
 	}
+	publishAgentStarted(ctx, r.events, s, events.EventType("platform.agent_started"))
 	return s, nil
 }
 

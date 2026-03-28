@@ -43,3 +43,15 @@ func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	}
 	t.Fatal("expected source-backed agent_message definition")
 }
+
+func TestContractDefinitionsForSource_DoesNotExposeCreateFlowInstance(t *testing.T) {
+	defs, err := ContractDefinitionsForSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	if err != nil {
+		t.Fatalf("ContractDefinitionsForSource: %v", err)
+	}
+	for _, def := range defs {
+		if def.Name == "create_flow_instance" {
+			t.Fatal("create_flow_instance should not be exposed as an agent tool definition")
+		}
+	}
+}

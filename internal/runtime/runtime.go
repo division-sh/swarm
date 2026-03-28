@@ -244,6 +244,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			Conversations: stores.ConversationStore,
 			Budget:        rt.Budget,
 			Workspaces:    rt.Workspace,
+			Events:        rt.Bus,
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)
