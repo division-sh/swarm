@@ -48,6 +48,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 	errs := make([]string, 0, 16)
 	warnings := make([]WorkflowContractWarning, 0, 8)
 	nodes := source.NodeEntries()
+	mcpPrefixes := workflowDeclaredMCPPrefixes(source)
 	events := source.EventEntries()
 	usesOwningNodeModel := contractBundleUsesOwningNodeModel(source)
 	runtimeExecutors := supportedWorkflowRuntimeExecutorIDs(source)
@@ -97,6 +98,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(agent.Subscriptions) == 0 {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
 			}
+			errs = append(errs, workflowValidateNativeTools(agentLabel, agent)...)
 			workflowValidatePromptWarnings(scope.PromptsDir, workflowProjectScopeLabel(scope), agentID, addWarning)
 		}
 	}
@@ -141,9 +143,18 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 			if len(agent.Subscriptions) == 0 {
 				errs = append(errs, fmt.Sprintf("agent %s missing required field subscriptions", agentLabel))
 			}
+			errs = append(errs, workflowValidateNativeTools(agentLabel, agent)...)
 			workflowValidatePromptWarnings(scope.PromptsDir, scopeLabel, agentID, addWarning)
 		}
 	}
+	for agentID, agent := range source.AgentEntries() {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		errs = append(errs, workflowValidateNativeTools(agentID, agent)...)
+	}
+	errs = append(errs, workflowValidateWebSearchProvider(source)...)
 	for _, warning := range workflowMergedAgentPermissionWarnings(source) {
 		addWarning(warning.Category, warning.Message)
 	}
@@ -427,6 +438,9 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 				continue
 			}
 			if _, ok := source.ToolEntryForAgent(agentID, toolID); !ok {
+				if workflowToolReferenceAllowedByMCPPrefix(toolID, mcpPrefixes) {
+					continue
+				}
 				errs = append(errs, fmt.Sprintf("agent %s references missing tool %s", strings.TrimSpace(agentID), toolID))
 			}
 		}
@@ -477,6 +491,118 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 		return warnings[i].Category < warnings[j].Category
 	})
 	return warnings, nil
+}
+
+func workflowDeclaredMCPPrefixes(source semanticview.Source) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	policy := policyDocumentToMap(source.ResolvedPolicyForFlow(""))
+	root, ok := asObject(policy["mcp_servers"])
+	if !ok || len(root) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(root))
+	for _, raw := range root {
+		server, ok := asObject(raw)
+		if !ok {
+			continue
+		}
+		prefix := strings.TrimSpace(asString(server["prefix"]))
+		if prefix == "" {
+			continue
+		}
+		out[prefix] = struct{}{}
+	}
+	return out
+}
+
+func workflowToolReferenceAllowedByMCPPrefix(toolID string, prefixes map[string]struct{}) bool {
+	if len(prefixes) == 0 {
+		return false
+	}
+	prefix, _, ok := strings.Cut(strings.TrimSpace(toolID), ".")
+	if !ok || strings.TrimSpace(prefix) == "" {
+		return false
+	}
+	_, exists := prefixes[strings.TrimSpace(prefix)]
+	return exists
+}
+
+func workflowValidateNativeTools(agentLabel string, agent runtimecontracts.AgentRegistryEntry) []string {
+	if len(agent.NativeTools) == 0 {
+		return nil
+	}
+	errs := make([]string, 0, len(agent.NativeTools))
+	for key, value := range agent.NativeTools {
+		key = strings.TrimSpace(key)
+		switch key {
+		case "bash", "web_search", "file_io":
+		default:
+			errs = append(errs, fmt.Sprintf("agent %s native_tools.%s is not a recognized capability", agentLabel, key))
+			continue
+		}
+		if _, ok := value.(bool); !ok {
+			errs = append(errs, fmt.Sprintf("agent %s native_tools.%s must be boolean", agentLabel, key))
+		}
+	}
+	return errs
+}
+
+func workflowValidateWebSearchProvider(source semanticview.Source) []string {
+	if source == nil || !workflowAnyAgentNeedsNativeCapability(source, "web_search") {
+		return nil
+	}
+	if _, ok := semanticview.PolicyValueForFlow(source, "", "web_search_provider"); !ok {
+		return nil
+	}
+	policy := policyDocumentToMap(source.ResolvedPolicyForFlow(""))
+	root, ok := asObject(policy["web_search_provider"])
+	if !ok {
+		return []string{"policy.web_search_provider must be a mapping"}
+	}
+	provider := strings.ToLower(strings.TrimSpace(asString(root["provider"])))
+	switch provider {
+	case "brave", "serper", "tavily":
+		return nil
+	case "custom":
+		if _, ok := asObject(root["http"]); !ok {
+			return []string{"policy.web_search_provider.http is required for custom provider"}
+		}
+		if strings.TrimSpace(asString(root["response_path"])) == "" {
+			return []string{"policy.web_search_provider.response_path is required for custom provider"}
+		}
+		fieldMapping, ok := asObject(root["field_mapping"])
+		if !ok {
+			return []string{"policy.web_search_provider.field_mapping is required for custom provider"}
+		}
+		for _, field := range []string{"title", "url", "snippet"} {
+			if strings.TrimSpace(asString(fieldMapping[field])) == "" {
+				return []string{fmt.Sprintf("policy.web_search_provider.field_mapping.%s is required for custom provider", field)}
+			}
+		}
+		return nil
+	default:
+		return []string{fmt.Sprintf("policy.web_search_provider.provider %q is not supported", provider)}
+	}
+}
+
+func workflowAnyAgentNeedsNativeCapability(source semanticview.Source, capability string) bool {
+	if source == nil {
+		return false
+	}
+	capability = strings.TrimSpace(capability)
+	if capability == "" {
+		return false
+	}
+	for _, agent := range source.AgentEntries() {
+		raw, ok := agent.NativeTools[capability]
+		flag, isBool := raw.(bool)
+		if ok && isBool && flag {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowHandlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {

@@ -110,6 +110,97 @@ func TestValidateWorkflowContractsDetailed_DefaultBundleDoesNotWarnOnKnownPermis
 	}
 }
 
+func TestValidateWorkflowContractsDetailed_AllowsDeclaredMCPPrefixedTools(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"ops-agent": {
+				ID:               "ops-agent",
+				Role:             "ops",
+				ModelTier:        "fast",
+				ConversationMode: "react",
+				Subscriptions:    []string{"task.requested"},
+				ToolsTier2:       []string{"infra.ping"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+		Policy: runtimecontracts.PolicyDocument{
+			Values: map[string]runtimecontracts.PolicyValue{
+				"mcp_servers": {
+					Value: map[string]any{
+						"empire-infra": map[string]any{
+							"transport": "stdio",
+							"command":   "empire-infra-mcp",
+							"prefix":    "infra",
+						},
+					},
+				},
+			},
+		},
+	}
+	bundle.Platform.Platform.Name = "Swarm Platform"
+	bundle.Platform.Platform.Version = "1.0.0"
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("expected declared MCP-prefixed tool to validate, got %v", err)
+	}
+}
+
+func TestValidateWorkflowContractsDetailed_RejectsUnknownNativeToolCapability(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"research-agent": {
+				ID:               "research-agent",
+				Role:             "research",
+				ModelTier:        "fast",
+				ConversationMode: "task",
+				Subscriptions:    []string{"task.requested"},
+				NativeTools:      map[string]any{"mystery_tool": true},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+	}
+	bundle.Platform.Platform.Name = "Swarm Platform"
+	bundle.Platform.Platform.Version = "1.0.0"
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err == nil || !workflowValidationErrorContains(err, "native_tools.mystery_tool") {
+		t.Fatalf("expected unknown native_tools capability error, got %v", err)
+	}
+}
+
+func TestValidateWorkflowContractsDetailed_RejectsNonBooleanNativeToolValue(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"research-agent": {
+				ID:               "research-agent",
+				Role:             "research",
+				ModelTier:        "fast",
+				ConversationMode: "task",
+				Subscriptions:    []string{"task.requested"},
+				NativeTools:      map[string]any{"bash": "yes"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+	}
+	bundle.Platform.Platform.Name = "Swarm Platform"
+	bundle.Platform.Platform.Version = "1.0.0"
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err == nil || !workflowValidationErrorContains(err, "native_tools.bash must be boolean") {
+		t.Fatalf("expected non-boolean native_tools error, got %v", err)
+	}
+}
+
 func TestWorkflowPolicyConflictWarnings(t *testing.T) {
 	projectScopes := []semanticview.ProjectScope{{
 		Key: "root",

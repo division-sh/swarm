@@ -13,6 +13,7 @@ func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 	e.registerEntityHandlers(handlers)
 	e.registerMailboxHandlers(handlers)
 	e.registerHumanTaskHandlers(handlers)
+	e.registerNativeToolHandlers(handlers)
 	return handlers
 }
 
@@ -39,6 +40,7 @@ func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
 	handlers["get_entity"] = e.execGetEntity
 	handlers["save_entity_field"] = e.execSaveEntityField
 	handlers["create_entity"] = e.execCreateEntity
+	handlers["query_entities"] = e.execQueryEntities
 	handlers["search_entities"] = e.execSearchEntities
 	handlers["query_metrics"] = e.execQueryMetrics
 }
@@ -50,4 +52,11 @@ func (e *Executor) registerFlowHandlers(handlers map[string]ToolHandler) {
 func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {
 	handlers["human_task_request"] = e.execHumanTaskRequest
 	handlers["human_task_decide"] = e.execHumanTaskDecide
+}
+
+func (e *Executor) registerNativeToolHandlers(handlers map[string]ToolHandler) {
+	handlers["bash"] = e.execNativeBash
+	handlers["web_search"] = e.execNativeWebSearch
+	handlers["read_file"] = e.execNativeReadFile
+	handlers["write_file"] = e.execNativeWriteFile
 }

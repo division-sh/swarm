@@ -203,7 +203,7 @@ classifier-agent:
   model_tier: haiku
   subscriptions: [ticket.created]
   emit_events: [ticket.classified]
-  tools_tier2: []
+  tools: []
   conversation_mode: task
   max_turns_per_task: 3
   description: Classifies tickets by category and priority
@@ -213,7 +213,7 @@ resolver-agent:
   model_tier: sonnet
   subscriptions: [ticket.assigned]
   emit_events: [ticket.resolved, ticket.escalated]
-  tools_tier2: [knowledge_base_search]
+  tools: [knowledge_base_search]
   conversation_mode: session_per_entity
   max_turns_per_task: 10
   description: Resolves tickets using knowledge base and reasoning

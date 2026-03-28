@@ -59,3 +59,13 @@ type Runtime interface {
 	StartSession(ctx context.Context, agentID string, systemPrompt string, tools []ToolDefinition) (*Session, error)
 	ContinueSession(ctx context.Context, session *Session, message Message) (*Response, error)
 }
+
+type NativeToolCapabilities struct {
+	Bash      bool
+	WebSearch bool
+	FileIO    bool
+}
+
+type NativeToolCapabilityProvider interface {
+	NativeToolCapabilities() NativeToolCapabilities
+}

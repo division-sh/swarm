@@ -11,6 +11,7 @@ import (
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type Schedule = runtimepipeline.Schedule
@@ -37,13 +38,14 @@ type Manager interface {
 type ManagerProvider func() Manager
 
 type ExecutorOptions struct {
-	Manager         Manager
-	ManagerProvider ManagerProvider
-	Config          *config.Config
-	Credentials     runtimecredentials.Store
-	MailboxStore    MailboxPersistence
-	MCPClient       *runtimemcp.Client
-	SQLDB           *sql.DB
-	WorkflowSource  semanticview.Source
-	FlowActivator   runtimepipeline.FlowInstanceActivator
+	Manager           Manager
+	ManagerProvider   ManagerProvider
+	Config            *config.Config
+	Credentials       runtimecredentials.Store
+	MailboxStore      MailboxPersistence
+	MCPClient         *runtimemcp.Client
+	SQLDB             *sql.DB
+	WorkflowSource    semanticview.Source
+	FlowActivator     runtimepipeline.FlowInstanceActivator
+	WorkspaceResolver workspace.Resolver
 }

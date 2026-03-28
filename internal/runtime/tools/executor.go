@@ -21,6 +21,7 @@ import (
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	workspace "swarm/internal/runtime/workspace"
 )
 
 type Executor struct {
@@ -38,6 +39,7 @@ type Executor struct {
 	mcpClient       *runtimemcp.Client
 	workflowSource  semanticview.Source
 	flowActivator   runtimepipeline.FlowInstanceActivator
+	workspaces      workspace.Resolver
 	authorizer      *ToolAuthorizer
 	validator       *ToolInputValidator
 	dispatcher      *ToolDispatcher
@@ -68,6 +70,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		mcpClient:       opts.MCPClient,
 		workflowSource:  opts.WorkflowSource,
 		flowActivator:   opts.FlowActivator,
+		workspaces:      opts.WorkspaceResolver,
 		oneShotEmits:    make(map[string]struct{}),
 	}
 	if exec.credentials == nil {
@@ -149,6 +152,9 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 }
 
 func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
+	if tool, ok := nativeFallbackRegisteredTool(actor, name); ok {
+		return tool, true, nil
+	}
 	e.mu.RLock()
 	source := e.workflowSource
 	client := e.mcpClient

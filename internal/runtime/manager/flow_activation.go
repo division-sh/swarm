@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
-	"github.com/google/uuid"
 )
 
 type flowInstancePersistence interface {
@@ -306,6 +306,9 @@ func buildFlowAgentConfig(
 		cfgPayload["tools_tier2"] = append([]string{}, tools...)
 		cfgPayload["allowed_tools"] = append([]string{}, tools...)
 	}
+	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
+		cfgPayload["native_tools"] = nativeTools
+	}
 	if emitEvents := normalizedConfiguredEventList(entry.EmitEvents, vars); len(emitEvents) > 0 {
 		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
 	}
@@ -466,6 +469,9 @@ func buildStaticFlowAgentConfig(
 		cfgPayload["tools_tier2"] = append([]string{}, tools...)
 		cfgPayload["allowed_tools"] = append([]string{}, tools...)
 	}
+	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
+		cfgPayload["native_tools"] = nativeTools
+	}
 	if emitEvents := normalizedConfiguredEventList(entry.EmitEvents, vars); len(emitEvents) > 0 {
 		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
 	}
@@ -565,6 +571,25 @@ func cloneFlowConfig(in map[string]any) map[string]any {
 
 func normalizedConfiguredToolList(raw []string) []string {
 	return dedupeStrings(raw)
+}
+
+func normalizedConfiguredNativeTools(raw map[string]any) map[string]bool {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(raw))
+	for key, value := range raw {
+		key = strings.TrimSpace(key)
+		flag, ok := value.(bool)
+		if key == "" || !ok {
+			continue
+		}
+		out[key] = flag
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func normalizedConfiguredEventList(raw []string, vars map[string]string) []string {

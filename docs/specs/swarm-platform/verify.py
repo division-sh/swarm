@@ -386,7 +386,7 @@ for flow in ['root'] + FLOWS:
     agents = root_agents if flow == 'root' else flow_data[flow]['agents']
     for aid, agent in agents.items():
         if not isinstance(agent, dict): continue
-        for tool in agent.get('tools_tier2', []):
+        for tool in agent.get('tools', agent.get('tools_tier2', [])):
             if tool not in all_tools:
                 warn("TOOL-MISSING", "%s/%s: tool '%s' not in any tools.yaml" % (flow, aid, tool))
 

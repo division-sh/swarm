@@ -226,6 +226,75 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	}
 }
 
+type nativeCapabilityRuntimeStub struct {
+	llm.NoopRuntime
+	caps llm.NativeToolCapabilities
+}
+
+func (s nativeCapabilityRuntimeStub) NativeToolCapabilities() llm.NativeToolCapabilities {
+	return s.caps
+}
+
+func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testing.T) {
+	agent := NewLLMAgent(
+		models.AgentConfig{
+			ID:   "researcher-1",
+			Role: "researcher",
+			Config: mustAgentConfigJSON(t, map[string]any{
+				"native_tools": map[string]any{
+					"bash":       true,
+					"web_search": true,
+					"file_io":    true,
+				},
+			}),
+		},
+		nativeCapabilityRuntimeStub{},
+		nil,
+		nil,
+	)
+	names := make([]string, 0, len(agent.conversation.Tools))
+	for _, tool := range agent.conversation.Tools {
+		names = append(names, tool.Name)
+	}
+	for _, want := range []string{"bash", "web_search", "read_file", "write_file"} {
+		if !containsString(names, want) {
+			t.Fatalf("expected native fallback tool %s in %v", want, names)
+		}
+	}
+}
+
+func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapability(t *testing.T) {
+	agent := NewLLMAgent(
+		models.AgentConfig{
+			ID:   "ops-1",
+			Role: "ops",
+			Config: mustAgentConfigJSON(t, map[string]any{
+				"native_tools": map[string]any{
+					"bash":       true,
+					"web_search": true,
+					"file_io":    true,
+				},
+			}),
+		},
+		nativeCapabilityRuntimeStub{caps: llm.NativeToolCapabilities{
+			Bash:      true,
+			WebSearch: true,
+			FileIO:    true,
+		}},
+		nil,
+		nil,
+	)
+	names := make([]string, 0, len(agent.conversation.Tools))
+	for _, tool := range agent.conversation.Tools {
+		names = append(names, tool.Name)
+	}
+	for _, forbidden := range []string{"bash", "web_search", "read_file", "write_file"} {
+		if containsString(names, forbidden) {
+			t.Fatalf("did not expect fallback tool %s in %v", forbidden, names)
+		}
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if strings.TrimSpace(value) == strings.TrimSpace(target) {

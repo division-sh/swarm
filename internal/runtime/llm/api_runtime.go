@@ -47,6 +47,10 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lock
 	}
 }
 
+func (r *AnthropicAPIRuntime) NativeToolCapabilities() NativeToolCapabilities {
+	return NativeToolCapabilities{}
+}
+
 func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
 	if r.conversations == nil || s == nil {
 		return nil
@@ -59,6 +63,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
+		SessionID: s.ID,
 		AgentID:   s.AgentID,
 		ScopeKey:  strings.TrimSpace(s.ScopeKey),
 		Mode:      mode,
@@ -248,9 +253,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		Latency:        latency,
 		RetryCount:     retryCount,
 	})
-	if !resolved.Stateless {
-		r.persistConversation(ctx, s)
-	}
+	r.persistConversation(ctx, s)
 
 	// Spend ledger: exact usage for API runtime when usage fields are present.
 	if r.budget != nil {
@@ -284,6 +287,7 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 		return
 	}
 	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
+		SessionID: s.ID,
 		AgentID:   s.AgentID,
 		ScopeKey:  strings.TrimSpace(s.ScopeKey),
 		Mode:      mode,

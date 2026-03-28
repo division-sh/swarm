@@ -687,7 +687,7 @@ engine:
       action: Every flow's required_agents roles must be fulfilled by agents in that flow's agents.yaml.
     - step: 9
       name: validate_tools
-      action: Every tool in every agent's tools_tier2 must exist in the tool registry.
+      action: Every tool in every agent's tools must exist in the tool registry.
     - step: 10
       name: validate_permissions
       action: Every agent has sufficient permissions for its declared tools.
@@ -901,24 +901,203 @@ engine:
         be modified at runtime. This is the agent's declared event contract.
     emit_tool_convention:
       description: The platform auto-generates emit tools from each agent's emit_events list. Agents do NOT need to list emit
-        tools in tools_tier2.
+        tools in tools.
       naming: 'emit_{event_name} where dots are replaced with underscores. Example: emit_events: [score.dimension_complete]
         → tool: emit_score_dimension_complete'
       behavior: Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
         the payload, attaches sender context, and publishes the event.
-      universal_tools: 'Some tools are auto-granted to all agents without explicit tools_tier2 listing: agent_message, mailbox_send.
+      universal_tools: 'Some tools are auto-granted to all agents without explicit tools listing: agent_message, mailbox_send.
         These are "universal" tools.'
-    task_mode_stateless: 'Agents in task conversation_mode do NOT get an agent_sessions row. Each event invocation is independent.
-      No conversation history persisted. Debugging traces for task invocations: spend_ledger (cost per invocation) + events
-      (what the agent emitted). Provider session IDs for task invocations are ephemeral and not stored.'
+    task_mode_audit: 'Agents in task conversation_mode DO get an agent_sessions row. The conversation transcript (reasoning,
+      tool calls, results) is persisted after each invocation for audit and debugging. However, the transcript is write-only —
+      it is NEVER loaded back for subsequent invocations. Each event invocation starts with a fresh context. Task mode means
+      "no memory between invocations", not "no record of what happened." The persisted transcript enables the builder Run tab
+      to show agent reasoning details regardless of conversation_mode. Rows may be archived per retention policy.'
     provider_session_ids: External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in agent_sessions.runtime_state.provider_session_id,
       NOT in session_id. session_id is the platform-owned UUID primary key. The provider ID is an implementation detail that
       may change if the provider is swapped.
     conversation_mode_values:
-      task: Stateless. No session persisted. Each invocation is independent.
-      session: Persistent session across events. Conversation history maintained.
-      session_per_entity: One session per agent × entity. Context preserved per entity.
+      task: Stateless between invocations. Transcript persisted (write-only) for audit. Never reloaded. Each invocation starts fresh.
+      session: Persistent session across events. Conversation history maintained and reused. Agent accumulates context.
+      session_per_entity: One session per agent × entity. Context preserved and reused per entity.
       stateless: Alias for task. Accepted by the loader, normalized to task internally.
+    native_tools:
+      description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
+        (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
+        entry is required. Native tools are not part of the tools system. They are provider-level capabilities that the
+        platform either enables natively or provides as local fallback tools.
+      contract_field:
+        field: native_tools
+        type: object
+        location: Agent declaration in agents.yaml, alongside tools and permissions.
+        default: All capabilities false. Agents do not get native capabilities unless explicitly enabled.
+        example: "native_tools:\n  bash: true\n  web_search: true\n  file_io: false"
+      authorization:
+        description: The native_tools field IS the authorization. It does not require a matching entry in the permissions list.
+          Permissions govern platform operations (shared state — agents table, routing, mailbox). Native tools govern local
+          execution capabilities (host shell, web access, filesystem). Different concerns, different gates. If the agent contract
+          says bash true, the agent gets bash. Boot validation checks that capability names are valid and values are boolean.
+      relationship_to_tool_filtering:
+        description: Native tools are NOT part of the tools filtering system. tools controls what the platform
+          injects as platform/MCP/HTTP tools. Native tools control what the provider brings to the session or what the platform
+          provides as a local execution shim. They are separate channels. When a fallback tool is injected (because the provider
+          lacks the capability), it fulfills the native_tools contract — it is not subject to tools filtering.
+      capabilities:
+        bash:
+          description: Shell command execution. Always runs locally on the platform host, in the agent's workspace directory
+            with workspace mounts active (/workspace read-write, /data read-only, /opt/swarm/contracts read-only).
+          tool_schema:
+            input:
+              command: string — shell command to execute
+              timeout_seconds: integer — optional, default 30
+              working_dir: string — optional, default /workspace
+            output:
+              stdout: string
+              stderr: string
+              exit_code: integer
+              duration_ms: integer
+          security_note: Powerful capability. The agent can execute arbitrary commands as the platform process user. Grant only
+            to agents that need host-level operations (e.g., infrastructure management agents). Not appropriate for data-processing
+            or analysis agents.
+        web_search:
+          description: Internet search. Returns search results as structured data. Executed locally — the platform makes the
+            search API call from the host.
+          tool_schema:
+            input:
+              query: string — search query
+              max_results: integer — optional, default 10
+            output:
+              results: array of objects with title, url, snippet fields
+          configuration:
+            description: Search provider configured in policy.yaml under web_search_provider. Only used when the platform
+              provides the fallback (API and local-model backends). CLI backends with native web search do not use this config.
+              The platform ships a generic HTTP-based search executor. The policy entry defines the provider, API endpoint,
+              and credentials.
+            policy_key: web_search_provider
+            schema:
+              provider: string — provider identifier. Supported values are brave, serper, tavily, custom. The platform ships
+                request/response adapters for known providers. Custom uses the http block directly.
+              credentials_key: string — credential store key for the API key
+              max_results_default: integer — optional, default 10. Overridden by agent's max_results parameter if provided.
+            known_providers:
+              brave:
+                description: Brave Search API
+                endpoint: https://api.search.brave.com/res/v1/web/search
+                auth_header: 'X-Subscription-Token: {{credentials.key}}'
+                response_path: web.results
+                field_mapping:
+                  title: title
+                  url: url
+                  snippet: description
+              serper:
+                description: Serper.dev Google Search API
+                endpoint: https://google.serper.dev/search
+                auth_header: 'X-API-KEY: {{credentials.key}}'
+                response_path: organic
+                field_mapping:
+                  title: title
+                  url: link
+                  snippet: snippet
+              tavily:
+                description: Tavily Search API
+                endpoint: https://api.tavily.com/search
+                auth_header: null
+                auth_body_key: api_key
+                response_path: results
+                field_mapping:
+                  title: title
+                  url: url
+                  snippet: content
+              custom:
+                description: User-defined search endpoint. Requires an http block in the policy entry, same format as
+                  http_tool_definition. The platform sends the query and max_results as input, expects the response to contain
+                  an array of results. The field_mapping tells the platform which response fields map to title, url, snippet.
+            example: "web_search_provider:\n  provider: brave\n  credentials_key: brave_search_api_key\n  max_results_default:\
+              \ 5"
+            custom_example: "web_search_provider:\n  provider: custom\n  credentials_key: my_search_key\n  http:\n    method:\
+              \ GET\n    url: \"https://my-search.example.com/api/search?q={{input.query}}&limit={{input.max_results}}\"\n  \
+              \  headers:\n      Authorization: \"Bearer {{credentials.my_search_key}}\"\n  response_path: data.items\n  field_mapping:\n\
+              \    title: name\n    url: link\n    snippet: summary"
+            response_contract:
+              description: Regardless of provider, the platform normalizes the response to this shape before returning to the agent.
+              output:
+                results:
+                  type: array
+                  items:
+                    title: string
+                    url: string
+                    snippet: string
+        file_io:
+          description: Read and write files within workspace mounts. /workspace is read-write, /data is read-only,
+            /opt/swarm/contracts is read-only. Always runs locally.
+          tool_schema:
+            read_file:
+              input:
+                path: string — file path relative to workspace root or absolute within mounts
+              output:
+                content: string
+                size_bytes: integer
+            write_file:
+              input:
+                path: string — must be within /workspace
+                content: string
+              output:
+                bytes_written: integer
+      tool_names:
+        description: Canonical tool names the agent sees when native capabilities are provided via platform fallback. These
+          names must be consistent across all backends. When the provider handles the capability natively, the provider's own
+          tool name is used (the agent adapts). When the platform injects fallbacks, these are the exact names.
+        bash:
+          tool_name: bash
+          note: Single tool. Same name as the capability.
+        web_search:
+          tool_name: web_search
+          note: Single tool. Same name as the capability.
+        file_io:
+          tool_names:
+          - read_file
+          - write_file
+          note: The file_io capability maps to two fallback tools. The contract field is one boolean (file_io), but the agent
+            sees two tools when the platform provides the fallback. Both are injected when file_io is true.
+      runtime_resolution:
+        description: How the platform resolves native_tools at agent session creation time. All execution is local to the
+          platform host. The only variable is whether the provider handles the tool natively or the platform provides it.
+        steps:
+        - 1. Read native_tools from agent contract. If absent or empty, no native capabilities — skip.
+        - 2. For each enabled capability (bash, web_search, file_io), check the LLM backend type.
+        - '3. CLI backend (e.g., claude -p): provider has native bash, web search, and file I/O. Enable via provider invocation
+          config. These run locally on the same host — workspace scoping is inherent.'
+        - '4. API backend (e.g., Anthropic API, OpenAI API): provider does not have local execution capabilities. The platform
+          injects fallback tools into the agent''s tool list. Fallback tools execute locally on the platform host.'
+        - '5. Local model backend (e.g., ollama): same as API — platform injects fallback tools, executed locally.'
+        - 6. The agent sees the same tool interface regardless of which path runs. All execution is local.
+        provider_detection: The platform determines provider capabilities from the configured LLM backend (api, cli, local).
+          Each backend adapter declares which native capabilities it supports. The platform does not probe the provider at
+          runtime — capabilities are known at configuration time.
+      environment:
+        description: All native tool execution is local to the platform host and respects the workspace model.
+        rules:
+        - All native tool execution runs locally on the platform host. There is no remote execution case.
+        - bash cwd is /workspace for the agent's workspace class scope
+        - file_io is scoped to /workspace (read-write) and /data (read-only). Writes outside /workspace are rejected.
+        - Workspace scoping is guaranteed in all cases — both provider-native (CLI) and platform-fallback (API/local) run
+          on the same host with the same mounts.
+        - Environment variables from the credential store are NOT exposed to native tools. Agents access credentials through
+          platform tools (HTTP tool credential substitution, MCP server auth), not via env vars in bash.
+      audit:
+        description: All native tool usage is captured for observability. Task-mode agents persist transcripts (write-only)
+          which ensures native tool calls are always recorded regardless of conversation mode.
+        provider_native: Provider-native tool usage is captured in the agent session transcript. For task-mode agents, the
+          transcript is persisted (write-only) but never reloaded — providing a full audit trail without breaking stateless
+          semantics.
+        platform_fallback: Platform-fallback tool usage is logged as a platform tool call in the events table, same as any
+          other platform tool invocation.
+      boot_validation:
+        checks:
+        - All capability names in native_tools must be recognized (bash, web_search, file_io). Unknown names are a boot error.
+        - All values must be boolean. Non-boolean values are a boot error.
+        - If web_search is enabled on any agent AND that agent's LLM backend lacks native web search AND policy.web_search_provider
+          is not configured, log boot warning. If all web_search agents use CLI backends with native support, no config needed.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
       the event loop. Timers are declared in nodes.yaml.
@@ -1061,6 +1240,10 @@ engine:
       severity: error
     - id: phantom_produces
       severity: warning
+    - id: native_tools_valid
+      severity: error
+    - id: mcp_server_reachable
+      severity: warning
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
@@ -1074,7 +1257,8 @@ compliance:
     description: Checks the platform performs during execution.
     required_checks:
     - Tool calls validated against tool schema before execution
-    - Tool calls checked against agent permissions before execution
+    - Platform builtin tool calls checked against agent permissions before execution (tools field entries only — MCP, HTTP,
+      and native tools have their own authorization models)
     - Message delivery checked against agent message scope permission
     - State state_changes only follow declared advances_to paths
     - Guards evaluated before state advancement — block if false
@@ -1126,18 +1310,21 @@ compliance:
   - Guards must reference fields that exist on the entity or in policy.yaml
   - advances_to states must be reachable from the current flow state space
   agent_coherence:
-  - Every tool in tools_tier2 must exist in tools.yaml
+  - Every tool in tools must exist in the merged tool registry (tools.yaml + MCP server catalogs)
   - Every event in emit_events must have a payload schema in events.yaml
-  - Agent permissions must include required permissions for their tools
+  - Agent permissions must include required permissions for platform builtin tools in their tools
   - Every subscription event must be emitted by some node or agent
+  - Every native_tools capability must be a recognized name (bash, web_search, file_io) with a boolean value
   boot_enforcement: All boot checks are defined in engine.boot_verification.checks. This is the single authoritative list.
 permissions_model:
   description: Agents have a permissions list controlling what capabilities they can exercise. The platform enforces permissions
     at tool execution time and message routing time. Workflows define permissions per agent in their agent registry. Optional
     permission_bundles in policy files provide shorthand for common sets.
-  enforcement: Before executing any tool call, the platform checks the calling agent's permissions list. If the tool requires
-    a permission the agent lacks, the call is rejected. Message scope is enforced at agent_message delivery per the scoping
-    rules defined in permission_scoping.
+  enforcement: Before executing a platform builtin tool call from tools, the platform checks the calling agent's permissions
+    list. If the tool requires a permission the agent lacks, the call is rejected. MCP and HTTP tools are authorized by the
+    tool registry and credential store, not by agent permissions. Native tools (bash, web_search, file_io) are authorized by
+    the native_tools field on the agent contract. Message scope is enforced at agent_message delivery per the scoping rules
+    defined in permission_scoping.
   workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
     permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.'
   permissions:
@@ -1210,7 +1397,7 @@ tool_model:
         and forwards agent calls via tools/call. The platform ships one generic MCP client executor — no per-tool handler code.
       handler_type_value: mcp
       boot_rule: If an MCP server is unreachable at boot, log warning. Tools from that server are marked unavailable. Agents
-        with those tools in tools_tier2 get a boot warning (not error — the agent may not be invoked in this run). If the agent
+        with those tools in tools get a boot warning (not error — the agent may not be invoked in this run). If the agent
         IS invoked and calls the tool, the platform returns a tool error to the agent.
       portability: Works anywhere the MCP server is reachable. Pre-built MCP servers exist for common services (databases,
         APIs, cloud providers). Products can ship custom MCP servers as sidecars for infrastructure-specific tools.
@@ -1252,14 +1439,14 @@ tool_model:
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
   agent_tool_filtering:
-    description: Agents only see tools listed in their tools_tier2 contract field. The platform never injects the full tool
+    description: Agents only see tools listed in their tools contract field. The platform never injects the full tool
       catalog from any source into an agent session. This controls LLM context cost.
-    rule: When constructing an agent session, the platform resolves tools_tier2 entries against the merged tool registry
+    rule: When constructing an agent session, the platform resolves tools entries against the merged tool registry
       (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable entries
       log a warning per the tool_resolution boot check.
-    universal_tools: agent_message and mailbox_send are included in every agent session without listing in tools_tier2. Emit
-      tools (emit_{event_name}) are auto-generated from emit_events. Neither requires explicit tools_tier2 entry.
-    context_cost: An agent with 4 tools in tools_tier2 pays for 4 tool schemas in LLM context, regardless of how many tools
+    universal_tools: agent_message and mailbox_send are included in every agent session without listing in tools. Emit
+      tools (emit_{event_name}) are auto-generated from emit_events. Neither requires explicit tools entry.
+    context_cost: An agent with 4 tools in tools pays for 4 tool schemas in LLM context, regardless of how many tools
       exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
   mcp_client:
     description: The platform acts as an MCP client, connecting to external MCP servers to discover and invoke tools. MCP
@@ -1284,7 +1471,7 @@ tool_model:
       description: MCP tools are prefixed with the server's configured prefix to avoid name collisions across servers and
         with platform builtins.
       rule: 'Server with prefix "pg" exposing tool "list_tables" registers as "pg.list_tables" in the platform tool registry.
-        Agents reference the prefixed name in tools_tier2: tools_tier2: [pg.list_tables].'
+        Agents reference the prefixed name in their tools field: [pg.list_tables].'
       resolution: 'When an agent calls "pg.list_tables", the platform splits on the first dot: prefix "pg" → server "postgres"
         → tool "list_tables". Forwards tools/call with name "list_tables" to the postgres server.'
     boot_sequence:
@@ -1429,6 +1616,24 @@ prompt_templating:
     compliance_test_sources: 'TestPromptVariablesComplete must scan ALL of these for each prompt directory: schema.yaml (instance_variables.variables),
       policy.yaml (all keys), agents.yaml (prompt_inputs), and the runtime-token allowlist. A variable is valid if it appears
       in ANY of these sources.'
+  prompt_postamble:
+    description: The platform appends a short environment postamble to every agent system prompt at session creation time.
+      The postamble tells the agent where it is working — workspace paths and access levels. It does NOT list available tools
+      or capabilities — the LLM sees those via tool definitions in the API call, same as MCP tools and platform builtins.
+      The product prompt (from prompts/{agent-id}.md, with variables resolved) comes first. The postamble follows.
+    construction:
+      order:
+      - 1. Product prompt (prompts/{agent-id}.md with {{variable}} substitution)
+      - 2. Platform postamble (auto-generated from workspace_class)
+      rules:
+      - Always included. Every agent gets workspace context.
+      - Does NOT list tools or native capabilities — those are conveyed via tool definitions, not prompt text.
+      - Generated at session creation time from the agent's workspace_class. Not editable by the product author.
+    template: "## Environment\n\nWorking directory: /workspace (read-write)\nReference data: /data (read-only)\nContracts:
+      /opt/swarm/contracts (read-only)"
+    note: The workspace paths are the same for all workspace classes — only the /workspace scope differs (per-agent vs
+      per-flow-instance). The postamble does not vary by scope — it tells the agent the paths, the platform enforces the
+      scoping.
 flow_model:
   description: A Flow is the universal building block. Every level of the system is a flow — from the root flow down to the
     smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate

@@ -80,6 +80,23 @@ func TestEntityTools_HappyPath(t *testing.T) {
 		t.Fatalf("unexpected search results: %#v", results)
 	}
 
+	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"entity_type": "accounts",
+		"filter":      "status = 'closed'",
+		"select":      []string{"entity_id", "status"},
+		"limit":       10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities: %v", err)
+	}
+	queryResults, ok := queryOut.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected query_entities result slice, got %#v", queryOut)
+	}
+	if len(queryResults) != 1 || strings.TrimSpace(asString(queryResults[0]["entity_id"])) != entityID {
+		t.Fatalf("unexpected query_entities results: %#v", queryResults)
+	}
+
 	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
 		"entity_type": "accounts",
 		"metric":      "count",
@@ -95,6 +112,23 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	grouped, ok := metricResult["result"].(map[string]any)
 	if !ok || grouped["closed"] == nil {
 		t.Fatalf("expected grouped metrics, got %#v", metricOut)
+	}
+
+	queryMetricOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"entity_type": "accounts",
+		"metric":      "count",
+		"group_by":    "status",
+	})
+	if err != nil {
+		t.Fatalf("query_entities grouped metric: %v", err)
+	}
+	queryMetricResult, ok := queryMetricOut.(map[string]any)
+	if !ok {
+		t.Fatalf("expected query_entities metric result map, got %#v", queryMetricOut)
+	}
+	queryGrouped, ok := queryMetricResult["result"].(map[string]any)
+	if !ok || queryGrouped["closed"] == nil {
+		t.Fatalf("expected query_entities grouped metrics, got %#v", queryMetricOut)
 	}
 }
 

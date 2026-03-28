@@ -2,6 +2,12 @@
 
 ## v1.4.0 (2026-03-27)
 
+### Breaking: tools_tier2 renamed to tools
+The agent field `tools_tier2` is renamed to `tools`. The tier naming was an Empire legacy — the platform has no tool tiers. The loader accepts `tools_tier2` as a deprecated alias with a boot warning.
+
+### New: native_tools — provider-adaptive agent capabilities
+Agents can now declare `native_tools` (bash, web_search, file_io) in their contract. The platform either enables the provider's native implementation or injects a platform fallback tool — the agent sees the same interface either way. All execution respects workspace mounts. Eliminates the need for custom MCP servers for simple infrastructure operations.
+
 ### New: platform.budget_threshold_crossed event
 Budget monitoring is a platform concern — the platform owns spend_ledger and knows the spend. New event in the platform event catalog with level field (warning/throttle/emergency/ok). Thresholds read from policy.yaml. One event, no separate events per level.
 

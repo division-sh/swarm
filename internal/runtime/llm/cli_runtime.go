@@ -53,6 +53,14 @@ func NewClaudeCLIRuntime(
 	}
 }
 
+func (r *ClaudeCLIRuntime) NativeToolCapabilities() NativeToolCapabilities {
+	return NativeToolCapabilities{
+		Bash:      true,
+		WebSearch: true,
+		FileIO:    true,
+	}
+}
+
 func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *Session) error {
 	if r.conversations == nil || s == nil {
 		return nil
@@ -65,6 +73,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 		return nil
 	}
 	return r.conversations.UpsertConversation(ctx, ConversationRecord{
+		SessionID: s.ID,
 		AgentID:   s.AgentID,
 		ScopeKey:  strings.TrimSpace(s.ScopeKey),
 		Mode:      mode,
@@ -387,9 +396,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		ParseOK:     true,
 		Latency:     latency,
 	})
-	if !resolved.Stateless {
-		r.persistConversation(ctx, s)
-	}
+	r.persistConversation(ctx, s)
 
 	// Spend ledger: CLI runtime does not expose exact usage; estimate from payload sizes.
 	if r.budget != nil {

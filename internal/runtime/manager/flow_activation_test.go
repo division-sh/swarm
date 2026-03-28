@@ -416,6 +416,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 			Type:            "generic",
 			Role:            "reviewer",
 			ToolsTier2:      []string{"schedule", "check_status"},
+			NativeTools:     map[string]any{"bash": true, "file_io": true},
 			EmitEvents:      []string{"task.completed", "task.completed", "review.failed"},
 			MaxTurnsPerTask: 7,
 		},
@@ -438,6 +439,10 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	}
 	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "task.completed" || got[1] != "review.failed" {
 		t.Fatalf("emit_events = %#v, want [task.completed review.failed]", got)
+	}
+	nativeTools, ok := payload["native_tools"].(map[string]any)
+	if !ok || nativeTools["bash"] != true || nativeTools["file_io"] != true {
+		t.Fatalf("native_tools = %#v, want bash/file_io true", payload["native_tools"])
 	}
 }
 

@@ -42,6 +42,7 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
 	allowedToolSet, constrained := extractAllowedToolSet(cfg)
 	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
+	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
 
 	maxTurns := 1000
 	mode := llm.SessionScoped
@@ -500,6 +501,93 @@ func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 	return allowed, found
 }
 
+func extractNativeToolConfig(cfg models.AgentConfig) map[string]bool {
+	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(cfg.Config, &obj); err != nil {
+		return nil
+	}
+	raw, ok := obj["native_tools"]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]bool, len(items))
+	for key, value := range items {
+		key = strings.TrimSpace(key)
+		flag, ok := value.(bool)
+		if key == "" || !ok || !flag {
+			continue
+		}
+		out[key] = true
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func supportedNativeToolCapabilities(runtime llm.Runtime) llm.NativeToolCapabilities {
+	if provider, ok := runtime.(llm.NativeToolCapabilityProvider); ok && provider != nil {
+		return provider.NativeToolCapabilities()
+	}
+	return llm.NativeToolCapabilities{}
+}
+
+func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runtime) []llm.ToolDefinition {
+	native := extractNativeToolConfig(cfg)
+	if len(native) == 0 {
+		return nil
+	}
+	supported := supportedNativeToolCapabilities(modelRuntime)
+	defs := make([]llm.ToolDefinition, 0, 4)
+	if native["bash"] && !supported.Bash {
+		defs = append(defs, llm.ToolDefinition{
+			Name:        "bash",
+			Description: "Execute a shell command locally in the agent workspace and return stdout, stderr, exit code, and duration.",
+			Schema: runtimetools.ObjectSchema(map[string]any{
+				"command":         map[string]any{"type": "string"},
+				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300},
+			}, "command"),
+		})
+	}
+	if native["web_search"] && !supported.WebSearch {
+		defs = append(defs, llm.ToolDefinition{
+			Name:        "web_search",
+			Description: "Search the web and return normalized results with title, url, and snippet.",
+			Schema: runtimetools.ObjectSchema(map[string]any{
+				"query":       map[string]any{"type": "string"},
+				"max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+			}, "query"),
+		})
+	}
+	if native["file_io"] && !supported.FileIO {
+		defs = append(defs,
+			llm.ToolDefinition{
+				Name:        "read_file",
+				Description: "Read a file from the agent workspace or mounted read-only data/contracts paths.",
+				Schema: runtimetools.ObjectSchema(map[string]any{
+					"path": map[string]any{"type": "string"},
+				}, "path"),
+			},
+			llm.ToolDefinition{
+				Name:        "write_file",
+				Description: "Write a file within the agent workspace.",
+				Schema: runtimetools.ObjectSchema(map[string]any{
+					"path":    map[string]any{"type": "string"},
+					"content": map[string]any{"type": "string"},
+				}, "path", "content"),
+			},
+		)
+	}
+	return defs
+}
+
 func extractEmitEvents(cfg models.AgentConfig) []string {
 	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
 		return nil
@@ -613,6 +701,18 @@ func formatEventForAgent(cfg models.AgentConfig, evt events.Event) string {
 	toolSummaryLine := ""
 	if len(nonEmitTools) > 0 {
 		toolSummaryLine = "\n- Available non-emit tools from your contract: " + strings.Join(nonEmitTools, ", ")
+	}
+	nativeTools := extractNativeToolConfig(cfg)
+	if len(nativeTools) > 0 {
+		nativeNames := make([]string, 0, len(nativeTools))
+		for _, name := range []string{"bash", "web_search", "file_io"} {
+			if nativeTools[name] {
+				nativeNames = append(nativeNames, name)
+			}
+		}
+		if len(nativeNames) > 0 {
+			toolSummaryLine += "\n- Native capabilities from your contract: " + strings.Join(nativeNames, ", ")
+		}
 	}
 	return fmt.Sprintf(
 		"Agent: %s\nRole: %s\nMode: %s\nEvent:\n- id: %s\n- type: %s\n- source: %s\n- task_id: %s\n- entity_id: %s\n- payload: %s\n\nExecution contract (required):\n- Act via tools when needed.\n- Emit events by calling emit_* tools only.\n- Do not return JSON envelopes for event emission.\n- Available emit tools for your role: %s%s%s",

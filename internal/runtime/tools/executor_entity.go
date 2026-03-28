@@ -134,6 +134,20 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 	return map[string]any{"entity_id": entityID, "created": true}, nil
 }
 
+func (e *Executor) execQueryEntities(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	payload := map[string]any{}
+	if err := decodeToolInput(input, &payload); err != nil {
+		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.decode", false, err, "decode query_entities input")
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if metric := strings.TrimSpace(asString(payload["metric"])); metric != "" || strings.TrimSpace(asString(payload["group_by"])) != "" {
+		return e.execQueryMetrics(ctx, actor, payload)
+	}
+	return e.execSearchEntities(ctx, actor, payload)
+}
+
 func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
 	db, schema, payload, err := e.entityToolDependencies(input)
 	if err != nil {

@@ -596,7 +596,7 @@ List agents for a flow (or all).
       "model_tier": "sonnet",
       "subscriptions": ["..."],
       "emit_events": ["..."],
-      "tools_tier2": ["..."],
+      "tools": ["..."],
       "permissions_bundle": "coordinator",
       "workspace_class": "shared",
       "manager_fallback": null

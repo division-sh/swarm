@@ -3,8 +3,8 @@ package llm
 import (
 	"strings"
 
-	"swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
+	"swarm/internal/runtime/sessions"
 )
 
 func resolvedSessionScope(mode, scopeKey string) sessions.ResolvedScope {
@@ -30,5 +30,5 @@ func sessionToken(s *Session) string {
 }
 
 func shouldPersistConversationMode(mode string) bool {
-	return !resolvedSessionScope(mode, "").Stateless
+	return true
 }

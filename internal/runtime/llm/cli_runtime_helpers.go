@@ -38,6 +38,7 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 		return
 	}
 	if err := r.conversations.UpsertConversation(ctx, ConversationRecord{
+		SessionID: s.ID,
 		AgentID:   s.AgentID,
 		ScopeKey:  strings.TrimSpace(s.ScopeKey),
 		Mode:      mode,

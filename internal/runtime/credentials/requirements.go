@@ -54,6 +54,15 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 			index[key] = append(index[key], Requirement{Kind: "mcp_server", Name: name})
 		}
 	}
+	if value, ok := semanticview.PolicyValueForFlow(source, "", "web_search_provider"); ok {
+		for name, key := range parseWebSearchProviderCredentialKeys(value.Value) {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			index[key] = append(index[key], Requirement{Kind: "web_search_provider", Name: name})
+		}
+	}
 	for key, refs := range index {
 		index[key] = normalizeRequirements(refs)
 	}
@@ -197,6 +206,22 @@ func parseMCPServerCredentialKeys(value any) map[string]string {
 		}
 	}
 	return out
+}
+
+func parseWebSearchProviderCredentialKeys(value any) map[string]string {
+	root, ok := anyMap(value)
+	if !ok {
+		return nil
+	}
+	key := strings.TrimSpace(anyString(root["credentials_key"]))
+	if key == "" {
+		return nil
+	}
+	provider := strings.TrimSpace(anyString(root["provider"]))
+	if provider == "" {
+		provider = "default"
+	}
+	return map[string]string{provider: key}
 }
 
 func anyMap(value any) (map[string]any, bool) {

@@ -239,15 +239,23 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		}
 	}
 	rt.LLM = modelRuntime
+	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, modelRuntime); err != nil {
+		return nil, fmt.Errorf("native tool validation failed: %w", err)
+	} else {
+		for _, warning := range warnings {
+			slog.Warn("native tool validation warning", "warning", warning.Error())
+		}
+	}
 
 	var managerRef *runtimemanager.AgentManager
 	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
-		Config:         cfg,
-		Credentials:    rt.Credentials,
-		MailboxStore:   stores.MailboxStore,
-		SQLDB:          stores.SQLDB,
-		WorkflowSource: source,
-		FlowActivator:  nil,
+		Config:            cfg,
+		Credentials:       rt.Credentials,
+		MailboxStore:      stores.MailboxStore,
+		SQLDB:             stores.SQLDB,
+		WorkflowSource:    source,
+		FlowActivator:     nil,
+		WorkspaceResolver: rt.Workspace,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},

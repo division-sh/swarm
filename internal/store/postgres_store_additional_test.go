@@ -947,6 +947,41 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}
 }
 
+func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "user", Content: "one-shot"},
+			{Role: "assistant", Content: "done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task): %v", err)
+	}
+
+	if rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "task", ""); err != nil || ok || rec.AgentID != "" {
+		t.Fatalf("LoadActiveConversation(task) ok=%v err=%v rec=%+v", ok, err, rec)
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'a1' AND runtime_mode = 'task'`).Scan(&count); err != nil {
+		t.Fatalf("count task sessions: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one persisted task audit row, got %d", count)
+	}
+}
+
 func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

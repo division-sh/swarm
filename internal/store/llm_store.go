@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimesessions "swarm/internal/runtime/sessions"
 )
@@ -77,9 +78,6 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	}
 	mode := runtimesessions.NormalizeConversationRuntimeMode(rec.Mode)
 	resolved := runtimesessions.ResolveScope(mode, rec.ScopeKey)
-	if resolved.Stateless {
-		return nil
-	}
 
 	status := strings.TrimSpace(strings.ToLower(rec.Status))
 	if status == "" {
@@ -98,6 +96,54 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		return fmt.Errorf("marshal conversation messages: %w", err)
 	}
 	summary := strings.ToValidUTF8(rec.Summary, "\uFFFD")
+	sessionID := strings.TrimSpace(rec.SessionID)
+	if sessionID == "" {
+		sessionID = uuid.NewString()
+	}
+
+	if resolved.Stateless {
+		scopeKey := strings.TrimSpace(rec.ScopeKey)
+		if scopeKey == "" {
+			scopeKey = sessionID
+		}
+		const q = `
+			INSERT INTO agent_sessions (
+				session_id, agent_id, entity_id, flow_instance, scope_key, scope,
+				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+			)
+			VALUES (
+				$1::uuid,
+				$2,
+				NULLIF($3,'')::uuid,
+				NULLIF($4,''),
+				$5,
+				$6,
+				$7::jsonb,
+				$8,
+				$9,
+				jsonb_build_object('summary', NULLIF($10,'')),
+				$11,
+				now(),
+				now()
+			)
+		`
+		if _, err := s.DB.ExecContext(ctx, q,
+			sessionID,
+			rec.AgentID,
+			resolved.EntityID,
+			resolved.FlowInstance,
+			scopeKey,
+			resolved.Scope,
+			string(msgJSON),
+			rec.TurnCount,
+			mode,
+			summary,
+			status,
+		); err != nil {
+			return fmt.Errorf("insert stateless conversation: %w", err)
+		}
+		return nil
+	}
 
 	const q = `
 		INSERT INTO agent_sessions (
@@ -105,7 +151,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
 		)
 		VALUES (
-			gen_random_uuid(),
+			COALESCE(NULLIF($11,''), gen_random_uuid()::text)::uuid,
 			$1,
 			NULLIF($2,'')::uuid,
 			NULLIF($3,''),
@@ -141,6 +187,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		mode,
 		summary,
 		status,
+		sessionID,
 	); err != nil {
 		return fmt.Errorf("upsert conversation: %w", err)
 	}

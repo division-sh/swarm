@@ -23,6 +23,7 @@ type TurnPersistence interface {
 }
 
 type ConversationRecord struct {
+	SessionID string
 	AgentID   string
 	ScopeKey  string
 	TaskID    string

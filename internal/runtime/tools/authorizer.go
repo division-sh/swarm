@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
-	"github.com/google/uuid"
 )
 
 type ToolAuthorizer struct {
@@ -29,6 +29,7 @@ const (
 	toolAuthorizationUniversal    toolAuthorizationClass = "universal"
 	toolAuthorizationPermission   toolAuthorizationClass = "permission"
 	toolAuthorizationEmitAllowed  toolAuthorizationClass = "emit_allowed"
+	toolAuthorizationNativeTool   toolAuthorizationClass = "native_tool"
 	toolAuthorizationActorConfig  toolAuthorizationClass = "actor_config"
 	toolAuthorizationDefaultAllow toolAuthorizationClass = "default_allow"
 	toolAuthorizationDenied       toolAuthorizationClass = "denied"
@@ -101,6 +102,11 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 	}
 	if IsEmitToolAllowedForRole(actor.Role, toolName) || IsEmitToolAllowedForConfig(actor.Config, toolName) {
 		decision.class = toolAuthorizationEmitAllowed
+		decision.allowed = true
+		return decision
+	}
+	if _, ok := nativeFallbackRegisteredTool(actor, toolName); ok {
+		decision.class = toolAuthorizationNativeTool
 		decision.allowed = true
 		return decision
 	}

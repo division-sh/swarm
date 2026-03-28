@@ -24,6 +24,7 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"get_entity":           {},
 	"save_entity_field":    {},
 	"create_entity":        {},
+	"query_entities":       {},
 	"search_entities":      {},
 	"query_metrics":        {},
 	"mailbox_send":         {},
@@ -127,6 +128,25 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 					"additionalProperties": true,
 				},
 			}, "entity_type", "entity_id"),
+		},
+		"query_entities": {
+			Category:    "entity_persistence",
+			Description: "Query typed entity rows using filters and optional grouping or aggregation.",
+			InputSchema: ObjectSchema(map[string]any{
+				"entity_type": map[string]any{"type": "string"},
+				"filter":      map[string]any{"type": "string"},
+				"select": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+				"limit":    map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
+				"group_by": map[string]any{"type": "string"},
+				"metric": map[string]any{
+					"type": "string",
+					"enum": []any{"count", "sum", "avg", "min", "max"},
+				},
+				"field": map[string]any{"type": "string"},
+			}, "entity_type"),
 		},
 		"search_entities": {
 			Category:    "entity_persistence",

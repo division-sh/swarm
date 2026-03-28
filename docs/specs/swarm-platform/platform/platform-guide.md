@@ -583,7 +583,7 @@ When an event arrives in an agent's inbox, the platform creates or resumes an ag
 7. Session completes when the agent signals done or hits `max_turns_per_task`.
 8. Session state is persisted for audit and debugging.
 
-The platform auto-generates emit tools from each agent's `emit_events` list. Agents do not need to list emit tools in `tools_tier2`. Universal tools (`agent_message`, `mailbox_send`) are also auto-granted.
+The platform auto-generates emit tools from each agent's `emit_events` list. Agents do not need to list emit tools in `tools`. Universal tools (`agent_message`, `mailbox_send`) are also auto-granted.
 
 #### Conversation Modes
 
@@ -972,7 +972,7 @@ This checklist is derived from the boot verification list, flow coherence rules,
 
 ### Agents
 
-- Every tool in `tools_tier2` exists in the tool registry.
+- Every tool in `tools` exists in the tool registry.
 - Agent permissions cover the tools they use.
 - Messaging expectations match `message_flow` and `message_peers` only.
 - `manager_fallback` is treated as escalation and hierarchy metadata, not as cross-flow messaging permission.
