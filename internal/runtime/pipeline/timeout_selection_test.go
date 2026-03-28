@@ -131,19 +131,6 @@ func TestDeclarativeNodeHandleEvent_MatchesDeepWildcardChildFlowHandler(t *testi
 	}
 }
 
-func TestValidateWorkflowContracts_AllowsDeepWildcardChildFlowSubscription(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-wildcard-deep-subscription")
-	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
-	if err != nil {
-		t.Fatalf("load bundle: %v", err)
-	}
-	if err := ValidateWorkflowContracts(semanticview.Wrap(bundle)); err != nil {
-		t.Fatalf("ValidateWorkflowContracts: %v", err)
-	}
-}
-
 func TestWorkflowMaxChainDepthPolicy_UsesFixturePolicy(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier6-event-loop", "test-chain-depth-limit")

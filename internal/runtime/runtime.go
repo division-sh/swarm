@@ -16,6 +16,7 @@ import (
 	"swarm/internal/events"
 	runtimeagents "swarm/internal/runtime/agents"
 	runtimeauthority "swarm/internal/runtime/authority"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
@@ -135,7 +136,17 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
 		return opts.WorkflowModule
 	})
-	return runtimepipeline.ValidateWorkflowContracts(opts.WorkflowModule.SemanticSource())
+	report := runtimebootverify.Run(context.Background(), opts.WorkflowModule.SemanticSource(), runtimebootverify.Options{
+		Credentials: opts.Credentials,
+	})
+	if !report.HasErrors() {
+		return nil
+	}
+	lines := make([]string, 0, len(report.Errors()))
+	for _, finding := range report.Errors() {
+		lines = append(lines, strings.TrimSpace(finding.Message))
+	}
+	return fmt.Errorf(strings.Join(lines, "\n"))
 }
 
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
@@ -348,11 +359,6 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
-	}
-	if rt.Pipeline != nil {
-		if err := rt.Pipeline.ValidateWorkflowContracts(); err != nil {
-			return fmt.Errorf("workflow contract validation failed: %w", err)
-		}
 	}
 	if rt.Pipeline != nil {
 		go rt.Pipeline.RunMaintenance(ctx)

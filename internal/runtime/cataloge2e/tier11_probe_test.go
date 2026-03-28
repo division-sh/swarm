@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	runtimepipeline "swarm/internal/runtime/pipeline"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -35,9 +35,9 @@ func TestTier11Probe(t *testing.T) {
 					return
 				}
 				source := semanticview.Wrap(bundle)
-				warnings, validationErr := runtimepipeline.ValidateWorkflowContractsDetailed(source)
-				t.Logf("boot warnings=%#v", warnings)
-				t.Logf("boot validationErr=%v", validationErr)
+				report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+				t.Logf("boot warnings=%#v", report.Warnings())
+				t.Logf("boot errors=%#v", report.Errors())
 				return
 			}
 			h := newRuntimeHarness(t, fixtureRoot, true)

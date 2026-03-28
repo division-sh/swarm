@@ -2,6 +2,7 @@ package cataloge2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,8 +12,8 @@ import (
 	"time"
 
 	runtime "swarm/internal/runtime"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -80,16 +81,15 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 			if loadErr != nil {
 				t.Fatalf("load workflow contract bundle %s: %v", fixtureRoot, loadErr)
 			}
-			source := semanticview.Wrap(bundle)
-			warnings, validationErr := runtimepipeline.ValidateWorkflowContractsDetailed(source)
+			report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
 
 			switch strings.ToLower(strings.TrimSpace(expected.Expected.BootResult)) {
 			case "", "success":
-				if validationErr != nil {
-					t.Fatalf("expected clean boot, got validation error: %v", validationErr)
+				if report.HasErrors() {
+					t.Fatalf("expected clean boot, got validation errors: %#v", report.Errors())
 				}
-				if len(warnings) > 0 {
-					t.Fatalf("expected clean boot warnings=[], got %#v", warnings)
+				if len(report.Warnings()) > 0 {
+					t.Fatalf("expected clean boot warnings=[], got %#v", report.Warnings())
 				}
 				rt, err := newTier8Runtime(bundle)
 				if err != nil {
@@ -97,11 +97,11 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 				}
 				startRuntimeForBootTest(t, rt)
 			case "warning":
-				if validationErr != nil {
-					t.Fatalf("expected warning boot result, got validation error: %v", validationErr)
+				if report.HasErrors() {
+					t.Fatalf("expected warning boot result, got validation errors: %#v", report.Errors())
 				}
-				if !warningsContain(warnings, expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
-					t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, warnings)
+				if !findingsContain(report.Warnings(), expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
+					t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
 				}
 				rt, err := newTier8Runtime(bundle)
 				if err != nil {
@@ -109,10 +109,10 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 				}
 				startRuntimeForBootTest(t, rt)
 			case "error":
-				if validationErr == nil {
+				if !report.HasErrors() {
 					t.Fatal("expected validation error")
 				}
-				assertBootErrorMatches(t, validationErr, expected)
+				assertBootErrorMatches(t, findingsError(report.Errors()), expected)
 				if _, err := newTier8Runtime(bundle); err == nil {
 					t.Fatal("expected NewRuntime to fail for invalid boot fixture")
 				} else {
@@ -187,17 +187,50 @@ func startRuntimeAndReturnError(rt *runtime.Runtime) error {
 	return rt.Shutdown()
 }
 
-func warningsContain(warnings []runtimepipeline.WorkflowContractWarning, category, contains string) bool {
-	for _, warning := range warnings {
-		if strings.TrimSpace(category) != "" && strings.TrimSpace(warning.Category) != strings.TrimSpace(category) {
+func findingsContain(findings []runtimebootverify.Finding, category, contains string) bool {
+	wantCheckID := legacyCategoryToCheckID(category)
+	for _, finding := range findings {
+		if wantCheckID != "" && strings.TrimSpace(finding.CheckID) != wantCheckID {
 			continue
 		}
-		if strings.TrimSpace(contains) != "" && !strings.Contains(warning.Message, strings.TrimSpace(contains)) {
+		if strings.TrimSpace(contains) != "" && !strings.Contains(finding.Message, strings.TrimSpace(contains)) {
 			continue
 		}
 		return true
 	}
 	return false
+}
+
+func findingsError(findings []runtimebootverify.Finding) error {
+	if len(findings) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(findings))
+	for _, finding := range findings {
+		lines = append(lines, finding.Message)
+	}
+	return fmt.Errorf(strings.Join(lines, "\n"))
+}
+
+func legacyCategoryToCheckID(raw string) string {
+	switch strings.TrimSpace(strings.ToUpper(raw)) {
+	case "TOOL-MISSING":
+		return "tool_resolution"
+	case "PROMPT-MISSING", "PROMPT-STUB":
+		return "prompt_exists"
+	case "POLICY-CONFLICT":
+		return "policy_conflict_detection"
+	case "EVENT-NO-CONSUMER":
+		return "event_consumer_exists"
+	case "EVENT-NO-PRODUCER":
+		return "event_producer_exists"
+	case "EVENT-NO-SCHEMA":
+		return "event_chain_integrity"
+	case "PERMISSION-MISMATCH":
+		return "agent_permission_validation"
+	default:
+		return ""
+	}
 }
 
 func assertBootErrorMatches(t testing.TB, err error, expected tier8ExpectedDocument) {
