@@ -148,17 +148,15 @@ func Decide(ctx context.Context, store runtimetools.MailboxPersistence, id, acti
 func NormalizeDecisionAction(action string) (DecisionOutcome, error) {
 	a := strings.ToLower(strings.TrimSpace(action))
 	a = strings.ReplaceAll(a, "_", "-")
-	switch a {
-	case "approve", "approved":
-		return DecisionOutcome{Status: "approved", Decision: "approve"}, nil
-	case "reject", "rejected":
-		return DecisionOutcome{Status: "rejected", Decision: "reject"}, nil
-	case "more-data", "defer", "deferred":
-		return DecisionOutcome{Status: "more_data", Decision: "more_data"}, nil
-	case "skip", "timed-out", "timeout":
-		return DecisionOutcome{Status: "timed_out", Decision: "timed_out"}, nil
-	default:
+	a = strings.ReplaceAll(a, " ", "-")
+	if a == "" {
 		return DecisionOutcome{}, fmt.Errorf("invalid mailbox decision action: %s", action)
+	}
+	switch a {
+	case "skip", "timed-out", "timeout":
+		return DecisionOutcome{Status: "expired", Decision: "timed_out"}, nil
+	default:
+		return DecisionOutcome{Status: "decided", Decision: a}, nil
 	}
 }
 

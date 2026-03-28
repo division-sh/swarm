@@ -5,10 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
-	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
 )
 
@@ -26,13 +22,12 @@ const (
 type toolAuthorizationClass string
 
 const (
-	toolAuthorizationUniversal    toolAuthorizationClass = "universal"
-	toolAuthorizationPermission   toolAuthorizationClass = "permission"
-	toolAuthorizationEmitAllowed  toolAuthorizationClass = "emit_allowed"
-	toolAuthorizationNativeTool   toolAuthorizationClass = "native_tool"
-	toolAuthorizationActorConfig  toolAuthorizationClass = "actor_config"
-	toolAuthorizationDefaultAllow toolAuthorizationClass = "default_allow"
-	toolAuthorizationDenied       toolAuthorizationClass = "denied"
+	toolAuthorizationUniversal   toolAuthorizationClass = "universal"
+	toolAuthorizationPermission  toolAuthorizationClass = "permission"
+	toolAuthorizationEmitAllowed toolAuthorizationClass = "emit_allowed"
+	toolAuthorizationNativeTool  toolAuthorizationClass = "native_tool"
+	toolAuthorizationActorConfig toolAuthorizationClass = "actor_config"
+	toolAuthorizationDenied      toolAuthorizationClass = "denied"
 )
 
 type toolAuthorizationDecision struct {
@@ -47,6 +42,7 @@ func NewToolAuthorizer(bus EventPublisher) *ToolAuthorizer {
 }
 
 func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig, toolName string) error {
+	_ = ctx
 	decision := classifyToolAuthorization(actor, toolName)
 	if decision.allowed {
 		return nil
@@ -63,21 +59,14 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 			"runtime_tool": true,
 		})
 		if marshalErr == nil {
-			if pubErr := a.bus.Publish(ctx, (events.Event{
-				ID:          uuid.NewString(),
-				Type:        events.EventType("spec.contradiction_detected"),
-				SourceAgent: "runtime",
-				Payload:     payload,
-				CreatedAt:   time.Now(),
-			}).WithEntityID(entityID)); pubErr != nil {
-				runtimeWarn(
-					"tool-executor",
-					"failed to publish spec.contradiction_detected actor=%s tool=%s: %v",
-					strings.TrimSpace(actor.ID),
-					strings.TrimSpace(toolName),
-					pubErr,
-				)
-			}
+			runtimeWarn(
+				"tool-executor",
+				"tool authorization denied actor=%s tool=%s entity=%s detail=%s",
+				strings.TrimSpace(actor.ID),
+				strings.TrimSpace(toolName),
+				entityID,
+				strings.TrimSpace(string(payload)),
+			)
 		}
 	}
 	return err
@@ -111,12 +100,12 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 		return decision
 	}
 	allowed, constrained := extractAllowedToolsFromConfig(actor)
+	decision.constrained = constrained
 	if !constrained {
-		decision.class = toolAuthorizationDefaultAllow
+		decision.class = toolAuthorizationActorConfig
 		decision.allowed = true
 		return decision
 	}
-	decision.constrained = true
 	if _, ok := allowed[toolName]; ok {
 		decision.class = toolAuthorizationActorConfig
 		decision.allowed = true

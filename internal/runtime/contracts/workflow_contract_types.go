@@ -744,11 +744,23 @@ type AgentRegistryEntry struct {
 	Subscriptions          []string       `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string       `yaml:"subscriptions_bootstrap"`
 	SubscribesTo           []string       `yaml:"subscribes_to"`
+	Tools                  []string       `yaml:"tools"`
 	ToolsTier2             []string       `yaml:"tools_tier2"`
 	NativeTools            map[string]any `yaml:"native_tools"`
 	EmitEvents             []string       `yaml:"emit_events"`
 	Implementation         string         `yaml:"implementation"`
 }
+
+func (e AgentRegistryEntry) ConfiguredTools() []string {
+	if len(e.Tools) > 0 {
+		return append([]string{}, e.Tools...)
+	}
+	if len(e.ToolsTier2) > 0 {
+		return append([]string{}, e.ToolsTier2...)
+	}
+	return nil
+}
+
 type ToolSchemaEntry struct {
 	Category           string          `yaml:"category"`
 	Description        string          `yaml:"description"`

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	runtimetools "swarm/internal/runtime/tools"
 	"github.com/google/uuid"
+	runtimetools "swarm/internal/runtime/tools"
 )
 
 // MailboxStore is the runtime mailbox persistence surface.
@@ -229,7 +229,7 @@ func (s *PostgresStore) DecideMailboxItem(ctx context.Context, id, status, decis
 	}
 
 	switch status {
-	case "approved", "rejected", "more_data", "timed_out":
+	case "decided", "expired", "cancelled":
 	default:
 		return fmt.Errorf("invalid mailbox status: %s", status)
 	}
@@ -276,7 +276,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 			LIMIT $1
 		)
 		UPDATE mailbox m
-		SET status = 'timed_out',
+		SET status = 'expired',
 		    decision = COALESCE(NULLIF(m.decision, ''), 'timed_out'),
 		    decision_notes = COALESCE(NULLIF(m.decision_notes, ''), 'Timed out without human decision'),
 		    decided_at = COALESCE(m.decided_at, now())
@@ -289,7 +289,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 			COALESCE(m.from_agent, ''),
 			m.type,
 			COALESCE(m.priority, 'normal'),
-			COALESCE(m.status, 'timed_out'),
+			COALESCE(m.status, 'expired'),
 			COALESCE(m.notified, false),
 			COALESCE(m.context, '{}'::jsonb),
 			COALESCE(m.summary, ''),
@@ -383,7 +383,7 @@ func (s *PostgresStore) insertMailboxItemSpec(ctx context.Context, item runtimet
 	if entityID := coalesceMailboxEntityID(item); entityID != "" {
 		scope = "entity"
 	}
-	status, decision := mailboxStateForStoredStatus(item.Status)
+	status, decision := mailboxStateForStoredStatus(item.Status, item.Decision)
 	var expiresAt any
 	if !item.TimeoutAt.IsZero() {
 		expiresAt = item.TimeoutAt
@@ -658,55 +658,32 @@ func denormalizeMailboxSeverity(severity string) string {
 	return normalizeMailboxSeverity(severity)
 }
 
-func mailboxStateForStoredStatus(status string) (rowStatus string, decision string) {
+func mailboxStateForStoredStatus(status, decision string) (rowStatus string, rowDecision string) {
 	switch strings.TrimSpace(status) {
-	case "approved", "rejected", "more_data":
-		return "decided", strings.TrimSpace(status)
-	case "timed_out":
-		return "expired", "timed_out"
-	case "cancelled":
-		return "cancelled", ""
+	case "decided", "expired", "cancelled":
+		return strings.TrimSpace(status), strings.TrimSpace(decision)
 	default:
-		return "pending", ""
+		return "pending", strings.TrimSpace(decision)
 	}
 }
 
 func mailboxDecisionState(status, decision string) (rowStatus string, rowDecision string) {
 	switch strings.TrimSpace(status) {
-	case "timed_out":
-		return "expired", "timed_out"
-	case "approved", "rejected", "more_data":
-		return "decided", strings.TrimSpace(status)
+	case "decided", "expired", "cancelled":
+		return strings.TrimSpace(status), strings.TrimSpace(decision)
 	default:
-		return "decided", strings.TrimSpace(decision)
+		return "decided", strings.TrimSpace(coalesce(strings.TrimSpace(decision), strings.TrimSpace(status)))
 	}
 }
 
 func denormalizeMailboxStatus(status, decision string) string {
-	switch strings.TrimSpace(status) {
-	case "decided":
-		if strings.TrimSpace(decision) != "" {
-			return strings.TrimSpace(decision)
-		}
-	case "expired":
-		if strings.TrimSpace(decision) != "" {
-			return strings.TrimSpace(decision)
-		}
-		return "timed_out"
-	}
+	_, _ = decision, status
 	return strings.TrimSpace(status)
 }
 
 func mailboxListFilter(status string) (string, string) {
 	status = strings.TrimSpace(status)
-	switch status {
-	case "approved", "rejected", "more_data":
-		return `status = 'decided' AND decision = $1`, status
-	case "timed_out":
-		return `status = 'expired' AND decision = 'timed_out'`, status
-	default:
-		return `status = $1`, status
-	}
+	return `status = $1`, status
 }
 
 func shouldFallbackLegacyMailboxSchema(err error) bool {

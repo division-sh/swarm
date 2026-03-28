@@ -434,8 +434,8 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	if got := payload["max_turns_per_task"]; got != float64(7) {
 		t.Fatalf("max_turns_per_task = %#v, want 7", got)
 	}
-	if got := anySliceToStrings(payload["allowed_tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "check_status" {
-		t.Fatalf("allowed_tools = %#v, want [schedule check_status]", got)
+	if got := anySliceToStrings(payload["tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "check_status" {
+		t.Fatalf("tools = %#v, want [schedule check_status]", got)
 	}
 	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "task.completed" || got[1] != "review.failed" {
 		t.Fatalf("emit_events = %#v, want [task.completed review.failed]", got)

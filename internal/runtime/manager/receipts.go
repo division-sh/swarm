@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimerterr "swarm/internal/runtime/rterrors"
-	"github.com/google/uuid"
 )
 
 type eventReceiptReader interface {
@@ -100,7 +100,7 @@ func (am *AgentManager) shouldSuppressForBudget(agentID string, evt events.Event
 		return false, ""
 	}
 	eventType := strings.ToLower(strings.TrimSpace(string(evt.Type)))
-	if strings.HasPrefix(eventType, "budget.") {
+	if eventType == "platform.budget_threshold_crossed" {
 		return false, ""
 	}
 	entityID := strings.TrimSpace(evt.EntityID())
@@ -257,7 +257,7 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 			"paused_by": "runtime",
 			"timestamp": now.Format(time.RFC3339Nano),
 		}),
-		CreatedAt:   now,
+		CreatedAt: now,
 	}); err != nil {
 		RuntimeWarn("agent-manager", "platform.paused publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
 	}

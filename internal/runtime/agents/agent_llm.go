@@ -40,6 +40,7 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	}
 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
+	systemPrompt = appendPromptPostamble(systemPrompt)
 	allowedToolSet, constrained := extractAllowedToolSet(cfg)
 	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
 	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
@@ -246,6 +247,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 	}
 	if found && strings.TrimSpace(prompt) != "" {
 		prompt = strings.TrimSpace(expandConfigPromptTemplate(prompt, a.cfg.Config))
+		prompt = appendPromptPostamble(prompt)
 		a.promptCache[cacheKey] = prompt
 		if cacheKey == "" {
 			a.promptCache[""] = prompt
@@ -266,6 +268,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 		base = strings.TrimSpace(a.conversation.SystemPrompt)
 	}
 	if base != "" {
+		base = appendPromptPostamble(base)
 		a.promptCache[""] = base
 		if cacheKey != "" {
 			a.promptCache[cacheKey] = base
@@ -320,6 +323,21 @@ func stringifyPromptTemplateValue(value any) string {
 func promptModeFromEvent(evt events.Event) string {
 	payload := sharedjson.ParsePayloadMap(evt.Payload)
 	return strings.TrimSpace(sharedjson.AsString(payload["mode"]))
+}
+
+const promptEnvironmentPostamble = "## Environment\n\nWorking directory: /workspace (read-write)\nReference data: /data (read-only)\nContracts: /opt/swarm/contracts (read-only)"
+
+func appendPromptPostamble(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	if strings.Contains(prompt, "Working directory: /workspace") &&
+		strings.Contains(prompt, "Reference data: /data") &&
+		strings.Contains(prompt, "Contracts: /opt/swarm/contracts") {
+		return prompt
+	}
+	return prompt + "\n\n" + promptEnvironmentPostamble
 }
 
 func (a *LLMAgent) resetConversationScopeIfNeeded(evt events.Event) {

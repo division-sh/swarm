@@ -64,7 +64,7 @@ func TestNormalizeDecisionAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
-	if out.Status != "more_data" || out.Decision != "more_data" {
+	if out.Status != "decided" || out.Decision != "more-data" {
 		t.Fatalf("unexpected outcome: %+v", out)
 	}
 }

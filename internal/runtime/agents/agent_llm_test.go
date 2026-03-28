@@ -102,6 +102,15 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	if strings.Contains(got, "{{team_name}}") {
 		t.Fatalf("expected resolved prompt to expand team_name token, got %q", got)
 	}
+	if !strings.Contains(got, "Working directory: /workspace (read-write)") {
+		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
+	}
+	if !strings.Contains(got, "Reference data: /data (read-only)") {
+		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
+	}
+	if !strings.Contains(got, "Contracts: /opt/swarm/contracts (read-only)") {
+		t.Fatalf("expected prompt postamble in resolved prompt, got %q", got)
+	}
 }
 
 func writeAgentPromptTestBundle(t *testing.T, repoRoot string) string {
@@ -223,6 +232,15 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	}
 	if containsString(names, "check_status") {
 		t.Fatalf("expected unconstrained non-universal tool to be filtered out, got %v", names)
+	}
+}
+
+func TestAppendPromptPostamble_IsIdempotent(t *testing.T) {
+	prompt := "You are helpful."
+	once := appendPromptPostamble(prompt)
+	twice := appendPromptPostamble(once)
+	if once != twice {
+		t.Fatalf("expected postamble append to be idempotent\nonce=%q\ntwice=%q", once, twice)
 	}
 }
 

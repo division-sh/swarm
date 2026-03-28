@@ -360,10 +360,10 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 		t.Fatalf("list pending: n=%d err=%v", len(items), err)
 	}
 
-	if err := s.DecideMailboxItem(ctx, id, "approved", "approve", "ok"); err != nil {
+	if err := s.DecideMailboxItem(ctx, id, "decided", "approve", "ok"); err != nil {
 		t.Fatalf("decide: %v", err)
 	}
-	if err := s.DecideMailboxItem(ctx, id, "approved", "approve", "again"); err == nil {
+	if err := s.DecideMailboxItem(ctx, id, "decided", "approve", "again"); err == nil {
 		t.Fatal("expected decide on non-pending to fail")
 	}
 	if err := s.DecideMailboxItem(ctx, uuid.NewString(), "nope", "approve", ""); err == nil {
@@ -390,8 +390,8 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	for _, it := range expired {
 		if it.ID == expID {
 			found = true
-			if it.Status != "timed_out" {
-				t.Fatalf("expected timed_out, got %+v", it)
+			if it.Status != "expired" || it.Decision != "timed_out" {
+				t.Fatalf("expected expired/timed_out, got %+v", it)
 			}
 		}
 	}

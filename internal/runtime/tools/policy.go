@@ -7,7 +7,7 @@ var universalRuntimeTools = map[string]struct{}{
 	"mailbox_send":      {},
 	"get_entity":        {},
 	"save_entity_field": {},
-	"create_entity":     {},
+	"query_entities":    {},
 	"search_entities":   {},
 	"query_metrics":     {},
 }

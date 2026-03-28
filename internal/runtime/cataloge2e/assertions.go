@@ -404,7 +404,7 @@ func catalogRootEventExists(source semanticview.Source, eventName string) bool {
 func shouldIgnoreCatalogE2EEvent(eventName string) bool {
 	eventName = strings.TrimSpace(eventName)
 	switch eventName {
-	case "platform.runtime_log", "spec.contradiction_detected":
+	case "platform.runtime_log":
 		return true
 	default:
 		return false

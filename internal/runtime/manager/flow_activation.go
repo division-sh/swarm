@@ -302,9 +302,8 @@ func buildFlowAgentConfig(
 	if maxTurns := entry.MaxTurnsPerTask; maxTurns > 0 {
 		cfgPayload["max_turns_per_task"] = maxTurns
 	}
-	if tools := normalizedConfiguredToolList(entry.ToolsTier2); len(tools) > 0 {
-		cfgPayload["tools_tier2"] = append([]string{}, tools...)
-		cfgPayload["allowed_tools"] = append([]string{}, tools...)
+	if tools := normalizedConfiguredToolList(entry.ConfiguredTools()); len(tools) > 0 {
+		cfgPayload["tools"] = append([]string{}, tools...)
 	}
 	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
 		cfgPayload["native_tools"] = nativeTools
@@ -465,9 +464,8 @@ func buildStaticFlowAgentConfig(
 	if maxTurns := entry.MaxTurnsPerTask; maxTurns > 0 {
 		cfgPayload["max_turns_per_task"] = maxTurns
 	}
-	if tools := normalizedConfiguredToolList(entry.ToolsTier2); len(tools) > 0 {
-		cfgPayload["tools_tier2"] = append([]string{}, tools...)
-		cfgPayload["allowed_tools"] = append([]string{}, tools...)
+	if tools := normalizedConfiguredToolList(entry.ConfiguredTools()); len(tools) > 0 {
+		cfgPayload["tools"] = append([]string{}, tools...)
 	}
 	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
 		cfgPayload["native_tools"] = nativeTools

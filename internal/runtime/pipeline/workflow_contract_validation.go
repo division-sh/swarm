@@ -154,6 +154,7 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 		}
 		errs = append(errs, workflowValidateNativeTools(agentID, agent)...)
 	}
+	errs = append(errs, workflowReservedPlatformEventErrors(source)...)
 	errs = append(errs, workflowValidateWebSearchProvider(source)...)
 	for _, warning := range workflowMergedAgentPermissionWarnings(source) {
 		addWarning(warning.Category, warning.Message)
@@ -432,7 +433,13 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 		if len(agent.SubscriptionsBootstrap) > 0 {
 			errs = append(errs, fmt.Sprintf("agent %s uses deprecated subscriptions_bootstrap", strings.TrimSpace(agentID)))
 		}
-		for _, toolID := range agent.ToolsTier2 {
+		if len(agent.Tools) == 0 && len(agent.ToolsTier2) > 0 {
+			warnings = append(warnings, WorkflowContractWarning{
+				Category: "DEPRECATED",
+				Message:  fmt.Sprintf("agent %s uses deprecated tools_tier2; rename to tools", strings.TrimSpace(agentID)),
+			})
+		}
+		for _, toolID := range agent.ConfiguredTools() {
 			toolID = strings.TrimSpace(toolID)
 			if toolID == "" {
 				continue
@@ -441,7 +448,10 @@ func validateWorkflowContractsDetailed(source semanticview.Source) ([]WorkflowCo
 				if workflowToolReferenceAllowedByMCPPrefix(toolID, mcpPrefixes) {
 					continue
 				}
-				errs = append(errs, fmt.Sprintf("agent %s references missing tool %s", strings.TrimSpace(agentID), toolID))
+				warnings = append(warnings, WorkflowContractWarning{
+					Category: "TOOL-MISSING",
+					Message:  fmt.Sprintf("agent %s references missing tool %s", strings.TrimSpace(agentID), toolID),
+				})
 			}
 		}
 	}
@@ -603,6 +613,45 @@ func workflowAnyAgentNeedsNativeCapability(source semanticview.Source, capabilit
 		}
 	}
 	return false
+}
+
+func workflowReservedPlatformEventErrors(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	errs := make([]string, 0)
+	for eventType := range source.EventEntries() {
+		eventType = strings.TrimSpace(eventType)
+		if strings.HasPrefix(eventType, "platform.") {
+			errs = append(errs, fmt.Sprintf("event %s uses reserved platform.* namespace", eventType))
+		}
+	}
+	for agentID, agent := range source.AgentEntries() {
+		for _, eventType := range agent.EmitEvents {
+			eventType = strings.TrimSpace(eventType)
+			if strings.HasPrefix(eventType, "platform.") {
+				errs = append(errs, fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", strings.TrimSpace(agentID), eventType))
+			}
+		}
+	}
+	for nodeID, node := range source.NodeEntries() {
+		for _, eventType := range node.Produces {
+			eventType = strings.TrimSpace(eventType)
+			if strings.HasPrefix(eventType, "platform.") {
+				errs = append(errs, fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(nodeID), eventType))
+			}
+		}
+		for eventType, handler := range source.NodeEventHandlers(nodeID) {
+			for _, emitted := range workflowHandlerEmits(handler) {
+				emitted = strings.TrimSpace(emitted)
+				if strings.HasPrefix(emitted, "platform.") {
+					errs = append(errs, fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted))
+				}
+			}
+		}
+	}
+	sort.Strings(errs)
+	return errs
 }
 
 func workflowHandlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
@@ -1399,8 +1448,9 @@ func workflowAgentPermissionWarnings(source semanticview.Source, scopeLabel, age
 		}}
 	}
 	permSet := normalizeStringSet(perms)
-	warnings := make([]WorkflowContractWarning, 0, len(agent.ToolsTier2))
-	for _, toolID := range agent.ToolsTier2 {
+	tools := agent.ConfiguredTools()
+	warnings := make([]WorkflowContractWarning, 0, len(tools))
+	for _, toolID := range tools {
 		toolID = strings.TrimSpace(toolID)
 		if toolID == "" {
 			continue

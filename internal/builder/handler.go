@@ -356,7 +356,7 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 		for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				result.Errors = append(result.Errors, ValidationIssue{
-					CheckID:  "workflow_contract_validation",
+					CheckID:  normalizeValidationErrorCheckID(line),
 					Severity: "error",
 					Message:  line,
 				})
@@ -393,7 +393,7 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 					requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
 				}
 				result.Warnings = append(result.Warnings, ValidationIssue{
-					CheckID:    "credential_requirements",
+					CheckID:    "credential_key_exists",
 					Severity:   "warning",
 					Message:    fmtCredentialWarning(item.Key, requiredBy),
 					Suggestion: "set the credential with credentials.set before executing dependent tools",
@@ -603,8 +603,54 @@ func normalizeCheckID(raw string) string {
 	if raw == "" {
 		return "validation"
 	}
+	switch raw {
+	case "condition-payload":
+		return "condition_payload_alignment"
+	case "tool-missing":
+		return "tool_resolution"
+	case "event-no-consumer":
+		return "event_consumer_exists"
+	case "event-no-producer":
+		return "event_producer_exists"
+	case "event-cycle":
+		return "event_cycle_detection"
+	case "prompt-missing", "prompt-stub":
+		return "prompt_exists"
+	case "policy-conflict":
+		return "policy_conflict_detection"
+	case "deprecated":
+		return "deprecated_contract_alias"
+	case "permission-mismatch":
+		return "agent_permission_validation"
+	}
 	replacer := strings.NewReplacer(" ", "_", "-", "_", ".", "_", "/", "_")
 	return replacer.Replace(raw)
+}
+
+func normalizeValidationErrorCheckID(message string) string {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case strings.Contains(msg, "reserved platform.* namespace"):
+		return "platform_namespace_violation"
+	case strings.Contains(msg, "native_tools."):
+		return "native_tools_valid"
+	case strings.Contains(msg, "required agent role"):
+		return "required_agents_match"
+	case strings.Contains(msg, "payload.") && strings.Contains(msg, "condition"):
+		return "condition_payload_alignment"
+	case strings.Contains(msg, "payload.") && strings.Contains(msg, "schema"):
+		return "payload_field_coverage"
+	case strings.Contains(msg, "cycle"):
+		return "event_cycle_detection"
+	case strings.Contains(msg, "on_complete") || strings.Contains(msg, "deprecated handler-level condition") || strings.Contains(msg, "deprecated logic field"):
+		return "dialect_compliance"
+	case strings.Contains(msg, "advances_to") || strings.Contains(msg, "initial_state") || strings.Contains(msg, "unreachable"):
+		return "state_machine_coherence"
+	case strings.Contains(msg, "workspace_class"):
+		return "workspace_class_exists"
+	default:
+		return "workflow_contract_validation"
+	}
 }
 
 func methodUnavailable(message string) *RPCError {

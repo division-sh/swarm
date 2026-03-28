@@ -2,15 +2,19 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
+	"github.com/google/uuid"
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
+	"swarm/internal/events"
 	"swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -198,7 +202,28 @@ func (c dashboardDynamicRuntimeControl) ResetState() error {
 	if rt == nil || rt.Manager == nil {
 		return fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.ResetRuntimeState()
+	if err := rt.Manager.ResetRuntimeState(); err != nil {
+		return err
+	}
+	if rt.Bus != nil {
+		payload, err := json.Marshal(map[string]any{
+			"source":    "builder_api",
+			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return fmt.Errorf("marshal platform.reset payload: %w", err)
+		}
+		if err := rt.Bus.Publish(context.Background(), events.Event{
+			ID:          uuid.NewString(),
+			Type:        events.EventType("platform.reset"),
+			SourceAgent: "runtime",
+			Payload:     payload,
+			CreatedAt:   time.Now(),
+		}); err != nil {
+			return fmt.Errorf("publish platform.reset: %w", err)
+		}
+	}
+	return nil
 }
 
 type dashboardDynamicAgentControl struct {

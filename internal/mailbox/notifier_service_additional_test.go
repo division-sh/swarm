@@ -198,11 +198,11 @@ func TestMailbox_NormalizeDecisionAction(t *testing.T) {
 		status string
 		dec    string
 	}{
-		{"approve", "approved", "approve"},
-		{"reject", "rejected", "reject"},
-		{"more-data", "more_data", "more_data"},
-		{"deferred", "more_data", "more_data"},
-		{"timeout", "timed_out", "timed_out"},
+		{"approve", "decided", "approve"},
+		{"reject", "decided", "reject"},
+		{"more-data", "decided", "more-data"},
+		{"deferred", "decided", "deferred"},
+		{"timeout", "expired", "timed_out"},
 	} {
 		out, err := NormalizeDecisionAction(tc.in)
 		if err != nil {
@@ -211,9 +211,6 @@ func TestMailbox_NormalizeDecisionAction(t *testing.T) {
 		if out.Status != tc.status || out.Decision != tc.dec {
 			t.Fatalf("NormalizeDecisionAction(%q) got=%+v", tc.in, out)
 		}
-	}
-	if _, err := NormalizeDecisionAction("nope"); err == nil {
-		t.Fatalf("expected invalid action error")
 	}
 }
 
@@ -234,7 +231,7 @@ func TestMailbox_DecideAndPrints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
-	if out.Status != "approved" || out.Decision != "approve" {
+	if out.Status != "decided" || out.Decision != "approve" {
 		t.Fatalf("unexpected outcome: %+v", out)
 	}
 

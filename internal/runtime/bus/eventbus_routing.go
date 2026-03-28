@@ -3,13 +3,12 @@ package bus
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"log"
 	"strings"
 	"time"
 
 	"swarm/internal/events"
 	runtimepipeline "swarm/internal/runtime/pipeline"
-	"github.com/google/uuid"
 )
 
 func (eb *EventBus) persistableRecipients(ctx context.Context, recipients []string) []string {
@@ -238,19 +237,7 @@ func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
 }
 
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
-	payload := []byte(fmt.Sprintf(`{"event_id":"%s","reason":"%s","source_type":"%s"}`,
-		source.ID, reason, source.Type))
-	evt := (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("spec.contradiction_detected"),
-		SourceAgent: "runtime",
-		TaskID:      source.TaskID,
-		Payload:     payload,
-		CreatedAt:   time.Now(),
-	}).WithEntityID(source.EntityID())
-	if err := eb.store.AppendEvent(ctx, evt); err != nil {
-		return fmt.Errorf("persist contradiction event: %w", err)
-	}
+	log.Printf("eventbus contradiction event_id=%s event_type=%s reason=%s entity_id=%s", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), strings.TrimSpace(reason), strings.TrimSpace(source.EntityID()))
 	return nil
 }
 

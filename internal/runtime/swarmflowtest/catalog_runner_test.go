@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
-	"gopkg.in/yaml.v3"
 )
 
 type catalogTriggerStep struct {
@@ -1355,7 +1355,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				}
 				toolSpec := catalogMap(bundle.AllTools[tool])
 				if len(bundle.AllTools) == 0 || len(toolSpec) == 0 {
-					issues = append(issues, catalogBootIssue{Severity: "error", Category: "TOOL-MISSING", Message: fmt.Sprintf("%s/%s: tool '%s' not in any tools.yaml", scopeLabel, agentID, tool)})
+					issues = append(issues, catalogBootIssue{Severity: "warning", Category: "TOOL-MISSING", Message: fmt.Sprintf("%s/%s: tool '%s' not in any tools.yaml", scopeLabel, agentID, tool)})
 					continue
 				}
 				requiredPermission := catalogToolRequiredPermission(tool, toolSpec)

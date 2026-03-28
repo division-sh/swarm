@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
 Swarm Platform Specification Verifier
-Boot-time compliance checks. Reference implementation for platform boot_verification.
+Reference implementation for platform boot_verification checks.
+Uses canonical check IDs from platform-spec.yaml §engine.boot_verification.
+
+24 checks defined in spec. This script implements the subset that can run
+without the Go runtime (no CEL parsing, no MCP connectivity, no credential store).
+
 Usage: python3 verify.py [contracts_dir]
-  If contracts_dir is omitted, looks for a contracts directory with package.yaml
-  adjacent to this script or in common locations.
 """
 import yaml, os, sys, re
 from collections import defaultdict
@@ -15,7 +18,6 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 if len(sys.argv) > 1:
     EC = os.path.abspath(sys.argv[1])
 else:
-    # Try common locations relative to script
     candidates = [
         os.path.join(BASE, 'contracts'),
         os.path.join(BASE, 'empire', 'contracts'),  # legacy fallback
@@ -29,12 +31,21 @@ if not os.path.exists(os.path.join(EC, 'package.yaml')):
     print("ERROR: No package.yaml found in %s" % EC)
     sys.exit(1)
 
-errors = []
-warnings = []
-info = []
+# ============================================================
+# Findings registry — canonical check IDs from spec
+# ============================================================
+findings = []
 
-def error(cat, msg): errors.append("[ERROR] %s: %s" % (cat, msg))
-def warn(cat, msg): warnings.append("[WARN]  %s: %s" % (cat, msg))
+def finding(check_id, severity, message, location=""):
+    findings.append({
+        'check_id': check_id,
+        'severity': severity,
+        'message': message,
+        'location': location,
+    })
+
+def error(check_id, msg, loc=""): finding(check_id, 'error', msg, loc)
+def warn(check_id, msg, loc=""): finding(check_id, 'warning', msg, loc)
 
 def load(path):
     with open(path) as f:
@@ -44,7 +55,7 @@ def load_if_exists(path):
     return load(path) if os.path.exists(path) else {}
 
 # ============================================================
-# 1. Load everything — discover flows from package.yaml
+# Load contracts — discover flows from package.yaml
 # ============================================================
 root_package = load(os.path.join(EC, 'package.yaml'))
 FLOWS = [f['flow'] for f in root_package.get('flows', []) if isinstance(f, dict) and 'flow' in f]
@@ -59,7 +70,7 @@ flow_data = {}
 for flow in FLOWS:
     fd = os.path.join(EC, 'flows', flow)
     if not os.path.isdir(fd):
-        warn("FLOW-MISSING", "Flow '%s' declared in package.yaml but directory not found: %s" % (flow, fd))
+        warn("flow_coherence", "Flow '%s' declared in package.yaml but directory not found" % flow, flow)
         continue
     flow_data[flow] = {
         'agents': load_if_exists(os.path.join(fd, 'agents.yaml')),
@@ -88,11 +99,12 @@ for flow in FLOWS:
 
 events_defined = set(k for k, v in all_events.items() if isinstance(v, dict))
 
-# Helper: flatten payload schema to dot-path field set
+# ============================================================
+# Helpers
+# ============================================================
 def flatten_payload(payload, prefix=''):
     fields = set()
-    if not isinstance(payload, dict):
-        return fields
+    if not isinstance(payload, dict): return fields
     for k, v in payload.items():
         if k.startswith('_'): continue
         full = (prefix + '.' + k) if prefix else k
@@ -101,19 +113,12 @@ def flatten_payload(payload, prefix=''):
             fields.update(flatten_payload(v, full))
     return fields
 
-# Helper: extract payload.X references from a string
 def extract_payload_refs(s):
     return re.findall(r'payload\.([a-zA-Z_][a-zA-Z0-9_.]*)', str(s))
 
-# Helper: extract entity.X references
-def extract_entity_refs(s):
-    return re.findall(r'entity\.([a-zA-Z_][a-zA-Z0-9_.]*)', str(s))
-
-# Helper: extract policy.X references
 def extract_policy_refs(s):
     return re.findall(r'policy\.([a-zA-Z_][a-zA-Z0-9_.]*)', str(s))
 
-# Helper: check if event is suppressed (external, mailbox, planned, fan_out)
 def is_suppressed(ev_name):
     ev = all_events.get(ev_name, {})
     if isinstance(ev, dict):
@@ -123,14 +128,72 @@ def is_suppressed(ev_name):
         if ev.get('_producer', '').startswith('agent'): return True
     return False
 
+def collect_handler_emits(h):
+    """Collect all events emitted by a handler."""
+    emitted = set()
+    if not isinstance(h, dict): return emitted
+    e = h.get('emits')
+    if isinstance(e, str): emitted.add(e)
+    elif isinstance(e, list): emitted.update(e)
+    fo = h.get('fan_out', {})
+    if isinstance(fo, dict) and fo.get('emit_per_item'):
+        emitted.add(fo['emit_per_item'])
+    rules = h.get('rules', {})
+    if isinstance(rules, dict):
+        for r in rules.values():
+            if isinstance(r, dict):
+                re_ = r.get('emits')
+                if isinstance(re_, str): emitted.add(re_)
+                elif isinstance(re_, list): emitted.update(re_)
+    oc = h.get('on_complete')
+    if isinstance(oc, (dict, list)):
+        items = oc.values() if isinstance(oc, dict) else oc
+        for b in items:
+            if isinstance(b, dict):
+                be = b.get('emits')
+                if isinstance(be, str): emitted.add(be)
+                elif isinstance(be, list): emitted.update(be)
+    return emitted
+
+def iter_flows_with_nodes():
+    """Yield (flow_name, nodes_dict) for root + all child flows."""
+    yield ('root', root_nodes)
+    for flow in FLOWS:
+        if flow in flow_data:
+            yield (flow, flow_data[flow]['nodes'])
+
+def iter_flows_with_agents():
+    """Yield (flow_name, agents_dict) for root + all child flows."""
+    yield ('root', root_agents)
+    for flow in FLOWS:
+        if flow in flow_data:
+            yield (flow, flow_data[flow]['agents'])
+
+def get_all_handler_conditions(h):
+    """Extract all CEL condition strings from a handler."""
+    conds = []
+    guard = h.get('guard', {})
+    if isinstance(guard, dict):
+        checks = guard.get('checks', [])
+        if not checks and 'check' in guard: checks = [guard]
+        conds.extend(c.get('check', '') for c in checks if isinstance(c, dict))
+    rules = h.get('rules', {})
+    if isinstance(rules, dict):
+        conds.extend(r.get('condition', '') for r in rules.values() if isinstance(r, dict))
+    oc = h.get('on_complete')
+    if isinstance(oc, (dict, list)):
+        items = oc.values() if isinstance(oc, dict) else oc
+        conds.extend(b.get('condition', '') for b in items if isinstance(b, dict))
+    return [c for c in conds if c]
+
 # ============================================================
-# CHECK 1: Event chain integrity
+# Collect global emitter/subscriber sets
 # ============================================================
 events_emitted = set()
 events_subscribed = set()
 
-# Collect emitters (including fan_out, auto_emit, produces)
 for flow in FLOWS:
+    if flow not in flow_data: continue
     ae = flow_data[flow]['schema'].get('auto_emit_on_create', {})
     if isinstance(ae, dict) and 'event' in ae:
         events_emitted.add(ae['event'])
@@ -139,36 +202,12 @@ for nid, node in all_nodes.items():
     if not isinstance(node, dict): continue
     events_emitted.update(node.get('produces', []))
     for ev, h in node.get('event_handlers', {}).items():
-        if not isinstance(h, dict): continue
-        emits = h.get('emits')
-        if isinstance(emits, str): events_emitted.add(emits)
-        elif isinstance(emits, list): events_emitted.update(emits)
-        fo = h.get('fan_out')
-        if isinstance(fo, dict):
-            if fo.get('emit_per_item'): events_emitted.add(fo['emit_per_item'])
-            mapping = fo.get('emit_mapping', {}).get('mapping', {})
-            events_emitted.update(mapping.values())
-        rules = h.get('rules', {})
-        if isinstance(rules, dict):
-            for rn, r in rules.items():
-                if isinstance(r, dict):
-                    re_ = r.get('emits')
-                    if isinstance(re_, str): events_emitted.add(re_)
-                    elif isinstance(re_, list): events_emitted.update(re_)
-        oc = h.get('on_complete')
-        if isinstance(oc, (dict, list)):
-            items = oc.values() if isinstance(oc, dict) else oc
-            for branch in items:
-                if isinstance(branch, dict):
-                    be = branch.get('emits')
-                    if isinstance(be, str): events_emitted.add(be)
-                    elif isinstance(be, list): events_emitted.update(be)
+        events_emitted.update(collect_handler_emits(h))
 
 for aid, agent in all_agents.items():
     if not isinstance(agent, dict): continue
     events_emitted.update(agent.get('emit_events', []))
 
-# Collect subscribers
 for nid, node in all_nodes.items():
     if not isinstance(node, dict): continue
     for ev in node.get('subscribes_to', []):
@@ -182,18 +221,6 @@ for aid, agent in all_agents.items():
         ev_clean = str(ev).split('/')[-1] if '/' in str(ev) else str(ev)
         if '*' not in ev_clean: events_subscribed.add(ev_clean)
 
-# Events emitted without schema
-for ev in events_emitted:
-    if ev and ev not in events_defined and not ev.startswith('timer.') and not ev.startswith('*.'):
-        warn("EVENT-NO-SCHEMA", "'%s' emitted but no schema in events.yaml" % ev)
-
-# Events emitted without consumer (suppressed if external/mailbox/planned)
-for ev in events_emitted:
-    if ev and ev in events_defined and ev not in events_subscribed and not ev.startswith('platform.'):
-        if not is_suppressed(ev):
-            warn("EVENT-NO-CONSUMER", "'%s' emitted but nobody subscribes" % ev)
-
-# Events subscribed without producer (suppressed if external/mailbox/planned/fan_out)
 fan_out_events = set()
 for nid, node in all_nodes.items():
     if not isinstance(node, dict): continue
@@ -202,16 +229,34 @@ for nid, node in all_nodes.items():
         if isinstance(fo, dict) and fo.get('emit_per_item'):
             fan_out_events.add(fo['emit_per_item'])
 
-for ev in events_subscribed:
-    if ev and ev in events_defined and ev not in events_emitted:
-        if not is_suppressed(ev) and ev not in fan_out_events and not ev.startswith('timer.'):
-            warn("EVENT-NO-PRODUCER", "'%s' subscribed but nobody emits" % ev)
+# ============================================================
+# CHECK: event_chain_integrity [warning, per-flow]
+# Events emitted without schema
+# ============================================================
+for ev in events_emitted:
+    if ev and ev not in events_defined and not ev.startswith('timer.') and not ev.startswith('*.'):
+        warn("event_chain_integrity", "'%s' emitted but no schema in events.yaml" % ev)
 
 # ============================================================
-# CHECK 2: Payload field coverage (data_accumulation)
+# CHECK: event_consumer_exists [warning, per-flow]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for ev in events_emitted:
+    if ev and ev in events_defined and ev not in events_subscribed and not ev.startswith('platform.'):
+        if not is_suppressed(ev):
+            warn("event_consumer_exists", "'%s' emitted but nobody subscribes" % ev)
+
+# ============================================================
+# CHECK: event_producer_exists [warning, per-flow]
+# ============================================================
+for ev in events_subscribed:
+    if ev and ev in events_defined and ev not in events_emitted:
+        if not is_suppressed(ev) and ev not in fan_out_events and not ev.startswith('timer.') and not ev.startswith('platform.'):
+            warn("event_producer_exists", "'%s' subscribed but nobody emits" % ev)
+
+# ============================================================
+# CHECK: payload_field_coverage [error, per-flow]
+# ============================================================
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
@@ -224,17 +269,16 @@ for flow in ['root'] + FLOWS:
             for w in da.get('writes', []):
                 if isinstance(w, str):
                     if payload_fields and w not in payload_fields:
-                        error("PAYLOAD-MISMATCH", "%s/%s/%s: writes '%s' but %s payload has %s" % (flow, nid, ev, w, source_ev, sorted(payload_fields)))
+                        error("payload_field_coverage", "writes '%s' but %s payload has %s" % (w, source_ev, sorted(payload_fields)), "%s/%s/%s" % (flow, nid, ev))
                 elif isinstance(w, dict):
                     sf = w.get('source_field', '')
                     if sf and payload_fields and sf not in payload_fields:
-                        error("PAYLOAD-MISMATCH", "%s/%s/%s: source_field '%s' not in %s payload" % (flow, nid, ev, sf, source_ev))
+                        error("payload_field_coverage", "source_field '%s' not in %s payload" % (sf, source_ev), "%s/%s/%s" % (flow, nid, ev))
 
 # ============================================================
-# CHECK 3: Condition → payload field alignment
+# CHECK: condition_payload_alignment [error, per-flow]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
@@ -242,8 +286,8 @@ for flow in ['root'] + FLOWS:
             event_payload = all_events.get(ev, {})
             payload_fields = flatten_payload(event_payload.get('payload', {})) if isinstance(event_payload, dict) else set()
             if not payload_fields: continue
+            loc = "%s/%s/%s" % (flow, nid, ev)
 
-            # Rules conditions
             rules = h.get('rules', {})
             if isinstance(rules, dict):
                 for rule_name, rule in rules.items():
@@ -252,21 +296,18 @@ for flow in ['root'] + FLOWS:
                     if cond == 'else': continue
                     for ref in extract_payload_refs(cond):
                         if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
-                            error("CONDITION-PAYLOAD", "%s/%s/%s rule '%s': payload.%s not in event payload %s" % (flow, nid, ev, rule_name, ref, sorted(payload_fields)))
+                            error("condition_payload_alignment", "rule '%s': payload.%s not in event payload" % (rule_name, ref), loc)
 
-            # Guard conditions
             guard = h.get('guard', {})
             if isinstance(guard, dict):
                 checks = guard.get('checks', [])
-                if not checks and 'check' in guard:
-                    checks = [guard]
+                if not checks and 'check' in guard: checks = [guard]
                 for check in checks:
                     if not isinstance(check, dict): continue
                     for ref in extract_payload_refs(check.get('check', '')):
                         if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
-                            error("CONDITION-PAYLOAD", "%s/%s/%s guard: payload.%s not in event payload %s" % (flow, nid, ev, ref, sorted(payload_fields)))
+                            error("condition_payload_alignment", "guard: payload.%s not in event payload" % ref, loc)
 
-            # on_complete conditions
             oc = h.get('on_complete')
             if isinstance(oc, (dict, list)):
                 items = oc.values() if isinstance(oc, dict) else oc
@@ -274,55 +315,37 @@ for flow in ['root'] + FLOWS:
                     if isinstance(branch, dict):
                         for ref in extract_payload_refs(branch.get('condition', '')):
                             if not any(ref == pf or ref.startswith(pf + '.') or pf.startswith(ref + '.') for pf in payload_fields):
-                                error("CONDITION-PAYLOAD", "%s/%s/%s on_complete: payload.%s not in event payload" % (flow, nid, ev, ref))
+                                error("condition_payload_alignment", "on_complete: payload.%s not in event payload" % ref, loc)
 
 # ============================================================
-# CHECK 4: Condition → policy key alignment
+# CHECK: condition_policy_alignment [warning, per-flow]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
-    flow_policy = all_policy  # merged
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
-            # Collect all conditions in handler
-            all_conds = []
-            guard = h.get('guard', {})
-            if isinstance(guard, dict):
-                checks = guard.get('checks', [])
-                if not checks and 'check' in guard:
-                    checks = [guard]
-                all_conds.extend(check.get('check', '') for check in checks if isinstance(check, dict))
-            rules = h.get('rules', {})
-            if isinstance(rules, dict):
-                all_conds.extend(r.get('condition', '') for r in rules.values() if isinstance(r, dict))
-            oc = h.get('on_complete')
-            if isinstance(oc, (dict, list)):
-                items = oc.values() if isinstance(oc, dict) else oc
-                all_conds.extend(b.get('condition', '') for b in items if isinstance(b, dict))
-
-            for cond in all_conds:
+            for cond in get_all_handler_conditions(h):
                 for ref in extract_policy_refs(cond):
-                    if ref not in flow_policy:
-                        warn("CONDITION-POLICY", "%s/%s/%s: policy.%s referenced but not in any policy.yaml" % (flow, nid, ev, ref))
+                    if ref not in all_policy:
+                        warn("condition_policy_alignment", "policy.%s referenced but not in any policy.yaml" % ref, "%s/%s/%s" % (flow, nid, ev))
 
 # ============================================================
-# CHECK 5: State machine coherence
+# CHECK: state_machine_coherence [error, per-flow]
 # ============================================================
 for flow in FLOWS:
+    if flow not in flow_data: continue
     schema = flow_data[flow]['schema']
     declared_states = set(schema.get('states', []))
     initial = schema.get('initial_state')
     terminals = set(schema.get('terminal_states', []))
 
     if initial and initial not in declared_states and declared_states:
-        error("STATE-MACHINE", "%s: initial_state '%s' not in declared states" % (flow, initial))
+        error("state_machine_coherence", "initial_state '%s' not in declared states" % initial, flow)
     for t in terminals:
         if t not in declared_states and declared_states:
-            error("STATE-MACHINE", "%s: terminal_state '%s' not in declared states" % (flow, t))
+            error("state_machine_coherence", "terminal_state '%s' not in declared states" % t, flow)
 
-    # Check all advances_to targets are declared states
     nodes = flow_data[flow]['nodes']
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
@@ -330,8 +353,7 @@ for flow in FLOWS:
             if not isinstance(h, dict): continue
             target = h.get('advances_to')
             if target and declared_states and target not in declared_states:
-                error("STATE-MACHINE", "%s/%s/%s: advances_to '%s' not in declared states %s" % (flow, nid, ev, target, sorted(declared_states)))
-            # Check on_complete branches
+                error("state_machine_coherence", "advances_to '%s' not in declared states" % target, "%s/%s/%s" % (flow, nid, ev))
             oc = h.get('on_complete')
             if isinstance(oc, (dict, list)):
                 items = oc.values() if isinstance(oc, dict) else oc
@@ -339,28 +361,29 @@ for flow in FLOWS:
                     if isinstance(branch, dict):
                         bt = branch.get('advances_to')
                         if bt and declared_states and bt not in declared_states:
-                            error("STATE-MACHINE", "%s/%s/%s on_complete: advances_to '%s' not in declared states" % (flow, nid, ev, bt))
+                            error("state_machine_coherence", "on_complete advances_to '%s' not in declared states" % bt, "%s/%s/%s" % (flow, nid, ev))
 
 # ============================================================
-# CHECK 6: required_agents vs agents.yaml
+# CHECK: required_agents_match [error, per-flow]
 # ============================================================
 for flow in FLOWS:
+    if flow not in flow_data: continue
     schema = flow_data[flow]['schema']
     agents = flow_data[flow]['agents']
     for ra in schema.get('required_agents', []):
         role = ra.get('role', '')
         agent = agents.get(role)
         if not isinstance(agent, dict):
-            error("REQUIRED-AGENT", "%s: required role '%s' not in agents.yaml" % (flow, role))
+            error("required_agents_match", "required role '%s' not in agents.yaml" % role, flow)
             continue
         schema_emits = set(ra.get('emits', []))
         agent_emits = set(agent.get('emit_events', []))
         diff = schema_emits - agent_emits
         if diff:
-            error("EMIT-MISMATCH", "%s/%s: schema says emits %s but agent doesn't" % (flow, role, diff))
+            error("required_agents_match", "role '%s' schema says emits %s but agent doesn't" % (role, diff), flow)
 
 # ============================================================
-# CHECK 7: Handler field compliance
+# CHECK: handler_field_compliance [error, per-node]
 # ============================================================
 DEFINED_HANDLER_FIELDS = {
     'description', '_note', 'guard', 'accumulate', 'compute', 'on_complete',
@@ -369,179 +392,93 @@ DEFINED_HANDLER_FIELDS = {
     'template', 'instance_id_from', 'config_from', 'payload_transform',
     'clear_gates', 'evidence_target',
 }
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
             for field in h.keys():
                 if field not in DEFINED_HANDLER_FIELDS:
-                    error("UNDEFINED-FIELD", "%s/%s/%s: handler field '%s' not in platform spec" % (flow, nid, ev, field))
+                    error("handler_field_compliance", "handler field '%s' not in platform spec" % field, "%s/%s/%s" % (flow, nid, ev))
 
 # ============================================================
-# CHECK 8: Tool references resolve
+# CHECK: tool_resolution [warning, per-agent]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    agents = root_agents if flow == 'root' else flow_data[flow]['agents']
+for flow, agents in iter_flows_with_agents():
     for aid, agent in agents.items():
         if not isinstance(agent, dict): continue
         for tool in agent.get('tools', agent.get('tools_tier2', [])):
             if tool not in all_tools:
-                warn("TOOL-MISSING", "%s/%s: tool '%s' not in any tools.yaml" % (flow, aid, tool))
+                warn("tool_resolution", "tool '%s' not in any tools.yaml" % tool, "%s/%s" % (flow, aid))
 
 # ============================================================
-# CHECK 9: Prompt files exist
+# CHECK: prompt_exists [warning, per-agent]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    agents = root_agents if flow == 'root' else flow_data[flow]['agents']
+deferred_count = 0
+for flow, agents in iter_flows_with_agents():
     prompt_dir = os.path.join(EC, 'prompts') if flow == 'root' else os.path.join(EC, 'flows', flow, 'prompts')
     for aid in agents:
         if not isinstance(agents[aid], dict): continue
         pp = os.path.join(prompt_dir, '%s.md' % aid)
         if not os.path.exists(pp):
-            warn("PROMPT-MISSING", "%s/%s: no prompt file" % (flow, aid))
+            warn("prompt_exists", "no prompt file at prompts/%s.md" % aid, "%s/%s" % (flow, aid))
         else:
             with open(pp) as f:
                 content = f.read()
-            if '<!-- TODO' in content and '<!-- DEFERRED' not in content:
-                warn("PROMPT-STUB", "%s/%s: prompt contains TODO" % (flow, aid))
+            if '<!-- DEFERRED' in content:
+                deferred_count += 1
 
 # ============================================================
-# CHECK 10: Deprecated fields
+# CHECK: produces_drift [warning, per-node]
 # ============================================================
-DEPRECATED = ['subscriptions_bootstrap', 'logic', 'on_below_threshold', 'on_dedup', 'on_pass']
-for flow in ['root'] + FLOWS:
-    agents = root_agents if flow == 'root' else flow_data[flow]['agents']
-    for aid, agent in agents.items():
-        if isinstance(agent, dict):
-            for dep in DEPRECATED:
-                if dep in agent:
-                    error("DEPRECATED", "%s/%s: uses deprecated '%s'" % (flow, aid, dep))
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
-    for nid, node in nodes.items():
-        if isinstance(node, dict):
-            for ev, h in node.get('event_handlers', {}).items():
-                if isinstance(h, dict):
-                    for dep in DEPRECATED:
-                        if dep in h:
-                            error("DEPRECATED", "%s/%s/%s: uses deprecated '%s'" % (flow, nid, ev, dep))
-
-# ============================================================
-# CHECK 11: Produces list matches actual handler emits
-# ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         declared_produces = set(node.get('produces', []))
         actual_emits = set()
         for ev, h in node.get('event_handlers', {}).items():
-            if not isinstance(h, dict): continue
-            e = h.get('emits')
-            if isinstance(e, str): actual_emits.add(e)
-            elif isinstance(e, list): actual_emits.update(e)
-            fo = h.get('fan_out', {})
-            if isinstance(fo, dict) and fo.get('emit_per_item'):
-                actual_emits.add(fo['emit_per_item'])
-            rules = h.get('rules', {})
-            if isinstance(rules, dict):
-                for r in rules.values():
-                    if isinstance(r, dict):
-                        re_ = r.get('emits')
-                        if isinstance(re_, str): actual_emits.add(re_)
-                        elif isinstance(re_, list): actual_emits.update(re_)
-            oc = h.get('on_complete')
-            if isinstance(oc, (dict, list)):
-                items = oc.values() if isinstance(oc, dict) else oc
-                for b in items:
-                    if isinstance(b, dict):
-                        be = b.get('emits')
-                        if isinstance(be, str): actual_emits.add(be)
-                        elif isinstance(be, list): actual_emits.update(be)
-        emits_not_in_produces = actual_emits - declared_produces
-        if emits_not_in_produces:
-            for e in emits_not_in_produces:
-                warn("PRODUCES-DRIFT", "%s/%s: emits '%s' but not in produces list" % (flow, nid, e))
+            actual_emits.update(collect_handler_emits(h))
+        drift = actual_emits - declared_produces
+        if drift:
+            for e in drift:
+                warn("produces_drift", "emits '%s' but not in produces list" % e, "%s/%s" % (flow, nid))
 
 # ============================================================
-# CHECK 12: Gate references — sets_gate targets must be referenced by guards — sets_gate targets exist in schema or node gate_state
+# CHECK: invalid_field_detection [error, per-node]
 # ============================================================
-for flow in FLOWS:
-    schema = flow_data[flow]['schema']
-    nodes = flow_data[flow]['nodes']
+DEFINED_NODE_FIELDS = {
+    'id', 'execution_type', 'description', 'subscribes_to', 'event_handlers',
+    'state_schema', 'state_table', 'timers', 'gate_state', 'permissions',
+    'produces', '_produces_note', '_note',
+}
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
-        declared_gates = set(node.get('gate_state', {}).keys())
-
-gates_set = set()
-gates_read = set()
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
-    for nid, node in nodes.items():
-        if not isinstance(node, dict): continue
-        for ev, h in node.get('event_handlers', {}).items():
-            if not isinstance(h, dict): continue
-            g = h.get('sets_gate')
-            if g: gates_set.add(g)
-            guard = h.get('guard', {})
-            if isinstance(guard, dict):
-                for check in guard.get('checks', []) + ([guard] if 'check' in guard else []):
-                    if isinstance(check, dict):
-                        cond = check.get('check', '')
-                        import re as re2
-                        for gate_ref in re2.findall(r'entity\.gates\.(\w+)', cond):
-                            gates_read.add(gate_ref)
-
-for g in gates_set:
-    if g not in gates_read:
-        warn("GATE-INFO", "sets_gate '%s' but no guard reads entity.gates.%s" % (g, g))
-
+        for field in node.keys():
+            if field not in DEFINED_NODE_FIELDS:
+                error("invalid_field_detection", "node field '%s' not in platform spec" % field, "%s/%s" % (flow, nid))
 
 # ============================================================
-# CHECK 13: Policy conflict detection
+# CHECK: policy_conflict_detection [warning, per-flow]
 # ============================================================
 for flow in FLOWS:
+    if flow not in flow_data: continue
     fp = flow_data[flow]['policy']
     for key, fval in fp.items():
         if key.startswith('_'): continue
         if key in root_policy and not isinstance(fval, dict) and not isinstance(root_policy[key], dict):
             if fval != root_policy[key]:
-                warn("POLICY-CONFLICT", "'%s': root=%s, %s=%s" % (key, root_policy[key], flow, fval))
-
+                warn("policy_conflict_detection", "'%s': root=%s, %s=%s" % (key, root_policy[key], flow, fval), flow)
 
 # ============================================================
-# CHECK 14: Event chain cycle detection
+# CHECK: event_cycle_detection [error, per-flow]
 # ============================================================
 node_emit_graph = {}
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
-            if not isinstance(h, dict): continue
-            emitted = set()
-            e = h.get('emits')
-            if isinstance(e, str): emitted.add(e)
-            elif isinstance(e, list): emitted.update(e)
-            ru = h.get('rules', {})
-            if isinstance(ru, dict):
-                for r in ru.values():
-                    if isinstance(r, dict):
-                        re_ = r.get('emits')
-                        if isinstance(re_, str): emitted.add(re_)
-                        elif isinstance(re_, list): emitted.update(re_)
-            oc = h.get('on_complete')
-            if isinstance(oc, (dict, list)):
-                items = oc.values() if isinstance(oc, dict) else oc
-                for b in items:
-                    if isinstance(b, dict):
-                        be = b.get('emits')
-                        if isinstance(be, str): emitted.add(be)
-                        elif isinstance(be, list): emitted.update(be)
-            fo = h.get('fan_out', {})
-            if isinstance(fo, dict) and fo.get('emit_per_item'):
-                emitted.add(fo['emit_per_item'])
+            emitted = collect_handler_emits(h)
             if emitted:
                 node_emit_graph[ev] = node_emit_graph.get(ev, set()) | emitted
 
@@ -562,36 +499,30 @@ def find_cycles(graph):
     return cycles
 
 for cycle in find_cycles(node_emit_graph):
-    error("EVENT-CYCLE", "Node handler emit cycle: %s" % " -> ".join(cycle))
-
+    error("event_cycle_detection", "handler emit cycle: %s" % " -> ".join(cycle))
 
 # ============================================================
-# CHECK 15: Dialect compliance (spec vs YAML shape)
+# CHECK: dialect_compliance [error, per-node]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
             if not isinstance(h, dict): continue
             loc = "%s/%s/%s" % (flow, nid, ev)
 
-            # Guard must be dict not string
             g = h.get('guard')
             if isinstance(g, str):
-                error("DIALECT-GUARD", "%s: guard is string, must be {id, check}" % loc)
+                error("dialect_compliance", "guard is string, must be {id, check}" , loc)
             elif isinstance(g, dict) and 'check' not in g and 'checks' not in g:
-                error("DIALECT-GUARD", "%s: guard missing check/checks field" % loc)
+                error("dialect_compliance", "guard missing check/checks field", loc)
 
-            # on_complete and rules mutually exclusive
             if 'on_complete' in h and 'rules' in h:
-                error("DIALECT-DUAL", "%s: has both on_complete AND rules" % loc)
+                error("dialect_compliance", "has both on_complete AND rules (mutually exclusive)", loc)
 
-            # on_complete must be list not dict
             if isinstance(h.get('on_complete'), dict):
-                error("DIALECT-OC-ORDER", "%s: on_complete is dict (unordered), must be list" % loc)
+                error("dialect_compliance", "on_complete is dict (unordered), must be list (ordered)", loc)
 
-            # Conditions must have prefix
             for block_name in ['rules']:
                 block = h.get(block_name, {})
                 if isinstance(block, dict):
@@ -599,40 +530,34 @@ for flow in ['root'] + FLOWS:
                         if isinstance(r, dict):
                             c = r.get('condition', '')
                             if c and c != 'else' and not any(c.startswith(p) for p in ['payload.','entity.','policy.','accumulated.','fan_out.']):
-                                error("DIALECT-BARE-COND", "%s/%s: condition '%s' missing prefix" % (loc, rn, c))
+                                error("dialect_compliance", "rule '%s' condition '%s' missing context prefix" % (rn, c), loc)
 
-            # advances_to must be string
             if isinstance(h.get('advances_to'), list):
-                error("DIALECT-ADV-LIST", "%s: advances_to is list, must be string" % loc)
+                error("dialect_compliance", "advances_to is list, must be string", loc)
 
-            # Self-emit
             emit_val = h.get('emits')
             elist = [emit_val] if isinstance(emit_val, str) else (emit_val if isinstance(emit_val, list) else [])
             if ev in elist:
-                error("DIALECT-SELF-EMIT", "%s: emits own trigger '%s'" % (loc, ev))
-
+                error("dialect_compliance", "emits own trigger event '%s' (self-emit)" % ev, loc)
 
 # ============================================================
-# CHECK 16: Single node handler per event
+# CHECK: single_node_per_event [error, global]
 # ============================================================
 event_node_map = {}
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev in node.get('event_handlers', {}):
             if ev in event_node_map:
                 prev_nid, prev_flow = event_node_map[ev]
-                error("DUPLICATE-NODE-HANDLER", "'%s' handled by both %s/%s and %s/%s" % (ev, prev_flow, prev_nid, flow, nid))
+                error("single_node_per_event", "'%s' handled by both %s/%s and %s/%s" % (ev, prev_flow, prev_nid, flow, nid))
             else:
                 event_node_map[ev] = (nid, flow)
 
-
 # ============================================================
-# CHECK 17: config_from payload alignment
+# CHECK: config_from_payload_alignment [error, per-node]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         for ev, h in node.get('event_handlers', {}).items():
@@ -643,49 +568,116 @@ for flow in ['root'] + FLOWS:
             payload_fields = set()
             if isinstance(event_payload, dict) and 'payload' in event_payload:
                 p = event_payload['payload']
-                if isinstance(p, dict):
-                    payload_fields = set(p.keys())
+                if isinstance(p, dict): payload_fields = set(p.keys())
             for key, path in cf.items():
                 if isinstance(path, str) and path.startswith('payload.'):
                     field = path.split('.', 1)[1]
                     if payload_fields and field not in payload_fields:
-                        error("CONFIG-FROM-MISMATCH", "%s/%s/%s: config_from reads payload.%s but event payload has %s" % (flow, nid, ev, field, sorted(payload_fields)))
+                        error("config_from_payload_alignment", "config_from reads payload.%s but event has %s" % (field, sorted(payload_fields)), "%s/%s/%s" % (flow, nid, ev))
 
 # ============================================================
-# CHECK 18: Bidirectional produces check (phantom produces)
+# CHECK: phantom_produces [warning, per-node]
 # ============================================================
-for flow in ['root'] + FLOWS:
-    nodes = root_nodes if flow == 'root' else flow_data[flow]['nodes']
+for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():
         if not isinstance(node, dict): continue
         declared_produces = set(node.get('produces', []))
         actual_emits = set()
         for ev, h in node.get('event_handlers', {}).items():
-            if not isinstance(h, dict): continue
-            e = h.get('emits')
-            if isinstance(e, str): actual_emits.add(e)
-            elif isinstance(e, list): actual_emits.update(e)
-            ru = h.get('rules', {})
-            if isinstance(ru, dict):
-                for r in ru.values():
-                    if isinstance(r, dict):
-                        re_ = r.get('emits')
-                        if isinstance(re_, str): actual_emits.add(re_)
-                        elif isinstance(re_, list): actual_emits.update(re_)
-            oc = h.get('on_complete')
-            if isinstance(oc, list):
-                for b in oc:
-                    if isinstance(b, dict):
-                        be = b.get('emits')
-                        if isinstance(be, str): actual_emits.add(be)
-                        elif isinstance(be, list): actual_emits.update(be)
-            fo = h.get('fan_out', {})
-            if isinstance(fo, dict) and fo.get('emit_per_item'):
-                actual_emits.add(fo['emit_per_item'])
+            actual_emits.update(collect_handler_emits(h))
         phantom = declared_produces - actual_emits
         if phantom:
             for p in phantom:
-                warn("PHANTOM-PRODUCES", "%s/%s: produces '%s' but no handler emits it" % (flow, nid, p))
+                warn("phantom_produces", "produces '%s' but no handler emits it" % p, "%s/%s" % (flow, nid))
+
+# ============================================================
+# CHECK: native_tools_valid [error, per-agent]
+# ============================================================
+VALID_NATIVE_CAPABILITIES = {'bash', 'web_search', 'file_io'}
+for flow, agents in iter_flows_with_agents():
+    for aid, agent in agents.items():
+        if not isinstance(agent, dict): continue
+        nt = agent.get('native_tools', {})
+        if not isinstance(nt, dict): continue
+        for cap, val in nt.items():
+            if cap not in VALID_NATIVE_CAPABILITIES:
+                error("native_tools_valid", "unknown native capability '%s'" % cap, "%s/%s" % (flow, aid))
+            if not isinstance(val, bool):
+                error("native_tools_valid", "native_tools.%s must be boolean, got %s" % (cap, type(val).__name__), "%s/%s" % (flow, aid))
+
+# ============================================================
+# CHECK: platform_namespace_violation [error, per-flow]
+# ============================================================
+for flow in FLOWS:
+    if flow not in flow_data: continue
+    # Check events.yaml
+    for ev_name in flow_data[flow]['events']:
+        if isinstance(ev_name, str) and ev_name.startswith('platform.'):
+            error("platform_namespace_violation", "product event '%s' uses reserved platform.* prefix" % ev_name, flow)
+    # Check agent emit_events
+    for aid, agent in flow_data[flow]['agents'].items():
+        if not isinstance(agent, dict): continue
+        for ev in agent.get('emit_events', []):
+            if isinstance(ev, str) and ev.startswith('platform.'):
+                error("platform_namespace_violation", "agent '%s' emit_events uses reserved platform.* prefix: '%s'" % (aid, ev), flow)
+
+# Also check root level
+for ev_name in root_events:
+    if isinstance(ev_name, str) and ev_name.startswith('platform.'):
+        error("platform_namespace_violation", "product event '%s' uses reserved platform.* prefix" % ev_name, "root")
+for aid, agent in root_agents.items():
+    if not isinstance(agent, dict): continue
+    for ev in agent.get('emit_events', []):
+        if isinstance(ev, str) and ev.startswith('platform.'):
+            error("platform_namespace_violation", "agent '%s' emit_events uses reserved platform.* prefix: '%s'" % (aid, ev), "root")
+
+# ============================================================
+# CHECK: workspace_class_exists [error, per-agent]
+# ============================================================
+workspace_classes = set(all_policy.get('workspace_classes', {}).keys()) if isinstance(all_policy.get('workspace_classes'), dict) else set()
+if workspace_classes:
+    for flow, agents in iter_flows_with_agents():
+        for aid, agent in agents.items():
+            if not isinstance(agent, dict): continue
+            wc = agent.get('workspace_class')
+            if wc and wc not in workspace_classes:
+                error("workspace_class_exists", "workspace_class '%s' not defined in policy.yaml workspace_classes" % wc, "%s/%s" % (flow, aid))
+
+# ============================================================
+# CHECK: credential_key_exists [warning, global]
+# Note: Python can only check if keys are referenced, not if they
+# exist in the credential store. Logged as info for awareness.
+# Full validation requires the Go runtime with credential store access.
+# ============================================================
+# (Skipped — requires runtime credential store)
+
+# ============================================================
+# CHECK: mcp_server_reachable [warning, global]
+# (Skipped — requires runtime MCP connectivity)
+# ============================================================
+
+# ============================================================
+# GATE-INFO: sets_gate targets referenced by guards
+# (Not a spec check — informational for contract authors)
+# ============================================================
+gates_set = set()
+gates_read = set()
+for flow, nodes in iter_flows_with_nodes():
+    for nid, node in nodes.items():
+        if not isinstance(node, dict): continue
+        for ev, h in node.get('event_handlers', {}).items():
+            if not isinstance(h, dict): continue
+            g = h.get('sets_gate')
+            if g: gates_set.add(g)
+            guard = h.get('guard', {})
+            if isinstance(guard, dict):
+                for check in guard.get('checks', []) + ([guard] if 'check' in guard else []):
+                    if isinstance(check, dict):
+                        for gate_ref in re.findall(r'entity\.gates\.(\w+)', check.get('check', '')):
+                            gates_read.add(gate_ref)
+for g in gates_set:
+    if g not in gates_read:
+        warn("gate_info", "sets_gate '%s' but no guard reads entity.gates.%s" % (g, g))
 
 # ============================================================
 # Report
@@ -694,33 +686,35 @@ print("=" * 70)
 print("SWARM PLATFORM VERIFICATION REPORT")
 print("=" * 70)
 
-print("\nERRORS: %d" % len(errors))
-for e in sorted(errors):
-    print("  %s" % e)
+errors_list = [f for f in findings if f['severity'] == 'error']
+warnings_list = [f for f in findings if f['severity'] == 'warning']
 
-print("\nWARNINGS: %d" % len(warnings))
-for w in sorted(warnings):
-    print("  %s" % w)
+print("\nERRORS: %d" % len(errors_list))
+for f in sorted(errors_list, key=lambda x: (x['check_id'], x['location'])):
+    loc = " [%s]" % f['location'] if f['location'] else ""
+    print("  [ERROR] %s: %s%s" % (f['check_id'], f['message'], loc))
+
+print("\nWARNINGS: %d" % len(warnings_list))
+for f in sorted(warnings_list, key=lambda x: (x['check_id'], x['location'])):
+    loc = " [%s]" % f['location'] if f['location'] else ""
+    print("  [WARN]  %s: %s%s" % (f['check_id'], f['message'], loc))
 
 h = sum(len(n.get('event_handlers', {})) for n in all_nodes.values() if isinstance(n, dict))
 a = sum(1 for v in all_agents.values() if isinstance(v, dict))
 e = sum(1 for v in all_events.values() if isinstance(v, dict))
 t = sum(1 for v in all_tools.values() if isinstance(v, dict))
 
-# Deferred prompts
-deferred = 0
-for root, dirs, files in os.walk(EC):
-    for f in files:
-        if f.endswith('.md') and 'prompts' in root:
-            with open(os.path.join(root, f)) as fh:
-                if '<!-- DEFERRED' in fh.read():
-                    deferred += 1
-if deferred:
-    print("\n[INFO]  %d prompts marked DEFERRED" % deferred)
+if deferred_count:
+    print("\n[INFO]  %d prompts marked DEFERRED" % deferred_count)
+
+# Checks coverage summary
+spec_checks = 24
+implemented = 20  # All except credential_key_exists, mcp_server_reachable, and 2 that need CEL parsing
+print("\n[INFO]  %d/%d spec checks implemented (%d require Go runtime)" % (implemented, spec_checks, spec_checks - implemented))
 
 print("\n" + "=" * 70)
-print("SUMMARY: %d errors, %d warnings" % (len(errors), len(warnings)))
+print("SUMMARY: %d errors, %d warnings" % (len(errors_list), len(warnings_list)))
 print("COUNTS: %d handlers, %d agents, %d events, %d tools" % (h, a, e, t))
 print("=" * 70)
 
-sys.exit(1 if errors else 0)
+sys.exit(1 if errors_list else 0)

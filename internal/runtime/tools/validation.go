@@ -28,9 +28,7 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		normalized := normalizeImplementationClass(name, entry)
 		switch rawType {
 		case "workflow_registered", "api_call":
-			if entry.HTTP == nil {
-				warnings = append(warnings, fmt.Errorf("tool %s uses deprecated handler_type %s with no http block; migrate to handler_type: http or mcp", name, rawType))
-			}
+			warnings = append(warnings, fmt.Errorf("tool %s uses deprecated handler_type %s; migrate to handler_type: http or mcp", name, rawType))
 		}
 		switch normalized {
 		case implementationPlatformBuiltin:

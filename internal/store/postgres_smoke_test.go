@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing.T) {
@@ -142,7 +142,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if items, err := pg.ListMailboxItems(ctx, "pending", 10); err != nil || len(items) == 0 {
 		t.Fatalf("list mailbox err=%v len=%d", err, len(items))
 	}
-	if err := pg.DecideMailboxItem(ctx, mbID, "approved", "approve", "ok"); err != nil {
+	if err := pg.DecideMailboxItem(ctx, mbID, "decided", "approve", "ok"); err != nil {
 		t.Fatalf("decide mailbox: %v", err)
 	}
 

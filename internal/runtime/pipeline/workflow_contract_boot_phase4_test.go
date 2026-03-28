@@ -20,7 +20,7 @@ func TestValidateWorkflowContractsDetailed_Tier8SemanticFixtures(t *testing.T) {
 		wantContains string
 	}{
 		{name: "condition payload mismatch", fixture: "test-boot-condition-payload-mismatch", wantCategory: "CONDITION-PAYLOAD", wantContains: "payload.nonexistent_field"},
-		{name: "tool missing", fixture: "test-boot-tool-missing", wantCategory: "TOOL-MISSING", wantContains: "nonexistent_tool"},
+		{name: "tool missing", fixture: "test-boot-tool-missing", wantCategory: "TOOL-MISSING", wantWarning: true, wantContains: "nonexistent_tool"},
 		{name: "self emit", fixture: "test-boot-self-emit", wantCategory: "DIALECT-SELF-EMIT", wantContains: "loop.event"},
 		{name: "event cycle", fixture: "test-boot-event-cycle", wantCategory: "EVENT-CYCLE", wantContains: "cycle.ping"},
 		{name: "event without schema", fixture: "test-boot-event-no-schema", wantCategory: "EVENT-NO-SCHEMA", wantWarning: true, wantContains: "orphan.event"},
@@ -198,6 +198,58 @@ func TestValidateWorkflowContractsDetailed_RejectsNonBooleanNativeToolValue(t *t
 	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
 	if err == nil || !workflowValidationErrorContains(err, "native_tools.bash must be boolean") {
 		t.Fatalf("expected non-boolean native_tools error, got %v", err)
+	}
+}
+
+func TestValidateWorkflowContractsDetailed_RejectsReservedPlatformEventNamespace(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"research-agent": {
+				ID:               "research-agent",
+				Role:             "research",
+				ModelTier:        "fast",
+				ConversationMode: "task",
+				Subscriptions:    []string{"task.requested"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"platform.bad_event": {},
+			"task.requested":     {},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+	}
+	bundle.Platform.Platform.Name = "Swarm Platform"
+	bundle.Platform.Platform.Version = "1.0.0"
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err == nil || !workflowValidationErrorContains(err, "reserved platform.* namespace") {
+		t.Fatalf("expected reserved platform namespace error, got %v", err)
+	}
+}
+
+func TestValidateWorkflowContractsDetailed_RejectsReservedPlatformNamespaceInAgentEmitEvents(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Platform: runtimecontracts.PlatformSpecDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"research-agent": {
+				ID:               "research-agent",
+				Role:             "research",
+				ModelTier:        "fast",
+				ConversationMode: "task",
+				Subscriptions:    []string{"task.requested"},
+				EmitEvents:       []string{"platform.bad_event"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.requested": {},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{},
+	}
+	bundle.Platform.Platform.Name = "Swarm Platform"
+	bundle.Platform.Platform.Version = "1.0.0"
+	_, err := ValidateWorkflowContractsDetailed(semanticview.Wrap(bundle))
+	if err == nil || !workflowValidationErrorContains(err, "emit_events references reserved platform.* namespace") {
+		t.Fatalf("expected reserved platform namespace emit_events error, got %v", err)
 	}
 }
 

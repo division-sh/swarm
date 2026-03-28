@@ -6,8 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"swarm/internal/events"
+	"swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -79,6 +83,35 @@ func TestRuntimeProjectSupervisor_RejectsInvalidBuilderProjectContracts(t *testi
 	}
 	if !strings.Contains(err.Error(), "emits its own trigger event") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDashboardDynamicRuntimeControl_ResetStatePublishesPlatformReset(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe("reset-test", events.EventType("platform.reset"))
+	control := dashboardDynamicRuntimeControl{
+		supervisor: &runtimeProjectSupervisor{
+			currentRT: &runtime.Runtime{
+				Bus:     bus,
+				Manager: &runtimemanager.AgentManager{},
+			},
+		},
+	}
+
+	if err := control.ResetState(); err != nil {
+		t.Fatalf("ResetState: %v", err)
+	}
+
+	select {
+	case evt := <-ch:
+		if evt.Type != events.EventType("platform.reset") {
+			t.Fatalf("event type = %s, want platform.reset", evt.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected platform.reset event")
 	}
 }
 

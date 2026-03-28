@@ -392,7 +392,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				})
 				if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 					FromAgent: "runtime",
-					Type:      "runtime.recovery_failed",
+					Type:      "alert",
 					Priority:  "critical",
 					Status:    "pending",
 					Context:   ctxPayload,
@@ -402,11 +402,13 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				}
 			}
 			payload := mustJSON(map[string]any{
-				"error": err.Error(),
+				"error":           err.Error(),
+				"failed_event_id": nil,
+				"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
 			})
 			if publishErr := rt.Bus.Publish(ctx, events.Event{
 				ID:          uuid.NewString(),
-				Type:        events.EventType("runtime.recovery_failed"),
+				Type:        events.EventType("platform.recovery_failed"),
 				SourceAgent: "runtime",
 				Payload:     payload,
 				CreatedAt:   time.Now(),
@@ -463,9 +465,24 @@ func (rt *Runtime) Wait(ctx context.Context) {
 
 func (rt *Runtime) selfCheck() error {
 	ctx := context.Background()
-	t := events.EventType("runtime.boot")
+	t := events.EventType("platform.boot")
 	ch := rt.Bus.Subscribe("bootstrap-self-check", t)
-	payload := mustJSON(map[string]string{"status": "ok"})
+	var flowCount, nodeCount, agentCount, eventCount int
+	if rt != nil && rt.Options.WorkflowModule != nil {
+		if source := rt.Options.WorkflowModule.SemanticSource(); source != nil {
+			flowCount = len(source.FlowSchemaEntries())
+			nodeCount = len(source.NodeEntries())
+			agentCount = len(source.AgentEntries())
+			eventCount = len(source.ResolvedEventCatalog())
+		}
+	}
+	payload := mustJSON(map[string]any{
+		"flow_count":  flowCount,
+		"node_count":  nodeCount,
+		"agent_count": agentCount,
+		"event_count": eventCount,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339Nano),
+	})
 	evt := events.Event{
 		ID:          uuid.NewString(),
 		Type:        t,

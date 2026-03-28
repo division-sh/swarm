@@ -84,7 +84,7 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 			}
 			errs = append(errs, fmt.Errorf("agent %s declares unknown permission %q", agent.id, perm))
 		}
-		for _, toolName := range agent.entry.ToolsTier2 {
+		for _, toolName := range agent.entry.ConfiguredTools() {
 			toolName = strings.TrimSpace(toolName)
 			requiredPerm, ok := toolPermissionRequirements[toolName]
 			if !ok {

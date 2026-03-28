@@ -1204,53 +1204,153 @@ engine:
     checks:
     - id: event_chain_integrity
       severity: warning
+      scope: per-flow
+      trigger: An emitted event has no handler path to any terminal state or output pin. Detects dead-end events.
+      when: boot-only
     - id: event_consumer_exists
       severity: warning
+      scope: per-flow
+      trigger: An event is emitted (by a node handler or agent emit_events) but no node or agent subscribes to it. Suppressed
+        if the event has _consumer or _status annotations.
+      when: boot-only
     - id: event_producer_exists
       severity: warning
+      scope: per-flow
+      trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if
+        the event has _source or _status annotations.
+      when: boot-only
     - id: payload_field_coverage
       severity: error
+      scope: per-flow
+      trigger: A handler references a payload field (in guard, data_accumulation, rules condition) that does not exist in the
+        triggering event's payload schema in events.yaml.
+      when: boot-only
     - id: condition_payload_alignment
       severity: error
+      scope: per-flow
+      trigger: A CEL condition references payload.X where X is not a declared field in the triggering event's schema.
+      when: boot-only
     - id: condition_policy_alignment
       severity: warning
+      scope: per-flow
+      trigger: A CEL condition references policy.X where X is not a key in any reachable policy.yaml (flow-level or root).
+      when: boot-only
     - id: state_machine_coherence
       severity: error
+      scope: per-flow
+      trigger: An advances_to target is not in the flow's declared states list. Or a state has no inbound transition (unreachable).
+        Or initial_state is not in states.
+      when: boot-only
     - id: required_agents_match
       severity: error
+      scope: per-flow
+      trigger: A flow schema declares a required_agents role that has no matching agent in agents.yaml (by map key).
+      when: boot-only
     - id: handler_field_compliance
       severity: error
+      scope: per-flow
+      trigger: A handler uses a field name not in the defined handler_fields set (guard, accumulate, fan_out, filter, reduce,
+        count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation, emits, action, payload_transform,
+        clear_gates, clear, query, description, evidence_target).
+      when: boot-only
     - id: tool_resolution
       severity: warning
+      scope: per-agent
+      trigger: An agent's tools list references a tool name that does not exist in the merged tool registry (tools.yaml +
+        MCP server catalogs).
+      when: boot-only
     - id: prompt_exists
       severity: warning
+      scope: per-agent
+      trigger: An agent has no prompt file at prompts/{agent-id}.md.
+      when: boot-only
     - id: produces_drift
       severity: warning
+      scope: per-node
+      trigger: A node's explicit produces list does not match the set of events derived from its handler emits, rules emits,
+        on_complete emits, and fan_out emit_per_item.
+      when: boot-only
     - id: invalid_field_detection
       severity: error
+      scope: per-node
+      trigger: A node declaration uses a top-level field not in the defined node_fields set (id, execution_type, description,
+        subscribes_to, event_handlers, state_schema, state_table, timers, gate_state, permissions, produces).
+      when: boot-only
     - id: policy_conflict_detection
       severity: warning
+      scope: per-flow
+      trigger: A child flow policy key overrides a parent flow policy key with a different value. Informational — override
+        is allowed, but the conflict is logged.
+      when: boot-only
     - id: event_cycle_detection
       severity: error
+      scope: per-flow
+      trigger: A handler emits an event that, through a chain of handlers, eventually triggers the same handler. Indicates
+        a potential infinite loop. Chain depth limit (50) is the runtime safety net, but cycles should be caught at boot.
+      when: boot-only
     - id: dialect_compliance
       severity: error
+      scope: per-node
+      trigger: A handler uses on_complete as a map (dict) instead of a list (ordered). Or uses both on_complete and rules
+        on the same handler.
+      when: boot-only
     - id: single_node_per_event
       severity: error
+      scope: global
+      trigger: Two system nodes declare handlers for the same event name. Only one node may own a handler per event.
+      when: boot-only
     - id: config_from_payload_alignment
       severity: error
+      scope: per-node
+      trigger: A create_flow_instance action's config_from references payload fields not present in the triggering event's
+        schema.
+      when: boot-only
     - id: phantom_produces
       severity: warning
+      scope: per-node
+      trigger: A node's produces list includes an event that no handler in the node actually emits.
+      when: boot-only
     - id: native_tools_valid
       severity: error
+      scope: per-agent
+      trigger: An agent's native_tools field contains an unrecognized capability name (not bash, web_search, file_io) or a
+        non-boolean value.
+      when: boot-only
     - id: mcp_server_reachable
       severity: warning
+      scope: global
+      trigger: An MCP server declared in policy.yaml mcp_servers is unreachable at boot. Tools from that server are unavailable.
+      when: boot-only
+    - id: platform_namespace_violation
+      severity: error
+      scope: per-flow
+      trigger: A product events.yaml contains an event name starting with the reserved platform. prefix. Also applies to
+        agent emit_events declarations.
+      when: boot-only
+    - id: workspace_class_exists
+      severity: error
+      scope: per-agent
+      trigger: An agent declares a workspace_class that is not defined in policy.yaml workspace_classes and is not a
+        platform-reserved class.
+      when: boot-only
+    - id: credential_key_exists
+      severity: warning
+      scope: global
+      trigger: A tool's credentials field or an MCP server's credentials_key references a credential key that does not exist
+        in the credential store (any tier). The tool may be unconfigured in this deployment.
+      when: boot-only
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
-    reference_implementation: 'verify.py implements structural checks (payload fields, handler fields, state machine, tools,
-      dialect, cycles, produces). It does NOT implement: CEL parsing, pin wiring, permission validation, entity schema coverage,
-      or namespace collision detection. Those require the Go runtime loader.'
-    check_count: 19 checks (10 error, 9 warning)
+    check_count: 24 checks (13 error, 11 warning)
+    implementation_notes:
+      framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
+        finding has the check ID, severity, message, and location (flow, node, agent, or event name). The boot sequence runs
+        all checks after contract loading and before starting nodes/agents.
+      always_on: All checks run on every boot. There is no mechanism to disable individual checks. Acknowledged warnings
+        (builder feature) are a UI concern, not a runtime concern.
+      scope_meaning: per-flow checks run once per flow in the tree. per-node checks run once per node. per-agent checks run
+        once per agent. global checks run once for the entire contract bundle.
 compliance:
   description: Boot-time and runtime compliance enforcement.
   runtime_enforcement:
@@ -1425,17 +1525,25 @@ tool_model:
       agent_reconfigure: Modify an agent's prompt, tools, or subscriptions. Requires agent_reconfigure permission.
       configure_routing: Add, remove, or modify event routing rules. Requires configure_routing permission.
       create_entity: Create a new entity row in entity_state.
-      create_flow_instance: Create a new dynamic flow instance from a template. Handler action only.
+      get_entity: Read an entity by ID. Returns all fields the agent has permission to see. Auto-granted to all agents (universal
+        tool).
       human_task_decide: Record a human decision on a pending task. Requires human_task_decide permission.
       human_task_request: Create a task for human execution. Requires human_task_request permission.
       mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
-      query_entities: Query entities by state, fields, or aggregation.
-      record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler specifying which
-        accumulator key to write to.
+      query_entities: Query entities by state, fields, or aggregation. Auto-granted to all agents (universal tool).
+      query_metrics: Read aggregated metrics (counts, sums, averages) across entities. Auto-granted to all agents (universal
+        tool).
+      save_entity_field: Write a specific field on an entity. Field must exist in entity_schema. Auto-granted to all agents
+        (universal tool).
       schedule: Schedule a future action or timer. Requires schedule permission.
-    note: 'create_flow_instance and record_evidence are handler ACTION field values, not tools agents call directly. They are
-      listed here because the platform ships the handler code. They are invoked via action: create_flow_instance or action:
-      record_evidence in node handlers.'
+      search_entities: Query entities by stage, field values, or metadata. Auto-granted to all agents (universal tool).
+    handler_actions:
+      description: These are handler ACTION field values, not agent-callable tools. They are invoked via the action field in
+        node handlers. The platform ships the handler code. They are listed separately from the tool catalog because agents
+        cannot call them directly.
+      actions:
+        create_flow_instance: Create a new dynamic flow instance from a template.
+        record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
   agent_tool_filtering:
@@ -1444,10 +1552,13 @@ tool_model:
     rule: When constructing an agent session, the platform resolves tools entries against the merged tool registry
       (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable entries
       log a warning per the tool_resolution boot check.
-    universal_tools: agent_message and mailbox_send are included in every agent session without listing in tools. Emit
-      tools (emit_{event_name}) are auto-generated from emit_events. Neither requires explicit tools entry.
+    universal_tools: 'The following tools are included in every agent session without listing in tools: agent_message,
+      mailbox_send, get_entity, save_entity_field, query_entities, query_metrics, search_entities. Emit tools
+      (emit_{event_name}) are auto-generated from emit_events. Neither universal nor emit tools require explicit tools entry.'
     context_cost: An agent with 4 tools in tools pays for 4 tool schemas in LLM context, regardless of how many tools
       exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
+    default_deny: If an agent calls a tool that is not in its tools list, not a universal tool, not an emit tool, and not
+      a native_tools capability — the call is rejected. There is no default-allow policy for unrecognized tools.
   mcp_client:
     description: The platform acts as an MCP client, connecting to external MCP servers to discover and invoke tools. MCP
       servers are registered in the product's policy.yaml under mcp_servers.
@@ -1536,7 +1647,8 @@ tool_model:
       tiers:
       - tier: env
         description: Environment variables. Read-only. Highest precedence. Used for CI, Docker, and production deployments.
-          Credential key "sendgrid_api_key" resolves to env var SWARM_CRED_SENDGRID_API_KEY (uppercased, prefixed with SWARM_CRED_).
+          Credential key "sendgrid_api_key" resolves by trying the raw key name, then the uppercased variant
+          (SENDGRID_API_KEY). No prefix required — env var names match the credential key directly.
         writable: false
         precedence: 1 (highest)
       - tier: file
@@ -1631,6 +1743,12 @@ prompt_templating:
       - Generated at session creation time from the agent's workspace_class. Not editable by the product author.
     template: "## Environment\n\nWorking directory: /workspace (read-write)\nReference data: /data (read-only)\nContracts:
       /opt/swarm/contracts (read-only)"
+    normative_content: The three workspace lines (/workspace, /data, /opt/swarm/contracts with their access levels) are
+      required. The exact wording is not normative — the content requirements are. The implementation may rephrase as long as
+      the paths and access levels are communicated.
+    native_tools_in_postamble: No. Native tools are NOT described in the postamble. They are conveyed via tool definitions
+      in the LLM API call, same as all other tools. CLI-native vs fallback distinction is invisible to the agent — both paths
+      produce the same tool interface.
     note: The workspace paths are the same for all workspace classes — only the /workspace scope differs (per-agent vs
       per-flow-instance). The postamble does not vary by scope — it tells the agent the paths, the platform enforces the
       scoping.
@@ -2020,7 +2138,15 @@ platform_events:
   namespace_reservation:
     reserved_prefixes:
     - platform.
-    rule: Boot error if any product events.yaml contains an event name starting with a reserved prefix.
+    rule: Boot error if any of the following use a reserved prefix.
+    violations:
+    - Event names declared in product events.yaml
+    - Event names in agent emit_events declarations
+    - Event names in node handler emits fields
+    - Event names in node produces lists
+    not_violations:
+    - Agent subscriptions to platform.* events (subscribing is allowed — products SHOULD subscribe to platform events)
+    - Wildcard subscriptions that match platform.* events (e.g., platform.* subscription pattern)
   catalog:
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
@@ -2075,13 +2201,17 @@ platform_events:
         timestamp: string (ISO 8601)
       produced_by_type: platform
     platform.reset:
-      description: Admin-initiated platform state reset.
+      description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
+        via the admin CLI or builder API. NOT emitted on crash recovery or automatic recovery fallback — those use
+        platform.recovery_failed if they fail, or normal boot if they succeed.
       scope: global
+      trigger: Explicit admin action only. The runtime calls ResetRuntimeState() and emits this event after the reset completes.
+        Product nodes may subscribe to this event to clear their own state (e.g., accumulator state, cycle counters).
       payload:
-        source: string
-        timestamp: string
+        source: string — who initiated the reset (admin_cli, builder_api, etc.)
+        timestamp: string (ISO 8601)
       produced_by_type: platform
-      _source: external (platform admin CLI)
+      _source: external (platform admin CLI or builder API)
     platform.auth_required:
       description: Agent or tool call blocked pending authorization.
       scope: flow
@@ -2117,6 +2247,44 @@ platform_events:
       payload:
         reason: string
         paused_by: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.agent_started:
+      description: Agent session created and ready to process events.
+      scope: flow
+      payload:
+        agent_id: string
+        flow_instance: string (nullable)
+        conversation_mode: string
+        model_tier: string
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.boot:
+      description: Platform boot completed successfully. Emitted after all validation passes and nodes/agents are started.
+      scope: global
+      payload:
+        flow_count: integer
+        node_count: integer
+        agent_count: integer
+        event_count: integer
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.inbound_recorded:
+      description: External event received and persisted. Emitted when an event enters the system from an external source
+        (API, webhook, admin CLI).
+      scope: entity or global
+      payload:
+        event_name: string
+        source: string
+        entity_id: string (nullable)
+        timestamp: string (ISO 8601)
+      produced_by_type: platform
+    platform.recovery_failed:
+      description: Crash recovery failed during event replay. Unrecoverable state.
+      scope: global
+      payload:
+        error: string
+        failed_event_id: string (nullable)
         timestamp: string (ISO 8601)
       produced_by_type: platform
   routing_rules:
@@ -2220,6 +2388,10 @@ workspace_model:
     - workspace_scope controls the /workspace mount only — the sole configurable dimension.
     - Every workspace_class referenced by an agent in agents.yaml must be defined in policy.yaml workspace_classes.
     - The platform validates this at boot. Missing class definition is a boot error.
+    platform_reserved_classes:
+      description: The platform may use internal workspace classes for its own processes (e.g., boot scaffolding, system-level
+        operations). Reserved class names are not declared in product policy.yaml — they are platform-internal. Products cannot
+        use reserved names. Reserved names are implementation-specific and not part of the contract.
   mount_guarantees:
     description: Rules the runtime MUST enforce.
     rules:

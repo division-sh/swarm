@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestEntityTools_HappyPath(t *testing.T) {
@@ -188,7 +188,7 @@ func TestEntityTools_CreateEntityDuplicate(t *testing.T) {
 	}
 }
 
-func TestEntityTools_ConstrainedAllowedToolsStillPermitEntityTools(t *testing.T) {
+func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutorWithActor(t, models.AgentConfig{
 		ID:   "tester",
 		Role: "operator",
@@ -205,14 +205,11 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitEntityTools(t *testing.T)
 			"score":  11.0,
 			"active": true,
 		},
-	}); err != nil {
-		t.Fatalf("create_entity with constrained allowed_tools: %v", err)
+	}); err == nil {
+		t.Fatalf("expected create_entity to be denied when not listed in tools")
 	}
-	if _, err := exec.Execute(ctx, "get_entity", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   entityID,
-	}); err != nil {
-		t.Fatalf("get_entity with constrained allowed_tools: %v", err)
+	if _, err := exec.Execute(ctx, "query_entities", map[string]any{"entity_type": "accounts"}); err != nil {
+		t.Fatalf("query_entities with constrained allowed_tools: %v", err)
 	}
 }
 

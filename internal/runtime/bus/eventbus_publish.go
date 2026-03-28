@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
-	"github.com/google/uuid"
 )
 
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
@@ -387,24 +387,6 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 	if evt.Type == events.EventType("platform.runtime_log") {
 		return plan, nil
 	}
-	// Budget events are broadcast guardrails. Deliver via delivery manifest so
-	// active agents also receive them during backlog replay.
-	if strings.HasPrefix(string(evt.Type), "budget.") {
-		recipients := []string{}
-		if lister, ok := eb.store.(ActiveAgentLister); ok {
-			if ids, err := lister.ListActiveAgentIDs(ctx); err == nil {
-				recipients = ids
-			}
-		}
-		if len(recipients) == 0 {
-			// Best-effort fallback: deliver to currently subscribed agents.
-			recipients = eb.resolveSubscribedRecipients(string(evt.Type))
-		}
-		plan.Recipients = uniqueStrings(recipients)
-		plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
-		return plan, nil
-	}
-
 	// Human task events must always reach the requesting agent (even if active
 	// and not subscribed) and should also be visible to subscribers like the
 	// control-plane roles. Treat them as global events, not entity-routed events.
