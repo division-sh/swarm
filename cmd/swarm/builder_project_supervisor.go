@@ -16,11 +16,10 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	"swarm/internal/runtime"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
-	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
 )
 
 type runtimeProjectSupervisor struct {
@@ -130,11 +129,9 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 	source := semanticview.Wrap(bundle)
-	if _, err := runtimepipeline.ValidateWorkflowContractsDetailed(source); err != nil {
-		return builderpkg.ProjectStatus{}, err
-	}
-	if _, permissionErrors := runtimetools.ValidateAgentPermissions(source); len(permissionErrors) > 0 {
-		return builderpkg.ProjectStatus{}, permissionErrors[0]
+	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
+	if report.HasErrors() {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("%s", report.Errors()[0].Message)
 	}
 	if _, err := initializeStateStores(ctx, s.stores, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err

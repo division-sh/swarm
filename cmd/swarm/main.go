@@ -23,6 +23,7 @@ import (
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/runtime"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecredentials "swarm/internal/runtime/credentials"
@@ -31,7 +32,6 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
-	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 )
@@ -98,20 +98,6 @@ func main() {
 		os.Exit(1)
 	}
 	source := semanticview.Wrap(bundle)
-	bootWarnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
-	if err != nil {
-		slog.Error("validate Swarm contracts", "error", err)
-		os.Exit(1)
-	}
-	agentCount, permissionErrors := runtimetools.ValidateAgentPermissions(source)
-	if len(permissionErrors) > 0 {
-		slog.Error("validate agent permissions", "count", len(permissionErrors), "error", permissionErrors[0])
-		for _, validationErr := range permissionErrors[1:] {
-			slog.Error("validate agent permissions", "error", validationErr)
-		}
-		os.Exit(1)
-	}
-	permissionSummary := fmt.Sprintf("validated %d agents, all permission requirements satisfied", agentCount)
 	stores, err := buildStores(ctx, *storeMode, cfg)
 	if err != nil {
 		log.Fatalf("init stores: %v", err)
@@ -130,6 +116,16 @@ func main() {
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		slog.Error("configure credentials", "error", err)
+		os.Exit(1)
+	}
+	bootReport := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
+		Credentials:       credentialStore,
+		CheckMCPReachable: true,
+	})
+	if bootReport.HasErrors() {
+		for _, finding := range bootReport.Errors() {
+			slog.Error("swarm boot verification failed", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
+		}
 		os.Exit(1)
 	}
 
@@ -154,7 +150,7 @@ func main() {
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
-	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootWarnings, permissionSummary, stateStoreSummary)
+	logBootSkeleton(source, contractsRoot, resolvedPlatformSpecPath, bootReport, stateStoreSummary)
 	if err := rt.Start(ctx); err != nil {
 		log.Fatalf("start runtime: %v", err)
 	}
@@ -417,10 +413,10 @@ func (m *swarmWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
 	return m.actionRegistry
 }
 
-func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, warnings []runtimepipeline.WorkflowContractWarning, permissionSummary, stateStoreSummary string) {
-	warningCounts := make(map[string]int, len(warnings))
-	for _, warning := range warnings {
-		warningCounts[strings.TrimSpace(warning.Category)]++
+func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath string, report runtimebootverify.Report, stateStoreSummary string) {
+	warningCounts := make(map[string]int, len(report.Findings))
+	for _, finding := range report.Warnings() {
+		warningCounts[strings.TrimSpace(finding.CheckID)]++
 	}
 	steps := []struct {
 		index int
@@ -433,10 +429,10 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 		{4, "register_templates", fmt.Sprintf("registered %d template flow(s)", templateFlowCount(source))},
 		{5, "build_registries", fmt.Sprintf("nodes=%d agents=%d events=%d tools=%d", len(source.NodeEntries()), len(source.AgentEntries()), len(source.ResolvedEventCatalog()), len(source.ToolEntries()))},
 		{6, "resolve_subscriptions", "subscription resolution skeleton in place; full validation lands in CP4"},
-		{7, "validate_pins", fmt.Sprintf("validated flow pins and event wiring; warnings=%d", warningCounts["EVENT-NO-SCHEMA"]+warningCounts["EVENT-NO-CONSUMER"]+warningCounts["EVENT-NO-PRODUCER"])},
+		{7, "validate_pins", fmt.Sprintf("validated flow pins and event wiring; warnings=%d", warningCounts["event_chain_integrity"]+warningCounts["event_consumer_exists"]+warningCounts["event_producer_exists"])},
 		{8, "validate_required_agents", "validated required_agents coverage and state-machine targets"},
-		{9, "validate_tools", fmt.Sprintf("validated tools and prompt coverage; warnings=%d", warningCounts["PROMPT-MISSING"]+warningCounts["PROMPT-STUB"])},
-		{10, "validate_permissions", permissionSummary},
+		{9, "validate_tools", fmt.Sprintf("validated tools and prompt coverage; warnings=%d", warningCounts["prompt_exists"]+warningCounts["tool_resolution"])},
+		{10, "validate_permissions", "validated platform permission requirements during boot verification"},
 		{11, "validate_platform_version", fmt.Sprintf("loaded platform spec version %s for workflow %s", strings.TrimSpace(source.PlatformSpec().Platform.Version), strings.TrimSpace(source.WorkflowVersion()))},
 		{12, "initialize_state_stores", fmt.Sprintf("%s (contracts=%s)", strings.TrimSpace(stateStoreSummary), contractsRoot)},
 		{13, "start_system_nodes", "delegated to runtime.Start()"},
@@ -446,8 +442,8 @@ func logBootSkeleton(source semanticview.Source, contractsRoot, platformSpecPath
 	for _, step := range steps {
 		slog.Info("swarm boot", "step", fmt.Sprintf("%02d", step.index), "name", step.name, "detail", step.note)
 	}
-	for _, warning := range warnings {
-		slog.Warn("swarm boot validation warning", "category", warning.Category, "detail", warning.Message)
+	for _, finding := range report.Warnings() {
+		slog.Warn("swarm boot validation warning", "check_id", finding.CheckID, "location", finding.Location, "detail", finding.Message)
 	}
 }
 

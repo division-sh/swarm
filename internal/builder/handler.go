@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
-	runtimetools "swarm/internal/runtime/tools"
 )
 
 type handler struct {
@@ -351,55 +351,24 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 		result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
 		return result
 	}
-	warnings, err := runtimepipeline.ValidateWorkflowContractsDetailed(source)
-	if err != nil {
-		for _, line := range strings.Split(strings.TrimSpace(err.Error()), "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				result.Errors = append(result.Errors, ValidationIssue{
-					CheckID:  normalizeValidationErrorCheckID(line),
-					Severity: "error",
-					Message:  line,
-				})
-			}
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{
+		Credentials:       h.credentials,
+		CheckMCPReachable: true,
+	})
+	for _, finding := range report.Findings {
+		issue := ValidationIssue{
+			CheckID:  finding.CheckID,
+			Severity: finding.Severity,
+			Message:  finding.Message,
 		}
-	}
-	_, permissionErrors := runtimetools.ValidateAgentPermissions(source)
-	for _, permissionErr := range permissionErrors {
-		result.Errors = append(result.Errors, ValidationIssue{
-			CheckID:  "agent_permission_validation",
-			Severity: "error",
-			Message:  strings.TrimSpace(permissionErr.Error()),
-		})
-	}
-	for _, warning := range warnings {
-		result.Warnings = append(result.Warnings, ValidationIssue{
-			CheckID:  normalizeCheckID(warning.Category),
-			Severity: "warning",
-			Message:  strings.TrimSpace(warning.Message),
-		})
-	}
-	if h.credentials != nil {
-		missing, err := runtimecredentials.MissingRequired(context.Background(), h.credentials, source)
-		if err != nil {
-			result.Errors = append(result.Errors, ValidationIssue{
-				CheckID:  "credential_validation",
-				Severity: "error",
-				Message:  strings.TrimSpace(err.Error()),
-			})
-		} else {
-			for _, item := range missing {
-				requiredBy := make([]string, 0, len(item.RequiredBy))
-				for _, ref := range item.RequiredBy {
-					requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
-				}
-				result.Warnings = append(result.Warnings, ValidationIssue{
-					CheckID:    "credential_key_exists",
-					Severity:   "warning",
-					Message:    fmtCredentialWarning(item.Key, requiredBy),
-					Suggestion: "set the credential with credentials.set before executing dependent tools",
-				})
-			}
+		if finding.CheckID == "credential_key_exists" && finding.Severity == "warning" {
+			issue.Suggestion = "set the credential with credentials.set before executing dependent tools"
 		}
+		if finding.Severity == "warning" {
+			result.Warnings = append(result.Warnings, issue)
+			continue
+		}
+		result.Errors = append(result.Errors, issue)
 	}
 	if len(result.Errors) > 0 {
 		result.Status = "fail"
@@ -598,61 +567,6 @@ func (c *wsClient) close() {
 	_ = c.conn.Close()
 }
 
-func normalizeCheckID(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "" {
-		return "validation"
-	}
-	switch raw {
-	case "condition-payload":
-		return "condition_payload_alignment"
-	case "tool-missing":
-		return "tool_resolution"
-	case "event-no-consumer":
-		return "event_consumer_exists"
-	case "event-no-producer":
-		return "event_producer_exists"
-	case "event-cycle":
-		return "event_cycle_detection"
-	case "prompt-missing", "prompt-stub":
-		return "prompt_exists"
-	case "policy-conflict":
-		return "policy_conflict_detection"
-	case "deprecated":
-		return "deprecated_contract_alias"
-	case "permission-mismatch":
-		return "agent_permission_validation"
-	}
-	replacer := strings.NewReplacer(" ", "_", "-", "_", ".", "_", "/", "_")
-	return replacer.Replace(raw)
-}
-
-func normalizeValidationErrorCheckID(message string) string {
-	msg := strings.ToLower(strings.TrimSpace(message))
-	switch {
-	case strings.Contains(msg, "reserved platform.* namespace"):
-		return "platform_namespace_violation"
-	case strings.Contains(msg, "native_tools."):
-		return "native_tools_valid"
-	case strings.Contains(msg, "required agent role"):
-		return "required_agents_match"
-	case strings.Contains(msg, "payload.") && strings.Contains(msg, "condition"):
-		return "condition_payload_alignment"
-	case strings.Contains(msg, "payload.") && strings.Contains(msg, "schema"):
-		return "payload_field_coverage"
-	case strings.Contains(msg, "cycle"):
-		return "event_cycle_detection"
-	case strings.Contains(msg, "on_complete") || strings.Contains(msg, "deprecated handler-level condition") || strings.Contains(msg, "deprecated logic field"):
-		return "dialect_compliance"
-	case strings.Contains(msg, "advances_to") || strings.Contains(msg, "initial_state") || strings.Contains(msg, "unreachable"):
-		return "state_machine_coherence"
-	case strings.Contains(msg, "workspace_class"):
-		return "workspace_class_exists"
-	default:
-		return "workflow_contract_validation"
-	}
-}
-
 func methodUnavailable(message string) *RPCError {
 	return &RPCError{Code: -32004, Message: strings.TrimSpace(message)}
 }
@@ -665,13 +579,6 @@ func internalError(err error) *RPCError {
 }
 
 func errUnavailable(message string) error { return errors.New(strings.TrimSpace(message)) }
-
-func fmtCredentialWarning(key string, requiredBy []string) string {
-	if len(requiredBy) == 0 {
-		return "missing credential " + strconvQuote(key)
-	}
-	return "missing credential " + strconvQuote(key) + " required by " + strings.Join(requiredBy, ", ")
-}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("content-type", "application/json")
