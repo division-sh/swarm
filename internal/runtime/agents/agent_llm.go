@@ -641,13 +641,13 @@ func emitToolDefinitions(cfg models.AgentConfig) []llm.ToolDefinition {
 }
 
 func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {
-	if !constrained {
-		return in
-	}
 	out := make([]llm.ToolDefinition, 0, len(in))
 	for _, t := range in {
 		if runtimetools.IsUniversal(t.Name) {
 			out = append(out, t)
+			continue
+		}
+		if !constrained {
 			continue
 		}
 		if _, ok := allowed[t.Name]; ok {

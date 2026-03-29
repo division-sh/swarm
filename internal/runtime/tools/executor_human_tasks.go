@@ -9,10 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/events"
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
-	"github.com/google/uuid"
 )
 
 func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -23,10 +21,6 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	if db == nil {
 		return nil, errors.New("sql db is not configured")
 	}
-	if e.bus == nil {
-		return nil, errors.New("event bus is not configured")
-	}
-
 	var in struct {
 		EntityID        string `json:"entity_id"`
 		Category        string `json:"category"`
@@ -96,29 +90,6 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		return nil, err
 	}
 
-	payload := map[string]any{
-		"task_id":          taskID,
-		"requesting_agent": actor.ID,
-		"task_type":        in.Category,
-		"description":      in.Description,
-	}
-
-	if err := e.bus.Publish(ctx, (events.Event{
-		ID:          uuid.NewString(),
-		Type:        events.EventType("human_task.requested"),
-		SourceAgent: actor.ID,
-		Payload:     mustJSON(payload),
-		CreatedAt:   time.Now(),
-	}).WithEntityID(entityID)); err != nil {
-		runtimeWarn(
-			"tool-executor",
-			"failed to publish human_task.requested task_id=%s actor=%s: %v",
-			strings.TrimSpace(taskID),
-			strings.TrimSpace(actor.ID),
-			err,
-		)
-	}
-
 	return map[string]any{
 		"task_id": taskID,
 		"status":  "pending_review",
@@ -132,9 +103,6 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 	e.mu.RUnlock()
 	if db == nil {
 		return nil, errors.New("sql db is not configured")
-	}
-	if e.bus == nil {
-		return nil, errors.New("event bus is not configured")
 	}
 	if !runtimeauthority.Active().CanDecideHumanTasks(actor.Role) {
 		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
@@ -161,17 +129,13 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 		return nil, errors.New("decision is required (approve|reject|defer)")
 	}
 	var newStatus string
-	var evtType events.EventType
 	switch in.Decision {
 	case "approve", "approved":
 		newStatus = "approved"
-		evtType = events.EventType("human_task.approved")
 	case "reject", "rejected":
 		newStatus = "rejected"
-		evtType = events.EventType("human_task.rejected")
 	case "defer", "deferred":
 		newStatus = "deferred"
-		evtType = events.EventType("human_task.deferred")
 	default:
 		return nil, fmt.Errorf("unknown decision: %s", in.Decision)
 	}
@@ -202,7 +166,6 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 		}
 		if approvedThisWeek >= cfg.Budget().HumanTasks.MaxTasksPerWeek {
 			newStatus = "deferred"
-			evtType = events.EventType("human_task.deferred")
 			if in.Reason == "" {
 				in.Reason = "weekly human task budget exhausted"
 			} else {
@@ -227,45 +190,8 @@ skipBudget:
 	}
 	decisionJSON, _ := json.Marshal(decisionObj)
 
-	var requestingAgent string
-	var entityID string
-	if err := updateHumanTaskMailboxSpec(ctx, db, in.TaskID, newStatus, actor.ID, decisionJSON, &requestingAgent, &entityID); err != nil {
+	if err := updateHumanTaskMailboxSpec(ctx, db, in.TaskID, newStatus, actor.ID, decisionJSON, nil, nil); err != nil {
 		return nil, err
-	}
-
-	outPayload := map[string]any{
-		"task_id":          in.TaskID,
-		"requesting_agent": strings.TrimSpace(requestingAgent),
-		"entity_id":        strings.TrimSpace(entityID),
-	}
-	switch string(evtType) {
-	case "human_task.approved":
-		outPayload["approved_reason"] = in.Reason
-		outPayload["priority_rank"] = in.PriorityRank
-	case "human_task.rejected":
-		outPayload["rejection_reason"] = in.Reason
-	case "human_task.deferred":
-		outPayload["defer_reason"] = in.Reason
-		if in.RequeueDate != "" {
-			outPayload["requeue_date"] = in.RequeueDate
-		}
-	}
-
-	if err := e.bus.Publish(ctx, (events.Event{
-		ID:          uuid.NewString(),
-		Type:        evtType,
-		SourceAgent: actor.ID,
-		Payload:     mustJSON(outPayload),
-		CreatedAt:   time.Now(),
-	}).WithEntityID(entityID)); err != nil {
-		runtimeWarn(
-			"tool-executor",
-			"failed to publish human task decision event=%s task_id=%s actor=%s: %v",
-			strings.TrimSpace(string(evtType)),
-			strings.TrimSpace(in.TaskID),
-			strings.TrimSpace(actor.ID),
-			err,
-		)
 	}
 
 	return map[string]any{

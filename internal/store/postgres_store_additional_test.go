@@ -980,6 +980,30 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 	if count != 1 {
 		t.Fatalf("expected one persisted task audit row, got %d", count)
 	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task): %v", err)
+	}
+
+	var parseOK bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false)
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&parseOK); err != nil {
+		t.Fatalf("load task runtime_state: %v", err)
+	}
+	if !parseOK {
+		t.Fatal("expected task-mode last_turn telemetry to be persisted")
+	}
 }
 
 func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {

@@ -94,3 +94,39 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 		t.Fatalf("model_tier = %#v, want haiku", got)
 	}
 }
+
+func TestAnthropicAPIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
+	turns := &turnCapture{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil)
+
+	runtime.persistTurn(context.Background(), AgentTurnRecord{
+		AgentID:     "agent-1",
+		RuntimeMode: sessions.RuntimeModeTask,
+		SessionID:   "session-1",
+	})
+
+	if len(turns.records) != 1 {
+		t.Fatalf("expected task-mode turn to persist, got %d records", len(turns.records))
+	}
+	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask {
+		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
+	}
+}
+
+func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
+	turns := &turnCapture{}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", turns, nil, nil, nil, nil)
+
+	runtime.persistTurn(context.Background(), AgentTurnRecord{
+		AgentID:     "agent-2",
+		RuntimeMode: sessions.RuntimeModeTask,
+		SessionID:   "session-2",
+	})
+
+	if len(turns.records) != 1 {
+		t.Fatalf("expected task-mode turn to persist, got %d records", len(turns.records))
+	}
+	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask {
+		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
+	}
+}

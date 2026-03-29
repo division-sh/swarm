@@ -308,9 +308,6 @@ func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRec
 	if r.turns == nil {
 		return
 	}
-	if strings.TrimSpace(turn.RuntimeMode) == sessions.RuntimeModeTask {
-		return
-	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
 		// Turn telemetry should not break runtime path.
 		log.Printf("failed to persist agent turn: agent=%s session=%s err=%v", turn.AgentID, turn.SessionID, err)

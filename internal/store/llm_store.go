@@ -18,9 +18,6 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	if rec.AgentID == "" || rec.RuntimeMode == "" || rec.SessionID == "" {
 		return fmt.Errorf("agent_id, runtime_mode, and session_id are required")
 	}
-	if runtimesessions.ResolveScope(rec.RuntimeMode, "").Stateless {
-		return nil
-	}
 
 	reqPayload := normalizeJSONPayload(rec.RequestPayload)
 	respPayload := normalizeJSONPayload(rec.ResponseRaw)

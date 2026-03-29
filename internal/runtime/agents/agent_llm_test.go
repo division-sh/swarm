@@ -70,6 +70,29 @@ func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 	}
 }
 
+func TestFilterTools_DefaultDeniesNonUniversalToolsWhenNoToolList(t *testing.T) {
+	allowed, constrained := extractAllowedToolSet(models.AgentConfig{})
+	if constrained {
+		t.Fatal("expected unconstrained tool set when no tools are configured")
+	}
+	tools := []llm.ToolDefinition{
+		{Name: "get_entity"},
+		{Name: "agent_message"},
+		{Name: "schedule"},
+	}
+	filtered := filterTools(tools, allowed, constrained)
+	names := make([]string, 0, len(filtered))
+	for _, tool := range filtered {
+		names = append(names, tool.Name)
+	}
+	if !containsString(names, "get_entity") || !containsString(names, "agent_message") {
+		t.Fatalf("expected universal tools preserved, got %v", names)
+	}
+	if containsString(names, "schedule") {
+		t.Fatalf("expected non-universal tool filtered out, got %v", names)
+	}
+}
+
 func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundleRoot := writeAgentPromptTestBundle(t, repoRoot)

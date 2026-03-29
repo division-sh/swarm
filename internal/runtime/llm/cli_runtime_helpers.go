@@ -18,9 +18,6 @@ func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord
 	if r.turns == nil {
 		return
 	}
-	if strings.TrimSpace(turn.RuntimeMode) == sessions.RuntimeModeTask {
-		return
-	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
 		log.Printf("failed to persist cli agent turn: agent=%s session=%s err=%v", turn.AgentID, turn.SessionID, err)
 	}

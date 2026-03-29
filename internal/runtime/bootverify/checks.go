@@ -132,9 +132,6 @@ type checkerContext struct {
 
 	deprecatedLoaded   bool
 	deprecatedFindings []Finding
-
-	minimumFilesLoaded   bool
-	minimumFilesFindings []Finding
 }
 
 var bootCheckRegistry = []Check{
@@ -175,7 +172,6 @@ var bootCheckRegistry = []Check{
 var supplementalChecks = []Check{
 	{ID: "impl.platform_metadata_validation", Severity: "error", Run: checkPlatformMetadataValidation},
 	{ID: "impl.deprecated_contract_alias", Severity: "warning", Run: checkDeprecatedContractAlias},
-	{ID: "impl.minimum_required_files", Severity: "error", Run: checkMinimumRequiredFiles},
 }
 
 func newCheckerContext(ctx context.Context, source semanticview.Source, opts Options) *checkerContext {
@@ -232,7 +228,6 @@ func checkTimerValidation(c *checkerContext) []Finding               { return c.
 func checkWritePinOwnershipValidation(c *checkerContext) []Finding   { return c.writePinOwnership() }
 func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
 func checkDeprecatedContractAlias(c *checkerContext) []Finding       { return c.deprecatedAliases() }
-func checkMinimumRequiredFiles(c *checkerContext) []Finding          { return c.minimumRequiredFiles() }
 
 func (c *checkerContext) eventWarningsByCheck(checkID string) []Finding {
 	items := c.eventWarnings()
@@ -648,40 +643,6 @@ func (c *checkerContext) deprecatedAliases() []Finding {
 		}
 	}
 	return c.deprecatedFindings
-}
-
-func (c *checkerContext) minimumRequiredFiles() []Finding {
-	if c.minimumFilesLoaded {
-		return c.minimumFilesFindings
-	}
-	c.minimumFilesLoaded = true
-	bundle, ok := semanticview.Bundle(c.source)
-	if !ok || bundle == nil {
-		return nil
-	}
-	if strings.TrimSpace(bundle.Paths.ProjectAgentsFile) == "" && len(bundle.Paths.Flows) == 0 {
-		c.minimumFilesFindings = append(c.minimumFilesFindings, Finding{
-			CheckID:  "impl.minimum_required_files",
-			Severity: "error",
-			Message:  "root flow has no agents.yaml and no child flows",
-			Location: "root",
-		})
-	}
-	for _, flow := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(flow.Paths.ID)
-		if flowID == "" {
-			continue
-		}
-		if strings.TrimSpace(flow.Paths.AgentsFile) == "" && len(flow.Children) == 0 {
-			c.minimumFilesFindings = append(c.minimumFilesFindings, Finding{
-				CheckID:  "impl.minimum_required_files",
-				Severity: "error",
-				Message:  fmt.Sprintf("flow %s has no agents.yaml and no child flows", flowID),
-				Location: flowID,
-			})
-		}
-	}
-	return c.minimumFilesFindings
 }
 
 func (c *checkerContext) workspace() []Finding {
