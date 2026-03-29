@@ -953,7 +953,7 @@ engine:
             input:
               command: string — shell command to execute
               timeout_seconds: integer — optional, default 30
-              working_dir: string — optional, default /workspace
+              working_dir: string — always /workspace for the agent's workspace scope. Not overridable by the agent.
             output:
               stdout: string
               stderr: string
@@ -1072,7 +1072,8 @@ engine:
           config. These run locally on the same host — workspace scoping is inherent.'
         - '4. API backend (e.g., Anthropic API, OpenAI API): provider does not have local execution capabilities. The platform
           injects fallback tools into the agent''s tool list. Fallback tools execute locally on the platform host.'
-        - '5. Local model backend (e.g., ollama): same as API — platform injects fallback tools, executed locally.'
+        - '5. Additional backends (e.g., local models) may be added in future versions. They follow the API backend pattern
+          — platform injects fallback tools.'
         - 6. The agent sees the same tool interface regardless of which path runs. All execution is local.
         provider_detection: The platform determines provider capabilities from the configured LLM backend (api, cli, local).
           Each backend adapter declares which native capabilities it supports. The platform does not probe the provider at
@@ -1083,7 +1084,7 @@ engine:
         - All native tool execution runs locally on the platform host. There is no remote execution case.
         - bash cwd is /workspace for the agent's workspace class scope
         - file_io is scoped to /workspace (read-write) and /data (read-only). Writes outside /workspace are rejected.
-        - Workspace scoping is guaranteed in all cases — both provider-native (CLI) and platform-fallback (API/local) run
+        - Workspace scoping is guaranteed in all cases — both provider-native (CLI) and platform-fallback (API) run
           on the same host with the same mounts.
         - Environment variables from the credential store are NOT exposed to native tools. Agents access credentials through
           platform tools (HTTP tool credential substitution, MCP server auth), not via env vars in bash.
@@ -1585,7 +1586,6 @@ tool_model:
       agent_fire: Terminate an agent session. Requires agent_fire permission.
       agent_hire: Spawn a new agent session. Requires agent_hire permission.
       agent_reconfigure: Modify an agent's prompt, tools, or subscriptions. Requires agent_reconfigure permission.
-      configure_routing: Add, remove, or modify event routing rules. Requires configure_routing permission.
       create_entity: Create a new entity row in entity_state.
       get_entity: Read an entity by ID. Returns all fields the agent has permission to see. Auto-granted to all agents (universal
         tool).
@@ -1606,6 +1606,11 @@ tool_model:
       actions:
         create_flow_instance: Create a new dynamic flow instance from a template.
         record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
+    planned_tools:
+      description: Tools planned for future platform versions. Not yet implemented. The permission may exist (as an authorization
+        gate) before the tool does.
+      configure_routing: Add, remove, or modify event routing rules at runtime. The configure_routing permission exists and gates
+        this capability. The agent-callable tool is not yet implemented. Planned for v1.5.
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
     entity_tool_schemas:
@@ -2074,7 +2079,7 @@ platform_tables:
         (materialized from contracts at boot for fast runtime lookup). flow_instance nullable for root-level agents not scoped
         to any flow. entity_id nullable — set only for agents scoped to a specific entity (rare). The contract in agents.yaml
         is the source of truth. This table is the runtime materialization. llm_backend specifies the LLM invocation backend
-        — api (production), cli_test (test harness), mock (fixture replay), local (local model). This is a deployment/agent
+        — api (production), cli_test (test harness), mock (fixture replay). This is a deployment/agent
         property, not a session property. agent_sessions.runtime_mode tracks conversation scope only.'
       ddl: "CREATE TABLE agents (\n    agent_id          TEXT PRIMARY KEY,\n    flow_instance     TEXT,\n    role        \
         \      TEXT NOT NULL,\n    model_tier        TEXT NOT NULL,\n    llm_backend       TEXT NOT NULL DEFAULT 'api' CHECK\

@@ -264,7 +264,6 @@ func payloadHasLegacyOnlyProps(payload map[string]any, schema map[string]any) bo
 func toolAllowsLegacySubsetFallback(name string) bool {
 	switch strings.TrimSpace(name) {
 	case "agent_message",
-		"configure_routing",
 		"agent_fire",
 		"mailbox_send",
 		"human_task_request",
@@ -339,33 +338,6 @@ func normalizeRuntimeToolInput(name string, input any) any {
 				}
 				payload["mode"] = "once"
 				payload["at"] = time.Now().Add(time.Duration(delaySeconds) * time.Second).UTC().Format(time.RFC3339)
-			}
-		}
-	case "configure_routing":
-		if strings.TrimSpace(asString(payload["operation"])) == "" {
-			switch strings.ToLower(strings.TrimSpace(asString(payload["status"]))) {
-			case "deactivated":
-				payload["operation"] = "remove"
-			default:
-				payload["operation"] = "add"
-			}
-		}
-		if strings.TrimSpace(asString(payload["event_type"])) == "" {
-			if pattern := strings.TrimSpace(asString(payload["event_pattern"])); pattern != "" {
-				payload["event_type"] = pattern
-			}
-		}
-		if strings.TrimSpace(asString(payload["event_pattern"])) == "" {
-			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
-				payload["event_pattern"] = eventType
-			}
-		}
-		if strings.TrimSpace(asString(payload["status"])) == "" {
-			switch strings.ToLower(strings.TrimSpace(asString(payload["operation"]))) {
-			case "remove":
-				payload["status"] = "deactivated"
-			case "add", "modify":
-				payload["status"] = "active"
 			}
 		}
 	case "agent_hire":
@@ -510,23 +482,21 @@ func extractAllowedTools(actor models.AgentConfig) (map[string]struct{}, bool) {
 		return allowed, false
 	}
 	found := false
-	for _, key := range []string{"tools", "allowed_tools"} {
-		raw, ok := parsed[key]
-		if !ok {
+	raw, ok := parsed["tools"]
+	if !ok {
+		return allowed, false
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return allowed, false
+	}
+	for _, item := range arr {
+		name := strings.TrimSpace(asString(item))
+		if name == "" {
 			continue
 		}
-		arr, ok := raw.([]any)
-		if !ok {
-			continue
-		}
-		for _, item := range arr {
-			name := strings.TrimSpace(asString(item))
-			if name == "" {
-				continue
-			}
-			found = true
-			allowed[name] = struct{}{}
-		}
+		found = true
+		allowed[name] = struct{}{}
 	}
 	return allowed, found
 }

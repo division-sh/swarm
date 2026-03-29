@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -201,17 +200,15 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 }
 
 type SpendRecord struct {
-	EntityID     string
-	Category     string
-	AmountCents  int
-	Currency     string
-	Description  string
-	ApprovedBy   string
-	Source       string // exact|estimated
-	Meta         any
-	RecordedBy   string
-	RecordedAt   time.Time
-	RequestingID string
+	EntityID       string
+	FlowInstance   string
+	AgentID        string
+	Model          string
+	InputTokens    int
+	OutputTokens   int
+	CostUSD        float64
+	InvocationType string
+	RecordedAt     time.Time
 }
 
 func (r SpendRecord) EffectiveEntityID() string {
@@ -230,45 +227,52 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	if t == nil || t.db == nil {
 		return nil
 	}
-	if strings.TrimSpace(rec.Category) == "" {
-		return fmt.Errorf("spend category is required")
-	}
-	if rec.Currency == "" {
-		rec.Currency = "USD"
-	}
 	if rec.RecordedAt.IsZero() {
 		rec.RecordedAt = time.Now()
 	}
-	rec.Source = strings.TrimSpace(strings.ToLower(rec.Source))
-	if rec.Source == "" {
-		rec.Source = "exact"
-	}
 	rec.NormalizeEntityID()
-
-	metaJSON := []byte("null")
-	if rec.Meta != nil {
-		if b, err := json.Marshal(rec.Meta); err == nil && len(b) > 0 {
-			metaJSON = b
-		}
+	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
+	rec.AgentID = strings.TrimSpace(rec.AgentID)
+	rec.Model = strings.TrimSpace(rec.Model)
+	rec.InvocationType = strings.TrimSpace(strings.ToLower(rec.InvocationType))
+	if rec.FlowInstance == "" {
+		return fmt.Errorf("spend flow_instance is required")
+	}
+	if rec.AgentID == "" {
+		return fmt.Errorf("spend agent_id is required")
+	}
+	if rec.Model == "" {
+		return fmt.Errorf("spend model is required")
+	}
+	if rec.InvocationType == "" {
+		return fmt.Errorf("spend invocation_type is required")
+	}
+	if rec.InputTokens < 0 {
+		rec.InputTokens = 0
+	}
+	if rec.OutputTokens < 0 {
+		rec.OutputTokens = 0
+	}
+	if rec.CostUSD < 0 {
+		rec.CostUSD = 0
 	}
 
 	const q = `
 		INSERT INTO spend_ledger (
-			entity_id, agent_id, category, amount_cents, currency, description, approved_by, source, metadata, created_at
+			entity_id, flow_instance, agent_id, model, input_tokens, output_tokens, cost_usd, invocation_type, created_at
 		) VALUES (
-			NULLIF($1,'')::uuid, NULLIF($2,''), $3, $4, $5, NULLIF($6,''), NULLIF($7,''), $8, $9::jsonb, $10
+			NULLIF($1,'')::uuid, $2, $3, $4, $5, $6, $7, $8, $9
 		)
 	`
 	if _, err := t.db.ExecContext(ctx, q,
 		rec.EffectiveEntityID(),
-		strings.TrimSpace(rec.RecordedBy),
-		strings.TrimSpace(rec.Category),
-		rec.AmountCents,
-		strings.TrimSpace(rec.Currency),
-		strings.TrimSpace(rec.Description),
-		strings.TrimSpace(rec.ApprovedBy),
-		rec.Source,
-		metaJSON,
+		rec.FlowInstance,
+		rec.AgentID,
+		rec.Model,
+		rec.InputTokens,
+		rec.OutputTokens,
+		rec.CostUSD,
+		rec.InvocationType,
 		rec.RecordedAt,
 	); err != nil {
 		return fmt.Errorf("insert spend_ledger: %w", err)
@@ -287,68 +291,67 @@ func (t *BudgetTracker) RecordLLMUsage(ctx context.Context, entityID string, age
 	agentID = strings.TrimSpace(agentID)
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	usage.Model = strings.TrimSpace(usage.Model)
-
-	amount := t.estimateLLMCostCents(usage.Model, usage.InputTokens, usage.OutputTokens)
-	source := "estimated"
-	if exact {
-		source = "exact"
+	if usage.Model == "" {
+		usage.Model = "unknown"
 	}
 
-	desc := fmt.Sprintf("llm usage agent=%s runtime=%s model=%s in=%d out=%d",
-		agentID, runtimeMode, usage.Model, usage.InputTokens, usage.OutputTokens)
+	flowInstance, err := t.resolveSpendFlowInstance(ctx, entityID, meta)
+	if err != nil {
+		return err
+	}
 	return t.RecordSpend(ctx, SpendRecord{
-		EntityID:    entityID,
-		Category:    "llm",
-		AmountCents: amount,
-		Currency:    "USD",
-		Description: desc,
-		Source:      source,
-		RecordedBy:  agentID,
-		Meta: mergeMeta(meta, map[string]any{
-			"agent_id":      agentID,
-			"runtime_mode":  runtimeMode,
-			"model":         usage.Model,
-			"input_tokens":  usage.InputTokens,
-			"output_tokens": usage.OutputTokens,
-			"exact":         exact,
-		}),
+		EntityID:       entityID,
+		FlowInstance:   flowInstance,
+		AgentID:        agentID,
+		Model:          usage.Model,
+		InputTokens:    usage.InputTokens,
+		OutputTokens:   usage.OutputTokens,
+		CostUSD:        t.estimateLLMCostUSD(usage.Model, usage.InputTokens, usage.OutputTokens),
+		InvocationType: runtimeMode,
 	})
 }
 
-func mergeMeta(a any, b map[string]any) any {
-	if a == nil {
-		return b
-	}
-	// If a is already a map, merge into it; otherwise, wrap.
-	if m, ok := a.(map[string]any); ok {
-		out := make(map[string]any, len(m)+len(b))
-		for k, v := range m {
-			out[k] = v
+func (t *BudgetTracker) resolveSpendFlowInstance(ctx context.Context, entityID string, meta any) (string, error) {
+	if values, ok := meta.(map[string]any); ok {
+		if flowInstance := strings.TrimSpace(asString(values["flow_instance"])); flowInstance != "" {
+			return flowInstance, nil
 		}
-		for k, v := range b {
-			out[k] = v
-		}
-		return out
 	}
-	return map[string]any{"meta": a, "extra": b}
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return "global", nil
+	}
+	var flowInstance string
+	if err := t.db.QueryRowContext(ctx, `
+		SELECT COALESCE(flow_instance, '')
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+	`, entityID).Scan(&flowInstance); err != nil {
+		return "", fmt.Errorf("resolve spend flow_instance for entity %s: %w", entityID, err)
+	}
+	flowInstance = strings.TrimSpace(flowInstance)
+	if flowInstance == "" {
+		return "", fmt.Errorf("resolve spend flow_instance for entity %s: empty flow_instance", entityID)
+	}
+	return flowInstance, nil
 }
 
-func (t *BudgetTracker) estimateLLMCostCents(model string, inputTokens, outputTokens int) int {
+func (t *BudgetTracker) estimateLLMCostUSD(model string, inputTokens, outputTokens int) float64 {
 	// Rough defaults; intended to be "good enough" until provider usage/cost is plumbed precisely.
 	// Prices are treated as USD per 1M tokens.
 	tier := modelTier(model)
 
-	inCentsPerM, outCentsPerM := 0, 0
+	inUSDPerM, outUSDPerM := 0.0, 0.0
 	switch tier {
 	case "haiku":
-		inCentsPerM = 80
-		outCentsPerM = 400
+		inUSDPerM = 0.80
+		outUSDPerM = 4.00
 	case "opus":
-		inCentsPerM = 1500
-		outCentsPerM = 7500
+		inUSDPerM = 15.00
+		outUSDPerM = 75.00
 	default: // sonnet-ish default
-		inCentsPerM = 300
-		outCentsPerM = 1500
+		inUSDPerM = 3.00
+		outUSDPerM = 15.00
 	}
 	if inputTokens < 0 {
 		inputTokens = 0
@@ -356,7 +359,7 @@ func (t *BudgetTracker) estimateLLMCostCents(model string, inputTokens, outputTo
 	if outputTokens < 0 {
 		outputTokens = 0
 	}
-	return int(float64(inputTokens)/1_000_000.0*float64(inCentsPerM) + float64(outputTokens)/1_000_000.0*float64(outCentsPerM))
+	return float64(inputTokens)/1_000_000.0*inUSDPerM + float64(outputTokens)/1_000_000.0*outUSDPerM
 }
 
 func modelTier(model string) string {
@@ -402,32 +405,32 @@ func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) er
 	return nil
 }
 
-func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityID string, capCents int) error {
-	if capCents <= 0 || !t.thresholds.Enabled {
+func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityID string, capUSD int) error {
+	if capUSD <= 0 || !t.thresholds.Enabled {
 		return nil
 	}
 	now := time.Now().UTC()
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 
-	var spent int
+	var spent float64
 	var err error
 	switch {
 	case scope == "system":
 		err = t.db.QueryRowContext(ctx, `
-			SELECT COALESCE(SUM(amount_cents), 0)
+			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE created_at >= $1
 		`, start).Scan(&spent)
 	case entityID == "":
 		err = t.db.QueryRowContext(ctx, `
-			SELECT COALESCE(SUM(amount_cents), 0)
+			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id IS NULL
 			  AND created_at >= $1
 		`, start).Scan(&spent)
 	default:
 		err = t.db.QueryRowContext(ctx, `
-			SELECT COALESCE(SUM(amount_cents), 0)
+			SELECT COALESCE(SUM(cost_usd), 0)
 			FROM spend_ledger
 			WHERE entity_id = $1::uuid
 			  AND created_at >= $2
@@ -437,7 +440,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		return err
 	}
 
-	ratio := float64(spent) / float64(capCents)
+	ratio := spent / float64(capUSD)
 	thresholds := t.thresholds
 	state := "ok"
 	switch {
@@ -472,8 +475,8 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 
 	payload := map[string]any{
 		"level":         state,
-		"current_spend": float64(spent) / 100.0,
-		"budget_cap":    float64(capCents) / 100.0,
+		"current_spend": spent,
+		"budget_cap":    float64(capUSD),
 		"percentage":    ratio * 100.0,
 		"period":        start.Format("2006-01"),
 		"timestamp":     now.Format(time.RFC3339),
@@ -493,7 +496,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	// Spec v2.0: budget.emergency must also create a critical mailbox item.
 	if state == "emergency" && t.mailbox != nil {
 		summary := fmt.Sprintf("Budget emergency: scope=%s spent=$%.2f cap=$%.2f (%.0f%%)",
-			scope, float64(spent)/100.0, float64(capCents)/100.0, ratio*100.0)
+			scope, spent, float64(capUSD), ratio*100.0)
 		// Best-effort: avoid breaking spend path if mailbox insert fails.
 		if _, err := t.mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			EventID:   evtID,

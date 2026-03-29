@@ -22,7 +22,7 @@ func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 		Role: "operator",
 		Mode: "task",
 		Config: mustAgentConfigJSON(t, map[string]any{
-			"allowed_tools": []string{"schedule", "get_entity", "emit_example"},
+			"tools": []string{"schedule", "get_entity", "emit_example"},
 		}),
 	}
 	evt := (events.Event{
@@ -42,7 +42,7 @@ func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 func TestFilterTools_RetainsUniversalEntityToolsWhenConstrained(t *testing.T) {
 	allowed, constrained := extractAllowedToolSet(models.AgentConfig{
 		Config: mustAgentConfigJSON(t, map[string]any{
-			"allowed_tools": []string{"emit_example"},
+			"tools": []string{"emit_example"},
 		}),
 	})
 	if !constrained {
@@ -228,8 +228,8 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 			ID:   "coordinator-1",
 			Role: "coordinator",
 			Config: mustAgentConfigJSON(t, map[string]any{
-				"allowed_tools": []string{"schedule"},
-				"emit_events":   []string{"coord.done"},
+				"tools":       []string{"schedule"},
+				"emit_events": []string{"coord.done"},
 			}),
 		},
 		nil,

@@ -126,23 +126,21 @@ func extractAllowedToolsFromConfig(actor models.AgentConfig) (map[string]struct{
 		return allowed, false
 	}
 	found := false
-	for _, key := range []string{"tools", "allowed_tools"} {
-		raw, ok := parsed[key]
-		if !ok {
+	raw, ok := parsed["tools"]
+	if !ok {
+		return allowed, false
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return allowed, false
+	}
+	for _, item := range arr {
+		name := strings.TrimSpace(asString(item))
+		if name == "" {
 			continue
 		}
-		arr, ok := raw.([]any)
-		if !ok {
-			continue
-		}
-		for _, item := range arr {
-			name := strings.TrimSpace(asString(item))
-			if name == "" {
-				continue
-			}
-			found = true
-			allowed[name] = struct{}{}
-		}
+		found = true
+		allowed[name] = struct{}{}
 	}
 	return allowed, found
 }

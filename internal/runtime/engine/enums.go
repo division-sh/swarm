@@ -22,9 +22,9 @@ const (
 func (s OutcomeStatus) String() string {
 	switch s {
 	case OutcomeCompleted:
-		return "completed"
+		return "success"
 	case OutcomeBlocked:
-		return "blocked"
+		return "reject"
 	case OutcomeDiscarded:
 		return "discard"
 	case OutcomeRejected:

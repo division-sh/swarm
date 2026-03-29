@@ -136,8 +136,15 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
 		return opts.WorkflowModule
 	})
+	source := opts.WorkflowModule.SemanticSource()
+	if opts.WorkspaceLifecycle != nil {
+		if err := opts.WorkspaceLifecycle.ValidateSource(context.Background(), source); err != nil {
+			return fmt.Errorf("workspace validation failed: %w", err)
+		}
+	}
 	report := runtimebootverify.Run(context.Background(), opts.WorkflowModule.SemanticSource(), runtimebootverify.Options{
-		Credentials: opts.Credentials,
+		Credentials:       opts.Credentials,
+		CheckMCPReachable: true,
 	})
 	if !report.HasErrors() {
 		return nil

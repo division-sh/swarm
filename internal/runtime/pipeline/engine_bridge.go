@@ -15,8 +15,8 @@ import (
 type HandlerOutcomeStatus string
 
 const (
-	HandlerOutcomeCompleted      HandlerOutcomeStatus = "completed"
-	HandlerOutcomeBlocked        HandlerOutcomeStatus = "blocked"
+	HandlerOutcomeCompleted      HandlerOutcomeStatus = "success"
+	HandlerOutcomeBlocked        HandlerOutcomeStatus = "reject"
 	HandlerOutcomeDiscarded      HandlerOutcomeStatus = "discard"
 	HandlerOutcomeRejected       HandlerOutcomeStatus = "reject"
 	HandlerOutcomeTerminalReject HandlerOutcomeStatus = "terminal_reject"

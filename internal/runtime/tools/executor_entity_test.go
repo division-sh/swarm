@@ -204,7 +204,7 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 		ID:   "tester",
 		Role: "operator",
 		Config: mustJSONRaw(t, map[string]any{
-			"allowed_tools": []string{"emit_something"},
+			"tools": []string{"emit_something"},
 		}),
 	})
 	entityID := uuid.NewString()
@@ -220,7 +220,7 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 		t.Fatalf("expected create_entity to be denied when not listed in tools")
 	}
 	if _, err := exec.Execute(ctx, "query_entities", map[string]any{}); err != nil {
-		t.Fatalf("query_entities with constrained allowed_tools: %v", err)
+		t.Fatalf("query_entities with constrained tools: %v", err)
 	}
 }
 

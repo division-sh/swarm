@@ -60,12 +60,7 @@ func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string
 }
 
 func runtimeToolHiddenFromAgents(name string) bool {
-	switch strings.TrimSpace(name) {
-	case "configure_routing":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func registeredToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]RegisteredTool, error) {
@@ -167,6 +162,9 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 }
 
 func normalizeImplementationClass(name string, entry runtimecontracts.ToolSchemaEntry) implementationClass {
+	if strings.TrimSpace(name) == "configure_routing" {
+		return ""
+	}
 	switch strings.ToLower(strings.TrimSpace(entry.HandlerType)) {
 	case "":
 		if _, ok := supportedRuntimeToolNames[strings.TrimSpace(name)]; ok {

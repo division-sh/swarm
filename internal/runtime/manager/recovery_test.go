@@ -78,7 +78,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 				ID:       "reviewer-inst-1",
 				Role:     "reviewer",
 				EntityID: "ent-1",
-				Config:   mustRecoveryJSON(t, map[string]any{"allowed_tools": []string{"agent_message"}}),
+				Config:   mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
 			},
 			StartedAt: time.Now().UTC(),
 		}},

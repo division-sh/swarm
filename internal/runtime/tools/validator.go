@@ -136,33 +136,6 @@ func validatorNormalizeRuntimeToolInput(name string, input any) any {
 				payload["at"] = time.Now().Add(time.Duration(delaySeconds) * time.Second).UTC().Format(time.RFC3339)
 			}
 		}
-	case "configure_routing":
-		if strings.TrimSpace(asString(payload["operation"])) == "" {
-			switch strings.ToLower(strings.TrimSpace(asString(payload["status"]))) {
-			case "deactivated":
-				payload["operation"] = "remove"
-			default:
-				payload["operation"] = "add"
-			}
-		}
-		if strings.TrimSpace(asString(payload["event_type"])) == "" {
-			if pattern := strings.TrimSpace(asString(payload["event_pattern"])); pattern != "" {
-				payload["event_type"] = pattern
-			}
-		}
-		if strings.TrimSpace(asString(payload["event_pattern"])) == "" {
-			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
-				payload["event_pattern"] = eventType
-			}
-		}
-		if strings.TrimSpace(asString(payload["status"])) == "" {
-			switch strings.ToLower(strings.TrimSpace(asString(payload["operation"]))) {
-			case "remove":
-				payload["status"] = "deactivated"
-			case "add", "modify":
-				payload["status"] = "active"
-			}
-		}
 	case "agent_hire":
 		if strings.TrimSpace(asString(payload["agent_id"])) == "" {
 			if config, ok := payload["config"].(map[string]any); ok {

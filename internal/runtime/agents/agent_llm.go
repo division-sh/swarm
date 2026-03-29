@@ -493,24 +493,22 @@ func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 		return allowed, false
 	}
 	found := false
-	for _, key := range []string{"tools", "allowed_tools"} {
-		raw, ok := obj[key]
-		if !ok {
+	raw, ok := obj["tools"]
+	if !ok {
+		return allowed, false
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return allowed, false
+	}
+	for _, item := range arr {
+		name, _ := item.(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
 			continue
 		}
-		arr, ok := raw.([]any)
-		if !ok {
-			continue
-		}
-		for _, item := range arr {
-			name, _ := item.(string)
-			name = strings.TrimSpace(name)
-			if name == "" {
-				continue
-			}
-			found = true
-			allowed[name] = struct{}{}
-		}
+		found = true
+		allowed[name] = struct{}{}
 	}
 	return allowed, found
 }

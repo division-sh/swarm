@@ -16,7 +16,6 @@ type ContractSchemaEntry struct {
 var supportedRuntimeToolNames = map[string]struct{}{
 	"agent_message":      {},
 	"schedule":           {},
-	"configure_routing":  {},
 	"agent_hire":         {},
 	"agent_fire":         {},
 	"agent_reconfigure":  {},

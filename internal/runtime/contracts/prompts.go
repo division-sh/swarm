@@ -526,7 +526,6 @@ func promptReservedConfigKeys() map[string]bool {
 		"max_turns_per_task": true,
 		"constraints":        true,
 		"tools":              true,
-		"allowed_tools":      true,
 		"native_tools":       true,
 		"emit_events":        true,
 		"fields":             true,
