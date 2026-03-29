@@ -29,6 +29,7 @@ import (
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
@@ -133,6 +134,8 @@ func main() {
 		SelfCheck:          *selfCheck,
 		WorkflowModule:     module,
 		WorkspaceLifecycle: workspaces,
+		EnableToolGateway:  true,
+		ToolGatewayToken:   strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
 		Credentials:        credentialStore,
 	})
 	if err != nil {
@@ -146,7 +149,7 @@ func main() {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
-	healthServer := newHealthServer(*healthAddr, &ready, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns, credentialStore))
+	healthServer := newHealthServer(*healthAddr, &ready, rt.ToolGateway, dashboardServerOptions(supervisor, stores, &ready, cfg.LLM.Session.RotateAfterTurns, credentialStore))
 	go serveHealth(healthServer)
 	defer shutdownHealthServer(healthServer)
 
@@ -457,7 +460,7 @@ func templateFlowCount(source semanticview.Source) int {
 	return count
 }
 
-func newHealthServer(addr string, ready *atomic.Bool, dashboardOpts dashboardserver.Options) *http.Server {
+func newHealthServer(addr string, ready *atomic.Bool, toolGateway *runtimemcp.Gateway, dashboardOpts dashboardserver.Options) *http.Server {
 	mux := http.NewServeMux()
 	dashboardHandler := dashboardserver.NewHandler(dashboardOpts)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -472,6 +475,11 @@ func newHealthServer(addr string, ready *atomic.Bool, dashboardOpts dashboardser
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ready\n"))
 	})
+	if toolGateway != nil {
+		gatewayHandler := toolGateway.Handler()
+		mux.Handle("/mcp", gatewayHandler)
+		mux.Handle("/tools/", gatewayHandler)
+	}
 	mux.Handle("/api/", dashboardHandler)
 	mux.Handle("/api", dashboardHandler)
 	return &http.Server{

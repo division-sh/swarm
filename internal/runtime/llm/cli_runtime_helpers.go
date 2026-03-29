@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"slices"
 	"strings"
 
 	"swarm/internal/config"
@@ -196,6 +197,59 @@ func claudeToolsArg(tools []ToolDefinition) string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+var claudeProviderBuiltinToolNames = []string{
+	"AskUserQuestion",
+	"Bash",
+	"Edit",
+	"EnterPlanMode",
+	"EnterWorktree",
+	"Glob",
+	"Grep",
+	"MultiEdit",
+	"NotebookEdit",
+	"Read",
+	"Skill",
+	"Task",
+	"TaskOutput",
+	"TaskStop",
+	"TodoWrite",
+	"ToolSearch",
+	"WebFetch",
+	"WebSearch",
+	"Write",
+}
+
+func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig) string {
+	allowed := map[string]struct{}{}
+	if len(actor.Config) != 0 && json.Valid(actor.Config) {
+		var parsed map[string]any
+		if err := json.Unmarshal(actor.Config, &parsed); err == nil {
+			if raw, ok := parsed["native_tools"].(map[string]any); ok {
+				if enabled, _ := raw["bash"].(bool); enabled {
+					allowed["Bash"] = struct{}{}
+				}
+				if enabled, _ := raw["web_search"].(bool); enabled {
+					allowed["WebSearch"] = struct{}{}
+				}
+				if enabled, _ := raw["file_io"].(bool); enabled {
+					allowed["Read"] = struct{}{}
+					allowed["Write"] = struct{}{}
+					allowed["Edit"] = struct{}{}
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(claudeProviderBuiltinToolNames))
+	for _, name := range claudeProviderBuiltinToolNames {
+		if _, ok := allowed[name]; ok {
+			continue
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ",")
 }
 
 func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig) UsageTokens {

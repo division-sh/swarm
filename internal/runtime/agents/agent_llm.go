@@ -461,12 +461,93 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	evt := boardDirectiveEvent(strings.TrimSpace(directive))
+	a.applyPromptForEvent(evt)
+	a.resetConversationScopeIfNeeded(evt)
+
 	ctx = models.WithActor(ctx, a.cfg)
-	resp, err := a.conversation.StepWithRole(ctx, "board_directive", directive)
+	ctx = runtimebus.WithInboundEvent(ctx, evt)
+	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
+	beforeMessages := len(a.conversation.Messages)
+	resp, err := a.conversation.Step(ctx, formatEventForAgent(a.cfg, evt))
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(resp.Message.Content), nil
+	if boardDirectiveSatisfied(recorder, a.conversation.Messages[beforeMessages:]) {
+		return strings.TrimSpace(resp.Message.Content), nil
+	}
+
+	beforeRemediation := len(a.conversation.Messages)
+	resp, err = a.conversation.Step(ctx, boardDirectiveRemediationPrompt(directive, strings.TrimSpace(resp.Message.Content)))
+	if err != nil {
+		return "", err
+	}
+	if boardDirectiveSatisfied(recorder, a.conversation.Messages[beforeRemediation:]) {
+		return strings.TrimSpace(resp.Message.Content), nil
+	}
+	return "", fmt.Errorf("directive completed without taking action; assistant response: %s", strings.TrimSpace(resp.Message.Content))
+}
+
+func boardDirectiveSatisfied(recorder *runtimebus.EmittedEventsRecorder, delta []llm.Message) bool {
+	if recorder != nil && len(recorder.Snapshot()) > 0 {
+		return true
+	}
+	for _, msg := range delta {
+		if strings.EqualFold(strings.TrimSpace(msg.Role), "tool") && toolMessageHasSuccessfulResult(msg.Content) {
+			return true
+		}
+	}
+	return false
+}
+
+func boardDirectiveRemediationPrompt(directive, assistantText string) string {
+	directive = strings.TrimSpace(directive)
+	assistantText = strings.TrimSpace(assistantText)
+	var b strings.Builder
+	b.WriteString("The previous reply described an intended action but did not take one.\n")
+	b.WriteString("You must act now using tools. If the directive should trigger workflow execution, call the appropriate emit_* tool in this turn.\n")
+	b.WriteString("Do not explain what you plan to do. Do it.\n")
+	if directive != "" {
+		b.WriteString("\nOriginal directive:\n")
+		b.WriteString(directive)
+	}
+	if assistantText != "" {
+		b.WriteString("\n\nPrevious reply:\n")
+		b.WriteString(assistantText)
+	}
+	return b.String()
+}
+
+func boardDirectiveEvent(directive string) events.Event {
+	payload := map[string]any{
+		"directive_text": strings.TrimSpace(directive),
+		"mode":           "directive",
+	}
+	raw, _ := json.Marshal(payload)
+	return events.Event{
+		Type:        events.EventType("board.directive"),
+		SourceAgent: "dashboard",
+		Payload:     raw,
+	}
+}
+
+func toolMessageHasSuccessfulResult(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return false
+	}
+	for _, item := range items {
+		if ok, exists := item["ok"].(bool); exists && ok {
+			return true
+		}
+	}
+	return false
 }
 
 func extractSystemPrompt(cfg models.AgentConfig) string {

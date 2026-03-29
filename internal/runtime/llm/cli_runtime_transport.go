@@ -127,6 +127,12 @@ func (r *ClaudeCLIRuntime) mcpContextTokenTTL(ctx context.Context) time.Duration
 
 func shouldUseMCPBridge() bool {
 	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_CLAUDE_USE_MCP")))
+	if v == "" {
+		return true
+	}
+	if v == "0" || v == "false" || v == "no" {
+		return false
+	}
 	return v == "1" || v == "true" || v == "yes"
 }
 

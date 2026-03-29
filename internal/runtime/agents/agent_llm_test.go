@@ -1,13 +1,16 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
@@ -255,6 +258,98 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	}
 	if containsString(names, "check_status") {
 		t.Fatalf("expected unconstrained non-universal tool to be filtered out, got %v", names)
+	}
+}
+
+type boardTestRuntime struct {
+	steps []*llm.Response
+	errs  []error
+	call  int
+}
+
+func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	return &llm.Session{
+		ID:                "sess-1",
+		AgentID:           agentID,
+		RuntimeMode:       "api",
+		ConversationMode:  "session",
+		SystemPrompt:      systemPrompt,
+		Tools:             tools,
+		Messages:          nil,
+		ProviderSessionID: "",
+	}, nil
+}
+
+func (r *boardTestRuntime) ContinueSession(_ context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
+	if r.call < len(r.errs) && r.errs[r.call] != nil {
+		err := r.errs[r.call]
+		r.call++
+		return nil, err
+	}
+	if r.call >= len(r.steps) {
+		return nil, errors.New("unexpected runtime call")
+	}
+	resp := r.steps[r.call]
+	r.call++
+	return resp, nil
+}
+
+type boardEmitExecutor struct{}
+
+func (boardEmitExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
+	if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
+		rec.Append(events.Event{Type: events.EventType(strings.TrimPrefix(name, "emit_"))})
+	}
+	return map[string]any{"ok": true, "name": name, "input": input}, nil
+}
+
+func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
+	agent := NewLLMAgent(
+		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
+		&boardTestRuntime{
+			steps: []*llm.Response{
+				{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
+				{Message: llm.Message{Role: "assistant", Content: "Still only explaining."}},
+			},
+		},
+		boardEmitExecutor{},
+		nil,
+	)
+
+	_, err := agent.BoardStep(context.Background(), "start a corpus run")
+	if err == nil {
+		t.Fatal("expected directive without action to fail")
+	}
+	if !strings.Contains(err.Error(), "without taking action") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
+	agent := NewLLMAgent(
+		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
+		&boardTestRuntime{
+			steps: []*llm.Response{
+				{Message: llm.Message{Role: "assistant", Content: "I will emit scan_requested now."}},
+				{
+					Message: llm.Message{Role: "assistant", Content: "Dispatching workflow now."},
+					ToolCalls: []llm.ToolCall{
+						{Name: "emit_scan_requested", Arguments: map[string]any{"entity_id": "corpus-1"}},
+					},
+				},
+				{Message: llm.Message{Role: "assistant", Content: "scan_requested emitted"}},
+			},
+		},
+		boardEmitExecutor{},
+		[]llm.ToolDefinition{{Name: "emit_scan_requested"}},
+	)
+
+	got, err := agent.BoardStep(context.Background(), "start a corpus run")
+	if err != nil {
+		t.Fatalf("BoardStep: %v", err)
+	}
+	if got != "scan_requested emitted" {
+		t.Fatalf("unexpected response: %q", got)
 	}
 }
 

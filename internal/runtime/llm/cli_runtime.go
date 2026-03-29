@@ -154,6 +154,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
+	disallowedBuiltinTools := claudeDisallowedBuiltinToolsArgForActor(actor)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
 	// LLM execution for the affected scope(s). Treated as transient so deliveries
@@ -224,10 +225,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
 			args = append(args, "--system-prompt", sys)
 		}
+		if strings.TrimSpace(disallowedBuiltinTools) != "" {
+			args = append(args, "--disallowedTools", disallowedBuiltinTools)
+		}
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-		} else if tools := claudeToolsArg(s.Tools); tools != "" {
-			args = append(args, "--tools", tools)
 		}
 	} else {
 		args = []string{
@@ -237,6 +239,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
+		if strings.TrimSpace(disallowedBuiltinTools) != "" {
+			args = append(args, "--disallowedTools", disallowedBuiltinTools)
+		}
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
@@ -268,6 +273,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		args = appendClaudePrintModeArgs(args, r.cfg)
 		args = append(args, permissionModeArgs()...)
+		if strings.TrimSpace(disallowedBuiltinTools) != "" {
+			args = append(args, "--disallowedTools", disallowedBuiltinTools)
+		}
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
@@ -310,10 +318,11 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
 					args = append(args, "--system-prompt", sys)
 				}
+				if strings.TrimSpace(disallowedBuiltinTools) != "" {
+					args = append(args, "--disallowedTools", disallowedBuiltinTools)
+				}
 				if mcpEnabled {
 					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-				} else if tools := claudeToolsArg(s.Tools); tools != "" {
-					args = append(args, "--tools", tools)
 				}
 				monitorMeta.SessionID = sessionToken(s)
 				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
@@ -327,6 +336,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 					}
 					args = appendClaudePrintModeArgs(args, r.cfg)
 					args = append(args, permissionModeArgs()...)
+					if strings.TrimSpace(disallowedBuiltinTools) != "" {
+						args = append(args, "--disallowedTools", disallowedBuiltinTools)
+					}
 					if mcpEnabled {
 						args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 					}
