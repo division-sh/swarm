@@ -205,6 +205,26 @@ func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsRecordEvidenceMissingEvidenceTarget(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {
+						Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target") {
+		t.Fatalf("expected handler_field_compliance error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_MapsPromptStubToPromptExistsWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-stub")
 
@@ -483,9 +503,22 @@ func TestRun_MapsProducesDriftToNamedWarning(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
+	source := loadTier8Fixture(t, "test-boot-missing-pin")
+
+	report := Run(context.Background(), source, Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("expected input_pin_wiring warning, got %#v", report.Warnings())
+	}
+}
+
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 32 {
-		t.Fatalf("bootCheckRegistry count = %d, want 32", got)
+	if got := len(bootCheckRegistry); got != 33 {
+		t.Fatalf("bootCheckRegistry count = %d, want 33", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)

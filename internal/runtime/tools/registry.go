@@ -41,6 +41,9 @@ func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string
 	}
 	names := make([]string, 0, len(entries))
 	for name := range entries {
+		if runtimeToolHiddenFromAgents(name) {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -54,6 +57,15 @@ func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string
 		})
 	}
 	return defs, nil
+}
+
+func runtimeToolHiddenFromAgents(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "configure_routing":
+		return true
+	default:
+		return false
+	}
 }
 
 func registeredToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]RegisteredTool, error) {

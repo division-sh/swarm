@@ -55,3 +55,25 @@ func TestContractDefinitionsForSource_DoesNotExposeCreateFlowInstance(t *testing
 		}
 	}
 }
+
+func TestContractDefinitionsForSource_DoesNotExposeConfigureRouting(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"configure_routing": {
+				HandlerType: "platform_builtin",
+				Category:    "platform",
+				Description: "deprecated runtime stub should stay hidden",
+			},
+		},
+	}
+
+	defs, err := ContractDefinitionsForSource(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("ContractDefinitionsForSource: %v", err)
+	}
+	for _, def := range defs {
+		if def.Name == "configure_routing" {
+			t.Fatal("configure_routing should not be exposed as an agent tool definition")
+		}
+	}
+}

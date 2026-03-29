@@ -45,12 +45,8 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
 	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
 
-	maxTurns := 1000
-	mode := llm.SessionScoped
-	if cfg.EffectiveEntityID() == "" {
-		mode = llm.TaskScoped
-		maxTurns = 100
-	}
+	maxTurns := 100
+	mode := llm.TaskScoped
 	if overrideMode, overrideMaxTurns := extractConversationConstraints(cfg.Config); overrideMode != nil {
 		mode = *overrideMode
 		if overrideMaxTurns > 0 {

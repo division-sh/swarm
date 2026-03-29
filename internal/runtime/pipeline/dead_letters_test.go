@@ -2,15 +2,18 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimerterr "swarm/internal/runtime/rterrors"
 	"swarm/internal/testutil"
 )
 
@@ -118,6 +121,46 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 	}
 }
 
+func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *testing.T) {
+	bus := &capturingDeadLetterBus{}
+	attempts := 0
+	runner := newSystemNodeRunner("node-a", bus, nil, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+		attempts++
+		return runtimerterr.NewRuntimeError("invalid_contract", "pipeline", "node.handle", false, "bad handler config")
+	})
+	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
+
+	evt := events.Event{
+		ID:          uuid.NewString(),
+		Type:        "source.evt",
+		SourceAgent: "src",
+		Payload:     []byte(`{"entity_id":"ent-1"}`),
+		CreatedAt:   time.Now().UTC(),
+	}
+	runner.ProcessEventForTest(context.Background(), evt)
+
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	published := bus.published()
+	if len(published) != 1 {
+		t.Fatalf("published dead letters = %d, want 1", len(published))
+	}
+	if published[0].Type != "platform.dead_letter" {
+		t.Fatalf("event type = %q, want platform.dead_letter", published[0].Type)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(published[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got := strings.TrimSpace(asString(payload["failure_type"])); got != "handler_error" {
+		t.Fatalf("failure_type = %q, want handler_error", got)
+	}
+	if got := asInt(payload["retry_count"]); got != 0 {
+		t.Fatalf("retry_count = %d, want 0", got)
+	}
+}
+
 type deadLetterTestBus struct{}
 
 func (deadLetterTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {
@@ -125,3 +168,27 @@ func (deadLetterTestBus) Subscribe(string, ...events.EventType) <-chan events.Ev
 }
 
 func (deadLetterTestBus) Publish(context.Context, events.Event) error { return nil }
+
+type capturingDeadLetterBus struct {
+	mu     sync.Mutex
+	events []events.Event
+}
+
+func (b *capturingDeadLetterBus) Subscribe(string, ...events.EventType) <-chan events.Event {
+	return make(chan events.Event)
+}
+
+func (b *capturingDeadLetterBus) Publish(_ context.Context, evt events.Event) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.events = append(b.events, evt)
+	return nil
+}
+
+func (b *capturingDeadLetterBus) published() []events.Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]events.Event, len(b.events))
+	copy(out, b.events)
+	return out
+}

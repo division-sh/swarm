@@ -6,9 +6,9 @@ import (
 	"time"
 )
 
-func TestScopeFromContext_DefaultsToSession(t *testing.T) {
+func TestScopeFromContext_DefaultsToTask(t *testing.T) {
 	scope := ScopeFromContext(nil)
-	if scope.ConversationMode != "session" || scope.ScopeKey != "" {
+	if scope.ConversationMode != "task" || scope.ScopeKey != "" {
 		t.Fatalf("unexpected nil-context scope: %+v", scope)
 	}
 

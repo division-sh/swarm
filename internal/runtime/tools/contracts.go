@@ -38,6 +38,9 @@ func LoadContractSchemasForSource(source semanticview.Source) (map[string]Contra
 	}
 	parsed := make(map[string]ContractSchemaEntry, len(defs))
 	for name, entry := range defs {
+		if runtimeToolHiddenFromAgents(name) {
+			continue
+		}
 		if entry.HandlerType == implementationMCP {
 			continue
 		}

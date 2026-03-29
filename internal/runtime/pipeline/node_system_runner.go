@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
 type systemNodeBus interface {
@@ -96,11 +97,13 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 	if n.isProcessed(ctx, evt) {
 		return
 	}
-	var lastErr error
 	retryLimit := n.retryLimit
 	if retryLimit <= 0 {
 		retryLimit = DefaultSystemNodeRetryLimit
 	}
+	var lastErr error
+	failureType := "retry_exhausted"
+	retryCount := maxInt(retryLimit, 1)
 	backoffFn := n.backoffFn
 	if backoffFn == nil {
 		backoffFn = func(attempt int) time.Duration { return defaultSystemNodeBackoff(time.Second, attempt) }
@@ -111,6 +114,12 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 			return
 		} else {
 			lastErr = err
+			if isNonRetryableHandlerError(err) {
+				failureType = "handler_error"
+				retryCount = 0
+				break
+			}
+			retryCount = attempt
 		}
 		if attempt >= retryLimit {
 			break
@@ -121,7 +130,7 @@ func (n *systemNodeRunner) ProcessEventForTest(ctx context.Context, evt events.E
 		case <-time.After(backoffFn(attempt)):
 		}
 	}
-	n.emitDeadLetter(ctx, evt, lastErr)
+	n.emitDeadLetter(ctx, evt, lastErr, failureType, retryCount)
 	n.markProcessed(ctx, evt)
 }
 
@@ -168,9 +177,16 @@ func (n *systemNodeRunner) handle(ctx context.Context, evt events.Event) error {
 	return n.handleFn(ctx, evt)
 }
 
-func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event, cause error) {
+func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event, cause error, failureType string, retryCount int) {
 	if n == nil || n.bus == nil {
 		return
+	}
+	failureType = strings.TrimSpace(failureType)
+	if failureType == "" {
+		failureType = "retry_exhausted"
+	}
+	if retryCount < 0 {
+		retryCount = 0
 	}
 	msg := "unknown error"
 	if cause != nil {
@@ -184,9 +200,9 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		"original_payload": json.RawMessage(evt.Payload),
 		"entity_id":        workflowEventEntityID(evt),
 		"flow_instance":    "runtime",
-		"failure_type":     "retry_exhausted",
+		"failure_type":     failureType,
 		"error_message":    msg,
-		"retry_count":      maxInt(n.retryLimit, 1),
+		"retry_count":      retryCount,
 		"chain_depth":      evt.ChainDepth,
 		"handler_node":     n.nodeID,
 		"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
@@ -197,9 +213,9 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 			OriginalEvent:   strings.TrimSpace(string(evt.Type)),
 			OriginalPayload: evt.Payload,
 			EntityID:        workflowEventEntityID(evt),
-			FailureType:     "retry_exhausted",
+			FailureType:     failureType,
 			ErrorMessage:    msg,
-			RetryCount:      maxInt(n.retryLimit, 1),
+			RetryCount:      retryCount,
 			ChainDepth:      evt.ChainDepth,
 			HandlerNode:     n.nodeID,
 		})
@@ -213,6 +229,14 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 	}).WithEntityID(workflowEventEntityID(evt))); err != nil {
 		slog.Warn("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
 	}
+}
+
+func isNonRetryableHandlerError(err error) bool {
+	if err == nil {
+		return false
+	}
+	runtimeErr, ok := runtimerterr.AsRuntimeError(err)
+	return ok && !runtimeErr.Retryable
 }
 
 func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bool {

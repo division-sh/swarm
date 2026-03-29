@@ -14,7 +14,7 @@ import (
 	"swarm/internal/testutil"
 )
 
-func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
+func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	pg, cleanup := newTestPostgresStore(t)
 	defer cleanup()
 
@@ -22,7 +22,7 @@ func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
 	entityID, agentID := seedEntityAndAgent(t, ctx, pg)
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_upsert")
 
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 2; i++ {
 		if err := pg.UpsertEventReceipt(ctx, evt.ID, agentID, "error", "boom"); err != nil {
 			t.Fatalf("upsert receipt error #%d: %v", i, err)
 		}
@@ -40,7 +40,7 @@ func TestUpsertEventReceipt_DeadLettersAfterThreeRetries_V2(t *testing.T) {
 		}
 
 		wantStatus := "error"
-		if i == 4 {
+		if i == 2 {
 			wantStatus = "dead_letter"
 		}
 		if status != wantStatus || retryCount != i {
@@ -89,53 +89,17 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 2, time.Now().Add(-4*time.Minute))
-	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
-	if err != nil {
-		t.Fatalf("list pending (retry=2 not ready): %v", err)
-	}
-	if len(evts) != 0 {
-		t.Fatalf("list pending (retry=2 not ready): got %d events, want 0", len(evts))
-	}
-
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 2, time.Now().Add(-6*time.Minute))
-	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
-	if err != nil {
-		t.Fatalf("list pending (retry=2 ready): %v", err)
-	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list pending (retry=2 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
-	}
-
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 3, time.Now().Add(-29*time.Minute))
-	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
-	if err != nil {
-		t.Fatalf("list pending (retry=3 not ready): %v", err)
-	}
-	if len(evts) != 0 {
-		t.Fatalf("list pending (retry=3 not ready): got %d events, want 0", len(evts))
-	}
-
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 3, time.Now().Add(-31*time.Minute))
-	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
-	if err != nil {
-		t.Fatalf("list pending (retry=3 ready): %v", err)
-	}
-	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list pending (retry=3 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
-	}
-
 	// After retries are exhausted, the event should not be pending.
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 4, time.Now().Add(-2*time.Hour))
+	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 2, time.Now().Add(-2*time.Hour))
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 	if err != nil {
-		t.Fatalf("list pending (retry=4): %v", err)
+		t.Fatalf("list pending (retry=2 exhausted): %v", err)
 	}
 	if len(evts) != 0 {
-		t.Fatalf("list pending (retry=4): got %d events, want 0", len(evts))
+		t.Fatalf("list pending (retry=2 exhausted): got %d events, want 0", len(evts))
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "dead_letter", 4, time.Now().Add(-2*time.Hour))
+	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "dead_letter", 2, time.Now().Add(-2*time.Hour))
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
 	if err != nil {
 		t.Fatalf("list pending (dead_letter): %v", err)
@@ -164,25 +128,16 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list subscribed pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID)
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 3, time.Now().Add(-29*time.Minute))
+	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 1, time.Now().Add(-2*time.Minute))
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
 	if err != nil {
-		t.Fatalf("list subscribed pending (retry=3 not ready): %v", err)
-	}
-	if len(evts) != 0 {
-		t.Fatalf("list subscribed pending (retry=3 not ready): got %d events, want 0", len(evts))
-	}
-
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "error", 3, time.Now().Add(-31*time.Minute))
-	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
-	if err != nil {
-		t.Fatalf("list subscribed pending (retry=3 ready): %v", err)
+		t.Fatalf("list subscribed pending (retry=1 ready): %v", err)
 	}
 	if len(evts) != 1 || evts[0].ID != evt.ID {
-		t.Fatalf("list subscribed pending (retry=3 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
+		t.Fatalf("list subscribed pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID)
 	}
 
-	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "dead_letter", 4, time.Now().Add(-2*time.Hour))
+	insertOrUpdateReceipt(t, ctx, pg, evt.ID, agentID, "dead_letter", 2, time.Now().Add(-2*time.Hour))
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
 	if err != nil {
 		t.Fatalf("list subscribed pending (dead_letter): %v", err)

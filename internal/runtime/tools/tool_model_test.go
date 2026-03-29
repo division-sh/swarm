@@ -165,6 +165,24 @@ func TestValidateToolImplementations_RejectsMalformedHTTPTool(t *testing.T) {
 	}
 }
 
+func TestValidateToolImplementations_AcceptsDeprecatedHandlerWithoutHTTPAsWarning(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"legacy_call": {
+				HandlerType: "api_call",
+			},
+		},
+	})
+
+	warnings, err := ValidateToolImplementations(source)
+	if err != nil {
+		t.Fatalf("ValidateToolImplementations: %v", err)
+	}
+	if len(warnings) == 0 {
+		t.Fatal("expected deprecated handler warning")
+	}
+}
+
 func TestContractDefinitionsForSource_DoesNotExposeRemovedInfraBuiltins(t *testing.T) {
 	defs, err := ContractDefinitionsForSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
 	if err != nil {

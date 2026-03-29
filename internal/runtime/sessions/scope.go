@@ -37,12 +37,12 @@ func WithScope(ctx context.Context, mode, scopeKey string) context.Context {
 
 func ScopeFromContext(ctx context.Context) ScopeContext {
 	if ctx == nil {
-		return ScopeContext{ConversationMode: RuntimeModeSession}
+		return ScopeContext{ConversationMode: RuntimeModeTask}
 	}
 	v := ctx.Value(scopeContextKey{})
 	payload, ok := v.(ScopeContext)
 	if !ok {
-		return ScopeContext{ConversationMode: RuntimeModeSession}
+		return ScopeContext{ConversationMode: RuntimeModeTask}
 	}
 	payload.ConversationMode = NormalizeConversationRuntimeMode(payload.ConversationMode)
 	payload.ScopeKey = strings.TrimSpace(payload.ScopeKey)
@@ -53,10 +53,12 @@ func NormalizeConversationRuntimeMode(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case RuntimeModeTask, "stateless":
 		return RuntimeModeTask
+	case RuntimeModeSession:
+		return RuntimeModeSession
 	case RuntimeModeSessionPerEntity:
 		return RuntimeModeSessionPerEntity
 	default:
-		return RuntimeModeSession
+		return RuntimeModeTask
 	}
 }
 

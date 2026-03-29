@@ -429,7 +429,8 @@ handler_specification:
         its node declared.'
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
     evidence_target:
-      description: Required when action is record_evidence. Specifies which accumulator key the evidence is appended to.
+      description: Specifies which accumulator key the evidence is appended to when action is record_evidence. If omitted,
+        defaults to the node ID. Explicit declaration is recommended for clarity.
       type: string
       example: build_evidence
   node_specification:
@@ -1186,7 +1187,9 @@ engine:
         original_payload: object — full payload of the failed event
         entity_id: string — entity the event was targeting
         flow_instance: string — flow instance path
-        failure_type: string — handler_error | chain_depth_exceeded | retry_exhausted
+        failure_type: 'string — handler_error (non-retryable failure: validation error, business logic error, guard-escalated
+          error — goes to dead letter immediately without retry) | chain_depth_exceeded (emission intercepted at depth limit)
+          | retry_exhausted (retried max_retries times, all failed)'
         error_message: string — human-readable error description
         retry_count: integer — number of retries attempted before dead-lettering
         chain_depth: integer — current chain depth (for chain_depth_exceeded)
@@ -1392,10 +1395,16 @@ engine:
       scope: per-node
       trigger: A handler's sets_gate references a gate name not declared in the node's gate_state schema.
       when: boot-only
+    - id: input_pin_wiring
+      severity: warning
+      scope: per-flow
+      trigger: A flow's required input event pin (from schema.yaml pins.inputs.events) has no emitter — no other flow's node
+        or agent produces this event. The flow cannot be triggered.
+      when: boot-only
     severity_behavior:
       error: Boot aborts. System does not start.
       warning: Boot continues. Warning logged with finding details.
-    check_count: 32 checks (21 error, 11 warning)
+    check_count: 33 checks (21 error, 12 warning)
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, and location (flow, node, agent, or event name). The boot sequence runs
@@ -2041,7 +2050,7 @@ platform_tables:
         \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
         \ IN ('node', 'agent', 'platform')),\n    subscriber_id     TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
         \     TEXT,\n    outcome           TEXT NOT NULL CHECK (outcome IN ('success', 'reject', 'discard', 'kill', 'escalate',\
-        \ 'dead_letter', 'no_op')),\n    state_before      TEXT,\n    state_after       TEXT,\n    side_effects      JSONB\
+        \ 'dead_letter', 'terminal_reject', 'waiting', 'fanned_out', 'no_op')),\n    state_before      TEXT,\n    state_after       TEXT,\n    side_effects      JSONB\
         \ NOT NULL DEFAULT '{}',\n    duration_ms       INTEGER,\n    idempotency_key   TEXT,\n    processed_at      TIMESTAMPTZ\
         \ NOT NULL DEFAULT NOW(),\n    UNIQUE (event_id, subscriber_id),\n    INDEX idx_receipts_entity (entity_id) WHERE\
         \ entity_id IS NOT NULL,\n    INDEX idx_receipts_subscriber (subscriber_id, processed_at),\n    INDEX idx_receipts_idempotency\

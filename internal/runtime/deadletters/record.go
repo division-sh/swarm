@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -21,6 +22,7 @@ type Record struct {
 	RetryCount      int
 	ChainDepth      int
 	HandlerNode     string
+	Timestamp       string
 }
 
 func Insert(ctx context.Context, db *sql.DB, rec Record) error {
@@ -34,6 +36,7 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 	rec.FailureType = strings.TrimSpace(rec.FailureType)
 	rec.ErrorMessage = strings.TrimSpace(rec.ErrorMessage)
 	rec.HandlerNode = strings.TrimSpace(rec.HandlerNode)
+	rec.Timestamp = strings.TrimSpace(rec.Timestamp)
 	if rec.OriginalEventID == "" {
 		return fmt.Errorf("dead letter original event id is required")
 	}
@@ -54,11 +57,14 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 	if rec.ChainDepth < 0 {
 		rec.ChainDepth = 0
 	}
+	if rec.Timestamp == "" {
+		rec.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 
 	const q = `
 		INSERT INTO dead_letters (
 			original_event_id, original_event, original_payload, entity_id, flow_instance,
-			failure_type, error_message, retry_count, chain_depth, handler_node
+			failure_type, error_message, retry_count, chain_depth, handler_node, created_at
 		)
 		SELECT
 			$1::uuid,
@@ -70,7 +76,8 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 			NULLIF($7, ''),
 			$8,
 			$9,
-			NULLIF($10, '')
+			NULLIF($10, ''),
+			COALESCE(NULLIF($11, '')::timestamptz, now())
 		WHERE NOT EXISTS (
 			SELECT 1
 			FROM dead_letters dl
@@ -92,6 +99,7 @@ func Insert(ctx context.Context, db *sql.DB, rec Record) error {
 		rec.RetryCount,
 		rec.ChainDepth,
 		rec.HandlerNode,
+		rec.Timestamp,
 	)
 	if err != nil {
 		return fmt.Errorf("insert dead letter: %w", err)

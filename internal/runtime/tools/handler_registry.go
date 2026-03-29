@@ -19,7 +19,6 @@ func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 func (e *Executor) registerAgentHandlers(handlers map[string]ToolHandler) {
 	handlers["agent_message"] = e.execAgentMessage
 	handlers["schedule"] = e.execSchedule
-	handlers["configure_routing"] = e.execConfigureRouting
 	handlers["agent_hire"] = func(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 		return e.execAgentHire(actor, input)
 	}

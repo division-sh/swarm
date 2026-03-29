@@ -33,7 +33,7 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 		ON CONFLICT (event_id, agent_id) DO UPDATE SET
 			processed_at = now(),
 			status = CASE
-				WHEN EXCLUDED.status = 'error' AND event_receipts.retry_count + 1 >= 4 THEN 'dead_letter'
+				WHEN EXCLUDED.status = 'error' AND event_receipts.retry_count + 1 >= 2 THEN 'dead_letter'
 				ELSE EXCLUDED.status
 			END,
 			error = EXCLUDED.error,
@@ -81,13 +81,9 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 				r.event_id IS NULL
 				OR (
 					r.status = 'error'
-					AND r.retry_count <= 3
+					AND r.retry_count <= 1
 					AND (
 						(r.retry_count = 1 AND r.processed_at <= now() - interval '1 minute')
-						OR
-						(r.retry_count = 2 AND r.processed_at <= now() - interval '5 minute')
-						OR
-						(r.retry_count = 3 AND r.processed_at <= now() - interval '30 minute')
 					)
 				)
 			)
@@ -153,13 +149,9 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 				r.event_id IS NULL
 				OR (
 					r.status = 'error'
-					AND r.retry_count <= 3
+					AND r.retry_count <= 1
 					AND (
 						(r.retry_count = 1 AND r.processed_at <= now() - interval '1 minute')
-						OR
-						(r.retry_count = 2 AND r.processed_at <= now() - interval '5 minute')
-						OR
-						(r.retry_count = 3 AND r.processed_at <= now() - interval '30 minute')
 					)
 				)
 			)
@@ -226,7 +218,7 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 		retryCount++
 	}
 	finalStatus := status
-	if status == runtimemanager.ReceiptStatusError && retryCount >= 4 {
+	if status == runtimemanager.ReceiptStatusError && retryCount >= 2 {
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
 	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
@@ -281,13 +273,9 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 				r.event_id IS NULL
 				OR (
 					COALESCE(r.side_effects->>'manager_status', '') = 'error'
-					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 3
+					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 1
 					AND (
 						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 1 AND r.processed_at <= now() - interval '1 minute')
-						OR
-						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 2 AND r.processed_at <= now() - interval '5 minute')
-						OR
-						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 3 AND r.processed_at <= now() - interval '30 minute')
 					)
 				)
 			)
@@ -330,13 +318,9 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 				r.event_id IS NULL
 				OR (
 					COALESCE(r.side_effects->>'manager_status', '') = 'error'
-					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 3
+					AND COALESCE((r.side_effects->>'retry_count')::int, 0) <= 1
 					AND (
 						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 1 AND r.processed_at <= now() - interval '1 minute')
-						OR
-						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 2 AND r.processed_at <= now() - interval '5 minute')
-						OR
-						(COALESCE((r.side_effects->>'retry_count')::int, 0) = 3 AND r.processed_at <= now() - interval '30 minute')
 					)
 				)
 			)

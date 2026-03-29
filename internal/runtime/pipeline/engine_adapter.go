@@ -497,7 +497,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		payload := parsePayloadMap(execCtx.Request.Event.Payload)
 		bucketID := pc.evidenceTargetForHandler(execCtx.Request.NodeID.String(), string(execCtx.Request.Event.Type))
 		if bucketID == "" {
-			bucketID = execCtx.Request.NodeID.String()
+			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), strings.TrimSpace(string(execCtx.Request.Event.Type)))
 		}
 		return pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload), nil
 	case "create_flow_instance":

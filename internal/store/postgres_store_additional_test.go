@@ -902,6 +902,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 
 	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
 		AgentID: "a1",
+		Mode:    "session",
 		Messages: []llm.Message{
 			{Role: "user", Content: "reach me at a@example.com"},
 		},
@@ -909,7 +910,7 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertConversation: %v", err)
 	}
-	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "", "")
+	rec, ok, err := pg.LoadActiveConversation(ctx, "a1", "session", "")
 	if err != nil || !ok {
 		t.Fatalf("LoadActiveConversation ok=%v err=%v", ok, err)
 	}

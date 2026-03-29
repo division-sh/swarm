@@ -258,6 +258,22 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 	}
 }
 
+func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
+	agent := NewLLMAgent(
+		models.AgentConfig{
+			ID:       "entity-agent-1",
+			Role:     "operator",
+			EntityID: "ent-1",
+		},
+		nil,
+		nil,
+		nil,
+	)
+	if agent.conversation.Mode != llm.TaskScoped {
+		t.Fatalf("conversation mode = %v, want task", agent.conversation.Mode)
+	}
+}
+
 func TestAppendPromptPostamble_IsIdempotent(t *testing.T) {
 	prompt := "You are helpful."
 	once := appendPromptPostamble(prompt)

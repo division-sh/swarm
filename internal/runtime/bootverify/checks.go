@@ -130,6 +130,9 @@ type checkerContext struct {
 	gateSchemaLoaded   bool
 	gateSchemaFindings []Finding
 
+	inputPinLoaded   bool
+	inputPinFindings []Finding
+
 	deprecatedLoaded   bool
 	deprecatedFindings []Finding
 }
@@ -167,6 +170,7 @@ var bootCheckRegistry = []Check{
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
+	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
 }
 
 var supplementalChecks = []Check{
@@ -227,6 +231,7 @@ func checkEventRuntimeWiringValidation(c *checkerContext) []Finding  { return c.
 func checkTimerValidation(c *checkerContext) []Finding               { return c.timerValidation() }
 func checkWritePinOwnershipValidation(c *checkerContext) []Finding   { return c.writePinOwnership() }
 func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
+func checkInputPinWiring(c *checkerContext) []Finding                { return c.inputPinWiring() }
 func checkDeprecatedContractAlias(c *checkerContext) []Finding       { return c.deprecatedAliases() }
 
 func (c *checkerContext) eventWarningsByCheck(checkID string) []Finding {
@@ -624,6 +629,69 @@ func (c *checkerContext) gateSchemaValidation() []Finding {
 		}
 	}
 	return c.gateSchemaFindings
+}
+
+func (c *checkerContext) inputPinWiring() []Finding {
+	if c.inputPinLoaded {
+		return c.inputPinFindings
+	}
+	c.inputPinLoaded = true
+
+	eventsEmitted := map[string]struct{}{}
+	for _, scope := range c.source.FlowScopes() {
+		if eventType := strings.TrimSpace(scope.AutoEmitEvent); eventType != "" {
+			eventsEmitted[eventType] = struct{}{}
+		}
+	}
+	for _, node := range c.source.NodeEntries() {
+		for _, handler := range node.EventHandlers {
+			for _, emitted := range handlerEmits(handler) {
+				emitted = strings.TrimSpace(emitted)
+				if emitted != "" {
+					eventsEmitted[emitted] = struct{}{}
+				}
+			}
+		}
+	}
+	for _, agent := range c.source.AgentEntries() {
+		for _, eventType := range agent.EmitEvents {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" {
+				eventsEmitted[eventType] = struct{}{}
+			}
+		}
+	}
+
+	for flowID := range c.source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		for _, eventType := range c.source.FlowInputEvents(flowID) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			entry, ok := c.source.EventEntry(eventType)
+			if !ok {
+				continue
+			}
+			if _, emitted := eventsEmitted[eventType]; emitted {
+				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(entry.Source), "external") || strings.EqualFold(strings.TrimSpace(entry.Status), "planned") {
+				continue
+			}
+			c.inputPinFindings = append(c.inputPinFindings, Finding{
+				CheckID:  "input_pin_wiring",
+				Severity: "warning",
+				Message:  fmt.Sprintf("flow %s input pin %s has no emitter", flowID, eventType),
+				Location: flowID,
+			})
+		}
+	}
+
+	return c.inputPinFindings
 }
 
 func (c *checkerContext) deprecatedAliases() []Finding {
@@ -1259,6 +1327,14 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 							Location: nodeID,
 						})
 					}
+				}
+				if normalizeWorkflowBuiltinActionID(actionID) == "record_evidence" && strings.TrimSpace(handler.EvidenceTarget) == "" {
+					c.handlerFindings = append(c.handlerFindings, Finding{
+						CheckID:  "handler_field_compliance",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s record_evidence is missing evidence_target", nodeID, eventType),
+						Location: nodeID,
+					})
 				}
 				if !handlerActionExecutable(c.source, actionID) {
 					c.handlerFindings = append(c.handlerFindings, Finding{

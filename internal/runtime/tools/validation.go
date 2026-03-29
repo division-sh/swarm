@@ -50,6 +50,10 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 				warnings = append(warnings, fmt.Errorf("tool %s uses handler_type mcp but is not prefixed with a server namespace", name))
 			}
 		case "":
+			if rawType == "workflow_registered" || rawType == "api_call" {
+				warnings = append(warnings, fmt.Errorf("tool %s uses deprecated handler_type %s with no http block; tool is ignored until migrated to handler_type: http or mcp", name, rawType))
+				continue
+			}
 			if rawType == "" {
 				warnings = append(warnings, fmt.Errorf("tool %s has no executable implementation in the generic runtime; provide handler_type: http with an http block or expose it via mcp", name))
 				continue

@@ -6,4 +6,5 @@ test-node:
   event_handlers:
     evidence.submitted:
       action: record_evidence
+      evidence_target: evidence.items
       emits: evidence.recorded
