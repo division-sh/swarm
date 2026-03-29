@@ -42,16 +42,34 @@ type AgentManager struct {
 	loopCancel         map[string]context.CancelFunc
 	runWG              sync.WaitGroup
 
-	poisonMu          sync.Mutex
-	poisonPanicCounts map[string]int
+	poisonMu            sync.Mutex
+	poisonPanicCounts   map[string]int
+	poisonEventEntities map[string]map[string]struct{}
+	poisonEventEmitted  map[string]bool
+
+	deadLetterMu         sync.Mutex
+	deadLetterWindows    map[string][]deadLetterEscalationSample
+	deadLetterLastRaised map[string]time.Time
 }
 
 const (
-	managerShutdownTimeout  = 15 * time.Second
-	poisonPanicQuarantineAt = 3
-	receiptWriteTimeout     = 3 * time.Second
-	runtimeSpecVersion      = "v2.2.1"
+	managerShutdownTimeout        = 15 * time.Second
+	poisonPanicQuarantineAt       = 3
+	poisonEventEntityThreshold    = 3
+	deadLetterEscalationThreshold = 3
+	deadLetterEscalationWindow    = 10 * time.Minute
+	receiptWriteTimeout           = 3 * time.Second
+	runtimeSpecVersion            = "v2.2.1"
 )
+
+type deadLetterEscalationSample struct {
+	at         time.Time
+	eventID    string
+	agentID    string
+	entityID   string
+	retryCount int
+	errText    string
+}
 
 func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
 	return NewAgentManagerWithOptions(bus, factory, AgentManagerOptions{}, stores...)
@@ -84,6 +102,10 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		inFlight:                 make(map[string]struct{}),
 		loopCancel:               make(map[string]context.CancelFunc),
 		poisonPanicCounts:        make(map[string]int),
+		poisonEventEntities:      make(map[string]map[string]struct{}),
+		poisonEventEmitted:       make(map[string]bool),
+		deadLetterWindows:        make(map[string][]deadLetterEscalationSample),
+		deadLetterLastRaised:     make(map[string]time.Time),
 	}
 }
 

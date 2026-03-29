@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -20,7 +21,6 @@ import (
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
-	"github.com/google/uuid"
 )
 
 func (am *AgentManager) RestartAgent(agentID string) error {
@@ -112,12 +112,16 @@ func (am *AgentManager) clearPoisonPanicCount(agentID, eventID string) {
 
 func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID string, evt events.Event, count int, panicText string) {
 	am.writeReceipt(ctx, evt.ID, agentID, ReceiptStatusProcessed, fmt.Sprintf("quarantined poison event after %d panics: %s", count, strings.TrimSpace(panicText)))
+	affectedCount, shouldEmit := am.recordPoisonQuarantine(strings.TrimSpace(string(evt.Type)), evt.EntityID())
+	if !shouldEmit {
+		return
+	}
 	payload := map[string]any{
-		"event_name":             strings.TrimSpace(string(evt.Type)),
-		"quarantine_reason":      fmt.Sprintf("event quarantined after %d repeated panics while processing", count),
-		"affected_entity_count":  1,
-		"sample_error":           strings.TrimSpace(panicText),
-		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
+		"event_name":            strings.TrimSpace(string(evt.Type)),
+		"quarantine_reason":     fmt.Sprintf("event quarantined after repeated panics across %d entities", affectedCount),
+		"affected_entity_count": affectedCount,
+		"sample_error":          strings.TrimSpace(panicText),
+		"timestamp":             time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
@@ -128,6 +132,32 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 	}); err != nil {
 		RuntimeWarn("agent-manager", "platform.event_quarantined publish failed agent=%s event=%s err=%v", agentID, strings.TrimSpace(evt.ID), err)
 	}
+}
+
+func (am *AgentManager) recordPoisonQuarantine(eventName, entityID string) (int, bool) {
+	eventName = strings.TrimSpace(eventName)
+	entityID = strings.TrimSpace(entityID)
+	if eventName == "" {
+		return 0, false
+	}
+	if entityID == "" {
+		entityID = "__unknown__"
+	}
+	am.poisonMu.Lock()
+	defer am.poisonMu.Unlock()
+	if am.poisonEventEntities[eventName] == nil {
+		am.poisonEventEntities[eventName] = map[string]struct{}{}
+	}
+	am.poisonEventEntities[eventName][entityID] = struct{}{}
+	affectedCount := len(am.poisonEventEntities[eventName])
+	if affectedCount < poisonEventEntityThreshold {
+		return affectedCount, false
+	}
+	if am.poisonEventEmitted[eventName] {
+		return affectedCount, false
+	}
+	am.poisonEventEmitted[eventName] = true
+	return affectedCount, true
 }
 
 func deterministicOutputEventID(inbound events.Event, agentID string, index int, out events.Event) string {
@@ -672,20 +702,20 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	}
 
 	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
-			ID:          uuid.NewString(),
-			Type:        events.EventType("platform.agent_failed"),
-			SourceAgent: "runtime",
-			Payload: mustJSON(map[string]any{
-				"agent_id":        agent.ID(),
-				"flow_instance":   flowInstance,
-				"entity_id":       entityID,
-				"error":           panicText,
-				"retry_count":     consecutivePanics,
-				"last_event_type": strings.TrimSpace(lastEventType),
-				"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
-			}),
-			CreatedAt: time.Now().UTC(),
-		}).WithEntityID(entityID)); err != nil {
+		ID:          uuid.NewString(),
+		Type:        events.EventType("platform.agent_failed"),
+		SourceAgent: "runtime",
+		Payload: mustJSON(map[string]any{
+			"agent_id":        agent.ID(),
+			"flow_instance":   flowInstance,
+			"entity_id":       entityID,
+			"error":           panicText,
+			"retry_count":     consecutivePanics,
+			"last_event_type": strings.TrimSpace(lastEventType),
+			"timestamp":       time.Now().UTC().Format(time.RFC3339Nano),
+		}),
+		CreatedAt: time.Now().UTC(),
+	}).WithEntityID(entityID)); err != nil {
 		RuntimeWarn("agent-manager", "platform.agent_failed publish failed agent=%s err=%v", agent.ID(), err)
 	}
 }

@@ -8,16 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
-	"github.com/google/uuid"
 )
 
 type entityToolSchema struct {
-	EntityType string
-	Fields     map[string]runtimecontracts.EntitySchemaField
-	Columns    []string
+	Defined bool
+	Fields  map[string]runtimecontracts.EntitySchemaField
 }
 
 type entityFilterCondition struct {
@@ -31,37 +30,26 @@ var (
 	entityFilterPattern  = regexp.MustCompile(`^\s*([a-z_][a-z0-9_]*)\s*(=|!=|>=|<=|>|<)\s*(.+?)\s*$`)
 )
 
-func entityToolSchemaFromSource(source semanticview.Source, entityType string) (entityToolSchema, error) {
-	entityType = strings.TrimSpace(entityType)
+func entityToolSchemaFromSource(source semanticview.Source) (entityToolSchema, error) {
 	if source == nil {
 		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
 	}
-	if entityType == "" {
-		return entityToolSchema{}, fmt.Errorf("entity_type is required")
-	}
+	fields := map[string]runtimecontracts.EntitySchemaField{}
+	defined := false
 	for _, group := range source.WorkflowEntitySchema().Groups {
-		groupName := strings.TrimSpace(group.Name)
-		if groupName != entityType {
-			continue
-		}
-		fields := make(map[string]runtimecontracts.EntitySchemaField, len(group.Fields))
-		columns := []string{"entity_id"}
 		for _, field := range group.Fields {
 			name := strings.TrimSpace(field.Name)
 			if name == "" {
 				continue
 			}
 			fields[name] = field
-			columns = append(columns, name)
+			defined = true
 		}
-		columns = append(columns, "created_at", "updated_at")
-		return entityToolSchema{
-			EntityType: entityType,
-			Fields:     fields,
-			Columns:    columns,
-		}, nil
 	}
-	return entityToolSchema{}, fmt.Errorf("%w: %q", ErrUnknownEntityType, entityType)
+	return entityToolSchema{
+		Defined: defined,
+		Fields:  fields,
+	}, nil
 }
 
 func (s entityToolSchema) field(name string) (runtimecontracts.EntitySchemaField, error) {
@@ -69,47 +57,21 @@ func (s entityToolSchema) field(name string) (runtimecontracts.EntitySchemaField
 	if name == "" {
 		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("field is required")
 	}
+	if !s.Defined {
+		return runtimecontracts.EntitySchemaField{Name: name}, nil
+	}
 	field, ok := s.Fields[name]
 	if !ok {
-		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("%w: entity_type %s does not define field %s", ErrUnknownEntityField, s.EntityType, name)
+		return runtimecontracts.EntitySchemaField{}, fmt.Errorf("%w: entity schema does not define field %s", ErrUnknownEntityField, name)
 	}
 	return field, nil
 }
 
-func (s entityToolSchema) selectColumns(requested []string) ([]string, error) {
-	if len(requested) == 0 {
-		return append([]string{}, s.Columns...), nil
-	}
-	out := make([]string, 0, len(requested))
-	seen := make(map[string]struct{}, len(requested))
-	for _, column := range requested {
-		column = strings.TrimSpace(column)
-		if column == "" {
-			continue
-		}
-		if _, dup := seen[column]; dup {
-			continue
-		}
-		switch column {
-		case "entity_id", "created_at", "updated_at":
-			seen[column] = struct{}{}
-			out = append(out, column)
-			continue
-		}
-		if _, err := s.field(column); err != nil {
-			return nil, err
-		}
-		seen[column] = struct{}{}
-		out = append(out, column)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("select must include at least one column")
-	}
-	return out, nil
-}
-
 func normalizeEntityFieldValue(field runtimecontracts.EntitySchemaField, value any) (any, error) {
 	fieldType := strings.ToLower(strings.TrimSpace(field.Type))
+	if fieldType == "" {
+		return value, nil
+	}
 	if value == nil {
 		if field.Nullable {
 			return nil, nil

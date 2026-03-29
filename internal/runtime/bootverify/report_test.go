@@ -2,6 +2,9 @@ package bootverify
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -21,6 +24,132 @@ func TestRun_MapsMissingToolToToolResolutionWarning(t *testing.T) {
 	}
 	if !reportContains(report.Warnings(), "tool_resolution", "nonexistent_tool") {
 		t.Fatalf("expected tool_resolution warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsMissingDiscoveredMCPToolToToolResolutionWarning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("Decode request: %v", err)
+		}
+		switch req["method"] {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]any{"name": "infra", "version": "1.0.0"},
+				},
+			})
+		case "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"result":  map[string]any{},
+			})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{
+						"name": "ping",
+					}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected mcp method %v", req["method"])
+		}
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {
+				Tools: []string{"infra.missing"},
+			},
+		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"mcp_servers": {
+				Value: map[string]any{
+					"infra": map[string]any{
+						"transport": "http",
+						"url":       server.URL,
+						"prefix":    "infra",
+					},
+				},
+			},
+		}},
+	})
+
+	report := Run(context.Background(), source, Options{CheckMCPReachable: true})
+
+	if !reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
+		t.Fatalf("expected tool_resolution warning for undiscovered mcp tool, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_MapsMissingContractMCPToolToToolResolutionWarning(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("Decode request: %v", err)
+		}
+		switch req["method"] {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]any{"name": "infra", "version": "1.0.0"},
+				},
+			})
+		case "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"tools": []map[string]any{{
+						"name": "ping",
+					}},
+				},
+			})
+		default:
+			t.Fatalf("unexpected mcp method %v", req["method"])
+		}
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {Tools: []string{"infra.missing"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"infra.missing": {HandlerType: "mcp"},
+		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"mcp_servers": {
+				Value: map[string]any{
+					"infra": map[string]any{
+						"transport": "http",
+						"url":       server.URL,
+						"prefix":    "infra",
+					},
+				},
+			},
+		}},
+	})
+
+	report := Run(context.Background(), source, Options{CheckMCPReachable: true})
+
+	if !reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
+		t.Fatalf("expected tool_resolution warning for undiscovered contract mcp tool, got %#v", report.Warnings())
 	}
 }
 

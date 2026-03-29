@@ -1598,6 +1598,89 @@ tool_model:
         record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
+    entity_tool_schemas:
+      description: All entity tools operate on the generic entity_state table. They read/write entity_state.fields (JSONB),
+        entity_state.current_state, entity_state.gates, and entity_state.accumulator. They do NOT operate on product-specific
+        typed tables. Product-specific tables are optional query-performance optimizations — the entity tools always use the
+        generic entity_state interface.
+      create_entity:
+        description: Create a new entity row in entity_state.
+        input:
+          entity_id: string — optional, auto-generated UUID if omitted
+          flow_instance: string — required, flow instance path this entity belongs to
+          entity_type: string — optional, default "default". Distinguishes entity kinds within a flow.
+          name: string — optional, human-readable name
+          initial_state: string — optional, defaults to flow schema's initial_state
+          fields: object — optional, initial field values (written to entity_state.fields JSONB)
+        output:
+          entity_id: string — the created entity's ID
+          current_state: string — the entity's initial state
+          created_at: string — ISO 8601
+      get_entity:
+        description: Read an entity by ID. Returns the full entity state from entity_state table.
+        input:
+          entity_id: string — required
+        output:
+          entity_id: string
+          flow_instance: string
+          entity_type: string
+          name: string (nullable)
+          current_state: string
+          gates: object — map of gate names to boolean values
+          fields: object — all entity fields from the JSONB column
+          accumulator: object — accumulator state
+          revision: integer — entity revision number
+          entered_state_at: string — ISO 8601, when current_state was entered
+          created_at: string — ISO 8601
+          updated_at: string — ISO 8601
+        note: Returns all fields. No per-caller field filtering in v1. All agents see all entity fields. Per-field visibility
+          is a potential future enhancement.
+      save_entity_field:
+        description: Write a specific field on an entity. The field is written to entity_state.fields JSONB.
+        input:
+          entity_id: string — required
+          field: string — required, field name to write. Must exist in entity_schema if entity_schema is defined.
+          value: any — required, the value to write
+        output:
+          entity_id: string
+          field: string
+          revision: integer — new revision after write
+        validation: If the flow's package.yaml defines entity_schema, the field name must exist in the schema. If no
+          entity_schema is defined, any field name is accepted.
+      search_entities:
+        description: Query entities by state, field values, or metadata. Returns matching entities from entity_state.
+        input:
+          flow_instance: string — optional, filter by flow instance
+          entity_type: string — optional, filter by entity type
+          current_state: string — optional, filter by state
+          filter: object — optional, field-value pairs to match against entity_state.fields JSONB
+          limit: integer — optional, default 100
+          offset: integer — optional, default 0
+        output:
+          results: array of entity objects (same shape as get_entity output)
+          total: integer — total matching count (before limit/offset)
+      query_entities:
+        description: Cross-entity read with aggregation. Query entities by state, fields, group, and aggregate.
+        input:
+          entity_type: string — optional, filter by entity type
+          filter: string — optional, CEL expression evaluated against entity fields
+          group_by: string — optional, field to group results by
+          select: array — optional, field names to include in results
+          limit: integer — optional, default 100
+        output:
+          results: array — matching entities or grouped aggregations
+      query_metrics:
+        description: Read aggregated metrics across entities. Counts, sums, averages.
+        input:
+          entity_type: string — optional
+          flow_instance: string — optional
+          metric: string — required, one of count, sum, avg, min, max
+          field: string — required for sum/avg/min/max, the JSONB field to aggregate
+          group_by: string — optional, field to group by
+          filter: string — optional, CEL expression
+        output:
+          value: number — the aggregated result (for ungrouped queries)
+          groups: array — for grouped queries, each entry has group_key and value
   agent_tool_filtering:
     description: Agents only see tools listed in their tools contract field. The platform never injects the full tool
       catalog from any source into an agent session. This controls LLM context cost.

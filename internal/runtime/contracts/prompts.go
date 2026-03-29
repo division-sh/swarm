@@ -10,29 +10,31 @@ import (
 	"strings"
 	"sync"
 
-	models "swarm/internal/runtime/core/actors"
 	"gopkg.in/yaml.v3"
+	models "swarm/internal/runtime/core/actors"
 )
 
 var (
-	promptBundleOnce sync.Once
-	promptBundle     *WorkflowContractBundle
-	promptBundleErr  error
-	activePromptMu   sync.RWMutex
+	promptBundleOnce   sync.Once
+	promptBundle       *WorkflowContractBundle
+	promptBundleErr    error
+	activePromptMu     sync.RWMutex
 	activePromptBundle *WorkflowContractBundle
 
 	promptTemplateFieldPattern = regexp.MustCompile(`\{[^}]+\}`)
 	promptTokenPattern         = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)\}\}`)
 
-	promptVariablesOnce sync.Once
-	promptVariables     map[string]any
-	promptVariablesErr  error
+	promptVariablesMu sync.RWMutex
+	promptVariables   = map[string]map[string]any{}
 )
 
 func SetActivePromptBundle(bundle *WorkflowContractBundle) {
 	activePromptMu.Lock()
 	defer activePromptMu.Unlock()
 	activePromptBundle = bundle
+	promptVariablesMu.Lock()
+	promptVariables = map[string]map[string]any{}
+	promptVariablesMu.Unlock()
 }
 
 func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
@@ -40,12 +42,12 @@ func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, erro
 	repoRoot := promptContractsRepoRoot()
 	bundle, _ := promptWorkflowBundle()
 	for _, agentID := range candidates {
-		var record bundleAgentRecord
+		record := bundleAgentRecord{}
 		if bundle != nil {
 			record, _ = bundleAgentRecordByLogicalID(bundle, agentID)
 		}
 		for _, dir := range dirs[agentID] {
-			prompt, found, err := loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, mode)
+			prompt, found, err := loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, record.Source, mode)
 			if err != nil {
 				return "", false, err
 			}
@@ -295,10 +297,10 @@ func promptContractsRepoRoot() string {
 }
 
 func loadPromptForAgentFromDir(repoRoot, promptsDir, agentID, mode string) (string, bool, error) {
-	return loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, AgentRegistryEntry{}, mode)
+	return loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, AgentRegistryEntry{}, ContractItemSource{}, mode)
 }
 
-func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, mode string) (string, bool, error) {
+func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, mode string) (string, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if agentID == "" || strings.TrimSpace(promptsDir) == "" {
@@ -315,7 +317,7 @@ func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry Agent
 			}
 			return "", false, err
 		}
-		rendered, err := renderPromptWithRuntimeVariables(repoRoot, string(raw))
+		rendered, err := renderPromptWithRuntimeVariables(repoRoot, string(raw), source)
 		if err != nil {
 			return "", false, fmt.Errorf("render prompt %s: %w", filepath.Base(candidate), err)
 		}
@@ -363,35 +365,106 @@ func promptWorkspaceRoleRef(entry AgentRegistryEntry) string {
 	return workspaceClass + "-" + role
 }
 
-func renderPromptWithRuntimeVariables(repoRoot, promptText string) (string, error) {
+func renderPromptWithRuntimeVariables(repoRoot, promptText string, source ContractItemSource) (string, error) {
 	if !promptTokenPattern.MatchString(promptText) {
 		return promptText, nil
 	}
-	vars, err := promptRuntimeVariables(repoRoot)
+	vars, err := promptRuntimeVariables(repoRoot, source)
 	if err != nil {
 		return promptText, nil
 	}
 	return renderPromptTemplatePreservingUnknown(promptText, vars), nil
 }
 
-func promptRuntimeVariables(repoRoot string) (map[string]any, error) {
-	promptVariablesOnce.Do(func() {
-		bundle, err := promptWorkflowBundle()
-		if err != nil {
-			promptVariablesErr = fmt.Errorf("load workflow contract bundle: %w", err)
-			return
+func promptRuntimeVariables(repoRoot string, source ContractItemSource) (map[string]any, error) {
+	bundle, err := promptWorkflowBundle()
+	if err != nil {
+		return nil, fmt.Errorf("load workflow contract bundle: %w", err)
+	}
+	scopeKey := promptVariableScopeKey(source)
+	promptVariablesMu.RLock()
+	if vars, ok := promptVariables[scopeKey]; ok {
+		defer promptVariablesMu.RUnlock()
+		return clonePromptVariables(vars), nil
+	}
+	promptVariablesMu.RUnlock()
+
+	policy := promptResolvedPolicy(bundle, source)
+	vars := map[string]any{}
+	for key, value := range policy.Values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
 		}
-		vars := map[string]any{}
-		for key, value := range bundle.ResolvedPolicyForFlow("").Values {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			vars[key] = value.Value
+		vars[key] = value.Value
+	}
+
+	promptVariablesMu.Lock()
+	promptVariables[scopeKey] = clonePromptVariables(vars)
+	promptVariablesMu.Unlock()
+	return vars, nil
+}
+
+func promptVariableScopeKey(source ContractItemSource) string {
+	return strings.TrimSpace(source.PackageKey) + "|" + strings.TrimSpace(source.FlowID)
+}
+
+func clonePromptVariables(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func promptResolvedPolicy(bundle *WorkflowContractBundle, source ContractItemSource) PolicyDocument {
+	if bundle == nil {
+		return PolicyDocument{Values: map[string]PolicyValue{}}
+	}
+	if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
+		return bundle.ResolvedPolicyForFlow(flowID)
+	}
+	out := clonePolicyDocument(bundle.Policy)
+	if out.Values == nil {
+		out.Values = map[string]PolicyValue{}
+	}
+	for _, pkg := range promptPackagePolicyLineage(bundle, strings.TrimSpace(source.PackageKey)) {
+		for key, value := range pkg.Policy.Values {
+			out.Values[key] = value
 		}
-		promptVariables = vars
-	})
-	return promptVariables, promptVariablesErr
+	}
+	return out
+}
+
+func promptPackagePolicyLineage(bundle *WorkflowContractBundle, packageKey string) []ProjectContractView {
+	packageKey = strings.TrimSpace(packageKey)
+	if bundle == nil || packageKey == "" {
+		return nil
+	}
+	parentByKey := make(map[string]string, len(bundle.PackageTree))
+	for _, pkg := range bundle.PackageTree {
+		parentByKey[strings.TrimSpace(pkg.Key)] = strings.TrimSpace(pkg.ParentKey)
+	}
+	keys := make([]string, 0, 4)
+	current := packageKey
+	for current != "" {
+		keys = append(keys, current)
+		next, ok := parentByKey[current]
+		if !ok {
+			break
+		}
+		current = next
+	}
+	slices.Reverse(keys)
+	lineage := make([]ProjectContractView, 0, len(keys))
+	for _, key := range keys {
+		view, ok := bundle.ProjectViewByKey(key)
+		if !ok {
+			continue
+		}
+		lineage = append(lineage, view)
+	}
+	return lineage
 }
 
 func renderPromptTemplatePreservingUnknown(promptText string, vars map[string]any) string {

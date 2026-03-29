@@ -78,7 +78,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 			t.Fatalf("json.Marshal: %v", err)
 		}
 		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
-			ID: "ops-7",
+			ID:     "ops-7",
 			Config: raw,
 		}, "workflow_custom_tool")
 		if authErr != nil {
@@ -93,7 +93,7 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 			"permission_bundles": {
 				Value: map[string]any{
 					"ops": map[string]any{
-						"permissions": []any{"agent_fire", systemAdminPermission},
+						"permissions": []any{"agent_fire", "schedule"},
 					},
 				},
 			},
@@ -106,7 +106,7 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveAgentPermissions: %v", err)
 	}
-	want := []string{"agent_fire", systemAdminPermission, "schedule"}
+	want := []string{"agent_fire", "schedule"}
 	if len(perms) != len(want) {
 		t.Fatalf("expected %v, got %v", want, perms)
 	}
@@ -155,6 +155,37 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 	}
 	if !strings.Contains(errs[0].Error(), `agent invalid-agent declares tool agent_fire without required permission "agent_fire"`) {
 		t.Fatalf("unexpected validation error: %v", errs[0])
+	}
+}
+
+func TestValidateAgentPermissions_AcceptsToolDefinedExtensionPermission(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"researcher": {
+				ID:          "researcher",
+				Role:        "researcher",
+				Permissions: []string{"external_api_access"},
+				Tools:       []string{"lookup_data"},
+			},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"lookup_data": {
+				HandlerType: "http",
+				Permission:  "external_api_access",
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    "https://example.com",
+				},
+			},
+		},
+	})
+
+	agentCount, errs := ValidateAgentPermissions(source)
+	if agentCount != 1 {
+		t.Fatalf("expected 1 agent, got %d", agentCount)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("expected no validation errors, got %v", errs)
 	}
 }
 

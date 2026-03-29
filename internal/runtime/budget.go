@@ -54,6 +54,7 @@ type BudgetTracker struct {
 }
 
 type budgetThresholds struct {
+	Enabled   bool
 	Warning   float64
 	Throttle  float64
 	Emergency float64
@@ -402,7 +403,7 @@ func (t *BudgetTracker) evaluateAndEmit(ctx context.Context, entityID string) er
 }
 
 func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityID string, capCents int) error {
-	if capCents <= 0 {
+	if capCents <= 0 || !t.thresholds.Enabled {
 		return nil
 	}
 	now := time.Now().UTC()
@@ -437,7 +438,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 	}
 
 	ratio := float64(spent) / float64(capCents)
-	thresholds := t.thresholds.withDefaults()
+	thresholds := t.thresholds
 	state := "ok"
 	switch {
 	case ratio >= thresholds.Emergency:
@@ -471,8 +472,8 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 
 	payload := map[string]any{
 		"level":         state,
-		"current_spend": spent,
-		"budget_cap":    capCents,
+		"current_spend": float64(spent) / 100.0,
+		"budget_cap":    float64(capCents) / 100.0,
 		"percentage":    ratio * 100.0,
 		"period":        start.Format("2006-01"),
 		"timestamp":     now.Format(time.RFC3339),
@@ -484,15 +485,15 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 		SourceAgent: "runtime",
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now(),
-	}).WithEntityID(entityID)
+	})
 	if err := t.bus.Publish(ctx, evt); err != nil {
 		return err
 	}
 
 	// Spec v2.0: budget.emergency must also create a critical mailbox item.
 	if state == "emergency" && t.mailbox != nil {
-		summary := fmt.Sprintf("Budget emergency: scope=%s spent=%d cap=%d (%.0f%%)",
-			scope, spent, capCents, ratio*100.0)
+		summary := fmt.Sprintf("Budget emergency: scope=%s spent=$%.2f cap=$%.2f (%.0f%%)",
+			scope, float64(spent)/100.0, float64(capCents)/100.0, ratio*100.0)
 		// Best-effort: avoid breaking spend path if mailbox insert fails.
 		if _, err := t.mailbox.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			EventID:   evtID,
@@ -511,48 +512,42 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 }
 
 func budgetThresholdsFromSource(source semanticview.Source) budgetThresholds {
+	warning, okWarning := percentPolicyValue(source, "budget_warning_percent")
+	throttle, okThrottle := percentPolicyValue(source, "budget_throttle_percent")
+	emergency, okEmergency := percentPolicyValue(source, "budget_emergency_percent")
+	if !okWarning || !okThrottle || !okEmergency {
+		return budgetThresholds{}
+	}
 	return budgetThresholds{
-		Warning:   percentPolicyValue(source, "budget_warning_percent", 80),
-		Throttle:  percentPolicyValue(source, "budget_throttle_percent", 90),
-		Emergency: percentPolicyValue(source, "budget_emergency_percent", 100),
-	}.withDefaults()
+		Enabled:   true,
+		Warning:   warning,
+		Throttle:  throttle,
+		Emergency: emergency,
+	}
 }
 
-func (t budgetThresholds) withDefaults() budgetThresholds {
-	if t.Warning <= 0 {
-		t.Warning = 0.80
-	}
-	if t.Throttle <= 0 {
-		t.Throttle = 0.90
-	}
-	if t.Emergency <= 0 {
-		t.Emergency = 1.00
-	}
-	return t
-}
-
-func percentPolicyValue(source semanticview.Source, key string, fallback float64) float64 {
+func percentPolicyValue(source semanticview.Source, key string) (float64, bool) {
 	value, ok := semanticview.PolicyValueForFlow(source, "", key)
 	if !ok {
-		return fallback / 100.0
+		return 0, false
 	}
 	switch typed := value.Value.(type) {
 	case int:
-		return normalizePercentValue(float64(typed), fallback)
+		return normalizePercentValue(float64(typed)), true
 	case int64:
-		return normalizePercentValue(float64(typed), fallback)
+		return normalizePercentValue(float64(typed)), true
 	case float64:
-		return normalizePercentValue(typed, fallback)
+		return normalizePercentValue(typed), true
 	case float32:
-		return normalizePercentValue(float64(typed), fallback)
+		return normalizePercentValue(float64(typed)), true
 	default:
-		return fallback / 100.0
+		return 0, false
 	}
 }
 
-func normalizePercentValue(value float64, fallback float64) float64 {
+func normalizePercentValue(value float64) float64 {
 	if value <= 0 {
-		return fallback / 100.0
+		return 0
 	}
 	if value > 1.0 {
 		return value / 100.0

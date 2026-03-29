@@ -14,21 +14,21 @@ type ContractSchemaEntry struct {
 }
 
 var supportedRuntimeToolNames = map[string]struct{}{
-	"agent_message":        {},
-	"schedule":             {},
-	"configure_routing":    {},
-	"agent_hire":           {},
-	"agent_fire":           {},
-	"agent_reconfigure":    {},
-	"get_entity":           {},
-	"save_entity_field":    {},
-	"create_entity":        {},
-	"query_entities":       {},
-	"search_entities":      {},
-	"query_metrics":        {},
-	"mailbox_send":         {},
-	"human_task_request":   {},
-	"human_task_decide":    {},
+	"agent_message":      {},
+	"schedule":           {},
+	"configure_routing":  {},
+	"agent_hire":         {},
+	"agent_fire":         {},
+	"agent_reconfigure":  {},
+	"get_entity":         {},
+	"save_entity_field":  {},
+	"create_entity":      {},
+	"query_entities":     {},
+	"search_entities":    {},
+	"query_metrics":      {},
+	"mailbox_send":       {},
+	"human_task_request": {},
+	"human_task_decide":  {},
 }
 
 func LoadContractSchemasForSource(source semanticview.Source) (map[string]ContractSchemaEntry, error) {
@@ -86,38 +86,39 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 	return map[string]ContractSchemaEntry{
 		"get_entity": {
 			Category:    "entity_persistence",
-			Description: "Read a typed entity row by entity type and entity id.",
+			Description: "Read a full entity_state row by entity id.",
 			InputSchema: ObjectSchema(map[string]any{
-				"entity_type": map[string]any{"type": "string"},
-				"entity_id":   map[string]any{"type": "string"},
-			}, "entity_type", "entity_id"),
+				"entity_id": map[string]any{"type": "string"},
+			}, "entity_id"),
 		},
 		"save_entity_field": {
 			Category:    "entity_persistence",
-			Description: "Write a single validated field on a typed entity row.",
+			Description: "Write a single field into entity_state.fields JSONB.",
 			InputSchema: ObjectSchema(map[string]any{
-				"entity_type": map[string]any{"type": "string"},
-				"entity_id":   map[string]any{"type": "string"},
-				"field":       map[string]any{"type": "string"},
-				"value":       anyValueSchema,
-			}, "entity_type", "entity_id", "field", "value"),
+				"entity_id": map[string]any{"type": "string"},
+				"field":     map[string]any{"type": "string"},
+				"value":     anyValueSchema,
+			}, "entity_id", "field", "value"),
 		},
 		"create_entity": {
 			Category:    "entity_persistence",
-			Description: "Create a new typed entity row with validated fields.",
+			Description: "Create a new entity_state row.",
 			InputSchema: ObjectSchema(map[string]any{
-				"entity_type": map[string]any{"type": "string"},
-				"entity_id":   map[string]any{"type": "string"},
+				"entity_id":     map[string]any{"type": "string"},
+				"flow_instance": map[string]any{"type": "string"},
+				"entity_type":   map[string]any{"type": "string"},
+				"name":          map[string]any{"type": "string"},
+				"initial_state": map[string]any{"type": "string"},
 				"fields": map[string]any{
 					"type":                 "object",
 					"properties":           map[string]any{},
 					"additionalProperties": true,
 				},
-			}, "entity_type", "entity_id"),
+			}, "flow_instance"),
 		},
 		"query_entities": {
 			Category:    "entity_persistence",
-			Description: "Query typed entity rows using filters and optional grouping or aggregation.",
+			Description: "Query entity_state rows using CEL filtering and optional grouping.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_type": map[string]any{"type": "string"},
 				"filter":      map[string]any{"type": "string"},
@@ -127,31 +128,30 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 				},
 				"limit":    map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
 				"group_by": map[string]any{"type": "string"},
-				"metric": map[string]any{
-					"type": "string",
-					"enum": []any{"count", "sum", "avg", "min", "max"},
-				},
-				"field": map[string]any{"type": "string"},
-			}, "entity_type"),
+			}),
 		},
 		"search_entities": {
 			Category:    "entity_persistence",
-			Description: "Query typed entity rows using simple field filters.",
+			Description: "Query entity_state rows by state, metadata, and JSONB field matches.",
 			InputSchema: ObjectSchema(map[string]any{
-				"entity_type": map[string]any{"type": "string"},
-				"filter":      map[string]any{"type": "string"},
-				"select": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"type": "string"},
+				"flow_instance": map[string]any{"type": "string"},
+				"entity_type":   map[string]any{"type": "string"},
+				"current_state": map[string]any{"type": "string"},
+				"filter": map[string]any{
+					"type":                 "object",
+					"properties":           map[string]any{},
+					"additionalProperties": true,
 				},
-				"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
-			}, "entity_type"),
+				"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 1000},
+				"offset": map[string]any{"type": "integer", "minimum": 0, "maximum": 100000},
+			}),
 		},
 		"query_metrics": {
 			Category:    "entity_persistence",
-			Description: "Aggregate metrics across typed entity rows.",
+			Description: "Aggregate metrics across entity_state rows.",
 			InputSchema: ObjectSchema(map[string]any{
-				"entity_type": map[string]any{"type": "string"},
+				"entity_type":   map[string]any{"type": "string"},
+				"flow_instance": map[string]any{"type": "string"},
 				"metric": map[string]any{
 					"type": "string",
 					"enum": []any{"count", "sum", "avg", "min", "max"},
@@ -159,7 +159,7 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 				"field":    map[string]any{"type": "string"},
 				"group_by": map[string]any{"type": "string"},
 				"filter":   map[string]any{"type": "string"},
-			}, "entity_type", "metric"),
+			}, "metric"),
 		},
 	}
 }

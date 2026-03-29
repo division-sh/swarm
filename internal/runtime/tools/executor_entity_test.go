@@ -12,7 +12,6 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
-	"swarm/internal/store"
 	"swarm/internal/testutil"
 )
 
@@ -21,8 +20,10 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	entityID := uuid.NewString()
 
 	out, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   entityID,
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
+		"entity_type":   "accounts",
+		"name":          "Acme",
 		"fields": map[string]any{
 			"status":   "open",
 			"score":    42.5,
@@ -38,10 +39,12 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if !ok || strings.TrimSpace(asString(created["entity_id"])) != entityID {
 		t.Fatalf("unexpected create_entity output: %#v", out)
 	}
+	if got := strings.TrimSpace(asString(created["current_state"])); got != "queued" {
+		t.Fatalf("create_entity current_state = %q, want queued", got)
+	}
 
 	got, err := exec.Execute(ctx, "get_entity", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   entityID,
+		"entity_id": entityID,
 	})
 	if err != nil {
 		t.Fatalf("get_entity: %v", err)
@@ -50,57 +53,95 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected entity map, got %#v", got)
 	}
-	if strings.TrimSpace(asString(entity["status"])) != "open" {
-		t.Fatalf("expected status=open, got %#v", entity)
+	if strings.TrimSpace(asString(entity["flow_instance"])) != "review/inst-1" {
+		t.Fatalf("flow_instance = %#v, want review/inst-1", entity["flow_instance"])
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok || strings.TrimSpace(asString(fields["status"])) != "open" {
+		t.Fatalf("expected fields.status=open, got %#v", entity)
 	}
 
-	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   entityID,
-		"field":       "status",
-		"value":       "closed",
-	}); err != nil {
+	saveOut, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "status",
+		"value":     "closed",
+	})
+	if err != nil {
 		t.Fatalf("save_entity_field: %v", err)
+	}
+	saved, ok := saveOut.(map[string]any)
+	if !ok || saved["revision"] == nil {
+		t.Fatalf("unexpected save_entity_field output: %#v", saveOut)
 	}
 
 	searchOut, err := exec.Execute(ctx, "search_entities", map[string]any{
-		"entity_type": "accounts",
-		"filter":      "status = 'closed' AND score > 40",
-		"select":      []string{"entity_id", "status", "score"},
-		"limit":       10,
+		"flow_instance": "review/inst-1",
+		"current_state": "queued",
+		"filter": map[string]any{
+			"status": "closed",
+		},
+		"limit":  10,
+		"offset": 0,
 	})
 	if err != nil {
 		t.Fatalf("search_entities: %v", err)
 	}
-	results, ok := searchOut.([]map[string]any)
+	searchResult, ok := searchOut.(map[string]any)
 	if !ok {
-		t.Fatalf("expected search result slice, got %#v", searchOut)
+		t.Fatalf("expected search result map, got %#v", searchOut)
+	}
+	results, ok := searchResult["results"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected search results slice, got %#v", searchResult["results"])
 	}
 	if len(results) != 1 || strings.TrimSpace(asString(results[0]["entity_id"])) != entityID {
 		t.Fatalf("unexpected search results: %#v", results)
 	}
+	if total, ok := searchResult["total"].(int); !ok || total != 1 {
+		t.Fatalf("search total = %#v, want 1", searchResult["total"])
+	}
 
 	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
 		"entity_type": "accounts",
-		"filter":      "status = 'closed'",
-		"select":      []string{"entity_id", "status"},
+		"filter":      `status == "closed"`,
+		"select":      []string{"current_state", "status"},
 		"limit":       10,
 	})
 	if err != nil {
 		t.Fatalf("query_entities: %v", err)
 	}
-	queryResults, ok := queryOut.([]map[string]any)
+	queryResult, ok := queryOut.(map[string]any)
 	if !ok {
-		t.Fatalf("expected query_entities result slice, got %#v", queryOut)
+		t.Fatalf("expected query_entities result map, got %#v", queryOut)
 	}
-	if len(queryResults) != 1 || strings.TrimSpace(asString(queryResults[0]["entity_id"])) != entityID {
+	queryResults, ok := queryResult["results"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected query_entities results slice, got %#v", queryResult["results"])
+	}
+	if len(queryResults) != 1 || strings.TrimSpace(asString(queryResults[0]["status"])) != "closed" {
 		t.Fatalf("unexpected query_entities results: %#v", queryResults)
 	}
 
+	groupedOut, err := exec.Execute(ctx, "query_entities", map[string]any{
+		"filter":   `status == "closed"`,
+		"group_by": "status",
+		"limit":    10,
+	})
+	if err != nil {
+		t.Fatalf("query_entities grouped: %v", err)
+	}
+	groupedResult, ok := groupedOut.(map[string]any)
+	if !ok {
+		t.Fatalf("expected grouped query result map, got %#v", groupedOut)
+	}
+	groupedRows, ok := groupedResult["results"].([]map[string]any)
+	if !ok || len(groupedRows) != 1 || strings.TrimSpace(asString(groupedRows[0]["group_key"])) != "closed" {
+		t.Fatalf("unexpected grouped query results: %#v", groupedResult["results"])
+	}
+
 	metricOut, err := exec.Execute(ctx, "query_metrics", map[string]any{
-		"entity_type": "accounts",
-		"metric":      "count",
-		"group_by":    "status",
+		"metric":   "count",
+		"group_by": "status",
 	})
 	if err != nil {
 		t.Fatalf("query_metrics: %v", err)
@@ -109,47 +150,18 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected metric result map, got %#v", metricOut)
 	}
-	grouped, ok := metricResult["result"].(map[string]any)
-	if !ok || grouped["closed"] == nil {
+	groups, ok := metricResult["groups"].([]map[string]any)
+	if !ok || len(groups) != 1 || strings.TrimSpace(asString(groups[0]["group_key"])) != "closed" {
 		t.Fatalf("expected grouped metrics, got %#v", metricOut)
-	}
-
-	queryMetricOut, err := exec.Execute(ctx, "query_entities", map[string]any{
-		"entity_type": "accounts",
-		"metric":      "count",
-		"group_by":    "status",
-	})
-	if err != nil {
-		t.Fatalf("query_entities grouped metric: %v", err)
-	}
-	queryMetricResult, ok := queryMetricOut.(map[string]any)
-	if !ok {
-		t.Fatalf("expected query_entities metric result map, got %#v", queryMetricOut)
-	}
-	queryGrouped, ok := queryMetricResult["result"].(map[string]any)
-	if !ok || queryGrouped["closed"] == nil {
-		t.Fatalf("expected query_entities grouped metrics, got %#v", queryMetricOut)
-	}
-}
-
-func TestEntityTools_InvalidEntityType(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
-	_, err := exec.Execute(ctx, "get_entity", map[string]any{
-		"entity_type": "missing",
-		"entity_id":   uuid.NewString(),
-	})
-	if err == nil || !errors.Is(err, runtimetools.ErrUnknownEntityType) {
-		t.Fatalf("expected invalid entity_type error, got %v", err)
 	}
 }
 
 func TestEntityTools_InvalidField(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   uuid.NewString(),
-		"field":       "unknown_field",
-		"value":       "x",
+		"entity_id": uuid.NewString(),
+		"field":     "unknown_field",
+		"value":     "x",
 	})
 	if err == nil || !errors.Is(err, runtimetools.ErrUnknownEntityField) {
 		t.Fatalf("expected invalid field error, got %v", err)
@@ -159,8 +171,7 @@ func TestEntityTools_InvalidField(t *testing.T) {
 func TestEntityTools_GetEntityNotFound(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   uuid.NewString(),
+		"entity_id": uuid.NewString(),
 	})
 	re, ok := runtimetools.AsRuntimeError(err)
 	if err == nil || !ok || re.Code != "not_found" {
@@ -172,8 +183,8 @@ func TestEntityTools_CreateEntityDuplicate(t *testing.T) {
 	ctx, exec := newEntityToolTestExecutor(t)
 	entityID := uuid.NewString()
 	input := map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   entityID,
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
 			"score":  10.0,
@@ -198,8 +209,8 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 	})
 	entityID := uuid.NewString()
 	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
-		"entity_type": "accounts",
-		"entity_id":   entityID,
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
 			"status": "open",
 			"score":  11.0,
@@ -208,8 +219,39 @@ func TestEntityTools_ConstrainedAllowedToolsStillPermitOnlyUniversalEntityTools(
 	}); err == nil {
 		t.Fatalf("expected create_entity to be denied when not listed in tools")
 	}
-	if _, err := exec.Execute(ctx, "query_entities", map[string]any{"entity_type": "accounts"}); err != nil {
+	if _, err := exec.Execute(ctx, "query_entities", map[string]any{}); err != nil {
 		t.Fatalf("query_entities with constrained allowed_tools: %v", err)
+	}
+}
+
+func TestEntityTools_NoSchemaAcceptsArbitraryFieldNames(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
+		ID:   "tester",
+		Role: "operator",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "save_entity_field", "get_entity"},
+		}),
+	}, &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "queued",
+		},
+	})
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"custom_flag": "x",
+		},
+	}); err != nil {
+		t.Fatalf("create_entity without schema: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "another_custom_field",
+		"value":     7,
+	}); err != nil {
+		t.Fatalf("save_entity_field without schema: %v", err)
 	}
 }
 
@@ -226,32 +268,29 @@ func newEntityToolTestExecutor(t *testing.T) (context.Context, *runtimetools.Exe
 
 func newEntityToolTestExecutorWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor) {
 	t.Helper()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	schema := runtimecontracts.EntitySchema{
-		Groups: []runtimecontracts.EntitySchemaGroup{{
-			Name: "accounts",
-			Fields: []runtimecontracts.EntitySchemaField{
-				{Name: "status", Type: "string", Indexed: true},
-				{Name: "score", Type: "numeric(10,2)"},
-				{Name: "priority", Type: "integer", Nullable: true},
-				{Name: "active", Type: "boolean"},
-				{Name: "metadata", Type: "jsonb", Nullable: true},
-			},
-		}},
-	}
-	plans, err := store.GenerateEntityTableDDLs(schema)
-	if err != nil {
-		t.Fatalf("GenerateEntityTableDDLs: %v", err)
-	}
-	if err := pg.EnsureSchemaTables(context.Background(), plans); err != nil {
-		t.Fatalf("EnsureSchemaTables: %v", err)
-	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			EntitySchema: schema,
+			InitialStage: "queued",
+			EntitySchema: runtimecontracts.EntitySchema{
+				Groups: []runtimecontracts.EntitySchemaGroup{{
+					Name: "accounts",
+					Fields: []runtimecontracts.EntitySchemaField{
+						{Name: "status", Type: "string", Indexed: true},
+						{Name: "score", Type: "numeric(10,2)"},
+						{Name: "priority", Type: "integer", Nullable: true},
+						{Name: "active", Type: "boolean"},
+						{Name: "metadata", Type: "jsonb", Nullable: true},
+					},
+				}},
+			},
 		},
 	}
+	return newEntityToolTestExecutorWithBundle(t, actor, bundle)
+}
+
+func newEntityToolTestExecutorWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor) {
+	t.Helper()
+	_, db, _ := testutil.StartPostgres(t)
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 		SQLDB:          db,
 		WorkflowSource: semanticview.Wrap(bundle),

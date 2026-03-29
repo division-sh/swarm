@@ -30,6 +30,10 @@ type checkerContext struct {
 	source semanticview.Source
 	opts   Options
 
+	mcpDiscoveryLoaded bool
+	mcpDiscoveredTools map[string]runtimemcp.DiscoveredTool
+	mcpDiscoveryErrors []error
+
 	permissionLoaded   bool
 	permissionFindings []Finding
 
@@ -672,6 +676,7 @@ func (c *checkerContext) toolResolution() []Finding {
 	}
 	c.toolLoaded = true
 	mcpPrefixes := declaredMCPPrefixes(c.source)
+	discoveredTools := c.mcpDiscovered()
 	for agentID, agent := range c.source.AgentEntries() {
 		agentID = strings.TrimSpace(agentID)
 		for _, toolID := range agent.ConfiguredTools() {
@@ -679,10 +684,18 @@ func (c *checkerContext) toolResolution() []Finding {
 			if toolID == "" {
 				continue
 			}
-			if _, ok := c.source.ToolEntryForAgent(agentID, toolID); ok {
+			if entry, ok := c.source.ToolEntryForAgent(agentID, toolID); ok {
+				if mcpToolEntryRequiresDiscovery(entry) && !toolReferenceAllowedByMCPCatalog(toolID, discoveredTools, mcpPrefixes) {
+					c.toolFindings = append(c.toolFindings, Finding{
+						CheckID:  "tool_resolution",
+						Severity: "warning",
+						Message:  fmt.Sprintf("agent %s references missing tool %s", agentID, toolID),
+						Location: agentID,
+					})
+				}
 				continue
 			}
-			if toolReferenceAllowedByMCPPrefix(toolID, mcpPrefixes) {
+			if toolReferenceAllowedByMCPCatalog(toolID, discoveredTools, mcpPrefixes) {
 				continue
 			}
 			c.toolFindings = append(c.toolFindings, Finding{
@@ -1712,11 +1725,7 @@ func (c *checkerContext) mcp() []Finding {
 		return c.mcpFindings
 	}
 	c.mcpLoaded = true
-	if !c.opts.CheckMCPReachable {
-		return nil
-	}
-	client := runtimemcp.NewClient(c.opts.Credentials)
-	for _, refreshErr := range client.Refresh(c.ctx, c.source) {
+	for _, refreshErr := range c.mcpDiscoveryErrs() {
 		msg := strings.TrimSpace(refreshErr.Error())
 		c.mcpFindings = append(c.mcpFindings, Finding{
 			CheckID:  "mcp_server_reachable",
@@ -1726,6 +1735,29 @@ func (c *checkerContext) mcp() []Finding {
 		})
 	}
 	return c.mcpFindings
+}
+
+func (c *checkerContext) mcpDiscovered() map[string]runtimemcp.DiscoveredTool {
+	c.ensureMCPDiscovery()
+	return c.mcpDiscoveredTools
+}
+
+func (c *checkerContext) mcpDiscoveryErrs() []error {
+	c.ensureMCPDiscovery()
+	return c.mcpDiscoveryErrors
+}
+
+func (c *checkerContext) ensureMCPDiscovery() {
+	if c.mcpDiscoveryLoaded {
+		return
+	}
+	c.mcpDiscoveryLoaded = true
+	if !c.opts.CheckMCPReachable {
+		return
+	}
+	client := runtimemcp.NewClient(c.opts.Credentials)
+	c.mcpDiscoveryErrors = client.Refresh(c.ctx, c.source)
+	c.mcpDiscoveredTools = client.DiscoveredTools()
 }
 
 func (c *checkerContext) phantomProduces() []Finding {
@@ -1906,6 +1938,22 @@ func toolReferenceAllowedByMCPPrefix(toolID string, prefixes map[string]struct{}
 	}
 	_, exists := prefixes[strings.TrimSpace(prefix)]
 	return exists
+}
+
+func toolReferenceAllowedByMCPCatalog(toolID string, discovered map[string]runtimemcp.DiscoveredTool, prefixes map[string]struct{}) bool {
+	toolID = strings.TrimSpace(toolID)
+	if toolID == "" {
+		return false
+	}
+	if len(discovered) > 0 {
+		_, ok := discovered[toolID]
+		return ok
+	}
+	return toolReferenceAllowedByMCPPrefix(toolID, prefixes)
+}
+
+func mcpToolEntryRequiresDiscovery(entry runtimecontracts.ToolSchemaEntry) bool {
+	return strings.EqualFold(strings.TrimSpace(entry.HandlerType), "mcp")
 }
 
 func rootPolicyScope(scopes []semanticview.ProjectScope) semanticview.ProjectScope {

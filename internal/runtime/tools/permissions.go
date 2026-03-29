@@ -10,8 +10,6 @@ import (
 	"swarm/internal/runtime/semanticview"
 )
 
-const systemAdminPermission = "system_admin"
-
 var defaultPlatformPermissions = []string{
 	"agent_fire",
 	"agent_hire",
@@ -28,13 +26,13 @@ var defaultPlatformPermissions = []string{
 }
 
 var toolPermissionRequirements = map[string]string{
-	"agent_fire":           "agent_fire",
-	"agent_hire":           "agent_hire",
-	"agent_reconfigure":    "agent_reconfigure",
-	"configure_routing":    "configure_routing",
-	"human_task_request":   "human_task_request",
-	"human_task_decide":    "human_task_decide",
-	"schedule":             "schedule",
+	"agent_fire":         "agent_fire",
+	"agent_hire":         "agent_hire",
+	"agent_reconfigure":  "agent_reconfigure",
+	"configure_routing":  "configure_routing",
+	"human_task_request": "human_task_request",
+	"human_task_decide":  "human_task_decide",
+	"schedule":           "schedule",
 }
 
 func agentHasPermission(agent models.AgentConfig, perm string) bool {
@@ -228,7 +226,7 @@ func stringsFromPolicyValue(value any) ([]string, error) {
 }
 
 func knownPermissionNames(source semanticview.Source) map[string]struct{} {
-	out := make(map[string]struct{}, len(defaultPlatformPermissions)+1)
+	out := make(map[string]struct{}, len(defaultPlatformPermissions)+8)
 	for _, perm := range defaultPlatformPermissions {
 		perm = strings.TrimSpace(perm)
 		if perm != "" {
@@ -251,9 +249,21 @@ func knownPermissionNames(source semanticview.Source) map[string]struct{} {
 		if len(source.ProjectScopes()) == 0 && len(source.FlowScopes()) == 0 {
 			collectPermissionBundleExtensions(out, source.ResolvedPolicyForFlow(""))
 		}
+		collectToolPermissionExtensions(out, source)
 	}
-	out[systemAdminPermission] = struct{}{}
 	return out
+}
+
+func collectToolPermissionExtensions(out map[string]struct{}, source semanticview.Source) {
+	if source == nil {
+		return
+	}
+	for toolID, entry := range source.ToolEntries() {
+		perm := strings.TrimSpace(toolRequiredPermission(toolID, entry))
+		if perm != "" {
+			out[perm] = struct{}{}
+		}
+	}
 }
 
 func collectPermissionBundleExtensions(out map[string]struct{}, policy runtimecontracts.PolicyDocument) {

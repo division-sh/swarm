@@ -231,20 +231,31 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 	runtimebus.PauseRuntimeIngress()
 	log.Printf("runtime pause breaker tripped: reason=%s agent=%s event=%s err=%v", reason, agentID, eventID, err)
 	now := time.Now().UTC()
+	entityID := ""
+	flowInstance := ""
+	am.mu.RLock()
+	if cfg, ok := am.agentCfg[agentID]; ok {
+		entityID = cfg.EffectiveEntityID()
+		flowInstance = flowPathFromAgentConfig(cfg)
+	}
+	am.mu.RUnlock()
 	if authRequired {
-		if err := am.bus.Publish(am.runtimeContext(), events.Event{
+		authEvt := events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType("platform.auth_required"),
 			SourceAgent: "runtime",
 			Payload: mustJSON(map[string]any{
-				"agent_id":  strings.TrimSpace(agentID),
-				"tool_name": nil,
-				"action":    "llm_call",
-				"reason":    reason,
-				"timestamp": now.Format(time.RFC3339Nano),
+				"agent_id":      strings.TrimSpace(agentID),
+				"entity_id":     entityID,
+				"flow_instance": flowInstance,
+				"tool_name":     nil,
+				"action":        "llm_call",
+				"reason":        reason,
+				"timestamp":     now.Format(time.RFC3339Nano),
 			}),
 			CreatedAt: now,
-		}); err != nil {
+		}.WithEntityID(entityID)
+		if err := am.bus.Publish(am.runtimeContext(), authEvt); err != nil {
 			RuntimeWarn("agent-manager", "platform.auth_required publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
 		}
 	}
@@ -337,6 +348,17 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		entityID = cfg.EffectiveEntityID()
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
+	count, sampleEvents, shouldEmit := am.recordDeadLetterEscalation(flowInstance, deadLetterEscalationSample{
+		at:         time.Now().UTC(),
+		eventID:    strings.TrimSpace(eventID),
+		agentID:    strings.TrimSpace(agentID),
+		entityID:   entityID,
+		retryCount: receipt.RetryCount,
+		errText:    strings.TrimSpace(receipt.Error),
+	})
+	if !shouldEmit {
+		return
+	}
 
 	if err := am.bus.Publish(am.runtimeContext(), events.Event{
 		ID:          uuid.NewString(),
@@ -344,21 +366,57 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		SourceAgent: "runtime",
 		Payload: mustJSON(map[string]any{
 			"flow_instance":     flowInstance,
-			"dead_letter_count": 1,
-			"window_minutes":    0,
-			"sample_events": []map[string]any{{
-				"event_id":    strings.TrimSpace(eventID),
-				"agent_id":    strings.TrimSpace(agentID),
-				"entity_id":   entityID,
-				"retry_count": receipt.RetryCount,
-				"error":       strings.TrimSpace(receipt.Error),
-			}},
-			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			"dead_letter_count": count,
+			"window_minutes":    int(deadLetterEscalationWindow / time.Minute),
+			"sample_events":     sampleEvents,
+			"timestamp":         time.Now().UTC().Format(time.RFC3339Nano),
 		}),
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		RuntimeWarn("agent-manager", "platform.dead_letter_escalation publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
 	}
+}
+
+func (am *AgentManager) recordDeadLetterEscalation(flowInstance string, sample deadLetterEscalationSample) (int, []map[string]any, bool) {
+	flowInstance = strings.TrimSpace(flowInstance)
+	key := flowInstance
+	if key == "" {
+		key = "__global__"
+	}
+	cutoff := sample.at.Add(-deadLetterEscalationWindow)
+
+	am.deadLetterMu.Lock()
+	defer am.deadLetterMu.Unlock()
+
+	window := am.deadLetterWindows[key][:0]
+	for _, item := range am.deadLetterWindows[key] {
+		if item.at.Before(cutoff) {
+			continue
+		}
+		window = append(window, item)
+	}
+	window = append(window, sample)
+	am.deadLetterWindows[key] = window
+
+	if len(window) < deadLetterEscalationThreshold {
+		return len(window), nil, false
+	}
+	if last := am.deadLetterLastRaised[key]; !last.IsZero() && sample.at.Sub(last) < deadLetterEscalationWindow {
+		return len(window), nil, false
+	}
+	am.deadLetterLastRaised[key] = sample.at
+
+	sampleEvents := make([]map[string]any, 0, len(window))
+	for _, item := range window {
+		sampleEvents = append(sampleEvents, map[string]any{
+			"event_id":    item.eventID,
+			"agent_id":    item.agentID,
+			"entity_id":   item.entityID,
+			"retry_count": item.retryCount,
+			"error":       item.errText,
+		})
+	}
+	return len(window), sampleEvents, true
 }
 
 func (am *AgentManager) resolveManagerAgentID(agentID string) string {

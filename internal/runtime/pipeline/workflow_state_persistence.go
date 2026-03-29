@@ -117,10 +117,33 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 	}
 	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		bucket := workflowMutableStateBucket(instance, "evidence")
-		bucket[bucketID] = cloneMap(payload)
+		workflowAppendEvidence(bucket, bucketID, payload)
 		workflowSetStateBucket(instance, "evidence", bucket)
 	})
 	return true
+}
+
+func workflowAppendEvidence(bucket map[string]any, bucketID string, payload map[string]any) {
+	if bucket == nil {
+		return
+	}
+	bucketID = strings.TrimSpace(bucketID)
+	if bucketID == "" {
+		return
+	}
+	entry := cloneMap(payload)
+	switch typed := bucket[bucketID].(type) {
+	case nil:
+		bucket[bucketID] = []any{entry}
+	case []any:
+		next := append([]any{}, typed...)
+		next = append(next, entry)
+		bucket[bucketID] = next
+	case map[string]any:
+		bucket[bucketID] = []any{cloneMap(typed), entry}
+	default:
+		bucket[bucketID] = []any{typed, entry}
+	}
 }
 
 func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {

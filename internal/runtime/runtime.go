@@ -493,7 +493,7 @@ func (rt *Runtime) selfCheck() error {
 	evt := events.Event{
 		ID:          uuid.NewString(),
 		Type:        t,
-		SourceAgent: "bootstrap",
+		SourceAgent: "runtime",
 		Payload:     payload,
 		CreatedAt:   time.Now(),
 	}
