@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	models "swarm/internal/runtime/core/actors"
@@ -47,7 +49,7 @@ func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, erro
 			record, _ = bundleAgentRecordByLogicalID(bundle, agentID)
 		}
 		for _, dir := range dirs[agentID] {
-			prompt, found, err := loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, record.Source, mode)
+			prompt, found, err := loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, record.Source, cfg, mode)
 			if err != nil {
 				return "", false, err
 			}
@@ -297,10 +299,10 @@ func promptContractsRepoRoot() string {
 }
 
 func loadPromptForAgentFromDir(repoRoot, promptsDir, agentID, mode string) (string, bool, error) {
-	return loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, AgentRegistryEntry{}, ContractItemSource{}, mode)
+	return loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, AgentRegistryEntry{}, ContractItemSource{}, models.AgentConfig{}, mode)
 }
 
-func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, mode string) (string, bool, error) {
+func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, cfg models.AgentConfig, mode string) (string, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if agentID == "" || strings.TrimSpace(promptsDir) == "" {
@@ -317,7 +319,7 @@ func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry Agent
 			}
 			return "", false, err
 		}
-		rendered, err := renderPromptWithRuntimeVariables(repoRoot, string(raw), source)
+		rendered, err := renderPromptWithRuntimeVariables(repoRoot, string(raw), source, cfg)
 		if err != nil {
 			return "", false, fmt.Errorf("render prompt %s: %w", filepath.Base(candidate), err)
 		}
@@ -365,23 +367,23 @@ func promptWorkspaceRoleRef(entry AgentRegistryEntry) string {
 	return workspaceClass + "-" + role
 }
 
-func renderPromptWithRuntimeVariables(repoRoot, promptText string, source ContractItemSource) (string, error) {
+func renderPromptWithRuntimeVariables(repoRoot, promptText string, source ContractItemSource, cfg models.AgentConfig) (string, error) {
 	if !promptTokenPattern.MatchString(promptText) {
 		return promptText, nil
 	}
-	vars, err := promptRuntimeVariables(repoRoot, source)
+	vars, err := promptRuntimeVariables(repoRoot, source, cfg)
 	if err != nil {
 		return promptText, nil
 	}
 	return renderPromptTemplatePreservingUnknown(promptText, vars), nil
 }
 
-func promptRuntimeVariables(repoRoot string, source ContractItemSource) (map[string]any, error) {
+func promptRuntimeVariables(repoRoot string, source ContractItemSource, cfg models.AgentConfig) (map[string]any, error) {
 	bundle, err := promptWorkflowBundle()
 	if err != nil {
 		return nil, fmt.Errorf("load workflow contract bundle: %w", err)
 	}
-	scopeKey := promptVariableScopeKey(source)
+	scopeKey := promptVariableScopeKey(source, cfg)
 	promptVariablesMu.RLock()
 	if vars, ok := promptVariables[scopeKey]; ok {
 		defer promptVariablesMu.RUnlock()
@@ -389,15 +391,7 @@ func promptRuntimeVariables(repoRoot string, source ContractItemSource) (map[str
 	}
 	promptVariablesMu.RUnlock()
 
-	policy := promptResolvedPolicy(bundle, source)
-	vars := map[string]any{}
-	for key, value := range policy.Values {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		vars[key] = value.Value
-	}
+	vars := promptVariableValues(bundle, source, cfg)
 
 	promptVariablesMu.Lock()
 	promptVariables[scopeKey] = clonePromptVariables(vars)
@@ -405,8 +399,14 @@ func promptRuntimeVariables(repoRoot string, source ContractItemSource) (map[str
 	return vars, nil
 }
 
-func promptVariableScopeKey(source ContractItemSource) string {
-	return strings.TrimSpace(source.PackageKey) + "|" + strings.TrimSpace(source.FlowID)
+func promptVariableScopeKey(source ContractItemSource, cfg models.AgentConfig) string {
+	cacheSeed := strings.TrimSpace(source.PackageKey) + "|" + strings.TrimSpace(source.FlowID)
+	configSeed := strings.TrimSpace(string(cfg.Config))
+	dateSeed := time.Now().In(time.Local).Format("2006-01-02")
+	if configSeed == "" {
+		return cacheSeed + "|" + dateSeed
+	}
+	return cacheSeed + "|" + configSeed + "|" + dateSeed
 }
 
 func clonePromptVariables(in map[string]any) map[string]any {
@@ -434,6 +434,113 @@ func promptResolvedPolicy(bundle *WorkflowContractBundle, source ContractItemSou
 		}
 	}
 	return out
+}
+
+func promptVariableValues(bundle *WorkflowContractBundle, source ContractItemSource, cfg models.AgentConfig) map[string]any {
+	vars := promptRuntimeTokens(cfg)
+	for key, value := range promptEntityStateFields(cfg.Config) {
+		vars[key] = value
+	}
+	policy := promptResolvedPolicy(bundle, source)
+	for key, value := range policy.Values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		vars[key] = value.Value
+	}
+	for key, value := range promptInstanceVariables(cfg.Config) {
+		vars[key] = value
+	}
+	return vars
+}
+
+func promptRuntimeTokens(cfg models.AgentConfig) map[string]any {
+	out := map[string]any{
+		"current_date": time.Now().In(time.Local).Format("2006-01-02"),
+		"agent_id":     strings.TrimSpace(cfg.ID),
+	}
+	if config := parsePromptConfig(cfg.Config); len(config) > 0 {
+		if flowPath := strings.TrimSpace(asPromptString(config["flow_path"])); flowPath != "" {
+			out["flow_instance_path"] = flowPath
+		}
+	}
+	return out
+}
+
+func promptInstanceVariables(raw json.RawMessage) map[string]any {
+	config := parsePromptConfig(raw)
+	if len(config) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for key, value := range config {
+		key = strings.TrimSpace(key)
+		if key == "" || promptReservedConfigKeys()[key] {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func promptEntityStateFields(raw json.RawMessage) map[string]any {
+	config := parsePromptConfig(raw)
+	if len(config) == 0 {
+		return nil
+	}
+	if entityState, ok := config["entity_state"].(map[string]any); ok {
+		if fields, ok := entityState["fields"].(map[string]any); ok && len(fields) > 0 {
+			return clonePromptVariables(fields)
+		}
+	}
+	if fields, ok := config["fields"].(map[string]any); ok && len(fields) > 0 {
+		return clonePromptVariables(fields)
+	}
+	return nil
+}
+
+func parsePromptConfig(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
+		return nil
+	}
+	return obj
+}
+
+func promptReservedConfigKeys() map[string]bool {
+	return map[string]bool{
+		"system_prompt":      true,
+		"subscriptions":      true,
+		"workspace_class":    true,
+		"flow_path":          true,
+		"manager_fallback":   true,
+		"model_tier":         true,
+		"conversation_mode":  true,
+		"max_turns_per_task": true,
+		"constraints":        true,
+		"tools":              true,
+		"allowed_tools":      true,
+		"native_tools":       true,
+		"emit_events":        true,
+		"fields":             true,
+		"entity_state":       true,
+	}
+}
+
+func asPromptString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprintf("%v", typed)
+	}
 }
 
 func promptPackagePolicyLineage(bundle *WorkflowContractBundle, packageKey string) []ProjectContractView {

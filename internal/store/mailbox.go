@@ -277,7 +277,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]ru
 		)
 		UPDATE mailbox m
 		SET status = 'expired',
-		    decision = COALESCE(NULLIF(m.decision, ''), 'timed_out'),
+		    decision = COALESCE(NULLIF(m.decision, ''), ''),
 		    decision_notes = COALESCE(NULLIF(m.decision_notes, ''), 'Timed out without human decision'),
 		    decided_at = COALESCE(m.decided_at, now())
 		FROM due
@@ -509,7 +509,7 @@ func (s *PostgresStore) expireMailboxItemsSpec(ctx context.Context, limit int) (
 		)
 		UPDATE mailbox m
 		SET status = 'expired',
-		    decision = COALESCE(NULLIF(m.decision, ''), 'timed_out'),
+		    decision = COALESCE(NULLIF(m.decision, ''), ''),
 		    decision_notes = COALESCE(NULLIF(m.decision_notes, ''), 'Timed out without human decision'),
 		    decided_at = COALESCE(m.decided_at, now())
 		FROM due

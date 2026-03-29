@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -87,4 +88,54 @@ func TestPromptResolvedPolicy_UsesPackageAndFlowPrecedence(t *testing.T) {
 	if got := flowPolicy.Values["priority"].Value; got != "medium" {
 		t.Fatalf("flow priority = %#v, want medium", got)
 	}
+}
+
+func TestPromptVariableValues_UsesSpecResolutionOrder(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		Policy: PolicyDocument{Values: map[string]PolicyValue{
+			"team_name":     {Value: "policy"},
+			"customer_tier": {Value: "gold"},
+			"current_date":  {Value: "policy-date"},
+		}},
+	}
+	cfg := models.AgentConfig{
+		ID: "agent-42",
+		Config: mustPromptJSON(t, map[string]any{
+			"team_name": "instance",
+			"flow_path": "flows/demo/inst-1",
+			"fields": map[string]any{
+				"team_name": "entity",
+				"score":     7,
+			},
+		}),
+	}
+
+	vars := promptVariableValues(bundle, ContractItemSource{}, cfg)
+	if got := vars["team_name"]; got != "instance" {
+		t.Fatalf("team_name = %#v, want instance", got)
+	}
+	if got := vars["customer_tier"]; got != "gold" {
+		t.Fatalf("customer_tier = %#v, want gold", got)
+	}
+	if got := vars["score"]; got != float64(7) {
+		t.Fatalf("score = %#v, want 7", got)
+	}
+	if got := vars["current_date"]; got != "policy-date" {
+		t.Fatalf("current_date = %#v, want policy-date", got)
+	}
+	if got := vars["agent_id"]; got != "agent-42" {
+		t.Fatalf("agent_id = %#v, want agent-42", got)
+	}
+	if got := vars["flow_instance_path"]; got != "flows/demo/inst-1" {
+		t.Fatalf("flow_instance_path = %#v, want flows/demo/inst-1", got)
+	}
+}
+
+func mustPromptJSON(t *testing.T, value any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal prompt json: %v", err)
+	}
+	return raw
 }

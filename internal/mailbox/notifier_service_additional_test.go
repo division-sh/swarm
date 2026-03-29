@@ -202,7 +202,7 @@ func TestMailbox_NormalizeDecisionAction(t *testing.T) {
 		{"reject", "decided", "reject"},
 		{"more-data", "decided", "more-data"},
 		{"deferred", "decided", "deferred"},
-		{"timeout", "expired", "timed_out"},
+		{"timeout", "expired", "timeout"},
 	} {
 		out, err := NormalizeDecisionAction(tc.in)
 		if err != nil {

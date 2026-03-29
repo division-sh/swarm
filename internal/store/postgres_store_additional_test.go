@@ -390,8 +390,8 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	for _, it := range expired {
 		if it.ID == expID {
 			found = true
-			if it.Status != "expired" || it.Decision != "timed_out" {
-				t.Fatalf("expected expired/timed_out, got %+v", it)
+			if it.Status != "expired" || it.Decision != "" {
+				t.Fatalf("expected expired/empty-decision, got %+v", it)
 			}
 		}
 	}

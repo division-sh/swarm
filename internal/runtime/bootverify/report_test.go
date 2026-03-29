@@ -487,8 +487,18 @@ func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 	if got := len(bootCheckRegistry); got != 32 {
 		t.Fatalf("bootCheckRegistry count = %d, want 32", got)
 	}
-	if got := len(supplementalChecks); got != 2 {
-		t.Fatalf("supplementalChecks count = %d, want 2", got)
+	if got := len(supplementalChecks); got != 3 {
+		t.Fatalf("supplementalChecks count = %d, want 3", got)
+	}
+}
+
+func TestRun_FlagsMissingMinimumRequiredFiles(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "impl.minimum_required_files", "no agents.yaml and no child flows") {
+		t.Fatalf("expected impl.minimum_required_files error, got %#v", report.Errors())
 	}
 }
 

@@ -442,8 +442,15 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	if rt.Stores.SQLDB != nil && rt.Logger != nil {
 	}
+	var bootCheck <-chan events.Event
+	if rt.Options.SelfCheck && rt.Bus != nil {
+		bootCheck = rt.Bus.Subscribe("bootstrap-self-check", events.EventType("platform.boot"))
+	}
+	if err := rt.publishBootCompleted(context.Background()); err != nil {
+		return fmt.Errorf("publish platform.boot: %w", err)
+	}
 	if rt.Options.SelfCheck {
-		if err := rt.selfCheck(); err != nil {
+		if err := rt.verifyBootPublished(bootCheck); err != nil {
 			return fmt.Errorf("self-check failed: %w", err)
 		}
 	}
@@ -470,10 +477,11 @@ func (rt *Runtime) Wait(ctx context.Context) {
 	<-ctx.Done()
 }
 
-func (rt *Runtime) selfCheck() error {
-	ctx := context.Background()
+func (rt *Runtime) publishBootCompleted(ctx context.Context) error {
+	if rt == nil || rt.Bus == nil {
+		return nil
+	}
 	t := events.EventType("platform.boot")
-	ch := rt.Bus.Subscribe("bootstrap-self-check", t)
 	var flowCount, nodeCount, agentCount, eventCount int
 	if rt != nil && rt.Options.WorkflowModule != nil {
 		if source := rt.Options.WorkflowModule.SemanticSource(); source != nil {
@@ -497,8 +505,15 @@ func (rt *Runtime) selfCheck() error {
 		Payload:     payload,
 		CreatedAt:   time.Now(),
 	}
-	if err := rt.Bus.Publish(ctx, evt); err != nil {
-		return err
+	return rt.Bus.Publish(ctx, evt)
+}
+
+func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
+	if rt == nil || !rt.Options.SelfCheck {
+		return nil
+	}
+	if ch == nil {
+		return fmt.Errorf("platform.boot subscription is not configured")
 	}
 	select {
 	case <-ch:

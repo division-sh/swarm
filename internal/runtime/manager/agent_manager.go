@@ -279,7 +279,6 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) models.Agent
 	if prompt == "" {
 		return cfg
 	}
-	prompt = ExpandConfigPromptTemplate(prompt, cfg.Config)
 	cfg.Config = withSystemPrompt(cfg.Config, prompt)
 	return cfg
 }

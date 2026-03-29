@@ -246,7 +246,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 		)
 	}
 	if found && strings.TrimSpace(prompt) != "" {
-		prompt = strings.TrimSpace(expandConfigPromptTemplate(prompt, a.cfg.Config))
+		prompt = strings.TrimSpace(prompt)
 		prompt = appendPromptPostamble(prompt)
 		a.promptCache[cacheKey] = prompt
 		if cacheKey == "" {

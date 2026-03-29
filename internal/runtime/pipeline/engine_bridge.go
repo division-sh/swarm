@@ -15,14 +15,15 @@ import (
 type HandlerOutcomeStatus string
 
 const (
-	HandlerOutcomeCompleted HandlerOutcomeStatus = "completed"
-	HandlerOutcomeBlocked   HandlerOutcomeStatus = "blocked"
-	HandlerOutcomeDiscarded HandlerOutcomeStatus = "discard"
-	HandlerOutcomeRejected  HandlerOutcomeStatus = "reject"
-	HandlerOutcomeKilled    HandlerOutcomeStatus = "kill"
-	HandlerOutcomeEscalated HandlerOutcomeStatus = "escalate"
-	HandlerOutcomeWaiting   HandlerOutcomeStatus = "waiting"
-	HandlerOutcomeFannedOut HandlerOutcomeStatus = "fanned_out"
+	HandlerOutcomeCompleted      HandlerOutcomeStatus = "completed"
+	HandlerOutcomeBlocked        HandlerOutcomeStatus = "blocked"
+	HandlerOutcomeDiscarded      HandlerOutcomeStatus = "discard"
+	HandlerOutcomeRejected       HandlerOutcomeStatus = "reject"
+	HandlerOutcomeTerminalReject HandlerOutcomeStatus = "terminal_reject"
+	HandlerOutcomeKilled         HandlerOutcomeStatus = "kill"
+	HandlerOutcomeEscalated      HandlerOutcomeStatus = "escalate"
+	HandlerOutcomeWaiting        HandlerOutcomeStatus = "waiting"
+	HandlerOutcomeFannedOut      HandlerOutcomeStatus = "fanned_out"
 )
 
 type handlerExecutionOutcome struct {
@@ -186,7 +187,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	if terminalStateHandlerRejected(pc, triggerCtx.State, handler) {
 		outcome := &handlerExecutionOutcome{
-			Status:          HandlerOutcomeRejected,
+			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
 		}
 		plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type)), handler)

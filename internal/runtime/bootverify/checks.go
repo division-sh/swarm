@@ -132,6 +132,9 @@ type checkerContext struct {
 
 	deprecatedLoaded   bool
 	deprecatedFindings []Finding
+
+	minimumFilesLoaded   bool
+	minimumFilesFindings []Finding
 }
 
 var bootCheckRegistry = []Check{
@@ -172,6 +175,7 @@ var bootCheckRegistry = []Check{
 var supplementalChecks = []Check{
 	{ID: "impl.platform_metadata_validation", Severity: "error", Run: checkPlatformMetadataValidation},
 	{ID: "impl.deprecated_contract_alias", Severity: "warning", Run: checkDeprecatedContractAlias},
+	{ID: "impl.minimum_required_files", Severity: "error", Run: checkMinimumRequiredFiles},
 }
 
 func newCheckerContext(ctx context.Context, source semanticview.Source, opts Options) *checkerContext {
@@ -228,6 +232,7 @@ func checkTimerValidation(c *checkerContext) []Finding               { return c.
 func checkWritePinOwnershipValidation(c *checkerContext) []Finding   { return c.writePinOwnership() }
 func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
 func checkDeprecatedContractAlias(c *checkerContext) []Finding       { return c.deprecatedAliases() }
+func checkMinimumRequiredFiles(c *checkerContext) []Finding          { return c.minimumRequiredFiles() }
 
 func (c *checkerContext) eventWarningsByCheck(checkID string) []Finding {
 	items := c.eventWarnings()
@@ -643,6 +648,40 @@ func (c *checkerContext) deprecatedAliases() []Finding {
 		}
 	}
 	return c.deprecatedFindings
+}
+
+func (c *checkerContext) minimumRequiredFiles() []Finding {
+	if c.minimumFilesLoaded {
+		return c.minimumFilesFindings
+	}
+	c.minimumFilesLoaded = true
+	bundle, ok := semanticview.Bundle(c.source)
+	if !ok || bundle == nil {
+		return nil
+	}
+	if strings.TrimSpace(bundle.Paths.ProjectAgentsFile) == "" && len(bundle.Paths.Flows) == 0 {
+		c.minimumFilesFindings = append(c.minimumFilesFindings, Finding{
+			CheckID:  "impl.minimum_required_files",
+			Severity: "error",
+			Message:  "root flow has no agents.yaml and no child flows",
+			Location: "root",
+		})
+	}
+	for _, flow := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(flow.Paths.ID)
+		if flowID == "" {
+			continue
+		}
+		if strings.TrimSpace(flow.Paths.AgentsFile) == "" && len(flow.Children) == 0 {
+			c.minimumFilesFindings = append(c.minimumFilesFindings, Finding{
+				CheckID:  "impl.minimum_required_files",
+				Severity: "error",
+				Message:  fmt.Sprintf("flow %s has no agents.yaml and no child flows", flowID),
+				Location: flowID,
+			})
+		}
+	}
+	return c.minimumFilesFindings
 }
 
 func (c *checkerContext) workspace() []Finding {
@@ -1242,6 +1281,24 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			if actionID := strings.TrimSpace(handler.Action.ID); actionID != "" {
+				if normalizeWorkflowBuiltinActionID(actionID) == "create_flow_instance" {
+					templateID := strings.TrimSpace(handler.Action.Template)
+					if templateID == "" {
+						c.handlerFindings = append(c.handlerFindings, Finding{
+							CheckID:  "handler_field_compliance",
+							Severity: "error",
+							Message:  fmt.Sprintf("node %s handler %s create_flow_instance is missing template", nodeID, eventType),
+							Location: nodeID,
+						})
+					} else if !flowSchemaIsTemplate(c.source, templateID) {
+						c.handlerFindings = append(c.handlerFindings, Finding{
+							CheckID:  "handler_field_compliance",
+							Severity: "error",
+							Message:  fmt.Sprintf("node %s handler %s create_flow_instance template %s is not mode: template", nodeID, eventType, templateID),
+							Location: nodeID,
+						})
+					}
+				}
 				if !handlerActionExecutable(c.source, actionID) {
 					c.handlerFindings = append(c.handlerFindings, Finding{
 						CheckID:  "handler_field_compliance",
@@ -1430,6 +1487,15 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 				if target == "" {
 					continue
 				}
+				if flowIsStateless(c.source, flowID) {
+					c.stateFindings = append(c.stateFindings, Finding{
+						CheckID:  "state_machine_coherence",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s advances_to is invalid in stateless flow %s", nodeID, eventType, validationFlowLabel(flowID)),
+						Location: nodeID,
+					})
+					continue
+				}
 				if _, ok := declaredStates[target]; ok {
 					continue
 				}
@@ -1445,6 +1511,15 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 	for _, transition := range c.source.DerivedHandlerTransitions() {
 		target := strings.TrimSpace(transition.AdvancesTo)
 		if target == "" {
+			continue
+		}
+		if flowIsStateless(c.source, strings.TrimSpace(transition.FlowID)) {
+			c.stateFindings = append(c.stateFindings, Finding{
+				CheckID:  "state_machine_coherence",
+				Severity: "error",
+				Message:  fmt.Sprintf("handler transition %s advances_to is invalid in stateless flow %s", transition.ID, validationFlowLabel(strings.TrimSpace(transition.FlowID))),
+				Location: strings.TrimSpace(transition.ID),
+			})
 			continue
 		}
 		validTargets := declaredStatesForFlow(c.source, strings.TrimSpace(transition.FlowID))
@@ -2267,6 +2342,28 @@ func flowRequiresStaticSubscriptionValidation(source semanticview.Source, flowID
 		return true
 	}
 	return !strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
+}
+
+func flowSchemaIsTemplate(source semanticview.Source, flowID string) bool {
+	if source == nil {
+		return false
+	}
+	schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID))
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
+}
+
+func flowIsStateless(source semanticview.Source, flowID string) bool {
+	if source == nil {
+		return false
+	}
+	schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID))
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(schema.InitialState) == "" && len(schema.States) == 0
 }
 
 func agentSubscriptions(agent runtimecontracts.AgentRegistryEntry) []string {

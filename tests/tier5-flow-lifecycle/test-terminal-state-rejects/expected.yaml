@@ -8,6 +8,6 @@ trigger:
         entity_id: ent-001
 
 expected:
-  handler_outcome: reject
+  handler_outcome: terminal_reject
   entity_state: done
   emitted_events: [task.finished]

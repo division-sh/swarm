@@ -4,11 +4,11 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type FlowInstanceActivationRequest struct {
@@ -42,6 +42,12 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	templateID := strings.TrimSpace(plan.Template)
 	if templateID == "" {
 		return false
+	}
+	if source := pc.SemanticSource(); source != nil {
+		schema, ok := source.FlowSchemaByID(templateID)
+		if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			return false
+		}
 	}
 	entityID := workflowEventEntityID(triggerCtx.Event)
 	payload := parsePayloadMap(triggerCtx.Event.Payload)

@@ -127,6 +127,31 @@ func TestExecuteNodeContractHandlerPublishesCollectedEventsWithoutParentCollecto
 	}
 }
 
+func TestExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntity(t *testing.T) {
+	pc := &PipelineCoordinator{
+		module: &previewWorkflowModule{
+			workflow: NewWorkflowDefinition("demo", []WorkflowStage{
+				{Name: "queued"},
+				{Name: "done", Terminal: true},
+			}, nil),
+		},
+	}
+
+	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
+		Event: events.Event{Type: events.EventType("custom.trigger")}.WithEntityID("ent-1"),
+		State: WorkflowState{Stage: WorkflowStateID("done"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if result.Outcome == nil || result.Outcome.Status != HandlerOutcomeTerminalReject {
+		t.Fatalf("outcome = %#v, want terminal_reject", result.Outcome)
+	}
+}
+
 func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{

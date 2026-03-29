@@ -907,8 +907,9 @@ engine:
         → tool: emit_score_dimension_complete'
       behavior: Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
         the payload, attaches sender context, and publishes the event.
-      universal_tools: 'Some tools are auto-granted to all agents without explicit tools listing: agent_message, mailbox_send.
-        These are "universal" tools.'
+      universal_tools: 'The following tools are auto-granted to all agents without explicit tools listing: agent_message,
+        mailbox_send, get_entity, save_entity_field, query_entities, query_metrics, search_entities. These are "universal"
+        tools. See tool_model.agent_tool_filtering.universal_tools for the authoritative list.'
     task_mode_audit: 'Agents in task conversation_mode DO get an agent_sessions row. The conversation transcript (reasoning,
       tool calls, results) is persisted after each invocation for audit and debugging. However, the transcript is write-only —
       it is NEVER loaded back for subsequent invocations. Each event invocation starts with a fresh context. Task mode means

@@ -2741,7 +2741,7 @@ func catalogNodeScope(node catalogNodeContract) string {
 
 func catalogApplyTerminalEventPolicy(result catalogRunResult, state, event string) catalogRunResult {
 	result.entityState = state
-	result.handlerOutcome = "reject"
+	result.handlerOutcome = "terminal_reject"
 	return result
 }
 

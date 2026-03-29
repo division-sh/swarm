@@ -135,7 +135,7 @@ func Decide(ctx context.Context, store runtimetools.MailboxPersistence, id, acti
 	if store == nil {
 		return DecisionOutcome{}, fmt.Errorf("mailbox store is required")
 	}
-	outcome, err := NormalizeDecisionAction(action)
+	outcome, err := DecisionOutcomeForAction(action)
 	if err != nil {
 		return DecisionOutcome{}, err
 	}
@@ -146,17 +146,22 @@ func Decide(ctx context.Context, store runtimetools.MailboxPersistence, id, acti
 }
 
 func NormalizeDecisionAction(action string) (DecisionOutcome, error) {
-	a := strings.ToLower(strings.TrimSpace(action))
-	a = strings.ReplaceAll(a, "_", "-")
-	a = strings.ReplaceAll(a, " ", "-")
-	if a == "" {
+	return DecisionOutcomeForAction(action)
+}
+
+func DecisionOutcomeForAction(action string) (DecisionOutcome, error) {
+	raw := strings.TrimSpace(action)
+	if raw == "" {
 		return DecisionOutcome{}, fmt.Errorf("invalid mailbox decision action: %s", action)
 	}
-	switch a {
-	case "skip", "timed-out", "timeout":
-		return DecisionOutcome{Status: "expired", Decision: "timed_out"}, nil
+	normalized := strings.ToLower(raw)
+	normalized = strings.ReplaceAll(normalized, "_", "-")
+	normalized = strings.ReplaceAll(normalized, " ", "-")
+	switch normalized {
+	case "skip", "timed-out", "timeout", "expired":
+		return DecisionOutcome{Status: "expired", Decision: raw}, nil
 	default:
-		return DecisionOutcome{Status: "decided", Decision: a}, nil
+		return DecisionOutcome{Status: "decided", Decision: raw}, nil
 	}
 }
 
