@@ -34,6 +34,7 @@ type Resolver interface {
 type Lifecycle interface {
 	Resolver
 	ValidateSource(ctx context.Context, source semanticview.Source) error
+	EnsurePrereqs(ctx context.Context) error
 	EnsureSystemWorkspaces(ctx context.Context) error
 	EnsureEntityWorkspace(ctx context.Context, entityID string) error
 	StopEntityWorkspace(ctx context.Context, entityID string) error
@@ -198,6 +199,22 @@ func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.
 	}
 	if strings.TrimSpace(m.cfg.WorkspaceImage) == "" {
 		return fmt.Errorf("workspace validation failed: workspace image is required")
+	}
+	return nil
+}
+
+func (m *DockerManager) EnsurePrereqs(ctx context.Context) error {
+	if m == nil {
+		return fmt.Errorf("workspace manager is required")
+	}
+	if err := m.ensureDockerAvailable(ctx); err != nil {
+		return err
+	}
+	if err := m.ensureWorkspaceNetwork(ctx); err != nil {
+		return err
+	}
+	if err := m.ensureWorkspaceImage(ctx); err != nil {
+		return err
 	}
 	return nil
 }
@@ -466,6 +483,46 @@ func (m *DockerManager) standardMountArgs() []string {
 		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.ContractsMountPoint)))
 	}
 	return args
+}
+
+func (m *DockerManager) ensureDockerAvailable(ctx context.Context) error {
+	if _, err := m.RunDocker(ctx, "version", "--format", "{{.Server.Version}}"); err != nil {
+		return fmt.Errorf("workspace prerequisite failed: docker is not available: %w", err)
+	}
+	return nil
+}
+
+func (m *DockerManager) ensureWorkspaceNetwork(ctx context.Context) error {
+	network := strings.TrimSpace(m.cfg.WorkspaceNetwork)
+	if network == "" {
+		return nil
+	}
+	if _, err := m.RunDocker(ctx, "network", "inspect", network); err == nil {
+		return nil
+	}
+	if _, err := m.RunDocker(ctx, "network", "create", network); err != nil {
+		return fmt.Errorf("workspace prerequisite failed: ensure network %s: %w", network, err)
+	}
+	return nil
+}
+
+func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
+	image := strings.TrimSpace(m.cfg.WorkspaceImage)
+	if image == "" {
+		return fmt.Errorf("workspace prerequisite failed: workspace image is required")
+	}
+	if _, err := m.RunDocker(ctx, "image", "inspect", image); err == nil {
+		return nil
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	dockerfile := filepath.Join(repoRoot, "Dockerfile.workspace")
+	if _, statErr := os.Stat(dockerfile); statErr != nil {
+		return fmt.Errorf("workspace prerequisite failed: inspect image %s and Dockerfile.workspace is unavailable: %w", image, statErr)
+	}
+	if _, err := m.RunDocker(ctx, "build", "-t", image, "-f", dockerfile, repoRoot); err != nil {
+		return fmt.Errorf("workspace prerequisite failed: build image %s: %w", image, err)
+	}
+	return nil
 }
 
 func (m *DockerManager) validateSharedMounts(ctx context.Context) error {

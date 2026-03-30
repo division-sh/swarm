@@ -185,3 +185,92 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 		t.Fatalf("expected shared flow workspace volume, got %v", created)
 	}
 }
+
+func TestEnsurePrereqs_CreatesMissingNetworkAndBuildsMissingImage(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = "test-network"
+	cfg.WorkspaceImage = "test-image:latest"
+	manager.SetConfig(cfg)
+
+	var calls [][]string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, append([]string{}, args...))
+		switch {
+		case len(args) >= 3 && args[0] == "version":
+			return "26.1.0", nil
+		case len(args) >= 3 && args[0] == "network" && args[1] == "inspect":
+			return "", fmt.Errorf("no such network")
+		case len(args) >= 3 && args[0] == "network" && args[1] == "create":
+			return "created", nil
+		case len(args) >= 3 && args[0] == "image" && args[1] == "inspect":
+			return "", fmt.Errorf("no such image")
+		case len(args) >= 6 && args[0] == "build":
+			return "built", nil
+		default:
+			return "", nil
+		}
+	})
+
+	if err := manager.EnsurePrereqs(context.Background()); err != nil {
+		t.Fatalf("EnsurePrereqs: %v", err)
+	}
+
+	joined := flattenDockerCalls(calls)
+	for _, expected := range []string{
+		"version --format {{.Server.Version}}",
+		"network inspect test-network",
+		"network create test-network",
+		"image inspect test-image:latest",
+		"build -t test-image:latest",
+		"Dockerfile.workspace",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("EnsurePrereqs calls missing %q: %s", expected, joined)
+		}
+	}
+}
+
+func TestEnsureSystemWorkspaces_CreatesScaffoldAndSystemContainers(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	cfg.WorkspaceImage = "test-image"
+	manager.SetConfig(cfg)
+
+	var calls [][]string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, append([]string{}, args...))
+		switch args[0] {
+		case "inspect":
+			return "", fmt.Errorf("no such object")
+		case "create", "start":
+			return "", nil
+		default:
+			return "", nil
+		}
+	})
+
+	if err := manager.EnsureSystemWorkspaces(context.Background()); err != nil {
+		t.Fatalf("EnsureSystemWorkspaces: %v", err)
+	}
+
+	joined := flattenDockerCalls(calls)
+	for _, expected := range []string{
+		"create --name swarm-scaffold",
+		"create --name swarm-system",
+		"test-image sleep infinity",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("EnsureSystemWorkspaces calls missing %q: %s", expected, joined)
+		}
+	}
+}
+
+func flattenDockerCalls(calls [][]string) string {
+	lines := make([]string, 0, len(calls))
+	for _, call := range calls {
+		lines = append(lines, strings.Join(call, " "))
+	}
+	return strings.Join(lines, "\n")
+}

@@ -136,6 +136,12 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err := workspaces.ValidateSource(ctx, source); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+	if err := workspaces.EnsurePrereqs(ctx); err != nil {
+		return builderpkg.ProjectStatus{}, err
+	}
+	if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
+		return builderpkg.ProjectStatus{}, err
+	}
 
 	newRT, err := runtime.NewRuntime(ctx, s.cfg, s.stores.runtimeStores(), runtime.RuntimeOptions{
 		SelfCheck:          false,

@@ -114,6 +114,14 @@ func main() {
 		slog.Error("validate workspaces", "error", err)
 		os.Exit(1)
 	}
+	if err := workspaces.EnsurePrereqs(ctx); err != nil {
+		slog.Error("prepare workspaces", "error", err)
+		os.Exit(1)
+	}
+	if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
+		slog.Error("ensure system workspaces", "error", err)
+		os.Exit(1)
+	}
 	credentialStore, err := buildCredentialStore()
 	if err != nil {
 		slog.Error("configure credentials", "error", err)
