@@ -96,7 +96,7 @@ func runtimeErrorEnvelope(raw string) string {
 	return runtimemcp.RuntimeErrorEnvelope(raw)
 }
 
-func RuntimeMCPGatewayHooks(logger *RuntimeLogger) runtimemcp.GatewayHooks {
+func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) runtimemcp.GatewayHooks {
 	return runtimemcp.GatewayHooks{
 		RuntimeIngressPaused:      runtimebus.RuntimeIngressPaused,
 		FormatError:               FormatRuntimeError,
@@ -104,6 +104,7 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger) runtimemcp.GatewayHooks {
 		RetryableFromError:        retryableFromGatewayError,
 		WithActor:                 runtimeactors.WithActor,
 		ActorFromContext:          runtimeactors.ActorFromContext,
+		ResolveActorConfig:        resolveActorConfig,
 		WithRuntimeEpoch:          runtimebus.WithRuntimeEpoch,
 		WithCurrentRuntimeEpoch:   runtimebus.WithCurrentRuntimeEpoch,
 		IsCurrentRuntimeEpoch:     runtimebus.IsCurrentRuntimeEpoch,

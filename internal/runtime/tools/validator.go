@@ -16,7 +16,7 @@ func NewToolInputValidator(definitions func() ([]llm.ToolDefinition, error)) *To
 }
 
 func (v *ToolInputValidator) Validate(name string, input any) error {
-	name = strings.TrimSpace(name)
+	name = normalizeNativeToolName(name)
 	if name == "" || strings.HasPrefix(name, "emit_") {
 		return nil
 	}
@@ -42,7 +42,7 @@ func (v *ToolInputValidator) Validate(name string, input any) error {
 }
 
 func validatorToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
-	name = strings.TrimSpace(name)
+	name = normalizeNativeToolName(name)
 	for _, def := range defs {
 		if strings.TrimSpace(def.Name) != name {
 			continue
@@ -71,7 +71,8 @@ func validatorPruneSchemaUnknownKeys(payload map[string]any, schema map[string]a
 }
 
 func validatorNormalizeRuntimeToolInput(name string, input any) any {
-	if strings.TrimSpace(name) == "" || strings.HasPrefix(strings.TrimSpace(name), "emit_") {
+	name = normalizeNativeToolName(name)
+	if name == "" || strings.HasPrefix(name, "emit_") {
 		return input
 	}
 	var payload map[string]any
@@ -80,6 +81,18 @@ func validatorNormalizeRuntimeToolInput(name string, input any) any {
 	}
 
 	switch name {
+	case "read_file":
+		if strings.TrimSpace(asString(payload["path"])) == "" {
+			if filePath := strings.TrimSpace(asString(payload["file_path"])); filePath != "" {
+				payload["path"] = filePath
+			}
+		}
+	case "write_file":
+		if strings.TrimSpace(asString(payload["path"])) == "" {
+			if filePath := strings.TrimSpace(asString(payload["file_path"])); filePath != "" {
+				payload["path"] = filePath
+			}
+		}
 	case "agent_message":
 		if strings.TrimSpace(asString(payload["to"])) == "" {
 			if target := strings.TrimSpace(asString(payload["target_agent_id"])); target != "" {

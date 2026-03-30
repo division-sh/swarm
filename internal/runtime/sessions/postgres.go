@@ -51,6 +51,7 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 	type rec struct {
 		sessionID         string
 		scopeKey          string
+		status            string
 		providerSessionID sql.NullString
 		leaseHolder       sql.NullString
 		leaseExpires      sql.NullTime
@@ -60,19 +61,20 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 		SELECT
 			session_id::text,
 			scope_key,
+			status,
 			NULLIF(runtime_state->>'provider_session_id', ''),
 			lease_holder,
 			lease_expires_at
 		FROM agent_sessions
 		WHERE agent_id = $1
 		  AND scope_key = $2
-		  AND status = 'active'
 		ORDER BY created_at DESC
 		LIMIT 1
 		FOR UPDATE
 	`, agentID, resolved.ScopeKey).Scan(
 		&r.sessionID,
 		&r.scopeKey,
+		&r.status,
 		&r.providerSessionID,
 		&r.leaseHolder,
 		&r.leaseExpires,
@@ -103,6 +105,42 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, fmt.Errorf("commit acquire new: %w", err)
+		}
+		return &Lease{
+			SessionID:   r.sessionID,
+			AgentID:     agentID,
+			RuntimeMode: resolved.RuntimeMode,
+			LockOwner:   lockOwner,
+			ScopeKey:    r.scopeKey,
+			ExpiresAt:   expires,
+		}, nil
+	}
+
+	if strings.TrimSpace(r.status) != "active" {
+		sessionID := uuid.NewString()
+		var expires time.Time
+		if err := tx.QueryRowContext(ctx, `
+			UPDATE agent_sessions
+			SET session_id = $1::uuid,
+			    entity_id = NULLIF($2,'')::uuid,
+			    flow_instance = NULLIF($3,''),
+			    scope = $4,
+			    conversation = '[]'::jsonb,
+			    turn_count = 0,
+			    runtime_mode = $5,
+			    runtime_state = '{}'::jsonb,
+			    lease_holder = $6,
+			    lease_expires_at = $7,
+			    status = 'active',
+			    updated_at = now()
+			WHERE agent_id = $8
+			  AND scope_key = $9
+			RETURNING session_id::text, scope_key, lease_expires_at
+		`, sessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, lockOwner, now.Add(sr.lockTTL), agentID, resolved.ScopeKey).Scan(&r.sessionID, &r.scopeKey, &expires); err != nil {
+			return nil, fmt.Errorf("reactivate session row: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit acquire recycled: %w", err)
 		}
 		return &Lease{
 			SessionID:   r.sessionID,
@@ -218,37 +256,26 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lo
 		return nil, ErrSessionLeased
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE agent_sessions
-		SET status = 'terminated',
-		    lease_holder = NULL,
-		    lease_expires_at = NULL,
-		    runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object(
-		    	'checkpoint_summary', NULLIF($1, ''),
-		    	'terminated_at', now()
-		    ),
-		    updated_at = now()
-		WHERE session_id = $2::uuid
-	`, summary, currentSessionID); err != nil {
-		return nil, fmt.Errorf("mark terminated session: %w", err)
-	}
-
 	newSessionID := uuid.NewString()
 	var expiresAt time.Time
 	if err := tx.QueryRowContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
-			conversation, turn_count, runtime_mode, runtime_state,
-			lease_holder, lease_expires_at, status, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6,
-			'[]'::jsonb, 0, $7, jsonb_build_object('checkpoint_summary', NULLIF($8,'')),
-			$9, $10, 'active', now(), now()
-		)
+		UPDATE agent_sessions
+		SET session_id = $1::uuid,
+		    entity_id = NULLIF($2,'')::uuid,
+		    flow_instance = NULLIF($3,''),
+		    scope = $4,
+		    conversation = '[]'::jsonb,
+		    turn_count = 0,
+		    runtime_mode = $5,
+		    runtime_state = jsonb_build_object('checkpoint_summary', NULLIF($6,'')),
+		    lease_holder = $7,
+		    lease_expires_at = $8,
+		    status = 'active',
+		    updated_at = now()
+		WHERE session_id = $9::uuid
 		RETURNING lease_expires_at
-	`, newSessionID, agentID, resolved.EntityID, resolved.FlowInstance, resolved.ScopeKey, resolved.Scope, resolved.RuntimeMode, summary, lockOwner, now.Add(sr.lockTTL)).Scan(&expiresAt); err != nil {
-		return nil, fmt.Errorf("insert rotated session: %w", err)
+	`, newSessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, summary, lockOwner, now.Add(sr.lockTTL), currentSessionID).Scan(&expiresAt); err != nil {
+		return nil, fmt.Errorf("rotate session row: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -339,7 +366,7 @@ func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtime
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
-		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object('provider_session_id', $1),
+		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object('provider_session_id', $1::text),
 		    lease_holder = $2,
 		    lease_expires_at = $3,
 		    updated_at = now()

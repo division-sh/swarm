@@ -195,7 +195,7 @@ func IsEmitToolAllowedForConfig(raw json.RawMessage, toolName string) bool {
 
 func eventTypeFromEmitToolName(toolName string) (string, bool) {
 	ensureEventSchemaRegistry()
-	return EventTypeFromEmitToolName(toolName, emitToolToEvent)
+	return EventTypeFromEmitToolName(normalizeNativeToolName(toolName), emitToolToEvent)
 }
 
 func schemaForEventType(eventType string) EmitSchema {

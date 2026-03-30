@@ -73,6 +73,7 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 }
 
 func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+	toolName = normalizeNativeToolName(toolName)
 	decision := toolAuthorizationDecision{
 		ownership: toolOwnershipForName(toolName),
 		class:     toolAuthorizationDenied,

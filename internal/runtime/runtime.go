@@ -19,6 +19,7 @@ import (
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
@@ -333,7 +334,12 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.InboundGateway = NewInboundGateway(rt.Bus, stores.InboundStore)
 	}
 	if opts.EnableToolGateway {
-		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger))
+		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger, func(agentID string) (runtimeactors.AgentConfig, bool) {
+			if rt.Manager == nil {
+				return runtimeactors.AgentConfig{}, false
+			}
+			return rt.Manager.GetAgentConfig(strings.TrimSpace(agentID))
+		}))
 	}
 
 	return rt, nil

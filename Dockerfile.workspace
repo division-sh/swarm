@@ -2,7 +2,7 @@ FROM golang:1.23-bookworm
 
 ARG INSTALL_CLAUDE_CLI=false
 ARG INSTALL_CODEX_CLI=false
-ARG CLAUDE_CODE_VERSION=2.1.69
+ARG CLAUDE_CODE_VERSION=2.1.87
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl ca-certificates postgresql-client nodejs npm && \

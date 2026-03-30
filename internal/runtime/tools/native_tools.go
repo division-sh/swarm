@@ -7,6 +7,8 @@ import (
 	models "swarm/internal/runtime/core/actors"
 )
 
+const runtimeToolsMCPPrefix = "mcp__runtime-tools__"
+
 func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool) {
 	name = strings.TrimSpace(name)
 	switch name {
@@ -81,6 +83,25 @@ func nativeToolCapabilityEnabledForActor(actor models.AgentConfig, capability st
 	}
 	flag, ok := items[capability].(bool)
 	return ok && flag
+}
+
+func normalizeNativeToolName(name string) string {
+	name = strings.TrimSpace(name)
+	if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
+		name = strings.TrimPrefix(name, runtimeToolsMCPPrefix)
+	}
+	switch name {
+	case "Bash":
+		return "bash"
+	case "WebSearch":
+		return "web_search"
+	case "Read":
+		return "read_file"
+	case "Write", "Edit":
+		return "write_file"
+	default:
+		return name
+	}
 }
 
 func nativeToolNameForCapability(capability string) []string {

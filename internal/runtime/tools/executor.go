@@ -150,6 +150,7 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 }
 
 func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
+	name = normalizeNativeToolName(name)
 	if tool, ok := nativeFallbackRegisteredTool(actor, name); ok {
 		return tool, true, nil
 	}
@@ -178,7 +179,7 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 	if !ok {
 		return nil, errors.New("missing actor context for tool execution")
 	}
-	name = strings.TrimSpace(name)
+	name = normalizeNativeToolName(strings.TrimSpace(name))
 	if err := e.authorizeToolUsage(ctx, actor, name); err != nil {
 		return nil, err
 	}
@@ -284,6 +285,18 @@ func normalizeRuntimeToolInput(name string, input any) any {
 	}
 
 	switch name {
+	case "read_file":
+		if strings.TrimSpace(asString(payload["path"])) == "" {
+			if filePath := strings.TrimSpace(asString(payload["file_path"])); filePath != "" {
+				payload["path"] = filePath
+			}
+		}
+	case "write_file":
+		if strings.TrimSpace(asString(payload["path"])) == "" {
+			if filePath := strings.TrimSpace(asString(payload["file_path"])); filePath != "" {
+				payload["path"] = filePath
+			}
+		}
 	case "agent_message":
 		if strings.TrimSpace(asString(payload["to"])) == "" {
 			if target := strings.TrimSpace(asString(payload["target_agent_id"])); target != "" {

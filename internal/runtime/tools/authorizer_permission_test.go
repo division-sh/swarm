@@ -85,6 +85,24 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 			t.Fatalf("expected listed workflow tool to be allowed: %v", authErr)
 		}
 	})
+
+	t.Run("provider native read allowed when file_io enabled", func(t *testing.T) {
+		raw, err := json.Marshal(map[string]any{
+			"native_tools": map[string]any{
+				"file_io": true,
+			},
+		})
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID:     "ops-8",
+			Config: raw,
+		}, "Read")
+		if authErr != nil {
+			t.Fatalf("expected provider native Read to be allowed: %v", authErr)
+		}
+	})
 }
 
 func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
@@ -231,5 +249,32 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 	}, "emit_coord_done")
 	if err != nil {
 		t.Fatalf("expected configured emit tool to be allowed: %v", err)
+	}
+}
+
+func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
+	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"market_research.scan_complete": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+	}))
+	raw, err := json.Marshal(map[string]any{
+		"emit_events": []string{"market_research.scan_complete"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	err = NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		ID:     "market-research-agent",
+		Config: raw,
+	}, "mcp__runtime-tools__emit_market_research_scan_complete")
+	if err != nil {
+		t.Fatalf("expected MCP-prefixed emit tool alias to be allowed: %v", err)
 	}
 }

@@ -252,6 +252,59 @@ func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig) string {
 	return strings.Join(names, ",")
 }
 
+const cliToolInvocationMarker = "## Swarm Tool Invocation"
+
+func augmentCLISystemPrompt(systemPrompt string, tools []ToolDefinition) string {
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if systemPrompt == "" {
+		return systemPrompt
+	}
+	if strings.Contains(systemPrompt, cliToolInvocationMarker) {
+		return systemPrompt
+	}
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return systemPrompt
+	}
+	slices.Sort(names)
+	var b strings.Builder
+	b.WriteString(systemPrompt)
+	b.WriteString("\n\n")
+	b.WriteString(cliToolInvocationMarker)
+	b.WriteString("\n")
+	b.WriteString("Call Swarm tools by these exact names when you need them:\n")
+	for _, name := range names {
+		b.WriteString("- ")
+		b.WriteString(name)
+		b.WriteString("\n")
+	}
+	b.WriteString("If Claude CLI also shows MCP-prefixed variants like `mcp__runtime-tools__...`, they map to the same Swarm runtime tools.\n")
+	if hasToolPrefix(names, "emit_") {
+		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func hasToolPrefix(names []string, prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return false
+	}
+	for _, name := range names {
+		if strings.HasPrefix(strings.TrimSpace(name), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func estimateCLIUsageTokens(in Message, out *Response, actor models.AgentConfig) UsageTokens {
 	// This is intentionally crude. Claude Code does not currently expose usage
 	// metadata in a stable non-interactive way, so we approximate from payload sizes

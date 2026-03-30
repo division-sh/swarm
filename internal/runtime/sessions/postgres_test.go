@@ -21,7 +21,7 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
+	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+status,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
 		WithArgs("a1", "global").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("INSERT INTO agent_sessions").
@@ -38,10 +38,10 @@ func TestPostgresSessionRegistry_AcquireNewAndExistingAndRelease(t *testing.T) {
 	}
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
+	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+status,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
 		WithArgs("a1", "global").
-		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "provider_session_id", "lease_holder", "lease_expires_at"}).
-			AddRow("sess-1", "global", nil, "owner-1", fixedNow.Add(30*time.Second)))
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "lease_holder", "lease_expires_at"}).
+			AddRow("sess-1", "global", "active", nil, "owner-1", fixedNow.Add(30*time.Second)))
 	mock.ExpectQuery("UPDATE agent_sessions\\s+SET lease_holder = \\$1,").
 		WithArgs("owner-1", fixedNow.Add(30*time.Second), "sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
@@ -85,10 +85,10 @@ func TestPostgresSessionRegistry_AcquireLeasedByOtherReturnsErrLeased(t *testing
 	sr.SetNowFnForTest(func() time.Time { return fixedNow })
 
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
+	mock.ExpectQuery("SELECT\\s+session_id::text,\\s+scope_key,\\s+status,\\s+NULLIF\\(runtime_state->>'provider_session_id'").
 		WithArgs("a1", "global").
-		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "provider_session_id", "lease_holder", "lease_expires_at"}).
-			AddRow("sess-1", "global", nil, "someone-else", fixedNow.Add(10*time.Second)))
+		WillReturnRows(sqlmock.NewRows([]string{"session_id", "scope_key", "status", "provider_session_id", "lease_holder", "lease_expires_at"}).
+			AddRow("sess-1", "global", "active", nil, "someone-else", fixedNow.Add(10*time.Second)))
 
 	_, err = sr.Acquire(context.Background(), "a1", RuntimeModeSession, "owner-1", "")
 	if err != ErrSessionLeased {
@@ -116,11 +116,8 @@ func TestPostgresSessionRegistry_Rotate_And_IncrementTurn(t *testing.T) {
 		WithArgs("a1", "global").
 		WillReturnRows(sqlmock.NewRows([]string{"session_id", "lease_holder", "lease_expires_at"}).
 			AddRow("sess-1", "owner-1", fixedNow.Add(10*time.Second)))
-	mock.ExpectExec("UPDATE agent_sessions\\s+SET status = 'terminated'").
-		WithArgs("sum", "sess-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("INSERT INTO agent_sessions").
-		WithArgs(sqlmock.AnyArg(), "a1", "", "", "global", "global", RuntimeModeSession, "sum", "owner-1", fixedNow.Add(30*time.Second)).
+	mock.ExpectQuery("UPDATE agent_sessions\\s+SET session_id = \\$1::uuid,").
+		WithArgs(sqlmock.AnyArg(), "", "", "global", RuntimeModeSession, "sum", "owner-1", fixedNow.Add(30*time.Second), "sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{"lease_expires_at"}).AddRow(fixedNow.Add(30 * time.Second)))
 	mock.ExpectCommit()
 

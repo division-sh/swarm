@@ -22,6 +22,7 @@ type GatewayHooks struct {
 	RetryableFromError        func(error) (bool, bool)
 	WithActor                 func(context.Context, models.AgentConfig) context.Context
 	ActorFromContext          func(context.Context) (models.AgentConfig, bool)
+	ResolveActorConfig        func(string) (models.AgentConfig, bool)
 	WithRuntimeEpoch          func(context.Context, int64) context.Context
 	WithCurrentRuntimeEpoch   func(context.Context) context.Context
 	IsCurrentRuntimeEpoch     func(int64) bool
@@ -46,6 +47,32 @@ func NewGateway(executor llm.ToolExecutor, authToken string, hooks GatewayHooks)
 		authToken: strings.TrimSpace(authToken),
 		hooks:     hooks,
 	}
+}
+
+func (g *Gateway) hydrateActor(actor models.AgentConfig) models.AgentConfig {
+	actor.ID = strings.TrimSpace(actor.ID)
+	if actor.ID == "" || g.hooks.ResolveActorConfig == nil {
+		actor.NormalizeEntityID()
+		return actor
+	}
+	if resolved, ok := g.hooks.ResolveActorConfig(actor.ID); ok {
+		if strings.TrimSpace(actor.Role) != "" {
+			resolved.Role = strings.TrimSpace(actor.Role)
+		}
+		if strings.TrimSpace(actor.Mode) != "" {
+			resolved.Mode = strings.TrimSpace(actor.Mode)
+		}
+		if strings.TrimSpace(actor.ParentAgent) != "" {
+			resolved.ParentAgent = strings.TrimSpace(actor.ParentAgent)
+		}
+		if strings.TrimSpace(actor.EntityID) != "" {
+			resolved.EntityID = strings.TrimSpace(actor.EntityID)
+		}
+		resolved.NormalizeEntityID()
+		return resolved
+	}
+	actor.NormalizeEntityID()
+	return actor
 }
 
 func (g *Gateway) SetHooks(hooks GatewayHooks) {
@@ -106,6 +133,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: "actor id is required"})
 		return
 	}
+	actor = g.hydrateActor(actor)
 
 	ctx := r.Context()
 	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
@@ -271,7 +299,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 				}
 				ctx := context.Background()
 				if g.hooks.WithActor != nil {
-					ctx = g.hooks.WithActor(ctx, turn.Actor)
+					ctx = g.hooks.WithActor(ctx, g.hydrateActor(turn.Actor))
 				}
 				if g.hooks.WithRuntimeEpoch != nil {
 					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
@@ -288,6 +316,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 		}
 		if AllowContextFallbackOnMiss() {
 			if actor, ok := ActorFromRequest(r); ok {
+				actor = g.hydrateActor(actor)
 				ctx := context.Background()
 				if g.hooks.WithActor != nil {
 					ctx = g.hooks.WithActor(ctx, actor)
@@ -308,6 +337,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 	if !ok {
 		return nil, g.newRuntimeError(ErrCodeActorMissing, "mcp.context.resolve", false, nil, "missing actor id for mcp tool execution")
 	}
+	actor = g.hydrateActor(actor)
 	ctx := context.Background()
 	if g.hooks.WithActor != nil {
 		ctx = g.hooks.WithActor(ctx, actor)

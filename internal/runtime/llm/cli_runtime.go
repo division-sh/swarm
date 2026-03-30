@@ -133,7 +133,7 @@ func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemProm
 		RuntimeMode:      resolved.RuntimeMode,
 		ConversationMode: mode,
 		ScopeKey:         resolved.ScopeKey,
-		SystemPrompt:     systemPrompt,
+		SystemPrompt:     augmentCLISystemPrompt(systemPrompt, tools),
 		Tools:            tools,
 		Messages:         nil,
 	}

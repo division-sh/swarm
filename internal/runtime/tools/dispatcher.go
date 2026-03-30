@@ -43,7 +43,7 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	if d == nil {
 		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
-	name = strings.TrimSpace(name)
+	name = normalizeNativeToolName(name)
 	if strings.HasPrefix(name, "emit_") {
 		if d.emitHandler == nil {
 			return nil, fmt.Errorf("emit tool handler is not configured")

@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"swarm/internal/config"
@@ -92,6 +93,33 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	}
 	if got := payload["model_tier"]; got != "haiku" {
 		t.Fatalf("model_tier = %#v, want haiku", got)
+	}
+}
+
+func TestClaudeCLIRuntime_StartSessionAugmentsSystemPromptWithSwarmTools(t *testing.T) {
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+
+	s, err := runtime.StartSession(context.Background(), "agent-2", "base prompt", []ToolDefinition{
+		{Name: "emit_market_research_scan_complete"},
+		{Name: "read_file"},
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if s == nil {
+		t.Fatal("expected session")
+	}
+	if !strings.Contains(s.SystemPrompt, cliToolInvocationMarker) {
+		t.Fatalf("expected CLI tool note in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "emit_market_research_scan_complete") {
+		t.Fatalf("expected emit tool name in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "read_file") {
+		t.Fatalf("expected native fallback tool name in system prompt, got %q", s.SystemPrompt)
+	}
+	if !strings.Contains(s.SystemPrompt, "Do not write JSON files under `/workspace/events`") {
+		t.Fatalf("expected emit workaround warning in system prompt, got %q", s.SystemPrompt)
 	}
 }
 
