@@ -192,11 +192,8 @@ func claudeToolsArg(tools []ToolDefinition) string {
 	if len(names) == 0 {
 		return ""
 	}
-	b, err := json.Marshal(names)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
+	slices.Sort(names)
+	return strings.Join(names, ",")
 }
 
 var claudeProviderBuiltinToolNames = []string{
@@ -250,6 +247,49 @@ func claudeDisallowedBuiltinToolsArgForActor(actor models.AgentConfig) string {
 	}
 	slices.Sort(names)
 	return strings.Join(names, ",")
+}
+
+func claudeAllowedToolsArgForActor(actor models.AgentConfig, tools []ToolDefinition) string {
+	allowed := make([]string, 0, len(tools)+4)
+	seen := make(map[string]struct{}, len(tools)+4)
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; ok {
+			return
+		}
+		seen[name] = struct{}{}
+		allowed = append(allowed, name)
+	}
+	for _, tool := range tools {
+		add(tool.Name)
+	}
+	add("ExitPlanMode")
+	if len(actor.Config) != 0 && json.Valid(actor.Config) {
+		var parsed map[string]any
+		if err := json.Unmarshal(actor.Config, &parsed); err == nil {
+			if raw, ok := parsed["native_tools"].(map[string]any); ok {
+				if enabled, _ := raw["bash"].(bool); enabled {
+					add("Bash")
+				}
+				if enabled, _ := raw["web_search"].(bool); enabled {
+					add("WebSearch")
+				}
+				if enabled, _ := raw["file_io"].(bool); enabled {
+					add("Read")
+					add("Write")
+					add("Edit")
+				}
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		return ""
+	}
+	slices.Sort(allowed)
+	return strings.Join(allowed, ",")
 }
 
 const cliToolInvocationMarker = "## Swarm Tool Invocation"

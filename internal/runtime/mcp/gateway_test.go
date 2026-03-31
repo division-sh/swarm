@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	models "swarm/internal/runtime/core/actors"
+	llm "swarm/internal/runtime/llm"
 )
 
 func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
@@ -39,3 +41,35 @@ func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 	}
 }
 
+func TestGatewayMCPToolsForRequest_UsesHydratedActorRoleForEmitTools(t *testing.T) {
+	g := NewGateway(nil, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			if agentID != "campaign-coordinator" {
+				return models.AgentConfig{}, false
+			}
+			return models.AgentConfig{
+				ID:   "campaign-coordinator",
+				Role: "campaign_coordinator",
+			}, true
+		},
+		EmitTools: func(role string) []llm.ToolDefinition {
+			if role != "campaign_coordinator" {
+				return nil
+			}
+			return []llm.ToolDefinition{{
+				Name:        "emit_scan_requested",
+				Description: "Emit scan.requested",
+				Schema:      map[string]any{"type": "object"},
+			}}
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?agent_id=campaign-coordinator", nil)
+	tools := g.mcpToolsForRequest(req)
+	for _, tool := range tools {
+		if tool.Name == "emit_scan_requested" {
+			return
+		}
+	}
+	t.Fatalf("emit_scan_requested not found in MCP tools: %#v", tools)
+}

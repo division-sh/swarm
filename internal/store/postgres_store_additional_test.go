@@ -24,6 +24,9 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 	if _, err := pg.DB.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
 		t.Fatalf("drop legacy agent_sessions: %v", err)
 	}
+	if _, err := pg.DB.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
+		t.Fatalf("drop legacy agent_turns: %v", err)
+	}
 	var spec runtimecontracts.PlatformSpecDocument
 	spec.PlatformTables.Tables = map[string]struct {
 		Description string `yaml:"description"`
@@ -31,6 +34,9 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 	}{
 		"agent_sessions": {
 			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
+		},
+		"agent_turns": {
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    trace_id TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -130,6 +136,68 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 	}
 	if gotEntityID != "" {
 		t.Fatalf("expected normalized empty entity_id, got %q", gotEntityID)
+	}
+}
+
+func TestPostgresStore_AppendEvent_InheritsParentTraceID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"events": {
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_name TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope TEXT NOT NULL DEFAULT 'global',\n    payload JSONB NOT NULL DEFAULT '{}'::jsonb,\n    chain_depth INTEGER NOT NULL DEFAULT 0,\n    trace_id TEXT,\n    produced_by TEXT,\n    produced_by_type TEXT NOT NULL DEFAULT 'agent',\n    source_event_id UUID,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(events): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(events): %v", err)
+	}
+
+	parentID := uuid.NewString()
+	childID := uuid.NewString()
+	parentTrace := "trace-parent-123"
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		Type:        events.EventType("parent.event"),
+		SourceAgent: "root",
+		TraceID:     parentTrace,
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+	if err := pg.AppendEvent(context.Background(), events.Event{
+		ID:            childID,
+		Type:          events.EventType("child.event"),
+		SourceAgent:   "child",
+		ParentEventID: parentID,
+		Payload:       []byte(`{}`),
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+
+	var gotTrace, gotParent string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(trace_id, ''), COALESCE(source_event_id::text, '')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, childID).Scan(&gotTrace, &gotParent); err != nil {
+		t.Fatalf("query child event: %v", err)
+	}
+	if gotTrace != parentTrace {
+		t.Fatalf("child trace_id = %q, want %q", gotTrace, parentTrace)
+	}
+	if gotParent != parentID {
+		t.Fatalf("child source_event_id = %q, want %q", gotParent, parentID)
 	}
 }
 
@@ -946,6 +1014,26 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
+
+	var availableToolsJSON, toolCallsJSON, emittedEventsJSON, mcpServersJSON, mcpToolsListedJSON, mcpToolsVisibleJSON string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(available_tools::text, '[]'),
+			COALESCE(tool_calls::text, '[]'),
+			COALESCE(emitted_events::text, '[]'),
+			COALESCE(mcp_servers::text, '{}'),
+			COALESCE(mcp_tools_listed::text, '[]'),
+			COALESCE(mcp_tools_visible::text, '[]')
+		FROM agent_turns
+		WHERE agent_id = 'a1' AND session_id = $1::uuid
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, sessionID).Scan(&availableToolsJSON, &toolCallsJSON, &emittedEventsJSON, &mcpServersJSON, &mcpToolsListedJSON, &mcpToolsVisibleJSON); err != nil {
+		t.Fatalf("load agent_turns row: %v", err)
+	}
+	if availableToolsJSON != "[]" || toolCallsJSON != "[]" || emittedEventsJSON != "[]" || mcpServersJSON != "{}" || mcpToolsListedJSON != "[]" || mcpToolsVisibleJSON != "[]" {
+		t.Fatalf("expected empty structured telemetry defaults, got tools=%s calls=%s emitted=%s mcp_servers=%s mcp_listed=%s mcp_visible=%s", availableToolsJSON, toolCallsJSON, emittedEventsJSON, mcpServersJSON, mcpToolsListedJSON, mcpToolsVisibleJSON)
+	}
 }
 
 func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *testing.T) {
@@ -1004,6 +1092,133 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 	}
 	if !parseOK {
 		t.Fatal("expected task-mode last_turn telemetry to be persisted")
+	}
+
+	var turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_turns
+		WHERE agent_id = 'a1' AND session_id = $1::uuid AND runtime_mode = 'task'
+	`, sessionID).Scan(&turnCount); err != nil {
+		t.Fatalf("count agent_turns(task): %v", err)
+	}
+	if turnCount != 1 {
+		t.Fatalf("expected one task-mode agent_turn row, got %d", turnCount)
+	}
+}
+
+func TestManagerStore_TaskConversationUpsertIsIdempotentBySessionID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	rec := runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "user", Content: "one-shot"},
+			{Role: "assistant", Content: "done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}
+	if err := pg.UpsertConversation(ctx, rec); err != nil {
+		t.Fatalf("UpsertConversation(task first): %v", err)
+	}
+
+	rec.Messages = append(rec.Messages, llm.Message{Role: "assistant", Content: "follow-up"})
+	rec.TurnCount = 2
+	if err := pg.UpsertConversation(ctx, rec); err != nil {
+		t.Fatalf("UpsertConversation(task second): %v", err)
+	}
+
+	var count, turnCount int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(turn_count), 0)
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&count, &turnCount); err != nil {
+		t.Fatalf("load task audit row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one task audit row after repeated upserts, got %d", count)
+	}
+	if turnCount != 2 {
+		t.Fatalf("expected turn_count to update on repeated task upsert, got %d", turnCount)
+	}
+}
+
+func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task missing row): %v", err)
+	}
+
+	var scope, scopeKey string
+	var parseOK bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT scope, scope_key, COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false)
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&scope, &scopeKey, &parseOK); err != nil {
+		t.Fatalf("load synthesized task audit row: %v", err)
+	}
+	if scope != "global" {
+		t.Fatalf("expected synthesized task audit scope=global, got %q", scope)
+	}
+	if scopeKey != sessionID {
+		t.Fatalf("expected synthesized task scope_key=%q, got %q", sessionID, scopeKey)
+	}
+	if !parseOK {
+		t.Fatal("expected synthesized task audit row to record last_turn telemetry")
+	}
+
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "assistant", Content: "done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task after append): %v", err)
+	}
+
+	var count, turns int
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND runtime_mode = 'task')
+		FROM agent_sessions
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&count, &turns); err != nil {
+		t.Fatalf("count synthesized task persistence: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one synthesized task audit row, got %d", count)
+	}
+	if turns != 1 {
+		t.Fatalf("expected one task agent_turn row after synthesized append, got %d", turns)
 	}
 }
 

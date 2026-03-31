@@ -222,8 +222,10 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
 	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	reasonCode := managerReceiptReasonCode(finalStatus, errText)
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": finalStatus,
+		"reason_code":    reasonCode,
 		"retry_count":    retryCount,
 		"error":          strings.TrimSpace(errText),
 		"trace_id":       traceID,
@@ -235,21 +237,22 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 	const q = `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, side_effects, processed_at
+			outcome, reason_code, side_effects, processed_at
 		)
 		SELECT
 			e.event_id, 'agent', $2, e.entity_id, e.flow_instance,
-			$3, $4::jsonb, now()
+			$3, NULLIF($4,''), $5::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
 		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
 			entity_id = EXCLUDED.entity_id,
 			flow_instance = EXCLUDED.flow_instance,
 			outcome = EXCLUDED.outcome,
+			reason_code = EXCLUDED.reason_code,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
 	`
-	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, outcome, string(sideEffects)); err != nil {
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, outcome, reasonCode, string(sideEffects)); err != nil {
 		return fmt.Errorf("upsert event receipt: %w", err)
 	}
 	return nil
@@ -448,5 +451,24 @@ func mapOutcomeToManagerReceiptStatus(outcome string) runtimemanager.ReceiptStat
 		return runtimemanager.ReceiptStatusDeadLetter
 	default:
 		return runtimemanager.ReceiptStatusProcessed
+	}
+}
+
+func managerReceiptReasonCode(status runtimemanager.ReceiptStatus, errText string) string {
+	if strings.TrimSpace(errText) != "" {
+		switch status {
+		case runtimemanager.ReceiptStatusDeadLetter:
+			return "retry_exhausted"
+		case runtimemanager.ReceiptStatusError:
+			return "handler_error"
+		default:
+			return "runtime_handled"
+		}
+	}
+	switch status {
+	case runtimemanager.ReceiptStatusDeadLetter:
+		return "retry_exhausted"
+	default:
+		return "agent_processed"
 	}
 }

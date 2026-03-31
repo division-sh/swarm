@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
-	"github.com/google/uuid"
 )
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
@@ -58,12 +58,13 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if payloadMap == nil {
 		payloadMap = map[string]any{}
 	}
+	schemaEventType := eventType
 	eventType = e.resolveAgentScopedEmitEventType(actor, eventType)
 
 	inbound, _ := InboundEventFromContext(ctx)
-	payloadMap = e.enrichEmitPayloadContext(actor, inbound, eventType, payloadMap)
-	payloadMap = trimEmitPayloadToSchema(eventType, payloadMap)
-	if err := ValidateEventPayloadAgainstSchema(eventType, payloadMap); err != nil {
+	payloadMap = e.enrichEmitPayloadContext(actor, inbound, schemaEventType, payloadMap)
+	payloadMap = trimEmitPayloadToSchema(schemaEventType, payloadMap)
+	if err := ValidateEventPayloadAgainstSchema(schemaEventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
 			"schema_validation_failed",
 			"tool-executor",
@@ -144,9 +145,9 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 	if !ok {
 		return eventType
 	}
-	for _, candidate := range append(append([]string{}, scope.OutputEvents...), scope.InputEvents...) {
+	for _, candidate := range scope.OutputEvents {
 		if strings.TrimSpace(candidate) == eventType {
-			return strings.Trim(flowPath+"/"+eventType, "/")
+			return eventType
 		}
 	}
 	if _, ok := scope.Events[eventType]; ok {

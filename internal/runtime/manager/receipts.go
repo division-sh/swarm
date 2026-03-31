@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
 	runtimerterr "swarm/internal/runtime/rterrors"
 )
@@ -38,6 +39,8 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 		am.writeReceipt(ctx, evt.ID, agent.ID(), ReceiptStatusProcessed, "intercepted simple directive (runtime-handled)")
 		return nil
 	}
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	out, err := agent.OnEvent(ctx, evt)
 	if err != nil {
 		if isTransientAgentError(err) {

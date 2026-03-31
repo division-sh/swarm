@@ -36,10 +36,17 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry) Even
 			continue
 		}
 		prop := map[string]any{}
-		if fieldType := strings.TrimSpace(field.Type); fieldType != "" {
+		fieldType, typeDescription := normalizeEventFieldType(field.Type)
+		if fieldType != "" {
 			prop["type"] = fieldType
 		}
-		if description := strings.TrimSpace(field.Description); description != "" {
+		description := strings.TrimSpace(field.Description)
+		if description == "" {
+			description = typeDescription
+		} else if typeDescription != "" {
+			description = typeDescription + ". " + description
+		}
+		if description != "" {
 			prop["description"] = description
 		}
 		properties[fieldName] = prop
@@ -56,6 +63,25 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry) Even
 		Description: fmt.Sprintf("Emit %s event", eventType),
 		Schema:      schema,
 	}
+}
+
+func normalizeEventFieldType(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	for _, base := range []string{"string", "integer", "number", "boolean", "object", "array"} {
+		if raw == base {
+			return base, ""
+		}
+		if strings.HasPrefix(raw, base+" ") || strings.HasPrefix(raw, base+"(") {
+			desc := strings.TrimSpace(strings.TrimPrefix(raw, base))
+			desc = strings.TrimLeft(desc, " -:\t")
+			desc = strings.TrimSpace(strings.Trim(desc, "()"))
+			return base, desc
+		}
+	}
+	return raw, ""
 }
 
 func SetActiveEventSchemaRegistry(registry map[string]EventSchema) {

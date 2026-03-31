@@ -117,6 +117,27 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if err := pg.UpsertEventReceipt(ctx, evt.ID, "control-plane", "processed", ""); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
+	var deliveryReason, receiptReason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
+	`, evt.ID).Scan(&deliveryReason); err != nil {
+		t.Fatalf("load delivery reason: %v", err)
+	}
+	if deliveryReason != "matched_agent_subscription" {
+		t.Fatalf("delivery reason = %q, want matched_agent_subscription", deliveryReason)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
+	`, evt.ID).Scan(&receiptReason); err != nil {
+		t.Fatalf("load receipt reason: %v", err)
+	}
+	if receiptReason != "agent_processed" {
+		t.Fatalf("receipt reason = %q, want agent_processed", receiptReason)
+	}
 
 	// Mailbox.
 	mbID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{

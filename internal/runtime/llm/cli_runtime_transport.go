@@ -11,6 +11,7 @@ import (
 	"time"
 
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	workspace "swarm/internal/runtime/workspace"
 )
 
@@ -78,7 +79,10 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 		headers["Authorization"] = "Bearer " + token
 	}
 	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
-	traceID := strings.TrimSpace(contextToken)
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	if traceID == "" {
+		traceID = strings.TrimSpace(contextToken)
+	}
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
 	}

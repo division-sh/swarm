@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -73,6 +74,7 @@ func main() {
 	storeMode := flag.String("store", "postgres", "Store mode: postgres")
 	healthAddr := flag.String("health-addr", defaultHealthAddr, "HTTP bind address for health checks")
 	selfCheck := flag.Bool("self-check", true, "Run runtime self-check during boot")
+	traceID := flag.String("trace-id", "", "Print a lifecycle trace for the given trace ID and exit")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -85,6 +87,22 @@ func main() {
 	cfg, err := loadRuntimeConfig(resolvedConfigPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+	stores, err := buildStores(ctx, *storeMode, cfg)
+	if err != nil {
+		log.Fatalf("init stores: %v", err)
+	}
+	defer closeDB(stores.SQLDB)
+	if strings.TrimSpace(*traceID) != "" {
+		if stores.Postgres == nil {
+			log.Fatal("trace reporting requires postgres store")
+		}
+		report, err := stores.Postgres.TraceReport(ctx, *traceID)
+		if err != nil {
+			log.Fatalf("trace report: %v", err)
+		}
+		printTraceReport(os.Stdout, report)
+		return
 	}
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
@@ -99,11 +117,6 @@ func main() {
 		os.Exit(1)
 	}
 	source := semanticview.Wrap(bundle)
-	stores, err := buildStores(ctx, *storeMode, cfg)
-	if err != nil {
-		log.Fatalf("init stores: %v", err)
-	}
-	defer closeDB(stores.SQLDB)
 	stateStoreSummary, err := initializeStateStores(ctx, stores, bundle)
 	if err != nil {
 		slog.Error("initialize state stores", "error", err)
@@ -298,6 +311,202 @@ func normalizeContractsRoot(path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no package.yaml found under %s", path)
+}
+
+func printTraceReport(w io.Writer, report store.TraceReport) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "Trace %s\n", strings.TrimSpace(report.TraceID))
+	fmt.Fprintf(w, "Events: %d  Deliveries: %d  Receipts: %d  DeadLetters: %d\n\n", len(report.Events), len(report.Deliveries), len(report.Receipts), len(report.DeadLetters))
+	if summary := traceFirstStuckSummary(report); summary != "" {
+		fmt.Fprintf(w, "Summary: %s\n\n", summary)
+	}
+
+	deliveriesByEvent := make(map[string][]store.TraceDelivery, len(report.Deliveries))
+	for _, delivery := range report.Deliveries {
+		deliveriesByEvent[delivery.EventID] = append(deliveriesByEvent[delivery.EventID], delivery)
+	}
+	receiptsByEvent := make(map[string][]store.TraceReceipt, len(report.Receipts))
+	for _, receipt := range report.Receipts {
+		receiptsByEvent[receipt.EventID] = append(receiptsByEvent[receipt.EventID], receipt)
+	}
+	deadLettersByEvent := make(map[string][]store.TraceDeadLetter, len(report.DeadLetters))
+	for _, deadLetter := range report.DeadLetters {
+		deadLettersByEvent[deadLetter.OriginalEventID] = append(deadLettersByEvent[deadLetter.OriginalEventID], deadLetter)
+	}
+	turnsByEvent := make(map[string][]store.TraceTurn, len(report.Turns))
+	turnsWithoutEvent := make([]store.TraceTurn, 0)
+	for _, turn := range report.Turns {
+		if strings.TrimSpace(turn.TriggerEventID) == "" {
+			turnsWithoutEvent = append(turnsWithoutEvent, turn)
+			continue
+		}
+		turnsByEvent[turn.TriggerEventID] = append(turnsByEvent[turn.TriggerEventID], turn)
+	}
+
+	for _, evt := range report.Events {
+		fmt.Fprintf(w, "%s  %s  id=%s", evt.CreatedAt.Format(time.RFC3339), evt.EventName, evt.EventID)
+		if evt.SourceEventID != "" {
+			fmt.Fprintf(w, " parent=%s", evt.SourceEventID)
+		}
+		if evt.ProducedBy != "" {
+			fmt.Fprintf(w, " by=%s", evt.ProducedBy)
+		}
+		if evt.FlowInstance != "" {
+			fmt.Fprintf(w, " flow=%s", evt.FlowInstance)
+		}
+		if evt.EntityID != "" {
+			fmt.Fprintf(w, " entity=%s", evt.EntityID)
+		}
+		fmt.Fprintln(w)
+
+		for _, delivery := range deliveriesByEvent[evt.EventID] {
+			fmt.Fprintf(w, "  delivery  %s/%s  status=%s", delivery.SubscriberType, delivery.SubscriberID, delivery.Status)
+			if delivery.ReasonCode != "" {
+				fmt.Fprintf(w, " reason=%s", delivery.ReasonCode)
+			}
+			if delivery.RetryCount > 0 {
+				fmt.Fprintf(w, " retries=%d", delivery.RetryCount)
+			}
+			if delivery.LastError != "" {
+				fmt.Fprintf(w, " error=%q", delivery.LastError)
+			}
+			fmt.Fprintln(w)
+		}
+		for _, receipt := range receiptsByEvent[evt.EventID] {
+			fmt.Fprintf(w, "  receipt   %s/%s  outcome=%s", receipt.SubscriberType, receipt.SubscriberID, receipt.Outcome)
+			if receipt.ReasonCode != "" {
+				fmt.Fprintf(w, " reason=%s", receipt.ReasonCode)
+			}
+			if errText := strings.TrimSpace(asString(receipt.SideEffects["error"])); errText != "" {
+				fmt.Fprintf(w, " error=%q", errText)
+			}
+			fmt.Fprintln(w)
+		}
+		for _, deadLetter := range deadLettersByEvent[evt.EventID] {
+			fmt.Fprintf(w, "  dead      type=%s retries=%d depth=%d", deadLetter.FailureType, deadLetter.RetryCount, deadLetter.ChainDepth)
+			if deadLetter.HandlerNode != "" {
+				fmt.Fprintf(w, " handler=%s", deadLetter.HandlerNode)
+			}
+			if deadLetter.ErrorMessage != "" {
+				fmt.Fprintf(w, " error=%q", deadLetter.ErrorMessage)
+			}
+			fmt.Fprintln(w)
+		}
+		for _, turn := range turnsByEvent[evt.EventID] {
+			printTraceTurn(w, turn)
+		}
+		fmt.Fprintln(w)
+	}
+	for _, turn := range turnsWithoutEvent {
+		printTraceTurn(w, turn)
+		fmt.Fprintln(w)
+	}
+}
+
+func printTraceTurn(w io.Writer, turn store.TraceTurn) {
+	fmt.Fprintf(w, "  turn      agent=%s session=%s mode=%s parse_ok=%t", turn.AgentID, turn.SessionID, turn.RuntimeMode, turn.ParseOK)
+	if turn.ScopeKey != "" {
+		fmt.Fprintf(w, " scope=%s", turn.ScopeKey)
+	}
+	if turn.LatencyMS > 0 {
+		fmt.Fprintf(w, " latency_ms=%d", turn.LatencyMS)
+	}
+	if turn.RetryCount > 0 {
+		fmt.Fprintf(w, " retries=%d", turn.RetryCount)
+	}
+	if turn.Error != "" {
+		fmt.Fprintf(w, " error=%q", turn.Error)
+	}
+	fmt.Fprintln(w)
+	if len(turn.AvailableTools) > 0 {
+		fmt.Fprintf(w, "    tools     available=%s\n", strings.Join(turn.AvailableTools, ","))
+	}
+	if len(turn.ToolCalls) > 0 {
+		fmt.Fprintf(w, "    tools     called=%s\n", strings.Join(turn.ToolCalls, ","))
+	}
+	if len(turn.EmittedEvents) > 0 {
+		fmt.Fprintf(w, "    events    emitted=%s\n", strings.Join(turn.EmittedEvents, ","))
+	}
+	if len(turn.MCPServers) > 0 || len(turn.MCPToolsListed) > 0 || len(turn.MCPToolsVisible) > 0 {
+		if len(turn.MCPServers) > 0 {
+			serverStates := make([]string, 0, len(turn.MCPServers))
+			for name, status := range turn.MCPServers {
+				serverStates = append(serverStates, name+":"+status)
+			}
+			sort.Strings(serverStates)
+			fmt.Fprintf(w, "    mcp       servers=%s\n", strings.Join(serverStates, ","))
+		}
+		if len(turn.MCPToolsListed) > 0 {
+			fmt.Fprintf(w, "    mcp       listed=%s\n", strings.Join(turn.MCPToolsListed, ","))
+		}
+		if len(turn.MCPToolsVisible) > 0 {
+			fmt.Fprintf(w, "    mcp       visible=%s\n", strings.Join(turn.MCPToolsVisible, ","))
+		}
+	}
+}
+
+func traceFirstStuckSummary(report store.TraceReport) string {
+	deliveriesByEvent := make(map[string][]store.TraceDelivery, len(report.Deliveries))
+	for _, delivery := range report.Deliveries {
+		deliveriesByEvent[delivery.EventID] = append(deliveriesByEvent[delivery.EventID], delivery)
+	}
+	receiptsByEvent := make(map[string][]store.TraceReceipt, len(report.Receipts))
+	for _, receipt := range report.Receipts {
+		receiptsByEvent[receipt.EventID] = append(receiptsByEvent[receipt.EventID], receipt)
+	}
+	deadLettersByEvent := make(map[string][]store.TraceDeadLetter, len(report.DeadLetters))
+	for _, deadLetter := range report.DeadLetters {
+		deadLettersByEvent[deadLetter.OriginalEventID] = append(deadLettersByEvent[deadLetter.OriginalEventID], deadLetter)
+	}
+
+	for _, evt := range report.Events {
+		deliveries := deliveriesByEvent[evt.EventID]
+		receipts := receiptsByEvent[evt.EventID]
+		if len(deliveries) == 0 && len(receipts) == 0 && len(deadLettersByEvent[evt.EventID]) == 0 {
+			return fmt.Sprintf("unrouted event %s id=%s", evt.EventName, evt.EventID)
+		}
+		receiptKeys := map[string]struct{}{}
+		for _, receipt := range receipts {
+			receiptKeys[receipt.SubscriberType+"/"+receipt.SubscriberID] = struct{}{}
+			switch strings.TrimSpace(strings.ToLower(receipt.Outcome)) {
+			case "dead_letter", "discard", "reject", "kill", "escalate":
+				if receipt.ReasonCode != "" {
+					return fmt.Sprintf("receipt %s/%s outcome=%s reason=%s for %s", receipt.SubscriberType, receipt.SubscriberID, receipt.Outcome, receipt.ReasonCode, evt.EventName)
+				}
+				return fmt.Sprintf("receipt %s/%s outcome=%s for %s", receipt.SubscriberType, receipt.SubscriberID, receipt.Outcome, evt.EventName)
+			}
+		}
+		for _, delivery := range deliveries {
+			key := delivery.SubscriberType + "/" + delivery.SubscriberID
+			if _, ok := receiptKeys[key]; !ok && strings.TrimSpace(strings.ToLower(delivery.Status)) == "pending" {
+				if delivery.ReasonCode != "" {
+					return fmt.Sprintf("pending delivery %s reason=%s for %s", key, delivery.ReasonCode, evt.EventName)
+				}
+				return fmt.Sprintf("pending delivery %s for %s", key, evt.EventName)
+			}
+			switch strings.TrimSpace(strings.ToLower(delivery.Status)) {
+			case "failed", "dead_letter":
+				if delivery.ReasonCode != "" {
+					return fmt.Sprintf("delivery %s status=%s reason=%s for %s", key, delivery.Status, delivery.ReasonCode, evt.EventName)
+				}
+				return fmt.Sprintf("delivery %s status=%s for %s", key, delivery.Status, evt.EventName)
+			}
+		}
+	}
+	return ""
+}
+
+func asString(v any) string {
+	switch typed := v.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	default:
+		return ""
+	}
 }
 
 func resolveContractsPath(repoRoot, raw string) string {

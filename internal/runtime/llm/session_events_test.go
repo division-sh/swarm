@@ -8,7 +8,9 @@ import (
 
 	"swarm/internal/config"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -156,5 +158,76 @@ func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 	}
 	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask {
 		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
+	}
+}
+
+func TestEnrichTurnRecordIncludesTraceTriggerToolsAndEmits(t *testing.T) {
+	ctx := runtimecorrelation.WithTraceID(context.Background(), "trace-123")
+	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
+		ID:      "11111111-1111-1111-1111-111111111111",
+		Type:    events.EventType("scan.requested"),
+		Payload: []byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`),
+	})
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
+	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
+	recorder.Append(events.Event{Type: events.EventType("discovery/scan_complete")})
+	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
+
+	session := &Session{
+		ID:       "33333333-3333-3333-3333-333333333333",
+		ScopeKey: "global",
+		Tools: []ToolDefinition{
+			{Name: "emit_category_assessed"},
+			{Name: "read_file"},
+		},
+	}
+	resp := &Response{
+		MCPServers: map[string]string{
+			"runtime-tools": "connected",
+		},
+		MCPVisibleTools: []string{
+			"mcp__runtime-tools__emit_category_assessed",
+		},
+		ToolCalls: []ToolCall{
+			{Name: "emit_category_assessed", Arguments: map[string]any{"subcategory": "x"}},
+		},
+	}
+
+	rec := enrichTurnRecord(ctx, session, AgentTurnRecord{
+		AgentID:     "market-research-agent",
+		RuntimeMode: sessions.RuntimeModeSession,
+		SessionID:   session.ID,
+	}, resp)
+
+	if rec.TraceID != "trace-123" {
+		t.Fatalf("trace_id = %q, want trace-123", rec.TraceID)
+	}
+	if rec.TriggerEventID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("trigger_event_id = %q", rec.TriggerEventID)
+	}
+	if rec.TriggerEventType != "scan.requested" {
+		t.Fatalf("trigger_event_type = %q", rec.TriggerEventType)
+	}
+	if rec.EntityID != "22222222-2222-2222-2222-222222222222" {
+		t.Fatalf("entity_id = %q", rec.EntityID)
+	}
+	if len(rec.AvailableTools) != 2 || rec.AvailableTools[0] != "emit_category_assessed" || rec.AvailableTools[1] != "read_file" {
+		t.Fatalf("available_tools = %#v", rec.AvailableTools)
+	}
+	if len(rec.ToolCalls) != 1 || rec.ToolCalls[0].Name != "emit_category_assessed" {
+		t.Fatalf("tool_calls = %#v", rec.ToolCalls)
+	}
+	if got := rec.MCPServers["runtime-tools"]; got != "connected" {
+		t.Fatalf("mcp_servers = %#v", rec.MCPServers)
+	}
+	if len(rec.MCPToolsListed) != 2 || rec.MCPToolsListed[0] != "mcp__runtime-tools__emit_category_assessed" || rec.MCPToolsListed[1] != "mcp__runtime-tools__read_file" {
+		t.Fatalf("mcp_tools_listed = %#v", rec.MCPToolsListed)
+	}
+	if len(rec.MCPToolsVisible) != 1 || rec.MCPToolsVisible[0] != "mcp__runtime-tools__emit_category_assessed" {
+		t.Fatalf("mcp_tools_visible = %#v", rec.MCPToolsVisible)
+	}
+	if len(rec.EmittedEvents) != 2 || rec.EmittedEvents[0] != "discovery/category.assessed" || rec.EmittedEvents[1] != "discovery/scan_complete" {
+		t.Fatalf("emitted_events = %#v", rec.EmittedEvents)
 	}
 }

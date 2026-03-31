@@ -286,11 +286,11 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 		_, err := n.db.ExecContext(ctx, `
 			INSERT INTO event_receipts (
 				event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-				outcome, side_effects, idempotency_key, processed_at
+				outcome, reason_code, side_effects, idempotency_key, processed_at
 			)
 			SELECT
 				e.event_id, 'node', $2, e.entity_id, e.flow_instance,
-				'no_op', $3::jsonb, $4, now()
+				'no_op', 'idempotent_no_op', $3::jsonb, $4, now()
 			FROM events e
 			WHERE e.event_id = $1::uuid
 			ON CONFLICT (event_id, subscriber_id) DO NOTHING

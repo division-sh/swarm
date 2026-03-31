@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	runtimecorrelation "swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).
@@ -270,6 +270,7 @@ func isMissingDiagnosticsTable(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "event_name") ||
 		strings.Contains(msg, "subscriber_id") ||
+		strings.Contains(msg, "reason_code") ||
 		strings.Contains(msg, "side_effects") ||
 		strings.Contains(msg, "duration_ms")
 }
@@ -313,13 +314,13 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, created_at
+			chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (
 			gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $1::jsonb,
-			0, 'runtime', 'platform', now()
+			0, NULLIF($2,''), 'runtime', 'platform', NULLIF($3,'')::uuid, now()
 		)
-	`, string(encoded))
+	`, string(encoded), traceID, parentEventID)
 	if err != nil {
 		return err
 	}
@@ -332,11 +333,18 @@ func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, hand
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(handler)
 	}
+	reasonCode := "pipeline_transition_applied"
+	if strings.TrimSpace(errText) != "" {
+		reasonCode = "pipeline_transition_error"
+	} else if strings.TrimSpace(dropReason) != "" {
+		reasonCode = "pipeline_transition_discarded"
+	}
 	sideEffects, err := json.Marshal(map[string]any{
 		"pipeline_type":  pipelineType,
 		"pipeline_id":    pipelineID,
 		"action":         action,
 		"handler_id":     handlerID,
+		"reason_code":    reasonCode,
 		"trace_id":       traceID,
 		"events_emitted": eventsEmitted,
 		"drop_reason":    strings.TrimSpace(dropReason),
@@ -350,6 +358,28 @@ func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, hand
 		outcome = "dead_letter"
 	} else if strings.TrimSpace(dropReason) != "" {
 		outcome = "discard"
+	}
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, state_before, state_after, side_effects, duration_ms, processed_at
+		)
+		SELECT
+			e.event_id, 'platform', $2, e.entity_id, e.flow_instance,
+			$3, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), $7::jsonb, NULLIF($8,0), now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
+			outcome = EXCLUDED.outcome,
+			reason_code = EXCLUDED.reason_code,
+			state_before = EXCLUDED.state_before,
+			state_after = EXCLUDED.state_after,
+			side_effects = EXCLUDED.side_effects,
+			duration_ms = EXCLUDED.duration_ms,
+			processed_at = now()
+	`, eventID, "pipeline:"+pipelineID, outcome, reasonCode, string(before), string(after), string(sideEffects), durationMS)
+	if err == nil || !isMissingDiagnosticsTable(err) {
+		return err
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO event_receipts (

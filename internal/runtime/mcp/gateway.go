@@ -360,7 +360,13 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 			}
 		}
 	}
-	role := headerValue(r, actorRoleHeader)
+	role := ""
+	if actor, ok := ActorFromRequest(r); ok {
+		role = strings.TrimSpace(g.hydrateActor(actor).Role)
+	}
+	if role == "" {
+		role = headerValue(r, actorRoleHeader)
+	}
 	if role != "" && g.hooks.EmitTools != nil {
 		for _, def := range g.hooks.EmitTools(role) {
 			name := strings.TrimSpace(def.Name)

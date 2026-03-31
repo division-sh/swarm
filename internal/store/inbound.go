@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"swarm/internal/runtime"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
@@ -109,16 +110,17 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 	if err != nil {
 		return false, fmt.Errorf("marshal inbound event payload: %w", err)
 	}
+	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO events (
 			event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, idempotency_key, created_at
+			chain_depth, trace_id, produced_by, produced_by_type, idempotency_key, created_at
 		)
 		VALUES (
 			'platform.inbound_recorded', $1::uuid, NULL, 'entity', $2::jsonb,
-			0, $3, 'external', $4, now()
+			0, NULLIF($3,''), $4, 'external', $5, now()
 		)
-	`, entityID, string(payload), provider, idempotencyKey); err != nil {
+	`, entityID, string(payload), traceID, provider, idempotencyKey); err != nil {
 		return false, fmt.Errorf("record inbound event in events: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -155,6 +155,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	entityID := actor.EffectiveEntityID()
 	scopeKey := budgetExecutionScopeKey(actor)
 	disallowedBuiltinTools := claudeDisallowedBuiltinToolsArgForActor(actor)
+	allowedToolsArg := claudeAllowedToolsArgForActor(actor, s.Tools)
 
 	// Spec v2.0 budget cap enforcement: at 100% (budget.emergency) we hard-stop
 	// LLM execution for the affected scope(s). Treated as transient so deliveries
@@ -196,7 +197,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if strings.TrimSpace(prompt) == "" {
 		err := errors.New("empty prompt input for claude cli")
 		s.ParseFailures++
-		r.persistTurn(ctx, AgentTurnRecord{
+		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode,
 			SessionID:      s.ID,
@@ -204,7 +205,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			ParseOK:        false,
 			Latency:        0,
 			Error:          err.Error(),
-		})
+		}, nil))
 		return nil, err
 	}
 
@@ -228,6 +229,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		if strings.TrimSpace(disallowedBuiltinTools) != "" {
 			args = append(args, "--disallowedTools", disallowedBuiltinTools)
 		}
+		if strings.TrimSpace(allowedToolsArg) != "" {
+			args = append(args, "--allowedTools", allowedToolsArg)
+		}
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
@@ -241,6 +245,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		args = append(args, permissionModeArgs()...)
 		if strings.TrimSpace(disallowedBuiltinTools) != "" {
 			args = append(args, "--disallowedTools", disallowedBuiltinTools)
+		}
+		if strings.TrimSpace(allowedToolsArg) != "" {
+			args = append(args, "--allowedTools", allowedToolsArg)
 		}
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
@@ -275,6 +282,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		args = append(args, permissionModeArgs()...)
 		if strings.TrimSpace(disallowedBuiltinTools) != "" {
 			args = append(args, "--disallowedTools", disallowedBuiltinTools)
+		}
+		if strings.TrimSpace(allowedToolsArg) != "" {
+			args = append(args, "--allowedTools", allowedToolsArg)
 		}
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
@@ -321,6 +331,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				if strings.TrimSpace(disallowedBuiltinTools) != "" {
 					args = append(args, "--disallowedTools", disallowedBuiltinTools)
 				}
+				if strings.TrimSpace(allowedToolsArg) != "" {
+					args = append(args, "--allowedTools", allowedToolsArg)
+				}
 				if mcpEnabled {
 					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 				}
@@ -339,6 +352,9 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 					if strings.TrimSpace(disallowedBuiltinTools) != "" {
 						args = append(args, "--disallowedTools", disallowedBuiltinTools)
 					}
+					if strings.TrimSpace(allowedToolsArg) != "" {
+						args = append(args, "--allowedTools", allowedToolsArg)
+					}
 					if mcpEnabled {
 						args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 					}
@@ -352,7 +368,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	latency := time.Since(start)
 	if err != nil {
 		s.ParseFailures++
-		r.persistTurn(ctx, AgentTurnRecord{
+		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:     s.AgentID,
 			RuntimeMode: resolved.RuntimeMode,
 			SessionID:   s.ID,
@@ -366,7 +382,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			ParseOK: false,
 			Latency: latency,
 			Error:   err.Error(),
-		})
+		}, nil))
 		if !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
 				lease = rotated
@@ -398,7 +414,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 
-	r.persistTurn(ctx, AgentTurnRecord{
+	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:     s.AgentID,
 		RuntimeMode: resolved.RuntimeMode,
 		SessionID:   s.ID,
@@ -412,7 +428,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		ResponseRaw: resp.Raw,
 		ParseOK:     true,
 		Latency:     latency,
-	})
+	}, resp))
 	r.persistConversation(ctx, s)
 
 	// Spend ledger: CLI runtime does not expose exact usage; estimate from payload sizes.

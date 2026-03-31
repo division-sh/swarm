@@ -216,7 +216,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	if lastErr != nil {
 		s.ParseFailures++
-		r.persistTurn(ctx, AgentTurnRecord{
+		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
 			RuntimeMode:    resolved.RuntimeMode,
 			SessionID:      s.ID,
@@ -226,7 +226,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			Latency:        latency,
 			RetryCount:     retryCount,
 			Error:          lastErr.Error(),
-		})
+		}, nil))
 		if !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
 				lease = rotated
@@ -247,7 +247,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		}
 	}
 
-	r.persistTurn(ctx, AgentTurnRecord{
+	r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
 		RuntimeMode:    resolved.RuntimeMode,
 		SessionID:      s.ID,
@@ -256,7 +256,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		ParseOK:        true,
 		Latency:        latency,
 		RetryCount:     retryCount,
-	})
+	}, &resp))
 	r.persistConversation(ctx, s)
 
 	// Spend ledger: exact usage for API runtime when usage fields are present.

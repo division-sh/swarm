@@ -451,20 +451,8 @@ func workflowNodeExternalDescendantEventType(source semanticview.Source, nodeID,
 }
 
 func workflowFlowLocalEventSet(scope semanticview.FlowScope) map[string]struct{} {
-	out := make(map[string]struct{}, len(scope.Events)+len(scope.InputEvents)+len(scope.OutputEvents)+1)
+	out := make(map[string]struct{}, len(scope.Events)+1)
 	for eventType := range scope.Events {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	for _, eventType := range scope.InputEvents {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	for _, eventType := range scope.OutputEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
@@ -488,16 +476,6 @@ func workflowFlowHasLocalEvent(source semanticview.Source, flowID, eventType str
 	}
 	if _, ok := scope.Events[eventType]; ok {
 		return true
-	}
-	for _, candidate := range scope.InputEvents {
-		if strings.TrimSpace(candidate) == eventType {
-			return true
-		}
-	}
-	for _, candidate := range scope.OutputEvents {
-		if strings.TrimSpace(candidate) == eventType {
-			return true
-		}
 	}
 	return strings.TrimSpace(scope.AutoEmitEvent) == eventType
 }

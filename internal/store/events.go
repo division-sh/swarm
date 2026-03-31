@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecorrelation "swarm/internal/runtime/correlation"
-	"github.com/google/uuid"
 )
 
 type rowQueryer interface {
@@ -26,6 +26,7 @@ func (s *PostgresStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
 }
 
 func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	evt = s.enrichEventCorrelation(ctx, chooseRowQueryer(s.DB, tx), evt)
 	if eventSchemaAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
 		if err := s.appendEventSpec(ctx, tx, evt); err == nil {
 			return nil
@@ -61,6 +62,7 @@ func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt event
 }
 
 func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
+	evt = s.enrichEventCorrelation(ctx, chooseRowQueryer(s.DB, nil), evt)
 	if err := s.persistEventWithDeliveriesSpec(ctx, evt, agentIDs); err == nil {
 		return nil
 	} else if !shouldFallbackLegacyEventsSchema(err) {
@@ -112,6 +114,25 @@ func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt even
 		return fmt.Errorf("commit event tx: %w", err)
 	}
 	return nil
+}
+
+func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, q rowQueryer, evt events.Event) events.Event {
+	parentID := strings.TrimSpace(evt.ParentEventID)
+	if parentID == "" {
+		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+			if inboundID := strings.TrimSpace(inbound.ID); inboundID != "" && inboundID != strings.TrimSpace(evt.ID) {
+				parentID = inboundID
+				evt.ParentEventID = inboundID
+			}
+		}
+	}
+	if strings.TrimSpace(evt.TraceID) == "" && parentID != "" {
+		if traceID := lookupEventTraceID(ctx, q, parentID); traceID != "" {
+			evt.TraceID = traceID
+		}
+	}
+	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
+	return evt
 }
 
 func sanitizeOptionalUUID(raw string) string {
@@ -255,15 +276,15 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	id, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, createdAt := eventStorageEnvelope(evt)
+	id, name, entityID, flowInstance, scope, payload, chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
 	const q = `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, produced_by, produced_by_type, created_at
+			chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (
 			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-			$7, NULLIF($8,''), $9, $10
+			$7, NULLIF($8,''), NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12
 		)
 		ON CONFLICT (event_id) DO NOTHING
 	`
@@ -271,7 +292,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	if _, err := execFn(ctx, q, id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, createdAt); err != nil {
+	if _, err := execFn(ctx, q, id, name, entityID, flowInstance, scope, string(payload), chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt); err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
 	return nil
@@ -297,8 +318,8 @@ func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, evt 
 
 func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
 	const q = `
-		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, created_at)
-		VALUES ($1::uuid, 'agent', $2, now())
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, created_at)
+		VALUES ($1::uuid, 'agent', $2, 'matched_agent_subscription', now())
 		ON CONFLICT DO NOTHING
 	`
 	execFn := s.DB.ExecContext
@@ -324,8 +345,10 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.T
 
 func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
 	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	reasonCode := pipelineReceiptReasonCode(status, errText)
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": strings.TrimSpace(status),
+		"reason_code":    reasonCode,
 		"error":          strings.TrimSpace(errText),
 		"trace_id":       traceID,
 	})
@@ -336,15 +359,16 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	const q = `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, side_effects, processed_at
+			outcome, reason_code, side_effects, processed_at
 		)
 		SELECT
 			e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance,
-			$2, $3::jsonb, now()
+			$2, NULLIF($3,''), $4::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
 		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
 			outcome = EXCLUDED.outcome,
+			reason_code = EXCLUDED.reason_code,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
 	`
@@ -352,7 +376,7 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	if _, err := execFn(ctx, q, eventID, outcome, string(sideEffects)); err != nil {
+	if _, err := execFn(ctx, q, eventID, outcome, reasonCode, string(sideEffects)); err != nil {
 		return fmt.Errorf("upsert pipeline receipt: %w", err)
 	}
 	return nil
@@ -412,6 +436,7 @@ func shouldFallbackLegacyEventsSchema(err error) bool {
 		strings.Contains(msg, `produced_by_type`) ||
 		strings.Contains(msg, `subscriber_type`) ||
 		strings.Contains(msg, `subscriber_id`) ||
+		strings.Contains(msg, `reason_code`) ||
 		strings.Contains(msg, `scope`) ||
 		strings.Contains(msg, `flow_instance`) ||
 		strings.Contains(msg, `outcome`) ||
@@ -459,7 +484,24 @@ func columnExists(ctx context.Context, q rowQueryer, tableName, columnName strin
 	return exists
 }
 
-func eventStorageEnvelope(evt events.Event) (id string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, createdAt time.Time) {
+func lookupEventTraceID(ctx context.Context, q rowQueryer, eventID string) string {
+	eventID = strings.TrimSpace(eventID)
+	if q == nil || eventID == "" {
+		return ""
+	}
+	var traceID string
+	if err := q.QueryRowContext(ctx, `
+		SELECT COALESCE(trace_id, '')
+		FROM events
+		WHERE event_id = $1::uuid
+		LIMIT 1
+	`, eventID).Scan(&traceID); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(traceID)
+}
+
+func eventStorageEnvelope(evt events.Event) (id string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, traceID string, producedBy string, producedByType string, sourceEventID string, createdAt time.Time) {
 	id = strings.TrimSpace(evt.ID)
 	if id == "" {
 		id = uuid.NewString()
@@ -468,6 +510,7 @@ func eventStorageEnvelope(evt events.Event) (id string, eventName string, entity
 	payload = eventPayloadForStorage(evt)
 	entityID = sanitizeOptionalUUID(evt.EntityID())
 	flowInstance = eventPayloadString(payload, "flow_instance")
+	traceID = strings.TrimSpace(evt.TraceID)
 	scope = "global"
 	if entityID != "" {
 		scope = "entity"
@@ -483,6 +526,7 @@ func eventStorageEnvelope(evt events.Event) (id string, eventName string, entity
 	if producedBy == "" || producedBy == "runtime" {
 		producedByType = "platform"
 	}
+	sourceEventID = sanitizeOptionalUUID(evt.ParentEventID)
 	createdAt = evt.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -532,5 +576,20 @@ func mapPipelineStatusToOutcome(status string) string {
 		return "dead_letter"
 	default:
 		return "success"
+	}
+}
+
+func pipelineReceiptReasonCode(status, errText string) string {
+	status = strings.TrimSpace(strings.ToLower(status))
+	if strings.TrimSpace(errText) != "" {
+		return "pipeline_error"
+	}
+	switch status {
+	case "dead_letter":
+		return "pipeline_dead_letter"
+	case "error":
+		return "pipeline_error"
+	default:
+		return "pipeline_persisted"
 	}
 }

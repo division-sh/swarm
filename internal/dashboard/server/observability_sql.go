@@ -122,24 +122,8 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, COALESCE(e.payload->>'entity_id', '')),
 			COALESCE(e.scope, ''),
-			COALESCE((
-				SELECT COALESCE(l.payload->>'trace_id', '')
-				FROM events l
-				WHERE l.event_name = 'platform.runtime_log'
-				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
-				  AND COALESCE(l.payload->>'action', '') = 'published'
-				ORDER BY l.created_at DESC
-				LIMIT 1
-			), '') AS trace_id,
-			COALESCE((
-				SELECT COALESCE(l.payload->>'parent_event_id', COALESCE(l.payload->'detail'->>'parent_event_id', ''))
-				FROM events l
-				WHERE l.event_name = 'platform.runtime_log'
-				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
-				  AND COALESCE(l.payload->>'action', '') = 'published'
-				ORDER BY l.created_at DESC
-				LIMIT 1
-			), '') AS parent_event_id,
+			COALESCE(e.trace_id, '') AS trace_id,
+			COALESCE(e.source_event_id::text, '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb),
 			COALESCE((
 				SELECT COUNT(*)::int
@@ -224,24 +208,8 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, COALESCE(e.payload->>'entity_id', '')),
 			COALESCE(e.scope, ''),
-			COALESCE((
-				SELECT COALESCE(l.payload->>'trace_id', '')
-				FROM events l
-				WHERE l.event_name = 'platform.runtime_log'
-				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
-				  AND COALESCE(l.payload->>'action', '') = 'published'
-				ORDER BY l.created_at DESC
-				LIMIT 1
-			), '') AS trace_id,
-			COALESCE((
-				SELECT COALESCE(l.payload->>'parent_event_id', COALESCE(l.payload->'detail'->>'parent_event_id', ''))
-				FROM events l
-				WHERE l.event_name = 'platform.runtime_log'
-				  AND COALESCE(l.payload->>'event_id', '') = e.event_id::text
-				  AND COALESCE(l.payload->>'action', '') = 'published'
-				ORDER BY l.created_at DESC
-				LIMIT 1
-			), '') AS parent_event_id,
+			COALESCE(e.trace_id, '') AS trace_id,
+			COALESCE(e.source_event_id::text, '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb)
 		FROM events e
 		WHERE e.event_id::text = $1

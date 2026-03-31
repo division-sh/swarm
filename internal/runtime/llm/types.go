@@ -19,10 +19,12 @@ type ToolCall struct {
 }
 
 type Response struct {
-	Message   Message    `json:"message"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	SessionID string     `json:"session_id,omitempty"`
-	Raw       []byte     `json:"raw,omitempty"`
+	Message         Message           `json:"message"`
+	ToolCalls       []ToolCall        `json:"tool_calls,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	Raw             []byte            `json:"raw,omitempty"`
+	MCPServers      map[string]string `json:"mcp_servers,omitempty"`
+	MCPVisibleTools []string          `json:"mcp_visible_tools,omitempty"`
 }
 
 type Session struct {

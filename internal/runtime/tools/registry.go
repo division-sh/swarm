@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"encoding/json"
 	"sort"
 	"strings"
 
@@ -217,15 +216,60 @@ func schemaToMap(schema runtimecontracts.ToolInputSchema) (map[string]any, error
 	if schema.Type == "" && len(schema.Properties) == 0 && len(schema.Required) == 0 && schema.Items == nil && len(schema.Enum) == 0 {
 		return nil, nil
 	}
-	raw, err := json.Marshal(schema)
-	if err != nil {
-		return nil, err
-	}
+	return toolSchemaToMap(schema), nil
+}
+
+func toolSchemaToMap(schema runtimecontracts.ToolInputSchema) map[string]any {
 	out := map[string]any{}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
+	if value := strings.TrimSpace(schema.Type); value != "" {
+		out["type"] = value
 	}
-	return out, nil
+	if value := strings.TrimSpace(schema.Description); value != "" {
+		out["description"] = value
+	}
+	if len(schema.Properties) > 0 {
+		props := make(map[string]any, len(schema.Properties))
+		for name, prop := range schema.Properties {
+			props[name] = toolSchemaToMap(prop)
+		}
+		out["properties"] = props
+	}
+	if len(schema.Required) > 0 {
+		out["required"] = append([]string{}, schema.Required...)
+	}
+	if schema.Items != nil {
+		out["items"] = toolSchemaToMap(*schema.Items)
+	}
+	if len(schema.Enum) > 0 {
+		enumValues := make([]any, 0, len(schema.Enum))
+		for _, literal := range schema.Enum {
+			enumValues = append(enumValues, schemaLiteralValue(literal))
+		}
+		out["enum"] = enumValues
+	}
+	if schema.AdditionalProperties.Allowed != nil {
+		out["additionalProperties"] = *schema.AdditionalProperties.Allowed
+	} else if schema.AdditionalProperties.Schema != nil {
+		out["additionalProperties"] = toolSchemaToMap(*schema.AdditionalProperties.Schema)
+	}
+	if schema.Minimum != nil {
+		out["minimum"] = *schema.Minimum
+	}
+	if schema.Maximum != nil {
+		out["maximum"] = *schema.Maximum
+	}
+	return out
+}
+
+func schemaLiteralValue(literal runtimecontracts.SchemaLiteral) any {
+	if literal.Node.Kind == 0 {
+		return nil
+	}
+	var out any
+	if err := literal.Node.Decode(&out); err != nil {
+		return strings.TrimSpace(literal.Node.Value)
+	}
+	return out
 }
 
 func deepCloneMap(in map[string]any) map[string]any {

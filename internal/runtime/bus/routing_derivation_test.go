@@ -7,6 +7,8 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/flowmodel"
+	"swarm/internal/runtime/semanticview"
 )
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
@@ -83,5 +85,94 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	}
 	if len(store.routes) != 0 {
 		t.Fatalf("persisted routes after remove = %#v, want none", store.routes)
+	}
+}
+
+func TestDeriveRouteTable_InputPinsStayAtParentScope(t *testing.T) {
+	producer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "producer",
+	}
+	discovery := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+			},
+		},
+		Path: "discovery",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scan-orchestrator": {
+				ID:           "scan-orchestrator",
+				SubscribesTo: []string{"scan.requested"},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, discovery}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"producer":  &root.Children[0],
+				"discovery": &root.Children[1],
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := rt.Resolve("scan.requested")
+	if len(got) != 1 || got[0].ID != "scan-orchestrator" {
+		t.Fatalf("Resolve(scan.requested) = %#v, want scan-orchestrator", got)
+	}
+	if got := rt.Resolve("discovery/scan.requested"); len(got) != 0 {
+		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want none", got)
+	}
+}
+
+func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T) {
+	scoring := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{Events: []string{"score.dimension_complete"}},
+			},
+		},
+		Path: "scoring",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"score.dimension_complete": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scoring-node": {
+				ID:           "scoring-node",
+				SubscribesTo: []string{"score.dimension_complete"},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{scoring}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"scoring": &root.Children[0],
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := rt.Resolve("scoring/score.dimension_complete")
+	if len(got) != 1 || got[0].ID != "scoring-node" {
+		t.Fatalf("Resolve(scoring/score.dimension_complete) = %#v, want scoring-node", got)
+	}
+	if got := rt.Resolve("score.dimension_complete"); len(got) != 0 {
+		t.Fatalf("Resolve(score.dimension_complete) = %#v, want none", got)
 	}
 }

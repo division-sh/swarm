@@ -9,6 +9,7 @@ import (
 
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
@@ -32,6 +33,22 @@ func (*recordingReceiptBus) Unsubscribe(string)                                 
 func (*recordingReceiptBus) Store() runtimebus.EventStore                                { return runtimebus.InMemoryEventStore{} }
 func (*recordingReceiptBus) ResetInMemoryState() error                                   { return nil }
 func (*recordingReceiptBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) {}
+
+type traceRecordingAgent struct {
+	traceID string
+	parent  string
+}
+
+func (a *traceRecordingAgent) ID() string                        { return "trace-agent" }
+func (a *traceRecordingAgent) Type() string                      { return "llm" }
+func (a *traceRecordingAgent) Subscriptions() []events.EventType { return nil }
+func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
+	a.traceID = runtimecorrelation.TraceIDFromContext(ctx)
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+		a.parent = inbound.ID
+	}
+	return nil, nil
+}
 
 func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.T) {
 	bus := &recordingReceiptBus{}
@@ -124,5 +141,24 @@ func TestRecordPoisonQuarantine_RequiresDistinctEntities(t *testing.T) {
 	}
 	if _, emit := am.recordPoisonQuarantine("item.failed", "ent-4"); emit {
 		t.Fatal("expected poison quarantine event to emit only once per event name")
+	}
+}
+
+func TestProcessEvent_PropagatesInboundTraceIntoAgentContext(t *testing.T) {
+	agent := &traceRecordingAgent{}
+	am := NewAgentManager(nil, nil)
+	evt := events.Event{
+		ID:      "evt-123",
+		Type:    events.EventType("discovery/market_research.scan_assigned"),
+		TraceID: "trace-root-123",
+	}
+	if err := am.processEvent(context.Background(), agent, evt); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if agent.traceID != "trace-root-123" {
+		t.Fatalf("trace id = %q, want trace-root-123", agent.traceID)
+	}
+	if agent.parent != "evt-123" {
+		t.Fatalf("parent event = %q, want evt-123", agent.parent)
 	}
 }

@@ -3,20 +3,31 @@ package llm
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
 type cliStreamAccumulator struct {
-	raw        bytes.Buffer
-	message    Message
-	toolCalls  []ToolCall
-	sessionID  string
-	resultText string
+	raw             bytes.Buffer
+	message         Message
+	toolCalls       []ToolCall
+	sessionID       string
+	resultText      string
+	pending         map[int]*cliPendingToolCall
+	mcpServers      map[string]string
+	mcpVisibleTools []string
+}
+
+type cliPendingToolCall struct {
+	Name      string
+	Input     any
+	InputJSON strings.Builder
 }
 
 func newCLIStreamAccumulator() *cliStreamAccumulator {
 	return &cliStreamAccumulator{
 		message: Message{Role: "assistant"},
+		pending: make(map[int]*cliPendingToolCall),
 	}
 }
 
@@ -35,6 +46,7 @@ func (a *cliStreamAccumulator) AddLine(line []byte) {
 	if err := json.Unmarshal(line, &obj); err != nil {
 		return
 	}
+	a.captureDiagnostics(obj)
 	if sid := strings.TrimSpace(coalesce(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
 		a.sessionID = sid
 	}
@@ -46,6 +58,8 @@ func (a *cliStreamAccumulator) AddLine(line []byte) {
 		if text := strings.TrimSpace(asString(obj["result"])); text != "" {
 			a.resultText = text
 		}
+	case "stream_event":
+		a.mergeStreamEvent(obj)
 	default:
 		// Ignore other stream events for final-response assembly.
 	}
@@ -79,6 +93,167 @@ func (a *cliStreamAccumulator) mergeAssistantObject(obj map[string]any) {
 	}
 }
 
+func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
+	event, _ := obj["event"].(map[string]any)
+	if len(event) == 0 {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(asString(event["type"]))) {
+	case "content_block_start":
+		index := asInt(event["index"])
+		block, _ := event["content_block"].(map[string]any)
+		if strings.ToLower(strings.TrimSpace(asString(block["type"]))) != "tool_use" {
+			return
+		}
+		call := &cliPendingToolCall{
+			Name: strings.TrimSpace(asString(block["name"])),
+		}
+		if input, ok := block["input"]; ok {
+			call.Input = input
+		}
+		if call.Name != "" {
+			a.pending[index] = call
+		}
+	case "content_block_delta":
+		index := asInt(event["index"])
+		call, ok := a.pending[index]
+		if !ok || call == nil {
+			return
+		}
+		delta, _ := event["delta"].(map[string]any)
+		if strings.ToLower(strings.TrimSpace(asString(delta["type"]))) != "input_json_delta" {
+			return
+		}
+		call.InputJSON.WriteString(asString(delta["partial_json"]))
+	case "content_block_stop":
+		index := asInt(event["index"])
+		call, ok := a.pending[index]
+		if !ok || call == nil {
+			return
+		}
+		delete(a.pending, index)
+		args := call.Input
+		if raw := strings.TrimSpace(call.InputJSON.String()); raw != "" {
+			var decoded any
+			if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
+				args = decoded
+			}
+		}
+		if strings.TrimSpace(call.Name) != "" {
+			a.appendVisibleTool(call.Name)
+			a.toolCalls = dedupeToolCalls(append(a.toolCalls, ToolCall{
+				Name:      call.Name,
+				Arguments: args,
+			}))
+		}
+	}
+}
+
+func (a *cliStreamAccumulator) captureDiagnostics(obj map[string]any) {
+	if a == nil || len(obj) == 0 {
+		return
+	}
+	walkCLIVisibilityPayload(obj, func(key string, value any) {
+		switch key {
+		case "mcp_servers":
+			for name, status := range parseMCPServers(value) {
+				if a.mcpServers == nil {
+					a.mcpServers = map[string]string{}
+				}
+				a.mcpServers[name] = status
+			}
+		case "tools":
+			for _, name := range parseVisibleToolNames(value) {
+				a.appendVisibleTool(name)
+			}
+		}
+	})
+}
+
+func walkCLIVisibilityPayload(value any, visit func(key string, value any)) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for rawKey, nested := range typed {
+			key := strings.TrimSpace(strings.ToLower(rawKey))
+			if key != "" {
+				visit(key, nested)
+			}
+			walkCLIVisibilityPayload(nested, visit)
+		}
+	case []any:
+		for _, nested := range typed {
+			walkCLIVisibilityPayload(nested, visit)
+		}
+	}
+}
+
+func parseMCPServers(value any) map[string]string {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, item := range list {
+		entry, _ := item.(map[string]any)
+		name := strings.TrimSpace(asString(entry["name"]))
+		status := strings.TrimSpace(asString(entry["status"]))
+		if name != "" && status != "" {
+			out[name] = status
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func parseVisibleToolNames(value any) []string {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		switch typed := item.(type) {
+		case string:
+			name := strings.TrimSpace(typed)
+			if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
+				if _, ok := seen[name]; !ok {
+					seen[name] = struct{}{}
+					out = append(out, name)
+				}
+			}
+		case map[string]any:
+			name := strings.TrimSpace(asString(typed["name"]))
+			if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
+				if _, ok := seen[name]; !ok {
+					seen[name] = struct{}{}
+					out = append(out, name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func (a *cliStreamAccumulator) appendVisibleTool(name string) {
+	if a == nil {
+		return
+	}
+	name = strings.TrimSpace(name)
+	if !strings.HasPrefix(name, runtimeToolsMCPPrefix) {
+		return
+	}
+	for _, existing := range a.mcpVisibleTools {
+		if existing == name {
+			return
+		}
+	}
+	a.mcpVisibleTools = append(a.mcpVisibleTools, name)
+	sort.Strings(a.mcpVisibleTools)
+}
+
 func (a *cliStreamAccumulator) Response() *Response {
 	if a == nil {
 		return &Response{Message: Message{Role: "assistant"}}
@@ -88,9 +263,28 @@ func (a *cliStreamAccumulator) Response() *Response {
 		message.Content = strings.TrimSpace(a.resultText)
 	}
 	return &Response{
-		Message:   message,
-		ToolCalls: dedupeToolCalls(a.toolCalls),
-		SessionID: strings.TrimSpace(a.sessionID),
-		Raw:       bytes.TrimSpace(a.raw.Bytes()),
+		Message:         message,
+		ToolCalls:       dedupeToolCalls(a.toolCalls),
+		SessionID:       strings.TrimSpace(a.sessionID),
+		Raw:             bytes.TrimSpace(a.raw.Bytes()),
+		MCPServers:      a.mcpServers,
+		MCPVisibleTools: append([]string(nil), a.mcpVisibleTools...),
+	}
+}
+
+func asInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case float32:
+		return int(n)
+	default:
+		return 0
 	}
 }

@@ -58,7 +58,7 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 
 	for _, scope := range semanticview.FlowScopes(source) {
 		flowPath := routeFlowPath(source, scope.ID)
-		localEvents := routeFlowLocalEventSet(scope)
+		localEvents := routeFlowLocalEventSet(source, scope)
 		if strings.EqualFold(scope.Mode, "template") {
 			rt.templates[scope.ID] = routeFlowTemplate{
 				LocalEvents: cloneStringSet(localEvents),
@@ -334,24 +334,43 @@ func routeProjectLocalEventSet(scope semanticview.ProjectScope) map[string]struc
 	return routeEventKeys(scope.Events)
 }
 
-func routeFlowLocalEventSet(scope semanticview.FlowScope) map[string]struct{} {
+func routeFlowLocalEventSet(source semanticview.Source, scope semanticview.FlowScope) map[string]struct{} {
 	out := routeEventKeys(scope.Events)
 	for _, eventType := range scope.InputEvents {
 		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
+		if eventType == "" || routeFlowInputHasExternalProducer(source, scope.ID, eventType) {
+			continue
 		}
-	}
-	for _, eventType := range scope.OutputEvents {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
+		out[eventType] = struct{}{}
 	}
 	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
 		out[autoEmit] = struct{}{}
 	}
 	return out
+}
+
+func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, eventType string) bool {
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || flowID == "" || eventType == "" {
+		return false
+	}
+	for _, scope := range semanticview.ProjectScopes(source) {
+		if _, ok := scope.Events[eventType]; ok {
+			return true
+		}
+	}
+	for _, scope := range source.FlowScopes() {
+		if strings.TrimSpace(scope.ID) == flowID {
+			continue
+		}
+		for _, candidate := range scope.OutputEvents {
+			if strings.TrimSpace(candidate) == eventType {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {
