@@ -436,6 +436,8 @@ func shouldFallbackLegacyEventsSchema(err error) bool {
 		strings.Contains(msg, `produced_by_type`) ||
 		strings.Contains(msg, `subscriber_type`) ||
 		strings.Contains(msg, `subscriber_id`) ||
+		strings.Contains(msg, `active_session_id`) ||
+		strings.Contains(msg, `started_at`) ||
 		strings.Contains(msg, `reason_code`) ||
 		strings.Contains(msg, `scope`) ||
 		strings.Contains(msg, `flow_instance`) ||

@@ -56,6 +56,7 @@ func (NoopRuntime) PersistConversationSnapshot(context.Context, *Session) error 
 
 type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error
+	MarkDeliveryInProgress(ctx context.Context, agentID, sessionID string) error
 }
 
 func defaultLockOwner() string {

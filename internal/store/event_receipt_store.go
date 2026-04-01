@@ -14,6 +14,31 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 )
 
+func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error {
+	eventID = strings.TrimSpace(eventID)
+	agentID = strings.TrimSpace(agentID)
+	if eventID == "" || agentID == "" {
+		return nil
+	}
+	sessionID = sanitizeOptionalUUID(sessionID)
+	if err := s.markEventDeliveryInProgressSpec(ctx, eventID, agentID, sessionID); err == nil {
+		return nil
+	} else if !shouldFallbackLegacyEventsSchema(err) {
+		return err
+	}
+
+	const q = `
+		UPDATE event_deliveries
+		SET status = 'in_progress'
+		WHERE event_id = $1::uuid
+		  AND agent_id = $2
+	`
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID); err != nil {
+		return fmt.Errorf("mark event delivery in progress: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
 	if eventID == "" || agentID == "" {
 		return nil
@@ -255,6 +280,63 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, outcome, reasonCode, string(sideEffects)); err != nil {
 		return fmt.Errorf("upsert event receipt: %w", err)
 	}
+	if err := s.syncAgentDeliverySpec(ctx, eventID, agentID, finalStatus, reasonCode, retryCount, errText); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *PostgresStore) syncAgentDeliverySpec(
+	ctx context.Context,
+	eventID, agentID string,
+	status runtimemanager.ReceiptStatus,
+	reasonCode string,
+	retryCount int,
+	errText string,
+) error {
+	deliveryStatus := "delivered"
+	switch status {
+	case runtimemanager.ReceiptStatusError:
+		deliveryStatus = "failed"
+	case runtimemanager.ReceiptStatusDeadLetter:
+		deliveryStatus = "dead_letter"
+	}
+	const q = `
+		UPDATE event_deliveries
+		SET
+			status = $3,
+			retry_count = $4,
+			reason_code = NULLIF($5, ''),
+			last_error = NULLIF($6, ''),
+			active_session_id = NULL,
+			delivered_at = now()
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, deliveryStatus, retryCount, reasonCode, strings.TrimSpace(errText)); err != nil {
+		return fmt.Errorf("sync event delivery: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eventID, agentID, sessionID string) error {
+	const q = `
+		UPDATE event_deliveries
+		SET
+			status = 'in_progress',
+			reason_code = 'agent_processing',
+			last_error = NULL,
+			active_session_id = COALESCE(NULLIF($3, '')::uuid, active_session_id),
+			started_at = COALESCE(started_at, now()),
+			delivered_at = NULL
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = $2
+	`
+	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, sessionID); err != nil {
+		return fmt.Errorf("mark event delivery in progress: %w", err)
+	}
 	return nil
 }
 
@@ -262,7 +344,8 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
-			COALESCE(e.entity_id::text, ''), e.payload, e.created_at
+			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
+			COALESCE(e.trace_id, ''), COALESCE(e.source_event_id::text, '')
 		FROM event_deliveries d
 		INNER JOIN events e ON e.event_id = d.event_id
 		LEFT JOIN event_receipts r
@@ -296,7 +379,8 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
 			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
-			COALESCE(e.entity_id::text, ''), e.payload, e.created_at
+			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
+			COALESCE(e.trace_id, ''), COALESCE(e.source_event_id::text, '')
 		FROM events e
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
@@ -424,6 +508,8 @@ func scanSpecPendingEvents(rows *sql.Rows) ([]events.Event, error) {
 			&entityID,
 			&evt.Payload,
 			&evt.CreatedAt,
+			&evt.TraceID,
+			&evt.ParentEventID,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending event: %w", err)
 		}

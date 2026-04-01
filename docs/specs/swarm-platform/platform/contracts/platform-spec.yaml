@@ -195,8 +195,8 @@ handler_specification:
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
-    graph: "\nquery (optional — pre-fetch cross-entity data into handler context)\n  └→ clear_gates (optional — reset gates\
-      \ before guard)\n       └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
+    graph: "\ncreate_entity (optional — mint new entity before any state operations)\n  └→ query (optional — pre-fetch cross-entity\
+      \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
       \           └→ on_complete / rules (mutually exclusive)\n                                          └→ advances_to ─┐\n\
@@ -229,6 +229,39 @@ handler_specification:
       field: description
       type: string
       purpose: Human-readable description of what this handler does. Not executed.
+    create_entity:
+      field: create_entity
+      type: boolean
+      purpose: When true, the handler mints a fresh entity_id before any other processing. All subsequent handler steps
+        (guard, data_accumulation, advances_to, emits, etc.) operate on the NEW entity. The inbound event's entity_id is
+        ignored for state operations — the new entity starts with a clean state at the flow's initial_state. The original
+        event entity_id is preserved in the event payload for reference.
+      default: false — handler operates on the inbound event's entity_id (inherit)
+      when_to_use: When an event arriving from outside the flow represents a new entity entering this flow's lifecycle.
+        Example — vertical.discovered arriving at scoring creates a new vertical entity for scoring. Without create_entity,
+        all discovered verticals would share the scan entity from discovery.
+      execution_position: First step in the dependency graph. Runs before query, guard, and all other steps. Establishes
+        the entity context for the entire handler.
+      entity_creation:
+        entity_id: Auto-generated UUID
+        initial_state: From the flow's schema.yaml initial_state
+        flow_instance: Current flow instance path
+        fields: Empty (clean slate). The handler's data_accumulation writes the initial field values.
+      interactions:
+        with_accumulate: 'PROHIBITED. create_entity mints a new entity_id on every handler invocation. Accumulate receives
+          multiple events for the same entity. Combining them would create a different entity on each accumulation event.
+          Boot error if both are declared on the same handler.'
+        with_fan_out: 'ALLOWED. create_entity creates ONE entity, then fan_out emits multiple events all carrying that entity_id.
+          Fan_out items share the new entity.'
+        with_guard: 'ALLOWED but guards evaluate against the NEWLY CREATED entity state (empty fields, initial_state). Guards
+          on create_entity handlers should check payload fields, not entity fields.'
+        with_on_complete: ALLOWED. on_complete evaluates after data_accumulation writes to the new entity.
+        with_rules: ALLOWED. Rules evaluate against payload, which is unaffected by create_entity.
+        with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
+      note_on_static_flows: 'For static flows (scoring, validation), create_entity is the mechanism for entity creation.
+        Without it, the first event arriving from outside the flow has no entity to write to unless the runtime creates one
+        implicitly. create_entity makes this explicit and unambiguous. For dynamic instances (mode: template), entity
+        creation happens in create_flow_instance step 9 — create_entity is not needed on those flows.'
     guard:
       field: guard
       type: object — single check OR list of checks
@@ -264,9 +297,23 @@ handler_specification:
       sub_fields:
         operation: string — weighted_average | pick_or_average | sum | min | max | count
         tiers: 'list — for weighted_average: [{dimensions, weight}]'
+        keys: object — field name mapping for reading accumulated items. Required for weighted_average with tiers.
         params: object — operation-specific parameters
         store_as: string — entity field to store result
         description: string — human-readable note
+      operation_requirements:
+        weighted_average:
+          description: Compute a weighted average across tiers of accumulated items.
+          required:
+            keys.dimension_key: string — field name in each accumulated item that identifies the dimension.
+            keys.score_keys: list of strings — field name(s) in each accumulated item that contain the numeric score.
+            tiers: list of objects — each with dimensions (list of dimension names) and weight (0.0-1.0, must sum to 1.0).
+            store_as: string — entity field to write the computed result.
+          boot_validation: If operation is weighted_average and keys.dimension_key or keys.score_keys are missing, boot
+            error. Silent zero output is not acceptable — missing keys must be caught at contract loading time.
+          example: "compute:\n  operation: weighted_average\n  keys:\n    dimension_key: dimension\n    score_keys: [score]\n\
+            \  tiers:\n  - dimensions: [build_complexity, automation_completeness]\n    weight: 0.6\n  - dimensions: [pain_severity]\n\
+            \    weight: 0.4\n  store_as: entity.composite_score"
     on_complete:
       field: on_complete
       type: list of {condition, advances_to, emits} objects — evaluated top-to-bottom, first match wins
@@ -1258,9 +1305,9 @@ engine:
     - id: handler_field_compliance
       severity: error
       scope: per-flow
-      trigger: A handler uses a field name not in the defined handler_fields set (guard, accumulate, fan_out, filter, reduce,
-        count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation, emits, action, payload_transform,
-        clear_gates, clear, query, description, evidence_target).
+      trigger: A handler uses a field name not in the defined handler_fields set (create_entity, guard, accumulate, fan_out,
+        filter, reduce, count, compute, on_complete, rules, advances_to, sets_gate, data_accumulation, emits, action,
+        payload_transform, clear_gates, clear, query, description, evidence_target).
       when: boot-only
     - id: tool_resolution
       severity: warning
@@ -1301,7 +1348,7 @@ engine:
       severity: error
       scope: per-node
       trigger: A handler uses on_complete as a map (dict) instead of a list (ordered). Or uses both on_complete and rules
-        on the same handler.
+        on the same handler. Or uses both create_entity and accumulate on the same handler.
       when: boot-only
     - id: single_node_per_event
       severity: error
@@ -2041,9 +2088,9 @@ platform_tables:
       ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id\
         \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
         \ IN ('node', 'agent')),\n    subscriber_id     TEXT NOT NULL,\n    status            TEXT NOT NULL DEFAULT 'pending'\
-        \ CHECK (status IN ('pending', 'delivered', 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT\
-        \ 0,\n    reason_code       TEXT,\n    last_error        TEXT,\n    delivered_at      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL\
-        \ DEFAULT NOW(),\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event (event_id)\n\
+        \ CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT\
+        \ 0,\n    reason_code       TEXT,\n    last_error        TEXT,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL\
+        \ DEFAULT NOW(),\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event (event_id),\n    INDEX idx_deliveries_active_session (active_session_id) WHERE active_session_id IS NOT NULL\n\
         );"
     event_receipts:
       description: Handler completion acknowledgement. One receipt per event × subscriber. Replaces both pipeline_receipts
@@ -2258,6 +2305,25 @@ platform_tables:
   entity_registry_policy: There is no separate entity registry table. entity_state IS the registry. Generic reads (list entities,
     find by slug, count by state) query entity_state directly. Contract-driven entity tables are optional optimizations —
     they materialize fields JSONB into typed columns for query performance. Not required for correctness.
+  entity_lifecycle_scoping:
+    description: Entities are global and persistent. Entity queries (search_entities, query_entities, get_entity) return
+      entities from ALL runs, not scoped to the current run or trace. This is intentional — a vertical discovered in one run
+      and killed in another is still visible to future queries. Products use this for dedup, historical analysis, and
+      trend detection.
+    rationale: In a continuous system where discovery runs periodically, entities accumulate over time. A killed vertical
+      should remain visible so the system does not rediscover the same opportunity. An operating vertical should be visible
+      so new discoveries can be checked against active investments. Global visibility enables agents to make informed decisions
+      about duplicate detection, market evolution, and portfolio context.
+    dedup_responsibility: Duplicate detection across runs is a product concern, not a platform concern. The platform
+      provides global entity queries. Products implement dedup logic in their agents and guards — checking entity names,
+      geographies, opportunity patterns, and current states to decide whether a newly discovered entity is genuinely new
+      or a rediscovery of an existing one.
+    entity_state_for_dedup: 'When an agent checks for duplicates, the entity''s current_state provides context for the
+      decision: active or in-pipeline entities are strong duplicates (skip). Recently killed entities are likely duplicates
+      (skip unless evidence changed). Entities killed long ago may warrant re-evaluation if market conditions shifted.
+      The platform does not enforce these rules — products encode them in agent prompts and guard conditions.'
+    cleanup: 'Entity data is never auto-deleted. Retention policy and archival are operational concerns. The platform may
+      provide a future archive/purge API, but entity_state rows persist indefinitely by default.'
   entity_metrics_convention:
     description: Metrics are entity fields in entity_state.fields JSONB. No separate table.
     canonical_fields:

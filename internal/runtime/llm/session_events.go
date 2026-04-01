@@ -16,6 +16,9 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	if publisher == nil || session == nil || strings.TrimSpace(session.AgentID) == "" {
 		return
 	}
+	if err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID); err != nil {
+		log.Printf("mark delivery in progress failed agent=%s session=%s err=%v", strings.TrimSpace(session.AgentID), strings.TrimSpace(session.ID), err)
+	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{
 		"agent_id":          strings.TrimSpace(session.AgentID),

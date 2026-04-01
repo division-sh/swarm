@@ -178,6 +178,22 @@ func (s *ComputeSpec) UnmarshalYAML(node *yaml.Node) error {
 			}
 		}
 	}
+	if err := validateTieredWeightedAverageSpec(*s); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateTieredWeightedAverageSpec(spec ComputeSpec) error {
+	if spec.Operation != ComputeOpWeightedAverage || len(spec.Tiers) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(spec.Keys.DimensionKey) == "" {
+		return fmt.Errorf("invalid compute spec: weighted_average with tiers requires keys.dimension_key")
+	}
+	if len(normalizeStrings(spec.Keys.ScoreKeys)) == 0 {
+		return fmt.Errorf("invalid compute spec: weighted_average with tiers requires keys.score_keys")
+	}
 	return nil
 }
 
@@ -383,8 +399,12 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var aux struct {
 		Field       string    `yaml:"field"`
+		Source      string    `yaml:"source"`
 		SourceField string    `yaml:"source_field"`
 		TargetField string    `yaml:"target_field"`
+		Literal     yaml.Node `yaml:"literal"`
+		CEL         string    `yaml:"cel"`
+		Expression  string    `yaml:"expression"`
 		Value       yaml.Node `yaml:"value"`
 	}
 	if err := node.Decode(&aux); err != nil {
@@ -395,9 +415,23 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		SourceField: strings.TrimSpace(aux.SourceField),
 		TargetField: strings.TrimSpace(aux.TargetField),
 	}
+	if w.SourceField == "" {
+		w.SourceField = strings.TrimSpace(aux.Source)
+	}
 	switch aux.Value.Kind {
 	case 0:
-		// no-op
+		switch {
+		case strings.TrimSpace(aux.CEL) != "":
+			w.Value = ExpressionValue{CEL: strings.TrimSpace(aux.CEL)}
+		case strings.TrimSpace(aux.Expression) != "":
+			w.Value = ExpressionValue{CEL: strings.TrimSpace(aux.Expression)}
+		case aux.Literal.Kind != 0:
+			var literal any
+			if err := aux.Literal.Decode(&literal); err != nil {
+				return err
+			}
+			w.Value = ExpressionValue{Literal: literal}
+		}
 	case yaml.MappingNode:
 		var expr ExpressionValue
 		if err := aux.Value.Decode(&expr); err != nil {
@@ -503,13 +537,14 @@ func decodeWorkflowDataAccumulationShorthandWrite(target string, node *yaml.Node
 			write.Value = ExpressionValue{Literal: literal}
 		}
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "source", "source_field", "value", "literal", "cel") {
+		if hasAnyYAMLMappingKey(node, "source", "source_field", "value", "literal", "cel", "expression") {
 			var aux struct {
 				Source      string     `yaml:"source"`
 				SourceField string     `yaml:"source_field"`
 				Value       *yaml.Node `yaml:"value"`
 				Literal     *yaml.Node `yaml:"literal"`
 				CEL         string     `yaml:"cel"`
+				Expression  string     `yaml:"expression"`
 			}
 			if err := node.Decode(&aux); err != nil {
 				return WorkflowDataWrite{}, err
@@ -522,6 +557,8 @@ func decodeWorkflowDataAccumulationShorthandWrite(target string, node *yaml.Node
 			switch {
 			case strings.TrimSpace(aux.CEL) != "":
 				write.Value = ExpressionValue{CEL: strings.TrimSpace(aux.CEL)}
+			case strings.TrimSpace(aux.Expression) != "":
+				write.Value = ExpressionValue{CEL: strings.TrimSpace(aux.Expression)}
 			case aux.Value != nil:
 				var literal any
 				if err := aux.Value.Decode(&literal); err != nil {
@@ -734,12 +771,22 @@ func (e *ExpressionValue) UnmarshalYAML(node *yaml.Node) error {
 		}
 		return nil
 	case yaml.MappingNode:
-		type alias ExpressionValue
-		var aux alias
+		var aux struct {
+			Literal    any    `yaml:"literal"`
+			CEL        string `yaml:"cel"`
+			Expression string `yaml:"expression"`
+		}
 		if err := node.Decode(&aux); err != nil {
 			return err
 		}
-		*e = ExpressionValue(aux)
+		switch {
+		case strings.TrimSpace(aux.CEL) != "":
+			*e = ExpressionValue{CEL: strings.TrimSpace(aux.CEL)}
+		case strings.TrimSpace(aux.Expression) != "":
+			*e = ExpressionValue{CEL: strings.TrimSpace(aux.Expression)}
+		default:
+			*e = ExpressionValue{Literal: aux.Literal}
+		}
 		return nil
 	case yaml.SequenceNode:
 		var literal any
@@ -1031,6 +1078,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var aux struct {
 		Action           yaml.Node                `yaml:"action"`
+		CreateEntity     bool                     `yaml:"create_entity"`
 		Template         string                   `yaml:"template"`
 		InstanceIDFrom   string                   `yaml:"instance_id_from"`
 		ConfigFrom       yaml.Node                `yaml:"config_from"`
@@ -1064,6 +1112,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*h = SystemNodeEventHandler{
+		CreateEntity:     aux.CreateEntity,
 		EvidenceTarget:   strings.TrimSpace(aux.EvidenceTarget),
 		Description:      strings.TrimSpace(aux.Description),
 		Emits:            aux.Emits,
@@ -1295,6 +1344,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"description":       {},
 		"_note":             {},
 		"evidence_target":   {},
+		"create_entity":     {},
 		"emits":             {},
 		"guard":             {},
 		"advances_to":       {},

@@ -67,6 +67,45 @@ func TestCLIStreamAccumulator_ReconstructsStreamedToolInput(t *testing.T) {
 	}
 }
 
+func TestCLIStreamAccumulator_IgnoresAssistantToolCallsWhenMCPConnected(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-3","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__query_metrics"]}`))
+	acc.AddLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"I attempted emit_scan_requested"},{"type":"tool_use","name":"emit_scan_requested","input":{"mode":"corpus"}}]}}`))
+
+	resp := acc.Response()
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected assistant-object tool calls to be ignored when MCP is connected, got %+v", resp.ToolCalls)
+	}
+}
+
+func TestCLIStreamAccumulator_SuppressesCompletedMCPToolCalls(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-4","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_scan_requested"]}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_123","name":"mcp__runtime-tools__emit_scan_requested","input":{}}},"session_id":"sess-4"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"mode\":\"corpus\"}"}},"session_id":"sess-4"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":2},"session_id":"sess-4"}`))
+	acc.AddLine([]byte(`{"type":"user","content":[{"type":"tool_result","tool_use_id":"toolu_123","content":[{"type":"text","text":"{\"event_id\":\"evt-1\",\"status\":\"published\"}"}]}]}`))
+
+	resp := acc.Response()
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected completed MCP tool call to be suppressed, got %+v", resp.ToolCalls)
+	}
+}
+
+func TestCLIStreamAccumulator_SuppressesCompletedMCPToolCalls_FromMessageWrappedUserEvent(t *testing.T) {
+	acc := newCLIStreamAccumulator()
+	acc.AddLine([]byte(`{"type":"system","subtype":"init","session_id":"sess-5","mcp_servers":[{"name":"runtime-tools","status":"connected"}],"tools":["mcp__runtime-tools__emit_scan_requested"]}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_123","name":"mcp__runtime-tools__emit_scan_requested","input":{}}},"session_id":"sess-5"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"mode\":\"corpus\"}"}},"session_id":"sess-5"}`))
+	acc.AddLine([]byte(`{"type":"stream_event","event":{"type":"content_block_stop","index":2},"session_id":"sess-5"}`))
+	acc.AddLine([]byte(`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_123","type":"tool_result","content":[{"type":"text","text":"{\"event_id\":\"evt-1\",\"status\":\"published\"}"}]}]}}`))
+
+	resp := acc.Response()
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected wrapped completed MCP tool call to be suppressed, got %+v", resp.ToolCalls)
+	}
+}
+
 func TestSummarizeMonitorEventLine_Assistant(t *testing.T) {
 	got := summarizeMonitorEventLine([]byte(`{"type":"assistant","message":{"content":[{"type":"text","text":"working"},{"type":"tool_use","name":"emit_event","input":{"ok":true}}]}}`))
 	want := "assistant: working tools=emit_event"

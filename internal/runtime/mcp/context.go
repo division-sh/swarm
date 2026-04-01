@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
-	"github.com/google/uuid"
 )
 
 type actorResolverFn func(context.Context) (models.AgentConfig, bool)
@@ -21,6 +21,7 @@ type TurnContext struct {
 	Inbound    events.Event
 	HasInbound bool
 	Recorder   *runtimebus.EmittedEventsRecorder
+	Emitted    map[string]struct{}
 	Epoch      int64
 	CreatedAt  time.Time
 	ExpiresAt  time.Time
@@ -87,6 +88,14 @@ func ResolveTurnContext(token string) (TurnContext, bool) {
 	return globalMCPTurnRegistry.get(strings.TrimSpace(token))
 }
 
+func MarkEmitUsed(token string) bool {
+	return globalMCPTurnRegistry.markEmitKeyUsed(strings.TrimSpace(token), "__default__")
+}
+
+func MarkEmitKeyUsed(token, key string) bool {
+	return globalMCPTurnRegistry.markEmitKeyUsed(strings.TrimSpace(token), strings.TrimSpace(key))
+}
+
 func UnregisterTurnContext(token string) {
 	globalMCPTurnRegistry.delete(strings.TrimSpace(token))
 }
@@ -132,6 +141,32 @@ func (r *mcpTurnRegistry) get(token string) (TurnContext, bool) {
 	r.pruneLocked(now)
 	v, ok := r.data[token]
 	return v, ok
+}
+
+func (r *mcpTurnRegistry) markEmitKeyUsed(token, key string) bool {
+	if strings.TrimSpace(token) == "" {
+		return false
+	}
+	if strings.TrimSpace(key) == "" {
+		key = "__default__"
+	}
+	now := time.Now().UTC()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pruneLocked(now)
+	v, ok := r.data[token]
+	if !ok {
+		return false
+	}
+	if v.Emitted == nil {
+		v.Emitted = map[string]struct{}{}
+	}
+	if _, ok := v.Emitted[key]; ok {
+		return true
+	}
+	v.Emitted[key] = struct{}{}
+	r.data[token] = v
+	return false
 }
 
 func (r *mcpTurnRegistry) delete(token string) {

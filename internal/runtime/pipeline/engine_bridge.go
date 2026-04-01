@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/semanticview"
 )
 
 type HandlerOutcomeStatus string
@@ -199,12 +201,13 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Handled:         true,
 		}, nil
 	}
+	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
 	entityID := strings.TrimSpace(firstNonEmptyString(
 		workflowEventEntityID(triggerCtx.Event),
 		triggerCtx.State.EntityID,
 	))
 	source := pc.SemanticSource()
-	flowID := workflowNodeFlowID(source, nodeID)
+	entityID, triggerCtx.Event = resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
 	var (
 		parentEventCollector *[]events.Event
 		collectLocally       bool
@@ -231,12 +234,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		ChainDepth: triggerCtx.Event.ChainDepth,
 		Handler:    handler,
 		Preview:    preview,
-		State: runtimeengine.StateSnapshot{
-			EntityID:     identity.NormalizeEntityID(entityID),
-			CurrentState: strings.TrimSpace(string(triggerCtx.State.Stage)),
-			Metadata:     cloneStringAnyMap(triggerCtx.State.Metadata),
-			StateBuckets: map[string]any{},
-		},
+		State:      handlerExecutionStateSnapshot(handler, entityID, triggerCtx.State),
 	})
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
@@ -271,6 +269,32 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
 		Handled:         true,
 	}, nil
+}
+
+func resolveHandlerEntityIDForFlow(
+	source semanticview.Source,
+	flowID string,
+	handler runtimecontracts.SystemNodeEventHandler,
+	entityID string,
+	evt events.Event,
+	state *WorkflowState,
+) (string, events.Event) {
+	entityID = strings.TrimSpace(entityID)
+	if handler.CreateEntity {
+		entityID = uuid.NewString()
+		if state != nil {
+			state.EntityID = entityID
+			state.Stage = ""
+			state.Status = ""
+			state.Metadata = nil
+		}
+		return entityID, evt
+	}
+	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
+	if state != nil && strings.TrimSpace(state.EntityID) == "" {
+		state.EntityID = entityID
+	}
+	return entityID, evt
 }
 
 func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *handlerExecutionOutcome {

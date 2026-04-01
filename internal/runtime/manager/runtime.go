@@ -23,6 +23,10 @@ import (
 	workspace "swarm/internal/runtime/workspace"
 )
 
+type traceRunCanceller interface {
+	CancelActiveTraceWorkByProducer(ctx context.Context, producerID string) ([]string, error)
+}
+
 func (am *AgentManager) RestartAgent(agentID string) error {
 	am.mu.RLock()
 	agent, ok := am.agents[agentID]
@@ -246,7 +250,7 @@ func (am *AgentManager) safeProcessEvent(ctx context.Context, agent Agent, evt e
 	return
 }
 
-func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string) (string, error) {
+func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error) {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return "", errors.New("agent id is required")
@@ -261,7 +265,47 @@ func (am *AgentManager) ChatWithAgent(ctx context.Context, agentID, directive st
 	if !ok {
 		return "", fmt.Errorf("agent does not support board chat: %s", agentID)
 	}
+	if killPrevious {
+		if err := am.killPreviousRuns(ctx, agentID); err != nil {
+			return "", err
+		}
+	}
 	return chatAgent.BoardStep(ctx, directive)
+}
+
+func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string) error {
+	producerID = strings.TrimSpace(producerID)
+	if producerID == "" {
+		return nil
+	}
+	canceller, ok := am.store.(traceRunCanceller)
+	if !ok || canceller == nil {
+		return nil
+	}
+	affectedAgents, err := canceller.CancelActiveTraceWorkByProducer(ctx, producerID)
+	if err != nil {
+		return fmt.Errorf("cancel previous traces for %s: %w", producerID, err)
+	}
+	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
+		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
+			log.Printf("kill previous workspace orphan processes failed: %v", err)
+		}
+	}
+	seen := make(map[string]struct{}, len(affectedAgents))
+	for _, raw := range affectedAgents {
+		agentID := strings.TrimSpace(raw)
+		if agentID == "" || agentID == producerID {
+			continue
+		}
+		if _, ok := seen[agentID]; ok {
+			continue
+		}
+		seen[agentID] = struct{}{}
+		if err := am.RestartAgent(agentID); err != nil {
+			log.Printf("restart agent after kill_previous failed agent=%s err=%v", agentID, err)
+		}
+	}
+	return nil
 }
 
 func (am *AgentManager) Run(ctx context.Context) {

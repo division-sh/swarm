@@ -139,6 +139,89 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 	}
 }
 
+func TestPostgresStore_CancelActiveTraceWorkByProducer_DeadLettersOldTraceDeliveries(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	rootEventID := uuid.NewString()
+	childEventID := uuid.NewString()
+	otherEventID := uuid.NewString()
+	traceID := "trace-old-1"
+	otherTraceID := "trace-other-1"
+
+	parentDirectiveID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, scope, payload, trace_id, produced_by, produced_by_type, source_event_id, created_at)
+		VALUES
+			($1::uuid, 'board.directive', 'global', '{}'::jsonb, '', 'campaign-coordinator', 'agent', NULL, now()),
+			($2::uuid, 'scan.requested', 'global', '{}'::jsonb, $3, 'campaign-coordinator', 'agent', $1::uuid, now()),
+			($4::uuid, 'discovery/market_research.scan_assigned', 'global', '{}'::jsonb, $3, 'runtime', 'agent', NULL, now()),
+			($5::uuid, 'scan.requested', 'global', '{}'::jsonb, $6, 'other-coordinator', 'agent', NULL, now())
+	`, parentDirectiveID, rootEventID, traceID, childEventID, otherEventID, otherTraceID); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
+		VALUES
+			($1::uuid, 'agent', 'market-research-agent', 'in_progress', now()),
+			($2::uuid, 'agent', 'analysis-agent', 'pending', now())
+	`, childEventID, otherEventID); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+
+	agents, err := pg.CancelActiveTraceWorkByProducer(ctx, "campaign-coordinator")
+	if err != nil {
+		t.Fatalf("CancelActiveTraceWorkByProducer: %v", err)
+	}
+	if len(agents) != 1 || agents[0] != "market-research-agent" {
+		t.Fatalf("affected agents = %#v", agents)
+	}
+
+	var (
+		status     string
+		reasonCode string
+		lastError  string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, ''), COALESCE(last_error, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_id = 'market-research-agent'
+	`, childEventID).Scan(&status, &reasonCode, &lastError); err != nil {
+		t.Fatalf("load cancelled delivery: %v", err)
+	}
+	if status != "dead_letter" || reasonCode != "cancelled_by_kill_previous" {
+		t.Fatalf("cancelled delivery = status=%q reason=%q", status, reasonCode)
+	}
+	if !strings.Contains(lastError, "--kill-previous") {
+		t.Fatalf("cancelled delivery last_error = %q", lastError)
+	}
+
+	var untouchedStatus string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_id = 'analysis-agent'
+	`, otherEventID).Scan(&untouchedStatus); err != nil {
+		t.Fatalf("load untouched delivery: %v", err)
+	}
+	if untouchedStatus != "pending" {
+		t.Fatalf("untouched delivery status = %q, want pending", untouchedStatus)
+	}
+
+	var outcome string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome
+		FROM event_receipts
+		WHERE event_id = $1::uuid AND subscriber_id = 'market-research-agent'
+	`, childEventID).Scan(&outcome); err != nil {
+		t.Fatalf("load cancellation receipt: %v", err)
+	}
+	if outcome != "dead_letter" {
+		t.Fatalf("receipt outcome = %q, want dead_letter", outcome)
+	}
+}
+
 func TestPostgresStore_AppendEvent_InheritsParentTraceID(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -811,6 +894,79 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	}
 	if _, ok := gotSet[directOtherID]; ok {
 		t.Fatalf("did not expect direct-other event %s in subscribed backlog, got=%v", directOtherID, gotSet)
+	}
+}
+
+func TestPendingEventQueries_PreserveTraceAndParentCorrelation(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
+
+	parentID := uuid.NewString()
+	parentTrace := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		Type:        "inbound.root",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{}`),
+		TraceID:     parentTrace,
+		CreatedAt:   time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+
+	childID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:            childID,
+		Type:          "inbound.child",
+		SourceAgent:   "runtime",
+		Payload:       []byte(`{}`),
+		ParentEventID: parentID,
+		CreatedAt:     time.Now().Add(-1 * time.Minute),
+	}); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+	if err := pg.InsertEventDeliveries(ctx, childID, []string{"a1"}); err != nil {
+		t.Fatalf("InsertEventDeliveries: %v", err)
+	}
+
+	direct, err := pg.ListPendingEventsForAgent(ctx, "a1", time.Now().Add(-1*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListPendingEventsForAgent: %v", err)
+	}
+	if len(direct) != 1 {
+		t.Fatalf("expected 1 direct pending event, got %d", len(direct))
+	}
+	if got := strings.TrimSpace(direct[0].TraceID); got != parentTrace {
+		t.Fatalf("direct pending trace_id = %q, want %q", got, parentTrace)
+	}
+	if got := strings.TrimSpace(direct[0].ParentEventID); got != parentID {
+		t.Fatalf("direct pending parent_event_id = %q, want %q", got, parentID)
+	}
+
+	subscribed, err := pg.ListPendingSubscribedEvents(ctx, "a1", []events.EventType{"inbound.*"}, time.Now().Add(-1*time.Hour), 10)
+	if err != nil {
+		t.Fatalf("ListPendingSubscribedEvents: %v", err)
+	}
+	var child events.Event
+	found := false
+	for _, evt := range subscribed {
+		if strings.TrimSpace(evt.ID) == childID {
+			child = evt
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected child event %s in subscribed pending set", childID)
+	}
+	if got := strings.TrimSpace(child.TraceID); got != parentTrace {
+		t.Fatalf("subscribed pending trace_id = %q, want %q", got, parentTrace)
+	}
+	if got := strings.TrimSpace(child.ParentEventID); got != parentID {
+		t.Fatalf("subscribed pending parent_event_id = %q, want %q", got, parentID)
 	}
 }
 

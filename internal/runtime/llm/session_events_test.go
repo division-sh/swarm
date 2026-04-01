@@ -16,10 +16,16 @@ import (
 
 type eventPublisherStub struct {
 	events []events.Event
+	marks  []string
 }
 
 func (s *eventPublisherStub) Publish(_ context.Context, evt events.Event) error {
 	s.events = append(s.events, evt)
+	return nil
+}
+
+func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, sessionID string) error {
+	s.marks = append(s.marks, strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
 	return nil
 }
 
@@ -41,6 +47,9 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	}
 	if len(publisher.events) != 1 {
 		t.Fatalf("expected 1 platform.agent_started event, got %d", len(publisher.events))
+	}
+	if len(publisher.marks) != 1 {
+		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
 	}
 	evt := publisher.events[0]
 	if evt.Type != events.EventType("platform.agent_started") {
@@ -81,6 +90,9 @@ func TestClaudeCLIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	}
 	if len(publisher.events) != 1 {
 		t.Fatalf("expected 1 platform.agent_started event, got %d", len(publisher.events))
+	}
+	if len(publisher.marks) != 1 {
+		t.Fatalf("expected 1 delivery mark, got %d", len(publisher.marks))
 	}
 	evt := publisher.events[0]
 	if evt.Type != events.EventType("platform.agent_started") {

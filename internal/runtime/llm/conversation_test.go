@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -35,12 +36,50 @@ func (f *fakeRuntime) ContinueSession(_ context.Context, s *Session, message Mes
 	}
 }
 
+type scriptedRuntime struct {
+	responses []*Response
+	calls     int
+	seenMsgs  []Message
+}
+
+func (s *scriptedRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
+	return &Session{ID: "sess-scripted", AgentID: agentID, RuntimeMode: "api"}, nil
+}
+
+func (s *scriptedRuntime) ContinueSession(_ context.Context, _ *Session, message Message) (*Response, error) {
+	s.calls++
+	s.seenMsgs = append(s.seenMsgs, message)
+	if len(s.responses) == 0 {
+		return &Response{Message: Message{Role: "assistant", Content: "done"}}, nil
+	}
+	resp := s.responses[0]
+	s.responses = s.responses[1:]
+	return resp, nil
+}
+
 type fakeToolExec struct {
 	calls int
 }
 
 func (f *fakeToolExec) Execute(_ context.Context, name string, input any) (any, error) {
 	f.calls++
+	return map[string]any{"name": name, "input": input}, nil
+}
+
+type selectiveToolExec struct {
+	results map[string]any
+	errors  map[string]error
+	calls   []string
+}
+
+func (s *selectiveToolExec) Execute(_ context.Context, name string, input any) (any, error) {
+	s.calls = append(s.calls, name)
+	if err := s.errors[name]; err != nil {
+		return nil, err
+	}
+	if out, ok := s.results[name]; ok {
+		return out, nil
+	}
 	return map[string]any{"name": name, "input": input}, nil
 }
 
@@ -153,7 +192,7 @@ func TestConversation_ExecuteToolCalls_RecoversPanic(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
 	c.SetToolExecutor(panicToolExec{})
 
-	raw := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -171,7 +210,7 @@ func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
-	raw := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -182,5 +221,123 @@ func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
 	resultMap, _ := arr[0]["result"].(map[string]any)
 	if resultMap == nil || resultMap["truncated"] != true {
 		t.Fatalf("expected truncated result metadata, got %#v", arr[0]["result"])
+	}
+}
+
+func TestConversationStep_TerminatesAfterSuccessfulEmitToolCalls(t *testing.T) {
+	rt := &scriptedRuntime{
+		responses: []*Response{{
+			Message: Message{Role: "assistant", Content: "emitting"},
+			ToolCalls: []ToolCall{
+				{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "corpus"}},
+			},
+		}},
+	}
+	te := &selectiveToolExec{
+		results: map[string]any{
+			"emit_scan_requested": map[string]any{"event_id": "evt-1", "status": "published"},
+		},
+	}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c.SetToolExecutor(te)
+
+	resp, err := c.Step(context.Background(), "start")
+	if err != nil {
+		t.Fatalf("step error: %v", err)
+	}
+	if rt.calls != 1 {
+		t.Fatalf("expected one runtime call, got %d", rt.calls)
+	}
+	if len(rt.seenMsgs) != 1 {
+		t.Fatalf("expected one seen message, got %d", len(rt.seenMsgs))
+	}
+	if len(resp.ToolCalls) != 0 {
+		t.Fatalf("expected terminal emit response to clear tool calls, got %+v", resp.ToolCalls)
+	}
+	if len(te.calls) != 1 || te.calls[0] != "emit_scan_requested" {
+		t.Fatalf("unexpected tool execution calls: %#v", te.calls)
+	}
+}
+
+func TestConversationStep_ContinuesWhenAnyNonEmitToolIsPresent(t *testing.T) {
+	rt := &scriptedRuntime{
+		responses: []*Response{{
+			Message: Message{Role: "assistant", Content: "continued"},
+		}},
+	}
+	te := &selectiveToolExec{
+		results: map[string]any{
+			"emit_scan_requested": map[string]any{"event_id": "evt-1", "status": "published"},
+			"echo":                map[string]any{"ok": true},
+		},
+	}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c.SetToolExecutor(te)
+	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
+
+	initial := &Response{
+		Message: Message{Role: "assistant", Content: "doing work"},
+		ToolCalls: []ToolCall{
+			{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "corpus"}},
+			{Name: "echo", Arguments: map[string]any{"text": "hello"}},
+		},
+	}
+	resp, err := c.resolveToolCalls(context.Background(), initial)
+	if err != nil {
+		t.Fatalf("resolveToolCalls error: %v", err)
+	}
+	if rt.calls != 1 {
+		t.Fatalf("expected continuation runtime call, got %d", rt.calls)
+	}
+	if len(rt.seenMsgs) != 1 || rt.seenMsgs[0].Role != "tool" {
+		t.Fatalf("expected tool continuation message, got %+v", rt.seenMsgs)
+	}
+	if resp.Message.Content != "continued" {
+		t.Fatalf("unexpected response content: %q", resp.Message.Content)
+	}
+}
+
+func TestConversationStep_ContinuesWhenEmitToolFails(t *testing.T) {
+	rt := &scriptedRuntime{
+		responses: []*Response{{
+			Message: Message{Role: "assistant", Content: "continued after error"},
+		}},
+	}
+	te := &selectiveToolExec{
+		errors: map[string]error{
+			"emit_scan_requested": errors.New("publish failed"),
+		},
+	}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c.SetToolExecutor(te)
+	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
+
+	initial := &Response{
+		Message: Message{Role: "assistant", Content: "doing work"},
+		ToolCalls: []ToolCall{
+			{Name: "emit_scan_requested", Arguments: map[string]any{"mode": "corpus"}},
+		},
+	}
+	if _, err := c.resolveToolCalls(context.Background(), initial); err != nil {
+		t.Fatalf("resolveToolCalls error: %v", err)
+	}
+	if rt.calls != 1 {
+		t.Fatalf("expected continuation runtime call after emit failure, got %d", rt.calls)
+	}
+}
+
+func TestIsTerminalEmitToolCall(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{name: "emit_scan_requested", want: true},
+		{name: "mcp__runtime-tools__emit_scan_requested", want: true},
+		{name: "query_entities", want: false},
+		{name: "mcp__runtime-tools__query_entities", want: false},
+	} {
+		if got := isTerminalEmitToolCall(tc.name); got != tc.want {
+			t.Fatalf("isTerminalEmitToolCall(%q) = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

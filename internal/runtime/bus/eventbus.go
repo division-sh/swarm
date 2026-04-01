@@ -10,6 +10,7 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
@@ -106,6 +107,24 @@ func (eb *EventBus) Store() EventStore {
 		return nil
 	}
 	return eb.store
+}
+
+func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, sessionID string) error {
+	if eb == nil || eb.store == nil {
+		return nil
+	}
+	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok || strings.TrimSpace(inbound.ID) == "" || strings.TrimSpace(agentID) == "" {
+		return nil
+	}
+	type deliveryProgressWriter interface {
+		MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
+	}
+	writer, ok := eb.store.(deliveryProgressWriter)
+	if !ok || writer == nil {
+		return nil
+	}
+	return writer.MarkEventDeliveryInProgress(ctx, inbound.ID, agentID, sessionID)
 }
 
 func (eb *EventBus) RouteTable() *RouteTable {

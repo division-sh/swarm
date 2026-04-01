@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -42,6 +43,12 @@ type stubActionRegistry struct {
 type stubActionRunner struct {
 	called []string
 }
+type lockOrderStateRepo struct {
+	order *[]string
+}
+type lockOrderLocker struct {
+	order *[]string
+}
 type stubEvaluator struct {
 	bools map[string]bool
 	errs  map[string]error
@@ -50,6 +57,9 @@ type stubGuardRegistry struct {
 	entries map[identity.GuardKey]runtimeregistry.GuardInstruction
 }
 type stubPayloadShaper struct{}
+type recordingPayloadShaper struct {
+	lastReq ExecutionRequest
+}
 
 func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
 	return StateSnapshot{}, false, nil
@@ -57,6 +67,21 @@ func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapsho
 func (stubStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error { return nil }
 func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error                     { return fn(stubTx{ctx: ctx}) }
 func (stubLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+func (r lockOrderStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+	if r.order != nil {
+		*r.order = append(*r.order, "load")
+	}
+	return StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}}, true, nil
+}
+func (lockOrderStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
+	return nil
+}
+func (l lockOrderLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
+	if l.order != nil {
+		*l.order = append(*l.order, "lock")
+	}
 	return fn(ctx)
 }
 func (stubOutbox) WriteOutbox(context.Context, []EmitIntent) error { return nil }
@@ -91,6 +116,12 @@ func (r *stubActionRunner) ExecuteAction(_ context.Context, action runtimecontra
 	return true, nil
 }
 func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
+	out := cloneStringAnyMap(payload)
+	out["shaped_for"] = eventType
+	return out, nil
+}
+func (s *recordingPayloadShaper) ShapeEmitPayload(_ context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
+	s.lastReq = req
 	out := cloneStringAnyMap(payload)
 	out["shaped_for"] = eventType
 	return out, nil
@@ -160,6 +191,120 @@ func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.
 	}
 }
 
+func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			CreateEntity: true,
+			Accumulate:   &runtimecontracts.AccumulateSpec{},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "declares both create_entity and accumulate") {
+		t.Fatalf("ValidateRequest error = %v, want create_entity/accumulate error", err)
+	}
+}
+
+func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Compute: &runtimecontracts.ComputeSpec{
+				Operation: runtimecontracts.ComputeOpWeightedAverage,
+				Keys: runtimecontracts.ComputeKeyConfig{
+					ScoreKeys: []string{"score"},
+				},
+				Tiers: []runtimecontracts.ComputeTier{{Dimensions: []string{"build_complexity"}, Weight: 1}},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "keys.dimension_key") {
+		t.Fatalf("ValidateRequest error = %v, want keys.dimension_key error", err)
+	}
+}
+
+func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutScoreKeys(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Compute: &runtimecontracts.ComputeSpec{
+				Operation: runtimecontracts.ComputeOpWeightedAverage,
+				Keys: runtimecontracts.ComputeKeyConfig{
+					DimensionKey: "dimension",
+				},
+				Tiers: []runtimecontracts.ComputeTier{{Dimensions: []string{"build_complexity"}, Weight: 1}},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "keys.score_keys") {
+		t.Fatalf("ValidateRequest error = %v, want keys.score_keys error", err)
+	}
+}
+
+func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
+	order := []string{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  lockOrderStateRepo{order: &order},
+		TxRunner:   stubRunner{},
+		Locker:     lockOrderLocker{order: &order},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("node-1"),
+		FlowID:   identity.FlowID("flow-1"),
+		Event: events.Event{
+			ID:        "evt-1",
+			Type:      events.EventType("test.event"),
+			CreatedAt: time.Now().UTC(),
+		}.WithEntityID("11111111-1111-1111-1111-111111111111"),
+		State: StateSnapshot{
+			Metadata:     map[string]any{},
+			StateBuckets: map[string]any{},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got, want := order, []string{"lock", "load"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+}
+
 func TestExecutor_StepOrderIsStable(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:       stubSource(),
@@ -182,6 +327,74 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 	}
 	if steps[5] != StepGroupBy {
 		t.Fatalf("expected group_by at index 5, got order %v", steps)
+	}
+}
+
+func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
+	shaper := &recordingPayloadShaper{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		TimerApplier:  stubTimerApplier{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: shaper,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	req := ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("scoring-node"),
+		FlowID:   identity.FlowID("scoring"),
+		Event: events.Event{
+			ID:        "evt-1",
+			Type:      events.EventType("scoring/score.dimension_complete"),
+			Payload:   []byte(`{"dimension":"build_complexity","score":80}`),
+			CreatedAt: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		}.WithEntityID("11111111-1111-1111-1111-111111111111"),
+		State: StateSnapshot{
+			EntityID:     identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+			CurrentState: "discovered",
+			Metadata: map[string]any{
+				"composite_score": 0,
+			},
+			StateBuckets: map[string]any{},
+		},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Compute: &runtimecontracts.ComputeSpec{
+				Operation: runtimecontracts.ComputeOpWeightedAverage,
+				StoreAs:   "entity.composite_score",
+				Tiers: []runtimecontracts.ComputeTier{
+					{Dimensions: []string{"build_complexity"}, Weight: 1},
+				},
+				Keys: runtimecontracts.ComputeKeyConfig{
+					DimensionKey: "dimension",
+					ScoreKeys:    []string{"score"},
+				},
+			},
+			Accumulate: &runtimecontracts.AccumulateSpec{
+				ExpectedFrom: "entity.dimensions_requested",
+				Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+				DedupBy:      "payload.dimension",
+			},
+			OnComplete: []runtimecontracts.HandlerRuleEntry{
+				{Condition: "else", Emits: runtimecontracts.EventEmission{Single: "vertical.rejected"}},
+			},
+		},
+	}
+	req.State.SetMetadata("dimensions_requested", []any{"build_complexity"})
+	result, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("emit intents = %d, want 1", len(result.EmitIntents))
+	}
+	if got := shaper.lastReq.State.Metadata["composite_score"]; got != 80.0 && got != 80 {
+		t.Fatalf("payload shaper saw composite_score = %#v, want 80", got)
 	}
 }
 
@@ -701,6 +914,86 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	}
 	if payload["shaped_for"] != "item.process" {
 		t.Fatalf("shaped payload missing marker: %#v", payload)
+	}
+}
+
+func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{"payload.mode == 'corpus'": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "vertical-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event: events.Event{
+			ID:      "evt-1",
+			Type:    "vertical.discovered",
+			Payload: json.RawMessage(`{"mode":"corpus","discovery_context":{"source":"corpus"}}`),
+		},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{
+					{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Test Vertical"}},
+					{TargetField: "dimensions_requested", Value: runtimecontracts.ExpressionValue{Literal: []string{"a", "b"}}},
+				},
+			},
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					Condition: "payload.mode == 'corpus'",
+					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+						Writes: []runtimecontracts.WorkflowDataWrite{
+							{TargetField: "scoring_rubric", Value: runtimecontracts.ExpressionValue{Literal: "corpus_rubric"}},
+						},
+					},
+				},
+			},
+			PayloadTransform: &runtimecontracts.PayloadTransformSpec{
+				Fields: map[string]string{
+					"vertical_id":          "entity.entity_id",
+					"vertical_name":        "entity.name",
+					"rubric":               "entity.scoring_rubric",
+					"dimensions_requested": "entity.dimensions_requested",
+					"discovery_context":    "payload.discovery_context",
+				},
+			},
+			Emits: runtimecontracts.EventEmission{Single: "scoring.requested"},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got := payload["vertical_id"]; got != "vertical-1" {
+		t.Fatalf("vertical_id = %#v", got)
+	}
+	if got := payload["vertical_name"]; got != "Test Vertical" {
+		t.Fatalf("vertical_name = %#v", got)
+	}
+	if got := payload["rubric"]; got != "corpus_rubric" {
+		t.Fatalf("rubric = %#v", got)
+	}
+	dims, ok := payload["dimensions_requested"].([]any)
+	if !ok || len(dims) != 2 || dims[0] != "a" || dims[1] != "b" {
+		t.Fatalf("dimensions_requested = %#v", payload["dimensions_requested"])
+	}
+	ctx, ok := payload["discovery_context"].(map[string]any)
+	if !ok || ctx["source"] != "corpus" {
+		t.Fatalf("discovery_context = %#v", payload["discovery_context"])
 	}
 }
 

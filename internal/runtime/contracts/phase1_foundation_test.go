@@ -27,6 +27,7 @@ func TestPhase1SemanticModelUsesTypedContracts(t *testing.T) {
 	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "ClearGates", reflect.TypeOf([]string{}))
 	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Query", reflect.TypeOf((*QuerySpec)(nil)))
 	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "Action", reflect.TypeOf(ActionSpec{}))
+	expectFieldType(t, reflect.TypeOf(SystemNodeEventHandler{}), "CreateEntity", reflect.TypeOf(true))
 	expectFieldType(t, reflect.TypeOf(HandlerRuleEntry{}), "Compute", reflect.TypeOf((*ComputeSpec)(nil)))
 	expectFieldType(t, reflect.TypeOf(HandlerTransitionSemantic{}), "Action", reflect.TypeOf(ActionSpec{}))
 	expectMissingField(t, reflect.TypeOf(SystemNodeEventHandler{}), "Template")

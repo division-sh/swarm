@@ -215,6 +215,87 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	}
 }
 
+func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) {
+	state := &StateSnapshot{Metadata: map[string]any{}}
+	base := BaseContext{
+		Entity: values.Wrap(map[string]any{
+			"mode": "corpus",
+		}),
+		Policy: values.Wrap(map[string]any{
+			"scoring_dimensions": []any{
+				"build_complexity",
+				"automation_completeness",
+			},
+		}),
+	}
+	spec := runtimecontracts.WorkflowDataAccumulation{
+		Writes: []runtimecontracts.WorkflowDataWrite{
+			{
+				TargetField: "entity.dimensions_requested",
+				Value:       runtimecontracts.ExpressionValue{CEL: "policy.scoring_dimensions"},
+			},
+			{
+				TargetField: "entity.scoring_rubric",
+				Value:       runtimecontracts.ExpressionValue{CEL: "'corpus_rubric'"},
+			},
+		},
+	}
+
+	applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+
+	dimensions, ok := state.Metadata["dimensions_requested"].([]any)
+	if !ok || len(dimensions) != 2 || dimensions[0] != "build_complexity" || dimensions[1] != "automation_completeness" {
+		t.Fatalf("dimensions_requested = %#v", state.Metadata["dimensions_requested"])
+	}
+	if got := state.Metadata["scoring_rubric"]; got != "corpus_rubric" {
+		t.Fatalf("scoring_rubric = %#v", got)
+	}
+}
+
+func TestComputeWeightedAverageReadsFlattenedAccumulatorItems(t *testing.T) {
+	acc := &Accumulator{
+		Items: []map[string]any{
+			{"dimension": "build_complexity", "score": 80},
+			{"dimension": "automation_completeness", "score": 70},
+		},
+	}
+	got := computeWeightedAverage(acc, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpWeightedAverage,
+		Keys: runtimecontracts.ComputeKeyConfig{
+			DimensionKey: "dimension",
+			ScoreKeys:    []string{"score"},
+		},
+		Tiers: []runtimecontracts.ComputeTier{
+			{Dimensions: []string{"build_complexity", "automation_completeness"}, Weight: 1},
+		},
+	})
+	if got != 75 {
+		t.Fatalf("computeWeightedAverage(flattened) = %v, want 75", got)
+	}
+}
+
+func TestComputeWeightedAverageStillSupportsLegacyNestedPayloadItems(t *testing.T) {
+	acc := &Accumulator{
+		Items: []map[string]any{
+			{"payload": map[string]any{"dimension": "build_complexity", "score": 80}},
+			{"payload": map[string]any{"dimension": "automation_completeness", "score": 70}},
+		},
+	}
+	got := computeWeightedAverage(acc, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpWeightedAverage,
+		Keys: runtimecontracts.ComputeKeyConfig{
+			DimensionKey: "dimension",
+			ScoreKeys:    []string{"score"},
+		},
+		Tiers: []runtimecontracts.ComputeTier{
+			{Dimensions: []string{"build_complexity", "automation_completeness"}, Weight: 1},
+		},
+	})
+	if got != 75 {
+		t.Fatalf("computeWeightedAverage(legacy nested) = %v, want 75", got)
+	}
+}
+
 func TestNextChainDepth_EnforcesLimit(t *testing.T) {
 	if next, err := nextChainDepth(1, 3); err != nil || next != 2 {
 		t.Fatalf("nextChainDepth ok = %d, %v", next, err)

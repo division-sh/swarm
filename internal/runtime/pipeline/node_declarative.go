@@ -6,10 +6,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
 	runtimeengine "swarm/internal/runtime/engine"
+	"swarm/internal/runtime/semanticview"
 )
 
 type Event = events.Event
@@ -252,6 +254,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	entityID := workflowEventEntityID(evt)
+	entityID, evt = ensureHandlerEntityID(e.coordinator.SemanticSource(), handler, entityID, evt)
 	flowID := workflowNodeFlowID(e.coordinator.SemanticSource(), e.nodeID)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
@@ -280,12 +283,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		Event:      evt,
 		ChainDepth: evt.ChainDepth,
 		Handler:    handler,
-		State: runtimeengine.StateSnapshot{
-			EntityID:     identity.NormalizeEntityID(entityID),
-			CurrentState: strings.TrimSpace(string(currentState.Stage)),
-			Metadata:     cloneStringAnyMap(currentState.Metadata),
-			StateBuckets: map[string]any{},
-		},
+		State:      handlerExecutionStateSnapshot(handler, entityID, currentState),
 	})
 	if err != nil {
 		return nil, err
@@ -305,4 +303,131 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		Handled:         handled,
 		ActionsExecuted: append([]string{}, result.ActionsExecuted...),
 	}, nil
+}
+
+func ensureHandlerEntityID(source semanticview.Source, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event) {
+	if handler.CreateEntity {
+		return uuid.NewString(), evt
+	}
+	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
+	if entityID != "" {
+		if strings.TrimSpace(evt.EntityID()) == "" {
+			evt = evt.WithEntityID(entityID)
+		}
+		return entityID, evt
+	}
+	if !handlerMaterializesEntity(source, handler) {
+		return "", evt
+	}
+	entityID = uuid.NewString()
+	return entityID, evt.WithEntityID(entityID)
+}
+
+func handlerMaterializesEntity(source semanticview.Source, handler SystemNodeEventHandler) bool {
+	if handler.CreateEntity {
+		return true
+	}
+	allowedFields := workflowEntitySchemaFields(source)
+	if len(allowedFields) == 0 {
+		return false
+	}
+	if workflowDataWritesEntityFields(handler.DataAccumulation, allowedFields) {
+		return true
+	}
+	if computeStoresEntityField(handler.Compute, allowedFields) {
+		return true
+	}
+	if payloadTransformReferencesEntity(handler.PayloadTransform) {
+		return true
+	}
+	if accumulateReferencesEntity(handler.Accumulate) {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if workflowDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
+			return true
+		}
+		if computeStoresEntityField(rule.Compute, allowedFields) {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if workflowDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
+			return true
+		}
+		if computeStoresEntityField(rule.Compute, allowedFields) {
+			return true
+		}
+	}
+	return false
+}
+
+func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState) runtimeengine.StateSnapshot {
+	snapshot := runtimeengine.StateSnapshot{
+		EntityID:     identity.NormalizeEntityID(entityID),
+		StateBuckets: map[string]any{},
+	}
+	if handler.CreateEntity {
+		snapshot.Metadata = map[string]any{}
+		return snapshot
+	}
+	snapshot.CurrentState = strings.TrimSpace(string(state.Stage))
+	snapshot.Metadata = cloneStringAnyMap(state.Metadata)
+	return snapshot
+}
+
+func workflowDataWritesEntityFields(spec runtimecontracts.WorkflowDataAccumulation, allowedFields map[string]struct{}) bool {
+	for _, write := range spec.Writes {
+		targetField := normalizeEntityWriteTarget(write.Target())
+		if targetField == "" {
+			continue
+		}
+		if _, ok := allowedFields[targetField]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func computeStoresEntityField(spec *runtimecontracts.ComputeSpec, allowedFields map[string]struct{}) bool {
+	if spec == nil {
+		return false
+	}
+	targetField := normalizeEntityWriteTarget(spec.StoreAs)
+	if targetField == "" {
+		return false
+	}
+	_, ok := allowedFields[targetField]
+	return ok
+}
+
+func payloadTransformReferencesEntity(spec *runtimecontracts.PayloadTransformSpec) bool {
+	if spec == nil {
+		return false
+	}
+	for _, expr := range spec.Fields {
+		if strings.HasPrefix(strings.TrimSpace(expr), "entity.") {
+			return true
+		}
+	}
+	return false
+}
+
+func accumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec) bool {
+	if spec == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(spec.ExpectedFrom), "entity.")
+}
+
+func normalizeEntityWriteTarget(target string) string {
+	target = strings.TrimSpace(target)
+	switch {
+	case strings.HasPrefix(target, "entity."):
+		return strings.TrimSpace(strings.TrimPrefix(target, "entity."))
+	case strings.HasPrefix(target, "metadata."):
+		return strings.TrimSpace(strings.TrimPrefix(target, "metadata."))
+	default:
+		return target
+	}
 }

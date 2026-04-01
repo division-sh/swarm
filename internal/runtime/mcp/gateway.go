@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -248,6 +249,21 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if strings.HasPrefix(toolName, "emit_") {
+			if token := ContextTokenFromRequest(r); token != "" && MarkEmitKeyUsed(token, emitTurnDedupeKey(toolName, req.Params["arguments"])) {
+				WriteRPCResult(w, req.ID, map[string]any{
+					"content": []map[string]any{{
+						"type": "text",
+						"text": ToolResultText(map[string]any{
+							"ok":     false,
+							"reason": "duplicate emit already executed this turn",
+						}),
+					}},
+					"isError": false,
+				})
+				return
+			}
+		}
 		out, execErr := g.executor.Execute(ctx, toolName, req.Params["arguments"])
 		if execErr != nil {
 			retryable := true
@@ -347,6 +363,15 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 	}
 	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 	return ctx, nil
+}
+
+func emitTurnDedupeKey(toolName string, arguments any) string {
+	normalized := strings.TrimSpace(toolName)
+	encoded, err := json.Marshal(arguments)
+	if err != nil {
+		return normalized + "\n" + fmt.Sprintf("%#v", arguments)
+	}
+	return normalized + "\n" + string(encoded)
 }
 
 func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {

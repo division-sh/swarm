@@ -327,7 +327,7 @@ func augmentCLISystemPrompt(systemPrompt string, tools []ToolDefinition) string 
 	}
 	b.WriteString("If Claude CLI also shows MCP-prefixed variants like `mcp__runtime-tools__...`, they map to the same Swarm runtime tools.\n")
 	if hasToolPrefix(names, "emit_") {
-		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
+		b.WriteString("When you need to publish an event, call the matching `emit_*` tool directly. Emit tools may not appear as MCP-prefixed variants in Claude CLI; Swarm will execute the exact `emit_*` call locally. Do not write JSON files under `/workspace/events` as a substitute for emission.\n")
 	}
 	return strings.TrimSpace(b.String())
 }

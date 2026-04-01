@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"swarm/internal/runtime/sessions"
-	"strings"
 )
 
 type ConversationMode int
@@ -34,6 +34,11 @@ type ToolResult struct {
 
 type ToolExecutor interface {
 	Execute(ctx context.Context, name string, input any) (any, error)
+}
+
+type executedToolCall struct {
+	Name string
+	OK   bool
 }
 
 type Conversation struct {
@@ -172,7 +177,13 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		if len(resp.ToolCalls) == 0 {
 			return resp, nil
 		}
-		toolMsg := Message{Role: "tool", Content: c.executeToolCalls(ctx, resp.ToolCalls)}
+		toolPayload, executed := c.executeToolCalls(ctx, resp.ToolCalls)
+		if shouldTerminateAfterToolCalls(executed) {
+			terminal := *resp
+			terminal.ToolCalls = nil
+			return &terminal, nil
+		}
+		toolMsg := Message{Role: "tool", Content: toolPayload}
 		next, err := c.continueOnce(ctx, toolMsg)
 		if err != nil {
 			return nil, err
@@ -182,8 +193,9 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 	return nil, fmt.Errorf("tool resolution exceeded max rounds (%d)", rounds)
 }
 
-func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) string {
+func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (string, []executedToolCall) {
 	results := make([]map[string]any, 0, len(calls))
+	executed := make([]executedToolCall, 0, len(calls))
 	for _, tc := range calls {
 		out, err := c.safeExecuteTool(ctx, tc.Name, tc.Arguments)
 		entry := map[string]any{
@@ -197,10 +209,14 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) s
 			entry["result"] = clampToolResult(out)
 		}
 		results = append(results, entry)
+		executed = append(executed, executedToolCall{
+			Name: strings.TrimSpace(tc.Name),
+			OK:   err == nil,
+		})
 	}
 	b, err := json.Marshal(results)
 	if err != nil {
-		return fmt.Sprintf(`[%q]`, err.Error())
+		return fmt.Sprintf(`[%q]`, err.Error()), executed
 	}
 	if len(b) > maxToolMessageBytes {
 		overflow := []map[string]any{{
@@ -210,11 +226,31 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) s
 		}}
 		guarded, gerr := json.Marshal(overflow)
 		if gerr != nil {
-			return `[{"name":"__runtime_guardrail__","ok":false,"error":"tool output too large"}]`
+			return `[{"name":"__runtime_guardrail__","ok":false,"error":"tool output too large"}]`, executed
 		}
-		return strings.TrimSpace(string(guarded))
+		return strings.TrimSpace(string(guarded)), executed
 	}
-	return strings.TrimSpace(string(b))
+	return strings.TrimSpace(string(b)), executed
+}
+
+func shouldTerminateAfterToolCalls(calls []executedToolCall) bool {
+	if len(calls) == 0 {
+		return false
+	}
+	for _, call := range calls {
+		if !call.OK || !isTerminalEmitToolCall(call.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+func isTerminalEmitToolCall(name string) bool {
+	name = strings.TrimSpace(name)
+	if strings.HasPrefix(name, "mcp__runtime-tools__") {
+		name = strings.TrimPrefix(name, "mcp__runtime-tools__")
+	}
+	return strings.HasPrefix(name, "emit_")
 }
 
 func (c *Conversation) safeExecuteTool(ctx context.Context, name string, input any) (out any, err error) {

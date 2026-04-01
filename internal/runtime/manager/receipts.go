@@ -23,6 +23,10 @@ type deadLetterRecorder interface {
 	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
 }
 
+type deliveryProgressWriter interface {
+	MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error
+}
+
 func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt events.Event) error {
 	if !am.markEventInFlight(agent.ID(), evt.ID) {
 		return nil
@@ -41,6 +45,11 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
+	if writer, ok := am.store.(deliveryProgressWriter); ok && writer != nil {
+		if err := writer.MarkEventDeliveryInProgress(ctx, evt.ID, agent.ID(), ""); err != nil {
+			RuntimeWarn("agent-manager", "mark delivery in progress failed agent=%s event=%s err=%v", agent.ID(), strings.TrimSpace(evt.ID), err)
+		}
+	}
 	out, err := agent.OnEvent(ctx, evt)
 	if err != nil {
 		if isTransientAgentError(err) {

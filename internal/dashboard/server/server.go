@@ -72,7 +72,7 @@ type ObservabilityReader interface {
 type AgentController interface {
 	RestartAgent(agentID string) error
 	ReplayAgentBacklog(ctx context.Context, agentID string) error
-	ChatWithAgent(ctx context.Context, agentID, directive string) (string, error)
+	ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error)
 }
 
 type RuntimeController interface {
@@ -207,7 +207,8 @@ type controlResult struct {
 }
 
 type directiveRequest struct {
-	Message string `json:"message"`
+	Message      string `json:"message"`
+	KillPrevious bool   `json:"kill_previous,omitempty"`
 }
 
 type runtimeActionRequest struct {
@@ -314,7 +315,7 @@ func (h *Handler) handleAgentDirective(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("message is required"))
 		return
 	}
-	resp, err := h.agentControl.ChatWithAgent(r.Context(), id, req.Message)
+	resp, err := h.agentControl.ChatWithAgent(r.Context(), id, req.Message, req.KillPrevious)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return

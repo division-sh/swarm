@@ -390,7 +390,7 @@ DEFINED_HANDLER_FIELDS = {
     'advances_to', 'sets_gate', 'data_accumulation', 'emits', 'rules',
     'fan_out', 'query', 'reduce', 'filter', 'count', 'clear', 'action',
     'template', 'instance_id_from', 'config_from', 'payload_transform',
-    'clear_gates', 'evidence_target',
+    'clear_gates', 'evidence_target', 'create_entity',
 }
 for flow, nodes in iter_flows_with_nodes():
     for nid, node in nodes.items():

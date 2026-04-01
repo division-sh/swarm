@@ -121,6 +121,57 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if handlerDeclaresConflictingCompletion(req.Handler) {
 		return fmt.Errorf("%w: handler declares both on_complete and rules", ErrInvalidConfig)
 	}
+	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
+		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
+	}
+	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	return nil
+}
+
+func validateHandlerComputeSpecs(handler runtimecontracts.SystemNodeEventHandler) error {
+	if err := validateComputeSpec(handler.Compute); err != nil {
+		return err
+	}
+	for _, rule := range handler.OnComplete {
+		if err := validateComputeSpec(rule.Compute); err != nil {
+			return err
+		}
+	}
+	for _, rule := range handler.Rules {
+		if err := validateComputeSpec(rule.Compute); err != nil {
+			return err
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if err := validateComputeSpec(rule.Compute); err != nil {
+				return err
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			if err := validateComputeSpec(handler.Accumulate.OnTimeout.Compute); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateComputeSpec(spec *runtimecontracts.ComputeSpec) error {
+	if spec == nil {
+		return nil
+	}
+	if spec.Operation != runtimecontracts.ComputeOpWeightedAverage || len(spec.Tiers) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(spec.Keys.DimensionKey) == "" {
+		return fmt.Errorf("weighted_average with tiers requires keys.dimension_key")
+	}
+	if len(normalizeStrings(spec.Keys.ScoreKeys)) == 0 {
+		return fmt.Errorf("weighted_average with tiers requires keys.score_keys")
+	}
 	return nil
 }
 
@@ -141,17 +192,18 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		entityID = identity.NormalizeEntityID(req.Event.EntityID())
 	}
 	req.EntityID = entityID
-	loaded, err := e.loadState(ctx, req)
-	if err != nil {
-		return ExecutionResult{FailureClass: ClassifyFailure(err)}, err
-	}
-	req.State = loaded
 
 	var (
 		result  ExecutionResult
 		intents []EmitIntent
 	)
-	err = e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
+	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
+		loaded, err := e.loadState(lockCtx, req)
+		if err != nil {
+			result.FailureClass = ClassifyFailure(err)
+			return err
+		}
+		req.State = loaded
 		return e.deps.TxRunner.Run(lockCtx, func(tx Tx) error {
 			frame := e.newExecutionFrame(tx, req)
 			if err := e.runSteps(&frame); err != nil {
@@ -435,13 +487,15 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		arrivalID := dedupIdentifier(current, frame.state, frame.req.Event, spec)
 		if arrivalID != "" && !acc.Received[arrivalID] {
 			acc.Received[arrivalID] = true
-			acc.Items = append(acc.Items, map[string]any{
-				"event_id":    strings.TrimSpace(frame.req.Event.ID),
-				"event_type":  strings.TrimSpace(string(frame.req.Event.Type)),
-				"source":      strings.TrimSpace(frame.req.Event.SourceAgent),
-				"payload":     cloneStringAnyMap(frame.payload),
-				"received_at": frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano),
-			})
+			item := cloneStringAnyMap(frame.payload)
+			if item == nil {
+				item = map[string]any{}
+			}
+			item["event_id"] = strings.TrimSpace(frame.req.Event.ID)
+			item["event_type"] = strings.TrimSpace(string(frame.req.Event.Type))
+			item["source"] = strings.TrimSpace(frame.req.Event.SourceAgent)
+			item["received_at"] = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
+			acc.Items = append(acc.Items, item)
 		}
 	}
 	acc.LastEventID = strings.TrimSpace(frame.req.Event.ID)
@@ -450,7 +504,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	acc.LastReceivedAt = frame.req.Event.CreatedAt.UTC().Format(time.RFC3339Nano)
 	storeAccumulator(&frame.state.State, frame.req.NodeID, bucketEventType, acc)
 	frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
-	frame.state.SetAccumulated(frame.req.NodeID.String(), accumulatorExpressionValue(acc))
+	frame.state.Accumulated = accumulatorExpressionValue(acc)
 	if isAccumulationTimeoutEvent(frame.req.Event.Type) && spec.OnTimeout != nil {
 		frame.rule = spec.OnTimeout
 		e.applyRule(frame, spec.OnTimeout)
@@ -744,7 +798,9 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 }
 
 func (e *Executor) stepTransform(frame *executionFrame) error {
-	transformed := payloadTransform(frame.base, frame.state, frame.req.Handler.PayloadTransform)
+	// Resolve payload transforms against the current execution context so
+	// data_accumulation and rule-selected writes are visible to emitted payloads.
+	transformed := payloadTransform(e.currentContext(frame), frame.state, frame.req.Handler.PayloadTransform)
 	if len(transformed) == 0 {
 		return nil
 	}
@@ -1170,7 +1226,9 @@ func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, pay
 	if e.deps.PayloadShaper == nil {
 		return cloned, nil
 	}
-	return e.deps.PayloadShaper.ShapeEmitPayload(frame.tx.Context(), frame.req, strings.TrimSpace(eventType), cloned)
+	req := frame.req
+	req.State = frame.state.State
+	return e.deps.PayloadShaper.ShapeEmitPayload(frame.tx.Context(), req, strings.TrimSpace(eventType), cloned)
 }
 
 func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payload map[string]any, chainDepth int) (EmitIntent, error) {

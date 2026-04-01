@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -31,7 +32,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		Policy:  cloneStringAnyMap(ctx.Policy.Raw()),
 		Vars: map[string]any{
 			"metadata":    cloneStringAnyMap(ctx.Metadata.Raw()),
-			"accumulated": cloneStringAnyMap(ctx.Accumulated.Raw()),
+			"accumulated": accumulatedItemsForCEL(ctx.Accumulated.Raw()),
 			"fan_out":     cloneStringAnyMap(ctx.FanOut.Raw()),
 		},
 	}
@@ -39,6 +40,35 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		return e.queryEntityCount(queryCtx, predicate)
 	}
 	return e.evaluator.EvalBool(expression, queryCtx)
+}
+
+func accumulatedItemsForCEL(raw map[string]any) any {
+	if len(raw) == 0 {
+		return []any{}
+	}
+	if items, ok := raw["items"].([]any); ok {
+		return append([]any(nil), items...)
+	}
+	if items, ok := raw["items"].([]map[string]any); ok {
+		out := make([]any, 0, len(items))
+		for _, item := range items {
+			out = append(out, cloneStringAnyMap(item))
+		}
+		return out
+	}
+	if items, ok := raw["items"]; ok {
+		return items
+	}
+	for _, value := range raw {
+		item, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if nested, ok := item["items"]; ok {
+			return nested
+		}
+	}
+	return []any{}
 }
 
 func (e pipelineEngineEvaluator) EvalValue(string, runtimeengine.BaseContext) (any, error) {
@@ -555,6 +585,25 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if instance == nil {
 		return
 	}
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
+	}
+	if strings.TrimSpace(instance.WorkflowName) == "" {
+		defaultWorkflowName := strings.TrimSpace(flowID)
+		if defaultWorkflowName == "" && source != nil {
+			defaultWorkflowName = strings.TrimSpace(source.WorkflowName())
+		}
+		instance.WorkflowName = defaultWorkflowName
+	}
+	if strings.TrimSpace(instance.WorkflowVersion) == "" && source != nil {
+		instance.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	}
+	if strings.TrimSpace(instance.CurrentState) == "" {
+		instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowScopedInitialState(source, flowID), "pending"))
+	}
+	if instance.EnteredStageAt.IsZero() {
+		instance.EnteredStageAt = time.Now().UTC()
+	}
 	if len(mutation.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
 		if mutation.Metadata == nil {
 			mutation.Metadata = cloneStringAnyMap(instance.Metadata)
@@ -583,28 +632,16 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if mutation.StateBuckets != nil {
 		instance.StateBuckets = cloneStringAnyMap(mutation.StateBuckets)
 	}
-	if !mutation.DataAccumulation.HasWrites() {
-		return
-	}
 	if len(allowedFields) == 0 {
 		return
 	}
 	entityProjection := workflowMutableStateBucket(instance, workflowStateBucketEntityProjection)
-	for _, write := range mutation.DataAccumulation.Writes {
-		targetField := strings.TrimSpace(write.Target())
-		switch {
-		case strings.HasPrefix(targetField, "entity."):
-			targetField = strings.TrimSpace(strings.TrimPrefix(targetField, "entity."))
-		case strings.HasPrefix(targetField, "metadata."):
-			targetField = strings.TrimSpace(strings.TrimPrefix(targetField, "metadata."))
-		}
+	if instance.Metadata == nil {
+		return
+	}
+	for targetField := range allowedFields {
+		targetField = strings.TrimSpace(targetField)
 		if targetField == "" {
-			continue
-		}
-		if _, ok := allowedFields[targetField]; !ok {
-			continue
-		}
-		if instance.Metadata == nil {
 			continue
 		}
 		value, ok := instance.Metadata[targetField]

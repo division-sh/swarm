@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -217,6 +218,119 @@ source: payload.value
 	}
 	if got := spec.Writes[0].Target(); got != "value" {
 		t.Fatalf("Writes[0].Target() = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_PreservesCreateEntity(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+create_entity: true
+emits: scoring.requested
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !handler.CreateEntity {
+		t.Fatal("expected create_entity to decode as true")
+	}
+	if got := handler.Emits.Single; got != "scoring.requested" {
+		t.Fatalf("Emits.Single = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+compute:
+  operation: weighted_average
+  keys:
+    score_keys: [score]
+  tiers:
+    - dimensions: [build_complexity]
+      weight: 1
+  store_as: entity.composite_score
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "keys.dimension_key") {
+		t.Fatalf("yaml.Unmarshal error = %v, want keys.dimension_key error", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsTieredWeightedAverageWithoutScoreKeys(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+compute:
+  operation: weighted_average
+  keys:
+    dimension_key: dimension
+  tiers:
+    - dimensions: [build_complexity]
+      weight: 1
+  store_as: entity.composite_score
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "keys.score_keys") {
+		t.Fatalf("yaml.Unmarshal error = %v, want keys.score_keys error", err)
+	}
+}
+
+func TestWorkflowDataWriteDecode_PreservesExpressionAliasInListForm(t *testing.T) {
+	var write WorkflowDataWrite
+	if err := yaml.Unmarshal([]byte(`
+target_field: dimensions_requested
+expression: policy.scoring_dimensions
+`), &write); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := write.Target(); got != "dimensions_requested" {
+		t.Fatalf("Target() = %q", got)
+	}
+	if got := write.Value.CEL; got != "policy.scoring_dimensions" {
+		t.Fatalf("Value.CEL = %q", got)
+	}
+}
+
+func TestWorkflowDataWriteDecode_PreservesCELAliasInListForm(t *testing.T) {
+	var write WorkflowDataWrite
+	if err := yaml.Unmarshal([]byte(`
+target_field: scoring_rubric
+cel: '''corpus_rubric'''
+`), &write); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := write.Target(); got != "scoring_rubric" {
+		t.Fatalf("Target() = %q", got)
+	}
+	if got := write.Value.CEL; got != "'corpus_rubric'" {
+		t.Fatalf("Value.CEL = %q", got)
+	}
+}
+
+func TestWorkflowDataAccumulationDecode_PreservesExpressionAliasInShorthandMapping(t *testing.T) {
+	var spec WorkflowDataAccumulation
+	if err := yaml.Unmarshal([]byte(`
+dimensions_requested:
+  expression: policy.scoring_dimensions
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := len(spec.Writes); got != 1 {
+		t.Fatalf("len(Writes) = %d", got)
+	}
+	if got := spec.Writes[0].Target(); got != "dimensions_requested" {
+		t.Fatalf("Target() = %q", got)
+	}
+	if got := spec.Writes[0].Value.CEL; got != "policy.scoring_dimensions" {
+		t.Fatalf("Value.CEL = %q", got)
+	}
+}
+
+func TestExpressionValueDecode_PreservesExpressionAliasInMappingForm(t *testing.T) {
+	var expr ExpressionValue
+	if err := yaml.Unmarshal([]byte(`
+expression: entity.score + 1
+`), &expr); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := expr.CEL; got != "entity.score + 1" {
+		t.Fatalf("CEL = %q", got)
 	}
 }
 

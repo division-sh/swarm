@@ -97,11 +97,12 @@ func (s stubObservability) ListIncidents(context.Context, IncidentFilter) ([]inc
 	return s.incidents, nil
 }
 
-type stubAgentControl struct{}
+type stubAgentControl struct{ lastKillPrevious bool }
 
 func (stubAgentControl) RestartAgent(string) error                        { return nil }
 func (stubAgentControl) ReplayAgentBacklog(context.Context, string) error { return nil }
-func (stubAgentControl) ChatWithAgent(context.Context, string, string) (string, error) {
+func (s *stubAgentControl) ChatWithAgent(_ context.Context, _, _ string, killPrevious bool) (string, error) {
+	s.lastKillPrevious = killPrevious
 	return "ok", nil
 }
 
@@ -173,6 +174,7 @@ func newBuilderHandlerForTest(
 
 func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	now := time.Date(2026, 3, 17, 12, 0, 0, 0, time.UTC)
+	agentCtl := &stubAgentControl{}
 	handler := NewHandler(Options{
 		Health: func(context.Context) (map[string]any, error) {
 			return map[string]any{"database": map[string]any{"ok": true}}, nil
@@ -191,7 +193,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 			HiredBy:   "test",
 			StartedAt: now,
 		}}},
-		AgentControl: stubAgentControl{},
+		AgentControl: agentCtl,
 		Conversations: stubConversations{
 			list: []ConversationSummary{{
 				AgentID:   "agent-1",
@@ -339,10 +341,13 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/agents/agent-1/actions/directive", strings.NewReader(`{"message":"hello","kill_previous":true}`))
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("agent directive status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !agentCtl.lastKillPrevious {
+		t.Fatal("expected kill_previous to be forwarded to agent control")
 	}
 
 	rec = httptest.NewRecorder()

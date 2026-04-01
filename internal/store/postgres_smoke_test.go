@@ -114,19 +114,46 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if err := pg.InsertEventDeliveries(ctx, evt.ID, []string{"control-plane"}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
+	activeSessionID := uuid.NewString()
+	if err := pg.MarkEventDeliveryInProgress(ctx, evt.ID, "control-plane", activeSessionID); err != nil {
+		t.Fatalf("mark delivery in progress: %v", err)
+	}
+	var inProgressStatus, inProgressReason, gotActiveSession string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(active_session_id::text, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
+	`, evt.ID).Scan(&inProgressStatus, &inProgressReason, &gotActiveSession); err != nil {
+		t.Fatalf("load in-progress delivery: %v", err)
+	}
+	if inProgressStatus != "in_progress" {
+		t.Fatalf("in-progress delivery status = %q, want in_progress", inProgressStatus)
+	}
+	if inProgressReason != "agent_processing" {
+		t.Fatalf("in-progress delivery reason = %q, want agent_processing", inProgressReason)
+	}
+	if gotActiveSession != activeSessionID {
+		t.Fatalf("active_session_id = %q, want %q", gotActiveSession, activeSessionID)
+	}
 	if err := pg.UpsertEventReceipt(ctx, evt.ID, "control-plane", "processed", ""); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
-	var deliveryReason, receiptReason string
+	var deliveryStatus, deliveryReason, receiptReason, clearedActiveSession string
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(reason_code, '')
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(active_session_id::text, '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_id = 'control-plane'
-	`, evt.ID).Scan(&deliveryReason); err != nil {
-		t.Fatalf("load delivery reason: %v", err)
+	`, evt.ID).Scan(&deliveryStatus, &deliveryReason, &clearedActiveSession); err != nil {
+		t.Fatalf("load delivery status/reason: %v", err)
 	}
-	if deliveryReason != "matched_agent_subscription" {
-		t.Fatalf("delivery reason = %q, want matched_agent_subscription", deliveryReason)
+	if deliveryStatus != "delivered" {
+		t.Fatalf("delivery status = %q, want delivered", deliveryStatus)
+	}
+	if deliveryReason != "agent_processed" {
+		t.Fatalf("delivery reason = %q, want agent_processed", deliveryReason)
+	}
+	if clearedActiveSession != "" {
+		t.Fatalf("active_session_id = %q, want cleared", clearedActiveSession)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(reason_code, '')

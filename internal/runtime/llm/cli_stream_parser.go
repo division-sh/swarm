@@ -11,23 +11,32 @@ type cliStreamAccumulator struct {
 	raw             bytes.Buffer
 	message         Message
 	toolCalls       []ToolCall
+	streamedCalls   []cliRecordedToolCall
 	sessionID       string
 	resultText      string
 	pending         map[int]*cliPendingToolCall
+	completedToolIDs map[string]struct{}
 	mcpServers      map[string]string
 	mcpVisibleTools []string
 }
 
 type cliPendingToolCall struct {
+	ID        string
 	Name      string
 	Input     any
 	InputJSON strings.Builder
 }
 
+type cliRecordedToolCall struct {
+	ID   string
+	Call ToolCall
+}
+
 func newCLIStreamAccumulator() *cliStreamAccumulator {
 	return &cliStreamAccumulator{
-		message: Message{Role: "assistant"},
-		pending: make(map[int]*cliPendingToolCall),
+		message:          Message{Role: "assistant"},
+		pending:          make(map[int]*cliPendingToolCall),
+		completedToolIDs: make(map[string]struct{}),
 	}
 }
 
@@ -54,6 +63,8 @@ func (a *cliStreamAccumulator) AddLine(line []byte) {
 	switch strings.ToLower(strings.TrimSpace(asString(obj["type"]))) {
 	case "assistant":
 		a.mergeAssistantObject(obj)
+	case "user":
+		a.mergeUserObject(obj)
 	case "result":
 		if text := strings.TrimSpace(asString(obj["result"])); text != "" {
 			a.resultText = text
@@ -88,9 +99,39 @@ func (a *cliStreamAccumulator) mergeAssistantObject(obj map[string]any) {
 			a.message.Content = strings.TrimSpace(a.message.Content + "\n" + text)
 		}
 	}
-	if len(resp.ToolCalls) > 0 {
+	if len(resp.ToolCalls) > 0 && !a.hasConnectedRuntimeMCP() {
 		a.toolCalls = dedupeToolCalls(append(a.toolCalls, resp.ToolCalls...))
 	}
+}
+
+func (a *cliStreamAccumulator) mergeUserObject(obj map[string]any) {
+	content, ok := cliMessageContent(obj)
+	if !ok {
+		return
+	}
+	for _, item := range content {
+		entry, _ := item.(map[string]any)
+		if strings.TrimSpace(strings.ToLower(asString(entry["type"]))) != "tool_result" {
+			continue
+		}
+		toolUseID := strings.TrimSpace(asString(entry["tool_use_id"]))
+		if toolUseID == "" {
+			continue
+		}
+		a.completedToolIDs[toolUseID] = struct{}{}
+	}
+}
+
+func cliMessageContent(obj map[string]any) ([]any, bool) {
+	if content, ok := obj["content"].([]any); ok {
+		return content, true
+	}
+	msg, _ := obj["message"].(map[string]any)
+	if len(msg) == 0 {
+		return nil, false
+	}
+	content, ok := msg["content"].([]any)
+	return content, ok
 }
 
 func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
@@ -106,6 +147,7 @@ func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
 			return
 		}
 		call := &cliPendingToolCall{
+			ID:   strings.TrimSpace(asString(block["id"])),
 			Name: strings.TrimSpace(asString(block["name"])),
 		}
 		if input, ok := block["input"]; ok {
@@ -141,10 +183,13 @@ func (a *cliStreamAccumulator) mergeStreamEvent(obj map[string]any) {
 		}
 		if strings.TrimSpace(call.Name) != "" {
 			a.appendVisibleTool(call.Name)
-			a.toolCalls = dedupeToolCalls(append(a.toolCalls, ToolCall{
-				Name:      call.Name,
-				Arguments: args,
-			}))
+			a.streamedCalls = append(a.streamedCalls, cliRecordedToolCall{
+				ID: strings.TrimSpace(call.ID),
+				Call: ToolCall{
+					Name:      call.Name,
+					Arguments: args,
+				},
+			})
 		}
 	}
 }
@@ -254,6 +299,13 @@ func (a *cliStreamAccumulator) appendVisibleTool(name string) {
 	sort.Strings(a.mcpVisibleTools)
 }
 
+func (a *cliStreamAccumulator) hasConnectedRuntimeMCP() bool {
+	if a == nil || len(a.mcpServers) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(a.mcpServers["runtime-tools"]), "connected")
+}
+
 func (a *cliStreamAccumulator) Response() *Response {
 	if a == nil {
 		return &Response{Message: Message{Role: "assistant"}}
@@ -262,9 +314,24 @@ func (a *cliStreamAccumulator) Response() *Response {
 	if strings.TrimSpace(message.Content) == "" && strings.TrimSpace(a.resultText) != "" {
 		message.Content = strings.TrimSpace(a.resultText)
 	}
+	toolCalls := append([]ToolCall(nil), a.toolCalls...)
+	for _, call := range a.streamedCalls {
+		if call.ID != "" {
+			if _, completed := a.completedToolIDs[call.ID]; completed {
+				continue
+			}
+		}
+		toolCalls = append(toolCalls, call.Call)
+	}
+	// If Claude already completed a runtime-tools MCP roundtrip inside the
+	// provider session, local replay would duplicate side effects. Treat the
+	// provider-managed tool loop as authoritative for that turn.
+	if a.hasConnectedRuntimeMCP() && len(a.completedToolIDs) > 0 {
+		toolCalls = nil
+	}
 	return &Response{
 		Message:         message,
-		ToolCalls:       dedupeToolCalls(a.toolCalls),
+		ToolCalls:       dedupeToolCalls(toolCalls),
 		SessionID:       strings.TrimSpace(a.sessionID),
 		Raw:             bytes.TrimSpace(a.raw.Bytes()),
 		MCPServers:      a.mcpServers,

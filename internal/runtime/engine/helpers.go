@@ -187,6 +187,11 @@ func resolveRefOrLiteral(base BaseContext, state ExecutionState, ref string) any
 	if unquoted, err := strconv.Unquote(ref); err == nil {
 		return unquoted
 	}
+	if len(ref) >= 2 {
+		if (strings.HasPrefix(ref, "'") && strings.HasSuffix(ref, "'")) || (strings.HasPrefix(ref, "\"") && strings.HasSuffix(ref, "\"")) {
+			return ref[1 : len(ref)-1]
+		}
+	}
 	switch strings.ToLower(ref) {
 	case "true":
 		return true
@@ -238,15 +243,14 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 			continue
 		}
 		source := strings.TrimSpace(write.Source())
-		if source == "" {
-			continue
+		if source != "" {
+			if value, ok := resolveContractPath(base, state, write.SourcePath, source); ok {
+				snapshot.SetMetadata(target, value)
+				continue
+			}
 		}
-		if value, ok := resolveContractPath(base, state, write.SourcePath, source); ok {
-			snapshot.SetMetadata(target, value)
-			continue
-		}
-		if strings.TrimSpace(write.Value.CEL) != "" {
-			snapshot.SetMetadata(target, write.Value.CEL)
+		if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
+			snapshot.SetMetadata(target, resolveRefOrLiteral(base, state, expr))
 		}
 	}
 	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
@@ -534,6 +538,16 @@ func accumulatorExpressionValue(acc *Accumulator) map[string]any {
 		"received_count": len(acc.Received),
 		"started_at":     acc.StartedAt,
 	}
+}
+
+func accumulatorItemFields(item map[string]any) map[string]any {
+	if len(item) == 0 {
+		return map[string]any{}
+	}
+	if payload, ok := asObject(item["payload"]); ok && len(payload) > 0 {
+		return payload
+	}
+	return item
 }
 
 func executionItems(value any) []any {
@@ -904,7 +918,7 @@ func computeWeightedAverage(acc *Accumulator, spec *runtimecontracts.ComputeSpec
 	}
 	dimensionScores := map[string]float64{}
 	for _, item := range acc.Items {
-		payload, _ := asObject(item["payload"])
+		payload := accumulatorItemFields(item)
 		dimension := strings.TrimSpace(asString(payload[dimensionKey]))
 		scoreValues := make([]any, 0, len(scoreKeys))
 		for _, key := range scoreKeys {
@@ -957,7 +971,7 @@ func computeWeightedAverageFromItems(acc *Accumulator, spec *runtimecontracts.Co
 	total := 0.0
 	weightSum := 0.0
 	for _, item := range acc.Items {
-		payload, _ := asObject(item["payload"])
+		payload := accumulatorItemFields(item)
 		score, okScore := asFloat(payload[valueField])
 		weight, okWeight := asFloat(payload[weightField])
 		if !okScore || !okWeight || weight == 0 {
@@ -1015,7 +1029,7 @@ func aggregateAccumulatorNumbers(acc *Accumulator, keys runtimecontracts.Compute
 	current := 0.0
 	idx := 0
 	for _, item := range acc.Items {
-		payload, _ := asObject(item["payload"])
+		payload := accumulatorItemFields(item)
 		values := make([]any, 0, len(numericKeys))
 		for _, key := range numericKeys {
 			values = append(values, payload[strings.TrimSpace(key)])

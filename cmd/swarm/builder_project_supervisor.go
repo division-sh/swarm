@@ -227,10 +227,10 @@ func (c dashboardDynamicAgentControl) ReplayAgentBacklog(ctx context.Context, ag
 	return rt.Manager.ReplayAgentBacklog(ctx, agentID)
 }
 
-func (c dashboardDynamicAgentControl) ChatWithAgent(ctx context.Context, agentID, directive string) (string, error) {
+func (c dashboardDynamicAgentControl) ChatWithAgent(ctx context.Context, agentID, directive string, killPrevious bool) (string, error) {
 	rt := c.supervisor.CurrentRuntime()
 	if rt == nil || rt.Manager == nil {
 		return "", fmt.Errorf("runtime manager unavailable")
 	}
-	return rt.Manager.ChatWithAgent(ctx, agentID, directive)
+	return rt.Manager.ChatWithAgent(ctx, agentID, directive, killPrevious)
 }

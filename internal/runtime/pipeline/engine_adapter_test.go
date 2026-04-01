@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
+	"swarm/internal/runtime/core/values"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
 )
@@ -97,6 +98,95 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	}
 	if gates["g_validated"] {
 		t.Fatalf("raw unscoped child gate leaked into metadata: %#v", gates)
+	}
+}
+
+func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "empire",
+			Version: "7.1.0",
+		},
+	})
+	instance := &WorkflowInstance{}
+	mutation := runtimeengine.StateMutation{
+		Metadata: map[string]any{
+			"name": "Test Vertical",
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Test Vertical"}},
+			},
+		},
+	}
+
+	applyEngineStateMutation(instance, mutation, map[string]struct{}{"name": {}}, source, "scoring")
+
+	if got := instance.WorkflowName; got != "scoring" {
+		t.Fatalf("WorkflowName = %q, want scoring", got)
+	}
+	if got := instance.WorkflowVersion; got != "7.1.0" {
+		t.Fatalf("WorkflowVersion = %q, want 7.1.0", got)
+	}
+	if got := instance.CurrentState; got != "pending" {
+		t.Fatalf("CurrentState = %q, want pending", got)
+	}
+	if instance.EnteredStageAt.IsZero() {
+		t.Fatal("expected EnteredStageAt to be initialized")
+	}
+}
+
+func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumulation(t *testing.T) {
+	instance := &WorkflowInstance{
+		Metadata: map[string]any{
+			"composite_score": 0,
+		},
+		StateBuckets: map[string]any{},
+	}
+	mutation := runtimeengine.StateMutation{
+		Metadata: map[string]any{
+			"composite_score": 71,
+			"scoring_rubric":  "corpus_rubric",
+		},
+	}
+
+	applyEngineStateMutation(instance, mutation, map[string]struct{}{
+		"composite_score": {},
+		"scoring_rubric":  {},
+	}, nil, "")
+
+	entityProjection, _ := workflowStateBucketObject(*instance, workflowStateBucketEntityProjection)
+	if got := entityProjection["composite_score"]; got != 71 {
+		t.Fatalf("entity_projection composite_score = %#v, want 71", got)
+	}
+	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
+		t.Fatalf("entity_projection scoring_rubric = %#v", got)
+	}
+}
+
+func TestPipelineEngineEvaluator_ExposesAccumulatedAsItemListForCEL(t *testing.T) {
+	eval := pipelineEngineEvaluator{evaluator: newWorkflowExpressionEvaluator()}
+	ok, err := eval.EvalBool(
+		`accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`,
+		runtimeengine.BaseContext{
+			Entity:  values.Wrap(map[string]any{}),
+			Payload: values.Wrap(map[string]any{}),
+			Policy:  values.Wrap(map[string]any{}),
+			Accumulated: values.Wrap(map[string]any{
+				"items": []any{
+					map[string]any{"dimension": "build_complexity", "score": 74, "tier": 1},
+					map[string]any{"dimension": "automation_completeness", "score": 72, "tier": 1},
+					map[string]any{"dimension": "retention_architecture", "score": 68, "tier": 3},
+				},
+				"received_count": 3,
+			}),
+		},
+	)
+	if err != nil {
+		t.Fatalf("EvalBool error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected CEL accumulated filter to match on flattened item list")
 	}
 }
 

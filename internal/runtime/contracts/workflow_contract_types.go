@@ -686,6 +686,7 @@ type SystemNodeContract struct {
 }
 type SystemNodeEventHandler struct {
 	Action           ActionSpec               `yaml:"action"`
+	CreateEntity     bool                     `yaml:"create_entity"`
 	Description      string                   `yaml:"description"`
 	EvidenceTarget   string                   `yaml:"evidence_target"`
 	Emits            EventEmission            `yaml:"emits"`

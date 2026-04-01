@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"errors"
@@ -83,6 +84,9 @@ func main() {
 	resolvedConfigPath := resolvePath(repo, *configPath)
 	resolvedContractsPath := resolveContractsPath(repo, *contractsPath)
 	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
+	if err := loadRepoDotEnv(repo); err != nil {
+		log.Fatalf("load .env: %v", err)
+	}
 
 	cfg, err := loadRuntimeConfig(resolvedConfigPath)
 	if err != nil {
@@ -269,6 +273,67 @@ func envInt(key string, fallback int) int {
 	return value
 }
 
+func loadRepoDotEnv(repo string) error {
+	repo = strings.TrimSpace(repo)
+	if repo == "" {
+		return nil
+	}
+	path := filepath.Join(repo, ".env")
+	return loadDotEnvFile(path)
+}
+
+func loadDotEnvFile(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for lineNo := 1; scanner.Scan(); lineNo++ {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "export ") {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			return fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNo)
+		}
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return fmt.Errorf("%s:%d: empty env key", path, lineNo)
+		}
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if unquoted, err := strconv.Unquote(value); err == nil {
+			value = unquoted
+		} else if len(value) >= 2 {
+			if (strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) || (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) {
+				value = value[1 : len(value)-1]
+			}
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("%s:%d: set %s: %w", path, lineNo, key, err)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func envDuration(key string, fallback time.Duration) time.Duration {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
@@ -365,6 +430,12 @@ func printTraceReport(w io.Writer, report store.TraceReport) {
 			fmt.Fprintf(w, "  delivery  %s/%s  status=%s", delivery.SubscriberType, delivery.SubscriberID, delivery.Status)
 			if delivery.ReasonCode != "" {
 				fmt.Fprintf(w, " reason=%s", delivery.ReasonCode)
+			}
+			if delivery.ActiveSessionID != "" {
+				fmt.Fprintf(w, " session=%s", delivery.ActiveSessionID)
+			}
+			if delivery.StartedAt.Valid {
+				fmt.Fprintf(w, " started=%s", delivery.StartedAt.Time.Format(time.RFC3339))
 			}
 			if delivery.RetryCount > 0 {
 				fmt.Fprintf(w, " retries=%d", delivery.RetryCount)
@@ -480,6 +551,15 @@ func traceFirstStuckSummary(report store.TraceReport) string {
 		}
 		for _, delivery := range deliveries {
 			key := delivery.SubscriberType + "/" + delivery.SubscriberID
+			if _, ok := receiptKeys[key]; !ok && strings.TrimSpace(strings.ToLower(delivery.Status)) == "in_progress" {
+				if delivery.ActiveSessionID != "" {
+					return fmt.Sprintf("in-progress delivery %s session=%s for %s", key, delivery.ActiveSessionID, evt.EventName)
+				}
+				if delivery.ReasonCode != "" {
+					return fmt.Sprintf("in-progress delivery %s reason=%s for %s", key, delivery.ReasonCode, evt.EventName)
+				}
+				return fmt.Sprintf("in-progress delivery %s for %s", key, evt.EventName)
+			}
 			if _, ok := receiptKeys[key]; !ok && strings.TrimSpace(strings.ToLower(delivery.Status)) == "pending" {
 				if delivery.ReasonCode != "" {
 					return fmt.Sprintf("pending delivery %s reason=%s for %s", key, delivery.ReasonCode, evt.EventName)

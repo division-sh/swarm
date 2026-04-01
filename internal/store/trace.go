@@ -33,6 +33,8 @@ type TraceDelivery struct {
 	ReasonCode     string
 	RetryCount     int
 	LastError      string
+	ActiveSessionID string
+	StartedAt      sql.NullTime
 	DeliveredAt    sql.NullTime
 	CreatedAt      time.Time
 }
@@ -160,6 +162,8 @@ func (s *PostgresStore) TraceReport(ctx context.Context, traceID string) (TraceR
 			COALESCE(reason_code, ''),
 			retry_count,
 			COALESCE(last_error, ''),
+			COALESCE(active_session_id::text, ''),
+			started_at,
 			delivered_at,
 			created_at
 		FROM event_deliveries
@@ -180,6 +184,8 @@ func (s *PostgresStore) TraceReport(ctx context.Context, traceID string) (TraceR
 			&row.ReasonCode,
 			&row.RetryCount,
 			&row.LastError,
+			&row.ActiveSessionID,
+			&row.StartedAt,
 			&row.DeliveredAt,
 			&row.CreatedAt,
 		); err != nil {
