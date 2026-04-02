@@ -274,10 +274,11 @@ func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T)
 	}
 }
 
-func TestEnrichTurnRecordIncludesTraceTriggerToolsAndEmits(t *testing.T) {
-	ctx := runtimecorrelation.WithTraceID(context.Background(), "trace-123")
+func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
+	ctx := runtimecorrelation.WithRunID(context.Background(), "run-123")
 	ctx = runtimebus.WithInboundEvent(ctx, events.Event{
 		ID:      "11111111-1111-1111-1111-111111111111",
+		RunID:   "run-123",
 		Type:    events.EventType("scan.requested"),
 		Payload: []byte(`{"entity_id":"22222222-2222-2222-2222-222222222222"}`),
 	})
@@ -313,8 +314,8 @@ func TestEnrichTurnRecordIncludesTraceTriggerToolsAndEmits(t *testing.T) {
 		SessionID:   session.ID,
 	}, resp)
 
-	if rec.TraceID != "trace-123" {
-		t.Fatalf("trace_id = %q, want trace-123", rec.TraceID)
+	if rec.RunID != "run-123" {
+		t.Fatalf("run_id = %q, want run-123", rec.RunID)
 	}
 	if rec.TriggerEventID != "11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("trigger_event_id = %q", rec.TriggerEventID)

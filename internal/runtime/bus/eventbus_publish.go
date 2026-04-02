@@ -357,7 +357,6 @@ func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, duration
 	eb.logRuntime(ctx, "debug", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
 		"type":            string(evt.Type),
 		"source":          evt.SourceAgent,
-		"trace_id":        strings.TrimSpace(evt.TraceID),
 		"parent_event_id": strings.TrimSpace(evt.ParentEventID),
 	}, "", durationUS)
 }
@@ -421,7 +420,6 @@ func (eb *EventBus) persistEventRecord(ctx context.Context, evt events.Event, re
 func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipients []string, extra map[string]any) {
 	detail := map[string]any{
 		"recipients_count": len(recipients),
-		"trace_id":         strings.TrimSpace(evt.TraceID),
 		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
 	}
 	for k, v := range extra {
@@ -482,7 +480,6 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
 		"direct":           true,
 		"recipients_count": len(recipients),
-		"trace_id":         strings.TrimSpace(evt.TraceID),
 		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),
 	}, "", int(time.Since(start)/time.Microsecond))
 	return nil

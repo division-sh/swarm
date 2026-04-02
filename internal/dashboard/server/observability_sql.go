@@ -51,7 +51,6 @@ type eventRecord struct {
 	SourceAgent   string                `json:"source_agent,omitempty"`
 	EntityID      string                `json:"entity_id,omitempty"`
 	Scope         string                `json:"scope,omitempty"`
-	TraceID       string                `json:"trace_id,omitempty"`
 	ParentEventID string                `json:"parent_event_id,omitempty"`
 	Payload       any                   `json:"payload,omitempty"`
 	Deliveries    []eventDeliveryRecord `json:"deliveries,omitempty"`
@@ -68,7 +67,6 @@ type runtimeLogRecord struct {
 	Component     string `json:"component,omitempty"`
 	Action        string `json:"action,omitempty"`
 	EventType     string `json:"event_type,omitempty"`
-	TraceID       string `json:"trace_id,omitempty"`
 	ParentEventID string `json:"parent_event_id,omitempty"`
 	HandlerID     string `json:"handler_id,omitempty"`
 	Error         string `json:"error,omitempty"`
@@ -122,7 +120,6 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, COALESCE(e.payload->>'entity_id', '')),
 			COALESCE(e.scope, ''),
-			COALESCE(e.trace_id, '') AS trace_id,
 			COALESCE(e.source_event_id::text, '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb),
 			COALESCE((
@@ -172,7 +169,7 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 			item       eventRecord
 			payloadRaw []byte
 		)
-		if err := rows.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.TraceID, &item.ParentEventID, &payloadRaw, &item.DeadCount, &item.ErrorCount, &item.PendingCount); err != nil {
+		if err := rows.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.ParentEventID, &payloadRaw, &item.DeadCount, &item.ErrorCount, &item.PendingCount); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
 		item.EventID = item.ID
@@ -208,7 +205,6 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 			COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, COALESCE(e.payload->>'entity_id', '')),
 			COALESCE(e.scope, ''),
-			COALESCE(e.trace_id, '') AS trace_id,
 			COALESCE(e.source_event_id::text, '') AS parent_event_id,
 			COALESCE(e.payload, '{}'::jsonb)
 		FROM events e
@@ -219,7 +215,7 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 		item       eventRecord
 		payloadRaw []byte
 	)
-	if err := row.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.TraceID, &item.ParentEventID, &payloadRaw); err == sql.ErrNoRows {
+	if err := row.Scan(&item.ID, &item.Type, &item.CreatedAt, &item.SourceAgent, &item.EntityID, &item.Scope, &item.ParentEventID, &payloadRaw); err == sql.ErrNoRows {
 		return eventRecord{}, false, nil
 	} else if err != nil {
 		return eventRecord{}, false, fmt.Errorf("get event: %w", err)
@@ -307,7 +303,6 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 			COALESCE(e.payload->>'component', ''),
 			COALESCE(e.payload->>'action', ''),
 			COALESCE(e.payload->>'event_type', ''),
-			COALESCE(e.payload->>'trace_id', ''),
 			COALESCE(e.payload->>'parent_event_id', COALESCE(e.payload->'detail'->>'parent_event_id', '')),
 			COALESCE(e.payload->>'handler_id', COALESCE(e.payload->'detail'->>'handler_id', '')),
 			COALESCE(e.payload->>'error', ''),
@@ -354,7 +349,7 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 			detailRaw      []byte
 			correlationRaw []byte
 		)
-		if err := rows.Scan(&item.ID, &item.EventID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.TraceID, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.SessionID, &item.DurationUS, &detailRaw, &correlationRaw, &item.Message); err != nil {
+		if err := rows.Scan(&item.ID, &item.EventID, &item.TS, &item.Level, &item.Component, &item.Action, &item.EventType, &item.ParentEventID, &item.HandlerID, &item.Error, &item.ErrorCode, &item.AgentID, &item.Source, &item.EntityID, &item.SessionID, &item.DurationUS, &detailRaw, &correlationRaw, &item.Message); err != nil {
 			return nil, fmt.Errorf("scan runtime log: %w", err)
 		}
 		detailMap, err := decodeJSONMap(detailRaw)

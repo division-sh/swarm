@@ -23,8 +23,8 @@ import (
 	workspace "swarm/internal/runtime/workspace"
 )
 
-type traceRunCanceller interface {
-	CancelActiveTraceWorkByProducer(ctx context.Context, producerID string) ([]string, error)
+type runCanceller interface {
+	CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]string, error)
 }
 
 func (am *AgentManager) RestartAgent(agentID string) error {
@@ -289,13 +289,17 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 	if producerID == "" {
 		return nil
 	}
-	canceller, ok := am.store.(traceRunCanceller)
-	if !ok || canceller == nil {
+	var (
+		affectedAgents []string
+		err            error
+	)
+	if canceller, ok := am.store.(runCanceller); ok && canceller != nil {
+		affectedAgents, err = canceller.CancelActiveRunWorkByProducer(ctx, producerID)
+		if err != nil {
+			return fmt.Errorf("cancel previous runs for %s: %w", producerID, err)
+		}
+	} else {
 		return nil
-	}
-	affectedAgents, err := canceller.CancelActiveTraceWorkByProducer(ctx, producerID)
-	if err != nil {
-		return fmt.Errorf("cancel previous traces for %s: %w", producerID, err)
 	}
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
@@ -530,7 +534,6 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 			if am.bus != nil {
 				evtCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
 				evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID))
-				evtCtx = runtimecorrelation.WithTraceID(evtCtx, strings.TrimSpace(evt.TraceID))
 				am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
 					Component: "agent-manager",
@@ -705,7 +708,6 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						}
 						evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
 						evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID))
-						evtCtx = runtimecorrelation.WithTraceID(evtCtx, strings.TrimSpace(evt.TraceID))
 						err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
 						if evtPanicked {
 							panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID)

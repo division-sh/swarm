@@ -133,34 +133,34 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 	if err != nil {
 		return false, fmt.Errorf("marshal inbound event payload: %w", err)
 	}
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	hasRunID := columnExists(ctx, tx, "events", "run_id")
 	insertQ := `
 		INSERT INTO events (
 			event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, trace_id, produced_by, produced_by_type, idempotency_key, created_at
+			chain_depth, produced_by, produced_by_type, idempotency_key, created_at
 		)
 		VALUES (
 			'platform.inbound_recorded', $1::uuid, NULL, 'entity', $2::jsonb,
-			0, NULLIF($3,''), $4, 'external', $5, now()
+			0, $3, 'external', $4, now()
 		)
 	`
-	args := []any{entityID, string(payload), traceID, provider, idempotencyKey}
-	if columnExists(ctx, tx, "events", "run_id") {
+	args := []any{entityID, string(payload), provider, idempotencyKey}
+	if hasRunID {
 		if err := s.ensureRunRow(ctx, tx, runID); err != nil {
 			return false, err
 		}
 		insertQ = `
 			INSERT INTO events (
 				run_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, trace_id, produced_by, produced_by_type, idempotency_key, created_at
+				chain_depth, produced_by, produced_by_type, idempotency_key, created_at
 			)
 			VALUES (
 				NULLIF($1,'')::uuid, 'platform.inbound_recorded', $2::uuid, NULL, 'entity', $3::jsonb,
-				0, NULLIF($4,''), $5, 'external', $6, now()
+				0, $4, 'external', $5, now()
 			)
 		`
-		args = []any{runID, entityID, string(payload), traceID, provider, idempotencyKey}
+		args = []any{runID, entityID, string(payload), provider, idempotencyKey}
 	}
 	if _, err := tx.ExecContext(ctx, insertQ, args...); err != nil {
 		return false, fmt.Errorf("record inbound event in events: %w", err)

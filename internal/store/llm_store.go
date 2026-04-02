@@ -131,9 +131,11 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}
 	}
 
+	hasRunID := columnExists(ctx, s.DB, "agent_turns", "run_id")
+
 	insertTurn := `
 		INSERT INTO agent_turns (
-			agent_id, session_id, runtime_mode, scope_key, trace_id, entity_id,
+			agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 			request_payload, response_payload, parse_ok, latency_ms, retry_count, error
@@ -142,23 +144,22 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			$2::uuid,
 			$3,
 			NULLIF($4, ''),
-			NULLIF($5, ''),
+			NULLIF($5, '')::uuid,
 			NULLIF($6, '')::uuid,
-			NULLIF($7, '')::uuid,
+			NULLIF($7, ''),
 			NULLIF($8, ''),
-			NULLIF($9, ''),
+			CASE WHEN $9 = '' THEN '[]'::jsonb ELSE $9::jsonb END,
 			CASE WHEN $10 = '' THEN '[]'::jsonb ELSE $10::jsonb END,
 			CASE WHEN $11 = '' THEN '[]'::jsonb ELSE $11::jsonb END,
-			CASE WHEN $12 = '' THEN '[]'::jsonb ELSE $12::jsonb END,
-			CASE WHEN $13 = '' THEN '{}'::jsonb ELSE $13::jsonb END,
+			CASE WHEN $12 = '' THEN '{}'::jsonb ELSE $12::jsonb END,
+			CASE WHEN $13 = '' THEN '[]'::jsonb ELSE $13::jsonb END,
 			CASE WHEN $14 = '' THEN '[]'::jsonb ELSE $14::jsonb END,
-			CASE WHEN $15 = '' THEN '[]'::jsonb ELSE $15::jsonb END,
+			CASE WHEN $15 = '' THEN NULL ELSE $15::jsonb END,
 			CASE WHEN $16 = '' THEN NULL ELSE $16::jsonb END,
-			CASE WHEN $17 = '' THEN NULL ELSE $17::jsonb END,
+			$17,
 			$18,
 			$19,
-			$20,
-			NULLIF($21, '')
+			NULLIF($20, '')
 		)
 	`
 	insertArgs := []any{
@@ -166,7 +167,6 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.SessionID,
 		runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
 		rec.ScopeKey,
-		rec.TraceID,
 		rec.EntityID,
 		rec.TriggerEventID,
 		rec.TriggerEventType,
@@ -184,13 +184,13 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.RetryCount,
 		rec.Error,
 	}
-	if columnExists(ctx, s.DB, "agent_turns", "run_id") {
+	if hasRunID {
 		if err := s.ensureRunRow(ctx, nil, runID); err != nil {
 			return err
 		}
 		insertTurn = `
 			INSERT INTO agent_turns (
-				run_id, agent_id, session_id, runtime_mode, scope_key, trace_id, entity_id,
+				run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 				emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
 				request_payload, response_payload, parse_ok, latency_ms, retry_count, error
@@ -200,26 +200,47 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 				$3::uuid,
 				$4,
 				NULLIF($5, ''),
-				NULLIF($6, ''),
+				NULLIF($6, '')::uuid,
 				NULLIF($7, '')::uuid,
-				NULLIF($8, '')::uuid,
+				NULLIF($8, ''),
 				NULLIF($9, ''),
-				NULLIF($10, ''),
+				CASE WHEN $10 = '' THEN '[]'::jsonb ELSE $10::jsonb END,
 				CASE WHEN $11 = '' THEN '[]'::jsonb ELSE $11::jsonb END,
 				CASE WHEN $12 = '' THEN '[]'::jsonb ELSE $12::jsonb END,
-				CASE WHEN $13 = '' THEN '[]'::jsonb ELSE $13::jsonb END,
-				CASE WHEN $14 = '' THEN '{}'::jsonb ELSE $14::jsonb END,
+				CASE WHEN $13 = '' THEN '{}'::jsonb ELSE $13::jsonb END,
+				CASE WHEN $14 = '' THEN '[]'::jsonb ELSE $14::jsonb END,
 				CASE WHEN $15 = '' THEN '[]'::jsonb ELSE $15::jsonb END,
-				CASE WHEN $16 = '' THEN '[]'::jsonb ELSE $16::jsonb END,
+				CASE WHEN $16 = '' THEN NULL ELSE $16::jsonb END,
 				CASE WHEN $17 = '' THEN NULL ELSE $17::jsonb END,
-				CASE WHEN $18 = '' THEN NULL ELSE $18::jsonb END,
+				$18,
 				$19,
 				$20,
-				$21,
-				NULLIF($22, '')
+				NULLIF($21, '')
 			)
 		`
-		insertArgs = append([]any{nullUUIDString(runID)}, insertArgs...)
+		insertArgs = []any{
+			nullUUIDString(runID),
+			rec.AgentID,
+			rec.SessionID,
+			runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode),
+			rec.ScopeKey,
+			rec.EntityID,
+			rec.TriggerEventID,
+			rec.TriggerEventType,
+			rec.TaskID,
+			availableToolsPayload,
+			toolCallsPayload,
+			emittedEventsPayload,
+			mcpServersPayload,
+			mcpToolsListedPayload,
+			mcpToolsVisiblePayload,
+			reqPayload,
+			respPayload,
+			rec.ParseOK,
+			latencyMS,
+			rec.RetryCount,
+			rec.Error,
+		}
 	}
 	if _, err := s.DB.ExecContext(ctx, insertTurn, insertArgs...); err != nil {
 		var pgErr *pq.Error

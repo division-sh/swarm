@@ -47,7 +47,7 @@ func (s *chatTestStore) ListPendingEventsForAgent(context.Context, string, time.
 func (s *chatTestStore) ListPendingSubscribedEvents(context.Context, string, []events.EventType, time.Time, int) ([]events.Event, error) {
 	return nil, nil
 }
-func (s *chatTestStore) CancelActiveTraceWorkByProducer(_ context.Context, producerID string) ([]string, error) {
+func (s *chatTestStore) CancelActiveRunWorkByProducer(_ context.Context, producerID string) ([]string, error) {
 	s.cancelCalls++
 	s.cancelFor = producerID
 	return append([]string(nil), s.agents...), nil

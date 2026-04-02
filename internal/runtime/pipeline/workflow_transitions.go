@@ -150,7 +150,6 @@ func isMissingDiagnosticsTable(err error) bool {
 }
 
 func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(handler)
@@ -167,7 +166,6 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 		"action":         action,
 		"handler_id":     handlerID,
 		"reason_code":    reasonCode,
-		"trace_id":       traceID,
 		"events_emitted": eventsEmitted,
 		"drop_reason":    strings.TrimSpace(dropReason),
 		"error":          strings.TrimSpace(errText),

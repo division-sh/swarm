@@ -168,7 +168,7 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) {
+func TestEventBusPublish_InheritsRunAndParentFromInboundContext(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := runtimebus.NewEventBus(store)
 	if err != nil {
@@ -178,7 +178,6 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 		ID:      "evt-parent",
 		Type:    events.EventType("task.started"),
 		RunID:   "run-abc",
-		TraceID: "trace-abc",
 	})
 	if err := eb.Publish(ctx, events.Event{
 		ID:   "evt-child",
@@ -196,9 +195,6 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 			if got := evt.RunID; got != "run-abc" {
 				t.Fatalf("persisted run_id = %q, want run-abc", got)
 			}
-			if got := evt.TraceID; got != "trace-abc" {
-				t.Fatalf("persisted trace_id = %q, want trace-abc", got)
-			}
 			if got := evt.ParentEventID; got != "evt-parent" {
 				t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)
 			}
@@ -210,9 +206,6 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 	}
 	if got := store.events[0].RunID; got != "run-abc" {
 		t.Fatalf("persisted run_id = %q, want run-abc", got)
-	}
-	if got := store.events[0].TraceID; got != "trace-abc" {
-		t.Fatalf("persisted trace_id = %q, want trace-abc", got)
 	}
 	if got := store.events[0].ParentEventID; got != "evt-parent" {
 		t.Fatalf("persisted parent_event_id = %q, want evt-parent", got)

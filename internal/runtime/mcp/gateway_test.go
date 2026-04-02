@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
+	runtimebus "swarm/internal/runtime/bus"
 	llm "swarm/internal/runtime/llm"
 )
 
@@ -253,6 +255,36 @@ func TestGatewayMCPExecutionContext_RejectsPrefixedMutatingToolOnContextMiss(t *
 	if _, err := g.mcpExecutionContext(req, "mcp__runtime-tools__emit_score_dimension_complete"); err == nil {
 		t.Fatal("expected context miss error for prefixed mutating tool")
 	}
+}
+
+func TestGatewayExecutionContext_UsesInboundTraceNotRequestTraceOnResolvedTurn(t *testing.T) {
+	g := NewGateway(nil, "", GatewayHooks{
+		ResolveTurnContext: ResolveTurnContext,
+		WithActor: func(ctx context.Context, actor models.AgentConfig) context.Context {
+			return models.WithActor(ctx, actor)
+		},
+		WithRuntimeEpoch: func(ctx context.Context, epoch int64) context.Context {
+			return ctx
+		},
+		WithInboundEvent: func(ctx context.Context, evt events.Event) context.Context {
+			return runtimebus.WithInboundEvent(ctx, evt)
+		},
+	})
+	PutTurnContextForTest("ctx-trace", TurnContext{
+		Actor:      models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Inbound:    events.Event{ID: "evt-1", RunID: "run-1"},
+		HasInbound: true,
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(time.Hour),
+	})
+	t.Cleanup(func() { UnregisterTurnContext("ctx-trace") })
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-trace", nil)
+	ctx, err := g.mcpExecutionContext(req, "get_entity")
+	if err != nil {
+		t.Fatalf("mcpExecutionContext: %v", err)
+	}
+	_ = ctx
 }
 
 func TestGatewayHandleMCP_AllowsReadOnlyToolWhenContextTokenMisses(t *testing.T) {

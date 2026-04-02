@@ -17,7 +17,6 @@ const (
 	entityIDHeader     = "X-SWARM-Entity-Id"
 	allowedToolsHeader = "X-SWARM-Allowed-Tools"
 	contextTokenHeader = "X-SWARM-Context-Token"
-	traceIDHeader      = "X-SWARM-Trace-Id"
 
 	actorIDQuery      = "agent_id"
 	actorRoleQuery    = "agent_role"
@@ -25,7 +24,6 @@ const (
 	entityIDQuery     = "entity_id"
 	allowedToolsQuery = "allowed_tools"
 	contextTokenQuery = "ctx_token"
-	traceIDQuery      = "trace_id"
 )
 
 type ToolGatewayRequest struct {
@@ -170,14 +168,6 @@ func ToolResultText(v any) string {
 		}
 		return string(raw)
 	}
-}
-
-func TraceIDFromRequest(r *http.Request) string {
-	return FirstNonEmpty(
-		headerValue(r, traceIDHeader),
-		strings.TrimSpace(r.URL.Query().Get(traceIDQuery)),
-		strings.TrimSpace(r.URL.Query().Get(contextTokenQuery)),
-	)
 }
 
 func headerValue(r *http.Request, key string) string {

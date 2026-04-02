@@ -36,7 +36,7 @@ func resetAgentSessionsSpecTable(t *testing.T, ctx context.Context, pg *Postgres
 			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
 		},
 		"agent_turns": {
-			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    trace_id TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -139,40 +139,43 @@ func TestPostgresStore_AppendEvent_NormalizesInvalidOptionalUUIDs(t *testing.T) 
 	}
 }
 
-func TestPostgresStore_CancelActiveTraceWorkByProducer_DeadLettersOldTraceDeliveries(t *testing.T) {
+func TestPostgresStore_CancelActiveRunWorkByProducer_DeadLettersOldRunDeliveries(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 
+	runID := uuid.NewString()
+	otherRunID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	childEventID := uuid.NewString()
 	otherEventID := uuid.NewString()
-	traceID := "trace-old-1"
-	otherTraceID := "trace-other-1"
 
-	parentDirectiveID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (event_id, event_name, scope, payload, trace_id, produced_by, produced_by_type, source_event_id, created_at)
+		INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running'), ($2::uuid, 'running')
+	`, runID, otherRunID); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 		VALUES
-			($1::uuid, 'board.directive', 'global', '{}'::jsonb, '', 'campaign-coordinator', 'agent', NULL, now()),
-			($2::uuid, 'scan.requested', 'global', '{}'::jsonb, $3, 'campaign-coordinator', 'agent', $1::uuid, now()),
-			($4::uuid, 'discovery/market_research.scan_assigned', 'global', '{}'::jsonb, $3, 'runtime', 'agent', NULL, now()),
-			($5::uuid, 'scan.requested', 'global', '{}'::jsonb, $6, 'other-coordinator', 'agent', NULL, now())
-	`, parentDirectiveID, rootEventID, traceID, childEventID, otherEventID, otherTraceID); err != nil {
+			($1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'campaign-coordinator', 'agent', now()),
+			($3::uuid, $2::uuid, 'discovery/market_research.scan_assigned', 'global', '{}'::jsonb, 'runtime', 'agent', now()),
+			($4::uuid, $5::uuid, 'scan.requested', 'global', '{}'::jsonb, 'other-coordinator', 'agent', now())
+	`, rootEventID, runID, childEventID, otherEventID, otherRunID); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, status, created_at)
+		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES
-			($1::uuid, 'agent', 'market-research-agent', 'in_progress', now()),
-			($2::uuid, 'agent', 'analysis-agent', 'pending', now())
-	`, childEventID, otherEventID); err != nil {
+			($1::uuid, $2::uuid, 'agent', 'market-research-agent', 'in_progress', now()),
+			($3::uuid, $4::uuid, 'agent', 'analysis-agent', 'pending', now())
+	`, runID, childEventID, otherRunID, otherEventID); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
 
-	agents, err := pg.CancelActiveTraceWorkByProducer(ctx, "campaign-coordinator")
+	agents, err := pg.CancelActiveRunWorkByProducer(ctx, "campaign-coordinator")
 	if err != nil {
-		t.Fatalf("CancelActiveTraceWorkByProducer: %v", err)
+		t.Fatalf("CancelActiveRunWorkByProducer: %v", err)
 	}
 	if len(agents) != 1 || agents[0] != "market-research-agent" {
 		t.Fatalf("affected agents = %#v", agents)
@@ -208,80 +211,6 @@ func TestPostgresStore_CancelActiveTraceWorkByProducer_DeadLettersOldTraceDelive
 	if untouchedStatus != "pending" {
 		t.Fatalf("untouched delivery status = %q, want pending", untouchedStatus)
 	}
-
-	var outcome string
-	if err := db.QueryRowContext(ctx, `
-		SELECT outcome
-		FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_id = 'market-research-agent'
-	`, childEventID).Scan(&outcome); err != nil {
-		t.Fatalf("load cancellation receipt: %v", err)
-	}
-	if outcome != "dead_letter" {
-		t.Fatalf("receipt outcome = %q, want dead_letter", outcome)
-	}
-}
-
-func TestPostgresStore_AppendEvent_InheritsParentTraceID(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &PostgresStore{DB: db}
-	ctx := context.Background()
-
-	var spec runtimecontracts.PlatformSpecDocument
-	spec.PlatformTables.Tables = map[string]struct {
-		Description string `yaml:"description"`
-		DDL         string `yaml:"ddl"`
-	}{
-		"events": {
-			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_name TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope TEXT NOT NULL DEFAULT 'global',\n    payload JSONB NOT NULL DEFAULT '{}'::jsonb,\n    chain_depth INTEGER NOT NULL DEFAULT 0,\n    trace_id TEXT,\n    produced_by TEXT,\n    produced_by_type TEXT NOT NULL DEFAULT 'agent',\n    source_event_id UUID,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
-		},
-	}
-	plans, err := GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs(events): %v", err)
-	}
-	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
-		t.Fatalf("EnsureSchemaTables(events): %v", err)
-	}
-
-	parentID := uuid.NewString()
-	childID := uuid.NewString()
-	parentTrace := "trace-parent-123"
-	if err := pg.AppendEvent(ctx, events.Event{
-		ID:          parentID,
-		Type:        events.EventType("parent.event"),
-		SourceAgent: "root",
-		TraceID:     parentTrace,
-		Payload:     []byte(`{}`),
-		CreatedAt:   time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("AppendEvent(parent): %v", err)
-	}
-	if err := pg.AppendEvent(context.Background(), events.Event{
-		ID:            childID,
-		Type:          events.EventType("child.event"),
-		SourceAgent:   "child",
-		ParentEventID: parentID,
-		Payload:       []byte(`{}`),
-		CreatedAt:     time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("AppendEvent(child): %v", err)
-	}
-
-	var gotTrace, gotParent string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(trace_id, ''), COALESCE(source_event_id::text, '')
-		FROM events
-		WHERE event_id = $1::uuid
-	`, childID).Scan(&gotTrace, &gotParent); err != nil {
-		t.Fatalf("query child event: %v", err)
-	}
-	if gotTrace != parentTrace {
-		t.Fatalf("child trace_id = %q, want %q", gotTrace, parentTrace)
-	}
-	if gotParent != parentID {
-		t.Fatalf("child source_event_id = %q, want %q", gotParent, parentID)
-	}
 }
 
 func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
@@ -298,7 +227,7 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 			DDL: "CREATE TABLE runs (\n    run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status TEXT NOT NULL DEFAULT 'running'\n);",
 		},
 		"events": {
-			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    event_name TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope TEXT NOT NULL DEFAULT 'global',\n    payload JSONB NOT NULL DEFAULT '{}'::jsonb,\n    chain_depth INTEGER NOT NULL DEFAULT 0,\n    trace_id TEXT,\n    produced_by TEXT,\n    produced_by_type TEXT NOT NULL DEFAULT 'agent',\n    source_event_id UUID,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    event_name TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope TEXT NOT NULL DEFAULT 'global',\n    payload JSONB NOT NULL DEFAULT '{}'::jsonb,\n    chain_depth INTEGER NOT NULL DEFAULT 0,\n    produced_by TEXT,\n    produced_by_type TEXT NOT NULL DEFAULT 'agent',\n    source_event_id UUID,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)
@@ -372,7 +301,6 @@ func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T
 			scope TEXT NOT NULL DEFAULT 'entity',
 			payload JSONB NOT NULL DEFAULT '{}'::jsonb,
 			chain_depth INTEGER NOT NULL DEFAULT 0,
-			trace_id TEXT,
 			produced_by TEXT,
 			produced_by_type TEXT NOT NULL DEFAULT 'agent',
 			source_event_id UUID,
@@ -417,9 +345,9 @@ func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
-			event_id, run_id, event_name, entity_id, payload, trace_id, produced_by, produced_by_type, created_at
+			event_id, run_id, event_name, entity_id, payload, produced_by, produced_by_type, created_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'scoring/scoring.requested', $3::uuid, '{}'::jsonb, 'trace-1', 'runtime', 'agent', now()
+			$1::uuid, $2::uuid, 'scoring/scoring.requested', $3::uuid, '{}'::jsonb, 'runtime', 'agent', now()
 		)
 	`, eventID, runID, entityID); err != nil {
 		t.Fatalf("seed event: %v", err)
@@ -1056,7 +984,7 @@ func TestListPendingSubscribedEvents_RespectsDirectDeliveryScope(t *testing.T) {
 	}
 }
 
-func TestPendingEventQueries_PreserveTraceAndParentCorrelation(t *testing.T) {
+func TestPendingEventQueries_PreserveParentCorrelation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -1064,13 +992,11 @@ func TestPendingEventQueries_PreserveTraceAndParentCorrelation(t *testing.T) {
 	seedSpecAgent(t, ctx, pg, "a1", "", "inbound.*")
 
 	parentID := uuid.NewString()
-	parentTrace := uuid.NewString()
 	if err := pg.AppendEvent(ctx, events.Event{
 		ID:          parentID,
 		Type:        "inbound.root",
 		SourceAgent: "runtime",
 		Payload:     []byte(`{}`),
-		TraceID:     parentTrace,
 		CreatedAt:   time.Now().Add(-2 * time.Minute),
 	}); err != nil {
 		t.Fatalf("AppendEvent(parent): %v", err)
@@ -1098,9 +1024,6 @@ func TestPendingEventQueries_PreserveTraceAndParentCorrelation(t *testing.T) {
 	if len(direct) != 1 {
 		t.Fatalf("expected 1 direct pending event, got %d", len(direct))
 	}
-	if got := strings.TrimSpace(direct[0].TraceID); got != parentTrace {
-		t.Fatalf("direct pending trace_id = %q, want %q", got, parentTrace)
-	}
 	if got := strings.TrimSpace(direct[0].ParentEventID); got != parentID {
 		t.Fatalf("direct pending parent_event_id = %q, want %q", got, parentID)
 	}
@@ -1120,9 +1043,6 @@ func TestPendingEventQueries_PreserveTraceAndParentCorrelation(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected child event %s in subscribed pending set", childID)
-	}
-	if got := strings.TrimSpace(child.TraceID); got != parentTrace {
-		t.Fatalf("subscribed pending trace_id = %q, want %q", got, parentTrace)
 	}
 	if got := strings.TrimSpace(child.ParentEventID); got != parentID {
 		t.Fatalf("subscribed pending parent_event_id = %q, want %q", got, parentID)
@@ -1386,7 +1306,7 @@ func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t
 			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
 		},
 		"agent_turns": {
-			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    trace_id TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
 		},
 	}
 	plans, err := GeneratePlatformTableDDLs(spec)

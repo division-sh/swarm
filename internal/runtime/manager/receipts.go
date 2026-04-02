@@ -45,7 +45,6 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
-	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	if writer, ok := am.store.(deliveryProgressWriter); ok && writer != nil {
 		if err := writer.MarkEventDeliveryInProgress(ctx, evt.ID, agent.ID(), ""); err != nil {
 			if am.bus != nil {

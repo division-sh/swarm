@@ -313,13 +313,10 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	if db == nil {
 		return nil
 	}
+	hasRunID := runtimeColumnExists(ctx, db, "events", "run_id")
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if traceID == "" {
-		traceID = strings.TrimSpace(asString(detailMap["trace_id"]))
-	}
 	if runID == "" {
 		runID = strings.TrimSpace(asString(detailMap["run_id"]))
 	}
@@ -338,7 +335,6 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 		"entity_id":       strings.TrimSpace(e.EffectiveEntityID()),
 		"session_id":      strings.TrimSpace(e.SessionID),
 		"run_id":          runID,
-		"trace_id":        traceID,
 		"parent_event_id": parentEventID,
 		"handler_id":      handlerID,
 		"correlation":     sanitizeStringMap(e.Correlation),
@@ -350,29 +346,29 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	if err != nil {
 		return err
 	}
-	if runtimeColumnExists(ctx, db, "events", "run_id") {
+	if hasRunID {
 		_, err = db.ExecContext(ctx, `
 			INSERT INTO events (
 				run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
+				chain_depth, produced_by, produced_by_type, source_event_id, created_at
 			)
 			VALUES (
 				NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
-				0, NULLIF($3,''), 'runtime', 'platform', NULLIF($4,'')::uuid, now()
+				0, 'runtime', 'platform', NULLIF($3,'')::uuid, now()
 			)
-		`, runID, string(encoded), traceID, parentEventID)
+		`, runID, string(encoded), parentEventID)
 		return err
 	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
+			chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (
 			gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $1::jsonb,
-			0, NULLIF($2,''), 'runtime', 'platform', NULLIF($3,'')::uuid, now()
+			0, 'runtime', 'platform', NULLIF($2,'')::uuid, now()
 		)
-	`, string(encoded), traceID, parentEventID)
+	`, string(encoded), parentEventID)
 	if err != nil {
 		return err
 	}
@@ -397,7 +393,6 @@ func runtimeColumnExists(ctx context.Context, db *sql.DB, tableName, columnName 
 }
 
 func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(handler)
@@ -414,7 +409,6 @@ func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, hand
 		"action":         action,
 		"handler_id":     handlerID,
 		"reason_code":    reasonCode,
-		"trace_id":       traceID,
 		"events_emitted": eventsEmitted,
 		"drop_reason":    strings.TrimSpace(dropReason),
 		"error":          strings.TrimSpace(errText),

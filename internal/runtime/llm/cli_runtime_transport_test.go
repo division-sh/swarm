@@ -10,7 +10,6 @@ import (
 
 	"swarm/internal/config"
 	models "swarm/internal/runtime/core/actors"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 )
 
 func TestShouldUseMCPBridge_DefaultsOn(t *testing.T) {
@@ -102,7 +101,7 @@ func TestClaudeAllowedToolsArgForActor_IncludesContractAndNativeTools(t *testing
 	}
 }
 
-func TestBuildMCPConfigArg_UsesCorrelationTraceID(t *testing.T) {
+func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:18082")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
@@ -116,8 +115,7 @@ func TestBuildMCPConfigArg_UsesCorrelationTraceID(t *testing.T) {
 		mcpTurnContextRegister = prevRegister
 		mcpTurnContextUnregister = prevUnregister
 	}()
-	ctx := runtimecorrelation.WithTraceID(context.Background(), "trace-root-123")
-	ctx = models.WithActor(ctx, models.AgentConfig{
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
 		ID:   "market-research-agent",
 		Role: "market_research",
 		Mode: "discovery",
@@ -148,14 +146,15 @@ func TestBuildMCPConfigArg_UsesCorrelationTraceID(t *testing.T) {
 	servers := payload["mcpServers"].(map[string]any)
 	runtimeTools := servers["runtime-tools"].(map[string]any)
 	headers := runtimeTools["headers"].(map[string]any)
-	if got := headers[mcpTraceIDHeader]; got != "trace-root-123" {
-		t.Fatalf("trace header = %#v, want trace-root-123", got)
+	if got := headers["X-SWARM-Trace-Id"]; got != nil {
+		t.Fatalf("unexpected trace header = %#v", got)
 	}
 	if got := headers[mcpContextTokenHeader]; got != contextToken {
 		t.Fatalf("context header = %#v, want %q", got, contextToken)
 	}
 	urlRaw := runtimeTools["url"].(string)
-	if !strings.Contains(urlRaw, "trace_id=trace-root-123") {
-		t.Fatalf("url %q missing propagated trace_id", urlRaw)
+	legacyTraceQuery := "trace" + "_id="
+	if strings.Contains(urlRaw, legacyTraceQuery) {
+		t.Fatalf("url %q should not propagate legacy trace query params", urlRaw)
 	}
 }

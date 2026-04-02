@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"swarm/internal/events"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimemanager "swarm/internal/runtime/manager"
 )
 
@@ -248,14 +247,12 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, age
 	if status == runtimemanager.ReceiptStatusError && retryCount >= 2 {
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	reasonCode := managerReceiptReasonCode(finalStatus, errText)
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": finalStatus,
 		"reason_code":    reasonCode,
 		"retry_count":    retryCount,
 		"error":          strings.TrimSpace(errText),
-		"trace_id":       traceID,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal event receipt side effects: %w", err)
@@ -343,11 +340,11 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 }
 
 func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
-			COALESCE(e.trace_id, ''), COALESCE(e.source_event_id::text, '')
+			COALESCE(e.source_event_id::text, '')
 		FROM event_deliveries d
 		INNER JOIN events e ON e.event_id = d.event_id
 		LEFT JOIN event_receipts r
@@ -369,7 +366,8 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 			)
 		ORDER BY e.created_at ASC
 		LIMIT $3
-	`, agentID, since, limit)
+	`)
+	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
 	}
@@ -378,11 +376,11 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 }
 
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+	q := fmt.Sprintf(`
 		SELECT
 			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
-			COALESCE(e.trace_id, ''), COALESCE(e.source_event_id::text, '')
+			COALESCE(e.source_event_id::text, '')
 		FROM events e
 		LEFT JOIN event_receipts r
 			ON r.event_id = e.event_id
@@ -415,7 +413,8 @@ func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, age
 			)
 		ORDER BY e.created_at ASC
 		LIMIT $3
-	`, agentID, since, limit)
+	`)
+	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query pending subscribed events for %s: %w", agentID, err)
 	}
@@ -511,7 +510,6 @@ func scanSpecPendingEvents(rows *sql.Rows) ([]events.Event, error) {
 			&entityID,
 			&evt.Payload,
 			&evt.CreatedAt,
-			&evt.TraceID,
 			&evt.ParentEventID,
 		); err != nil {
 			return nil, fmt.Errorf("scan pending event: %w", err)

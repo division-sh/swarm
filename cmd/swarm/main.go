@@ -84,7 +84,6 @@ func main() {
 	storeMode := flag.String("store", "postgres", "Store mode: postgres")
 	healthAddr := flag.String("health-addr", defaultHealthAddr, "HTTP bind address for health checks")
 	selfCheck := flag.Bool("self-check", true, "Run runtime self-check during boot")
-	traceID := flag.String("trace-id", "", "Print a lifecycle trace for the given trace ID and exit")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -106,17 +105,6 @@ func main() {
 		log.Fatalf("init stores: %v", err)
 	}
 	defer closeDB(stores.SQLDB)
-	if strings.TrimSpace(*traceID) != "" {
-		if stores.Postgres == nil {
-			log.Fatal("trace reporting requires postgres store")
-		}
-		report, err := stores.Postgres.TraceReport(ctx, *traceID)
-		if err != nil {
-			log.Fatalf("trace report: %v", err)
-		}
-		printTraceReport(os.Stdout, report)
-		return
-	}
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
 		log.Fatalf("resolve contracts: %v", err)
@@ -248,7 +236,6 @@ type runStatusReport struct {
 	RunTableStatus    string                    `json:"run_table_status,omitempty"`
 	RootEventID       string                    `json:"root_event_id,omitempty"`
 	RootEventType     string                    `json:"root_event_type,omitempty"`
-	TraceID           string                    `json:"trace_id,omitempty"`
 	StartedAt         time.Time                 `json:"started_at,omitempty"`
 	LastEventAt       time.Time                 `json:"last_event_at,omitempty"`
 	EndedAt           *time.Time                `json:"ended_at,omitempty"`
@@ -433,12 +420,12 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 	}
 
 	if err := db.QueryRowContext(ctx, `
-		SELECT event_id::text, event_name, COALESCE(trace_id::text, ''), created_at
+		SELECT event_id::text, event_name, created_at
 		FROM events
 		WHERE run_id = $1::uuid
 		ORDER BY created_at ASC
 		LIMIT 1
-	`, report.RunID).Scan(&report.RootEventID, &report.RootEventType, &report.TraceID, &report.StartedAt); err != nil {
+	`, report.RunID).Scan(&report.RootEventID, &report.RootEventType, &report.StartedAt); err != nil {
 		return runStatusReport{}, fmt.Errorf("load root event: %w", err)
 	}
 	if err := db.QueryRowContext(ctx, `
@@ -566,7 +553,7 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 		return runStatusReport{}, fmt.Errorf("read agent turns: %w", err)
 	}
 
-	if report.TraceID != "" || report.RunID != "" {
+	if report.RunID != "" {
 		logLevels := []string{"warn", "error"}
 		if opts.LogsAllLevels {
 			logLevels = []string{"info", "warn", "error"}
@@ -576,13 +563,10 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 			SELECT COUNT(*)
 			FROM events
 			WHERE event_name = 'platform.runtime_log'
-			  AND (
-				payload->>'run_id' = $1
-				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
-			  )
-			  AND payload->>'level' = ANY($3::text[])
-			  AND ($4 = '' OR payload->>'component' = $4)
-		`, report.RunID, report.TraceID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
+			  AND payload->>'run_id' = $1
+			  AND payload->>'level' = ANY($2::text[])
+			  AND ($3 = '' OR payload->>'component' = $3)
+		`, report.RunID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
 			return runStatusReport{}, fmt.Errorf("load runtime log summary: %w", err)
 		}
 		logSummaryRows, err := db.QueryContext(ctx, `
@@ -593,16 +577,13 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 				COUNT(*)
 			FROM events
 			WHERE event_name = 'platform.runtime_log'
-			  AND (
-				payload->>'run_id' = $1
-				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
-			  )
-			  AND payload->>'level' = ANY($3::text[])
-			  AND ($4 = '' OR payload->>'component' = $4)
+			  AND payload->>'run_id' = $1
+			  AND payload->>'level' = ANY($2::text[])
+			  AND ($3 = '' OR payload->>'component' = $3)
 			GROUP BY payload->>'level', payload->>'component', payload->>'action'
 			ORDER BY COUNT(*) DESC, payload->>'component', payload->>'action'
 			LIMIT 12
-		`, report.RunID, report.TraceID, pq.Array(logLevels), componentFilter)
+		`, report.RunID, pq.Array(logLevels), componentFilter)
 		if err != nil {
 			return runStatusReport{}, fmt.Errorf("load runtime log rollup: %w", err)
 		}
@@ -626,15 +607,12 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 				created_at
 			FROM events
 			WHERE event_name = 'platform.runtime_log'
-			  AND (
-				payload->>'run_id' = $1
-				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
-			  )
-			  AND payload->>'level' = ANY($3::text[])
-			  AND ($4 = '' OR payload->>'component' = $4)
+			  AND payload->>'run_id' = $1
+			  AND payload->>'level' = ANY($2::text[])
+			  AND ($3 = '' OR payload->>'component' = $3)
 			ORDER BY created_at DESC
-			LIMIT $5
-		`, report.RunID, report.TraceID, pq.Array(logLevels), componentFilter, logLimitForStatus(opts))
+			LIMIT $4
+		`, report.RunID, pq.Array(logLevels), componentFilter, logLimitForStatus(opts))
 		if err != nil {
 			return runStatusReport{}, fmt.Errorf("load runtime logs: %w", err)
 		}
@@ -695,9 +673,6 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 	fmt.Fprintf(w, "Run %s\n", report.RunID)
 	if strings.TrimSpace(report.RootEventType) != "" {
 		fmt.Fprintf(w, "Root: %s (%s)\n", report.RootEventType, report.RootEventID)
-	}
-	if strings.TrimSpace(report.TraceID) != "" {
-		fmt.Fprintf(w, "Trace: %s\n", report.TraceID)
 	}
 	if strings.TrimSpace(report.RunTableStatus) != "" {
 		fmt.Fprintf(w, "Run Status: %s\n", report.RunTableStatus)
@@ -1021,206 +996,6 @@ func normalizeContractsRoot(path string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no package.yaml found under %s", path)
-}
-
-func printTraceReport(w io.Writer, report store.TraceReport) {
-	if w == nil {
-		return
-	}
-	fmt.Fprintf(w, "Trace %s\n", strings.TrimSpace(report.TraceID))
-	fmt.Fprintf(w, "Events: %d  Deliveries: %d  Receipts: %d  DeadLetters: %d\n\n", len(report.Events), len(report.Deliveries), len(report.Receipts), len(report.DeadLetters))
-	if summary := traceFirstStuckSummary(report); summary != "" {
-		fmt.Fprintf(w, "Summary: %s\n\n", summary)
-	}
-
-	deliveriesByEvent := make(map[string][]store.TraceDelivery, len(report.Deliveries))
-	for _, delivery := range report.Deliveries {
-		deliveriesByEvent[delivery.EventID] = append(deliveriesByEvent[delivery.EventID], delivery)
-	}
-	receiptsByEvent := make(map[string][]store.TraceReceipt, len(report.Receipts))
-	for _, receipt := range report.Receipts {
-		receiptsByEvent[receipt.EventID] = append(receiptsByEvent[receipt.EventID], receipt)
-	}
-	deadLettersByEvent := make(map[string][]store.TraceDeadLetter, len(report.DeadLetters))
-	for _, deadLetter := range report.DeadLetters {
-		deadLettersByEvent[deadLetter.OriginalEventID] = append(deadLettersByEvent[deadLetter.OriginalEventID], deadLetter)
-	}
-	turnsByEvent := make(map[string][]store.TraceTurn, len(report.Turns))
-	turnsWithoutEvent := make([]store.TraceTurn, 0)
-	for _, turn := range report.Turns {
-		if strings.TrimSpace(turn.TriggerEventID) == "" {
-			turnsWithoutEvent = append(turnsWithoutEvent, turn)
-			continue
-		}
-		turnsByEvent[turn.TriggerEventID] = append(turnsByEvent[turn.TriggerEventID], turn)
-	}
-
-	for _, evt := range report.Events {
-		fmt.Fprintf(w, "%s  %s  id=%s", evt.CreatedAt.Format(time.RFC3339), evt.EventName, evt.EventID)
-		if evt.SourceEventID != "" {
-			fmt.Fprintf(w, " parent=%s", evt.SourceEventID)
-		}
-		if evt.ProducedBy != "" {
-			fmt.Fprintf(w, " by=%s", evt.ProducedBy)
-		}
-		if evt.FlowInstance != "" {
-			fmt.Fprintf(w, " flow=%s", evt.FlowInstance)
-		}
-		if evt.EntityID != "" {
-			fmt.Fprintf(w, " entity=%s", evt.EntityID)
-		}
-		fmt.Fprintln(w)
-
-		for _, delivery := range deliveriesByEvent[evt.EventID] {
-			fmt.Fprintf(w, "  delivery  %s/%s  status=%s", delivery.SubscriberType, delivery.SubscriberID, delivery.Status)
-			if delivery.ReasonCode != "" {
-				fmt.Fprintf(w, " reason=%s", delivery.ReasonCode)
-			}
-			if delivery.ActiveSessionID != "" {
-				fmt.Fprintf(w, " session=%s", delivery.ActiveSessionID)
-			}
-			if delivery.StartedAt.Valid {
-				fmt.Fprintf(w, " started=%s", delivery.StartedAt.Time.Format(time.RFC3339))
-			}
-			if delivery.RetryCount > 0 {
-				fmt.Fprintf(w, " retries=%d", delivery.RetryCount)
-			}
-			if delivery.LastError != "" {
-				fmt.Fprintf(w, " error=%q", delivery.LastError)
-			}
-			fmt.Fprintln(w)
-		}
-		for _, receipt := range receiptsByEvent[evt.EventID] {
-			fmt.Fprintf(w, "  receipt   %s/%s  outcome=%s", receipt.SubscriberType, receipt.SubscriberID, receipt.Outcome)
-			if receipt.ReasonCode != "" {
-				fmt.Fprintf(w, " reason=%s", receipt.ReasonCode)
-			}
-			if errText := strings.TrimSpace(asString(receipt.SideEffects["error"])); errText != "" {
-				fmt.Fprintf(w, " error=%q", errText)
-			}
-			fmt.Fprintln(w)
-		}
-		for _, deadLetter := range deadLettersByEvent[evt.EventID] {
-			fmt.Fprintf(w, "  dead      type=%s retries=%d depth=%d", deadLetter.FailureType, deadLetter.RetryCount, deadLetter.ChainDepth)
-			if deadLetter.HandlerNode != "" {
-				fmt.Fprintf(w, " handler=%s", deadLetter.HandlerNode)
-			}
-			if deadLetter.ErrorMessage != "" {
-				fmt.Fprintf(w, " error=%q", deadLetter.ErrorMessage)
-			}
-			fmt.Fprintln(w)
-		}
-		for _, turn := range turnsByEvent[evt.EventID] {
-			printTraceTurn(w, turn)
-		}
-		fmt.Fprintln(w)
-	}
-	for _, turn := range turnsWithoutEvent {
-		printTraceTurn(w, turn)
-		fmt.Fprintln(w)
-	}
-}
-
-func printTraceTurn(w io.Writer, turn store.TraceTurn) {
-	fmt.Fprintf(w, "  turn      agent=%s session=%s mode=%s parse_ok=%t", turn.AgentID, turn.SessionID, turn.RuntimeMode, turn.ParseOK)
-	if turn.ScopeKey != "" {
-		fmt.Fprintf(w, " scope=%s", turn.ScopeKey)
-	}
-	if turn.LatencyMS > 0 {
-		fmt.Fprintf(w, " latency_ms=%d", turn.LatencyMS)
-	}
-	if turn.RetryCount > 0 {
-		fmt.Fprintf(w, " retries=%d", turn.RetryCount)
-	}
-	if turn.Error != "" {
-		fmt.Fprintf(w, " error=%q", turn.Error)
-	}
-	fmt.Fprintln(w)
-	if len(turn.AvailableTools) > 0 {
-		fmt.Fprintf(w, "    tools     available=%s\n", strings.Join(turn.AvailableTools, ","))
-	}
-	if len(turn.ToolCalls) > 0 {
-		fmt.Fprintf(w, "    tools     called=%s\n", strings.Join(turn.ToolCalls, ","))
-	}
-	if len(turn.EmittedEvents) > 0 {
-		fmt.Fprintf(w, "    events    emitted=%s\n", strings.Join(turn.EmittedEvents, ","))
-	}
-	if len(turn.MCPServers) > 0 || len(turn.MCPToolsListed) > 0 || len(turn.MCPToolsVisible) > 0 {
-		if len(turn.MCPServers) > 0 {
-			serverStates := make([]string, 0, len(turn.MCPServers))
-			for name, status := range turn.MCPServers {
-				serverStates = append(serverStates, name+":"+status)
-			}
-			sort.Strings(serverStates)
-			fmt.Fprintf(w, "    mcp       servers=%s\n", strings.Join(serverStates, ","))
-		}
-		if len(turn.MCPToolsListed) > 0 {
-			fmt.Fprintf(w, "    mcp       listed=%s\n", strings.Join(turn.MCPToolsListed, ","))
-		}
-		if len(turn.MCPToolsVisible) > 0 {
-			fmt.Fprintf(w, "    mcp       visible=%s\n", strings.Join(turn.MCPToolsVisible, ","))
-		}
-	}
-}
-
-func traceFirstStuckSummary(report store.TraceReport) string {
-	deliveriesByEvent := make(map[string][]store.TraceDelivery, len(report.Deliveries))
-	for _, delivery := range report.Deliveries {
-		deliveriesByEvent[delivery.EventID] = append(deliveriesByEvent[delivery.EventID], delivery)
-	}
-	receiptsByEvent := make(map[string][]store.TraceReceipt, len(report.Receipts))
-	for _, receipt := range report.Receipts {
-		receiptsByEvent[receipt.EventID] = append(receiptsByEvent[receipt.EventID], receipt)
-	}
-	deadLettersByEvent := make(map[string][]store.TraceDeadLetter, len(report.DeadLetters))
-	for _, deadLetter := range report.DeadLetters {
-		deadLettersByEvent[deadLetter.OriginalEventID] = append(deadLettersByEvent[deadLetter.OriginalEventID], deadLetter)
-	}
-
-	for _, evt := range report.Events {
-		deliveries := deliveriesByEvent[evt.EventID]
-		receipts := receiptsByEvent[evt.EventID]
-		if len(deliveries) == 0 && len(receipts) == 0 && len(deadLettersByEvent[evt.EventID]) == 0 {
-			return fmt.Sprintf("unrouted event %s id=%s", evt.EventName, evt.EventID)
-		}
-		receiptKeys := map[string]struct{}{}
-		for _, receipt := range receipts {
-			receiptKeys[receipt.SubscriberType+"/"+receipt.SubscriberID] = struct{}{}
-			switch strings.TrimSpace(strings.ToLower(receipt.Outcome)) {
-			case "dead_letter", "discard", "reject", "kill", "escalate":
-				if receipt.ReasonCode != "" {
-					return fmt.Sprintf("receipt %s/%s outcome=%s reason=%s for %s", receipt.SubscriberType, receipt.SubscriberID, receipt.Outcome, receipt.ReasonCode, evt.EventName)
-				}
-				return fmt.Sprintf("receipt %s/%s outcome=%s for %s", receipt.SubscriberType, receipt.SubscriberID, receipt.Outcome, evt.EventName)
-			}
-		}
-		for _, delivery := range deliveries {
-			key := delivery.SubscriberType + "/" + delivery.SubscriberID
-			if _, ok := receiptKeys[key]; !ok && strings.TrimSpace(strings.ToLower(delivery.Status)) == "in_progress" {
-				if delivery.ActiveSessionID != "" {
-					return fmt.Sprintf("in-progress delivery %s session=%s for %s", key, delivery.ActiveSessionID, evt.EventName)
-				}
-				if delivery.ReasonCode != "" {
-					return fmt.Sprintf("in-progress delivery %s reason=%s for %s", key, delivery.ReasonCode, evt.EventName)
-				}
-				return fmt.Sprintf("in-progress delivery %s for %s", key, evt.EventName)
-			}
-			if _, ok := receiptKeys[key]; !ok && strings.TrimSpace(strings.ToLower(delivery.Status)) == "pending" {
-				if delivery.ReasonCode != "" {
-					return fmt.Sprintf("pending delivery %s reason=%s for %s", key, delivery.ReasonCode, evt.EventName)
-				}
-				return fmt.Sprintf("pending delivery %s for %s", key, evt.EventName)
-			}
-			switch strings.TrimSpace(strings.ToLower(delivery.Status)) {
-			case "failed", "dead_letter":
-				if delivery.ReasonCode != "" {
-					return fmt.Sprintf("delivery %s status=%s reason=%s for %s", key, delivery.Status, delivery.ReasonCode, evt.EventName)
-				}
-				return fmt.Sprintf("delivery %s status=%s for %s", key, delivery.Status, evt.EventName)
-			}
-		}
-	}
-	return ""
 }
 
 func asString(v any) string {

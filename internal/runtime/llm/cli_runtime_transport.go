@@ -10,7 +10,6 @@ import (
 	"time"
 
 	models "swarm/internal/runtime/core/actors"
-	runtimecorrelation "swarm/internal/runtime/correlation"
 	workspace "swarm/internal/runtime/workspace"
 )
 
@@ -21,7 +20,6 @@ const (
 	mcpEntityIDHeader     = "X-SWARM-Entity-Id"
 	mcpAllowedToolsHeader = "X-SWARM-Allowed-Tools"
 	mcpContextTokenHeader = "X-SWARM-Context-Token"
-	mcpTraceIDHeader      = "X-SWARM-Trace-Id"
 
 	mcpActorIDQuery      = "agent_id"
 	mcpActorRoleQuery    = "agent_role"
@@ -29,7 +27,6 @@ const (
 	mcpEntityIDQuery     = "entity_id"
 	mcpAllowedToolsQuery = "allowed_tools"
 	mcpContextTokenQuery = "ctx_token"
-	mcpTraceIDQuery      = "trace_id"
 )
 
 func (r *ClaudeCLIRuntime) runWithPromptArg(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, error) {
@@ -78,17 +75,10 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 		headers["Authorization"] = "Bearer " + token
 	}
 	contextToken = mcpTurnContextRegister(ctx, r.mcpContextTokenTTL(ctx))
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
-	if traceID == "" {
-		traceID = strings.TrimSpace(contextToken)
-	}
 	if contextToken != "" {
 		headers[mcpContextTokenHeader] = contextToken
 	}
-	if traceID != "" {
-		headers[mcpTraceIDHeader] = traceID
-	}
-	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools, traceID)
+	serverURL = withMCPContextQuery(serverURL, actor, contextToken, allowedTools)
 	cfg := map[string]any{
 		"mcpServers": map[string]any{
 			"runtime-tools": map[string]any{
@@ -159,7 +149,7 @@ func normalizeMCPServerURL(raw string) string {
 	return strings.TrimSpace(u.String())
 }
 
-func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, allowedTools, traceID string) string {
+func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, allowedTools string) string {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return rawURL
@@ -186,9 +176,6 @@ func withMCPContextQuery(rawURL string, actor models.AgentConfig, contextToken, 
 	}
 	if v := strings.TrimSpace(allowedTools); v != "" {
 		q.Set(mcpAllowedToolsQuery, v)
-	}
-	if v := strings.TrimSpace(traceID); v != "" {
-		q.Set(mcpTraceIDQuery, v)
 	}
 	u.RawQuery = q.Encode()
 	return strings.TrimSpace(u.String())

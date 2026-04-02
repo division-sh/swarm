@@ -132,11 +132,6 @@ func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, q rowQueryer
 			evt.RunID = runID
 		}
 	}
-	if strings.TrimSpace(evt.TraceID) == "" && parentID != "" {
-		if traceID := lookupEventTraceID(ctx, q, parentID); traceID != "" {
-			evt.TraceID = traceID
-		}
-	}
 	_, evt = runtimecorrelation.CorrelateEvent(ctx, evt)
 	return evt
 }
@@ -282,39 +277,40 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
+	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
+	hasRunID := columnExists(ctx, chooseRowQueryer(s.DB, tx), "events", "run_id")
 	q := `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
-			chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
+			chain_depth, produced_by, produced_by_type, source_event_id, created_at
 		)
 		VALUES (
 			$1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-			$7, NULLIF($8,''), NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12
+			$7, NULLIF($8,''), $9, NULLIF($10,'')::uuid, $11
 		)
 		ON CONFLICT (event_id) DO NOTHING
 	`
-	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt}
-	if columnExists(ctx, chooseRowQueryer(s.DB, tx), "events", "run_id") {
+	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
+	if hasRunID {
 		if err := s.ensureRunRow(ctx, tx, runID); err != nil {
 			return err
 		}
 		q = `
 			INSERT INTO events (
 				event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
-				chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
+				chain_depth, produced_by, produced_by_type, source_event_id, created_at
 			)
 			VALUES (
 				$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,''), $6, $7::jsonb,
-				$8, NULLIF($9,''), NULLIF($10,''), $11, NULLIF($12,'')::uuid, $13
+				$8, NULLIF($9,''), $10, NULLIF($11,'')::uuid, $12
 			)
 			ON CONFLICT (event_id) DO NOTHING
 		`
-		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt}
+		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
 	}
 	if _, err := execFn(ctx, q, args...); err != nil {
 		return fmt.Errorf("append event: %w", err)
@@ -378,13 +374,11 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.T
 }
 
 func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
-	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	reasonCode := pipelineReceiptReasonCode(status, errText)
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": strings.TrimSpace(status),
 		"reason_code":    reasonCode,
 		"error":          strings.TrimSpace(errText),
-		"trace_id":       traceID,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal pipeline receipt side effects: %w", err)
@@ -525,23 +519,6 @@ func columnExists(ctx context.Context, q rowQueryer, tableName, columnName strin
 	return exists
 }
 
-func lookupEventTraceID(ctx context.Context, q rowQueryer, eventID string) string {
-	eventID = strings.TrimSpace(eventID)
-	if q == nil || eventID == "" {
-		return ""
-	}
-	var traceID string
-	if err := q.QueryRowContext(ctx, `
-		SELECT COALESCE(trace_id, '')
-		FROM events
-		WHERE event_id = $1::uuid
-		LIMIT 1
-	`, eventID).Scan(&traceID); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(traceID)
-}
-
 func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
 	eventID = strings.TrimSpace(eventID)
 	if q == nil || eventID == "" {
@@ -585,7 +562,7 @@ func runIDOrEventID(runID, eventID string) string {
 	return nullUUIDString(eventID)
 }
 
-func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, traceID string, producedBy string, producedByType string, sourceEventID string, createdAt time.Time) {
+func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, producedBy string, producedByType string, sourceEventID string, createdAt time.Time) {
 	id = strings.TrimSpace(evt.ID)
 	if id == "" {
 		id = uuid.NewString()
@@ -595,7 +572,6 @@ func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName 
 	payload = eventPayloadForStorage(evt)
 	entityID = sanitizeOptionalUUID(evt.EntityID())
 	flowInstance = eventPayloadString(payload, "flow_instance")
-	traceID = strings.TrimSpace(evt.TraceID)
 	scope = "global"
 	if entityID != "" {
 		scope = "entity"

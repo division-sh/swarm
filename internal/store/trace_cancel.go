@@ -9,7 +9,7 @@ import (
 	"github.com/lib/pq"
 )
 
-func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, producerID string) ([]string, error) {
+func (s *PostgresStore) CancelActiveRunWorkByProducer(ctx context.Context, producerID string) ([]string, error) {
 	producerID = strings.TrimSpace(producerID)
 	if producerID == "" {
 		return nil, nil
@@ -17,7 +17,7 @@ func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, pro
 
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin cancel traces tx: %w", err)
+		return nil, fmt.Errorf("begin cancel runs tx: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -26,43 +26,43 @@ func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, pro
 		}
 	}()
 
-	traceRows, err := tx.QueryContext(ctx, `
-		SELECT DISTINCT e.trace_id
+	runRows, err := tx.QueryContext(ctx, `
+		SELECT DISTINCT e.run_id::text
 		FROM events e
-		WHERE COALESCE(e.trace_id, '') <> ''
+		WHERE e.run_id IS NOT NULL
 		  AND COALESCE(e.produced_by, '') = $1
 		  AND e.event_name NOT LIKE 'platform.%'
 		  AND EXISTS (
 			SELECT 1
-			FROM events te
-			JOIN event_deliveries d ON d.event_id = te.event_id
-			WHERE te.trace_id = e.trace_id
+			FROM events re
+			JOIN event_deliveries d ON d.event_id = re.event_id
+			WHERE re.run_id = e.run_id
 			  AND d.status IN ('pending', 'in_progress')
 		  )
-		ORDER BY e.trace_id ASC
+		ORDER BY e.run_id::text ASC
 	`, producerID)
 	if err != nil {
-		return nil, fmt.Errorf("query active traces for producer %s: %w", producerID, err)
+		return nil, fmt.Errorf("query active runs for producer %s: %w", producerID, err)
 	}
-	defer traceRows.Close()
+	defer runRows.Close()
 
-	traceIDs := make([]string, 0, 8)
-	for traceRows.Next() {
-		var traceID string
-		if err := traceRows.Scan(&traceID); err != nil {
-			return nil, fmt.Errorf("scan active trace id: %w", err)
+	runIDs := make([]string, 0, 8)
+	for runRows.Next() {
+		var runID string
+		if err := runRows.Scan(&runID); err != nil {
+			return nil, fmt.Errorf("scan active run id: %w", err)
 		}
-		traceID = strings.TrimSpace(traceID)
-		if traceID != "" {
-			traceIDs = append(traceIDs, traceID)
+		runID = strings.TrimSpace(runID)
+		if runID != "" {
+			runIDs = append(runIDs, runID)
 		}
 	}
-	if err := traceRows.Err(); err != nil {
-		return nil, fmt.Errorf("read active trace ids: %w", err)
+	if err := runRows.Err(); err != nil {
+		return nil, fmt.Errorf("read active run ids: %w", err)
 	}
-	if len(traceIDs) == 0 {
+	if len(runIDs) == 0 {
 		if err := tx.Commit(); err != nil {
-			return nil, fmt.Errorf("commit empty cancel traces tx: %w", err)
+			return nil, fmt.Errorf("commit empty cancel runs tx: %w", err)
 		}
 		committed = true
 		return nil, nil
@@ -72,13 +72,13 @@ func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, pro
 		SELECT DISTINCT d.subscriber_id
 		FROM event_deliveries d
 		JOIN events e ON e.event_id = d.event_id
-		WHERE e.trace_id = ANY($1::text[])
+		WHERE e.run_id::text = ANY($1::text[])
 		  AND d.subscriber_type = 'agent'
 		  AND d.status IN ('pending', 'in_progress')
 		ORDER BY d.subscriber_id ASC
-	`, pq.Array(traceIDs))
+	`, pq.Array(runIDs))
 	if err != nil {
-		return nil, fmt.Errorf("query affected agents for traces: %w", err)
+		return nil, fmt.Errorf("query affected agents for runs: %w", err)
 	}
 	defer agentRows.Close()
 
@@ -124,7 +124,7 @@ func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, pro
 			now()
 		FROM event_deliveries d
 		JOIN events e ON e.event_id = d.event_id
-		WHERE e.trace_id = ANY($1::text[])
+		WHERE e.run_id::text = ANY($1::text[])
 		  AND d.status IN ('pending', 'in_progress')
 		ON CONFLICT (event_id, subscriber_id) DO UPDATE SET
 			entity_id = EXCLUDED.entity_id,
@@ -133,7 +133,7 @@ func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, pro
 			reason_code = EXCLUDED.reason_code,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
-	`, pq.Array(traceIDs), string(sideEffects)); err != nil {
+	`, pq.Array(runIDs), string(sideEffects)); err != nil {
 		return nil, fmt.Errorf("upsert kill_previous receipts: %w", err)
 	}
 
@@ -147,14 +147,14 @@ func (s *PostgresStore) CancelActiveTraceWorkByProducer(ctx context.Context, pro
 			delivered_at = now()
 		FROM events e
 		WHERE e.event_id = d.event_id
-		  AND e.trace_id = ANY($1::text[])
+		  AND e.run_id::text = ANY($1::text[])
 		  AND d.status IN ('pending', 'in_progress')
-	`, pq.Array(traceIDs)); err != nil {
+	`, pq.Array(runIDs)); err != nil {
 		return nil, fmt.Errorf("mark kill_previous deliveries dead_letter: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit cancel traces tx: %w", err)
+		return nil, fmt.Errorf("commit cancel runs tx: %w", err)
 	}
 	committed = true
 	return affectedAgents, nil

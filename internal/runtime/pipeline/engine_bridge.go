@@ -216,7 +216,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
-	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(triggerCtx.Event.TraceID))
 	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type)))
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {

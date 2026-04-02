@@ -460,7 +460,6 @@ func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
 	evt := (events.Event{
 		ID:          "evt-1",
 		RunID:       "run-123",
-		TraceID:     "trace-123",
 		Type:        "scoring/scoring.requested",
 		SourceAgent: "runtime",
 		Payload:     []byte(`{"entity_id":"ent-1"}`),

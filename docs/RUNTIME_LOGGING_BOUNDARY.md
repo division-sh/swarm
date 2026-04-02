@@ -15,7 +15,6 @@ These diagnostics should go through the structured runtime log path:
 Expected fields when available:
 
 - `run_id`
-- `trace_id`
 - `event_id`
 - `event_type`
 - `agent_id`
@@ -32,6 +31,8 @@ Run-bound diagnostics are the canonical source for:
 - correlation across events, deliveries, sessions, and turns
 
 If a code path already has a `context.Context` for a live event or turn, it should prefer persisted runtime logging over plain process logging.
+
+`trace_id` may still appear in legacy diagnostics during the transition away from trace-shaped correlation, but it is no longer the authoritative execution key. Prefer `run_id`.
 
 ## Process-global logs
 

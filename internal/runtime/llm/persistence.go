@@ -15,7 +15,6 @@ type AgentTurnRecord struct {
 	SessionID        string
 	ScopeKey         string
 	RunID            string
-	TraceID          string
 	EntityID         string
 	TriggerEventID   string
 	TriggerEventType string
@@ -58,9 +57,6 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		if len(rec.MCPToolsListed) == 0 {
 			rec.MCPToolsListed = mcpListedToolsForSession(s.Tools)
 		}
-	}
-	if strings.TrimSpace(rec.TraceID) == "" {
-		rec.TraceID = strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
 	}
 	if strings.TrimSpace(rec.RunID) == "" {
 		rec.RunID = strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))

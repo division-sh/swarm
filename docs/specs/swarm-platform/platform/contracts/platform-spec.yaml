@@ -2121,15 +2121,14 @@ platform_tables:
       ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id            UUID\
         \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
         \     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
-        \    payload           JSONB NOT NULL DEFAULT '{}',\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    trace_id\
-        \          TEXT,\n    produced_by       TEXT,\n    produced_by_type  TEXT CHECK (produced_by_type IN ('node', 'agent',\
+        \    payload           JSONB NOT NULL DEFAULT '{}',\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n\
+        \    produced_by       TEXT,\n    produced_by_type  TEXT CHECK (produced_by_type IN ('node', 'agent',\
         \ 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key   TEXT,\n    source_event_id   UUID,\n\
         \    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_run (run_id, created_at) WHERE\
         \ run_id IS NOT NULL,\n    INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,\n    INDEX\
         \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_global (event_name,\
-        \ created_at) WHERE scope = 'global',\n    INDEX idx_events_trace (trace_id, created_at) WHERE trace_id IS NOT\
-        \ NULL,\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key IS NOT NULL,\n    INDEX idx_events_source\
-        \ (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+        \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
+        \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
     event_deliveries:
       description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber. run_id
         inherited from the parent event for run-scoped queries.
@@ -2222,7 +2221,7 @@ platform_tables:
       ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \             UUID REFERENCES runs(run_id),\n    agent_id           TEXT NOT NULL,\n    session_id         UUID\
         \ NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
-        \    scope_key          TEXT,\n    trace_id           TEXT,\n    entity_id          UUID,\n    trigger_event_id\
+        \    scope_key          TEXT,\n    entity_id          UUID,\n    trigger_event_id\
         \   UUID,\n    trigger_event_type TEXT,\n    task_id            TEXT,\n    available_tools    JSONB NOT NULL DEFAULT\
         \ '[]',\n    tool_calls         JSONB NOT NULL DEFAULT '[]',\n    emitted_events     JSONB NOT NULL DEFAULT '[]',\n\
         \    mcp_servers        JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed   JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible\
@@ -2230,9 +2229,8 @@ platform_tables:
         \     BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms         INTEGER NOT NULL DEFAULT 0,\n    retry_count       \
         \ INTEGER NOT NULL DEFAULT 0,\n    error              TEXT,\n    created_at         TIMESTAMPTZ NOT NULL DEFAULT\
         \ NOW(),\n    INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_agent_turns_session\
-        \ (session_id, created_at),\n    INDEX idx_agent_turns_agent (agent_id, created_at),\n    INDEX idx_agent_turns_trace\
-        \ (trace_id, created_at) WHERE trace_id IS NOT NULL,\n    INDEX idx_agent_turns_event (trigger_event_id) WHERE\
-        \ trigger_event_id IS NOT NULL\n);"
+        \ (session_id, created_at),\n    INDEX idx_agent_turns_agent (agent_id, created_at),\n    INDEX idx_agent_turns_event\
+        \ (trigger_event_id) WHERE trigger_event_id IS NOT NULL\n);"
     routing_rules:
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
@@ -2410,7 +2408,7 @@ platform_tables:
     they materialize fields JSONB into typed columns for query performance. Not required for correctness.
   entity_lifecycle_scoping:
     description: Entities are global and persistent. Entity queries (search_entities, query_entities, get_entity) return
-      entities from ALL runs, not scoped to the current run or trace. This is intentional — a vertical discovered in one run
+      entities from ALL runs, not scoped to the current run. This is intentional — a vertical discovered in one run
       and killed in another is still visible to future queries. Products use this for dedup, historical analysis, and
       trend detection.
     rationale: In a continuous system where discovery runs periodically, entities accumulate over time. A killed vertical
@@ -2471,6 +2469,46 @@ run_model:
   description: 'A run is the top-level execution context for the platform. Every event, delivery, session, turn,
     and entity mutation belongs to exactly one run. Runs provide isolation for observability, debugging, and
     fork/replay. The run_id is the primary correlation key across all platform tables.'
+  lineage:
+    description: 'Event lineage is tracked via two fields: run_id (which run this event belongs to) and
+      source_event_id (which event caused this event to be emitted). Together they replace the former trace_id
+      column. run_id provides flat grouping (all events in a run). source_event_id provides causal ordering
+      (parent → child event chain). No trace_id column exists — it has been removed from all platform tables.'
+    run_id:
+      description: 'The run this event belongs to. Set at event creation time. Propagated through the causal
+        chain — when a handler or agent emits a new event, the child inherits run_id from the inbound event.
+        External events (API, webhook, admin CLI) either join an active run or create a new one.'
+      present_on:
+      - events.run_id
+      - event_deliveries.run_id
+      - agent_sessions.run_id
+      - agent_turns.run_id
+      - entity_mutations.run_id
+      propagation_rule: 'Child event run_id = parent event run_id. The bus publish path reads run_id from
+        the inbound event context and stamps it on every outbound event. No handler or agent code touches
+        run_id directly.'
+    source_event_id:
+      description: 'The event that directly caused this event to be emitted. Forms a tree (not a DAG — each
+        event has exactly one parent). The root event in a run has source_event_id = NULL. Walking
+        source_event_id from any event back to NULL reconstructs the full causal chain.'
+      present_on:
+      - events.source_event_id
+      usage:
+        causal_chain: "WITH RECURSIVE chain AS (\n  SELECT * FROM events WHERE run_id = :run_id AND source_event_id\
+          \ IS NULL\n  UNION ALL\n  SELECT e.* FROM events e JOIN chain c ON e.source_event_id = c.event_id\n\
+          ) SELECT * FROM chain ORDER BY created_at;"
+        parent_lookup: 'SELECT * FROM events WHERE event_id = :source_event_id'
+        children: 'SELECT * FROM events WHERE source_event_id = :event_id'
+    combined_queries:
+      run_timeline: 'SELECT * FROM events WHERE run_id = :run_id ORDER BY created_at'
+      causal_tree: "WITH RECURSIVE tree AS (\n  SELECT *, 0 AS depth FROM events WHERE run_id = :run_id\
+        \ AND source_event_id IS NULL\n  UNION ALL\n  SELECT e.*, t.depth + 1 FROM events e JOIN tree t\
+        \ ON e.source_event_id = t.event_id\n) SELECT * FROM tree ORDER BY depth, created_at;"
+      entity_in_run: 'SELECT * FROM events WHERE run_id = :run_id AND entity_id = :entity_id ORDER BY created_at'
+    fork_lineage: 'Forked runs link to their parent via runs.forked_from_run_id and runs.forked_from_event_id.
+      This provides cross-run lineage: which run was this forked from, and at which event. The event
+      tree within the forked run starts fresh (new event_ids, new source_event_id chains) — it does not
+      extend the parent run''s event tree.'
   lifecycle:
     creation: 'A run is created when: (1) system.started fires (cold start), (2) an external event arrives with
       no active run (warm start), or (3) swarm fork creates a forked run. The platform inserts a row in the runs

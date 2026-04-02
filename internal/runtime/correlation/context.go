@@ -10,7 +10,6 @@ import (
 
 type inboundEventContextKey struct{}
 type runIDContextKey struct{}
-type traceIDContextKey struct{}
 type handlerIDContextKey struct{}
 
 func WithInboundEvent(ctx context.Context, evt events.Event) context.Context {
@@ -32,17 +31,6 @@ func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
 	return evt, ok
 }
 
-func WithTraceID(ctx context.Context, traceID string) context.Context {
-	if ctx == nil {
-		return nil
-	}
-	traceID = strings.TrimSpace(traceID)
-	if traceID == "" {
-		return ctx
-	}
-	return context.WithValue(ctx, traceIDContextKey{}, traceID)
-}
-
 func WithRunID(ctx context.Context, runID string) context.Context {
 	if ctx == nil {
 		return nil
@@ -60,14 +48,6 @@ func RunIDFromContext(ctx context.Context) string {
 	}
 	runID, _ := ctx.Value(runIDContextKey{}).(string)
 	return strings.TrimSpace(runID)
-}
-
-func TraceIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	traceID, _ := ctx.Value(traceIDContextKey{}).(string)
-	return strings.TrimSpace(traceID)
 }
 
 func WithHandlerID(ctx context.Context, handlerID string) context.Context {
@@ -104,21 +84,6 @@ func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, eve
 	}
 	evt.RunID = runID
 	ctx = WithRunID(ctx, runID)
-
-	traceID := strings.TrimSpace(evt.TraceID)
-	if traceID == "" {
-		traceID = TraceIDFromContext(ctx)
-	}
-	if traceID == "" {
-		if inbound, ok := InboundEventFromContext(ctx); ok {
-			traceID = strings.TrimSpace(inbound.TraceID)
-		}
-	}
-	if traceID == "" {
-		traceID = uuid.NewString()
-	}
-	evt.TraceID = traceID
-	ctx = WithTraceID(ctx, traceID)
 
 	if strings.TrimSpace(evt.ParentEventID) == "" {
 		if inbound, ok := InboundEventFromContext(ctx); ok {

@@ -16,7 +16,6 @@ type Event struct {
 	Payload       json.RawMessage `json:"payload"`
 	ChainDepth    int             `json:"-"`
 	RunID         string          `json:"-"`
-	TraceID       string          `json:"-"`
 	ParentEventID string          `json:"-"`
 	CreatedAt     time.Time       `json:"created_at"`
 }

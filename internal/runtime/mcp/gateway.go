@@ -211,8 +211,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if toolName == "" {
 			err := g.newRuntimeError(ErrCodeInvalidRequest, "mcp.tools.call", false, nil, "tool name is required")
 			g.logMCP(r, "warn", "mcp.tools.call.invalid", err, map[string]any{
-				"method":   "tools/call",
-				"trace_id": TraceIDFromRequest(r),
+				"method": "tools/call",
 			})
 			WriteRPCResult(w, req.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
@@ -227,7 +226,6 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				g.logMCP(r, "warn", "mcp.tools.call.denied", err, map[string]any{
 					"method":    "tools/call",
 					"tool_name": toolName,
-					"trace_id":  TraceIDFromRequest(r),
 				})
 				WriteRPCResult(w, req.ID, map[string]any{
 					"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
@@ -241,7 +239,6 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.logMCP(r, "warn", "mcp.tools.call.context_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,
-				"trace_id":  TraceIDFromRequest(r),
 			})
 			WriteRPCResult(w, req.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
@@ -276,7 +273,6 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,
-				"trace_id":  TraceIDFromRequest(r),
 			})
 			WriteRPCResult(w, req.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},
@@ -287,7 +283,6 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		g.logMCP(r, "debug", "mcp.tools.call.success", nil, map[string]any{
 			"method":    "tools/call",
 			"tool_name": toolName,
-			"trace_id":  TraceIDFromRequest(r),
 		})
 		if g.hooks.AfterToolSuccess != nil {
 			g.hooks.AfterToolSuccess(ctx, r, toolName)
@@ -322,7 +317,6 @@ func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context
 					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
 				}
 				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
-				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
 					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
 				}
@@ -343,7 +337,6 @@ func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context
 				if g.hooks.WithCurrentRuntimeEpoch != nil {
 					ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 				}
-				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 				return ctx, nil
 			}
 		}
@@ -371,7 +364,6 @@ func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
-	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 	return ctx, nil
 }
 
@@ -391,7 +383,6 @@ func (g *Gateway) toolExecutionContext(r *http.Request, actor models.AgentConfig
 					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
 				}
 				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
-				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
 					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
 				}
@@ -410,7 +401,6 @@ func (g *Gateway) toolExecutionContext(r *http.Request, actor models.AgentConfig
 			if g.hooks.WithCurrentRuntimeEpoch != nil {
 				ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 			}
-			ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 			return ctx, nil
 		}
 		g.logContextFallback(r, "tool.context.fallback_blocked", toolName, "token_not_found", token, false)
@@ -428,7 +418,6 @@ func (g *Gateway) toolExecutionContext(r *http.Request, actor models.AgentConfig
 	if g.hooks.WithCurrentRuntimeEpoch != nil {
 		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
 	}
-	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 	return ctx, nil
 }
 
@@ -474,7 +463,6 @@ func (g *Gateway) logContextFallback(r *http.Request, action, toolName, reason, 
 		"fallback_on_miss":   AllowContextFallbackOnMiss(),
 		"request_path":       strings.TrimSpace(r.URL.Path),
 		"request_method":     strings.TrimSpace(r.Method),
-		"request_trace_id":   TraceIDFromRequest(r),
 	})
 }
 

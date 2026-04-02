@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,81 +11,7 @@ import (
 
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
-	"swarm/internal/store"
 )
-
-func TestPrintTraceReport(t *testing.T) {
-	var buf bytes.Buffer
-	report := store.TraceReport{
-		TraceID: "trace-123",
-		Events: []store.TraceEvent{
-			{
-				EventID:       "evt-1",
-				EventName:     "scan.requested",
-				SourceEventID: "",
-				ProducedBy:    "campaign-coordinator",
-				CreatedAt:     time.Unix(1700000000, 0).UTC(),
-			},
-		},
-		Deliveries: []store.TraceDelivery{
-			{EventID: "evt-1", SubscriberType: "agent", SubscriberID: "worker-1", Status: "pending", ReasonCode: "matched_agent_subscription"},
-		},
-		Receipts: []store.TraceReceipt{
-			{EventID: "evt-1", SubscriberType: "platform", SubscriberID: "pipeline", Outcome: "success", ReasonCode: "pipeline_persisted"},
-		},
-	}
-
-	printTraceReport(&buf, report)
-	out := buf.String()
-	for _, want := range []string{
-		"Trace trace-123",
-		"Summary: pending delivery agent/worker-1 reason=matched_agent_subscription for scan.requested",
-		"scan.requested",
-		"delivery  agent/worker-1  status=pending reason=matched_agent_subscription",
-		"receipt   platform/pipeline  outcome=success reason=pipeline_persisted",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("trace output missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestPrintTraceReport_InProgressDeliverySummary(t *testing.T) {
-	var buf bytes.Buffer
-	startedAt := time.Unix(1700000100, 0).UTC()
-	report := store.TraceReport{
-		TraceID: "trace-456",
-		Events: []store.TraceEvent{
-			{
-				EventID:   "evt-2",
-				EventName: "discovery/market_research.scan_assigned",
-				CreatedAt: time.Unix(1700000000, 0).UTC(),
-			},
-		},
-		Deliveries: []store.TraceDelivery{
-			{
-				EventID:         "evt-2",
-				SubscriberType:  "agent",
-				SubscriberID:    "market-research-agent",
-				Status:          "in_progress",
-				ReasonCode:      "agent_processing",
-				ActiveSessionID: "sess-123",
-				StartedAt:       sql.NullTime{Time: startedAt, Valid: true},
-			},
-		},
-	}
-
-	printTraceReport(&buf, report)
-	out := buf.String()
-	for _, want := range []string{
-		"Summary: in-progress delivery agent/market-research-agent session=sess-123 for discovery/market_research.scan_assigned",
-		"delivery  agent/market-research-agent  status=in_progress reason=agent_processing session=sess-123 started=2023-11-14T22:15:00Z",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("trace output missing %q:\n%s", want, out)
-		}
-	}
-}
 
 func TestPrintRunStatusReport(t *testing.T) {
 	var buf bytes.Buffer
@@ -97,7 +22,6 @@ func TestPrintRunStatusReport(t *testing.T) {
 		RunTableStatus:    "running",
 		RootEventID:       "evt-1",
 		RootEventType:     "scan.requested",
-		TraceID:           "trace-123",
 		StartedAt:         started,
 		LastEventAt:       last,
 		EventCount:        7,
@@ -131,7 +55,6 @@ func TestPrintRunStatusReport(t *testing.T) {
 	for _, want := range []string{
 		"Run run-123",
 		"Root: scan.requested (evt-1)",
-		"Trace: trace-123",
 		"Run Status: running",
 		"Summary: events=7 deliveries=1 dead_letters=0 agent_turns=1 runtime_warn_errors=1",
 		"Heuristics:",

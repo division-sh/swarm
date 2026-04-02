@@ -169,7 +169,6 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 
 	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
-	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
@@ -488,7 +487,6 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 
 	ctx = models.WithActor(ctx, a.cfg)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
-	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
