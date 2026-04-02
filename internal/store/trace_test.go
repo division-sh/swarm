@@ -9,8 +9,9 @@ import (
 
 func TestEventStorageEnvelope_PersistsTraceAndParent(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	id, name, entityID, flowInstance, scope, payload, chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(events.Event{
+	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(events.Event{
 		ID:            "evt-1",
+		RunID:         "33333333-3333-3333-3333-333333333333",
 		Type:          events.EventType("demo.event"),
 		SourceAgent:   "agent-1",
 		TraceID:       "trace-123",
@@ -21,6 +22,9 @@ func TestEventStorageEnvelope_PersistsTraceAndParent(t *testing.T) {
 
 	if id != "evt-1" || name != "demo.event" {
 		t.Fatalf("unexpected envelope identity: id=%q name=%q", id, name)
+	}
+	if runID != "33333333-3333-3333-3333-333333333333" {
+		t.Fatalf("run_id = %q", runID)
 	}
 	if entityID != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("entity_id = %q", entityID)

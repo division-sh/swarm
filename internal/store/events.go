@@ -126,6 +126,11 @@ func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, q rowQueryer
 			}
 		}
 	}
+	if strings.TrimSpace(evt.RunID) == "" && parentID != "" {
+		if runID := lookupEventRunID(ctx, q, parentID); runID != "" {
+			evt.RunID = runID
+		}
+	}
 	if strings.TrimSpace(evt.TraceID) == "" && parentID != "" {
 		if traceID := lookupEventTraceID(ctx, q, parentID); traceID != "" {
 			evt.TraceID = traceID
@@ -276,8 +281,12 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	id, name, entityID, flowInstance, scope, payload, chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
-	const q = `
+	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	q := `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
 			chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
@@ -288,11 +297,25 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 		)
 		ON CONFLICT (event_id) DO NOTHING
 	`
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
+	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt}
+	if columnExists(ctx, chooseRowQueryer(s.DB, tx), "events", "run_id") {
+		if err := s.ensureRunRow(ctx, tx, runID); err != nil {
+			return err
+		}
+		q = `
+			INSERT INTO events (
+				event_id, run_id, event_name, entity_id, flow_instance, scope, payload,
+				chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
+			)
+			VALUES (
+				$1::uuid, NULLIF($2,'')::uuid, $3, NULLIF($4,'')::uuid, NULLIF($5,''), $6, $7::jsonb,
+				$8, NULLIF($9,''), NULLIF($10,''), $11, NULLIF($12,'')::uuid, $13
+			)
+			ON CONFLICT (event_id) DO NOTHING
+		`
+		args = []any{id, runID, name, entityID, flowInstance, scope, string(payload), chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt}
 	}
-	if _, err := execFn(ctx, q, id, name, entityID, flowInstance, scope, string(payload), chainDepth, traceID, producedBy, producedByType, sourceEventID, createdAt); err != nil {
+	if _, err := execFn(ctx, q, args...); err != nil {
 		return fmt.Errorf("append event: %w", err)
 	}
 	return nil
@@ -317,14 +340,24 @@ func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, evt 
 }
 
 func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
-	const q = `
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	q := `
 		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, created_at)
 		VALUES ($1::uuid, 'agent', $2, 'matched_agent_subscription', now())
 		ON CONFLICT DO NOTHING
 	`
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
+	useRunID := columnExists(ctx, chooseRowQueryer(s.DB, tx), "event_deliveries", "run_id")
+	if useRunID {
+		q = `
+			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, created_at)
+			SELECT e.run_id, e.event_id, 'agent', $2, 'matched_agent_subscription', now()
+			FROM events e
+			WHERE e.event_id = $1::uuid
+			ON CONFLICT DO NOTHING
+		`
 	}
 	seen := make(map[string]struct{}, len(agentIDs))
 	for _, agentID := range agentIDs {
@@ -431,6 +464,7 @@ func shouldFallbackLegacyEventsSchema(err error) bool {
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	return strings.Contains(msg, `event_id`) ||
+		strings.Contains(msg, `run_id`) ||
 		strings.Contains(msg, `event_name`) ||
 		strings.Contains(msg, `produced_by`) ||
 		strings.Contains(msg, `produced_by_type`) ||
@@ -503,11 +537,55 @@ func lookupEventTraceID(ctx context.Context, q rowQueryer, eventID string) strin
 	return strings.TrimSpace(traceID)
 }
 
-func eventStorageEnvelope(evt events.Event) (id string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, traceID string, producedBy string, producedByType string, sourceEventID string, createdAt time.Time) {
+func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
+	eventID = strings.TrimSpace(eventID)
+	if q == nil || eventID == "" {
+		return ""
+	}
+	var runID string
+	if err := q.QueryRowContext(ctx, `
+		SELECT COALESCE(run_id::text, '')
+		FROM events
+		WHERE event_id = $1::uuid
+		LIMIT 1
+	`, eventID).Scan(&runID); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(runID)
+}
+
+func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID string) error {
+	runID = nullUUIDString(runID)
+	if runID == "" || !columnExists(ctx, chooseRowQueryer(s.DB, tx), "runs", "run_id") {
+		return nil
+	}
+	execFn := s.DB.ExecContext
+	if tx != nil {
+		execFn = tx.ExecContext
+	}
+	if _, err := execFn(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', now())
+		ON CONFLICT (run_id) DO NOTHING
+	`, runID); err != nil {
+		return fmt.Errorf("ensure run row: %w", err)
+	}
+	return nil
+}
+
+func runIDOrEventID(runID, eventID string) string {
+	if runID = nullUUIDString(runID); runID != "" {
+		return runID
+	}
+	return nullUUIDString(eventID)
+}
+
+func eventStorageEnvelope(evt events.Event) (id string, runID string, eventName string, entityID string, flowInstance string, scope string, payload []byte, chainDepth int, traceID string, producedBy string, producedByType string, sourceEventID string, createdAt time.Time) {
 	id = strings.TrimSpace(evt.ID)
 	if id == "" {
 		id = uuid.NewString()
 	}
+	runID = runIDOrEventID(evt.RunID, id)
 	eventName = strings.TrimSpace(string(evt.Type))
 	payload = eventPayloadForStorage(evt)
 	entityID = sanitizeOptionalUUID(evt.EntityID())

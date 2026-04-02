@@ -177,6 +177,7 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), events.Event{
 		ID:      "evt-parent",
 		Type:    events.EventType("task.started"),
+		RunID:   "run-abc",
 		TraceID: "trace-abc",
 	})
 	if err := eb.Publish(ctx, events.Event{
@@ -192,6 +193,9 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 				continue
 			}
 			found = true
+			if got := evt.RunID; got != "run-abc" {
+				t.Fatalf("persisted run_id = %q, want run-abc", got)
+			}
 			if got := evt.TraceID; got != "trace-abc" {
 				t.Fatalf("persisted trace_id = %q, want trace-abc", got)
 			}
@@ -203,6 +207,9 @@ func TestEventBusPublish_InheritsTraceAndParentFromInboundContext(t *testing.T) 
 			t.Fatalf("persisted events = %#v, want child event", store.events)
 		}
 		return
+	}
+	if got := store.events[0].RunID; got != "run-abc" {
+		t.Fatalf("persisted run_id = %q, want run-abc", got)
 	}
 	if got := store.events[0].TraceID; got != "trace-abc" {
 		t.Fatalf("persisted trace_id = %q, want trace-abc", got)

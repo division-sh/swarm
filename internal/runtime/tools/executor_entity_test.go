@@ -60,6 +60,10 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	if !ok || strings.TrimSpace(asString(fields["status"])) != "open" {
 		t.Fatalf("expected fields.status=open, got %#v", entity)
 	}
+	metadata, ok := fields["metadata"].(map[string]any)
+	if !ok || strings.TrimSpace(asString(metadata["region"])) != "us" {
+		t.Fatalf("expected fields.metadata.region=us, got %#v", fields["metadata"])
+	}
 
 	saveOut, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -153,6 +157,50 @@ func TestEntityTools_HappyPath(t *testing.T) {
 	groups, ok := metricResult["groups"].([]map[string]any)
 	if !ok || len(groups) != 1 || strings.TrimSpace(asString(groups[0]["group_key"])) != "closed" {
 		t.Fatalf("expected grouped metrics, got %#v", metricOut)
+	}
+}
+
+func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status": "open",
+			"score":  10.0,
+			"active": true,
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	const brief = "BUSINESS BRIEF - sample plain text"
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "metadata",
+		"value":     brief,
+	}); err != nil {
+		t.Fatalf("save_entity_field metadata: %v", err)
+	}
+
+	got, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity: %v", err)
+	}
+	entity, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", got)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected fields map, got %#v", entity["fields"])
+	}
+	if got := strings.TrimSpace(asString(fields["metadata"])); got != brief {
+		t.Fatalf("metadata = %q, want %q", got, brief)
+	}
+	if strings.HasPrefix(strings.TrimSpace(asString(fields["metadata"])), "Ik") {
+		t.Fatalf("metadata appears base64-encoded: %q", fields["metadata"])
 	}
 }
 

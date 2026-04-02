@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimepkg "swarm/internal/runtime"
 	runtimebus "swarm/internal/runtime/bus"
-	"github.com/google/uuid"
 )
 
 type runHub struct {
@@ -120,6 +120,7 @@ func (h *runHub) startRun(ctx context.Context, runID string, inputs map[string]a
 		}
 		evt := events.Event{
 			ID:          uuid.NewString(),
+			RunID:       runID,
 			Type:        events.EventType(eventName),
 			SourceAgent: "builder",
 			Payload:     encoded,
@@ -503,6 +504,7 @@ func (h *runHub) submitPendingHumanDecision(ctx context.Context, runID string, d
 	}
 	if err := runtimeRef.Bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
+		RunID:       runID,
 		Type:        events.EventType(eventType),
 		SourceAgent: "builder",
 		Payload:     encoded,

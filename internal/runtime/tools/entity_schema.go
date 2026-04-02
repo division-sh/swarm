@@ -102,11 +102,10 @@ func normalizeEntityFieldValue(field runtimecontracts.EntitySchemaField, value a
 		}
 		return value, nil
 	case fieldType == "jsonb":
-		raw, err := json.Marshal(value)
-		if err != nil {
+		if _, err := json.Marshal(value); err != nil {
 			return nil, fmt.Errorf("field %s must be valid json: %w", strings.TrimSpace(field.Name), err)
 		}
-		return raw, nil
+		return value, nil
 	case fieldType == "timestamp":
 		switch t := value.(type) {
 		case time.Time:

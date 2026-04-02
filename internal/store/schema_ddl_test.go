@@ -88,6 +88,40 @@ func TestGeneratePlatformTableDDLs(t *testing.T) {
 	}
 }
 
+func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"events": {
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY,\n    run_id UUID REFERENCES runs(run_id)\n);",
+		},
+		"runs": {
+			DDL: "CREATE TABLE runs (\n    run_id UUID PRIMARY KEY\n);",
+		},
+		"entity_mutations": {
+			DDL: "CREATE TABLE entity_mutations (\n    mutation_id UUID PRIMARY KEY,\n    run_id UUID REFERENCES runs(run_id),\n    caused_by_event UUID REFERENCES events(event_id)\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 3 {
+		t.Fatalf("expected 3 platform DDL plans, got %d", len(plans))
+	}
+	if plans[0].TableName != "runs" {
+		t.Fatalf("first table = %q, want runs", plans[0].TableName)
+	}
+	if plans[1].TableName != "events" {
+		t.Fatalf("second table = %q, want events", plans[1].TableName)
+	}
+	if plans[2].TableName != "entity_mutations" {
+		t.Fatalf("third table = %q, want entity_mutations", plans[2].TableName)
+	}
+}
+
 func TestGenerateEntityTableDDLs(t *testing.T) {
 	schema := runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{

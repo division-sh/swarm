@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/store"
 )
 
@@ -123,5 +126,49 @@ func TestLoadDotEnvFileRejectsMalformedLine(t *testing.T) {
 	err := loadDotEnvFile(path)
 	if err == nil || !strings.Contains(err.Error(), "expected KEY=VALUE") {
 		t.Fatalf("loadDotEnvFile error = %v", err)
+	}
+}
+
+func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
+	var buf bytes.Buffer
+	code := runVerifyCommand(context.Background(), repoRoot(), []string{
+		"-contracts", filepath.Join(t.TempDir(), "missing"),
+	}, &buf)
+	if code == 0 {
+		t.Fatal("expected non-zero exit code")
+	}
+	if out := buf.String(); !strings.Contains(out, "verify failed: resolve contracts") {
+		t.Fatalf("output = %q", out)
+	}
+}
+
+func TestVerifyEmitSchemaCoverage_RejectsStrictMissingEmitSchemas(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {
+				ID:         "agent-1",
+				EmitEvents: []string{"missing.event"},
+			},
+		},
+	})
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	err := verifyEmitSchemaCoverage(source)
+	if err == nil || !strings.Contains(err.Error(), "emit schema strict mode enabled") {
+		t.Fatalf("verifyEmitSchemaCoverage error = %v, want strict emit schema error", err)
+	}
+}
+
+func TestVerifyEmitSchemaCoverage_AllowsMissingWhenStrictDisabled(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {
+				ID:         "agent-1",
+				EmitEvents: []string{"missing.event"},
+			},
+		},
+	})
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
+	if err := verifyEmitSchemaCoverage(source); err != nil {
+		t.Fatalf("verifyEmitSchemaCoverage: %v", err)
 	}
 }

@@ -284,6 +284,75 @@ func TestPostgresStore_AppendEvent_InheritsParentTraceID(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"runs": {
+			DDL: "CREATE TABLE runs (\n    run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status TEXT NOT NULL DEFAULT 'running'\n);",
+		},
+		"events": {
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    event_name TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope TEXT NOT NULL DEFAULT 'global',\n    payload JSONB NOT NULL DEFAULT '{}'::jsonb,\n    chain_depth INTEGER NOT NULL DEFAULT 0,\n    trace_id TEXT,\n    produced_by TEXT,\n    produced_by_type TEXT NOT NULL DEFAULT 'agent',\n    source_event_id UUID,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(events): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(events): %v", err)
+	}
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	parentID := uuid.NewString()
+	childID := uuid.NewString()
+	if err := pg.AppendEvent(ctx, events.Event{
+		ID:          parentID,
+		RunID:       runID,
+		Type:        events.EventType("parent.event"),
+		SourceAgent: "root",
+		Payload:     []byte(`{}`),
+		CreatedAt:   time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(parent): %v", err)
+	}
+	if err := pg.AppendEvent(context.Background(), events.Event{
+		ID:            childID,
+		Type:          events.EventType("child.event"),
+		SourceAgent:   "child",
+		ParentEventID: parentID,
+		Payload:       []byte(`{}`),
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("AppendEvent(child): %v", err)
+	}
+
+	var gotRunID, gotParent string
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(run_id::text, ''), COALESCE(source_event_id::text, '')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, childID).Scan(&gotRunID, &gotParent); err != nil {
+		t.Fatalf("query child event: %v", err)
+	}
+	if gotRunID != runID {
+		t.Fatalf("child run_id = %q, want %q", gotRunID, runID)
+	}
+	if gotParent != parentID {
+		t.Fatalf("child source_event_id = %q, want %q", gotParent, parentID)
+	}
+}
+
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1189,6 +1258,85 @@ func TestManagerStore_Conversations_AndAgentTurns(t *testing.T) {
 	}
 	if availableToolsJSON != "[]" || toolCallsJSON != "[]" || emittedEventsJSON != "[]" || mcpServersJSON != "{}" || mcpToolsListedJSON != "[]" || mcpToolsVisibleJSON != "[]" {
 		t.Fatalf("expected empty structured telemetry defaults, got tools=%s calls=%s emitted=%s mcp_servers=%s mcp_listed=%s mcp_visible=%s", availableToolsJSON, toolCallsJSON, emittedEventsJSON, mcpServersJSON, mcpToolsListedJSON, mcpToolsVisibleJSON)
+	}
+}
+
+func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_sessions CASCADE`); err != nil {
+		t.Fatalf("drop agent_sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS agent_turns CASCADE`); err != nil {
+		t.Fatalf("drop agent_turns: %v", err)
+	}
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"runs": {
+			DDL: "CREATE TABLE runs (\n    run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status TEXT NOT NULL DEFAULT 'running'\n);",
+		},
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    agent_id TEXT NOT NULL,\n    entity_id UUID,\n    flow_instance TEXT,\n    scope_key TEXT NOT NULL,\n    scope TEXT NOT NULL DEFAULT 'entity',\n    conversation JSONB NOT NULL DEFAULT '[]',\n    turn_count INTEGER NOT NULL DEFAULT 0,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    runtime_state JSONB NOT NULL DEFAULT '{}',\n    lease_holder TEXT,\n    lease_expires_at TIMESTAMPTZ,\n    status TEXT NOT NULL DEFAULT 'active',\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key)\n);",
+		},
+		"agent_turns": {
+			DDL: "CREATE TABLE agent_turns (\n    turn_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id UUID REFERENCES runs(run_id),\n    agent_id TEXT NOT NULL,\n    session_id UUID NOT NULL,\n    runtime_mode TEXT NOT NULL DEFAULT 'task',\n    scope_key TEXT,\n    trace_id TEXT,\n    entity_id UUID,\n    trigger_event_id UUID,\n    trigger_event_type TEXT,\n    task_id TEXT,\n    available_tools JSONB NOT NULL DEFAULT '[]',\n    tool_calls JSONB NOT NULL DEFAULT '[]',\n    emitted_events JSONB NOT NULL DEFAULT '[]',\n    mcp_servers JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible JSONB NOT NULL DEFAULT '[]',\n    request_payload JSONB,\n    response_payload JSONB,\n    parse_ok BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms INTEGER NOT NULL DEFAULT 0,\n    retry_count INTEGER NOT NULL DEFAULT 0,\n    error TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs(agent_sessions): %v", err)
+	}
+	if err := pg.EnsureSchemaTables(ctx, plans); err != nil {
+		t.Fatalf("EnsureSchemaTables(agent_sessions): %v", err)
+	}
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		RunID:     runID,
+		Mode:      "task",
+		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation: %v", err)
+	}
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		RunID:          runID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn: %v", err)
+	}
+
+	var gotSessionRunID, gotTurnRunID string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(run_id::text, '') FROM agent_sessions WHERE session_id = $1::uuid`, sessionID).Scan(&gotSessionRunID); err != nil {
+		t.Fatalf("load session run_id: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(run_id::text, '') FROM agent_turns WHERE session_id = $1::uuid ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&gotTurnRunID); err != nil {
+		t.Fatalf("load turn run_id: %v", err)
+	}
+	if gotSessionRunID != runID {
+		t.Fatalf("session run_id = %q, want %q", gotSessionRunID, runID)
+	}
+	if gotTurnRunID != runID {
+		t.Fatalf("turn run_id = %q, want %q", gotTurnRunID, runID)
 	}
 }
 

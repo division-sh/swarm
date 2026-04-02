@@ -189,6 +189,15 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 		}
 		resp, err = a.conversation.Step(ctx, input)
 	}
+	if err != nil && a.shouldRetryAfterTaskScopeFatalCLIError(err) {
+		a.conversation.Reset()
+		scopeKey := strings.TrimSpace(conversationScopeKeyForEvent(a.conversation.Mode, evt))
+		if scopeKey != "" {
+			a.conversation.TaskID = scopeKey
+			a.scopeKey = scopeKey
+		}
+		resp, err = a.conversation.Step(ctx, input)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -381,6 +390,13 @@ func (a *LLMAgent) shouldRetryAfterTaskScopeReset(err error) bool {
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
 	return strings.Contains(msg, "max turns reached")
+}
+
+func (a *LLMAgent) shouldRetryAfterTaskScopeFatalCLIError(err error) bool {
+	if a == nil || a.conversation == nil || a.conversation.Mode != llm.TaskScoped || err == nil {
+		return false
+	}
+	return llm.ShouldResetTaskScopedConversationOnCLIError(err)
 }
 
 func (a *LLMAgent) attemptPostTurnContractRemediation(ctx context.Context, inbound events.Event, recorder *runtimebus.EmittedEventsRecorder, contractErr error) error {

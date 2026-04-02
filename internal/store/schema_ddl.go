@@ -292,6 +292,8 @@ func platformTableOrder(name string) int {
 	switch strings.TrimSpace(name) {
 	case "schema_version":
 		return 0
+	case "runs":
+		return 5
 	case "events":
 		return 10
 	case "dead_letters":
@@ -312,6 +314,8 @@ func platformTableOrder(name string) int {
 		return 80
 	case "event_receipts":
 		return 90
+	case "entity_mutations":
+		return 95
 	case "mailbox":
 		return 100
 	case "spend_ledger":

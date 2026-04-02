@@ -1,6 +1,6 @@
 platform:
   name: swarm-orchestrator
-  version: 1.4.0
+  version: 1.5.0
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
@@ -2032,10 +2032,13 @@ flow_model:
       through system nodes which accumulate, filter, and emit — but no entity state machine is maintained. The accumulator
       state is flow-scoped, not entity-scoped.'
     when_to_use: Producer pipelines, ETL flows, signal processing, fan-out dispatchers.
-    entity_behavior: 'In a stateless flow (initial_state: null, states: []), the platform does not create entity_state rows.
-      Events pass through system nodes for accumulation and fan_out but no state machine is maintained. advances_to is invalid
-      in a stateless flow handler (boot error if used). Guards may reference payload and policy but not entity (no entity
-      exists). Accumulators are flow-scoped, keyed by a handler-declared key, not by entity_id.'
+    entity_behavior: 'In a stateless flow (initial_state: null, states: []), no state machine is maintained. advances_to
+      is invalid in a stateless flow handler (boot error if used). However, stateless does NOT mean entityless. If a handler
+      writes entity-scoped fields (data_accumulation, accumulate tracking, compute store_as), the platform auto-materializes
+      an entity for that handler invocation. This entity has no current_state and no lifecycle transitions, but it persists
+      accumulator state, data_accumulation writes, and computed values. Guards in stateless flows may reference entity fields
+      written by prior handlers. The distinction: stateless = no lifecycle state machine. Entityless = no entity at all (rare —
+      only flows with no data_accumulation, no accumulate, and no compute).'
   state_composition:
     description: How flow-level state machines compose into the entity lifecycle.
     per_flow_states: Each flow defines its own state space. An entity in the scoring flow has scoring states. The same entity
@@ -2072,25 +2075,32 @@ platform_tables:
     events:
       description: 'Append-only event store. Every event persisted before delivery. Three scopes: entity (entity_id + flow_instance
         set), flow (flow_instance set, entity_id NULL), global (both NULL — system bootstrap, runtime recovery, admin commands).
-        idempotency_key for external dedup. source_event_id for causal chain tracing.'
-      ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_name     \
-        \   TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    scope             TEXT NOT NULL\
-        \ DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n    payload           JSONB NOT NULL DEFAULT '{}',\n\
-        \    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    trace_id          TEXT,\n    produced_by       TEXT,\n    produced_by_type  TEXT CHECK\
-        \ (produced_by_type IN ('node', 'agent', 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key\
-        \   TEXT,\n    source_event_id   UUID,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_entity\
-        \ (entity_id, created_at) WHERE entity_id IS NOT NULL,\n    INDEX idx_events_flow (flow_instance, event_name) WHERE\
-        \ flow_instance IS NOT NULL,\n    INDEX idx_events_global (event_name, created_at) WHERE scope = 'global',\n    INDEX\
-        \ idx_events_trace (trace_id, created_at) WHERE trace_id IS NOT NULL,\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key IS NOT NULL,\n    INDEX idx_events_source (source_event_id)\
-        \ WHERE source_event_id IS NOT NULL\n);"
+        idempotency_key for external dedup. source_event_id for causal chain tracing. run_id links every event to its
+        execution context for observability and fork/replay.'
+      ddl: "CREATE TABLE events (\n    event_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id            UUID\
+        \ REFERENCES runs(run_id),\n    event_name        TEXT NOT NULL,\n    entity_id         UUID,\n    flow_instance\
+        \     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n\
+        \    payload           JSONB NOT NULL DEFAULT '{}',\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    trace_id\
+        \          TEXT,\n    produced_by       TEXT,\n    produced_by_type  TEXT CHECK (produced_by_type IN ('node', 'agent',\
+        \ 'platform', 'external')),\n    handler_node      TEXT,\n    idempotency_key   TEXT,\n    source_event_id   UUID,\n\
+        \    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_run (run_id, created_at) WHERE\
+        \ run_id IS NOT NULL,\n    INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,\n    INDEX\
+        \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_global (event_name,\
+        \ created_at) WHERE scope = 'global',\n    INDEX idx_events_trace (trace_id, created_at) WHERE trace_id IS NOT\
+        \ NULL,\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key IS NOT NULL,\n    INDEX idx_events_source\
+        \ (source_event_id) WHERE source_event_id IS NOT NULL\n);"
     event_deliveries:
-      description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber.
-      ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    event_id\
-        \          UUID NOT NULL REFERENCES events(event_id),\n    subscriber_type   TEXT NOT NULL CHECK (subscriber_type\
-        \ IN ('node', 'agent')),\n    subscriber_id     TEXT NOT NULL,\n    status            TEXT NOT NULL DEFAULT 'pending'\
-        \ CHECK (status IN ('pending', 'in_progress', 'delivered', 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT\
-        \ 0,\n    reason_code       TEXT,\n    last_error        TEXT,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL\
-        \ DEFAULT NOW(),\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event (event_id),\n    INDEX idx_deliveries_active_session (active_session_id) WHERE active_session_id IS NOT NULL\n\
+      description: Tracks delivery of events to subscribers (nodes and agents). One row per event × subscriber. run_id
+        inherited from the parent event for run-scoped queries.
+      ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
+        \            UUID REFERENCES runs(run_id),\n    event_id          UUID NOT NULL REFERENCES events(event_id),\n\
+        \    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT\
+        \ NULL,\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
+        \ 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT 0,\n    reason_code       TEXT,\n\
+        \    last_error        TEXT,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
+        \      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_deliveries_run (run_id,\
+        \ status) WHERE run_id IS NOT NULL,\n    INDEX idx_deliveries_status (status, created_at),\n    INDEX idx_deliveries_event\
+        \ (event_id),\n    INDEX idx_deliveries_active_session (active_session_id) WHERE active_session_id IS NOT NULL\n\
         );"
     event_receipts:
       description: Handler completion acknowledgement. One receipt per event × subscriber. Replaces both pipeline_receipts
@@ -2145,17 +2155,18 @@ platform_tables:
         key used by the runtime: for entity scope it is the entity_id, for flow scope it is the flow_instance path, for global
         scope it is the literal "global". runtime_mode matches the agent conversation_mode from contracts. lease_holder/lease_expires_at
         for distributed session locking.'
-      ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id\
-        \          TEXT NOT NULL REFERENCES agents(agent_id),\n    entity_id         UUID,\n    flow_instance     TEXT,\n\
-        \    scope_key         TEXT NOT NULL,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
-        \ 'flow', 'global')),\n    conversation      JSONB NOT NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL\
-        \ DEFAULT 0,\n    runtime_mode      TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
-        \    runtime_state     JSONB NOT NULL DEFAULT '{}',\n    lease_holder      TEXT,\n    lease_expires_at  TIMESTAMPTZ,\n\
-        \    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n \
-        \   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
-        \    UNIQUE (agent_id, scope_key),\n    INDEX idx_sessions_agent (agent_id, status),\n    INDEX idx_sessions_entity\
-        \ (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_sessions_scope (scope, status),\n    INDEX idx_sessions_lease\
-        \ (lease_expires_at) WHERE lease_holder IS NOT NULL\n);"
+      ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
+        \            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),\n\
+        \    entity_id         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT NOT NULL,\n    scope         \
+        \    TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n    conversation      JSONB NOT\
+        \ NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL DEFAULT\
+        \ 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n    runtime_state     JSONB NOT NULL\
+        \ DEFAULT '{}',\n    lease_holder      TEXT,\n    lease_expires_at  TIMESTAMPTZ,\n    status            TEXT NOT\
+        \ NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    created_at        TIMESTAMPTZ\
+        \ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key),\n\
+        \    INDEX idx_sessions_run (run_id) WHERE run_id IS NOT NULL,\n    INDEX idx_sessions_agent (agent_id, status),\n\
+        \    INDEX idx_sessions_entity (entity_id) WHERE entity_id IS NOT NULL,\n    INDEX idx_sessions_scope (scope, status),\n\
+        \    INDEX idx_sessions_lease (lease_expires_at) WHERE lease_holder IS NOT NULL\n);"
       scope_rules:
         entity: entity_id NOT NULL, flow_instance NOT NULL, scope_key = entity_id. One session per agent per entity.
         flow: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
@@ -2167,18 +2178,20 @@ platform_tables:
       description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
         attempted tool calls, emitted event names, and sanitized request/response payloads. Complements agent_sessions.runtime_state.last_turn
         with a queryable historical record.'
-      ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    agent_id\
-        \          TEXT NOT NULL,\n    session_id         UUID NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task'\
-        \ CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n    scope_key          TEXT,\n    trace_id\
-        \           TEXT,\n    entity_id          UUID,\n    trigger_event_id   UUID,\n    trigger_event_type TEXT,\n    task_id\
-        \            TEXT,\n    available_tools    JSONB NOT NULL DEFAULT '[]',\n    tool_calls         JSONB NOT NULL DEFAULT\
-        \ '[]',\n    emitted_events     JSONB NOT NULL DEFAULT '[]',\n    mcp_servers        JSONB NOT NULL DEFAULT '{}',\n\
-        \    mcp_tools_listed   JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible  JSONB NOT NULL DEFAULT '[]',\n    request_payload    JSONB,\n    response_payload\
-        \   JSONB,\n    parse_ok           BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms         INTEGER NOT NULL DEFAULT\
-        \ 0,\n    retry_count        INTEGER NOT NULL DEFAULT 0,\n    error              TEXT,\n    created_at         TIMESTAMPTZ\
-        \ NOT NULL DEFAULT NOW(),\n    INDEX idx_agent_turns_session (session_id, created_at),\n    INDEX idx_agent_turns_agent\
-        \ (agent_id, created_at),\n    INDEX idx_agent_turns_trace (trace_id, created_at) WHERE trace_id IS NOT NULL,\n \
-        \   INDEX idx_agent_turns_event (trigger_event_id) WHERE trigger_event_id IS NOT NULL\n);"
+      ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
+        \             UUID REFERENCES runs(run_id),\n    agent_id           TEXT NOT NULL,\n    session_id         UUID\
+        \ NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
+        \    scope_key          TEXT,\n    trace_id           TEXT,\n    entity_id          UUID,\n    trigger_event_id\
+        \   UUID,\n    trigger_event_type TEXT,\n    task_id            TEXT,\n    available_tools    JSONB NOT NULL DEFAULT\
+        \ '[]',\n    tool_calls         JSONB NOT NULL DEFAULT '[]',\n    emitted_events     JSONB NOT NULL DEFAULT '[]',\n\
+        \    mcp_servers        JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed   JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible\
+        \  JSONB NOT NULL DEFAULT '[]',\n    request_payload    JSONB,\n    response_payload   JSONB,\n    parse_ok      \
+        \     BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms         INTEGER NOT NULL DEFAULT 0,\n    retry_count       \
+        \ INTEGER NOT NULL DEFAULT 0,\n    error              TEXT,\n    created_at         TIMESTAMPTZ NOT NULL DEFAULT\
+        \ NOW(),\n    INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_agent_turns_session\
+        \ (session_id, created_at),\n    INDEX idx_agent_turns_agent (agent_id, created_at),\n    INDEX idx_agent_turns_trace\
+        \ (trace_id, created_at) WHERE trace_id IS NOT NULL,\n    INDEX idx_agent_turns_event (trigger_event_id) WHERE\
+        \ trigger_event_id IS NOT NULL\n);"
     routing_rules:
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
@@ -2264,6 +2277,55 @@ platform_tables:
         \   retry_count       INTEGER NOT NULL DEFAULT 0,\n    chain_depth       INTEGER NOT NULL DEFAULT 0,\n    handler_node\
         \      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_dead_letters_flow (flow_instance,\
         \ created_at),\n    INDEX idx_dead_letters_type (failure_type)\n);"
+    runs:
+      description: 'Platform run registry. A run is a top-level execution context — everything that happens from a
+        system.started event or a fork operation. Every event, delivery, session, and turn belongs to exactly one run.
+        run_id is the primary correlation key for observability, debugging, and fork/replay. Forked runs link back to
+        their parent via forked_from_run_id and forked_from_event_id.'
+      ddl: "CREATE TABLE runs (\n    run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    status            TEXT\
+        \ NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),\n\
+        \    trigger_event_id  UUID,\n    trigger_event_type TEXT,\n    forked_from_run_id UUID REFERENCES runs(run_id),\n\
+        \    forked_from_event_id UUID,\n    entity_count      INTEGER NOT NULL DEFAULT 0,\n    event_count       INTEGER\
+        \ NOT NULL DEFAULT 0,\n    error_summary     TEXT,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \    ended_at          TIMESTAMPTZ,\n    INDEX idx_runs_status (status, started_at),\n    INDEX idx_runs_fork\
+        \ (forked_from_run_id) WHERE forked_from_run_id IS NOT NULL\n);"
+      lifecycle:
+        running: Active execution. Events being processed.
+        paused: Execution suspended (budget threshold, admin action). Resumable.
+        completed: All pipelines reached terminal states or idle. No in-flight events.
+        failed: Unrecoverable error. Run cannot continue.
+        cancelled: Admin-terminated. In-flight events drained but no new processing.
+        forked: 'A new run was forked from this one. Original run is frozen at the fork point.
+          The forked run continues execution independently.'
+      run_id_propagation: 'run_id is set once at event creation time and propagated through the causal chain.
+        When a handler emits a new event, the child event inherits run_id from the parent event.
+        External events (API, webhook, admin CLI) start a new run or join an existing one
+        based on the ingress configuration.'
+    entity_mutations:
+      description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
+        entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
+        The mutation log is the audit trail for the flight recorder and the undo log for fork/replay.
+        Not a separate event stream — just a side-table that captures the before/after of every state change.'
+      ddl: "CREATE TABLE entity_mutations (\n    mutation_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
+        \            UUID NOT NULL REFERENCES runs(run_id),\n    entity_id         UUID NOT NULL,\n    field             TEXT\
+        \ NOT NULL,\n    old_value         JSONB,\n    new_value         JSONB,\n    caused_by_event   UUID REFERENCES\
+        \ events(event_id),\n    writer_type       TEXT NOT NULL CHECK (writer_type IN ('system_node', 'agent', 'platform')),\n\
+        \    writer_id         TEXT NOT NULL,\n    handler_step      TEXT,\n    created_at        TIMESTAMPTZ NOT NULL\
+        \ DEFAULT NOW(),\n    INDEX idx_mutations_run (run_id, created_at),\n    INDEX idx_mutations_entity (entity_id,\
+        \ created_at),\n    INDEX idx_mutations_event (caused_by_event) WHERE caused_by_event IS NOT NULL\n);"
+      write_sources:
+        system_node_handlers: 'data_accumulation writes, compute store_as, sets_gate, advances_to (current_state),
+          clear (gate/accumulator resets). writer_type = system_node, writer_id = node ID,
+          handler_step = the handler step name (e.g., data_accumulation, compute, sets_gate).'
+        agent_tool_calls: 'save_entity_field tool calls. writer_type = agent, writer_id = agent ID,
+          handler_step = save_entity_field.'
+        platform_operations: 'create_entity (initial field population), entity state fixes during recovery.
+          writer_type = platform, writer_id = operation name.'
+      not_logged: 'Event payloads (already in events table). Agent conversation turns (already in agent_turns).
+        Read operations (get_entity, search_entities, query_entities). Timer creation/cancellation.'
+      hot_path_cost: 'One extra read (old value) + one insert per field write. The read is a single JSONB field
+        extraction from entity_state — sub-millisecond. The insert is append-only with no unique constraints
+        on the hot path. Given LLM calls at 1-30 seconds per agent turn, the overhead is negligible.'
     schema_version:
       description: 'Platform schema versioning. Tracks which version of the platform DDL has been applied. The platform checks
         this at boot: if the stored version < current platform version, it applies migrations. Products never read or write
@@ -2364,6 +2426,99 @@ platform_tables:
       This is a product-level migration — inbound.go is product code, not platform code. Move it out of generic runtime.
     platform_guarantee: The platform never reads, writes, logs, or indexes credential fields. It treats flow_instances.config
       as opaque JSONB. Products own their secrets.
+run_model:
+  description: 'A run is the top-level execution context for the platform. Every event, delivery, session, turn,
+    and entity mutation belongs to exactly one run. Runs provide isolation for observability, debugging, and
+    fork/replay. The run_id is the primary correlation key across all platform tables.'
+  lifecycle:
+    creation: 'A run is created when: (1) system.started fires (cold start), (2) an external event arrives with
+      no active run (warm start), or (3) swarm fork creates a forked run. The platform inserts a row in the runs
+      table with status=running and returns the run_id.'
+    propagation: 'run_id propagates through the causal chain. When a handler or agent emits an event, the child
+      event inherits run_id from the parent. This is set at event creation time in the bus publish path — no
+      handler or agent code needs to pass run_id explicitly.'
+    completion: 'A run transitions to completed when: all entities have reached terminal states AND no in-flight
+      events remain (pending deliveries = 0). The runtime checks this after each event receipt. Runs with active
+      timers remain running until the timers fire or are cancelled.'
+    failure: 'A run transitions to failed when an unrecoverable platform error occurs (not a handler/agent error —
+      those produce dead letters within the run). Examples: database connection loss, contract corruption, boot
+      failure mid-run.'
+    pause_resume: 'Admin can pause a run (stop accepting new external events, drain in-flight events). Resume
+      re-enables external ingress. Platform events platform.paused and platform.resumed are emitted within the run.'
+  fork:
+    description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
+      loading new contracts, and resuming execution. The system automatically determines which events need
+      to be re-delivered. The original run is frozen. The forked run gets independent execution.'
+    command: 'swarm fork --run <run_id> --at <event_id|timestamp> [--contracts <path>]'
+    event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
+      timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
+      a moment without looking up timestamps manually.'
+    semantics:
+      1_reconstruct_state: 'Reconstruct all entity states at timestamp T. For every entity touched by the source
+        run (SELECT DISTINCT entity_id FROM entity_mutations WHERE run_id = :source_run_id), reverse-apply
+        all mutations with created_at > T (newest first, set each field to old_value). Alternative: forward-apply
+        from empty entity for reliability. Only committed mutations are included — in-progress deliveries at T
+        are excluded, their partial mutations are not applied.'
+      2_detect_pending: 'Identify events that were pending at timestamp T — events with created_at <= T whose
+        delivery chain was incomplete. This includes: deliveries with status pending or in_progress at T,
+        accumulations that had not reached completion at T, entities in non-terminal states expecting further
+        events. These are the events the system will re-deliver.'
+      3_create_run: 'Insert new run row with forked_from_run_id = source run, forked_from_event_id = target event
+        (if event ID was provided). Copy reconstructed entity states into the fork context.'
+      4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
+        Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
+      5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
+        No manual event selection — the system knows what was unfinished.'
+    parallel_safety: 'Timestamp-based fork handles parallel agent execution naturally. At timestamp T, all
+      concurrent branches either committed their mutations or did not. No DAG traversal, no branch
+      classification, no sibling carry-over logic. The reconstructed state is simply "what was the world at T."'
+    contract_swap: 'When --contracts specifies a new contract path, the forked run uses the new handler logic
+      for all re-delivered events. This is the primary use case: fix a bug in a handler or prompt, fork to
+      before the failure, resume with the fix. All re-delivered events use the new contracts uniformly —
+      no mixed-version state.'
+    timestamp_precision: 'Events committed in the same millisecond are disambiguated by (created_at, event_id)
+      composite ordering. The fork point is inclusive: mutations from the target moment are included in
+      reconstructed state. Only mutations strictly after T are undone.'
+    isolation: 'Forked runs are fully isolated. They get their own event stream, their own entity state copies,
+      and their own agent sessions. Results can be compared side-by-side with the original run.'
+    original_run: 'The source run transitions to status=forked. It is frozen — no new events are processed.
+      Its data is preserved for comparison and audit.'
+  mutation_log:
+    description: 'The entity_mutations table is the audit trail for all entity state changes. It serves three
+      purposes: (1) flight recorder — step-by-step view of what happened, (2) fork — state reconstruction at
+      any point in time, (3) drift detection — verify entity_state matches the mutation history.'
+    write_contract: 'Every write to entity_state MUST produce a corresponding entity_mutations row in the same
+      transaction. This includes system node handler writes (data_accumulation, compute, sets_gate, advances_to,
+      clear) and agent tool writes (save_entity_field). The runtime enforces this — there is no code path that
+      mutates entity_state without logging the mutation.'
+    drift_detection: 'swarm verify --run <run_id> reconstructs entity state from the mutation log and compares
+      it to current entity_state. Any mismatch indicates a write that bypassed the mutation log. This is a
+      correctness check, not a normal operation — run it when debugging unexpected state.'
+    retention: 'Mutation rows are never auto-deleted. Retention policy is an operational concern. The platform
+      may provide a future archive/purge API for mutations older than N days on terminated entities.'
+  flight_recorder:
+    description: 'The flight recorder is not a separate system — it is a query pattern over four tables:
+      events (what happened), entity_mutations (what changed), agent_turns (why it changed), event_deliveries
+      (who processed it). All four tables carry run_id for scoped queries.'
+    reconstruction_query: 'To reconstruct a run step-by-step:
+      SELECT e.event_type, e.payload, m.field, m.old_value, m.new_value, m.writer_type, m.writer_id
+      FROM events e LEFT JOIN entity_mutations m ON m.caused_by_event = e.event_id
+      WHERE e.run_id = :run_id ORDER BY e.created_at, m.created_at.
+      Join with agent_turns on trigger_event_id for agent reasoning context.'
+    entity_timeline: 'To see one entity''s full history across runs:
+      SELECT * FROM entity_mutations WHERE entity_id = :entity_id ORDER BY created_at.
+      This shows every field change, who made it, and which event caused it.'
+  builder_api:
+    runs_list: 'GET /runs — list runs with status filter. Returns run_id, status, event_count, entity_count,
+      started_at, ended_at.'
+    run_detail: 'GET /runs/:run_id — full run metadata including fork lineage.'
+    run_events: 'GET /runs/:run_id/events — paginated event stream for the run.'
+    run_mutations: 'GET /runs/:run_id/mutations — paginated mutation log for the run.'
+    run_fork: 'POST /runs/:run_id/fork — fork a run at a specific event. Body: {event_id: uuid}.
+      Returns the new run_id.'
+    run_pause: 'POST /runs/:run_id/pause — pause a running run.'
+    run_resume: 'POST /runs/:run_id/resume — resume a paused run.'
+    run_cancel: 'POST /runs/:run_id/cancel — cancel a running run. Drains in-flight events.'
 platform_events:
   description: Events emitted by the platform engine itself. These are NOT product events — they are operational signals from
     the engine. All platform events use the platform.* namespace. Products MUST NOT define events with reserved prefixes.

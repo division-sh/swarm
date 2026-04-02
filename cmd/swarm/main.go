@@ -35,6 +35,7 @@ import (
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
+	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 	"swarm/internal/store"
 )
@@ -69,6 +70,9 @@ func (s storeBundle) runtimeStores() runtime.Stores {
 
 func main() {
 	repo := repoRoot()
+	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "verify" {
+		os.Exit(runVerifyCommand(context.Background(), repo, os.Args[2:], os.Stdout))
+	}
 	configPath := flag.String("config", "", "Optional path to Swarm runtime config")
 	contractsPath := flag.String("contracts", "", "Path to Swarm contract bundle root")
 	platformSpecPath := flag.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
@@ -187,6 +191,93 @@ func main() {
 
 	<-ctx.Done()
 	ready.Store(false)
+}
+
+func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
+	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	contractsPath := fs.String("contracts", "", "Path to Swarm contract bundle root")
+	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
+	if err := fs.Parse(args); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "verify failed: %v\n", err)
+		}
+		return 2
+	}
+	if err := loadRepoDotEnv(repo); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "verify failed: load .env: %v\n", err)
+		}
+		return 1
+	}
+	resolvedContractsPath := resolveContractsPath(repo, *contractsPath)
+	resolvedPlatformSpecPath := resolvePath(repo, *platformSpecPath)
+	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "verify failed: resolve contracts: %v\n", err)
+		}
+		return 1
+	}
+	if _, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "verify failed: load Swarm contracts: %v\n", err)
+		}
+		return 1
+	} else {
+		if err := verifyBundle(ctx, semanticview.Wrap(bundle)); err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "verify failed: %v\n", err)
+			}
+			return 1
+		}
+		if out != nil {
+			fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
+		}
+	}
+	return 0
+}
+
+func verifyBundle(ctx context.Context, source semanticview.Source) error {
+	if source == nil {
+		return errors.New("semantic source is required")
+	}
+	if bundle, ok := semanticview.Bundle(source); ok {
+		if err := runtimecontracts.ValidatePromptSchemaGuardsForBundle(bundle); err != nil {
+			return fmt.Errorf("validate prompt schema guards: %w", err)
+		}
+	}
+	credentialStore, err := buildCredentialStore()
+	if err != nil {
+		return fmt.Errorf("configure credentials: %w", err)
+	}
+	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{
+		Credentials:       credentialStore,
+		CheckMCPReachable: true,
+	})
+	if report.HasErrors() {
+		lines := make([]string, 0, len(report.Errors()))
+		for _, finding := range report.Errors() {
+			lines = append(lines, fmt.Sprintf("%s [%s] %s", strings.TrimSpace(finding.CheckID), strings.TrimSpace(finding.Location), strings.TrimSpace(finding.Message)))
+		}
+		return fmt.Errorf("boot verification failed:\n%s", strings.Join(lines, "\n"))
+	}
+	return verifyEmitSchemaCoverage(source)
+}
+
+func verifyEmitSchemaCoverage(source semanticview.Source) error {
+	if source == nil {
+		return errors.New("semantic source is required")
+	}
+	runtimetools.InitEventSchemaRegistry(source)
+	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 && envBool("SWARM_EMIT_SCHEMA_STRICT", true) {
+		sample := generated
+		if len(sample) > 10 {
+			sample = sample[:10]
+		}
+		return fmt.Errorf("emit schema strict mode enabled: %d agent-emitted schemas are missing explicit EventSchemaRegistry entries (sample: %s)", len(generated), strings.Join(sample, ", "))
+	}
+	return nil
 }
 
 func loadRuntimeConfig(path string) (*config.Config, error) {

@@ -369,6 +369,65 @@ func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
 	}
 }
 
+type taskRetryRuntime struct {
+	startCalls    int
+	continueCalls int
+}
+
+func (r *taskRetryRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	r.startCalls++
+	return &llm.Session{
+		ID:               "sess-" + strings.TrimSpace(agentID) + "-" + string(rune('0'+r.startCalls)),
+		AgentID:          agentID,
+		RuntimeMode:      "cli_test",
+		ConversationMode: "task",
+		SystemPrompt:     systemPrompt,
+		Tools:            tools,
+	}, nil
+}
+
+func (r *taskRetryRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+	r.continueCalls++
+	if r.continueCalls == 1 {
+		return nil, errors.New("claude cli run failed: exit status 1, stderr=API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy")
+	}
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
+}
+
+func TestLLMAgent_TaskScopedFatalCLIErrorResetsConversationAndRetries(t *testing.T) {
+	rt := &taskRetryRuntime{}
+	agent := NewLLMAgent(
+		models.AgentConfig{
+			ID:       "spec-reviewer",
+			Role:     "spec_reviewer",
+			EntityID: "ent-1",
+			Config: mustAgentConfigJSON(t, map[string]any{
+				"conversation_mode": "stateless",
+			}),
+		},
+		rt,
+		nil,
+		nil,
+	)
+
+	evt := (events.Event{
+		ID:          "evt-1",
+		Type:        "validation/spec_review.requested",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"ent-1"}`),
+	}).WithEntityID("ent-1")
+
+	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if rt.continueCalls != 2 {
+		t.Fatalf("continue calls = %d, want 2", rt.continueCalls)
+	}
+	if rt.startCalls != 2 {
+		t.Fatalf("start calls = %d, want 2 after reset", rt.startCalls)
+	}
+}
+
 func TestAppendPromptPostamble_IsIdempotent(t *testing.T) {
 	prompt := "You are helpful."
 	once := appendPromptPostamble(prompt)

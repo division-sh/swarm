@@ -14,6 +14,7 @@ type AgentTurnRecord struct {
 	RuntimeMode      string
 	SessionID        string
 	ScopeKey         string
+	RunID            string
 	TraceID          string
 	EntityID         string
 	TriggerEventID   string
@@ -60,6 +61,9 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 	}
 	if strings.TrimSpace(rec.TraceID) == "" {
 		rec.TraceID = strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	}
+	if strings.TrimSpace(rec.RunID) == "" {
+		rec.RunID = strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	}
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		if strings.TrimSpace(rec.TriggerEventID) == "" {
@@ -134,6 +138,7 @@ type ConversationRecord struct {
 	SessionID string
 	AgentID   string
 	ScopeKey  string
+	RunID     string
 	TaskID    string
 	Mode      string
 	Messages  []Message

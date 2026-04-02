@@ -11,6 +11,7 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -80,6 +81,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 		SessionID: s.ID,
 		AgentID:   s.AgentID,
 		ScopeKey:  strings.TrimSpace(s.ScopeKey),
+		RunID:     strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
 		Mode:      mode,
 		Messages:  s.Messages,
 		Summary:   BuildSessionSummary(s),

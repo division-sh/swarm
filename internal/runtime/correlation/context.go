@@ -4,11 +4,12 @@ import (
 	"context"
 	"strings"
 
-	"swarm/internal/events"
 	"github.com/google/uuid"
+	"swarm/internal/events"
 )
 
 type inboundEventContextKey struct{}
+type runIDContextKey struct{}
 type traceIDContextKey struct{}
 type handlerIDContextKey struct{}
 
@@ -42,6 +43,25 @@ func WithTraceID(ctx context.Context, traceID string) context.Context {
 	return context.WithValue(ctx, traceIDContextKey{}, traceID)
 }
 
+func WithRunID(ctx context.Context, runID string) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, runIDContextKey{}, runID)
+}
+
+func RunIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	runID, _ := ctx.Value(runIDContextKey{}).(string)
+	return strings.TrimSpace(runID)
+}
+
 func TraceIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -70,6 +90,21 @@ func HandlerIDFromContext(ctx context.Context) string {
 }
 
 func CorrelateEvent(ctx context.Context, evt events.Event) (context.Context, events.Event) {
+	runID := strings.TrimSpace(evt.RunID)
+	if runID == "" {
+		runID = RunIDFromContext(ctx)
+	}
+	if runID == "" {
+		if inbound, ok := InboundEventFromContext(ctx); ok {
+			runID = strings.TrimSpace(inbound.RunID)
+		}
+	}
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	evt.RunID = runID
+	ctx = WithRunID(ctx, runID)
+
 	traceID := strings.TrimSpace(evt.TraceID)
 	if traceID == "" {
 		traceID = TraceIDFromContext(ctx)

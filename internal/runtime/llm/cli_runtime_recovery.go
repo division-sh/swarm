@@ -60,3 +60,16 @@ func isPromptArgRequiredError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "input must be provided either through stdin or as a prompt argument when using --print")
 }
+
+func isUsagePolicyRefusalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(strings.Join(strings.Fields(err.Error()), " "))
+	return strings.Contains(msg, "usage policy") ||
+		(strings.Contains(msg, "claude code is unable to respond to this request") && strings.Contains(msg, "api error"))
+}
+
+func ShouldResetTaskScopedConversationOnCLIError(err error) bool {
+	return shouldRotateSessionOnCLIError(err) || isUsagePolicyRefusalError(err)
+}

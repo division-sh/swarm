@@ -16,6 +16,7 @@ import (
 	"swarm/internal/config"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -69,6 +70,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 		SessionID: s.ID,
 		AgentID:   s.AgentID,
 		ScopeKey:  strings.TrimSpace(s.ScopeKey),
+		RunID:     strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)),
 		Mode:      mode,
 		Messages:  s.Messages,
 		Summary:   BuildSessionSummary(s),
