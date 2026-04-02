@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log"
 	"os"
 	"slices"
 	"strings"
@@ -21,7 +20,7 @@ func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord
 		return
 	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
-		log.Printf("failed to persist cli agent turn: agent=%s session=%s err=%v", turn.AgentID, turn.SessionID, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_cli_turn_failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
 	}
 }
 
@@ -47,7 +46,10 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 		TurnCount: s.TurnCount,
 		Status:    "active",
 	}); err != nil {
-		log.Printf("failed to persist cli conversation: agent=%s err=%v", s.AgentID, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", s.AgentID, s.ID, "", map[string]any{
+			"conversation_mode": mode,
+			"scope_key":         strings.TrimSpace(s.ScopeKey),
+		}, err)
 	}
 }
 

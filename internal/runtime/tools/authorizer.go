@@ -59,7 +59,7 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 			"runtime_tool": true,
 		})
 		if marshalErr == nil {
-			runtimeWarn(
+			processWarn(
 				"tool-executor",
 				"tool authorization denied actor=%s tool=%s entity=%s detail=%s",
 				strings.TrimSpace(actor.ID),

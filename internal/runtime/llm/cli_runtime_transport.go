@@ -205,6 +205,7 @@ func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, a
 	if err == nil {
 		used.Used = true
 		log.Printf("claude cli transport fallback: switched to prompt argument mode")
+		logPublisherRuntime(ctx, r.events, "warn", "prompt_transport_fallback_used", "", "", "", nil, nil)
 	}
 	return resp, used, err
 }

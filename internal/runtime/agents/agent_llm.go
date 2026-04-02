@@ -14,6 +14,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/runtime/sessions"
@@ -167,6 +168,8 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.resetConversationScopeIfNeeded(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
+	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
@@ -175,7 +178,9 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	// Human task events must feed back into the requesting agent's reasoning context
 	// as an async tool-result style message correlated by task_id.
 	if isHumanTaskOutcomeEvent(evt.Type) {
-		_ = a.injectHumanTaskToolResult(ctx, evt)
+		if err := a.injectHumanTaskToolResult(ctx, evt); err != nil {
+			return nil, err
+		}
 	}
 
 	input := formatEventForAgent(a.cfg, evt)
@@ -242,7 +247,7 @@ func (a *LLMAgent) resolvePromptForMode(mode string) string {
 
 	prompt, found, err := runtimecontracts.LoadPromptForAgent(a.cfg, mode)
 	if err != nil {
-		runtimeWarn(
+		processWarn(
 			"agent-llm",
 			"contract prompt load failed agent_id=%s mode=%s err=%v",
 			strings.TrimSpace(a.cfg.ID),
@@ -482,6 +487,8 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive string) (string, err
 	a.resetConversationScopeIfNeeded(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
+	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = sessions.WithScope(ctx, llm.ConversationModeString(a.conversation.Mode), conversationScopeKeyForEvent(a.conversation.Mode, evt))
 	recorder := runtimebus.NewEmittedEventsRecorder()
@@ -726,9 +733,9 @@ func extractEmitEvents(cfg models.AgentConfig) []string {
 
 func emitToolDefinitions(cfg models.AgentConfig) []llm.ToolDefinition {
 	if emitEvents := extractEmitEvents(cfg); len(emitEvents) > 0 {
-		return runtimetools.GenerateEmitToolsForEvents(emitEvents, runtimeWarnOnce)
+		return runtimetools.GenerateEmitToolsForEvents(emitEvents, processWarnOnce)
 	}
-	return runtimetools.GenerateEmitToolsForRole(cfg.Role, runtimeWarnOnce)
+	return runtimetools.GenerateEmitToolsForRole(cfg.Role, processWarnOnce)
 }
 
 func filterTools(in []llm.ToolDefinition, allowed map[string]struct{}, constrained bool) []llm.ToolDefinition {

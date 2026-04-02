@@ -3,7 +3,6 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 	"time"
 
@@ -17,7 +16,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		return
 	}
 	if err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID); err != nil {
-		log.Printf("mark delivery in progress failed agent=%s session=%s err=%v", strings.TrimSpace(session.AgentID), strings.TrimSpace(session.ID), err)
+		logPublisherRuntime(ctx, publisher, "error", "mark_delivery_in_progress_failed", session.AgentID, session.ID, "", nil, err)
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{
@@ -32,7 +31,9 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("marshal %s payload failed: %v", strings.TrimSpace(string(eventType)), err)
+		logPublisherRuntime(ctx, publisher, "error", "marshal_agent_started_payload_failed", session.AgentID, session.ID, "", map[string]any{
+			"event_type": strings.TrimSpace(string(eventType)),
+		}, err)
 		return
 	}
 	evt := events.Event{
@@ -46,7 +47,9 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		evt = evt.WithEntityID(entityID)
 	}
 	if err := publisher.Publish(ctx, evt); err != nil {
-		log.Printf("publish %s failed agent=%s err=%v", strings.TrimSpace(string(eventType)), strings.TrimSpace(session.AgentID), err)
+		logPublisherRuntime(ctx, publisher, "error", "publish_agent_started_failed", session.AgentID, session.ID, evt.EntityID(), map[string]any{
+			"event_type": strings.TrimSpace(string(eventType)),
+		}, err)
 	}
 }
 

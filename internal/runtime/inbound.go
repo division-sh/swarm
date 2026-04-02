@@ -25,6 +25,10 @@ type InboundPersistence interface {
 	PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
+type InboundFailureRollback interface {
+	DeleteInboundEvent(ctx context.Context, providerEventID, entityID, provider string) error
+}
+
 type InboundTarget struct {
 	EntityID      string
 	EntitySlug    string
@@ -53,9 +57,10 @@ type InboundGateway struct {
 	mux   *http.ServeMux
 	bus   *runtimebus.EventBus
 	store InboundPersistence
+	logger *RuntimeLogger
 }
 
-func NewInboundGateway(bus *runtimebus.EventBus, stores ...InboundPersistence) *InboundGateway {
+func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
@@ -64,6 +69,7 @@ func NewInboundGateway(bus *runtimebus.EventBus, stores ...InboundPersistence) *
 		mux:   http.NewServeMux(),
 		bus:   bus,
 		store: store,
+		logger: logger,
 	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g
@@ -156,6 +162,27 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:   now,
 		}).WithEntityID(entityID)); err != nil {
 			log.Printf("inbound publish failed provider=%s entity=%s err=%v", provider, entityID, err)
+			if g.logger != nil {
+				g.logger.Error(r.Context(), "inbound-gateway", "publish_failed", map[string]any{
+					"provider":          provider,
+					"entity_id":         entityID,
+					"provider_event_id": providerEventID,
+				}, err)
+			}
+			if rollback, ok := g.store.(InboundFailureRollback); ok && rollback != nil {
+				if rollbackErr := rollback.DeleteInboundEvent(r.Context(), providerEventID, entityID, provider); rollbackErr != nil {
+					log.Printf("inbound rollback failed provider=%s entity=%s provider_event_id=%s err=%v", provider, entityID, providerEventID, rollbackErr)
+					if g.logger != nil {
+						g.logger.Error(r.Context(), "inbound-gateway", "rollback_failed", map[string]any{
+							"provider":          provider,
+							"entity_id":         entityID,
+							"provider_event_id": providerEventID,
+						}, rollbackErr)
+					}
+				}
+			}
+			http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+			return
 		}
 	}
 

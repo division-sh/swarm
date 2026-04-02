@@ -195,7 +195,9 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
-		r.coordinator.updateEntityState(ctx, entityID.String(), next, "")
+		if err := r.coordinator.updateEntityState(ctx, entityID.String(), next, ""); err != nil {
+			return err
+		}
 		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), next); err != nil {
 			return err
 		}
@@ -529,7 +531,10 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		if bucketID == "" {
 			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), strings.TrimSpace(string(execCtx.Request.Event.Type)))
 		}
-		return pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload), nil
+		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload); err != nil {
+			return true, err
+		}
+		return true, nil
 	case "create_flow_instance":
 		plan := handlerExecutionPlan{
 			NodeID:         execCtx.Request.NodeID.String(),

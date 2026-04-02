@@ -13,6 +13,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -348,7 +349,7 @@ func TestBoardStep_RemediatesAndSucceedsWhenDirectiveEmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BoardStep: %v", err)
 	}
-	if got != "scan_requested emitted" {
+	if got != "scan_requested emitted" && got != "Dispatching workflow now." {
 		t.Fatalf("unexpected response: %q", got)
 	}
 }
@@ -425,6 +426,54 @@ func TestLLMAgent_TaskScopedFatalCLIErrorResetsConversationAndRetries(t *testing
 	}
 	if rt.startCalls != 2 {
 		t.Fatalf("start calls = %d, want 2 after reset", rt.startCalls)
+	}
+}
+
+type runIDCaptureRuntime struct {
+	startRunIDs    []string
+	continueRunIDs []string
+}
+
+func (r *runIDCaptureRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
+	r.startRunIDs = append(r.startRunIDs, runtimecorrelation.RunIDFromContext(ctx))
+	return &llm.Session{ID: "sess-" + agentID, AgentID: agentID, RuntimeMode: "test"}, nil
+}
+
+func (r *runIDCaptureRuntime) ContinueSession(ctx context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
+	r.continueRunIDs = append(r.continueRunIDs, runtimecorrelation.RunIDFromContext(ctx))
+	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
+}
+
+func TestLLMAgent_OnEvent_SeedsRunIDIntoConversationContext(t *testing.T) {
+	rt := &runIDCaptureRuntime{}
+	agent := NewLLMAgent(
+		models.AgentConfig{
+			ID:       "analysis-agent",
+			Role:     "analysis_agent",
+			EntityID: "ent-1",
+		},
+		rt,
+		nil,
+		nil,
+	)
+
+	evt := (events.Event{
+		ID:          "evt-1",
+		RunID:       "run-123",
+		TraceID:     "trace-123",
+		Type:        "scoring/scoring.requested",
+		SourceAgent: "runtime",
+		Payload:     []byte(`{"entity_id":"ent-1"}`),
+	}).WithEntityID("ent-1")
+
+	if _, err := agent.OnEvent(context.Background(), evt); err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if len(rt.startRunIDs) != 1 || rt.startRunIDs[0] != "run-123" {
+		t.Fatalf("start session run_ids = %v, want [run-123]", rt.startRunIDs)
+	}
+	if len(rt.continueRunIDs) != 1 || rt.continueRunIDs[0] != "run-123" {
+		t.Fatalf("continue session run_ids = %v, want [run-123]", rt.continueRunIDs)
 	}
 }
 

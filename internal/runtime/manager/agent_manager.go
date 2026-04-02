@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -253,34 +252,40 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 }
 
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
-	cfg = am.applyContractPrompt(cfg)
+	var err error
+	cfg, err = am.applyContractPrompt(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if am.factory != nil {
 		return am.factory(cfg)
 	}
 	return newGenericAgent(cfg), nil
 }
 
-func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) models.AgentConfig {
+func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.AgentConfig, error) {
 	prompt, found, err := runtimecontracts.LoadPromptForAgent(cfg, "")
 	if err != nil {
-		RuntimeWarn(
-			"agent-manager",
-			"contract prompt load failed agent_id=%s role=%s err=%v",
+		return cfg, fmt.Errorf(
+			"contract prompt load failed agent_id=%s role=%s: %w",
 			strings.TrimSpace(cfg.ID),
 			strings.TrimSpace(cfg.Role),
 			err,
 		)
-		return cfg
 	}
 	if !found {
-		return cfg
+		return cfg, nil
 	}
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		return cfg
+		return cfg, nil
 	}
-	cfg.Config = withSystemPrompt(cfg.Config, prompt)
-	return cfg
+	updated, err := withSystemPrompt(cfg.Config, prompt)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Config = updated
+	return cfg, nil
 }
 
 func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig) error {
@@ -305,6 +310,21 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	newAgent, err := am.buildAgent(updated)
 	if err != nil {
 		return err
+	}
+
+	// Spec v2.0: reconfigure triggers session rotation so the agent restarts on a
+	// clean session with the new prompt/tool set. Fail fast if rotation fails.
+	am.mu.RLock()
+	sessions := am.sessions
+	runtimeMode := strings.TrimSpace(am.runtimeMode)
+	am.mu.RUnlock()
+	if sessions != nil && runtimeMode != "" {
+		rotated, err := sessions.Rotate(am.runtimeContext(), agentID, runtimeMode, "reconfigure", "agent reconfigured", "")
+		if err != nil {
+			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, runtimeMode, err)
+		} else if rotated != nil {
+			llm.LogSessionRotated(agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
+		}
 	}
 	if am.store != nil {
 		if err := am.store.UpsertAgent(am.runtimeContext(), PersistedAgent{
@@ -331,20 +351,6 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	am.runMu.Unlock()
 	if running {
 		am.startAgentLoop(ctx, newAgent)
-	}
-
-	// Spec v2.0: reconfigure triggers session rotation so the agent restarts on a
-	// clean session with the new prompt/tool set.
-	am.mu.RLock()
-	sessions := am.sessions
-	runtimeMode := strings.TrimSpace(am.runtimeMode)
-	am.mu.RUnlock()
-	if sessions != nil && runtimeMode != "" {
-		if rotated, err := sessions.Rotate(ctx, agentID, runtimeMode, "reconfigure", "agent reconfigured", ""); err != nil {
-			log.Printf("agent reconfigure session rotation failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
-		} else if rotated != nil {
-			llm.LogSessionRotated(agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
-		}
 	}
 	return nil
 }

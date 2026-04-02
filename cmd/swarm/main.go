@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -72,6 +73,9 @@ func main() {
 	repo := repoRoot()
 	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "verify" {
 		os.Exit(runVerifyCommand(context.Background(), repo, os.Args[2:], os.Stdout))
+	}
+	if len(os.Args) > 1 && strings.TrimSpace(os.Args[1]) == "status" {
+		os.Exit(runStatusCommand(context.Background(), repo, os.Args[2:], os.Stdout))
 	}
 	configPath := flag.String("config", "", "Optional path to Swarm runtime config")
 	contractsPath := flag.String("contracts", "", "Path to Swarm contract bundle root")
@@ -236,6 +240,493 @@ func runVerifyCommand(ctx context.Context, repo string, args []string, out io.Wr
 		}
 	}
 	return 0
+}
+
+type runStatusReport struct {
+	RunID             string                    `json:"run_id"`
+	RunTableStatus    string                    `json:"run_table_status,omitempty"`
+	RootEventID       string                    `json:"root_event_id,omitempty"`
+	RootEventType     string                    `json:"root_event_type,omitempty"`
+	TraceID           string                    `json:"trace_id,omitempty"`
+	StartedAt         time.Time                 `json:"started_at,omitempty"`
+	LastEventAt       time.Time                 `json:"last_event_at,omitempty"`
+	EndedAt           *time.Time                `json:"ended_at,omitempty"`
+	EventCount        int                       `json:"event_count"`
+	WarnErrorLogCount int                       `json:"warn_error_log_count"`
+	EventCounts       []runStatusEventCount     `json:"event_counts"`
+	Deliveries        []runStatusDeliveryCount  `json:"deliveries"`
+	RecentEvents      []runStatusEvent          `json:"recent_events"`
+	DeadLetters       []runStatusDeadLetter     `json:"dead_letters,omitempty"`
+	AgentTurns        []runStatusAgentTurn      `json:"agent_turns,omitempty"`
+	RuntimeLogSummary []runStatusRuntimeSummary `json:"runtime_log_summary,omitempty"`
+	RuntimeLogs       []runStatusRuntimeLog     `json:"runtime_logs,omitempty"`
+}
+
+type runStatusEventCount struct {
+	EventName string `json:"event_name"`
+	Count     int    `json:"count"`
+}
+
+type runStatusDeliveryCount struct {
+	SubscriberID string `json:"subscriber_id"`
+	Status       string `json:"status"`
+	Count        int    `json:"count"`
+}
+
+type runStatusEvent struct {
+	EventName string    `json:"event_name"`
+	EntityID  string    `json:"entity_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type runStatusDeadLetter struct {
+	OriginalEvent string    `json:"original_event"`
+	EntityID      string    `json:"entity_id,omitempty"`
+	FailureType   string    `json:"failure_type"`
+	ErrorMessage  string    `json:"error_message,omitempty"`
+	HandlerNode   string    `json:"handler_node,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type runStatusAgentTurn struct {
+	AgentID    string    `json:"agent_id"`
+	Turns      int       `json:"turns"`
+	ErrorCount int       `json:"error_count"`
+	LastAt     time.Time `json:"last_at"`
+}
+
+type runStatusRuntimeLog struct {
+	Level     string    `json:"level"`
+	Component string    `json:"component"`
+	Action    string    `json:"action"`
+	Error     string    `json:"error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type runStatusRuntimeSummary struct {
+	Level     string `json:"level"`
+	Component string `json:"component"`
+	Action    string `json:"action"`
+	Count     int    `json:"count"`
+}
+
+func runStatusCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
+	fs := flag.NewFlagSet("status", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	configPath := fs.String("config", "", "Optional path to Swarm runtime config")
+	storeMode := fs.String("store", "postgres", "Store mode: postgres")
+	runID := fs.String("run-id", "", "Run ID to inspect; defaults to latest run with scan.requested")
+	asJSON := fs.Bool("json", false, "Emit JSON")
+	if err := fs.Parse(args); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "status failed: %v\n", err)
+		}
+		return 2
+	}
+	if err := loadRepoDotEnv(repo); err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "status failed: load .env: %v\n", err)
+		}
+		return 1
+	}
+	cfg, err := loadRuntimeConfig(resolvePath(repo, *configPath))
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "status failed: load config: %v\n", err)
+		}
+		return 1
+	}
+	stores, err := buildStores(ctx, *storeMode, cfg)
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "status failed: init stores: %v\n", err)
+		}
+		return 1
+	}
+	defer closeDB(stores.SQLDB)
+	if stores.SQLDB == nil {
+		if out != nil {
+			fmt.Fprintln(out, "status failed: postgres store required")
+		}
+		return 1
+	}
+	report, err := loadRunStatusReport(ctx, stores.SQLDB, strings.TrimSpace(*runID))
+	if err != nil {
+		if out != nil {
+			fmt.Fprintf(out, "status failed: %v\n", err)
+		}
+		return 1
+	}
+	if *asJSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(out, "status failed: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	printRunStatusReport(out, report)
+	return 0
+}
+
+func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStatusReport, error) {
+	if db == nil {
+		return runStatusReport{}, errors.New("db is required")
+	}
+	report := runStatusReport{}
+	if strings.TrimSpace(runID) == "" {
+		if err := db.QueryRowContext(ctx, `
+			SELECT COALESCE(run_id::text, '')
+			FROM events
+			WHERE event_name = 'scan.requested'
+			  AND run_id IS NOT NULL
+			ORDER BY created_at DESC
+			LIMIT 1
+		`).Scan(&runID); err != nil {
+			if err == sql.ErrNoRows {
+				return runStatusReport{}, errors.New("no current run found")
+			}
+			return runStatusReport{}, fmt.Errorf("resolve latest run: %w", err)
+		}
+	}
+	report.RunID = strings.TrimSpace(runID)
+	if report.RunID == "" {
+		return runStatusReport{}, errors.New("run_id is required")
+	}
+
+	var (
+		runStatus string
+		trigger   string
+		started   sql.NullTime
+		ended     sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(trigger_event_type, ''), started_at, ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, report.RunID).Scan(&runStatus, &trigger, &started, &ended); err == nil {
+		report.RunTableStatus = strings.TrimSpace(runStatus)
+		if started.Valid {
+			report.StartedAt = started.Time
+		}
+		if ended.Valid {
+			tm := ended.Time
+			report.EndedAt = &tm
+		}
+		_ = trigger
+	}
+
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_id::text, event_name, COALESCE(trace_id::text, ''), created_at
+		FROM events
+		WHERE run_id = $1::uuid
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, report.RunID).Scan(&report.RootEventID, &report.RootEventType, &report.TraceID, &report.StartedAt); err != nil {
+		return runStatusReport{}, fmt.Errorf("load root event: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MAX(created_at)
+		FROM events
+		WHERE run_id = $1::uuid
+	`, report.RunID).Scan(&report.EventCount, &report.LastEventAt); err != nil {
+		return runStatusReport{}, fmt.Errorf("load event summary: %w", err)
+	}
+
+	eventRows, err := db.QueryContext(ctx, `
+		SELECT event_name, COUNT(*)
+		FROM events
+		WHERE run_id = $1::uuid
+		GROUP BY event_name
+		ORDER BY event_name
+	`, report.RunID)
+	if err != nil {
+		return runStatusReport{}, fmt.Errorf("load event counts: %w", err)
+	}
+	defer eventRows.Close()
+	for eventRows.Next() {
+		var item runStatusEventCount
+		if err := eventRows.Scan(&item.EventName, &item.Count); err != nil {
+			return runStatusReport{}, fmt.Errorf("scan event counts: %w", err)
+		}
+		report.EventCounts = append(report.EventCounts, item)
+	}
+	if err := eventRows.Err(); err != nil {
+		return runStatusReport{}, fmt.Errorf("read event counts: %w", err)
+	}
+
+	deliveryRows, err := db.QueryContext(ctx, `
+		SELECT COALESCE(subscriber_id, ''), COALESCE(status, ''), COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		GROUP BY subscriber_id, status
+		ORDER BY subscriber_id, status
+	`, report.RunID)
+	if err != nil {
+		return runStatusReport{}, fmt.Errorf("load deliveries: %w", err)
+	}
+	defer deliveryRows.Close()
+	for deliveryRows.Next() {
+		var item runStatusDeliveryCount
+		if err := deliveryRows.Scan(&item.SubscriberID, &item.Status, &item.Count); err != nil {
+			return runStatusReport{}, fmt.Errorf("scan deliveries: %w", err)
+		}
+		report.Deliveries = append(report.Deliveries, item)
+	}
+	if err := deliveryRows.Err(); err != nil {
+		return runStatusReport{}, fmt.Errorf("read deliveries: %w", err)
+	}
+
+	recentRows, err := db.QueryContext(ctx, `
+		SELECT event_name, COALESCE(entity_id::text, ''), created_at
+		FROM events
+		WHERE run_id = $1::uuid
+		ORDER BY created_at DESC
+		LIMIT 15
+	`, report.RunID)
+	if err != nil {
+		return runStatusReport{}, fmt.Errorf("load recent events: %w", err)
+	}
+	defer recentRows.Close()
+	for recentRows.Next() {
+		var item runStatusEvent
+		if err := recentRows.Scan(&item.EventName, &item.EntityID, &item.CreatedAt); err != nil {
+			return runStatusReport{}, fmt.Errorf("scan recent events: %w", err)
+		}
+		report.RecentEvents = append(report.RecentEvents, item)
+	}
+	if err := recentRows.Err(); err != nil {
+		return runStatusReport{}, fmt.Errorf("read recent events: %w", err)
+	}
+
+	deadRows, err := db.QueryContext(ctx, `
+		SELECT
+			COALESCE(dl.original_event, ''),
+			COALESCE(dl.entity_id::text, ''),
+			COALESCE(dl.failure_type, ''),
+			COALESCE(dl.error_message, ''),
+			COALESCE(dl.handler_node, ''),
+			dl.created_at
+		FROM dead_letters dl
+		INNER JOIN events e ON e.event_id = dl.original_event_id
+		WHERE e.run_id = $1::uuid
+		ORDER BY dl.created_at DESC
+		LIMIT 10
+	`, report.RunID)
+	if err != nil {
+		return runStatusReport{}, fmt.Errorf("load dead letters: %w", err)
+	}
+	defer deadRows.Close()
+	for deadRows.Next() {
+		var item runStatusDeadLetter
+		if err := deadRows.Scan(&item.OriginalEvent, &item.EntityID, &item.FailureType, &item.ErrorMessage, &item.HandlerNode, &item.CreatedAt); err != nil {
+			return runStatusReport{}, fmt.Errorf("scan dead letters: %w", err)
+		}
+		report.DeadLetters = append(report.DeadLetters, item)
+	}
+	if err := deadRows.Err(); err != nil {
+		return runStatusReport{}, fmt.Errorf("read dead letters: %w", err)
+	}
+
+	turnRows, err := db.QueryContext(ctx, `
+		SELECT agent_id, COUNT(*), COUNT(*) FILTER (WHERE COALESCE(error, '') <> ''), MAX(created_at)
+		FROM agent_turns
+		WHERE run_id = $1::uuid
+		GROUP BY agent_id
+		ORDER BY agent_id
+	`, report.RunID)
+	if err != nil {
+		return runStatusReport{}, fmt.Errorf("load agent turns: %w", err)
+	}
+	defer turnRows.Close()
+	for turnRows.Next() {
+		var item runStatusAgentTurn
+		if err := turnRows.Scan(&item.AgentID, &item.Turns, &item.ErrorCount, &item.LastAt); err != nil {
+			return runStatusReport{}, fmt.Errorf("scan agent turns: %w", err)
+		}
+		report.AgentTurns = append(report.AgentTurns, item)
+	}
+	if err := turnRows.Err(); err != nil {
+		return runStatusReport{}, fmt.Errorf("read agent turns: %w", err)
+	}
+
+	if report.TraceID != "" || report.RunID != "" {
+		if err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM events
+			WHERE event_name = 'platform.runtime_log'
+			  AND (
+				payload->>'run_id' = $1
+				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
+			  )
+			  AND payload->>'level' IN ('warn', 'error')
+		`, report.RunID, report.TraceID).Scan(&report.WarnErrorLogCount); err != nil {
+			return runStatusReport{}, fmt.Errorf("load runtime log summary: %w", err)
+		}
+		logSummaryRows, err := db.QueryContext(ctx, `
+			SELECT
+				COALESCE(payload->>'level', ''),
+				COALESCE(payload->>'component', ''),
+				COALESCE(payload->>'action', ''),
+				COUNT(*)
+			FROM events
+			WHERE event_name = 'platform.runtime_log'
+			  AND (
+				payload->>'run_id' = $1
+				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
+			  )
+			  AND payload->>'level' IN ('warn', 'error')
+			GROUP BY payload->>'level', payload->>'component', payload->>'action'
+			ORDER BY COUNT(*) DESC, payload->>'component', payload->>'action'
+			LIMIT 12
+		`, report.RunID, report.TraceID)
+		if err != nil {
+			return runStatusReport{}, fmt.Errorf("load runtime log rollup: %w", err)
+		}
+		defer logSummaryRows.Close()
+		for logSummaryRows.Next() {
+			var item runStatusRuntimeSummary
+			if err := logSummaryRows.Scan(&item.Level, &item.Component, &item.Action, &item.Count); err != nil {
+				return runStatusReport{}, fmt.Errorf("scan runtime log rollup: %w", err)
+			}
+			report.RuntimeLogSummary = append(report.RuntimeLogSummary, item)
+		}
+		if err := logSummaryRows.Err(); err != nil {
+			return runStatusReport{}, fmt.Errorf("read runtime log rollup: %w", err)
+		}
+		logRows, err := db.QueryContext(ctx, `
+			SELECT
+				COALESCE(payload->>'level', ''),
+				COALESCE(payload->>'component', ''),
+				COALESCE(payload->>'action', ''),
+				COALESCE(payload->>'error', ''),
+				created_at
+			FROM events
+			WHERE event_name = 'platform.runtime_log'
+			  AND (
+				payload->>'run_id' = $1
+				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
+			  )
+			  AND payload->>'level' IN ('warn', 'error')
+			ORDER BY created_at DESC
+			LIMIT 20
+		`, report.RunID, report.TraceID)
+		if err != nil {
+			return runStatusReport{}, fmt.Errorf("load runtime logs: %w", err)
+		}
+		defer logRows.Close()
+		for logRows.Next() {
+			var item runStatusRuntimeLog
+			if err := logRows.Scan(&item.Level, &item.Component, &item.Action, &item.Error, &item.CreatedAt); err != nil {
+				return runStatusReport{}, fmt.Errorf("scan runtime logs: %w", err)
+			}
+			report.RuntimeLogs = append(report.RuntimeLogs, item)
+		}
+		if err := logRows.Err(); err != nil {
+			return runStatusReport{}, fmt.Errorf("read runtime logs: %w", err)
+		}
+	}
+
+	return report, nil
+}
+
+func printRunStatusReport(w io.Writer, report runStatusReport) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "Run %s\n", report.RunID)
+	if strings.TrimSpace(report.RootEventType) != "" {
+		fmt.Fprintf(w, "Root: %s (%s)\n", report.RootEventType, report.RootEventID)
+	}
+	if strings.TrimSpace(report.TraceID) != "" {
+		fmt.Fprintf(w, "Trace: %s\n", report.TraceID)
+	}
+	if strings.TrimSpace(report.RunTableStatus) != "" {
+		fmt.Fprintf(w, "Run Status: %s\n", report.RunTableStatus)
+	}
+	fmt.Fprintf(w, "Started: %s\n", report.StartedAt.Format(time.RFC3339))
+	if !report.LastEventAt.IsZero() {
+		fmt.Fprintf(w, "Last Event: %s\n", report.LastEventAt.Format(time.RFC3339))
+	}
+	if report.EndedAt != nil && !report.EndedAt.IsZero() {
+		fmt.Fprintf(w, "Ended: %s\n", report.EndedAt.Format(time.RFC3339))
+	}
+	fmt.Fprintf(w, "Summary: events=%d deliveries=%d dead_letters=%d agent_turns=%d runtime_warn_errors=%d\n",
+		report.EventCount,
+		len(report.Deliveries),
+		len(report.DeadLetters),
+		len(report.AgentTurns),
+		report.WarnErrorLogCount,
+	)
+	if len(report.EventCounts) > 0 {
+		fmt.Fprintln(w, "\nEvent Counts:")
+		for _, item := range report.EventCounts {
+			fmt.Fprintf(w, "  %s  %d\n", item.EventName, item.Count)
+		}
+	}
+	if len(report.Deliveries) > 0 {
+		fmt.Fprintln(w, "\nDeliveries:")
+		for _, item := range report.Deliveries {
+			fmt.Fprintf(w, "  %s  status=%s  count=%d\n", item.SubscriberID, item.Status, item.Count)
+		}
+	}
+	if len(report.AgentTurns) > 0 {
+		fmt.Fprintln(w, "\nAgent Turns:")
+		for _, item := range report.AgentTurns {
+			fmt.Fprintf(w, "  %s  turns=%d errors=%d last=%s\n", item.AgentID, item.Turns, item.ErrorCount, item.LastAt.Format(time.RFC3339))
+		}
+	}
+	if len(report.DeadLetters) > 0 {
+		fmt.Fprintln(w, "\nDead Letters:")
+		for _, item := range report.DeadLetters {
+			fmt.Fprintf(w, "  %s  entity=%s  type=%s  handler=%s  at=%s\n",
+				item.OriginalEvent,
+				item.EntityID,
+				item.FailureType,
+				item.HandlerNode,
+				item.CreatedAt.Format(time.RFC3339),
+			)
+			if strings.TrimSpace(item.ErrorMessage) != "" {
+				fmt.Fprintf(w, "    error=%s\n", item.ErrorMessage)
+			}
+		}
+	}
+	if len(report.RuntimeLogs) > 0 {
+		if len(report.RuntimeLogSummary) > 0 {
+			fmt.Fprintln(w, "\nRuntime Log Summary:")
+			for _, item := range report.RuntimeLogSummary {
+				fmt.Fprintf(w, "  %s  %s/%s  count=%d\n",
+					strings.ToUpper(item.Level),
+					item.Component,
+					item.Action,
+					item.Count,
+				)
+			}
+		}
+		fmt.Fprintln(w, "\nRuntime Warnings/Errors:")
+		for _, item := range report.RuntimeLogs {
+			fmt.Fprintf(w, "  %s  %s/%s  at=%s\n",
+				strings.ToUpper(item.Level),
+				item.Component,
+				item.Action,
+				item.CreatedAt.Format(time.RFC3339),
+			)
+			if strings.TrimSpace(item.Error) != "" {
+				fmt.Fprintf(w, "    error=%s\n", item.Error)
+			}
+		}
+	}
+	if len(report.RecentEvents) > 0 {
+		fmt.Fprintln(w, "\nRecent Events:")
+		for _, item := range report.RecentEvents {
+			fmt.Fprintf(w, "  %s  entity=%s  at=%s\n",
+				item.EventName,
+				item.EntityID,
+				item.CreatedAt.Format(time.RFC3339),
+			)
+		}
+	}
 }
 
 func verifyBundle(ctx context.Context, source semanticview.Source) error {

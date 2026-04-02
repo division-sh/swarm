@@ -14,6 +14,10 @@ const (
 )
 
 func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, runtimeMode string) func() {
+	return StartLeaseHeartbeatWithErrorHandler(ctx, sessions, lease, runtimeMode, nil)
+}
+
+func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry, lease *Lease, runtimeMode string, onError func(error)) func() {
 	if sessions == nil || lease == nil {
 		return func() {}
 	}
@@ -44,6 +48,9 @@ func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease, r
 				refreshed, err := sessions.Acquire(ctx, agentID, runtimeMode, lockOwner, scopeKey)
 				if err != nil {
 					log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
+					if onError != nil {
+						onError(err)
+					}
 					continue
 				}
 				if refreshed != nil {

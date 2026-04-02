@@ -353,6 +353,96 @@ func TestPostgresStore_AppendEvent_InheritsParentRunID(t *testing.T) {
 	}
 }
 
+func TestPostgresStore_ListPendingEventsForAgentSpec_PreservesRunID(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS runs (
+			run_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			status TEXT NOT NULL DEFAULT 'running'
+		)`,
+		`CREATE TABLE IF NOT EXISTS events (
+			event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID REFERENCES runs(run_id),
+			event_name TEXT NOT NULL,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope TEXT NOT NULL DEFAULT 'entity',
+			payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+			chain_depth INTEGER NOT NULL DEFAULT 0,
+			trace_id TEXT,
+			produced_by TEXT,
+			produced_by_type TEXT NOT NULL DEFAULT 'agent',
+			source_event_id UUID,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS event_deliveries (
+			delivery_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			run_id UUID REFERENCES runs(run_id),
+			event_id UUID NOT NULL REFERENCES events(event_id),
+			subscriber_type TEXT NOT NULL,
+			subscriber_id TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			retry_count INTEGER NOT NULL DEFAULT 0,
+			reason_code TEXT,
+			last_error TEXT,
+			active_session_id UUID,
+			started_at TIMESTAMPTZ,
+			delivered_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+		`CREATE TABLE IF NOT EXISTS event_receipts (
+			receipt_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			event_id UUID NOT NULL,
+			subscriber_type TEXT NOT NULL,
+			subscriber_id TEXT NOT NULL,
+			outcome TEXT NOT NULL DEFAULT 'success',
+			side_effects JSONB NOT NULL DEFAULT '{}'::jsonb,
+			processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("exec schema stmt: %v", err)
+		}
+	}
+
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, entity_id, payload, trace_id, produced_by, produced_by_type, created_at
+		) VALUES (
+			$1::uuid, $2::uuid, 'scoring/scoring.requested', $3::uuid, '{}'::jsonb, 'trace-1', 'runtime', 'agent', now()
+		)
+	`, eventID, runID, entityID); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
+		VALUES ($1::uuid, $2::uuid, 'agent', 'analysis-agent', 'pending', now())
+	`, runID, eventID); err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+
+	got, err := pg.listPendingEventsForAgentSpec(ctx, "analysis-agent", time.Now().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatalf("listPendingEventsForAgentSpec: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("pending events = %d, want 1", len(got))
+	}
+	if got[0].RunID != runID {
+		t.Fatalf("pending event run_id = %q, want %q", got[0].RunID, runID)
+	}
+}
+
 func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -1057,16 +1147,15 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 		t.Fatalf("seed event: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", ""); err != nil {
-		t.Fatalf("UpsertEventReceipt empty event: %v", err)
+	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", ""); err == nil {
+		t.Fatal("expected UpsertEventReceipt empty event to fail")
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", ""); err != nil {
-		t.Fatalf("UpsertEventReceipt default: %v", err)
+	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", ""); err == nil {
+		t.Fatal("expected UpsertEventReceipt empty status to fail")
 	}
-	r, ok, err := pg.GetEventReceipt(ctx, eventID, "a1")
-	if err != nil || !ok || r.Status != "processed" {
-		t.Fatalf("GetEventReceipt got ok=%v err=%v rec=%+v", ok, err, r)
+	if _, ok, err := pg.GetEventReceipt(ctx, eventID, "a1"); err != nil || ok {
+		t.Fatalf("expected no receipt after invalid write ok=%v err=%v", ok, err)
 	}
 
 	if _, _, err := pg.GetEventReceipt(ctx, "", "a1"); err == nil {
@@ -1078,6 +1167,19 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 
 	if _, ok, err := pg.GetEventReceipt(ctx, uuid.NewString(), "a1"); err != nil || ok {
 		t.Fatalf("expected not found ok=false err=%v", err)
+	}
+}
+
+func TestManagerStore_MarkEventDeliveryInProgress_RequiresIDs(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if err := pg.MarkEventDeliveryInProgress(ctx, "", "a1", ""); err == nil {
+		t.Fatal("expected empty eventID to fail")
+	}
+	if err := pg.MarkEventDeliveryInProgress(ctx, uuid.NewString(), "", ""); err == nil {
+		t.Fatal("expected empty agentID to fail")
 	}
 }
 

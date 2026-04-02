@@ -98,7 +98,7 @@ func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipeline
 func FlushDeferredPipelineTransitions(ctx context.Context, deferred []DeferredPipelineTransition) {
 	for _, item := range deferred {
 		if err := RecordPipelineTransition(ctx, item.db, item.input); err != nil {
-			runtimeWarn("diagnostics", "failed to persist deferred pipeline transition event_id=%s event_type=%s pipeline_id=%s: %v", strings.TrimSpace(item.input.EventID), strings.TrimSpace(item.input.EventType), strings.TrimSpace(item.input.PipelineID), err)
+			processWarn("diagnostics", "failed to persist deferred pipeline transition event_id=%s event_type=%s pipeline_id=%s: %v", strings.TrimSpace(item.input.EventID), strings.TrimSpace(item.input.EventType), strings.TrimSpace(item.input.PipelineID), err)
 		}
 	}
 }

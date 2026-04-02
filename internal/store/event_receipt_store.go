@@ -18,7 +18,7 @@ func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
-		return nil
+		return fmt.Errorf("mark event delivery in progress: eventID and agentID required")
 	}
 	sessionID = sanitizeOptionalUUID(sessionID)
 	if err := s.markEventDeliveryInProgressSpec(ctx, eventID, agentID, sessionID); err == nil {
@@ -40,11 +40,13 @@ func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID
 }
 
 func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+	eventID = strings.TrimSpace(eventID)
+	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
-		return nil
+		return fmt.Errorf("upsert event receipt: eventID and agentID required")
 	}
 	if status == "" {
-		status = runtimemanager.ReceiptStatusProcessed
+		return fmt.Errorf("upsert event receipt: status required")
 	}
 	if err := s.upsertAgentReceiptSpec(ctx, eventID, agentID, status, errText); err == nil {
 		return nil
@@ -343,7 +345,7 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
-			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
 			COALESCE(e.trace_id, ''), COALESCE(e.source_event_id::text, '')
 		FROM event_deliveries d
@@ -378,7 +380,7 @@ func (s *PostgresStore) listPendingEventsForAgentSpec(ctx context.Context, agent
 func (s *PostgresStore) listPendingSubscribedEventsSpec(ctx context.Context, agentID string, subscriptions []events.EventType, since time.Time, limit int) ([]events.Event, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
-			e.event_id::text, e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), e.payload, e.created_at,
 			COALESCE(e.trace_id, ''), COALESCE(e.source_event_id::text, '')
 		FROM events e
@@ -503,6 +505,7 @@ func scanSpecPendingEvents(rows *sql.Rows) ([]events.Event, error) {
 		var entityID string
 		if err := rows.Scan(
 			&evt.ID,
+			&evt.RunID,
 			&evt.Type,
 			&evt.SourceAgent,
 			&entityID,

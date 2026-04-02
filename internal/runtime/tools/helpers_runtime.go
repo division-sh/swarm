@@ -12,7 +12,7 @@ func canonicalRuntimeRole(role string) string {
 	return strings.ToLower(strings.TrimSpace(role))
 }
 
-func runtimeWarn(component string, format string, args ...any) {
+func processWarn(component string, format string, args ...any) {
 	component = strings.TrimSpace(component)
 	if component == "" {
 		component = "runtime"

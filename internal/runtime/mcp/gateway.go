@@ -136,10 +136,10 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	}
 	actor = g.hydrateActor(actor)
 
-	ctx := r.Context()
-	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
-	if g.hooks.WithActor != nil {
-		ctx = g.hooks.WithActor(ctx, actor)
+	ctx, err := g.toolExecutionContext(r, actor, toolName)
+	if err != nil {
+		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
+		return
 	}
 	out, err := g.executor.Execute(ctx, toolName, req.Input)
 	if err != nil {
@@ -236,7 +236,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		ctx, err := g.mcpExecutionContext(r)
+		ctx, err := g.mcpExecutionContext(r, toolName)
 		if err != nil {
 			g.logMCP(r, "warn", "mcp.tools.call.context_error", err, map[string]any{
 				"method":    "tools/call",
@@ -306,7 +306,8 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) {
+func (g *Gateway) mcpExecutionContext(r *http.Request, toolName string) (context.Context, error) {
+	toolName = normalizeGatewayToolName(toolName)
 	if token := ContextTokenFromRequest(r); token != "" {
 		if g.hooks.ResolveTurnContext != nil {
 			if turn, ok := g.hooks.ResolveTurnContext(token); ok {
@@ -320,6 +321,7 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 				if g.hooks.WithRuntimeEpoch != nil {
 					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
 				}
+				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
 				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
 					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
@@ -330,7 +332,8 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 				return ctx, nil
 			}
 		}
-		if AllowContextFallbackOnMiss() {
+		if AllowContextFallbackOnMiss() && toolAllowsContextFallback(toolName) {
+			g.logContextFallback(r, "mcp.context.fallback_used", toolName, "token_not_found", token, true)
 			if actor, ok := ActorFromRequest(r); ok {
 				actor = g.hydrateActor(actor)
 				ctx := context.Background()
@@ -344,11 +347,18 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 				return ctx, nil
 			}
 		}
+		g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_not_found", token, false)
 		return nil, g.newRuntimeError(ErrCodeContextNotFound, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
 	}
-	if RequireContextToken() {
+	if !toolAllowsContextFallback(toolName) {
+		g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_missing", "", false)
 		return nil, g.newRuntimeError(ErrCodeContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
 	}
+	if RequireContextToken() {
+		g.logContextFallback(r, "mcp.context.fallback_blocked", toolName, "token_missing", "", false)
+		return nil, g.newRuntimeError(ErrCodeContextMissing, "mcp.context.resolve", false, nil, "missing or invalid mcp context token")
+	}
+	g.logContextFallback(r, "mcp.context.fallback_used", toolName, "token_missing", "", true)
 	actor, ok := ActorFromRequest(r)
 	if !ok {
 		return nil, g.newRuntimeError(ErrCodeActorMissing, "mcp.context.resolve", false, nil, "missing actor id for mcp tool execution")
@@ -363,6 +373,109 @@ func (g *Gateway) mcpExecutionContext(r *http.Request) (context.Context, error) 
 	}
 	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
 	return ctx, nil
+}
+
+func (g *Gateway) toolExecutionContext(r *http.Request, actor models.AgentConfig, toolName string) (context.Context, error) {
+	toolName = normalizeGatewayToolName(toolName)
+	if token := ContextTokenFromRequest(r); token != "" {
+		if g.hooks.ResolveTurnContext != nil {
+			if turn, ok := g.hooks.ResolveTurnContext(token); ok {
+				if g.hooks.IsCurrentRuntimeEpoch != nil && !g.hooks.IsCurrentRuntimeEpoch(turn.Epoch) {
+					return nil, g.newRuntimeError(ErrCodeContextStale, "tool.context.resolve", false, nil, "stale mcp context token")
+				}
+				ctx := r.Context()
+				if g.hooks.WithActor != nil {
+					ctx = g.hooks.WithActor(ctx, g.hydrateActor(turn.Actor))
+				}
+				if g.hooks.WithRuntimeEpoch != nil {
+					ctx = g.hooks.WithRuntimeEpoch(ctx, turn.Epoch)
+				}
+				ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(turn.Inbound.RunID))
+				ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
+				if turn.HasInbound && g.hooks.WithInboundEvent != nil {
+					ctx = g.hooks.WithInboundEvent(ctx, turn.Inbound)
+				}
+				if turn.Recorder != nil && g.hooks.WithEmittedEventsRecorder != nil {
+					ctx = g.hooks.WithEmittedEventsRecorder(ctx, turn.Recorder)
+				}
+				return ctx, nil
+			}
+		}
+		if AllowContextFallbackOnMiss() && toolAllowsContextFallback(toolName) {
+			g.logContextFallback(r, "tool.context.fallback_used", toolName, "token_not_found", token, true)
+			ctx := r.Context()
+			if g.hooks.WithActor != nil {
+				ctx = g.hooks.WithActor(ctx, actor)
+			}
+			if g.hooks.WithCurrentRuntimeEpoch != nil {
+				ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
+			}
+			ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
+			return ctx, nil
+		}
+		g.logContextFallback(r, "tool.context.fallback_blocked", toolName, "token_not_found", token, false)
+		return nil, g.newRuntimeError(ErrCodeContextNotFound, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
+	}
+	if !toolAllowsContextFallback(toolName) {
+		g.logContextFallback(r, "tool.context.fallback_blocked", toolName, "token_missing", "", false)
+		return nil, g.newRuntimeError(ErrCodeContextMissing, "tool.context.resolve", false, nil, "missing or invalid mcp context token")
+	}
+	g.logContextFallback(r, "tool.context.fallback_used", toolName, "token_missing", "", true)
+	ctx := r.Context()
+	if g.hooks.WithActor != nil {
+		ctx = g.hooks.WithActor(ctx, actor)
+	}
+	if g.hooks.WithCurrentRuntimeEpoch != nil {
+		ctx = g.hooks.WithCurrentRuntimeEpoch(ctx)
+	}
+	ctx = runtimecorrelation.WithTraceID(ctx, TraceIDFromRequest(r))
+	return ctx, nil
+}
+
+func normalizeGatewayToolName(name string) string {
+	name = strings.TrimSpace(name)
+	if strings.HasPrefix(name, "mcp__runtime-tools__") {
+		name = strings.TrimPrefix(name, "mcp__runtime-tools__")
+	}
+	switch name {
+	case "Bash":
+		return "bash"
+	case "WebSearch":
+		return "web_search"
+	case "Read":
+		return "read_file"
+	case "Write", "Edit":
+		return "write_file"
+	default:
+		return name
+	}
+}
+
+func toolAllowsContextFallback(toolName string) bool {
+	switch normalizeGatewayToolName(toolName) {
+	case "get_entity", "query_entities", "search_entities", "query_metrics", "read_file", "web_search":
+		return true
+	default:
+		return false
+	}
+}
+
+func (g *Gateway) logContextFallback(r *http.Request, action, toolName, reason, token string, used bool) {
+	if g == nil || r == nil {
+		return
+	}
+	g.logMCP(r, "warn", action, nil, map[string]any{
+		"tool_name":          strings.TrimSpace(toolName),
+		"reason":             strings.TrimSpace(reason),
+		"context_token":      strings.TrimSpace(token),
+		"fallback_used":      used,
+		"fallback_allowed":   toolAllowsContextFallback(toolName),
+		"require_ctx_token":  RequireContextToken(),
+		"fallback_on_miss":   AllowContextFallbackOnMiss(),
+		"request_path":       strings.TrimSpace(r.URL.Path),
+		"request_method":     strings.TrimSpace(r.Method),
+		"request_trace_id":   TraceIDFromRequest(r),
+	})
 }
 
 func emitTurnDedupeKey(toolName string, arguments any) string {
@@ -522,7 +635,17 @@ func (g *Gateway) newRuntimeError(code, operation string, retryable bool, cause 
 	if g != nil && g.hooks.NewRuntimeError != nil {
 		return g.hooks.NewRuntimeError(code, operation, retryable, cause, format, args...)
 	}
-	return cause
+	message := strings.TrimSpace(fmt.Sprintf(format, args...))
+	if message == "" && cause != nil {
+		message = strings.TrimSpace(cause.Error())
+	}
+	if message == "" {
+		message = strings.TrimSpace(code)
+	}
+	if cause != nil {
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 func asString(v any) string {

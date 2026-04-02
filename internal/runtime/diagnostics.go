@@ -91,6 +91,40 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 	_ = logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, level, component, action, e, detail)
 }
 
+func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, detail any, err error) {
+	if l == nil {
+		return
+	}
+	errText := ""
+	if err != nil {
+		errText = strings.TrimSpace(err.Error())
+	}
+	l.Log(ctx, RuntimeLogEntry{
+		Level:     "warn",
+		Component: strings.TrimSpace(component),
+		Action:    strings.TrimSpace(action),
+		Detail:    detail,
+		Error:     errText,
+	})
+}
+
+func (l *RuntimeLogger) Error(ctx context.Context, component, action string, detail any, err error) {
+	if l == nil {
+		return
+	}
+	errText := ""
+	if err != nil {
+		errText = strings.TrimSpace(err.Error())
+	}
+	l.Log(ctx, RuntimeLogEntry{
+		Level:     "error",
+		Component: strings.TrimSpace(component),
+		Action:    strings.TrimSpace(action),
+		Detail:    detail,
+		Error:     errText,
+	})
+}
+
 type PipelineTransitionInput struct {
 	EventID      string
 	EventType    string
@@ -175,7 +209,7 @@ func appendDeferredPipelineTransition(ctx context.Context, item deferredPipeline
 func flushDeferredPipelineTransitions(ctx context.Context, deferred []deferredPipelineTransition) {
 	for _, item := range deferred {
 		if err := RecordPipelineTransition(ctx, item.db, item.input); err != nil {
-			runtimeWarn(
+			processWarn(
 				"diagnostics",
 				"failed to persist deferred pipeline transition event_id=%s event_type=%s pipeline_id=%s: %v",
 				strings.TrimSpace(item.input.EventID),
@@ -282,8 +316,12 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	detailMap := map[string]any{}
 	_ = json.Unmarshal(detail, &detailMap)
 	traceID := strings.TrimSpace(runtimecorrelation.TraceIDFromContext(ctx))
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if traceID == "" {
 		traceID = strings.TrimSpace(asString(detailMap["trace_id"]))
+	}
+	if runID == "" {
+		runID = strings.TrimSpace(asString(detailMap["run_id"]))
 	}
 	parentEventID := strings.TrimSpace(asString(detailMap["parent_event_id"]))
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
@@ -299,6 +337,7 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 		"agent_id":        strings.TrimSpace(e.AgentID),
 		"entity_id":       strings.TrimSpace(e.EffectiveEntityID()),
 		"session_id":      strings.TrimSpace(e.SessionID),
+		"run_id":          runID,
 		"trace_id":        traceID,
 		"parent_event_id": parentEventID,
 		"handler_id":      handlerID,
@@ -309,6 +348,19 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
+		return err
+	}
+	if runtimeColumnExists(ctx, db, "events", "run_id") {
+		_, err = db.ExecContext(ctx, `
+			INSERT INTO events (
+				run_id, event_id, event_name, entity_id, flow_instance, scope, payload,
+				chain_depth, trace_id, produced_by, produced_by_type, source_event_id, created_at
+			)
+			VALUES (
+				NULLIF($1,'')::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb,
+				0, NULLIF($3,''), 'runtime', 'platform', NULLIF($4,'')::uuid, now()
+			)
+		`, runID, string(encoded), traceID, parentEventID)
 		return err
 	}
 	_, err = db.ExecContext(ctx, `
@@ -325,6 +377,23 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 		return err
 	}
 	return nil
+}
+
+func runtimeColumnExists(ctx context.Context, db *sql.DB, tableName, columnName string) bool {
+	if db == nil {
+		return false
+	}
+	var exists bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_name = $1 AND column_name = $2
+		)
+	`, strings.TrimSpace(tableName), strings.TrimSpace(columnName)).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
 }
 
 func recordPipelineTransitionSpec(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {

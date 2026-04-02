@@ -20,6 +20,10 @@ type systemNodeBus interface {
 	Publish(ctx context.Context, evt events.Event) error
 }
 
+type systemNodeRuntimeLogger interface {
+	LogRuntime(context.Context, RuntimeLogEntry)
+}
+
 type systemNodeRunner struct {
 	nodeID string
 	bus    systemNodeBus
@@ -208,7 +212,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	if n.db != nil {
-		_ = runtimedeadletters.Insert(ctx, n.db, runtimedeadletters.Record{
+		if err := runtimedeadletters.Insert(ctx, n.db, runtimedeadletters.Record{
 			OriginalEventID: strings.TrimSpace(evt.ID),
 			OriginalEvent:   strings.TrimSpace(string(evt.Type)),
 			OriginalPayload: evt.Payload,
@@ -218,7 +222,20 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 			RetryCount:      retryCount,
 			ChainDepth:      evt.ChainDepth,
 			HandlerNode:     n.nodeID,
-		})
+		}); err != nil {
+			slog.Error("system node dead letter persist failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
+			if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+				logger.LogRuntime(ctx, RuntimeLogEntry{
+					Level:     "error",
+					Component: n.nodeID,
+					Action:    "dead_letter_persist_failed",
+					EventID:   strings.TrimSpace(evt.ID),
+					EventType: strings.TrimSpace(string(evt.Type)),
+					EntityID:  workflowEventEntityID(evt),
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
+		}
 	}
 	if err := n.bus.Publish(ctx, (events.Event{
 		ID:          uuid.NewString(),
@@ -227,7 +244,18 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),
 	}).WithEntityID(workflowEventEntityID(evt))); err != nil {
-		slog.Warn("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
+		slog.Error("system node dead letter publish failed", "node_id", n.nodeID, "event_id", strings.TrimSpace(evt.ID), "error", err)
+		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Component: n.nodeID,
+				Action:    "dead_letter_publish_failed",
+				EventID:   strings.TrimSpace(evt.ID),
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
 	}
 }
 
@@ -304,7 +332,18 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 		VALUES ($1::uuid, $2, now())
 		ON CONFLICT (event_id, node_id) DO NOTHING
 	`, eventID, n.nodeID); err != nil {
-		slog.Warn("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		slog.Error("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
+		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
+			logger.LogRuntime(ctx, RuntimeLogEntry{
+				Level:     "error",
+				Component: n.nodeID,
+				Action:    "mark_processed_failed",
+				EventID:   eventID,
+				EventType: strings.TrimSpace(string(evt.Type)),
+				EntityID:  workflowEventEntityID(evt),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
 	}
 }
 

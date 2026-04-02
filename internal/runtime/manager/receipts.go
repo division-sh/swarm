@@ -12,6 +12,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimedeadletters "swarm/internal/runtime/deadletters"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimerterr "swarm/internal/runtime/rterrors"
 )
 
@@ -44,10 +45,22 @@ func (am *AgentManager) processEvent(ctx context.Context, agent Agent, evt event
 		return nil
 	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID))
 	ctx = runtimecorrelation.WithTraceID(ctx, strings.TrimSpace(evt.TraceID))
 	if writer, ok := am.store.(deliveryProgressWriter); ok && writer != nil {
 		if err := writer.MarkEventDeliveryInProgress(ctx, evt.ID, agent.ID(), ""); err != nil {
-			RuntimeWarn("agent-manager", "mark delivery in progress failed agent=%s event=%s err=%v", agent.ID(), strings.TrimSpace(evt.ID), err)
+			if am.bus != nil {
+				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "mark_delivery_in_progress_failed",
+					EventID:   strings.TrimSpace(evt.ID),
+					EventType: strings.TrimSpace(string(evt.Type)),
+					AgentID:   agent.ID(),
+					EntityID:  strings.TrimSpace(evt.EntityID()),
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 		}
 	}
 	out, err := agent.OnEvent(ctx, evt)
@@ -242,6 +255,19 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 
 	runtimebus.PauseRuntimeIngress()
 	log.Printf("runtime pause breaker tripped: reason=%s agent=%s event=%s err=%v", reason, agentID, eventID, err)
+	if am.bus != nil {
+		am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+			Level:     "error",
+			Component: "agent-manager",
+			Action:    "runtime_pause_breaker_tripped",
+			EventID:   strings.TrimSpace(eventID),
+			AgentID:   strings.TrimSpace(agentID),
+			Error:     strings.TrimSpace(err.Error()),
+			Detail: map[string]any{
+				"reason": reason,
+			},
+		})
+	}
 	now := time.Now().UTC()
 	entityID := ""
 	flowInstance := ""
@@ -268,7 +294,17 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 			CreatedAt: now,
 		}.WithEntityID(entityID)
 		if err := am.bus.Publish(am.runtimeContext(), authEvt); err != nil {
-			RuntimeWarn("agent-manager", "platform.auth_required publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
+			if am.bus != nil {
+				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "publish_auth_required_failed",
+					EventID:   strings.TrimSpace(eventID),
+					AgentID:   strings.TrimSpace(agentID),
+					EntityID:  entityID,
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 		}
 	}
 	if err := am.bus.Publish(am.runtimeContext(), events.Event{
@@ -282,7 +318,20 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 		}),
 		CreatedAt: now,
 	}); err != nil {
-		RuntimeWarn("agent-manager", "platform.paused publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
+		if am.bus != nil {
+			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "publish_paused_failed",
+				EventID:   strings.TrimSpace(eventID),
+				AgentID:   strings.TrimSpace(agentID),
+				EntityID:  entityID,
+				Error:     strings.TrimSpace(err.Error()),
+				Detail: map[string]any{
+					"reason": reason,
+				},
+			})
+		}
 	}
 	if running {
 		_ = am.Shutdown()
@@ -319,6 +368,19 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 			err = retryErr
 		}
 		log.Printf("receipt write failed event=%s agent=%s status=%s err=%v", eventID, agentID, status, err)
+		if am.bus != nil {
+			am.bus.LogRuntime(writeCtx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "receipt_write_failed",
+				EventID:   strings.TrimSpace(eventID),
+				AgentID:   strings.TrimSpace(agentID),
+				Error:     strings.TrimSpace(err.Error()),
+				Detail: map[string]any{
+					"status": strings.TrimSpace(string(status)),
+				},
+			})
+		}
 		return
 	}
 
@@ -341,16 +403,6 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	if ReceiptStatus(strings.TrimSpace(string(receipt.Status))) != ReceiptStatusDeadLetter {
 		return
 	}
-	if recorder, ok := am.store.(deadLetterRecorder); ok && recorder != nil {
-		_ = recorder.RecordDeadLetter(ctx, runtimedeadletters.Record{
-			OriginalEventID: eventID,
-			FailureType:     "retry_exhausted",
-			ErrorMessage:    strings.TrimSpace(receipt.Error),
-			RetryCount:      receipt.RetryCount,
-			HandlerNode:     agentID,
-		})
-	}
-
 	am.mu.RLock()
 	cfg, cfgOK := am.agentCfg[agentID]
 	am.mu.RUnlock()
@@ -359,6 +411,27 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 	if cfgOK {
 		entityID = cfg.EffectiveEntityID()
 		flowInstance = flowPathFromAgentConfig(cfg)
+	}
+	if recorder, ok := am.store.(deadLetterRecorder); ok && recorder != nil {
+		if err := recorder.RecordDeadLetter(ctx, runtimedeadletters.Record{
+			OriginalEventID: eventID,
+			FailureType:     "retry_exhausted",
+			ErrorMessage:    strings.TrimSpace(receipt.Error),
+			RetryCount:      receipt.RetryCount,
+			HandlerNode:     agentID,
+		}); err != nil {
+			if am.bus != nil {
+				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "record_dead_letter_failed",
+					EventID:   strings.TrimSpace(eventID),
+					AgentID:   strings.TrimSpace(agentID),
+					EntityID:  entityID,
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
+		}
 	}
 	count, sampleEvents, shouldEmit := am.recordDeadLetterEscalation(flowInstance, deadLetterEscalationSample{
 		at:         time.Now().UTC(),
@@ -385,7 +458,20 @@ func (am *AgentManager) maybeEscalateDeadLetter(ctx context.Context, eventID, ag
 		}),
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
-		RuntimeWarn("agent-manager", "platform.dead_letter_escalation publish failed agent=%s event=%s err=%v", strings.TrimSpace(agentID), strings.TrimSpace(eventID), err)
+		if am.bus != nil {
+			am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "dead_letter_escalation_publish_failed",
+				EventID:   strings.TrimSpace(eventID),
+				AgentID:   strings.TrimSpace(agentID),
+				EntityID:  entityID,
+				Error:     strings.TrimSpace(err.Error()),
+				Detail: map[string]any{
+					"flow_instance": flowInstance,
+				},
+			})
+		}
 	}
 }
 

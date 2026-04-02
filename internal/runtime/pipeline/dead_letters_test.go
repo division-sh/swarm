@@ -161,6 +161,82 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}
 }
 
+func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"node-a": {
+					"score.dimension_complete": {
+						Rules: []runtimecontracts.HandlerRuleEntry{
+							{Condition: "payload.score >=", Emits: runtimecontracts.EventEmission{Single: "vertical.shortlisted"}},
+						},
+					},
+				},
+			},
+		},
+	}
+	pc := NewPipelineCoordinatorWithOptions(previewBus{}, db, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{
+			bundle: bundle,
+			workflowNodes: []WorkflowNode{
+				{
+					ID: "node-a",
+					Policies: map[string]WorkflowEventPolicy{
+						"score.dimension_complete": {Consume: true},
+					},
+				},
+			},
+		},
+	})
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		Type:        events.EventType("score.dimension_complete"),
+		SourceAgent: "analysis-agent",
+		Payload:     []byte(`{"entity_id":"` + uuid.NewString() + `","dimension":"expansion_potential","score":74,"tier":3}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(uuid.NewString())
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2, NULLIF($3,'')::uuid, 'runtime', 'entity', $4::jsonb, 'analysis-agent', 'agent', now())
+	`, evt.ID, string(evt.Type), evt.EntityID(), string(evt.Payload)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+	postCommit := make([]func(), 0, 1)
+	override := &PipelineReceiptOverride{}
+	ctx := WithPipelinePostCommitActions(context.Background(), &postCommit)
+	ctx = WithPipelineReceiptOverride(ctx, override)
+
+	passthrough, _, err := pc.Intercept(ctx, evt)
+	if err != nil {
+		t.Fatalf("Intercept error = %v, want nil", err)
+	}
+	if passthrough {
+		t.Fatal("Intercept passthrough = true, want false for consumed handler error")
+	}
+	status, errText, ok := PipelineReceiptOverrideFromContext(ctx)
+	if !ok || status != "dead_letter" || strings.TrimSpace(errText) == "" {
+		t.Fatalf("receipt override = (%q, %q, %v), want dead_letter with error", status, errText, ok)
+	}
+	flushPipelinePostCommitActions(postCommit)
+
+	var (
+		failureType string
+		handlerNode string
+		errorText   string
+	)
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT failure_type, COALESCE(handler_node, ''), COALESCE(error_message, '')
+		FROM dead_letters
+		WHERE original_event_id = $1::uuid
+	`, evt.ID).Scan(&failureType, &handlerNode, &errorText); err != nil {
+		t.Fatalf("query dead_letters: %v", err)
+	}
+	if failureType != "handler_error" || handlerNode != "node-a" || strings.TrimSpace(errorText) == "" {
+		t.Fatalf("dead_letter row = type=%q handler=%q error=%q", failureType, handlerNode, errorText)
+	}
+}
+
 type deadLetterTestBus struct{}
 
 func (deadLetterTestBus) Subscribe(string, ...events.EventType) <-chan events.Event {

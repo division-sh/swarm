@@ -65,7 +65,7 @@ func extractSystemPromptFromConfig(raw json.RawMessage) string {
 	return ExtractSystemPromptFromConfig(raw)
 }
 
-func withSystemPrompt(raw json.RawMessage, prompt string) json.RawMessage {
+func withSystemPrompt(raw json.RawMessage, prompt string) (json.RawMessage, error) {
 	return WithSystemPrompt(raw, prompt)
 }
 

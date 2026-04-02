@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -179,7 +178,12 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			return nil, err
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
-		stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, resolved.RuntimeMode)
+		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
+			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", s.AgentID, s.ID, entityID, map[string]any{
+				"runtime_mode": resolved.RuntimeMode,
+				"scope_key":    resolved.ScopeKey,
+			}, heartbeatErr)
+		})
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
@@ -398,7 +402,10 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		oldSessionID := strings.TrimSpace(s.ProviderSessionID)
 		if !resolved.Stateless {
 			if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, lease.LockOwner, sid, resolved.ScopeKey); err != nil {
-				log.Printf("failed to adopt claude session id: agent=%s old=%s new=%s err=%v", s.AgentID, oldSessionID, sid, err)
+				logPublisherRuntime(ctx, r.events, "warn", "adopt_cli_provider_session_failed", s.AgentID, s.ID, entityID, map[string]any{
+					"old_provider_session_id": oldSessionID,
+					"new_provider_session_id": sid,
+				}, err)
 			} else {
 				s.ProviderSessionID = sid
 				LogSessionAdopted(s.AgentID, resolved.RuntimeMode, oldSessionID, sid, resolved.ScopeKey)
@@ -439,7 +446,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "cli_test", usage, false, map[string]any{
 			"session_id": s.ID,
 		}); err != nil {
-			log.Printf("failed to record cli llm usage: agent=%s session=%s err=%v", s.AgentID, s.ID, err)
+			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}
 

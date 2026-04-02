@@ -64,6 +64,29 @@ func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before tim
 	return s.purgeInboundEventsSpec(ctx, before, limit)
 }
 
+func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID, entityID, provider string) error {
+	if strings.TrimSpace(providerEventID) == "" {
+		return fmt.Errorf("provider_event_id is required")
+	}
+	if strings.TrimSpace(entityID) == "" {
+		return fmt.Errorf("entity_id is required")
+	}
+	if strings.TrimSpace(provider) == "" {
+		return fmt.Errorf("provider is required")
+	}
+	idempotencyKey := inboundEventIdempotencyKey(providerEventID, entityID, provider)
+	_, err := s.DB.ExecContext(ctx, `
+		DELETE FROM events
+		WHERE idempotency_key = $1
+		  AND event_name = 'platform.inbound_recorded'
+		  AND entity_id IS NOT DISTINCT FROM NULLIF($2,'')::uuid
+	`, idempotencyKey, entityID)
+	if err != nil {
+		return fmt.Errorf("delete inbound event marker: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {

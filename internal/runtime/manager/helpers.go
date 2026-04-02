@@ -3,7 +3,6 @@ package manager
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 
@@ -104,18 +103,6 @@ func NormalizeStringList(in []string) []string {
 	return out
 }
 
-func RuntimeWarn(component string, format string, args ...any) {
-	component = strings.TrimSpace(component)
-	if component == "" {
-		component = "runtime"
-	}
-	msg := strings.TrimSpace(fmt.Sprintf(format, args...))
-	if msg == "" {
-		return
-	}
-	log.Printf("runtime.warn component=%s message=%s", component, msg)
-}
-
 func MustJSON(v any) []byte {
 	raw, err := json.Marshal(v)
 	if err != nil || len(raw) == 0 {
@@ -188,21 +175,26 @@ func ExtractSystemPromptFromConfig(raw json.RawMessage) string {
 	return strings.TrimSpace(v)
 }
 
-func WithSystemPrompt(raw json.RawMessage, prompt string) json.RawMessage {
+func WithSystemPrompt(raw json.RawMessage, prompt string) (json.RawMessage, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		return raw
+		return raw, nil
 	}
 	obj := map[string]any{}
 	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &obj)
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return nil, fmt.Errorf("with system prompt: invalid agent config json: %w", err)
+		}
 	}
 	obj["system_prompt"] = prompt
 	b, err := json.Marshal(obj)
 	if err != nil || len(b) == 0 {
-		return json.RawMessage([]byte("{}"))
+		if err != nil {
+			return nil, fmt.Errorf("with system prompt: marshal updated config: %w", err)
+		}
+		return json.RawMessage([]byte("{}")), nil
 	}
-	return json.RawMessage(b)
+	return json.RawMessage(b), nil
 }
 
 func ExpandConfigPromptTemplate(prompt string, raw json.RawMessage) string {

@@ -23,7 +23,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, inte
 	})
 }
 
-func newRuntimePayloadValidator(strict bool) runtimebus.PayloadValidator {
+func newRuntimePayloadValidator(strict bool, logger *RuntimeLogger) runtimebus.PayloadValidator {
 	return func(eventType string, payload []byte) error {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
@@ -46,6 +46,11 @@ func newRuntimePayloadValidator(strict bool) runtimebus.PayloadValidator {
 				"event_type", eventType,
 				"error", err.Error(),
 			)
+			if logger != nil {
+				logger.Warn(context.Background(), "event-bus", "payload_validation_json_invalid", map[string]any{
+					"event_type": eventType,
+				}, err)
+			}
 			return nil
 		}
 		if err := runtimetools.ValidatePayloadAgainstSchema(schema.Schema, decoded); err != nil {
@@ -56,6 +61,11 @@ func newRuntimePayloadValidator(strict bool) runtimebus.PayloadValidator {
 				"event_type", eventType,
 				"error", err.Error(),
 			)
+			if logger != nil {
+				logger.Warn(context.Background(), "event-bus", "payload_validation_warning", map[string]any{
+					"event_type": eventType,
+				}, err)
+			}
 		}
 		return nil
 	}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -158,7 +157,12 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			return nil, err
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
-		stopLeaseHeartbeat := sessions.StartLeaseHeartbeat(ctx, r.sessions, lease, resolved.RuntimeMode)
+		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
+			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", s.AgentID, s.ID, entityID, map[string]any{
+				"runtime_mode": resolved.RuntimeMode,
+				"scope_key":    resolved.ScopeKey,
+			}, heartbeatErr)
+		})
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
@@ -268,7 +272,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "api", usage, true, map[string]any{
 			"session_id": s.ID,
 		}); err != nil {
-			log.Printf("failed to record api llm usage: agent=%s session=%s err=%v", s.AgentID, s.ID, err)
+			logPublisherRuntime(ctx, r.events, "warn", "record_api_llm_usage_failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}
 
@@ -302,7 +306,10 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 		TurnCount: s.TurnCount,
 		Status:    "active",
 	}); err != nil {
-		log.Printf("failed to persist api conversation: agent=%s err=%v", s.AgentID, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_api_conversation_failed", s.AgentID, s.ID, "", map[string]any{
+			"conversation_mode": mode,
+			"scope_key":         strings.TrimSpace(s.ScopeKey),
+		}, err)
 	}
 }
 
@@ -312,7 +319,7 @@ func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRec
 	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
 		// Turn telemetry should not break runtime path.
-		log.Printf("failed to persist agent turn: agent=%s session=%s err=%v", turn.AgentID, turn.SessionID, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_api_turn_failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
 	}
 }
 

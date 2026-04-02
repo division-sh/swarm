@@ -5,11 +5,14 @@ import (
 	"testing"
 	"time"
 
+	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
+	runtimeregistry "swarm/internal/runtime/core/registry"
 	"swarm/internal/runtime/core/values"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/testutil"
 )
 
 func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *testing.T) {
@@ -161,6 +164,85 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 	}
 	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
 		t.Fatalf("entity_projection scoring_rubric = %#v", got)
+	}
+}
+
+func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	pc := &PipelineCoordinator{
+		workflowStore: NewWorkflowInstanceStore(db),
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					Name:    "empire",
+					Version: "1.0.0",
+				},
+			},
+		},
+	}
+
+	err := pc.updateEntityState(context.Background(), "11111111-1111-1111-1111-111111111111", "marginal_review", "scoring/vertical.marginal")
+	if err == nil {
+		t.Fatal("expected updateEntityState to fail when workflow store mutate fails")
+	}
+}
+
+func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	pc := &PipelineCoordinator{
+		workflowStore: NewWorkflowInstanceStore(db),
+	}
+
+	err := pc.recordWorkflowEvidence(context.Background(), "11111111-1111-1111-1111-111111111111", "research", map[string]any{"summary": "done"})
+	if err == nil {
+		t.Fatal("expected recordWorkflowEvidence to fail when workflow store mutate fails")
+	}
+}
+
+func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	pc := &PipelineCoordinator{
+		workflowStore: NewWorkflowInstanceStore(db),
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+						"node-a": {
+							"research.completed": {
+								Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+								EvidenceTarget: "research",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	runner := pipelineEngineActionRunner{coordinator: pc}
+	ok, err := runner.ExecuteAction(context.Background(), runtimecontracts.ActionSpec{ID: "record_evidence"}, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
+		Request: runtimeengine.ExecutionRequest{
+			EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+			NodeID:   identity.NormalizeNodeID("node-a"),
+			Event: (events.Event{
+				Type:    "research.completed",
+				Payload: []byte(`{"summary":"done"}`),
+			}).WithEntityID("11111111-1111-1111-1111-111111111111"),
+		},
+	})
+	if !ok {
+		t.Fatal("expected record_evidence action to be claimed")
+	}
+	if err == nil {
+		t.Fatal("expected record_evidence action to return mutation error")
 	}
 }
 

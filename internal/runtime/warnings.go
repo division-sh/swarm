@@ -7,9 +7,9 @@ import (
 	"sync"
 )
 
-var runtimeWarnOnceSeen sync.Map
+var processWarnOnceSeen sync.Map
 
-func runtimeWarn(component string, format string, args ...any) {
+func processWarn(component string, format string, args ...any) {
 	component = strings.TrimSpace(component)
 	if component == "" {
 		component = "runtime"
@@ -21,16 +21,16 @@ func runtimeWarn(component string, format string, args ...any) {
 	log.Printf("runtime.warn component=%s message=%s", component, msg)
 }
 
-func runtimeWarnOnce(key, component string, format string, args ...any) {
+func processWarnOnce(key, component string, format string, args ...any) {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		runtimeWarn(component, format, args...)
+		processWarn(component, format, args...)
 		return
 	}
-	if _, loaded := runtimeWarnOnceSeen.LoadOrStore(key, struct{}{}); loaded {
+	if _, loaded := processWarnOnceSeen.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
-	runtimeWarn(component, format, args...)
+	processWarn(component, format, args...)
 }
 
 func summarizeLogList(values []string, max int) string {

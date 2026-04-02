@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -11,22 +12,56 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/sessions"
 )
 
 type eventPublisherStub struct {
-	events []events.Event
-	marks  []string
+	events      []events.Event
+	marks       []string
+	runtimeLogs []runtimepipeline.RuntimeLogEntry
+	publishErr  error
+	markErr     error
 }
 
 func (s *eventPublisherStub) Publish(_ context.Context, evt events.Event) error {
+	if s.publishErr != nil {
+		return s.publishErr
+	}
 	s.events = append(s.events, evt)
 	return nil
 }
 
 func (s *eventPublisherStub) MarkDeliveryInProgress(_ context.Context, agentID, sessionID string) error {
+	if s.markErr != nil {
+		return s.markErr
+	}
 	s.marks = append(s.marks, strings.TrimSpace(agentID)+"|"+strings.TrimSpace(sessionID))
 	return nil
+}
+
+func (s *eventPublisherStub) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) {
+	s.runtimeLogs = append(s.runtimeLogs, entry)
+}
+
+type failingConversationStore struct {
+	err error
+}
+
+func (s *failingConversationStore) UpsertConversation(context.Context, ConversationRecord) error {
+	return s.err
+}
+
+func (s *failingConversationStore) LoadActiveConversation(context.Context, string, string, string) (ConversationRecord, bool, error) {
+	return ConversationRecord{}, false, nil
+}
+
+type failingTurnStore struct {
+	err error
+}
+
+func (s *failingTurnStore) AppendAgentTurn(context.Context, AgentTurnRecord) error {
+	return s.err
 }
 
 func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
@@ -170,6 +205,72 @@ func TestClaudeCLIRuntime_PersistTurnIncludesTaskMode(t *testing.T) {
 	}
 	if turns.records[0].RuntimeMode != sessions.RuntimeModeTask {
 		t.Fatalf("runtime_mode = %q, want task", turns.records[0].RuntimeMode)
+	}
+}
+
+func TestPublishAgentStarted_LogsRuntimeFailures(t *testing.T) {
+	publisher := &eventPublisherStub{
+		markErr:    errors.New("mark boom"),
+		publishErr: errors.New("publish boom"),
+	}
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
+		ID:       "agent-1",
+		EntityID: "entity-1",
+	})
+
+	publishAgentStarted(ctx, publisher, &Session{
+		ID:                "session-1",
+		AgentID:           "agent-1",
+		ConversationMode:  sessions.RuntimeModeTask,
+		RuntimeMode:       sessions.RuntimeModeTask,
+		ProviderSessionID: "provider-1",
+	}, events.EventType("platform.agent_started"))
+
+	if len(publisher.runtimeLogs) != 2 {
+		t.Fatalf("runtime log count = %d, want 2", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "mark_delivery_in_progress_failed" {
+		t.Fatalf("first action = %q", publisher.runtimeLogs[0].Action)
+	}
+	if publisher.runtimeLogs[1].Action != "publish_agent_started_failed" {
+		t.Fatalf("second action = %q", publisher.runtimeLogs[1].Action)
+	}
+}
+
+func TestClaudeCLIRuntime_PersistTurnFailureLogsRuntime(t *testing.T) {
+	publisher := &eventPublisherStub{}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", &failingTurnStore{err: errors.New("turn boom")}, nil, nil, nil, publisher)
+
+	runtime.persistTurn(context.Background(), AgentTurnRecord{
+		AgentID:   "agent-2",
+		SessionID: "session-2",
+		EntityID:  "entity-2",
+	})
+
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "persist_cli_turn_failed" {
+		t.Fatalf("action = %q", publisher.runtimeLogs[0].Action)
+	}
+}
+
+func TestAnthropicAPIRuntime_PersistConversationFailureLogsRuntime(t *testing.T) {
+	publisher := &eventPublisherStub{}
+	runtime := NewAnthropicAPIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, &failingConversationStore{err: errors.New("conversation boom")}, nil, publisher)
+
+	runtime.persistConversation(context.Background(), &Session{
+		ID:               "session-3",
+		AgentID:          "agent-3",
+		ConversationMode: sessions.RuntimeModeTask,
+		ScopeKey:         "task-3",
+	})
+
+	if len(publisher.runtimeLogs) != 1 {
+		t.Fatalf("runtime log count = %d, want 1", len(publisher.runtimeLogs))
+	}
+	if publisher.runtimeLogs[0].Action != "persist_api_conversation_failed" {
+		t.Fatalf("action = %q", publisher.runtimeLogs[0].Action)
 	}
 }
 

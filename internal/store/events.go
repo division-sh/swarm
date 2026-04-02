@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -463,7 +464,7 @@ func shouldFallbackLegacyEventsSchema(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `event_id`) ||
+	fallback := strings.Contains(msg, `event_id`) ||
 		strings.Contains(msg, `run_id`) ||
 		strings.Contains(msg, `event_name`) ||
 		strings.Contains(msg, `produced_by`) ||
@@ -480,6 +481,10 @@ func shouldFallbackLegacyEventsSchema(err error) bool {
 		strings.Contains(msg, `duration_ms`) ||
 		strings.Contains(msg, `relation "event_receipts" does not exist`) ||
 		strings.Contains(msg, `relation "event_deliveries" does not exist`)
+	if fallback {
+		log.Printf("store legacy schema fallback triggered err=%v", err)
+	}
+	return fallback
 }
 
 func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {

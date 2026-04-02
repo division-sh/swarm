@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -165,7 +166,7 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		callCount++
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{})
+	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
 
 	PutTurnContextForTest("ctx-emit-gateway", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -210,5 +211,212 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	}
 	if !strings.Contains(duplicate.Body.String(), "duplicate emit already executed this turn") {
 		t.Fatalf("duplicate body = %s", duplicate.Body.String())
+	}
+}
+
+func TestGatewayHandleMCP_RejectsMutatingToolWhenContextTokenMisses(t *testing.T) {
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "emit_score_dimension_complete",
+			"arguments": map[string]any{"dimension": "build_complexity", "score": 72},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestGatewayMCPExecutionContext_RejectsPrefixedMutatingToolOnContextMiss(t *testing.T) {
+	g := NewGateway(nil, "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", nil)
+	if _, err := g.mcpExecutionContext(req, "mcp__runtime-tools__emit_score_dimension_complete"); err == nil {
+		t.Fatal("expected context miss error for prefixed mutating tool")
+	}
+}
+
+func TestGatewayHandleMCP_AllowsReadOnlyToolWhenContextTokenMisses(t *testing.T) {
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "mcp__runtime-tools__query_entities",
+			"arguments": map[string]any{"query": "kind = 'vertical'"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if callCount != 1 {
+		t.Fatalf("executor call count = %d, want 1", callCount)
+	}
+	if strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) {
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+
+	body, err := json.Marshal(ToolGatewayRequest{
+		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Input: map[string]any{"dimension": "build_complexity", "score": 72},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", callCount)
+	}
+	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestGatewayHandleTool_AllowsReadOnlyToolWithoutContextToken(t *testing.T) {
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+
+	body, err := json.Marshal(ToolGatewayRequest{
+		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Input: map[string]any{"query": "kind = 'vertical'"},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tools/query_entities", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if callCount != 1 {
+		t.Fatalf("executor call count = %d, want 1", callCount)
+	}
+}
+
+func TestGatewayHandleMCP_LogsFallbackUsedReason(t *testing.T) {
+	var actions []string
+	var reasons []string
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{
+		ResolveTurnContext: ResolveTurnContext,
+		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+			actions = append(actions, action)
+			if reason, _ := detail["reason"].(string); strings.TrimSpace(reason) != "" {
+				reasons = append(reasons, strings.TrimSpace(reason))
+			}
+		},
+	})
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "mcp__runtime-tools__query_entities",
+			"arguments": map[string]any{"query": "kind = 'vertical'"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=missing&agent_id=analysis-agent&agent_role=analysis", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !slices.Contains(actions, "mcp.context.fallback_used") {
+		t.Fatalf("actions = %#v, want mcp.context.fallback_used", actions)
+	}
+	if !slices.Contains(reasons, "token_not_found") {
+		t.Fatalf("reasons = %#v, want token_not_found", reasons)
+	}
+}
+
+func TestGatewayHandleTool_LogsFallbackBlockedReason(t *testing.T) {
+	var actions []string
+	var reasons []string
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{
+		ResolveTurnContext: ResolveTurnContext,
+		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+			actions = append(actions, action)
+			if reason, _ := detail["reason"].(string); strings.TrimSpace(reason) != "" {
+				reasons = append(reasons, strings.TrimSpace(reason))
+			}
+		},
+	})
+
+	body, err := json.Marshal(ToolGatewayRequest{
+		Actor: models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		Input: map[string]any{"dimension": "build_complexity", "score": 72},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/tools/emit_score_dimension_complete", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if !slices.Contains(actions, "tool.context.fallback_blocked") {
+		t.Fatalf("actions = %#v, want tool.context.fallback_blocked", actions)
+	}
+	if !slices.Contains(reasons, "token_missing") {
+		t.Fatalf("reasons = %#v, want token_missing", reasons)
 	}
 }

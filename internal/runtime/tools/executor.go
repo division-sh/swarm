@@ -79,7 +79,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 	}
 	if exec.mcpClient != nil {
 		for _, err := range exec.mcpClient.Refresh(context.Background(), exec.workflowSource) {
-			runtimeWarn("tool-executor", "mcp discovery warning: %v", err)
+			processWarn("tool-executor", "mcp discovery warning: %v", err)
 		}
 	}
 	exec.authorizer = NewToolAuthorizer(bus)
@@ -121,7 +121,7 @@ func (e *Executor) SetWorkflowSource(source semanticview.Source) {
 	e.mu.Unlock()
 	if client != nil {
 		for _, err := range client.Refresh(context.Background(), source) {
-			runtimeWarn("tool-executor", "mcp discovery warning: %v", err)
+			processWarn("tool-executor", "mcp discovery warning: %v", err)
 		}
 	}
 }
@@ -168,7 +168,7 @@ func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) 
 func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
 	defs, err := e.contractDefinitions()
 	if err != nil {
-		runtimeWarn("tool-executor", "failed to load contract tool definitions: %v", err)
+		processWarn("tool-executor", "failed to load contract tool definitions: %v", err)
 		return nil
 	}
 	return defs

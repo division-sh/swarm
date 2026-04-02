@@ -16,6 +16,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimemcp "swarm/internal/runtime/mcp"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -134,7 +135,18 @@ func (am *AgentManager) quarantinePoisonEvent(ctx context.Context, agentID strin
 		Payload:     mustJSON(payload),
 		CreatedAt:   time.Now().UTC(),
 	}); err != nil {
-		RuntimeWarn("agent-manager", "platform.event_quarantined publish failed agent=%s event=%s err=%v", agentID, strings.TrimSpace(evt.ID), err)
+		if am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "publish_event_quarantined_failed",
+				EventID:   strings.TrimSpace(evt.ID),
+				EventType: strings.TrimSpace(string(evt.Type)),
+				AgentID:   strings.TrimSpace(agentID),
+				EntityID:  strings.TrimSpace(evt.EntityID()),
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
 	}
 }
 
@@ -289,6 +301,15 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
 			log.Printf("kill previous workspace orphan processes failed: %v", err)
+			if am.bus != nil {
+				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "kill_previous_orphan_kill_failed",
+					AgentID:   producerID,
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 		}
 	}
 	seen := make(map[string]struct{}, len(affectedAgents))
@@ -303,6 +324,18 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 		seen[agentID] = struct{}{}
 		if err := am.RestartAgent(agentID); err != nil {
 			log.Printf("restart agent after kill_previous failed agent=%s err=%v", agentID, err)
+			if am.bus != nil {
+				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "kill_previous_restart_failed",
+					AgentID:   agentID,
+					Error:     strings.TrimSpace(err.Error()),
+					Detail: map[string]any{
+						"producer_id": producerID,
+					},
+				})
+			}
 		}
 	}
 	return nil
@@ -420,6 +453,14 @@ func (am *AgentManager) retryLoop(ctx context.Context) {
 		case <-ticker.C:
 			if err := am.replayPendingEvents(ctx); err != nil {
 				log.Printf("retry replay failed: %v", err)
+				if am.bus != nil {
+					am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+						Level:     "error",
+						Component: "agent-manager",
+						Action:    "retry_replay_failed",
+						Error:     strings.TrimSpace(err.Error()),
+					})
+				}
 			}
 		}
 	}
@@ -446,6 +487,15 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 		}
 		if err := am.ReplayAgentBacklog(ctx, id); err != nil {
 			log.Printf("pending replay failed for agent=%s err=%v", id, err)
+			if am.bus != nil {
+				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "pending_replay_failed",
+					AgentID:   id,
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 		}
 	}
 	return nil
@@ -483,6 +533,21 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 		}
 		if err := am.processEvent(ctx, agent, evt); err != nil {
 			log.Printf("pending replay failed for agent=%s event=%s err=%v", agentID, evt.ID, err)
+			if am.bus != nil {
+				evtCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
+				evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID))
+				evtCtx = runtimecorrelation.WithTraceID(evtCtx, strings.TrimSpace(evt.TraceID))
+				am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "pending_replay_event_failed",
+					EventID:   strings.TrimSpace(evt.ID),
+					EventType: strings.TrimSpace(string(evt.Type)),
+					AgentID:   agentID,
+					EntityID:  strings.TrimSpace(evt.EntityID()),
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 			if isClaudeAuthError(err) {
 				return nil
 			}
@@ -550,6 +615,14 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
 		if err := resetter.ResetAll(am.runtimeMode); err != nil {
 			log.Printf("session reset failed: %v", err)
+			if am.bus != nil {
+				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
+					Level:     "error",
+					Component: "agent-manager",
+					Action:    "session_reset_failed",
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 		}
 	}
 	if am.bus != nil {
@@ -637,12 +710,30 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						if !ok {
 							return
 						}
-						err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(loopCtx, agent, evt)
+						evtCtx := runtimecorrelation.WithInboundEvent(loopCtx, evt)
+						evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID))
+						evtCtx = runtimecorrelation.WithTraceID(evtCtx, strings.TrimSpace(evt.TraceID))
+						err, evtPanicked, evtPanicText, evtStackTrace := am.safeProcessEvent(evtCtx, agent, evt)
 						if evtPanicked {
 							panicCount := am.incrementPoisonPanicCount(agent.ID(), evt.ID)
-							am.writeReceipt(loopCtx, evt.ID, agent.ID(), ReceiptStatusError, "panic: "+strings.TrimSpace(evtPanicText))
+							am.writeReceipt(evtCtx, evt.ID, agent.ID(), ReceiptStatusError, "panic: "+strings.TrimSpace(evtPanicText))
+							if am.bus != nil {
+								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+									Level:     "error",
+									Component: "agent-manager",
+									Action:    "agent_event_panic",
+									EventID:   strings.TrimSpace(evt.ID),
+									EventType: strings.TrimSpace(string(evt.Type)),
+									AgentID:   agent.ID(),
+									EntityID:  strings.TrimSpace(evt.EntityID()),
+									Error:     strings.TrimSpace(evtPanicText),
+									Detail: map[string]any{
+										"stack_trace": evtStackTrace,
+									},
+								})
+							}
 							if panicCount >= poisonPanicQuarantineAt {
-								am.quarantinePoisonEvent(loopCtx, agent.ID(), evt, panicCount, evtPanicText)
+								am.quarantinePoisonEvent(evtCtx, agent.ID(), evt, panicCount, evtPanicText)
 								am.clearPoisonPanicCount(agent.ID(), evt.ID)
 								consecutivePanics = 0
 								continue
@@ -657,6 +748,18 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						consecutivePanics = 0
 						if err != nil {
 							log.Printf("agent %s failed processing event %s: %v", agent.ID(), evt.Type, err)
+							if am.bus != nil {
+								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
+									Level:     "error",
+									Component: "agent-manager",
+									Action:    "agent_event_failed",
+									EventID:   strings.TrimSpace(evt.ID),
+									EventType: strings.TrimSpace(string(evt.Type)),
+									AgentID:   agent.ID(),
+									EntityID:  strings.TrimSpace(evt.EntityID()),
+									Error:     strings.TrimSpace(err.Error()),
+								})
+							}
 						}
 					}
 				}
@@ -710,6 +813,21 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		entityID = cfg.EffectiveEntityID()
 		flowInstance = flowPathFromAgentConfig(cfg)
 	}
+	if am.bus != nil {
+		am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level:     "error",
+			Component: "agent-manager",
+			Action:    "agent_loop_panic",
+			AgentID:   agent.ID(),
+			EntityID:  entityID,
+			Error:     panicText,
+			Detail: map[string]any{
+				"count":           consecutivePanics,
+				"last_event_type": strings.TrimSpace(lastEventType),
+				"stack_trace":     stackTrace,
+			},
+		})
+	}
 
 	if err := am.bus.Publish(am.runtimeContext(), (events.Event{
 		ID:          uuid.NewString(),
@@ -726,7 +844,16 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		}),
 		CreatedAt: time.Now().UTC(),
 	}).WithEntityID(entityID)); err != nil {
-		RuntimeWarn("agent-manager", "platform.agent_panic publish failed agent=%s err=%v", agent.ID(), err)
+		if am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "publish_agent_panic_failed",
+				AgentID:   agent.ID(),
+				EntityID:  entityID,
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
 	}
 
 	if consecutivePanics < 5 {
@@ -760,6 +887,15 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 		}),
 		CreatedAt: time.Now().UTC(),
 	}).WithEntityID(entityID)); err != nil {
-		RuntimeWarn("agent-manager", "platform.agent_failed publish failed agent=%s err=%v", agent.ID(), err)
+		if am.bus != nil {
+			am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+				Level:     "error",
+				Component: "agent-manager",
+				Action:    "publish_agent_failed_failed",
+				AgentID:   agent.ID(),
+				EntityID:  entityID,
+				Error:     strings.TrimSpace(err.Error()),
+			})
+		}
 	}
 }

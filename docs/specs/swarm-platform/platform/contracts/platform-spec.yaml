@@ -324,6 +324,47 @@ handler_specification:
         emits: string — event to emit
       _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
         condition executes.
+  expression_context:
+    description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
+      rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
+      data source. Referencing a field that does not exist in the resolved data source is a runtime error.'
+    namespaces:
+      entity:
+        resolves_to: 'entity_state row for the current entity. entity.X reads entity_state.fields->>X.
+          entity.current_state reads entity_state.current_state. entity.gates.X reads entity_state.gates->>X.'
+        populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
+          (agent tool), and create_entity (initial field population).'
+        does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
+          collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
+          only in the accumulator. To reference them, use the accumulated namespace.'
+      accumulated:
+        resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
+          representing one accumulated event payload. Available only in on_complete conditions and filter
+          expressions — these run after accumulation completes.'
+        usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
+          accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
+          (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
+        not_available_in: 'guard.check — guards run before accumulation. data_accumulation.expression — runs
+          before accumulation. rules.condition — rules are an alternative to on_complete, not used after
+          accumulation.'
+      payload:
+        resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
+          JSONB payload.'
+      policy:
+        resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
+          (or root policy.yaml if not overridden at flow level).'
+    boot_validation:
+      description: 'The platform SHOULD validate expression field references at boot. For every entity.X
+        reference in a condition or expression, verify that at least one handler in the same flow writes X
+        to entity state (via data_accumulation, compute.store_as, or create_entity field population). If no
+        upstream writer exists, emit a boot warning. This catches the class of bug where a condition references
+        entity.field_name but the field is only available in the accumulator or was never written.'
+      severity: warning (not error — agents may write fields via save_entity_field that are not statically
+        visible in the contract)
+      example_violation: 'on_complete condition references entity.build_complexity, but no handler in the flow
+        has data_accumulation writing build_complexity or compute storing to build_complexity. The field only
+        exists as a dimension name in accumulated items. Correct usage would be
+        accumulated.filter(d, d.dimension == "build_complexity" && d.score >= threshold).size() == 1.'
     advances_to:
       field: advances_to
       type: string

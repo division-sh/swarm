@@ -222,6 +222,9 @@ func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
 
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
 	log.Printf("eventbus contradiction event_id=%s event_type=%s reason=%s entity_id=%s", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), strings.TrimSpace(reason), strings.TrimSpace(source.EntityID()))
+	eb.logRuntime(ctx, "warn", "eventbus", "contradiction", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
+		"reason": strings.TrimSpace(reason),
+	}, "", 0)
 	return nil
 }
 
@@ -237,7 +240,11 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 	if !ok {
 		return
 	}
-	_ = recorder.UpsertPipelineReceipt(ctx, eventID, status, errText)
+	if err := recorder.UpsertPipelineReceipt(ctx, eventID, status, errText); err != nil {
+		eb.logRuntime(ctx, "error", "eventbus", "pipeline_receipt_persist_failed", eventID, "", "", "", "", nil, map[string]any{
+			"status": status,
+		}, err.Error(), 0)
+	}
 }
 
 func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {

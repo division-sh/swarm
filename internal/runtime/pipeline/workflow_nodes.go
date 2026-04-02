@@ -654,16 +654,25 @@ func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, evt events.Event) bool {
+	handled, _ := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	return handled
+}
+
+func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Context, evt events.Event) (bool, error) {
 	eventType := strings.TrimSpace(string(evt.Type))
 	if eventType == "" {
-		return false
+		return false, nil
 	}
 	for _, node := range pc.WorkflowNodes() {
-		if handled := pc.executeNodeHandlerPlan(ctx, strings.TrimSpace(node.ID), evt); handled {
-			return true
+		handled, err := pc.executeNodeHandlerPlanResult(ctx, strings.TrimSpace(node.ID), evt)
+		if err != nil {
+			return handled, err
+		}
+		if handled {
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {

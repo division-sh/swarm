@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 type recordingPipelineBus struct {
 	mu        sync.Mutex
 	publishes []events.Event
+	publishErr error
 }
 
 type recordingPipelineDispatcher struct {
@@ -22,6 +24,9 @@ type recordingPipelineDispatcher struct {
 }
 
 func (b *recordingPipelineBus) Publish(_ context.Context, evt events.Event) error {
+	if b.publishErr != nil {
+		return b.publishErr
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.publishes = append(b.publishes, evt)
@@ -68,6 +73,18 @@ func (b *recordingPipelineBus) publishedEvent(i int) events.Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.publishes[i]
+}
+
+func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
+	wantErr := errors.New("bus publish failed")
+	pc := &PipelineCoordinator{
+		bus: &recordingPipelineBus{publishErr: wantErr},
+	}
+
+	err := pc.publish(context.Background(), "custom.emitted", "ent-1", map[string]any{"ok": true})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("publish error = %v, want %v", err, wantErr)
+	}
 }
 
 func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *testing.T) {

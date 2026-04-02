@@ -152,7 +152,17 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 				pc.notifyTestSubscribed()
 				continue
 			}
-			pc.handleEvent(ctx, evt)
+			if _, err := pc.handleEventResult(ctx, evt); err != nil && pc.bus != nil {
+				pc.bus.LogRuntime(ctx, RuntimeLogEntry{
+					Level:     "error",
+					Component: runtimeWorkflowID,
+					Action:    "handler_error",
+					EventID:   strings.TrimSpace(evt.ID),
+					EventType: strings.TrimSpace(string(evt.Type)),
+					EntityID:  workflowEventEntityID(evt),
+					Error:     strings.TrimSpace(err.Error()),
+				})
+			}
 		}
 	}
 }
@@ -173,7 +183,14 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	}
 	emitted := make([]events.Event, 0, 4)
 	ictx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
-	if !pc.handleEvent(ictx, evt) {
+	handled, err := pc.handleEventResult(ictx, evt)
+	if err != nil {
+		if consume {
+			return false, emitted, nil
+		}
+		return true, emitted, nil
+	}
+	if !handled {
 		return true, nil, nil
 	}
 	return !consume, emitted, nil
@@ -191,31 +208,41 @@ func (pc *PipelineCoordinator) subscribe() <-chan events.Event {
 }
 
 func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
-	return pc.dispatchWorkflowNodeEvent(ctx, evt)
+	handled, _ := pc.handleEventResult(ctx, evt)
+	return handled
+}
+
+func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, error) {
+	return pc.dispatchWorkflowNodeEventResult(ctx, evt)
 }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeID string, evt events.Event) bool {
+	handled, _ := pc.executeNodeHandlerPlanResult(ctx, nodeID, evt)
+	return handled
+}
+
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
 	if pc == nil {
-		return false
+		return false, nil
 	}
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
-		return false
+		return false, nil
 	}
 	source := pc.SemanticSource()
 	if source == nil {
-		return false
+		return false, nil
 	}
 	trigger := strings.TrimSpace(string(evt.Type))
 	if trigger == "" {
-		return false
+		return false, nil
 	}
 	handler, ok := source.NodeEventHandler(nodeID, trigger)
 	if !ok && isAccumulationTimeoutEvent(events.EventType(trigger)) {
 		handler, ok = findAccumulationTimeoutHandlerForNode(source, nodeID, trigger)
 	}
 	if !ok {
-		return false
+		return false, nil
 	}
 	ctx = withPipelineFlowScope(ctx, workflowNodeFlowID(source, nodeID))
 	result, err := pc.executeNodeContractHandler(ctx, nodeID, handler, workflowTriggerContext{
@@ -232,15 +259,55 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeI
 				HandlerNode:     nodeID,
 			})
 			setPipelineReceiptOverride(ctx, "dead_letter", err.Error())
-			return true
+			return true, nil
 		}
-		return false
+		pc.recordWorkflowHandlerFailure(ctx, evt, nodeID, err)
+		return true, err
 	}
 	pc.recordInterceptedEmitDeadLetters(ctx, evt, nodeID, result.Outcome)
 	if result.Handled {
 		pc.reconcileWorkflowEventTimers(ctx, workflowEventEntityID(evt), trigger)
 	}
-	return result.Handled
+	return result.Handled, nil
+}
+
+func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context, evt events.Event, nodeID string, err error) {
+	if pc == nil || err == nil {
+		return
+	}
+	errText := strings.TrimSpace(err.Error())
+	if errText == "" {
+		errText = "unknown handler error"
+	}
+	setPipelineReceiptOverride(ctx, "dead_letter", errText)
+	if pc.bus != nil {
+		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
+			Level:     "error",
+			Component: runtimeWorkflowID,
+			Action:    "handler_error",
+			EventID:   strings.TrimSpace(evt.ID),
+			EventType: strings.TrimSpace(string(evt.Type)),
+			EntityID:  workflowEventEntityID(evt),
+			Error:     errText,
+			Detail: map[string]any{
+				"node_id": nodeID,
+			},
+		})
+	}
+	if pc.db != nil {
+		_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
+			OriginalEventID: strings.TrimSpace(evt.ID),
+			OriginalEvent:   strings.TrimSpace(string(evt.Type)),
+			OriginalPayload: evt.Payload,
+			EntityID:        workflowEventEntityID(evt),
+			FlowInstance:    "runtime",
+			FailureType:     "handler_error",
+			ErrorMessage:    errText,
+			RetryCount:      0,
+			ChainDepth:      evt.ChainDepth,
+			HandlerNode:     strings.TrimSpace(nodeID),
+		})
+	}
 }
 
 func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Context, trigger events.Event, nodeID string, outcome *handlerExecutionOutcome) {
@@ -271,7 +338,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 				return
 			}
 			if err := runtimedeadletters.Insert(ctx, pc.db, rec); err != nil {
-				runtimeWarn("workflow-runtime", "intercepted emit dead letter persist failed event=%s entity_id=%s: %v", eventType, entityID, err)
+				processWarn("workflow-runtime", "intercepted emit dead letter persist failed event=%s entity_id=%s: %v", eventType, entityID, err)
 			}
 		}
 		if !queuePipelinePostCommitAction(ctx, recordDeadLetter) {
@@ -304,7 +371,9 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			continue
 		}
 		publishDeadLetter := func() {
-			pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload)
+			if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
+				processWarn("workflow-runtime", "intercepted emit dead letter publish failed event=%s entity_id=%s: %v", eventType, entityID, err)
+			}
 		}
 		if !queuePipelinePostCommitAction(ctx, publishDeadLetter) {
 			publishDeadLetter()
@@ -336,9 +405,9 @@ func (pc *PipelineCoordinator) notifyTestEntityStateUpdated(entityID, state stri
 	}
 }
 
-func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID string, payload map[string]any) {
+func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID string, payload map[string]any) error {
 	if pc == nil {
-		return
+		return nil
 	}
 	if payload == nil {
 		payload = map[string]any{}
@@ -356,21 +425,23 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 	}).WithEntityID(entityID)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
-		return
+		return nil
 	}
 	if pc.bus != nil {
-		_ = pc.bus.Publish(ctx, emitted)
+		if err := pc.bus.Publish(ctx, emitted); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, entityID string, payload map[string]any, recipients []string) {
+func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, entityID string, payload map[string]any, recipients []string) error {
 	if pc == nil {
-		return
+		return nil
 	}
 	recipients = uniqueStrings(recipients)
 	if len(recipients) == 0 {
-		pc.publish(ctx, eventType, entityID, payload)
-		return
+		return pc.publish(ctx, eventType, entityID, payload)
 	}
 	sourceAgent := pipelineSourceAgent(ctx)
 	if sourceAgent == "" {
@@ -385,9 +456,12 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 	}).WithEntityID(entityID)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, emitted)
-		return
+		return nil
 	}
 	if pc.bus != nil {
-		_ = pc.bus.PublishDirect(ctx, emitted, recipients)
+		if err := pc.bus.PublishDirect(ctx, emitted, recipients); err != nil {
+			return err
+		}
 	}
+	return nil
 }

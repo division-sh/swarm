@@ -112,7 +112,7 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(strin
 		WithEmittedEventsRecorder: runtimebus.WithEmittedEventsRecorder,
 		ResolveTurnContext:        resolveMCPTurnContext,
 		EmitTools: func(role string) []llm.ToolDefinition {
-			return runtimetools.GenerateEmitToolsForRole(role, runtimeWarnOnce)
+			return runtimetools.GenerateEmitToolsForRole(role, processWarnOnce)
 		},
 		EmitSchemaForTool: runtimeGatewayEmitSchemaForTool,
 		Log: func(ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {

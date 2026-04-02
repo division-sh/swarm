@@ -88,6 +88,64 @@ func TestPrintTraceReport_InProgressDeliverySummary(t *testing.T) {
 	}
 }
 
+func TestPrintRunStatusReport(t *testing.T) {
+	var buf bytes.Buffer
+	started := time.Unix(1700000000, 0).UTC()
+	last := started.Add(5 * time.Minute)
+	report := runStatusReport{
+		RunID:             "run-123",
+		RunTableStatus:    "running",
+		RootEventID:       "evt-1",
+		RootEventType:     "scan.requested",
+		TraceID:           "trace-123",
+		StartedAt:         started,
+		LastEventAt:       last,
+		EventCount:        7,
+		WarnErrorLogCount: 1,
+		EventCounts: []runStatusEventCount{
+			{EventName: "scan.requested", Count: 1},
+			{EventName: "vertical.discovered", Count: 2},
+		},
+		Deliveries: []runStatusDeliveryCount{
+			{SubscriberID: "analysis-agent", Status: "delivered", Count: 2},
+		},
+		AgentTurns: []runStatusAgentTurn{
+			{AgentID: "analysis-agent", Turns: 2, ErrorCount: 0, LastAt: last},
+		},
+		RuntimeLogSummary: []runStatusRuntimeSummary{
+			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Count: 3},
+		},
+		RuntimeLogs: []runStatusRuntimeLog{
+			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Error: "missing or invalid mcp context token", CreatedAt: last},
+		},
+		RecentEvents: []runStatusEvent{
+			{EventName: "vertical.discovered", EntityID: "ent-1", CreatedAt: last},
+		},
+	}
+
+	printRunStatusReport(&buf, report)
+	out := buf.String()
+	for _, want := range []string{
+		"Run run-123",
+		"Root: scan.requested (evt-1)",
+		"Trace: trace-123",
+		"Run Status: running",
+		"Summary: events=7 deliveries=1 dead_letters=0 agent_turns=1 runtime_warn_errors=1",
+		"Event Counts:",
+		"analysis-agent  status=delivered  count=2",
+		"Runtime Log Summary:",
+		"WARN  mcp-gateway/mcp.context.fallback_used  count=3",
+		"Runtime Warnings/Errors:",
+		"WARN  mcp-gateway/mcp.context.fallback_used",
+		"Recent Events:",
+		"vertical.discovered  entity=ent-1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("status output missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestLoadDotEnvFileSetsMissingVarsOnly(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".env")

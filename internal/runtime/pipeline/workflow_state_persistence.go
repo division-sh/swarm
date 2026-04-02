@@ -29,22 +29,22 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 	return state
 }
 
-func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, nextState, sourceEvent string) {
+func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, nextState, sourceEvent string) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return
+		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
 	nextState = strings.TrimSpace(string(NormalizeWorkflowStateID(nextState)))
 	sourceEvent = strings.TrimSpace(sourceEvent)
 	if entityID == "" || nextState == "" {
-		return
+		return nil
 	}
 	current := pc.currentWorkflowState(ctx, entityID)
 	currentState := strings.TrimSpace(string(current.Stage))
 	source := pc.SemanticSource()
 	flowID := pipelineFlowScope(ctx)
 	stateKey := workflowScopedStateKey(source, flowID)
-	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	if err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		enteredStateAt := time.Now().UTC()
 		if flowID == "" && strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
 			enteredStateAt = instance.EnteredStageAt
@@ -72,21 +72,24 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		} else if currentState == "" && len(instance.TransitionHistory) == 0 {
 			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord("", nextState, sourceEvent))
 		}
-	})
+	}); err != nil {
+		return err
+	}
 	pc.notifyTestEntityStateUpdated(entityID, nextState)
 	pc.reconcileWorkflowStageTimers(ctx, entityID, currentState, nextState, sourceEvent)
+	return nil
 }
 
-func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) {
+func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return
+		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
 	setGate = strings.TrimSpace(setGate)
 	if entityID == "" {
-		return
+		return nil
 	}
-	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		metadata := cloneStringAnyMap(instance.Metadata)
 		gates := payloadMap(metadata["gates"])
 		if clear {
@@ -106,21 +109,20 @@ func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, en
 	})
 }
 
-func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) bool {
+func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
-		return false
+		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
 	bucketID = strings.TrimSpace(bucketID)
 	if entityID == "" || bucketID == "" {
-		return false
+		return nil
 	}
-	_ = pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		bucket := workflowMutableStateBucket(instance, "evidence")
 		workflowAppendEvidence(bucket, bucketID, payload)
 		workflowSetStateBucket(instance, "evidence", bucket)
 	})
-	return true
 }
 
 func workflowAppendEvidence(bucket map[string]any, bucketID string, payload map[string]any) {

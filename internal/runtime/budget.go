@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +44,7 @@ type BudgetTracker struct {
 	db          *sql.DB
 	bus         *runtimebus.EventBus
 	cfg         *config.Config
+	logger      *RuntimeLogger
 	mailbox     runtimetools.MailboxPersistence
 	mailboxFrom string
 	thresholds  budgetThresholds
@@ -78,12 +80,13 @@ func TerminalInstanceStates() []string {
 	return out
 }
 
-func NewBudgetTracker(db *sql.DB, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, source semanticview.Source) *BudgetTracker {
+func NewBudgetTracker(db *sql.DB, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source) *BudgetTracker {
 	SetTerminalInstanceStates(source.WorkflowTerminalStages())
 	return &BudgetTracker{
 		db:          db,
 		bus:         bus,
 		cfg:         cfg,
+		logger:      logger,
 		mailbox:     mailbox,
 		mailboxFrom: "runtime",
 		thresholds:  budgetThresholdsFromSource(source),
@@ -177,7 +180,12 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		return
 	}
 	// Evaluate system-wide budget.
-	_ = t.evaluateAndEmit(ctx, "")
+	if err := t.evaluateAndEmit(ctx, ""); err != nil {
+		log.Printf("budget evaluate system failed: err=%v", err)
+		if t.logger != nil {
+			t.logger.Warn(ctx, "budget", "evaluate_system_failed", nil, err)
+		}
+	}
 
 	// Evaluate each active entity with any spend/metrics.
 	rows, err := t.db.QueryContext(ctx, `
@@ -195,7 +203,12 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		if err := rows.Scan(&id); err != nil {
 			return
 		}
-		_ = t.evaluateAndEmit(ctx, strings.TrimSpace(id))
+		if err := t.evaluateAndEmit(ctx, strings.TrimSpace(id)); err != nil {
+			log.Printf("budget evaluate entity failed: entity=%s err=%v", strings.TrimSpace(id), err)
+			if t.logger != nil {
+				t.logger.Warn(ctx, "budget", "evaluate_entity_failed", map[string]any{"entity_id": strings.TrimSpace(id)}, err)
+			}
+		}
 	}
 }
 
@@ -279,7 +292,12 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 	}
 
 	// Best-effort guardrail evaluation.
-	_ = t.evaluateAndEmit(ctx, rec.EffectiveEntityID())
+	if err := t.evaluateAndEmit(ctx, rec.EffectiveEntityID()); err != nil {
+		log.Printf("budget evaluate on spend failed: entity=%s err=%v", rec.EffectiveEntityID(), err)
+		if t.logger != nil {
+			t.logger.Warn(ctx, "budget", "evaluate_on_spend_failed", map[string]any{"entity_id": rec.EffectiveEntityID()}, err)
+		}
+	}
 	return nil
 }
 
@@ -508,7 +526,7 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 			Context:   mustJSON(payload),
 			Summary:   summary,
 		}); err != nil {
-			runtimeWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", entityID, scope, err)
+			processWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", entityID, scope, err)
 		}
 	}
 	return nil
