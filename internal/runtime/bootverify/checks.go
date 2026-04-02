@@ -115,6 +115,9 @@ type checkerContext struct {
 	conditionExprLoaded   bool
 	conditionExprFindings []Finding
 
+	entityRefLoaded   bool
+	entityRefFindings []Finding
+
 	transitionOwnerLoaded   bool
 	transitionOwnerFindings []Finding
 
@@ -165,6 +168,7 @@ var bootCheckRegistry = []Check{
 	{ID: "agent_permission_validation", Severity: "error", Run: checkAgentPermissionValidation},
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
+	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Severity: "error", Run: checkTimerValidation},
@@ -226,6 +230,9 @@ func checkSingleNodePerEvent(c *checkerContext) []Finding            { return c.
 func checkPlatformMetadataValidation(c *checkerContext) []Finding    { return c.platformMetadata() }
 func checkTransitionReferenceValidation(c *checkerContext) []Finding { return c.transitionReferences() }
 func checkConditionExpressionValidation(c *checkerContext) []Finding { return c.conditionExpressions() }
+func checkExpressionFieldReferenceValidation(c *checkerContext) []Finding {
+	return c.expressionFieldReferences()
+}
 func checkTransitionOwnershipValidation(c *checkerContext) []Finding { return c.transitionOwnership() }
 func checkEventRuntimeWiringValidation(c *checkerContext) []Finding  { return c.eventRuntimeWiring() }
 func checkTimerValidation(c *checkerContext) []Finding               { return c.timerValidation() }
@@ -434,6 +441,48 @@ func (c *checkerContext) conditionExpressions() []Finding {
 		}
 	}
 	return c.conditionExprFindings
+}
+
+func (c *checkerContext) expressionFieldReferences() []Finding {
+	if c.entityRefLoaded {
+		return c.entityRefFindings
+	}
+	c.entityRefLoaded = true
+
+	seen := map[string]struct{}{}
+	for _, flow := range c.source.FlowScopes() {
+		flowID := strings.TrimSpace(flow.ID)
+		if flowID == "" {
+			continue
+		}
+		writers := flowEntityFieldWriters(flow.Nodes)
+		for nodeID, node := range flow.Nodes {
+			nodeID = strings.TrimSpace(nodeID)
+			for eventType, handler := range node.EventHandlers {
+				eventType = strings.TrimSpace(eventType)
+				for _, expr := range handlerEntityExpressions(handler) {
+					for _, field := range entityReferences(expr.Expression) {
+						if _, ok := writers[field]; ok {
+							continue
+						}
+						key := strings.Join([]string{flowID, nodeID, eventType, expr.Kind, field}, "|")
+						if _, ok := seen[key]; ok {
+							continue
+						}
+						seen[key] = struct{}{}
+						c.entityRefFindings = append(c.entityRefFindings, Finding{
+							CheckID:  "expression_field_reference_validation",
+							Severity: "warning",
+							Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s but no handler writes %s to entity state — did you mean accumulated.filter()?", flowID, nodeID, eventType, field, expr.Kind, field),
+							Location: nodeID,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return c.entityRefFindings
 }
 
 func (c *checkerContext) transitionOwnership() []Finding {
@@ -2135,6 +2184,12 @@ func policyValueMap(policy runtimecontracts.PolicyDocument) map[string]any {
 
 var bootverifyPolicyReferencePattern = regexp.MustCompile(`policy\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 var bootverifyPayloadReferencePattern = regexp.MustCompile(`payload\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+var bootverifyEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_]*)`)
+
+type expressionReference struct {
+	Kind       string
+	Expression string
+}
 
 func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []string {
 	out := make([]string, 0, 8)
@@ -2173,6 +2228,202 @@ func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []string
 	return out
 }
 
+func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+	out := make([]expressionReference, 0, 16)
+	if handler.Guard != nil {
+		if check := strings.TrimSpace(handler.Guard.Check); check != "" {
+			out = append(out, expressionReference{Kind: "guard", Expression: check})
+		}
+		for _, item := range handler.Guard.Checks {
+			if check := strings.TrimSpace(item.Check); check != "" {
+				out = append(out, expressionReference{Kind: "guard", Expression: check})
+			}
+		}
+	}
+	if condition := strings.TrimSpace(handler.Condition); condition != "" && !strings.EqualFold(condition, "else") {
+		out = append(out, expressionReference{Kind: "condition", Expression: condition})
+	}
+	appendWriteExpressions := func(kind string, writes []runtimecontracts.WorkflowDataWrite) {
+		for _, write := range writes {
+			if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
+				out = append(out, expressionReference{Kind: kind, Expression: expr})
+			}
+		}
+	}
+	appendRuleExpressions := func(kindPrefix string, rule runtimecontracts.HandlerRuleEntry) {
+		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
+			out = append(out, expressionReference{Kind: kindPrefix + " condition", Expression: condition})
+		}
+		appendWriteExpressions(kindPrefix+" expression", rule.DataAccumulation.Writes)
+		if rule.FanOut != nil {
+			// Fan-out has no CEL-bearing fields today.
+		}
+	}
+
+	appendWriteExpressions("expression", handler.DataAccumulation.Writes)
+	for _, rule := range handler.Rules {
+		appendRuleExpressions("rule", rule)
+	}
+	for _, rule := range handler.OnComplete {
+		appendRuleExpressions("on_complete", rule)
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			appendRuleExpressions("accumulate.on_complete", rule)
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			appendRuleExpressions("accumulate.on_timeout", *handler.Accumulate.OnTimeout)
+		}
+	}
+	if handler.Filter != nil {
+		if predicate := strings.TrimSpace(handler.Filter.Predicate); predicate != "" {
+			out = append(out, expressionReference{Kind: "filter predicate", Expression: predicate})
+		}
+		if condition := strings.TrimSpace(handler.Filter.Condition); condition != "" {
+			out = append(out, expressionReference{Kind: "filter condition", Expression: condition})
+		}
+	}
+	if handler.Count != nil {
+		if condition := strings.TrimSpace(handler.Count.Condition); condition != "" {
+			out = append(out, expressionReference{Kind: "count condition", Expression: condition})
+		}
+	}
+	if handler.Query != nil {
+		appendQueryExpressions(&out, *handler.Query)
+	}
+	if handler.Reduce != nil {
+		for key, value := range handler.Reduce.Params {
+			if expr := strings.TrimSpace(value.CEL); expr != "" {
+				out = append(out, expressionReference{Kind: "reduce param " + strings.TrimSpace(key), Expression: expr})
+			}
+		}
+	}
+	for _, branch := range handler.Branch {
+		if condition := strings.TrimSpace(branch.Condition); condition != "" && !strings.EqualFold(condition, "else") {
+			out = append(out, expressionReference{Kind: "branch condition", Expression: condition})
+		}
+		if branch.Then != nil {
+			appendRuleExpressions("branch.then", *branch.Then)
+		}
+		if branch.Else != nil {
+			appendRuleExpressions("branch.else", *branch.Else)
+		}
+	}
+	return out
+}
+
+func appendQueryExpressions(out *[]expressionReference, query runtimecontracts.QuerySpec) {
+	if filter := strings.TrimSpace(query.Filter); filter != "" {
+		*out = append(*out, expressionReference{Kind: "query filter", Expression: filter})
+	}
+	for _, nested := range query.Queries {
+		appendQueryExpressions(out, nested)
+	}
+}
+
+func flowEntityFieldWriters(nodes map[string]runtimecontracts.SystemNodeContract) map[string]struct{} {
+	out := map[string]struct{}{}
+	addWriter := func(target string) {
+		if field, ok := entityFieldNameFromTarget(target); ok {
+			out[field] = struct{}{}
+		}
+	}
+	var addRuleWriters func(rule runtimecontracts.HandlerRuleEntry)
+	addRuleWriters = func(rule runtimecontracts.HandlerRuleEntry) {
+		for _, write := range rule.DataAccumulation.Writes {
+			addWriter(write.Target())
+		}
+		if rule.Compute != nil {
+			addWriter(rule.Compute.StoreAs)
+		}
+	}
+	var addQueryWriters func(query *runtimecontracts.QuerySpec)
+	addQueryWriters = func(query *runtimecontracts.QuerySpec) {
+		if query == nil {
+			return
+		}
+		addWriter(query.StoreAs)
+		for i := range query.Queries {
+			addQueryWriters(&query.Queries[i])
+		}
+	}
+	for _, node := range nodes {
+		for _, handler := range node.EventHandlers {
+			for _, write := range handler.DataAccumulation.Writes {
+				addWriter(write.Target())
+			}
+			if handler.Compute != nil {
+				addWriter(handler.Compute.StoreAs)
+			}
+			if handler.GroupBy != nil {
+				addWriter(handler.GroupBy.StoreAs)
+			}
+			if handler.Filter != nil {
+				addWriter(handler.Filter.StoreAs)
+			}
+			if handler.Reduce != nil {
+				addWriter(handler.Reduce.StoreAs)
+			}
+			if handler.Count != nil {
+				addWriter(handler.Count.StoreAs)
+			}
+			if handler.Query != nil {
+				addQueryWriters(handler.Query)
+			}
+			if handler.Clear != nil {
+				addWriter(handler.Clear.Target)
+				for _, target := range handler.Clear.Targets {
+					addWriter(target)
+				}
+			}
+			for _, rule := range handler.Rules {
+				addRuleWriters(rule)
+			}
+			for _, rule := range handler.OnComplete {
+				addRuleWriters(rule)
+			}
+			if handler.Accumulate != nil {
+				for _, rule := range handler.Accumulate.OnComplete {
+					addRuleWriters(rule)
+				}
+				if handler.Accumulate.OnTimeout != nil {
+					addRuleWriters(*handler.Accumulate.OnTimeout)
+				}
+			}
+			for _, branch := range handler.Branch {
+				if branch.Then != nil {
+					addRuleWriters(*branch.Then)
+				}
+				if branch.Else != nil {
+					addRuleWriters(*branch.Else)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func entityFieldNameFromTarget(target string) (string, bool) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", false
+	}
+	if strings.HasPrefix(target, "entity.") {
+		target = strings.TrimPrefix(target, "entity.")
+	}
+	if idx := strings.IndexByte(target, '.'); idx >= 0 {
+		target = target[:idx]
+	}
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "", false
+	}
+	if !regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(target) {
+		return "", false
+	}
+	return target, true
+}
+
 func policyReferences(expression string) []string {
 	expression = strings.TrimSpace(expression)
 	if expression == "" {
@@ -2204,6 +2455,31 @@ func payloadReferences(expression string) []string {
 		return nil
 	}
 	matches := bootverifyPayloadReferencePattern.FindAllStringSubmatch(expression, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		ref := strings.TrimSpace(match[1])
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func entityReferences(expression string) []string {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return nil
+	}
+	matches := bootverifyEntityReferencePattern.FindAllStringSubmatch(expression, -1)
 	out := make([]string, 0, len(matches))
 	seen := map[string]struct{}{}
 	for _, match := range matches {

@@ -516,9 +516,42 @@ func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Condition = "entity.missing_score >= 70"
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "expression_field_reference_validation", "entity.missing_score") {
+		t.Fatalf("expected expression_field_reference_validation warning, got %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "expression_field_reference_validation", "did you mean accumulated.filter()?") {
+		t.Fatalf("expected accumulated.filter hint, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_SuppressesExpressionFieldReferenceWarningWhenWriterExists(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	handler.Condition = "entity.missing_score >= 70"
+	handler.DataAccumulation.Writes = append(handler.DataAccumulation.Writes, runtimecontracts.WorkflowDataWrite{
+		TargetField: "missing_score",
+		SourceField: "payload.score",
+	})
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "expression_field_reference_validation", "entity.missing_score") {
+		t.Fatalf("unexpected expression_field_reference_validation warning, got %#v", report.Warnings())
+	}
+}
+
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 33 {
-		t.Fatalf("bootCheckRegistry count = %d, want 33", got)
+	if got := len(bootCheckRegistry); got != 34 {
+		t.Fatalf("bootCheckRegistry count = %d, want 34", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
@@ -558,4 +591,33 @@ func firstBundleHandler(bundle *runtimecontracts.WorkflowContractBundle) (string
 		}
 	}
 	return "", "", runtimecontracts.SystemNodeEventHandler{}, false
+}
+
+func firstFlowHandlerInFlowView(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) (string, string, string, runtimecontracts.SystemNodeEventHandler) {
+	t.Helper()
+	for _, view := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(view.Paths.ID)
+		for nodeID, node := range view.Nodes {
+			for eventType, handler := range node.EventHandlers {
+				return flowID, nodeID, eventType, handler
+			}
+		}
+	}
+	t.Fatal("expected fixture to include at least one flow handler")
+	return "", "", "", runtimecontracts.SystemNodeEventHandler{}
+}
+
+func writeFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	node := flowView.Nodes[nodeID]
+	node.EventHandlers[eventType] = handler
+	flowView.Nodes[nodeID] = node
+	if bundle.Nodes == nil {
+		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	}
+	bundle.Nodes[nodeID] = node
 }

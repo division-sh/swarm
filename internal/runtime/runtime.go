@@ -161,6 +161,9 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
+	if err := validateClaudeStartupConfig(cfg, opts); err != nil {
+		return nil, fmt.Errorf("claude runtime startup validation failed: %w", err)
+	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return nil, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -485,6 +488,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if err := rt.Manager.EnsureStaticFlowRequiredAgents(ctx, rt.Options.WorkflowModule.SemanticSource()); err != nil {
 			return fmt.Errorf("bootstrap static flow required agents: %w", err)
 		}
+	}
+	if err := validateClaudeManagedAgentWorkspaces(ctx, rt.Config, rt.Workspace, rt.Manager); err != nil {
+		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
+	}
+	if err := validateClaudeMCPToolsForManagedAgents(rt.Config, rt.ToolGateway, rt.Options.ToolGatewayToken, rt.Manager); err != nil {
+		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
 	if rt.Manager != nil {
 		rt.Manager.Run(ctx)

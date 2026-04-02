@@ -95,6 +95,16 @@ func (am *AgentManager) GetAgentConfig(agentID string) (runtimeactors.AgentConfi
 	return cfg, ok
 }
 
+func (am *AgentManager) ListAgentConfigs() []runtimeactors.AgentConfig {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	out := make([]runtimeactors.AgentConfig, 0, len(am.agentCfg))
+	for _, cfg := range am.agentCfg {
+		out = append(out, cfg)
+	}
+	return out
+}
+
 func (am *AgentManager) poisonKey(agentID, eventID string) string {
 	return strings.TrimSpace(agentID) + "|" + strings.TrimSpace(eventID)
 }

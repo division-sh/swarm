@@ -23,10 +23,11 @@ func (r *ClaudeCLIRuntime) run(ctx context.Context, args []string, target *works
 
 func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta) (*Response, error) {
 	timeout := r.effectiveCLITimeout(ctx)
-	if target != nil && target.Enabled() {
-		if strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) == "" {
-			return nil, fmt.Errorf("%w: CLAUDE_CODE_OAUTH_TOKEN is missing", ErrClaudeAuthRequired)
-		}
+	if target == nil || !target.Enabled() {
+		return nil, fmt.Errorf("%w: claude sessions must run in a container workspace", ErrClaudeWorkspaceRequired)
+	}
+	if strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) == "" {
+		return nil, fmt.Errorf("%w: CLAUDE_CODE_OAUTH_TOKEN is missing", ErrClaudeAuthRequired)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -275,11 +276,18 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 
 func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Target, error) {
 	if r.workspaces == nil {
-		return nil, nil
+		return nil, fmt.Errorf("%w: workspace resolver is not configured", ErrClaudeWorkspaceRequired)
 	}
 	actor, ok := runtimeactors.ActorFromContext(ctx)
 	if !ok {
-		return nil, nil
+		return nil, fmt.Errorf("%w: actor context is missing", ErrClaudeWorkspaceRequired)
 	}
-	return r.workspaces.ResolveWorkspace(ctx, actor)
+	target, err := r.workspaces.ResolveWorkspace(ctx, actor)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil || !target.Enabled() {
+		return nil, fmt.Errorf("%w: no container workspace target resolved for agent %s", ErrClaudeWorkspaceRequired, strings.TrimSpace(actor.ID))
+	}
+	return target, nil
 }
