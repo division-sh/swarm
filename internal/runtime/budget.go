@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -181,7 +180,6 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 	}
 	// Evaluate system-wide budget.
 	if err := t.evaluateAndEmit(ctx, ""); err != nil {
-		log.Printf("budget evaluate system failed: err=%v", err)
 		if t.logger != nil {
 			t.logger.Warn(ctx, "budget", "evaluate_system_failed", nil, err)
 		}
@@ -204,7 +202,6 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 			return
 		}
 		if err := t.evaluateAndEmit(ctx, strings.TrimSpace(id)); err != nil {
-			log.Printf("budget evaluate entity failed: entity=%s err=%v", strings.TrimSpace(id), err)
 			if t.logger != nil {
 				t.logger.Warn(ctx, "budget", "evaluate_entity_failed", map[string]any{"entity_id": strings.TrimSpace(id)}, err)
 			}
@@ -293,7 +290,6 @@ func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error 
 
 	// Best-effort guardrail evaluation.
 	if err := t.evaluateAndEmit(ctx, rec.EffectiveEntityID()); err != nil {
-		log.Printf("budget evaluate on spend failed: entity=%s err=%v", rec.EffectiveEntityID(), err)
 		if t.logger != nil {
 			t.logger.Warn(ctx, "budget", "evaluate_on_spend_failed", map[string]any{"entity_id": rec.EffectiveEntityID()}, err)
 		}
@@ -526,7 +522,15 @@ func (t *BudgetTracker) evaluateScope(ctx context.Context, scope string, entityI
 			Context:   mustJSON(payload),
 			Summary:   summary,
 		}); err != nil {
-			processWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", entityID, scope, err)
+			if t.logger != nil {
+				t.logger.Warn(ctx, "budget", "budget_emergency_mailbox_insert_failed", map[string]any{
+					"event_id":  strings.TrimSpace(evtID),
+					"entity_id": strings.TrimSpace(entityID),
+					"scope":     strings.TrimSpace(scope),
+				}, err)
+			} else {
+				processWarn("budget", "failed to insert emergency budget mailbox item entity=%s scope=%s: %v", entityID, scope, err)
+			}
 		}
 	}
 	return nil

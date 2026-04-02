@@ -226,7 +226,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 			Payload:     payload,
 			CreatedAt:   time.Now(),
 		}).WithEntityID(sc.EffectiveEntityID())); err != nil {
-			log.Printf("schedule publish failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 			if rt.Logger != nil {
 				rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
 					"agent_id":   sc.AgentID,
@@ -238,7 +237,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		if stores.ScheduleStore != nil {
 			if exactStore, ok := stores.ScheduleStore.(runtimepipeline.ExactSchedulePersistence); ok {
 				if err := exactStore.MarkScheduleFiredExact(callbackCtx, sc); err != nil {
-					log.Printf("mark schedule fired failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 					if rt.Logger != nil {
 						rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 							"agent_id":   sc.AgentID,
@@ -248,7 +246,6 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 					}
 				}
 			} else if err := stores.ScheduleStore.MarkScheduleFired(callbackCtx, sc); err != nil {
-				log.Printf("mark schedule fired failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 				if rt.Logger != nil {
 					rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 						"agent_id":   sc.AgentID,
@@ -410,7 +407,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 		for _, sc := range schedules {
 			if err := rt.Scheduler.Register(sc); err != nil {
-				log.Printf("restore schedule failed agent=%s event=%s err=%v", sc.AgentID, sc.EventType, err)
 				if rt.Logger != nil {
 					rt.Logger.Error(ctx, "scheduler", "restore_schedule_failed", map[string]any{
 						"agent_id":   sc.AgentID,
@@ -421,13 +417,11 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			}
 		}
 		if err := ensureLifecycleWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
-			log.Printf("workflow lifecycle schedule ensure failed: %v", err)
 			if rt.Logger != nil {
 				rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err)
 			}
 		}
 		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Pipeline); err != nil {
-			log.Printf("workflow recurring schedule ensure failed: %v", err)
 			if rt.Logger != nil {
 				rt.Logger.Error(ctx, "scheduler", "ensure_recurring_failed", nil, err)
 			}
@@ -435,12 +429,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	if rt.Config.Runtime.RecoveryOnStartup && rt.Manager != nil {
 		if err := rt.Manager.Recover(ctx); err != nil {
-			log.Printf("runtime recovery failed (continuing without recovery): %v", err)
 			if rt.Logger != nil {
 				rt.Logger.Error(ctx, "runtime", "recovery_failed", nil, err)
 			}
 			if resetErr := rt.Manager.ResetRuntimeState(); resetErr != nil {
-				log.Printf("runtime state reset after recovery failure also failed: %v", resetErr)
 				if rt.Logger != nil {
 					rt.Logger.Error(ctx, "runtime", "recovery_reset_failed", nil, resetErr)
 				}
@@ -458,7 +450,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 					Context:   ctxPayload,
 					Summary:   runtimeTruncateString("Runtime recovery failed: "+err.Error(), 200),
 				}); mailboxErr != nil {
-					log.Printf("runtime recovery mailbox insert failed: %v", mailboxErr)
 					if rt.Logger != nil {
 						rt.Logger.Error(ctx, "runtime", "recovery_mailbox_insert_failed", nil, mailboxErr)
 					}
@@ -476,7 +467,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				Payload:     payload,
 				CreatedAt:   time.Now(),
 			}); publishErr != nil {
-				log.Printf("runtime recovery_failed publish failed: %v", publishErr)
 				if rt.Logger != nil {
 					rt.Logger.Error(ctx, "runtime", "recovery_failed_publish_failed", nil, publishErr)
 				}

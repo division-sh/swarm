@@ -2,9 +2,10 @@ package runtime
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"sync"
+
+	"swarm/internal/runtime/diaglog"
 )
 
 var processWarnOnceSeen sync.Map
@@ -18,7 +19,7 @@ func processWarn(component string, format string, args ...any) {
 	if msg == "" {
 		return
 	}
-	log.Printf("runtime.warn component=%s message=%s", component, msg)
+	diaglog.ProcessLog("warn", component, msg)
 }
 
 func processWarnOnce(key, component string, format string, args ...any) {

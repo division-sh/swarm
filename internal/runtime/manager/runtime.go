@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -300,7 +299,6 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 	}
 	if killer, ok := am.workspaces.(workspace.OrphanKiller); ok && killer != nil {
 		if err := killer.KillOrphanProcesses(am.runtimeContext()); err != nil {
-			log.Printf("kill previous workspace orphan processes failed: %v", err)
 			if am.bus != nil {
 				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
@@ -323,7 +321,6 @@ func (am *AgentManager) killPreviousRuns(ctx context.Context, producerID string)
 		}
 		seen[agentID] = struct{}{}
 		if err := am.RestartAgent(agentID); err != nil {
-			log.Printf("restart agent after kill_previous failed agent=%s err=%v", agentID, err)
 			if am.bus != nil {
 				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
@@ -452,7 +449,6 @@ func (am *AgentManager) retryLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := am.replayPendingEvents(ctx); err != nil {
-				log.Printf("retry replay failed: %v", err)
 				if am.bus != nil {
 					am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 						Level:     "error",
@@ -486,7 +482,6 @@ func (am *AgentManager) replayPendingEvents(ctx context.Context) error {
 			return nil
 		}
 		if err := am.ReplayAgentBacklog(ctx, id); err != nil {
-			log.Printf("pending replay failed for agent=%s err=%v", id, err)
 			if am.bus != nil {
 				am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
@@ -532,7 +527,6 @@ func (am *AgentManager) ReplayAgentBacklog(ctx context.Context, agentID string) 
 			return nil
 		}
 		if err := am.processEvent(ctx, agent, evt); err != nil {
-			log.Printf("pending replay failed for agent=%s event=%s err=%v", agentID, evt.ID, err)
 			if am.bus != nil {
 				evtCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
 				evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID))
@@ -614,7 +608,6 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	runtimemcp.ResetTurnContexts()
 	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
 		if err := resetter.ResetAll(am.runtimeMode); err != nil {
-			log.Printf("session reset failed: %v", err)
 			if am.bus != nil {
 				am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 					Level:     "error",
@@ -747,7 +740,6 @@ func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
 						am.clearPoisonPanicCount(agent.ID(), evt.ID)
 						consecutivePanics = 0
 						if err != nil {
-							log.Printf("agent %s failed processing event %s: %v", agent.ID(), evt.Type, err)
 							if am.bus != nil {
 								am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
 									Level:     "error",
@@ -802,7 +794,6 @@ func (am *AgentManager) handleAgentLoopPanic(ctx context.Context, agent Agent, c
 	if panicText == "" {
 		panicText = "unknown panic"
 	}
-	log.Printf("agent loop panic: agent=%s count=%d err=%s", agent.ID(), consecutivePanics, panicText)
 
 	entityID := ""
 	flowInstance := ""

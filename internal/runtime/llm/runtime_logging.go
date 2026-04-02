@@ -4,20 +4,17 @@ import (
 	"context"
 	"strings"
 
+	"swarm/internal/runtime/diaglog"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
-type runtimeLogPublisher interface {
+type RuntimeLogSink interface {
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
 }
 
-func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, action, agentID, sessionID, entityID string, detail any, err error) {
-	if publisher == nil {
-		return
-	}
-	logger, ok := publisher.(runtimeLogPublisher)
-	if !ok || logger == nil {
+func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, agentID, sessionID, entityID string, detail any, err error) {
+	if logger == nil {
 		return
 	}
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
@@ -25,7 +22,7 @@ func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, a
 	if err != nil {
 		errText = strings.TrimSpace(err.Error())
 	}
-	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+	diaglog.RunLog(ctx, logger, runtimepipeline.RuntimeLogEntry{
 		Level:     strings.TrimSpace(level),
 		Component: "llm-runtime",
 		Action:    strings.TrimSpace(action),
@@ -36,5 +33,47 @@ func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, a
 		SessionID: strings.TrimSpace(sessionID),
 		Detail:    detail,
 		Error:     errText,
+	})
+}
+
+func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, action, agentID, sessionID, entityID string, detail any, err error) {
+	if publisher == nil {
+		return
+	}
+	logger, ok := publisher.(RuntimeLogSink)
+	if !ok || logger == nil {
+		return
+	}
+	logRunRuntime(ctx, logger, level, action, agentID, sessionID, entityID, detail, err)
+}
+
+func logSessionRuntime(ctx context.Context, sink any, action, agentID, sessionID string, detail any) {
+	if logger, ok := sink.(RuntimeLogSink); ok && logger != nil {
+		logRunRuntime(ctx, logger, "info", action, agentID, sessionID, "", detail, nil)
+		return
+	}
+	if publisher, ok := sink.(EventPublisher); ok && publisher != nil {
+		logPublisherRuntime(ctx, publisher, "info", action, agentID, sessionID, "", detail, nil)
+	}
+}
+
+func LogSessionRotatedForRun(ctx context.Context, sink any, agentID, runtimeMode, oldSessionID, newSessionID, scopeKey, reason string, turnCount, parseFailures int) {
+	logSessionRuntime(ctx, sink, "session_rotated", agentID, newSessionID, map[string]any{
+		"runtime_mode":   strings.TrimSpace(runtimeMode),
+		"old_session_id": strings.TrimSpace(oldSessionID),
+		"new_session_id": strings.TrimSpace(newSessionID),
+		"scope_key":      strings.TrimSpace(scopeKey),
+		"reason":         strings.TrimSpace(reason),
+		"turn_count":     turnCount,
+		"parse_failures": parseFailures,
+	})
+}
+
+func LogSessionAdoptedForRun(ctx context.Context, sink any, agentID, runtimeMode, oldSessionID, newSessionID, scopeKey string) {
+	logSessionRuntime(ctx, sink, "session_adopted", agentID, newSessionID, map[string]any{
+		"runtime_mode":   strings.TrimSpace(runtimeMode),
+		"old_session_id": strings.TrimSpace(oldSessionID),
+		"new_session_id": strings.TrimSpace(newSessionID),
+		"scope_key":      strings.TrimSpace(scopeKey),
 	})
 }

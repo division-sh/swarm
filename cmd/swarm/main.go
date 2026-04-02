@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lib/pq"
 	builderpkg "swarm/internal/builder"
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
@@ -258,6 +259,7 @@ type runStatusReport struct {
 	RecentEvents      []runStatusEvent          `json:"recent_events"`
 	DeadLetters       []runStatusDeadLetter     `json:"dead_letters,omitempty"`
 	AgentTurns        []runStatusAgentTurn      `json:"agent_turns,omitempty"`
+	Heuristics        []string                  `json:"heuristics,omitempty"`
 	RuntimeLogSummary []runStatusRuntimeSummary `json:"runtime_log_summary,omitempty"`
 	RuntimeLogs       []runStatusRuntimeLog     `json:"runtime_logs,omitempty"`
 }
@@ -310,6 +312,12 @@ type runStatusRuntimeSummary struct {
 	Count     int    `json:"count"`
 }
 
+type runStatusOptions struct {
+	LogsOnly      bool
+	LogsAllLevels bool
+	Component     string
+}
+
 func runStatusCommand(ctx context.Context, repo string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -317,6 +325,9 @@ func runStatusCommand(ctx context.Context, repo string, args []string, out io.Wr
 	storeMode := fs.String("store", "postgres", "Store mode: postgres")
 	runID := fs.String("run-id", "", "Run ID to inspect; defaults to latest run with scan.requested")
 	asJSON := fs.Bool("json", false, "Emit JSON")
+	logsOnly := fs.Bool("logs", false, "Show runtime log-focused status output")
+	logsAll := fs.Bool("logs-all", false, "Include info-level runtime logs in status output")
+	component := fs.String("component", "", "Filter runtime logs to a specific component")
 	if err := fs.Parse(args); err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "status failed: %v\n", err)
@@ -350,7 +361,11 @@ func runStatusCommand(ctx context.Context, repo string, args []string, out io.Wr
 		}
 		return 1
 	}
-	report, err := loadRunStatusReport(ctx, stores.SQLDB, strings.TrimSpace(*runID))
+	report, err := loadRunStatusReport(ctx, stores.SQLDB, strings.TrimSpace(*runID), runStatusOptions{
+		LogsOnly:      *logsOnly,
+		LogsAllLevels: *logsAll,
+		Component:     strings.TrimSpace(*component),
+	})
 	if err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "status failed: %v\n", err)
@@ -370,7 +385,7 @@ func runStatusCommand(ctx context.Context, repo string, args []string, out io.Wr
 	return 0
 }
 
-func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStatusReport, error) {
+func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts runStatusOptions) (runStatusReport, error) {
 	if db == nil {
 		return runStatusReport{}, errors.New("db is required")
 	}
@@ -552,6 +567,11 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStat
 	}
 
 	if report.TraceID != "" || report.RunID != "" {
+		logLevels := []string{"warn", "error"}
+		if opts.LogsAllLevels {
+			logLevels = []string{"info", "warn", "error"}
+		}
+		componentFilter := strings.TrimSpace(opts.Component)
 		if err := db.QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM events
@@ -560,8 +580,9 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStat
 				payload->>'run_id' = $1
 				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
 			  )
-			  AND payload->>'level' IN ('warn', 'error')
-		`, report.RunID, report.TraceID).Scan(&report.WarnErrorLogCount); err != nil {
+			  AND payload->>'level' = ANY($3::text[])
+			  AND ($4 = '' OR payload->>'component' = $4)
+		`, report.RunID, report.TraceID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
 			return runStatusReport{}, fmt.Errorf("load runtime log summary: %w", err)
 		}
 		logSummaryRows, err := db.QueryContext(ctx, `
@@ -576,11 +597,12 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStat
 				payload->>'run_id' = $1
 				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
 			  )
-			  AND payload->>'level' IN ('warn', 'error')
+			  AND payload->>'level' = ANY($3::text[])
+			  AND ($4 = '' OR payload->>'component' = $4)
 			GROUP BY payload->>'level', payload->>'component', payload->>'action'
 			ORDER BY COUNT(*) DESC, payload->>'component', payload->>'action'
 			LIMIT 12
-		`, report.RunID, report.TraceID)
+		`, report.RunID, report.TraceID, pq.Array(logLevels), componentFilter)
 		if err != nil {
 			return runStatusReport{}, fmt.Errorf("load runtime log rollup: %w", err)
 		}
@@ -608,10 +630,11 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStat
 				payload->>'run_id' = $1
 				OR (payload->>'run_id' = '' AND payload->>'trace_id' = $2)
 			  )
-			  AND payload->>'level' IN ('warn', 'error')
+			  AND payload->>'level' = ANY($3::text[])
+			  AND ($4 = '' OR payload->>'component' = $4)
 			ORDER BY created_at DESC
-			LIMIT 20
-		`, report.RunID, report.TraceID)
+			LIMIT $5
+		`, report.RunID, report.TraceID, pq.Array(logLevels), componentFilter, logLimitForStatus(opts))
 		if err != nil {
 			return runStatusReport{}, fmt.Errorf("load runtime logs: %w", err)
 		}
@@ -627,8 +650,42 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string) (runStat
 			return runStatusReport{}, fmt.Errorf("read runtime logs: %w", err)
 		}
 	}
+	report.Heuristics = deriveRunStatusHeuristics(report)
 
 	return report, nil
+}
+
+func logLimitForStatus(opts runStatusOptions) int {
+	if opts.LogsOnly || opts.LogsAllLevels || strings.TrimSpace(opts.Component) != "" {
+		return 100
+	}
+	return 20
+}
+
+func deriveRunStatusHeuristics(report runStatusReport) []string {
+	eventCounts := map[string]int{}
+	for _, item := range report.EventCounts {
+		eventCounts[strings.TrimSpace(item.EventName)] = item.Count
+	}
+	activeDeliveries := 0
+	for _, item := range report.Deliveries {
+		switch strings.ToLower(strings.TrimSpace(item.Status)) {
+		case "pending", "in_progress":
+			activeDeliveries += item.Count
+		}
+	}
+	heuristics := make([]string, 0, 4)
+	terminalScoring := eventCounts["scoring/vertical.marginal"] + eventCounts["scoring/vertical.rejected"] + eventCounts["vertical.shortlisted"]
+	if activeDeliveries == 0 && eventCounts["scoring/scoring.requested"] > 0 && terminalScoring == 0 {
+		heuristics = append(heuristics, "run appears settled after scoring started but no terminal scoring outcome was emitted")
+	}
+	if strings.EqualFold(strings.TrimSpace(report.RunTableStatus), "running") && activeDeliveries == 0 && !report.LastEventAt.IsZero() {
+		heuristics = append(heuristics, "runs table still says running, but there are no pending or in-progress deliveries")
+	}
+	if len(report.DeadLetters) > 0 {
+		heuristics = append(heuristics, "dead letters exist for this run")
+	}
+	return heuristics
 }
 
 func printRunStatusReport(w io.Writer, report runStatusReport) {
@@ -659,6 +716,12 @@ func printRunStatusReport(w io.Writer, report runStatusReport) {
 		len(report.AgentTurns),
 		report.WarnErrorLogCount,
 	)
+	if len(report.Heuristics) > 0 {
+		fmt.Fprintln(w, "\nHeuristics:")
+		for _, item := range report.Heuristics {
+			fmt.Fprintf(w, "  %s\n", item)
+		}
+	}
 	if len(report.EventCounts) > 0 {
 		fmt.Fprintln(w, "\nEvent Counts:")
 		for _, item := range report.EventCounts {

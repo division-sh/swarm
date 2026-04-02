@@ -3,13 +3,13 @@ package llm
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
+	"swarm/internal/runtime/diaglog"
 	"swarm/internal/runtime/sessions"
 )
 
-func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode string, registry sessions.Registry, lockOwner string, rotateAfter int) (*sessions.Lease, error) {
+func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode string, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || rotateAfter <= 0 {
 		return nil, nil
 	}
@@ -30,20 +30,24 @@ func MaybeRotateAfterTurn(ctx context.Context, s *Session, runtimeMode string, r
 	s.Messages = []Message{
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
-	LogSessionRotated(
-		s.AgentID,
-		runtimeMode,
-		oldSessionID,
-		lease.SessionID,
-		strings.TrimSpace(s.ScopeKey),
-		fmt.Sprintf("turn_limit_reached:%d", rotateAfter),
-		oldTurnCount,
-		oldParseFailures,
-	)
+	if sink != nil {
+		LogSessionRotatedForRun(ctx, sink, s.AgentID, runtimeMode, oldSessionID, lease.SessionID, strings.TrimSpace(s.ScopeKey), fmt.Sprintf("turn_limit_reached:%d", rotateAfter), oldTurnCount, oldParseFailures)
+	} else {
+		LogSessionRotated(
+			s.AgentID,
+			runtimeMode,
+			oldSessionID,
+			lease.SessionID,
+			strings.TrimSpace(s.ScopeKey),
+			fmt.Sprintf("turn_limit_reached:%d", rotateAfter),
+			oldTurnCount,
+			oldParseFailures,
+		)
+	}
 	return lease, nil
 }
 
-func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode string, registry sessions.Registry, lockOwner string, threshold int) (*sessions.Lease, error) {
+func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode string, registry sessions.Registry, lockOwner string, threshold int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || threshold <= 0 {
 		return nil, nil
 	}
@@ -64,16 +68,20 @@ func MaybeRotateAfterParseFailures(ctx context.Context, s *Session, runtimeMode 
 	s.Messages = []Message{
 		{Role: "system", Content: "Previous session summary:\n" + summary},
 	}
-	LogSessionRotated(
-		s.AgentID,
-		runtimeMode,
-		oldSessionID,
-		lease.SessionID,
-		strings.TrimSpace(s.ScopeKey),
-		fmt.Sprintf("parse_failures_threshold:%d", threshold),
-		oldTurnCount,
-		oldParseFailures,
-	)
+	if sink != nil {
+		LogSessionRotatedForRun(ctx, sink, s.AgentID, runtimeMode, oldSessionID, lease.SessionID, strings.TrimSpace(s.ScopeKey), fmt.Sprintf("parse_failures_threshold:%d", threshold), oldTurnCount, oldParseFailures)
+	} else {
+		LogSessionRotated(
+			s.AgentID,
+			runtimeMode,
+			oldSessionID,
+			lease.SessionID,
+			strings.TrimSpace(s.ScopeKey),
+			fmt.Sprintf("parse_failures_threshold:%d", threshold),
+			oldTurnCount,
+			oldParseFailures,
+		)
+	}
 	return lease, nil
 }
 
@@ -117,27 +125,25 @@ func LogSessionRotated(agentID, runtimeMode, oldSessionID, newSessionID, scopeKe
 	runtimeMode = strings.TrimSpace(runtimeMode)
 	scopeKey = strings.TrimSpace(scopeKey)
 	reason = snippetForLog(reason, 180)
-	log.Printf(
-		"session.rotated agent=%q runtime=%q scope=%q reason=%q old=%q new=%q turn_count=%d parse_failures=%d",
-		agentID,
-		runtimeMode,
-		scopeKey,
-		reason,
-		strings.TrimSpace(oldSessionID),
-		strings.TrimSpace(newSessionID),
-		turnCount,
-		parseFailures,
+	diaglog.ProcessLog("info", "llm-runtime", "session rotated",
+		"agent_id", agentID,
+		"runtime_mode", runtimeMode,
+		"scope_key", scopeKey,
+		"reason", reason,
+		"old_session_id", strings.TrimSpace(oldSessionID),
+		"new_session_id", strings.TrimSpace(newSessionID),
+		"turn_count", turnCount,
+		"parse_failures", parseFailures,
 	)
 }
 
 func LogSessionAdopted(agentID, runtimeMode, oldSessionID, newSessionID, scopeKey string) {
-	log.Printf(
-		"session.adopted agent=%q runtime=%q scope=%q old=%q new=%q",
-		strings.TrimSpace(agentID),
-		strings.TrimSpace(runtimeMode),
-		strings.TrimSpace(scopeKey),
-		strings.TrimSpace(oldSessionID),
-		strings.TrimSpace(newSessionID),
+	diaglog.ProcessLog("info", "llm-runtime", "session adopted",
+		"agent_id", strings.TrimSpace(agentID),
+		"runtime_mode", strings.TrimSpace(runtimeMode),
+		"scope_key", strings.TrimSpace(scopeKey),
+		"old_session_id", strings.TrimSpace(oldSessionID),
+		"new_session_id", strings.TrimSpace(newSessionID),
 	)
 }
 

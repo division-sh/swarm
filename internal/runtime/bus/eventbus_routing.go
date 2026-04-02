@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"log"
 	"strings"
 	"time"
 
@@ -221,7 +220,6 @@ func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
 }
 
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
-	log.Printf("eventbus contradiction event_id=%s event_type=%s reason=%s entity_id=%s", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), strings.TrimSpace(reason), strings.TrimSpace(source.EntityID()))
 	eb.logRuntime(ctx, "warn", "eventbus", "contradiction", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
 		"reason": strings.TrimSpace(reason),
 	}, "", 0)

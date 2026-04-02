@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -161,7 +160,6 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			Payload:     envelopeBytes,
 			CreatedAt:   now,
 		}).WithEntityID(entityID)); err != nil {
-			log.Printf("inbound publish failed provider=%s entity=%s err=%v", provider, entityID, err)
 			if g.logger != nil {
 				g.logger.Error(r.Context(), "inbound-gateway", "publish_failed", map[string]any{
 					"provider":          provider,
@@ -171,7 +169,6 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 			if rollback, ok := g.store.(InboundFailureRollback); ok && rollback != nil {
 				if rollbackErr := rollback.DeleteInboundEvent(r.Context(), providerEventID, entityID, provider); rollbackErr != nil {
-					log.Printf("inbound rollback failed provider=%s entity=%s provider_event_id=%s err=%v", provider, entityID, providerEventID, rollbackErr)
 					if g.logger != nil {
 						g.logger.Error(r.Context(), "inbound-gateway", "rollback_failed", map[string]any{
 							"provider":          provider,

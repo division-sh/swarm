@@ -187,7 +187,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
-			LogSessionAdopted(s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
+			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
 			s.ID = lease.SessionID
 		}
 		if sid := strings.TrimSpace(lease.ProviderSessionID); sid != "" {
@@ -314,16 +314,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				if len(s.Messages) > 0 {
 					s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
 				}
-				LogSessionRotated(
-					s.AgentID,
-					resolved.RuntimeMode,
-					oldSessionID,
-					rotated.SessionID,
-					resolved.ScopeKey,
-					rotateReason,
-					oldTurnCount,
-					oldParseFailures,
-				)
+				LogSessionRotatedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, oldSessionID, rotated.SessionID, resolved.ScopeKey, rotateReason, oldTurnCount, oldParseFailures)
 				args = []string{
 					"-p",
 					"--session-id", sessionToken(s),
@@ -390,7 +381,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			Error:   err.Error(),
 		}, nil))
 		if !resolved.Stateless {
-			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
+			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
 				lease = rotated
 			}
 		}
@@ -408,7 +399,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 				}, err)
 			} else {
 				s.ProviderSessionID = sid
-				LogSessionAdopted(s.AgentID, resolved.RuntimeMode, oldSessionID, sid, resolved.ScopeKey)
+				LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, oldSessionID, sid, resolved.ScopeKey)
 			}
 		} else {
 			s.ProviderSessionID = sid
@@ -451,7 +442,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	}
 
 	if !resolved.Stateless {
-		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
+		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
 			lease = rotated
 		}
 	}

@@ -79,7 +79,11 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 
 func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) {
 	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
-		processWarn(runtimeWorkflowID, "workflow timer projection failed entity_id=%s stage=%s: %v", entityID, nextStage, err)
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
+			"stage":         strings.TrimSpace(nextStage),
+			"current_stage": strings.TrimSpace(currentStage),
+			"source_event":  strings.TrimSpace(sourceEvent),
+		}, err)
 	}
 }
 
@@ -97,7 +101,9 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 		return
 	}
 	if _, ok, err := pc.workflowStore.Load(ctx, entityID); err != nil {
-		processWarn(runtimeWorkflowID, "workflow event timer load failed entity_id=%s event=%s: %v", entityID, sourceEvent, err)
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_event_timer_load_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
+			"source_event": sourceEvent,
+		}, err)
 		return
 	} else if !ok {
 		return
@@ -143,7 +149,9 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, fireAt, workflowTimerPolicy(source)))
 		}
 	}); err != nil {
-		processWarn(runtimeWorkflowID, "workflow event timer projection failed entity_id=%s event=%s: %v", entityID, sourceEvent, err)
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_event_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
+			"source_event": sourceEvent,
+		}, err)
 		return
 	}
 	for _, sc := range toCancel {
@@ -378,12 +386,18 @@ func (pc *PipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context
 	}
 	if pc.timerScheduler != nil {
 		if err := pc.timerScheduler.Register(sc); err != nil {
-			processWarn(runtimeWorkflowID, "workflow timer register failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
-			processWarn(runtimeWorkflowID, "workflow timer persist failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 	}
 }
@@ -394,7 +408,10 @@ func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, 
 	}
 	if pc.timerScheduler != nil {
 		if err := pc.timerScheduler.CancelExact(sc); err != nil {
-			processWarn(runtimeWorkflowID, "workflow timer cancel failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 	}
 	if pc.timerScheduleStore == nil {
@@ -402,12 +419,18 @@ func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, 
 	}
 	if exactStore, ok := pc.timerScheduleStore.(ExactSchedulePersistence); ok {
 		if err := exactStore.CancelScheduleExact(ctx, sc); err != nil {
-			processWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 		return
 	}
 	if err := pc.timerScheduleStore.CancelSchedule(ctx, sc.AgentID, sc.EventType); err != nil {
-		processWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+			"task_id": strings.TrimSpace(sc.TaskID),
+			"mode":    strings.TrimSpace(sc.Mode),
+		}, err)
 	}
 }
 
@@ -417,13 +440,19 @@ func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context,
 	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
-			processWarn(runtimeWorkflowID, "workflow timer persist failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 	}
 	if pc.timerScheduler != nil {
 		register := func() {
 			if err := pc.timerScheduler.Register(sc); err != nil {
-				processWarn(runtimeWorkflowID, "workflow timer register failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_register_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+					"task_id": strings.TrimSpace(sc.TaskID),
+					"mode":    strings.TrimSpace(sc.Mode),
+				}, err)
 			}
 		}
 		if !queuePipelinePostCommitAction(ctx, register) {
@@ -439,16 +468,25 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 	if pc.timerScheduleStore != nil {
 		if exactStore, ok := pc.timerScheduleStore.(ExactSchedulePersistence); ok {
 			if err := exactStore.CancelScheduleExact(ctx, sc); err != nil {
-				processWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+					"task_id": strings.TrimSpace(sc.TaskID),
+					"mode":    strings.TrimSpace(sc.Mode),
+				}, err)
 			}
 		} else if err := pc.timerScheduleStore.CancelSchedule(ctx, sc.AgentID, sc.EventType); err != nil {
-			processWarn(runtimeWorkflowID, "workflow timer cancel persist failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+			pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_persist_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+				"task_id": strings.TrimSpace(sc.TaskID),
+				"mode":    strings.TrimSpace(sc.Mode),
+			}, err)
 		}
 	}
 	if pc.timerScheduler != nil {
 		cancel := func() {
 			if err := pc.timerScheduler.CancelExact(sc); err != nil {
-				processWarn(runtimeWorkflowID, "workflow timer cancel failed agent=%s event=%s entity_id=%s: %v", sc.AgentID, sc.EventType, sc.EffectiveEntityID(), err)
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_cancel_failed", "", sc.EventType, sc.AgentID, sc.EffectiveEntityID(), map[string]any{
+					"task_id": strings.TrimSpace(sc.TaskID),
+					"mode":    strings.TrimSpace(sc.Mode),
+				}, err)
 			}
 		}
 		if !queuePipelinePostCommitAction(ctx, cancel) {

@@ -102,6 +102,9 @@ func TestPrintRunStatusReport(t *testing.T) {
 		LastEventAt:       last,
 		EventCount:        7,
 		WarnErrorLogCount: 1,
+		Heuristics: []string{
+			"run appears settled after scoring started but no terminal scoring outcome was emitted",
+		},
 		EventCounts: []runStatusEventCount{
 			{EventName: "scan.requested", Count: 1},
 			{EventName: "vertical.discovered", Count: 2},
@@ -131,6 +134,8 @@ func TestPrintRunStatusReport(t *testing.T) {
 		"Trace: trace-123",
 		"Run Status: running",
 		"Summary: events=7 deliveries=1 dead_letters=0 agent_turns=1 runtime_warn_errors=1",
+		"Heuristics:",
+		"run appears settled after scoring started but no terminal scoring outcome was emitted",
 		"Event Counts:",
 		"analysis-agent  status=delivered  count=2",
 		"Runtime Log Summary:",

@@ -323,7 +323,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 		if err != nil {
 			return fmt.Errorf("agent reconfigure session rotation failed: agent=%s runtime=%s: %w", agentID, runtimeMode, err)
 		} else if rotated != nil {
-			llm.LogSessionRotated(agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
+			llm.LogSessionRotatedForRun(am.runtimeContext(), am.bus, agentID, runtimeMode, "", rotated.SessionID, "", "agent_reconfigured", 0, 0)
 		}
 	}
 	if am.store != nil {

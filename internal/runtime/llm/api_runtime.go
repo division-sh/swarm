@@ -166,7 +166,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		defer stopLeaseHeartbeat()
 
 		if lease.SessionID != s.ID {
-			LogSessionAdopted(s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
+			LogSessionAdoptedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode, s.ID, lease.SessionID, resolved.ScopeKey)
 			s.ID = lease.SessionID
 		}
 	}
@@ -234,7 +234,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			Error:          lastErr.Error(),
 		}, nil))
 		if !resolved.Stateless {
-			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures); rotateErr == nil && rotated != nil {
+			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
 				lease = rotated
 			}
 		}
@@ -277,7 +277,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	}
 
 	if !resolved.Stateless {
-		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns); rotateErr == nil && rotated != nil {
+		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
 			lease = rotated
 		}
 	}

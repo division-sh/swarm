@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"errors"
-	"log"
 	"strings"
 	"time"
 
@@ -254,7 +253,6 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(agentID, eventID string, err
 	am.runMu.Unlock()
 
 	runtimebus.PauseRuntimeIngress()
-	log.Printf("runtime pause breaker tripped: reason=%s agent=%s event=%s err=%v", reason, agentID, eventID, err)
 	if am.bus != nil {
 		am.bus.LogRuntime(am.runtimeContext(), runtimepipeline.RuntimeLogEntry{
 			Level:     "error",
@@ -367,7 +365,6 @@ func (am *AgentManager) writeReceipt(ctx context.Context, eventID, agentID strin
 			}
 			err = retryErr
 		}
-		log.Printf("receipt write failed event=%s agent=%s status=%s err=%v", eventID, agentID, status, err)
 		if am.bus != nil {
 			am.bus.LogRuntime(writeCtx, runtimepipeline.RuntimeLogEntry{
 				Level:     "error",

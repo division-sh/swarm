@@ -47,9 +47,10 @@ func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry,
 			case <-ticker.C:
 				refreshed, err := sessions.Acquire(ctx, agentID, runtimeMode, lockOwner, scopeKey)
 				if err != nil {
-					log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
 					if onError != nil {
 						onError(err)
+					} else {
+						log.Printf("session lease heartbeat failed: agent=%s runtime=%s err=%v", agentID, runtimeMode, err)
 					}
 					continue
 				}

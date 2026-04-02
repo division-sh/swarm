@@ -11,36 +11,12 @@ import (
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/diaglog"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
-type RuntimeLogEntry struct {
-	Level       string
-	Component   string
-	Action      string
-	EventID     string
-	EventType   string
-	AgentID     string
-	EntityID    string
-	SessionID   string
-	Correlation map[string]string
-	Detail      any
-	Error       string
-	DurationUS  int
-}
-
-func (e RuntimeLogEntry) EffectiveEntityID() string {
-	return strings.TrimSpace(e.EntityID)
-}
-
-func (e *RuntimeLogEntry) NormalizeEntityID() {
-	if e == nil {
-		return
-	}
-	entityID := e.EffectiveEntityID()
-	e.EntityID = entityID
-}
+type RuntimeLogEntry = diaglog.RunEntry
 
 type Bus interface {
 	Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event
@@ -227,7 +203,7 @@ func processWarn(component string, format string, args ...any) {
 	if msg == "" {
 		return
 	}
-	log.Printf("runtime.warn component=%s message=%s", component, msg)
+	diaglog.ProcessLog("warn", component, msg)
 }
 
 func snippetForLog(raw string, max int) string {

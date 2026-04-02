@@ -338,7 +338,10 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 				return
 			}
 			if err := runtimedeadletters.Insert(ctx, pc.db, rec); err != nil {
-				processWarn("workflow-runtime", "intercepted emit dead letter persist failed event=%s entity_id=%s: %v", eventType, entityID, err)
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID), strings.TrimSpace(string(trigger.Type)), runtimeWorkflowID, entityID, map[string]any{
+					"intercepted_event_type": eventType,
+					"handler_node":          nodeID,
+				}, err)
 			}
 		}
 		if !queuePipelinePostCommitAction(ctx, recordDeadLetter) {
@@ -372,13 +375,45 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 		}
 		publishDeadLetter := func() {
 			if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
-				processWarn("workflow-runtime", "intercepted emit dead letter publish failed event=%s entity_id=%s: %v", eventType, entityID, err)
+				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID), strings.TrimSpace(string(trigger.Type)), runtimeWorkflowID, entityID, map[string]any{
+					"intercepted_event_type": eventType,
+					"handler_node":          nodeID,
+				}, err)
 			}
 		}
 		if !queuePipelinePostCommitAction(ctx, publishDeadLetter) {
 			publishDeadLetter()
 		}
 	}
+}
+
+func (pc *PipelineCoordinator) logRuntimeWarn(ctx context.Context, component, action, eventID, eventType, agentID, entityID string, detail any, err error) {
+	if pc != nil && pc.bus != nil {
+		errText := ""
+		if err != nil {
+			errText = strings.TrimSpace(err.Error())
+		}
+		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
+			Level:     "warn",
+			Component: strings.TrimSpace(component),
+			Action:    strings.TrimSpace(action),
+			EventID:   strings.TrimSpace(eventID),
+			EventType: strings.TrimSpace(eventType),
+			AgentID:   strings.TrimSpace(agentID),
+			EntityID:  strings.TrimSpace(entityID),
+			Detail:    detail,
+			Error:     errText,
+		})
+		return
+	}
+	processWarn(component, "%s", strings.TrimSpace(errText(err)))
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (pc *PipelineCoordinator) notifyTestSubscribed() {

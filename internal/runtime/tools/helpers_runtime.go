@@ -2,9 +2,9 @@ package tools
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
+	"swarm/internal/runtime/diaglog"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
 
@@ -21,7 +21,7 @@ func processWarn(component string, format string, args ...any) {
 	if msg == "" {
 		return
 	}
-	log.Printf("runtime.warn component=%s message=%s", component, msg)
+	diaglog.ProcessLog("warn", component, msg)
 }
 
 func mustJSON(v any) []byte {
