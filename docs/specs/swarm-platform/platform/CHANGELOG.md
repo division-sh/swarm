@@ -1,5 +1,91 @@
 # Swarm Platform Changelog
 
+## v1.5.0 (2026-04-02)
+
+### New: Run Model (`run_model` section)
+
+Platform-level execution context. Every event, delivery, session, turn, and entity mutation belongs to exactly one run.
+
+**New tables:**
+- `runs` — run registry with lifecycle states (running, paused, completed, failed, cancelled, forked), fork lineage (forked_from_run_id, forked_from_event_id)
+- `entity_mutations` — append-only mutation log (entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step)
+
+**`run_id` column added to:**
+- events, event_deliveries, agent_sessions, agent_turns
+
+**Run lifecycle:** creation (system.started, external event, fork), causal chain propagation, completion detection, pause/resume.
+
+**Fork:** timestamp-based system fork with optional contract swap. `swarm fork --run <id> --at <event_id|timestamp> [--contracts <path>]`. System auto-detects pending work at fork point. Reconstructs all entity states via mutation log reverse-apply.
+
+**Flight recorder:** query pattern over events + entity_mutations + agent_turns + event_deliveries. Run reconstruction, entity timeline, drift detection.
+
+**Builder API:** REST endpoints for run list/detail/events/mutations/fork/pause/resume/cancel.
+
+**Runtime implementation required:**
+- [ ] `runs` table + boot creation
+- [ ] `entity_mutations` table + boot creation
+- [ ] `run_id` column on events, event_deliveries, agent_sessions, agent_turns
+- [ ] run_id propagation in bus publish path (child inherits from parent)
+- [ ] Mutation logging in save_entity_field tool executor
+- [ ] Mutation logging in system node handler executor (data_accumulation, compute, sets_gate, advances_to, clear)
+- [ ] `swarm fork` CLI command
+
+### New: Lineage Model (replaces trace_id)
+
+**`trace_id` removed** from events and agent_turns DDL (column + index). Lineage now tracked via:
+- `run_id` — flat grouping (all events in a run)
+- `source_event_id` — causal tree (parent → child, recursive CTE)
+- `runs.forked_from_run_id` + `runs.forked_from_event_id` — cross-run fork lineage
+
+Postgres recursive CTE examples provided for causal chain and causal tree queries.
+
+**Runtime implementation required:**
+- [ ] Drop trace_id column from events (migration)
+- [ ] Drop trace_id column from agent_turns (migration)
+- [ ] Remove all trace_id references from Go runtime code
+- [ ] Ensure source_event_id set on all emitted events
+
+### New: Expression Context Specification (`handler_specification.expression_context`)
+
+Explicitly defines namespaces available in CEL expressions (guard, on_complete, rules, data_accumulation, filter):
+
+| Namespace | Resolves to | Available in |
+|-----------|------------|--------------|
+| `entity.*` | entity_state.fields | all expressions |
+| `accumulated.*` | accumulator items array | on_complete, filter only |
+| `payload.*` | inbound event payload | all expressions |
+| `policy.*` | merged policy context | all expressions |
+
+Key rule: `entity.*` does NOT include accumulated items. Dimension scores, fan-out results, and per-item data live in `accumulated.*` only. No implicit promotion.
+
+**Boot validation rule:** for every `entity.X` in a condition/expression, verify at least one upstream handler writes X. Warning if no writer found.
+
+**Runtime implementation required:**
+- [ ] Expression field reference validation in `swarm verify` / boot checks
+- [ ] Extract `entity.*` references from condition/check/expression strings
+- [ ] Cross-reference against data_accumulation writes and compute.store_as
+- [ ] Boot warning for unresolved references
+
+### Version bump: 1.4.0 → 1.5.0
+
+---
+
+### Empire Contract Changes (same session)
+
+Product-level, not platform spec. Listed for implementer awareness.
+
+**Scoring: on_complete shortlist condition fixed.** `entity.build_complexity` / `entity.automation_completeness` → `accumulated.filter()`. Root cause of the 10/11 accumulator bug — old condition referenced non-existent entity fields, on_complete evaluation failed, transaction rolled back on 11th dimension.
+
+**Scoring: derivation flow reworked (two-phase).** Old: single handler emitted `scoring.derived_requested` directly to agent, no child entity creation. New: Phase 1 (`vertical.derived`) guards on parent + increments child_count + emits `scoring.derived_requested`. Phase 2 (`scoring.derived_requested` handler, new) creates child entity + emits `scoring.derived_ready`. Agent subscribes to `scoring.derived_ready`. Anti-bias preserved: primary agent never scores derived verticals.
+
+**Scoring: derivation guard simplified.** Removed `entity.scores.icp_crispness` and `entity.scores.retention_architecture` (nested fields that don't exist). Guards can't access accumulated data.
+
+**Validation: revision counters wired.** Added `data_accumulation` with `expression: entity.revision_count + 1` to 4 spec-revision handlers + `brand_revision_count + 1` to brand revision handler. Previously referenced in guards but never incremented.
+
+**Signal-search: missing events.** Added `timer.search_campaign_timeout`. Removed duplicate cross-scope events that caused ambiguous alias in merge logic.
+
+**Misc:** factory-cto orphan subscription removed. portfolio-coordinator gets `policy.change_requested`. Signals-mode MRA tool name fixed. pre-brand-agent stale emit removed. Validation output pins completed. Scoring schema pins cleaned. Cross-flow-exits docs updated.
+
 ## v1.4.0 (2026-03-27)
 
 ### Breaking: tools_tier2 renamed to tools
