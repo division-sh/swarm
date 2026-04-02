@@ -66,6 +66,62 @@ Key rule: `entity.*` does NOT include accumulated items. Dimension scores, fan-o
 - [ ] Cross-reference against data_accumulation writes and compute.store_as
 - [ ] Boot warning for unresolved references
 
+### New: `create_entity` Handler Field (`handler_specification.create_entity`)
+
+New handler field that mints a fresh entity_id before any other processing. All subsequent handler steps operate on the new entity. Execution position: first in the dependency graph (before query, guard, everything).
+
+Key interactions specified:
+- `create_entity` + `accumulate` = **PROHIBITED** (boot error). Accumulate needs same entity across events; create_entity mints a new one each time.
+- `create_entity` + `fan_out` = ALLOWED. One entity, multiple fan-out events.
+- `create_entity` + `guard` = ALLOWED, but guard sees empty entity state.
+
+Dependency graph updated to show `create_entity` as first step. `handler_field_compliance` and `dialect_compliance` boot checks updated.
+
+**Runtime implementation required:**
+- [ ] Implement create_entity as first step in handler execution
+- [ ] Boot error if create_entity + accumulate on same handler
+
+### New: `compute.keys` and `operation_requirements` (`handler_specification.compute`)
+
+`compute` now has explicit requirements for `weighted_average` operation:
+- `keys.dimension_key` — field name in accumulated items identifying the dimension
+- `keys.score_keys` — field name(s) containing numeric scores
+- Boot error if weighted_average is missing keys
+
+This was the root cause of the early scoring zero-composite bug — without keys, the runtime couldn't map accumulated items to dimensions.
+
+### Changed: Universal Tools List Expanded (`engine.agent_session_management`)
+
+Universal tools (auto-granted to all agents without explicit listing) expanded from 2 to 7:
+- agent_message, mailbox_send (existing)
+- get_entity, save_entity_field, query_entities, query_metrics, search_entities (new)
+
+### Changed: `event_deliveries` DDL
+
+Added columns: `in_progress` to status CHECK, `reason_code`, `active_session_id`, `started_at`. Added index on `active_session_id`.
+
+**Runtime implementation required:**
+- [ ] Migration to add new columns
+
+### Changed: `event_receipts` DDL
+
+Added outcomes: `terminal_reject`, `waiting`, `fanned_out`. Added `reason_code` column.
+
+**Runtime implementation required:**
+- [ ] Migration to add new outcomes and column
+
+### Changed: Stateless Flow Entity Behavior (`flow_model.stateless_flows`)
+
+Clarified: stateless does NOT mean entityless. If a handler in a stateless flow writes entity-scoped fields (data_accumulation, accumulate, compute), the platform auto-materializes an entity. The entity has no `current_state` and no lifecycle transitions, but persists accumulator state and computed values. Distinction: stateless = no state machine. Entityless = no entity at all (rare).
+
+### New: Boot Check `input_pin_wiring` (check #33)
+
+Warning severity. Fires when a flow's required input event pin has no emitter — no other flow's node or agent produces this event. Check count: 32 → 33 (21 error, 12 warning).
+
+### Changed: `configure_routing` Moved to `planned_tools`
+
+`configure_routing` removed from `platform_builtin_tools` and moved to a new `planned_tools` section. The permission exists (as an authorization gate) but the tool is not yet implemented. Planned for v1.5.
+
 ### Version bump: 1.4.0 → 1.5.0
 
 ---
