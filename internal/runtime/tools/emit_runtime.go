@@ -29,7 +29,7 @@ func InitEventSchemaRegistry(source semanticview.Source) {
 
 	var catalog map[string]runtimecontracts.EventCatalogEntry
 	if source != nil {
-		catalog = source.EventEntries()
+		catalog = source.ResolvedEventCatalog()
 	}
 	activeSchemas = runtimecontracts.EventSchemaRegistryFromCatalog(catalog)
 	runtimecontracts.SetActiveEventSchemaRegistry(activeSchemas)
@@ -41,7 +41,7 @@ func InitEventSchemaRegistry(source semanticview.Source) {
 				if eventType == "" {
 					continue
 				}
-				if _, ok := activeSchemas[eventType]; ok {
+				if _, ok := emitSchemaForEventTypeLocal(eventType); ok {
 					continue
 				}
 				generatedSchemas[eventType] = struct{}{}
@@ -57,6 +57,20 @@ func InitEventSchemaRegistry(source semanticview.Source) {
 	emitToolToEvent = make(map[string]string, len(activeSchemas))
 	for eventType := range activeSchemas {
 		emitToolToEvent[EmitToolName(eventType)] = eventType
+	}
+	if source != nil {
+		for _, entry := range source.AgentEntries() {
+			for _, eventType := range entry.EmitEvents {
+				eventType = strings.TrimSpace(eventType)
+				if eventType == "" {
+					continue
+				}
+				if _, ok := emitSchemaForEventTypeLocal(eventType); !ok {
+					continue
+				}
+				emitToolToEvent[EmitToolName(eventType)] = eventType
+			}
+		}
 	}
 	emitRegistryReady = true
 }
@@ -99,11 +113,7 @@ func GenerateEmitToolsForRole(role string, warn func(string, string, string, ...
 			if eventType == "" {
 				return EmitSchema{}, false
 			}
-			schema, ok := activeSchemas[eventType]
-			if !ok {
-				return EmitSchema{}, false
-			}
-			return schema, true
+			return emitSchemaForEventTypeLocal(eventType)
 		},
 		warn,
 	)
@@ -121,7 +131,7 @@ func GenerateEmitToolsForEvents(eventTypes []string, warn func(string, string, s
 		if eventType == "" {
 			continue
 		}
-		schema, ok := activeSchemas[eventType]
+		schema, ok := emitSchemaForEventTypeLocal(eventType)
 		if !ok {
 			if warn != nil {
 				warn(
@@ -141,6 +151,10 @@ func GenerateEmitToolsForEvents(eventTypes []string, warn func(string, string, s
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools
+}
+
+func GenerateEmitToolsForConfig(raw json.RawMessage, warn func(string, string, string, ...any)) []llm.ToolDefinition {
+	return GenerateEmitToolsForEvents(configuredEmitEvents(raw), warn)
 }
 
 func GeneratedEmitSchemasForAgentRoles() []string {
@@ -200,10 +214,10 @@ func eventTypeFromEmitToolName(toolName string) (string, bool) {
 
 func schemaForEventType(eventType string) EmitSchema {
 	ensureEventSchemaRegistry()
-	eventType = strings.TrimSpace(eventType)
-	if schema, ok := activeSchemas[eventType]; ok {
+	if schema, ok := emitSchemaForEventTypeLocal(eventType); ok {
 		return schema
 	}
+	eventType = strings.TrimSpace(eventType)
 	return EmitSchema{
 		Description: "Emit " + eventType + " event",
 		Schema: map[string]any{
@@ -212,6 +226,22 @@ func schemaForEventType(eventType string) EmitSchema {
 			"additionalProperties": false,
 		},
 	}
+}
+
+func emitSchemaForEventTypeLocal(eventType string) (EmitSchema, bool) {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return EmitSchema{}, false
+	}
+	if schema, ok := activeSchemas[eventType]; ok {
+		return schema, true
+	}
+	local := localEmitEventType(eventType)
+	if local == "" || local == eventType {
+		return EmitSchema{}, false
+	}
+	schema, ok := activeSchemas[local]
+	return schema, ok
 }
 
 func configuredEmitEvents(raw json.RawMessage) []string {

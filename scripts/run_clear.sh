@@ -4,7 +4,9 @@ set -euo pipefail
 CONTRACTS_ROOT="${CONTRACTS_ROOT:-/Users/youmew/swarm/empire/contracts}"
 HEALTH_ADDR="${HEALTH_ADDR:-127.0.0.1:8081}"
 HEALTH_URL="http://${HEALTH_ADDR}/healthz"
+READY_URL="http://${HEALTH_ADDR}/readyz"
 API_HEALTH_URL="http://${HEALTH_ADDR}/api/health"
+HEALTH_PORT="${HEALTH_ADDR##*:}"
 
 SWARM_DB_HOST="${SWARM_DB_HOST:-127.0.0.1}"
 SWARM_DB_PORT="${SWARM_DB_PORT:-5432}"
@@ -22,13 +24,44 @@ CORPUS_PATH="${CORPUS_PATH:-/data/test-signals-25.jsonl}"
 CORPUS_MODE="${CORPUS_MODE:-corpus}"
 CORPUS_GEOGRAPHY="${CORPUS_GEOGRAPHY:-US}"
 
+kill_swarm_processes() {
+  local pids=""
+  pids+=" $(pgrep -f 'go run ./cmd/swarm' 2>/dev/null || true)"
+  pids+=" $(pgrep -f '/tmp/go-build.*/exe/swarm' 2>/dev/null || true)"
+  pids+=" $(pgrep -f '/Library/Caches/go-build/.*/swarm' 2>/dev/null || true)"
+  pids+=" $(pgrep -x 'swarm' 2>/dev/null || true)"
+  pids+=" $(pgrep -f '(^|[ /])swarm([[:space:]]|$)' 2>/dev/null || true)"
+  pids+=" $(lsof -tiTCP:${HEALTH_PORT} -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -f "${PID_FILE}" ]]; then
+    pids+=" $(cat "${PID_FILE}" 2>/dev/null || true)"
+    rm -f "${PID_FILE}"
+  fi
+  pids="$(printf '%s\n' ${pids} | awk 'NF {print $1}' | sort -u)"
+  if [[ -z "${pids}" ]]; then
+    return
+  fi
+  echo "Killing Swarm PIDs: ${pids//$'\n'/ }"
+  while read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    kill "${pid}" >/dev/null 2>&1 || true
+  done <<<"${pids}"
+  sleep 1
+  while read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    if kill -0 "${pid}" >/dev/null 2>&1; then
+      kill -9 "${pid}" >/dev/null 2>&1 || true
+    fi
+  done <<<"${pids}"
+  sleep 1
+  if pgrep -x 'swarm' >/dev/null 2>&1; then
+    echo "Failed to stop all swarm processes:"
+    pgrep -alf '(^|[ /])swarm([[:space:]]|$)' || true
+    exit 1
+  fi
+}
+
 echo "Stopping local Swarm processes..."
-pkill -f 'go run ./cmd/swarm' >/dev/null 2>&1 || true
-pkill -f '/tmp/go-build.*/exe/swarm' >/dev/null 2>&1 || true
-if [[ -f "${PID_FILE}" ]]; then
-  kill "$(cat "${PID_FILE}")" >/dev/null 2>&1 || true
-  rm -f "${PID_FILE}"
-fi
+kill_swarm_processes
 
 echo "Stopping running Docker containers..."
 container_ids="$(docker ps -q 2>/dev/null || true)"
@@ -55,13 +88,15 @@ SQL
 echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
 : > "${LOG_FILE}"
 nohup go run ./cmd/swarm -contracts "${CONTRACTS_ROOT}" -health-addr "${HEALTH_ADDR}" >"${LOG_FILE}" 2>&1 &
-echo $! > "${PID_FILE}"
+launcher_pid=$!
+echo "${launcher_pid}" > "${PID_FILE}"
 
 ready=0
 for _ in $(seq 1 "${START_TIMEOUT}"); do
   health_code="$(curl -s -o /tmp/swarm-healthz.json -w '%{http_code}' "${HEALTH_URL}" || true)"
+  ready_code="$(curl -s -o /tmp/swarm-readyz.json -w '%{http_code}' "${READY_URL}" || true)"
   api_code="$(curl -s -o /tmp/swarm-api-health.json -w '%{http_code}' "${API_HEALTH_URL}" || true)"
-  if [[ "${health_code}" == "200" && "${api_code}" == "200" ]]; then
+  if [[ "${health_code}" == "200" && "${ready_code}" == "200" && "${api_code}" == "200" ]]; then
     ready=1
     break
   fi
@@ -72,6 +107,11 @@ if [[ "${ready}" -ne 1 ]]; then
   echo "Swarm failed to become ready. Current log:"
   tail -n 200 "${LOG_FILE}"
   exit 1
+fi
+
+serving_pid="$(lsof -tiTCP:${HEALTH_PORT} -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+if [[ -n "${serving_pid}" ]]; then
+  echo "${serving_pid}" > "${PID_FILE}"
 fi
 
 echo "Swarm ready at http://${HEALTH_ADDR}"

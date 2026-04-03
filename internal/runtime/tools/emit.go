@@ -13,7 +13,19 @@ import (
 type EmitSchema = runtimecontracts.EventSchema
 
 func EmitToolName(eventType string) string {
+	eventType = localEmitEventType(eventType)
 	return "emit_" + strings.ReplaceAll(strings.TrimSpace(eventType), ".", "_")
+}
+
+func localEmitEventType(eventType string) string {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	if eventType == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(eventType, "/"); idx >= 0 {
+		return strings.TrimSpace(eventType[idx+1:])
+	}
+	return eventType
 }
 
 func EventTypeFromEmitToolName(toolName string, toolToEvent map[string]string) (string, bool) {

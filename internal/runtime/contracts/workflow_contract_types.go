@@ -350,10 +350,19 @@ type NodeStateSchema struct {
 	Description string           `yaml:"description"`
 	Fields      []NodeStateField `yaml:"fields"`
 }
+type NodeGateStateSchema struct {
+	Description string          `yaml:"description"`
+	Gates       []NodeGateField `yaml:"gates"`
+	Storage     string          `yaml:"storage"`
+}
 type NodeStateField struct {
 	Name    string `yaml:"name"`
 	Type    string `yaml:"type"`
 	Default any    `yaml:"default"`
+}
+type NodeGateField struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
 }
 type PolicyDocument = flowmodel.PolicyDocument
 type PolicyValue = flowmodel.PolicyValue
@@ -683,6 +692,7 @@ type SystemNodeContract struct {
 	Timers           []WorkflowTimerContract           `yaml:"timers"`
 	EventHandlers    map[string]SystemNodeEventHandler `yaml:"event_handlers"`
 	StateSchema      NodeStateSchema                   `yaml:"state_schema"`
+	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
 	Action           ActionSpec               `yaml:"action"`
@@ -716,6 +726,7 @@ type SystemNodeEventHandler struct {
 type EventCatalogEntry struct {
 	Emitter           EventEmitterRef  `yaml:"emitter"`
 	EmitterType       string           `yaml:"emitter_type"`
+	Producer          []string         `yaml:"producer"`
 	AlternateEmitters []string         `yaml:"alternate_emitters"`
 	Consumer          []string         `yaml:"consumer"`
 	ConsumerType      []string         `yaml:"consumer_type"`

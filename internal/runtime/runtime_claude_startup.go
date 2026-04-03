@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 
 	"swarm/internal/config"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
+	runtimetools "swarm/internal/runtime/tools"
 	workspace "swarm/internal/runtime/workspace"
 )
 
@@ -115,6 +117,59 @@ func validateClaudeMCPToolsForManagedAgents(cfg *config.Config, gateway *runtime
 		if len(tools) == 0 {
 			return fmt.Errorf("mcp tools/list returned no tools for agent %s", agentID)
 		}
+		toolNames := make(map[string]struct{}, len(tools))
+		for _, tool := range tools {
+			name := strings.TrimSpace(asString(tool["name"]))
+			if name == "" {
+				continue
+			}
+			toolNames[name] = struct{}{}
+		}
+		missingEmitTools := make([]string, 0)
+		for _, eventType := range configuredEmitEventsForStartup(agentCfg.Config) {
+			name := runtimetools.EmitToolName(eventType)
+			if _, ok := toolNames[name]; ok {
+				continue
+			}
+			missingEmitTools = append(missingEmitTools, name)
+		}
+		if len(missingEmitTools) > 0 {
+			sort.Strings(missingEmitTools)
+			return fmt.Errorf("mcp tools/list missing required emit tools for agent %s: %s", agentID, strings.Join(missingEmitTools, ", "))
+		}
 	}
 	return nil
+}
+
+func configuredEmitEventsForStartup(raw json.RawMessage) []string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	eventsRaw, ok := payload["emit_events"]
+	if !ok {
+		return nil
+	}
+	items, ok := eventsRaw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		eventType := strings.TrimSpace(asString(item))
+		if eventType == "" {
+			continue
+		}
+		if _, exists := seen[eventType]; exists {
+			continue
+		}
+		seen[eventType] = struct{}{}
+		out = append(out, eventType)
+	}
+	sort.Strings(out)
+	return out
 }

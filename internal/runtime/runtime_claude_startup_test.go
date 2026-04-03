@@ -118,7 +118,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsVisibleTools(t *testing.T
 	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
 		ID:     "campaign-coordinator",
 		Role:   "campaign_coordinator",
-		Config: json.RawMessage(`{"emit_events":["scan.requested"]}`),
+		Config: json.RawMessage(`{}`),
 	}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -126,6 +126,25 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsVisibleTools(t *testing.T
 
 	if err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager); err != nil {
 		t.Fatalf("validateClaudeMCPToolsForManagedAgents: %v", err)
+	}
+}
+
+func TestValidateClaudeMCPToolsForManagedAgents_FailsWhenRequiredEmitToolsMissing(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.RuntimeMode = "cli_test"
+	manager := runtimemanager.NewAgentManager(nil, nil)
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{
+		ID:     "market-research-agent",
+		Role:   "market_research",
+		Config: json.RawMessage(`{"emit_events":["discovery/category.assessed","discovery/market_research.scan_complete"]}`),
+	}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	gateway := runtimemcp.NewGateway(startupProbeToolExecutor{}, "gateway-token", RuntimeMCPGatewayHooks(nil, manager.GetAgentConfig))
+
+	err := validateClaudeMCPToolsForManagedAgents(cfg, gateway, "gateway-token", manager)
+	if err == nil || !strings.Contains(err.Error(), "missing required emit tools") {
+		t.Fatalf("expected missing emit tools error, got %v", err)
 	}
 }
 

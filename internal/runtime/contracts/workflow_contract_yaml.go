@@ -867,6 +867,51 @@ func (s *NodeStateSchema) UnmarshalYAML(node *yaml.Node) error {
 	s.Fields = fields
 	return nil
 }
+func (s *NodeGateStateSchema) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*s = NodeGateStateSchema{}
+		return nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		gates, err := decodeNodeGateFields(node)
+		if err != nil {
+			return err
+		}
+		s.Gates = gates
+		return nil
+	case yaml.MappingNode:
+		if hasYAMLMappingKey(node, "description") || hasYAMLMappingKey(node, "gates") || hasYAMLMappingKey(node, "storage") {
+			var aux struct {
+				Description string    `yaml:"description"`
+				Gates       yaml.Node `yaml:"gates"`
+				Storage     string    `yaml:"storage"`
+			}
+			if err := node.Decode(&aux); err != nil {
+				return err
+			}
+			gates, err := decodeNodeGateFields(&aux.Gates)
+			if err != nil {
+				return err
+			}
+			s.Description = strings.TrimSpace(aux.Description)
+			s.Gates = gates
+			s.Storage = strings.TrimSpace(aux.Storage)
+			return nil
+		}
+		gates, err := decodeNodeGateFields(node)
+		if err != nil {
+			return err
+		}
+		s.Gates = gates
+		return nil
+	default:
+		return fmt.Errorf("unsupported node gate state yaml node kind %d", node.Kind)
+	}
+}
 func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -1182,20 +1227,24 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 	var aux struct {
-		Emitter           yaml.Node `yaml:"emitter"`
-		EmitterType       string    `yaml:"emitter_type"`
-		AlternateEmitters []string  `yaml:"alternate_emitters"`
-		Consumer          yaml.Node `yaml:"consumer"`
-		ConsumerType      yaml.Node `yaml:"consumer_type"`
-		Source            string    `yaml:"_source"`
-		Status            string    `yaml:"_status"`
-		Intercepted       yaml.Node `yaml:"intercepted"`
-		Passthrough       yaml.Node `yaml:"passthrough"`
-		RuntimeHandling   string    `yaml:"runtime_handling"`
-		OwningNode        string    `yaml:"owning_node"`
-		DeliveryChannel   yaml.Node `yaml:"delivery_channel"`
-		Payload           yaml.Node `yaml:"payload"`
-		Required          []string  `yaml:"required"`
+		Emitter            yaml.Node `yaml:"emitter"`
+		EmitterType        string    `yaml:"emitter_type"`
+		Producer           yaml.Node `yaml:"producer"`
+		ProducerLegacy     yaml.Node `yaml:"_producer"`
+		AlternateEmitters  []string  `yaml:"alternate_emitters"`
+		Consumer           yaml.Node `yaml:"consumer"`
+		ConsumerLegacy     yaml.Node `yaml:"_consumer"`
+		ConsumerType       yaml.Node `yaml:"consumer_type"`
+		ConsumerTypeLegacy yaml.Node `yaml:"_consumer_type"`
+		Source             string    `yaml:"_source"`
+		Status             string    `yaml:"_status"`
+		Intercepted        yaml.Node `yaml:"intercepted"`
+		Passthrough        yaml.Node `yaml:"passthrough"`
+		RuntimeHandling    string    `yaml:"runtime_handling"`
+		OwningNode         string    `yaml:"owning_node"`
+		DeliveryChannel    yaml.Node `yaml:"delivery_channel"`
+		Payload            yaml.Node `yaml:"payload"`
+		Required           []string  `yaml:"required"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -1204,11 +1253,27 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if err != nil {
 		return err
 	}
+	producer, err := decodeStringListNode(&aux.Producer)
+	if err != nil {
+		return err
+	}
+	legacyProducer, err := decodeStringListNode(&aux.ProducerLegacy)
+	if err != nil {
+		return err
+	}
 	consumer, err := decodeStringListNode(&aux.Consumer)
 	if err != nil {
 		return err
 	}
+	legacyConsumer, err := decodeStringListNode(&aux.ConsumerLegacy)
+	if err != nil {
+		return err
+	}
 	consumerType, err := decodeStringListNode(&aux.ConsumerType)
+	if err != nil {
+		return err
+	}
+	legacyConsumerType, err := decodeStringListNode(&aux.ConsumerTypeLegacy)
 	if err != nil {
 		return err
 	}
@@ -1230,9 +1295,10 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	}
 	e.Emitter = emitter
 	e.EmitterType = strings.TrimSpace(aux.EmitterType)
+	e.Producer = mergeStringLists(producer, legacyProducer)
 	e.AlternateEmitters = mergeStringLists(aux.AlternateEmitters, alternates)
-	e.Consumer = consumer
-	e.ConsumerType = consumerType
+	e.Consumer = mergeStringLists(consumer, legacyConsumer)
+	e.ConsumerType = mergeStringLists(consumerType, legacyConsumerType)
 	e.Source = strings.TrimSpace(aux.Source)
 	e.Status = strings.TrimSpace(aux.Status)
 	e.Intercepted = intercepted
@@ -1770,6 +1836,67 @@ func decodeNodeStateField(name string, node *yaml.Node) (NodeStateField, error) 
 		return field, nil
 	default:
 		return NodeStateField{}, fmt.Errorf("unsupported node state field yaml node kind %d", node.Kind)
+	}
+}
+func decodeNodeGateFields(node *yaml.Node) ([]NodeGateField, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.SequenceNode:
+		gates := make([]NodeGateField, 0, len(node.Content))
+		for _, item := range node.Content {
+			switch item.Kind {
+			case yaml.ScalarNode:
+				name := strings.TrimSpace(item.Value)
+				if name == "" {
+					continue
+				}
+				gates = append(gates, NodeGateField{Name: name})
+			case yaml.MappingNode:
+				var field NodeGateField
+				if err := item.Decode(&field); err != nil {
+					return nil, err
+				}
+				field.Name = strings.TrimSpace(field.Name)
+				field.Description = strings.TrimSpace(field.Description)
+				if field.Name == "" {
+					return nil, fmt.Errorf("node gate field entry missing name")
+				}
+				gates = append(gates, field)
+			default:
+				return nil, fmt.Errorf("unsupported node gate fields yaml node kind %d", item.Kind)
+			}
+		}
+		return gates, nil
+	case yaml.MappingNode:
+		gates := make([]NodeGateField, 0, len(node.Content)/2)
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			name := strings.TrimSpace(node.Content[i].Value)
+			if name == "" {
+				continue
+			}
+			field := NodeGateField{Name: name}
+			switch node.Content[i+1].Kind {
+			case yaml.ScalarNode:
+				field.Description = strings.TrimSpace(node.Content[i+1].Value)
+			case yaml.MappingNode:
+				var aux NodeGateField
+				if err := node.Content[i+1].Decode(&aux); err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(aux.Name) != "" {
+					field.Name = strings.TrimSpace(aux.Name)
+				}
+				field.Description = strings.TrimSpace(aux.Description)
+			default:
+				return nil, fmt.Errorf("unsupported node gate field yaml node kind %d", node.Content[i+1].Kind)
+			}
+			gates = append(gates, field)
+		}
+		return gates, nil
+	default:
+		return nil, fmt.Errorf("unsupported node gate fields yaml node kind %d", node.Kind)
 	}
 }
 

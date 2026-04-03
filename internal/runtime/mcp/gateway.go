@@ -30,6 +30,7 @@ type GatewayHooks struct {
 	WithInboundEvent          func(context.Context, events.Event) context.Context
 	WithEmittedEventsRecorder func(context.Context, *runtimebus.EmittedEventsRecorder) context.Context
 	ResolveTurnContext        func(string) (TurnContext, bool)
+	EmitToolsForActor         func(models.AgentConfig) []llm.ToolDefinition
 	EmitTools                 func(string) []llm.ToolDefinition
 	EmitSchemaForTool         func(string) (description string, schema any, ok bool)
 	Log                       func(context.Context, string, string, string, string, map[string]any, string)
@@ -454,15 +455,15 @@ func (g *Gateway) logContextFallback(r *http.Request, action, toolName, reason, 
 		return
 	}
 	g.logMCP(r, "warn", action, nil, map[string]any{
-		"tool_name":          strings.TrimSpace(toolName),
-		"reason":             strings.TrimSpace(reason),
-		"context_token":      strings.TrimSpace(token),
-		"fallback_used":      used,
-		"fallback_allowed":   toolAllowsContextFallback(toolName),
-		"require_ctx_token":  RequireContextToken(),
-		"fallback_on_miss":   AllowContextFallbackOnMiss(),
-		"request_path":       strings.TrimSpace(r.URL.Path),
-		"request_method":     strings.TrimSpace(r.Method),
+		"tool_name":         strings.TrimSpace(toolName),
+		"reason":            strings.TrimSpace(reason),
+		"context_token":     strings.TrimSpace(token),
+		"fallback_used":     used,
+		"fallback_allowed":  toolAllowsContextFallback(toolName),
+		"require_ctx_token": RequireContextToken(),
+		"fallback_on_miss":  AllowContextFallbackOnMiss(),
+		"request_path":      strings.TrimSpace(r.URL.Path),
+		"request_method":    strings.TrimSpace(r.Method),
 	})
 }
 
@@ -487,13 +488,22 @@ func (g *Gateway) mcpToolsForRequest(r *http.Request) []ToolDef {
 		}
 	}
 	role := ""
-	if actor, ok := ActorFromRequest(r); ok {
-		role = strings.TrimSpace(g.hydrateActor(actor).Role)
+	actor, actorOK := ActorFromRequest(r)
+	if actorOK {
+		actor = g.hydrateActor(actor)
+		role = strings.TrimSpace(actor.Role)
 	}
 	if role == "" {
 		role = headerValue(r, actorRoleHeader)
 	}
-	if role != "" && g.hooks.EmitTools != nil {
+	if actorOK && g.hooks.EmitToolsForActor != nil {
+		for _, def := range g.hooks.EmitToolsForActor(actor) {
+			name := strings.TrimSpace(def.Name)
+			if name != "" {
+				catalog[name] = def
+			}
+		}
+	} else if role != "" && g.hooks.EmitTools != nil {
 		for _, def := range g.hooks.EmitTools(role) {
 			name := strings.TrimSpace(def.Name)
 			if name != "" {

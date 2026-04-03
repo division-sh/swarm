@@ -312,6 +312,80 @@ additionalProperties: false
 	}
 }
 
+func TestSystemNodeContract_GateStateSupportsShorthandMap(t *testing.T) {
+	var node SystemNodeContract
+	if err := loadYAMLBytes([]byte(`
+id: build-orchestrator
+gate_state:
+  g_product_spec: PM completed product spec
+  g_tech_spec: CTO completed tech spec
+`), &node); err != nil {
+		t.Fatalf("load system node: %v", err)
+	}
+	if got := len(node.GateState.Gates); got != 2 {
+		t.Fatalf("expected 2 gates, got %d", got)
+	}
+	if got := node.GateState.Gates[0].Name; got != "g_product_spec" {
+		t.Fatalf("expected first gate g_product_spec, got %q", got)
+	}
+	if got := node.GateState.Gates[0].Description; got != "PM completed product spec" {
+		t.Fatalf("expected first gate description, got %q", got)
+	}
+}
+
+func TestSystemNodeContract_GateStateSupportsStructuredForm(t *testing.T) {
+	var node SystemNodeContract
+	if err := loadYAMLBytes([]byte(`
+id: validation-orchestrator
+gate_state:
+  description: Tracks 4 validation gates per vertical
+  gates:
+    - g1_research
+    - g2_spec
+  storage: validation_pipelines.gate_state JSONB
+`), &node); err != nil {
+		t.Fatalf("load system node: %v", err)
+	}
+	if got := strings.TrimSpace(node.GateState.Description); got != "Tracks 4 validation gates per vertical" {
+		t.Fatalf("expected gate_state description, got %q", got)
+	}
+	if got := len(node.GateState.Gates); got != 2 {
+		t.Fatalf("expected 2 gates, got %d", got)
+	}
+	if got := node.GateState.Gates[1].Name; got != "g2_spec" {
+		t.Fatalf("expected second gate g2_spec, got %q", got)
+	}
+	if got := strings.TrimSpace(node.GateState.Storage); got != "validation_pipelines.gate_state JSONB" {
+		t.Fatalf("expected gate_state storage, got %q", got)
+	}
+}
+
+func TestEventCatalogEntry_ConsumerAliasesAndSourceAnnotations(t *testing.T) {
+	var entry EventCatalogEntry
+	if err := loadYAMLBytes([]byte(`
+_source: external (human board interface)
+_producer: mailbox_human
+_consumer: mailbox_system (external UI, not agent-subscribed)
+_consumer_type: external_ui
+payload:
+  entity_id: string
+`), &entry); err != nil {
+		t.Fatalf("load event catalog entry: %v", err)
+	}
+	if got := strings.TrimSpace(entry.Source); got != "external (human board interface)" {
+		t.Fatalf("expected source annotation preserved, got %q", got)
+	}
+	if got := len(entry.Consumer); got != 1 || strings.TrimSpace(entry.Consumer[0]) == "" {
+		t.Fatalf("expected _consumer alias to populate consumer, got %#v", entry.Consumer)
+	}
+	if got := len(entry.ConsumerType); got != 1 || strings.TrimSpace(entry.ConsumerType[0]) != "external_ui" {
+		t.Fatalf("expected _consumer_type alias to populate consumer_type, got %#v", entry.ConsumerType)
+	}
+	if got := len(entry.Producer); got != 1 || strings.TrimSpace(entry.Producer[0]) != "mailbox_human" {
+		t.Fatalf("expected _producer alias to populate producer, got %#v", entry.Producer)
+	}
+}
+
 func loadYAMLBytes(raw []byte, target any) error {
 	return yaml.Unmarshal(raw, target)
 }

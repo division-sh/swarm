@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -147,14 +148,23 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 		Credentials:       opts.Credentials,
 		CheckMCPReachable: true,
 	})
-	if !report.HasErrors() {
+	if !report.HasErrors() && !(bootWarningsFatal() && len(report.Warnings()) > 0) {
 		return nil
 	}
-	lines := make([]string, 0, len(report.Errors()))
+	lines := make([]string, 0, len(report.Errors())+len(report.Warnings()))
 	for _, finding := range report.Errors() {
 		lines = append(lines, strings.TrimSpace(finding.Message))
 	}
+	if bootWarningsFatal() {
+		for _, finding := range report.Warnings() {
+			lines = append(lines, strings.TrimSpace(finding.Message))
+		}
+	}
 	return fmt.Errorf(strings.Join(lines, "\n"))
+}
+
+func bootWarningsFatal() bool {
+	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
 }
 
 func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts RuntimeOptions) (*Runtime, error) {
@@ -177,6 +187,14 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if warnings, err := runtimetools.ValidateToolImplementations(source); err != nil {
 		return nil, fmt.Errorf("tool implementation validation failed: %w", err)
 	} else {
+		if bootWarningsFatal() && len(warnings) > 0 {
+			parts := make([]string, 0, len(warnings))
+			for _, warning := range warnings {
+				parts = append(parts, strings.TrimSpace(warning.Error()))
+			}
+			sort.Strings(parts)
+			return nil, fmt.Errorf("tool implementation validation warnings are fatal: %s", strings.Join(parts, "; "))
+		}
 		for _, warning := range warnings {
 			slog.Warn("tool implementation validation warning", "warning", warning.Error())
 		}
@@ -283,6 +301,14 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, modelRuntime); err != nil {
 		return nil, fmt.Errorf("native tool validation failed: %w", err)
 	} else {
+		if bootWarningsFatal() && len(warnings) > 0 {
+			parts := make([]string, 0, len(warnings))
+			for _, warning := range warnings {
+				parts = append(parts, strings.TrimSpace(warning.Error()))
+			}
+			sort.Strings(parts)
+			return nil, fmt.Errorf("native tool validation warnings are fatal: %s", strings.Join(parts, "; "))
+		}
 		for _, warning := range warnings {
 			slog.Warn("native tool validation warning", "warning", warning.Error())
 		}
@@ -304,6 +330,19 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 	if missing, err := runtimecredentials.MissingRequired(ctx, rt.Credentials, source); err != nil {
 		return nil, fmt.Errorf("credential validation failed: %w", err)
 	} else {
+		if bootWarningsFatal() && len(missing) > 0 {
+			parts := make([]string, 0, len(missing))
+			for _, item := range missing {
+				requiredBy := make([]string, 0, len(item.RequiredBy))
+				for _, ref := range item.RequiredBy {
+					requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+":"+strings.TrimSpace(ref.Name))
+				}
+				sort.Strings(requiredBy)
+				parts = append(parts, fmt.Sprintf("%s required by %s", strings.TrimSpace(item.Key), strings.Join(requiredBy, ", ")))
+			}
+			sort.Strings(parts)
+			return nil, fmt.Errorf("missing required credentials: %s", strings.Join(parts, "; "))
+		}
 		for _, item := range missing {
 			requiredBy := make([]string, 0, len(item.RequiredBy))
 			for _, ref := range item.RequiredBy {

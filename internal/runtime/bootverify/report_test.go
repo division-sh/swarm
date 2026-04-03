@@ -205,6 +205,15 @@ func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
 	}
 }
 
+func TestEventProducedExternallyLocal_AllowsAnnotatedSourceText(t *testing.T) {
+	t.Parallel()
+
+	entry := runtimecontracts.EventCatalogEntry{Source: "platform (timer system)"}
+	if !eventProducedExternallyLocal(entry) {
+		t.Fatal("expected platform source annotation to count as externally produced")
+	}
+}
+
 func TestRun_ReportsRecordEvidenceMissingEvidenceTarget(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
