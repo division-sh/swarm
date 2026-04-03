@@ -6,5 +6,12 @@ trigger:
 expected:
   handler_outcome: success
   entity_state: done
+  flow_entities:
+    child:
+      subject_id: 11111111-1111-1111-1111-111111111111
+      entity_state: completed
+    grandchild:
+      subject_id: 11111111-1111-1111-1111-111111111111
+      entity_state: finished
   emitted_events:
     - pipeline.complete

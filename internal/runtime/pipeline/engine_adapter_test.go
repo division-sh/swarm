@@ -412,6 +412,48 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 	}
 }
 
+func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	entityID := "11111111-1111-1111-1111-111111111111"
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		SubjectID:       entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "flow-a",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"subject_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("upsert flow-a entity: %v", err)
+	}
+
+	repo := pipelineEngineStateRepo{
+		coordinator: &PipelineCoordinator{
+			workflowStore: store,
+			module: &previewWorkflowModule{
+				bundle: &runtimecontracts.WorkflowContractBundle{
+					Semantics: runtimecontracts.WorkflowSemanticView{
+						FlowPrefix: map[string]string{
+							"flow-a": "flow-a",
+							"flow-b": "flow-b",
+						},
+					},
+				},
+			},
+		},
+	}
+	ctx := withPipelineFlowScope(context.Background(), "flow-b")
+	err := repo.SaveState(ctx, identity.NormalizeEntityID(entityID), runtimeengine.StateMutation{
+		Metadata: map[string]any{"note": "bad write"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
+		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
+	}
+}
+
 func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	if err := db.Close(); err != nil {

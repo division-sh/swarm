@@ -585,6 +585,99 @@ func TestRun_AllowsCreateEntityForStatefulInputPinHandlers(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	flowID := "child"
+	schema, ok := bundle.FlowSchemas[flowID]
+	if !ok {
+		t.Fatalf("flow schema %s missing", flowID)
+	}
+	schema.Mode = "template"
+	bundle.FlowSchemas[flowID] = schema
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	for nodeID, node := range flowView.Nodes {
+		for eventType, handler := range node.EventHandlers {
+			handler.CreateEntity = false
+			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+		}
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsStatelessFlowInputPinHandlersWithoutCreateEntity(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	flowID := "child"
+	schema, ok := bundle.FlowSchemas[flowID]
+	if !ok {
+		t.Fatalf("flow schema %s missing", flowID)
+	}
+	schema.InitialState = ""
+	bundle.FlowSchemas[flowID] = schema
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	for nodeID, node := range flowView.Nodes {
+		for eventType, handler := range node.EventHandlers {
+			handler.CreateEntity = false
+			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+		}
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsBackpropInputPinHandlersWithoutCreateEntity(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	flowID := "child"
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	var (
+		nodeID    string
+		eventType string
+		handler   runtimecontracts.SystemNodeEventHandler
+		found     bool
+	)
+	for candidateNodeID, node := range flowView.Nodes {
+		for candidateEventType, candidateHandler := range node.EventHandlers {
+			nodeID = candidateNodeID
+			eventType = candidateEventType
+			handler = candidateHandler
+			found = true
+			break
+		}
+		if found {
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected child flow handler")
+	}
+	newEventType := "child.killed_backprop"
+	handler.CreateEntity = false
+	renameFlowHandlerEvent(t, bundle, flowID, nodeID, eventType, newEventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 	if got := len(bootCheckRegistry); got != 35 {
 		t.Fatalf("bootCheckRegistry count = %d, want 35", got)
@@ -669,4 +762,29 @@ func writeFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBun
 		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 	}
 	bundle.Nodes[nodeID] = node
+}
+
+func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID, oldEventType, newEventType string, handler runtimecontracts.SystemNodeEventHandler) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	node := flowView.Nodes[nodeID]
+	delete(node.EventHandlers, oldEventType)
+	node.EventHandlers[newEventType] = handler
+	flowView.Nodes[nodeID] = node
+	if bundle.Nodes == nil {
+		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
+	}
+	bundle.Nodes[nodeID] = node
+	if len(bundle.Semantics.FlowInputs[flowID]) > 0 {
+		inputs := append([]string{}, bundle.Semantics.FlowInputs[flowID]...)
+		for idx, eventType := range inputs {
+			if strings.TrimSpace(eventType) == strings.TrimSpace(oldEventType) {
+				inputs[idx] = newEventType
+			}
+		}
+		bundle.Semantics.FlowInputs[flowID] = inputs
+	}
 }

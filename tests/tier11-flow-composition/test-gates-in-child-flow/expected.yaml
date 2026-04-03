@@ -9,3 +9,9 @@ expected:
   emitted_events: [validate.passed]
   gates:
     child/g_validated: true
+  flow_entities:
+    child:
+      subject_id: 11111111-1111-1111-1111-111111111111
+      entity_state: done
+      gates:
+        child/g_validated: true

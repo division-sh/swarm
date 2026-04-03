@@ -6,6 +6,12 @@ trigger:
 expected:
   handler_outcome: success
   entity_state: processed
+  flow_entities:
+    flow-a:
+      subject_id: 11111111-1111-1111-1111-111111111111
+      entity_state: processed
+    flow-b:
+      exists: false
   emitted_events:
     - internal.done
     - alpha.complete

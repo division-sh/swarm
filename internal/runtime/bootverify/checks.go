@@ -785,6 +785,9 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if _, ok := inputs[eventType]; !ok {
 					continue
 				}
+				if isBackpropEvent(eventType) {
+					continue
+				}
 				if handler.CreateEntity {
 					continue
 				}
@@ -810,6 +813,11 @@ func normalizeStringSet(values []string) map[string]struct{} {
 		out[value] = struct{}{}
 	}
 	return out
+}
+
+func isBackpropEvent(eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	return eventType != "" && strings.HasSuffix(eventType, "_backprop")
 }
 
 func platformVersionAtLeast(raw string, major, minor, patch int) bool {

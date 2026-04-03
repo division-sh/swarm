@@ -188,6 +188,9 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		return nil
 	}
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
+		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
+			return err
+		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource())
 		if err := r.coordinator.workflowStore.Mutate(ctx, entityID.String(), func(instance *WorkflowInstance) {
 			applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
@@ -209,6 +212,24 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}
 	}
 	return nil
+}
+
+func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entityID string) error {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.Enabled() {
+		return nil
+	}
+	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+	if flowID == "" {
+		return nil
+	}
+	instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID)
+	if err != nil || !ok {
+		return err
+	}
+	if workflowInstanceOwnedByFlow(r.coordinator.SemanticSource(), instance, flowID) {
+		return nil
+	}
+	return fmt.Errorf("cross_flow_write_forbidden: flow %s cannot write entity %s owned by workflow %s", flowID, entityID, strings.TrimSpace(instance.WorkflowName))
 }
 
 type pipelineEngineTimerApplier struct {
@@ -783,6 +804,25 @@ func workflowStateGatesAsBools(metadata map[string]any) map[string]bool {
 		}
 	}
 	return out
+}
+
+func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowInstance, flowID string) bool {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return true
+	}
+	if strings.TrimSpace(instance.WorkflowName) == flowID {
+		return true
+	}
+	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	if flowPath == "" && source != nil {
+		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	}
+	if flowPath == "" {
+		return false
+	}
+	storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
+	return storageRef == flowPath || strings.HasPrefix(storageRef, flowPath+"/")
 }
 
 func workflowStateGatesForScope(source semanticview.Source, flowID string, metadata map[string]any) map[string]bool {

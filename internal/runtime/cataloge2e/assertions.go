@@ -39,8 +39,10 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		}
 	}
 	if entityID != "" {
+		assertEntitySubjectID(t, h.workflow, entityID, expected.Expected.SubjectID)
 		assertFlowState(t, h.workflow, h.bundle, entityID, "", expected.Expected.ParentState)
 		assertFlowState(t, h.workflow, h.bundle, entityID, "flow-b", expected.Expected.FlowBState)
+		assertSubjectFlowEntities(t, h.workflow, h.bundle, entityID, expected.Expected.FlowEntities)
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
 		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
@@ -53,6 +55,54 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 	}
 	if expected.Expected.TemplateInstances != nil {
 		assertFlowInstanceCount(t, h.db, h.startedAt, *expected.Expected.TemplateInstances)
+	}
+}
+
+func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, bundle *runtimecontracts.WorkflowContractBundle, subjectID string, want map[string]catalogEntityExpected) {
+	t.Helper()
+	if len(want) == 0 {
+		return
+	}
+	for flowID, expected := range want {
+		flowID = strings.TrimSpace(flowID)
+		got, found, err := catalogFlowInstanceForSubject(workflow, semanticview.Wrap(bundle), strings.TrimSpace(subjectID), flowID)
+		if err != nil {
+			t.Fatalf("load subject flow instance %s/%s: %v", subjectID, flowID, err)
+		}
+		if expected.Exists != nil && !*expected.Exists {
+			if found {
+				t.Fatalf("subject flow instance %s/%s unexpectedly exists: entity_id=%s state=%s", subjectID, flowID, got.InstanceID, got.CurrentState)
+			}
+			continue
+		}
+		if !found {
+			t.Fatalf("subject flow instance for %s/%s not found", subjectID, flowID)
+		}
+		if wantSubjectID := strings.TrimSpace(expected.SubjectID); wantSubjectID != "" {
+			if gotSubjectID := strings.TrimSpace(got.SubjectID); gotSubjectID != wantSubjectID {
+				t.Fatalf("subject flow instance %s/%s subject_id = %q, want %q", subjectID, flowID, gotSubjectID, wantSubjectID)
+			}
+		}
+		if wantState := strings.TrimSpace(expected.EntityState); wantState != "" {
+			if gotState := strings.TrimSpace(got.CurrentState); gotState != wantState {
+				t.Fatalf("subject flow instance %s/%s state = %q, want %q", subjectID, flowID, gotState, wantState)
+			}
+		}
+		if len(expected.EntityFields) > 0 {
+			for key, wantValue := range expected.EntityFields {
+				if gotValue := got.Metadata[strings.TrimSpace(key)]; fmt.Sprintf("%#v", gotValue) != fmt.Sprintf("%#v", wantValue) {
+					t.Fatalf("subject flow instance %s/%s field %s = %#v, want %#v", subjectID, flowID, key, gotValue, wantValue)
+				}
+			}
+		}
+		if len(expected.Gates) > 0 {
+			gates := catalogBoolGates(got.Metadata)
+			for key, wantValue := range expected.Gates {
+				if gotValue := gates[strings.TrimSpace(key)]; gotValue != wantValue {
+					t.Fatalf("subject flow instance %s/%s gate %s = %v, want %v", subjectID, flowID, key, gotValue, wantValue)
+				}
+			}
+		}
 	}
 }
 
@@ -69,10 +119,32 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 		if strings.TrimSpace(want.EntityState) != "" {
 			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
 		}
+		assertEntitySubjectID(t, h.workflow, entityID, want.SubjectID)
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
 		assertGates(t, h.workflow, entityID, want.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
+	}
+}
+
+func assertEntitySubjectID(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID, wantSubjectID string) {
+	t.Helper()
+	wantSubjectID = strings.TrimSpace(wantSubjectID)
+	if wantSubjectID == "" {
+		return
+	}
+	if workflow == nil {
+		t.Fatal("workflow instance store is required")
+	}
+	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	if err != nil {
+		t.Fatalf("load workflow instance %s for subject assertion: %v", entityID, err)
+	}
+	if !ok {
+		t.Fatalf("workflow instance %s not found for subject assertion", entityID)
+	}
+	if got := strings.TrimSpace(instance.SubjectID); got != wantSubjectID {
+		t.Fatalf("entity %s subject_id = %q, want %q", entityID, got, wantSubjectID)
 	}
 }
 
@@ -246,8 +318,6 @@ func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceSto
 					matched = true
 				case rowStorage == candidate:
 					matched = true
-				case rowStorage != "" && strings.HasPrefix(rowStorage, candidate+"/"):
-					matched = true
 				}
 				if matched {
 					break
@@ -370,16 +440,29 @@ func catalogSubjectEntityIDs(t testing.TB, db *sql.DB, entityID string) map[stri
 	if db == nil {
 		return out
 	}
-	if _, err := uuid.Parse(entityID); err != nil {
+	parsedEntityID, err := uuid.Parse(entityID)
+	if err != nil {
+		return out
+	}
+	subjectID := parsedEntityID.String()
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(subject_id::text, entity_id::text)
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+		LIMIT 1
+	`, parsedEntityID.String()).Scan(&subjectID); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("query subject id for %s: %v", entityID, err)
+	}
+	if _, err := uuid.Parse(subjectID); err != nil {
 		return out
 	}
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT entity_id::text
 		FROM entity_state
-		WHERE subject_id = $1::uuid
-	`, entityID)
+		WHERE subject_id = $1::uuid OR entity_id = $1::uuid
+	`, subjectID)
 	if err != nil {
-		t.Fatalf("query subject entity ids for %s: %v", entityID, err)
+		t.Fatalf("query subject entity ids for %s via subject %s: %v", entityID, subjectID, err)
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -437,6 +520,21 @@ func normalizeCatalogObservedEventName(eventName, flowPrefix string, source sema
 		}
 	}
 	return eventName
+}
+
+func catalogBoolGates(metadata map[string]any) map[string]bool {
+	raw, _ := metadata["gates"].(map[string]any)
+	out := make(map[string]bool, len(raw))
+	for key, value := range raw {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		if b, ok := value.(bool); ok {
+			out[key] = b
+		}
+	}
+	return out
 }
 
 func catalogRootEventExists(source semanticview.Source, eventName string) bool {

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtime "swarm/internal/runtime"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -20,7 +21,6 @@ import (
 	"swarm/internal/runtime/sessions"
 	"swarm/internal/store"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 type catalogTriggerStep struct {
@@ -45,9 +45,11 @@ type catalogExpectedDocument struct {
 	Expected struct {
 		BootResult          string                           `yaml:"boot_result"`
 		HandlerOutcome      string                           `yaml:"handler_outcome"`
+		SubjectID           string                           `yaml:"subject_id"`
 		EntityState         string                           `yaml:"entity_state"`
 		ParentState         string                           `yaml:"parent_state"`
 		FlowBState          string                           `yaml:"flow_b_state"`
+		FlowEntities        map[string]catalogEntityExpected `yaml:"flow_entities"`
 		EntityFields        map[string]any                   `yaml:"entity_fields"`
 		Gates               map[string]bool                  `yaml:"gates"`
 		EmittedEvents       []string                         `yaml:"emitted_events"`
@@ -62,6 +64,8 @@ type catalogExpectedDocument struct {
 
 type catalogEntityExpected struct {
 	HandlerOutcome string          `yaml:"handler_outcome"`
+	Exists         *bool           `yaml:"exists"`
+	SubjectID      string          `yaml:"subject_id"`
 	EntityState    string          `yaml:"entity_state"`
 	EntityFields   map[string]any  `yaml:"entity_fields"`
 	Gates          map[string]bool `yaml:"gates"`

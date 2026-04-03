@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -246,6 +247,9 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	if got := strings.TrimSpace(asString(entity["current_state"])); got != "marginal_review" {
 		t.Fatalf("current_state = %q, want marginal_review", got)
 	}
+	if _, exists := entity["flow_states"]; exists {
+		t.Fatalf("unexpected legacy flow_states in entity payload: %#v", entity)
+	}
 }
 
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
@@ -310,7 +314,7 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 }
 
 func TestEntityTools_GetSubjectStatusAggregatesFlowLocalEntities(t *testing.T) {
-	ctx, exec := newEntityToolTestExecutor(t)
+	ctx, exec, db := newEntityToolTestHarness(t)
 	subjectID := uuid.NewString()
 	scoringID := uuid.NewString()
 	validationID := uuid.NewString()
@@ -336,6 +340,21 @@ func TestEntityTools_GetSubjectStatusAggregatesFlowLocalEntities(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create_entity validation: %v", err)
 	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE entity_state
+		SET entered_state_at = $2, updated_at = $2
+		WHERE entity_id = $1::uuid
+	`, scoringID, now.Add(-time.Hour)); err != nil {
+		t.Fatalf("seed scoring timestamps: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		UPDATE entity_state
+		SET entered_state_at = $2, updated_at = $2
+		WHERE entity_id = $1::uuid
+	`, validationID, now); err != nil {
+		t.Fatalf("seed validation timestamps: %v", err)
+	}
 
 	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
 	if err != nil {
@@ -352,14 +371,177 @@ func TestEntityTools_GetSubjectStatusAggregatesFlowLocalEntities(t *testing.T) {
 	if !ok || len(entities) != 2 {
 		t.Fatalf("entities = %#v, want 2 rows", status["entities"])
 	}
-	if got := strings.TrimSpace(asString(status["latest_flow"])); got == "" {
-		t.Fatalf("latest_flow empty in %#v", status)
+	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "validation" {
+		t.Fatalf("latest_flow = %q, want validation", got)
 	}
-	if got := strings.TrimSpace(asString(status["latest_state"])); got == "" {
-		t.Fatalf("latest_state empty in %#v", status)
+	if got := strings.TrimSpace(asString(status["latest_state"])); got != "researching" {
+		t.Fatalf("latest_state = %q, want researching", got)
 	}
 	if allTerminal, ok := status["all_terminal"].(bool); !ok || allTerminal {
 		t.Fatalf("all_terminal = %#v, want false", status["all_terminal"])
+	}
+}
+
+func TestEntityTools_GetSubjectStatusReturnsEmptyForUnknownSubject(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+	subjectID := uuid.NewString()
+
+	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
+	if err != nil {
+		t.Fatalf("get_subject_status: %v", err)
+	}
+	status, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected status map, got %#v", out)
+	}
+	entities, ok := status["entities"].([]map[string]any)
+	if !ok || len(entities) != 0 {
+		t.Fatalf("entities = %#v, want empty", status["entities"])
+	}
+	if allTerminal, ok := status["all_terminal"].(bool); !ok || !allTerminal {
+		t.Fatalf("all_terminal = %#v, want true", status["all_terminal"])
+	}
+	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "" {
+		t.Fatalf("latest_flow = %q, want empty", got)
+	}
+	if got := strings.TrimSpace(asString(status["latest_state"])); got != "" {
+		t.Fatalf("latest_state = %q, want empty", got)
+	}
+}
+
+func TestEntityTools_GetSubjectStatusAllTerminalTrueWhenAllFlowsTerminal(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "queued",
+			FlowTerminal: map[string][]string{
+				"scoring":    []string{"killed"},
+				"validation": []string{"killed"},
+			},
+		},
+	}
+	ctx, exec := newEntityToolTestExecutorWithBundle(t, models.AgentConfig{
+		ID:   "tester",
+		Role: "operator",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "get_subject_status"},
+		}),
+	}, bundle)
+	subjectID := uuid.NewString()
+	for _, row := range []struct {
+		entityID     string
+		flowInstance string
+		initialState string
+	}{
+		{entityID: uuid.NewString(), flowInstance: "scoring", initialState: "killed"},
+		{entityID: uuid.NewString(), flowInstance: "validation", initialState: "killed"},
+	} {
+		if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+			"entity_id":     row.entityID,
+			"subject_id":    subjectID,
+			"flow_instance": row.flowInstance,
+			"initial_state": row.initialState,
+			"fields": map[string]any{
+				"status": "closed",
+			},
+		}); err != nil {
+			t.Fatalf("create_entity %s: %v", row.flowInstance, err)
+		}
+	}
+
+	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
+	if err != nil {
+		t.Fatalf("get_subject_status: %v", err)
+	}
+	status := out.(map[string]any)
+	if allTerminal, ok := status["all_terminal"].(bool); !ok || !allTerminal {
+		t.Fatalf("all_terminal = %#v, want true", status["all_terminal"])
+	}
+}
+
+func TestEntityTools_GetSubjectStatusSingleFlowSubject(t *testing.T) {
+	ctx, exec := newEntityToolTestExecutor(t)
+	subjectID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"subject_id":    subjectID,
+		"flow_instance": "scoring",
+		"initial_state": "active",
+		"fields": map[string]any{
+			"status": "open",
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
+	if err != nil {
+		t.Fatalf("get_subject_status: %v", err)
+	}
+	status := out.(map[string]any)
+	entities, ok := status["entities"].([]map[string]any)
+	if !ok || len(entities) != 1 {
+		t.Fatalf("entities = %#v, want one row", status["entities"])
+	}
+	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "scoring" {
+		t.Fatalf("latest_flow = %q, want scoring", got)
+	}
+	if got := strings.TrimSpace(asString(status["latest_state"])); got != "active" {
+		t.Fatalf("latest_state = %q, want active", got)
+	}
+}
+
+func TestEntityTools_GetSubjectStatusPrefersDeeperFlowOnEqualEnteredStateAt(t *testing.T) {
+	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-nested-three-levels")
+	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+		ID:   "tester",
+		Role: "operator",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "get_subject_status"},
+		}),
+	}, bundle)
+	subjectID := uuid.NewString()
+	childID := uuid.NewString()
+	grandchildID := uuid.NewString()
+	for _, row := range []struct {
+		entityID     string
+		flowInstance string
+		initialState string
+	}{
+		{entityID: childID, flowInstance: "child", initialState: "waiting"},
+		{entityID: grandchildID, flowInstance: "child/grandchild", initialState: "ready"},
+	} {
+		if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+			"entity_id":     row.entityID,
+			"subject_id":    subjectID,
+			"flow_instance": row.flowInstance,
+			"initial_state": row.initialState,
+			"fields": map[string]any{
+				"status": "open",
+			},
+		}); err != nil {
+			t.Fatalf("create_entity %s: %v", row.flowInstance, err)
+		}
+	}
+	sameMoment := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.ExecContext(ctx, `
+		UPDATE entity_state
+		SET entered_state_at = $2, updated_at = $2
+		WHERE entity_id IN ($1::uuid, $3::uuid)
+	`, childID, sameMoment, grandchildID); err != nil {
+		t.Fatalf("seed equal entered_state_at: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "get_subject_status", map[string]any{"subject_id": subjectID})
+	if err != nil {
+		t.Fatalf("get_subject_status: %v", err)
+	}
+	status := out.(map[string]any)
+	if got := strings.TrimSpace(asString(status["latest_flow"])); got != "grandchild" {
+		t.Fatalf("latest_flow = %q, want grandchild", got)
+	}
+	if got := strings.TrimSpace(asString(status["latest_state"])); got != "ready" {
+		t.Fatalf("latest_state = %q, want ready", got)
 	}
 }
 
@@ -519,6 +701,43 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 		"value":     "closed",
 	}); err != nil {
 		t.Fatalf("save_entity_field same flow: %v", err)
+	}
+}
+
+func TestEntityTools_GetEntityAllowsCrossFlowRead(t *testing.T) {
+	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+		ID:   "analyzer",
+		Role: "analyzer",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "get_entity"},
+		}),
+	}, bundle)
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "other-flow/inst-1",
+		"initial_state": "open",
+		"fields": map[string]any{
+			"status": "foreign",
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+	if err != nil {
+		t.Fatalf("get_entity cross-flow read: %v", err)
+	}
+	entity, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", out)
+	}
+	if got := strings.TrimSpace(asString(entity["flow_instance"])); got != "other-flow/inst-1" {
+		t.Fatalf("flow_instance = %q, want other-flow/inst-1", got)
+	}
+	if got := strings.TrimSpace(asString(entity["current_state"])); got != "open" {
+		t.Fatalf("current_state = %q, want open", got)
 	}
 }
 
