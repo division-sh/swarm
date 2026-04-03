@@ -1,6 +1,6 @@
 platform:
   name: swarm-orchestrator
-  version: 1.5.0
+  version: 1.6.0
 vocabulary:
   state_change: A transition in the entity state machine, triggered by an advances_to handler field.
   guard:
@@ -1687,6 +1687,9 @@ tool_model:
         (universal tool).
       schedule: Schedule a future action or timer. Requires schedule permission.
       search_entities: Query entities by stage, field values, or metadata. Auto-granted to all agents (universal tool).
+      get_subject_status: 'Query the full lifecycle of a business object across flows. Input: {subject_id}.
+        Returns all flow entities for the subject with their states, terminal flags, and the latest active
+        flow. Auto-granted to all agents (universal tool).'
     handler_actions:
       description: These are handler ACTION field values, not agent-callable tools. They are invoked via the action field in
         node handlers. The platform ships the handler code. They are listed separately from the tool catalog because agents
@@ -2081,16 +2084,63 @@ flow_model:
       written by prior handlers. The distinction: stateless = no lifecycle state machine. Entityless = no entity at all (rare —
       only flows with no data_accumulation, no accumulate, and no compute).'
   state_composition:
-    description: How flow-level state machines compose into the entity lifecycle.
-    per_flow_states: Each flow defines its own state space. An entity in the scoring flow has scoring states. The same entity
-      in the validation flow has validation states. These are SEPARATE state machines — not one unified enum.
-    cross_flow_transitions: 'When an entity moves from one flow to another (intake → processing), the transition is: 1. Intake
-      flow handler emits a cross-flow event (e.g., order.ready). 2. Processing flow node handles it, advances entity to
-      processing initial state (queued). 3. The entity now has a processing flow state. Its intake flow state is terminal
-      (dispatched). There is no "global state" — each flow tracks its own state for the entity.'
-    killed_across_flows: killed is a terminal state in every flow. When a downstream flow kills an entity, it emits entity.killed
-      + entity.killed_backprop. Upstream flows handle killed_backprop and advance the entity to killed in their state machines
-      too.
+    description: 'How flow-level state machines compose into the entity lifecycle. Core principle:
+      state is flow-local, lineage is cross-flow.'
+    flow_scoped_entities:
+      description: 'One entity belongs to exactly one flow. One row in entity_state, one current_state,
+        one state machine. No flow_states map. No shared mutable state across flow boundaries.'
+      invariant: 'entity_state.flow_instance identifies the owning flow. Only handlers within that flow
+        may write to the entity (advances_to, sets_gate, data_accumulation, save_entity_field). The
+        platform enforces this — cross-flow writes are rejected at runtime.'
+      current_state: 'entity_state.current_state is singular and unambiguous. It reflects the state within
+        the owning flow. No flow_states disambiguation needed.'
+    cross_flow_handoff:
+      description: 'When a business object moves from one flow to the next, the transition is an explicit
+        handoff via events. The receiving flow creates its own entity.'
+      pattern:
+      - '1. Source flow handler emits a cross-flow event (output pin). Example: scoring emits vertical.shortlisted.'
+      - '2. Destination flow handler receives the event (input pin) with create_entity: true.'
+      - '3. Destination creates its OWN entity row — new entity_id, own current_state, own fields.'
+      - '4. Data from the source entity is passed via the event payload, or the destination agent reads
+        the source entity via get_entity (read-only).'
+      enforcement: 'If a handler subscribes to an input pin event AND the flow has initial_state (not
+        stateless), the handler MUST declare create_entity: true. Boot error otherwise. Stateless flows
+        (initial_state: null) are exempt — they do not own entity state machines.'
+    cross_flow_writes:
+      description: 'Cross-flow entity writes are prohibited by the platform.'
+      rule: 'save_entity_field checks that the target entity''s flow_instance matches the calling agent''s
+        flow. Mismatch = rejected. This is a platform enforcement, not a convention.'
+      reads: 'Cross-flow entity reads are allowed. An agent in validation can get_entity on a scoring
+        entity to read composite_score, dimension evidence, etc. This is read-only — the scoring entity
+        is immutable from validation''s perspective.'
+    subject_id:
+      description: 'A business object (e.g., a vertical) passes through multiple flows, creating a separate
+        entity in each. subject_id links these flow-local entities into one business identity.'
+      column: 'entity_state.subject_id — UUID, nullable, indexed. Platform-owned column — products do NOT
+        declare it in entity_schema. The platform auto-populates it on create_entity.'
+      propagation_rules:
+        first_flow: 'When create_entity fires and no source entity exists (first flow in the chain):
+          subject_id = entity_id. The new entity IS the subject origin.'
+        subsequent_flows: 'When create_entity fires from a cross-flow handoff event: read source entity''s
+          subject_id. If non-null, copy it. If null, use source entity_id. Never invent a new subject_id
+          mid-chain.'
+        immutable: 'Once set, subject_id is never updated.'
+      name_metadata: 'Name and display metadata belong to the origin entity (the first entity in the
+        subject chain, where subject_id = entity_id). Subsequent flow entities do not duplicate the name
+        unless the product explicitly copies it via data_accumulation at handoff.'
+    killed_across_flows: 'killed is a terminal state in every flow. When a downstream flow kills an entity,
+      it emits entity.killed + entity.killed_backprop. Upstream flows handle killed_backprop and advance
+      their own entity to killed. Each flow kills its own entity. No shared mutation.'
+    subject_lifecycle_query:
+      description: 'Platform tool for querying the full lifecycle of a business object across flows.'
+      tool_name: get_subject_status
+      input: '{subject_id: uuid}'
+      output: '{subject_id, entities: [{entity_id, flow, state, terminal}], all_terminal, latest_flow, latest_state}'
+      latest_flow_ordering: 'Determined by entered_state_at — the most recent non-terminal state transition
+        across all flow entities for the subject. Tiebreaker: flow depth in package.yaml flows list
+        (downstream flows take precedence). latest_state is that entity''s current_state.'
+      availability: 'Read-only, available to all agents. Used by dashboards, lifecycle-coordinator,
+        and any agent that needs cross-flow context.'
 versioning:
   description: Platform and products version independently.
   platform_versioning:
@@ -2162,14 +2212,15 @@ platform_tables:
         are top-level columns for fast lookup/display without JSONB queries. entity_type distinguishes entity kinds within
         a flow (e.g., order, ticket, customer). fields JSONB holds all contract-driven entity fields. Generic store reads use
         entity_state for listing, filtering, and lookup.
-      ddl: "CREATE TABLE entity_state (\n    entity_id         UUID PRIMARY KEY,\n    flow_instance     TEXT NOT NULL,\n \
-        \   entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n    name              TEXT,\n\
-        \    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n    fields            JSONB\
-        \ NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision          INTEGER NOT NULL\
-        \ DEFAULT 0,\n    entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    created_at        TIMESTAMPTZ NOT NULL\
-        \ DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_entity_flow (flow_instance,\
-        \ current_state),\n    INDEX idx_entity_state (current_state),\n    INDEX idx_entity_type (entity_type),\n    INDEX\
-        \ idx_entity_slug (slug) WHERE slug IS NOT NULL\n);"
+      ddl: "CREATE TABLE entity_state (\n    entity_id         UUID PRIMARY KEY,\n    subject_id        UUID,\n\
+        \    flow_instance     TEXT NOT NULL,\n    entity_type       TEXT NOT NULL DEFAULT 'default',\n    slug              TEXT,\n\
+        \    name              TEXT,\n    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n\
+        \    fields            JSONB NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision\
+        \          INTEGER NOT NULL DEFAULT 0,\n    entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    created_at\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX\
+        \ idx_entity_subject (subject_id) WHERE subject_id IS NOT NULL,\n    INDEX idx_entity_flow (flow_instance, current_state),\n\
+        \    INDEX idx_entity_state (current_state),\n    INDEX idx_entity_type (entity_type),\n    INDEX idx_entity_slug\
+        \ (slug) WHERE slug IS NOT NULL\n);"
     agents:
       description: 'Runtime agent registry. One row per agent instance. Carries the full runtime descriptor: role (from agents.yaml),
         parent_agent_id (managerial hierarchy), config (agent-specific configuration from contracts), subscriptions/emit_events/tools/permissions

@@ -1,5 +1,34 @@
 # Swarm Platform Changelog
 
+## v1.6.0 (2026-04-02)
+
+### Breaking: Flow-Scoped Entity State (`flow_model.state_composition`)
+
+Core principle: **state is flow-local, lineage is cross-flow.**
+
+One entity belongs to exactly one flow. No shared mutable state across flow boundaries. `flow_states` map removed. `current_state` is singular and unambiguous within the owning flow.
+
+**Cross-flow handoff**: when a business object moves between flows, the receiving flow creates its own entity via `create_entity: true`. Data crosses via event payloads or read-only `get_entity` on the source entity. Cross-flow writes are prohibited by the platform (save_entity_field rejects flow_instance mismatch).
+
+**Boot validation**: input pin handlers in stateful flows MUST declare `create_entity: true`. Boot error otherwise.
+
+**subject_id**: new platform-owned column on entity_state. Links flow-local entities into one business identity. Auto-populated on create_entity — first flow: subject_id = entity_id; subsequent flows: copied from source entity. Immutable once set. Products do not declare it in entity_schema.
+
+**get_subject_status**: new platform tool. Returns all flow entities for a subject with states, terminal flags, latest active flow. Latest flow determined by entered_state_at (most recent non-terminal transition), tiebreaker: flow depth in package.yaml.
+
+**entity_state DDL**: added `subject_id UUID` column with index.
+
+**Runtime implementation required:**
+- [ ] Add subject_id column to entity_state (migration)
+- [ ] Auto-populate subject_id in create_entity step
+- [ ] Enforce cross-flow write prohibition in save_entity_field
+- [ ] Boot validation: input pin + stateful flow → require create_entity: true
+- [ ] Remove flow_states write path
+- [ ] Implement get_subject_status tool
+- [ ] Update get_entity to include subject_id in response
+
+**Backward compatibility:** enforced at platform >= 1.6.0. Products on >= 1.5.0 use the previous shared-row model.
+
 ## v1.5.0 (2026-04-02)
 
 ### New: Run Model (`run_model` section)
