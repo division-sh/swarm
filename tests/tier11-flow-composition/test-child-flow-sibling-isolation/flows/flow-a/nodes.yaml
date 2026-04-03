@@ -5,6 +5,7 @@ alpha-intake:
   produces: [internal.done]
   event_handlers:
     alpha.start:
+      create_entity: true
       advances_to: working
       emits: internal.done
 

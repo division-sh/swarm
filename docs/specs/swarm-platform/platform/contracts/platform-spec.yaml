@@ -2103,9 +2103,12 @@ flow_model:
       - '3. Destination creates its OWN entity row — new entity_id, own current_state, own fields.'
       - '4. Data from the source entity is passed via the event payload, or the destination agent reads
         the source entity via get_entity (read-only).'
-      enforcement: 'If a handler subscribes to an input pin event AND the flow has initial_state (not
-        stateless), the handler MUST declare create_entity: true. Boot error otherwise. Stateless flows
-        (initial_state: null) are exempt — they do not own entity state machines.'
+      enforcement: 'Input pin events that introduce a new business object into a static flow (mode: static)
+        with initial_state MUST use create_entity: true on the receiving handler. Boot error otherwise.
+        Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2) Template flows
+        (mode: template) — entity creation happens via create_flow_instance, not create_entity. (3) Back-
+        propagation events (e.g., killed_backprop) that operate on an existing entity within the flow — these
+        are input pins but do not introduce new business objects.'
     cross_flow_writes:
       description: 'Cross-flow entity writes are prohibited by the platform.'
       rule: 'save_entity_field checks that the target entity''s flow_instance matches the calling agent''s

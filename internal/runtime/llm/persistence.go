@@ -27,6 +27,7 @@ type AgentTurnRecord struct {
 	TaskID           string
 	RequestPayload   []byte
 	ResponseRaw      []byte
+	TurnBlocks       []TurnBlock
 	ParseOK          bool
 	Latency          time.Duration
 	RetryCount       int

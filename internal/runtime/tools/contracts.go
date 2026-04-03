@@ -22,6 +22,7 @@ var supportedRuntimeToolNames = map[string]struct{}{
 	"get_entity":         {},
 	"save_entity_field":  {},
 	"create_entity":      {},
+	"get_subject_status": {},
 	"query_entities":     {},
 	"search_entities":    {},
 	"query_metrics":      {},
@@ -107,6 +108,7 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 			Description: "Create a new entity_state row.",
 			InputSchema: ObjectSchema(map[string]any{
 				"entity_id":     map[string]any{"type": "string"},
+				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": map[string]any{"type": "string"},
 				"entity_type":   map[string]any{"type": "string"},
 				"name":          map[string]any{"type": "string"},
@@ -117,6 +119,13 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 					"additionalProperties": true,
 				},
 			}, "flow_instance"),
+		},
+		"get_subject_status": {
+			Category:    "entity_persistence",
+			Description: "Query the lifecycle of a business object across flow-local entities.",
+			InputSchema: ObjectSchema(map[string]any{
+				"subject_id": map[string]any{"type": "string"},
+			}, "subject_id"),
 		},
 		"query_entities": {
 			Category:    "entity_persistence",
@@ -136,6 +145,7 @@ func builtinRuntimeContractSchemas() map[string]ContractSchemaEntry {
 			Category:    "entity_persistence",
 			Description: "Query entity_state rows by state, metadata, and JSONB field matches.",
 			InputSchema: ObjectSchema(map[string]any{
+				"subject_id":    map[string]any{"type": "string"},
 				"flow_instance": map[string]any{"type": "string"},
 				"entity_type":   map[string]any{"type": "string"},
 				"current_state": map[string]any{"type": "string"},

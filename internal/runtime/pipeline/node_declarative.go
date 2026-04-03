@@ -368,7 +368,10 @@ func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID stri
 		StateBuckets: map[string]any{},
 	}
 	if handler.CreateEntity {
-		snapshot.Metadata = map[string]any{}
+		snapshot.Metadata = cloneStringAnyMap(state.Metadata)
+		if snapshot.Metadata == nil {
+			snapshot.Metadata = map[string]any{}
+		}
 		return snapshot
 	}
 	snapshot.CurrentState = strings.TrimSpace(string(state.Stage))

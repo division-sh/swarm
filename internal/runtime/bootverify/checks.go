@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -136,6 +137,9 @@ type checkerContext struct {
 	inputPinLoaded   bool
 	inputPinFindings []Finding
 
+	flowBoundaryCreateEntityLoaded   bool
+	flowBoundaryCreateEntityFindings []Finding
+
 	deprecatedLoaded   bool
 	deprecatedFindings []Finding
 }
@@ -175,6 +179,7 @@ var bootCheckRegistry = []Check{
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
+	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
 }
 
 var supplementalChecks = []Check{
@@ -239,7 +244,10 @@ func checkTimerValidation(c *checkerContext) []Finding               { return c.
 func checkWritePinOwnershipValidation(c *checkerContext) []Finding   { return c.writePinOwnership() }
 func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
 func checkInputPinWiring(c *checkerContext) []Finding                { return c.inputPinWiring() }
-func checkDeprecatedContractAlias(c *checkerContext) []Finding       { return c.deprecatedAliases() }
+func checkFlowBoundaryCreateEntityValidation(c *checkerContext) []Finding {
+	return c.flowBoundaryCreateEntityValidation()
+}
+func checkDeprecatedContractAlias(c *checkerContext) []Finding { return c.deprecatedAliases() }
 
 func (c *checkerContext) eventWarningsByCheck(checkID string) []Finding {
 	items := c.eventWarnings()
@@ -741,6 +749,95 @@ func (c *checkerContext) inputPinWiring() []Finding {
 	}
 
 	return c.inputPinFindings
+}
+
+func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
+	if c.flowBoundaryCreateEntityLoaded {
+		return c.flowBoundaryCreateEntityFindings
+	}
+	c.flowBoundaryCreateEntityLoaded = true
+	for flowID, schema := range c.source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			continue
+		}
+		if strings.TrimSpace(schema.InitialState) == "" {
+			continue
+		}
+		inputs := normalizeStringSet(c.source.FlowInputEvents(flowID))
+		if len(inputs) == 0 {
+			continue
+		}
+		scope, ok := c.source.FlowScopeByID(flowID)
+		if !ok {
+			continue
+		}
+		for nodeID, node := range scope.Nodes {
+			nodeID = strings.TrimSpace(nodeID)
+			for eventType, handler := range node.EventHandlers {
+				eventType = strings.TrimSpace(eventType)
+				if eventType == "" {
+					continue
+				}
+				if _, ok := inputs[eventType]; !ok {
+					continue
+				}
+				if handler.CreateEntity {
+					continue
+				}
+				c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
+					CheckID:  "flow_boundary_create_entity_validation",
+					Severity: "error",
+					Message:  fmt.Sprintf("flow %s input pin handler %s on node %s must declare create_entity: true", flowID, eventType, nodeID),
+					Location: flowID,
+				})
+			}
+		}
+	}
+	return c.flowBoundaryCreateEntityFindings
+}
+
+func normalizeStringSet(values []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out[value] = struct{}{}
+	}
+	return out
+}
+
+func platformVersionAtLeast(raw string, major, minor, patch int) bool {
+	raw = strings.TrimSpace(raw)
+	for _, prefix := range []string{">=", ">", "=", "~", "^"} {
+		raw = strings.TrimPrefix(raw, prefix)
+	}
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "v"))
+	if raw == "" {
+		return false
+	}
+	parts := strings.Split(raw, ".")
+	parse := func(index int) int {
+		if index >= len(parts) {
+			return 0
+		}
+		value, _ := strconv.Atoi(strings.TrimSpace(parts[index]))
+		return value
+	}
+	gotMajor, gotMinor, gotPatch := parse(0), parse(1), parse(2)
+	switch {
+	case gotMajor != major:
+		return gotMajor > major
+	case gotMinor != minor:
+		return gotMinor > minor
+	default:
+		return gotPatch >= patch
+	}
 }
 
 func (c *checkerContext) deprecatedAliases() []Finding {

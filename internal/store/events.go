@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -27,39 +28,41 @@ func (s *PostgresStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
 }
 
 func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
-	evt = s.enrichEventCorrelation(ctx, chooseRowQueryer(s.DB, tx), evt)
-	if eventSchemaAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
-		if err := s.appendEventSpec(ctx, tx, evt); err == nil {
-			return nil
-		} else if !shouldFallbackLegacyEventsSchema(err) {
-			return err
+	return withEventStoreRetry(ctx, tx, func() error {
+		evt = s.enrichEventCorrelation(ctx, chooseRowQueryer(s.DB, tx), evt)
+		if eventSchemaAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
+			if err := s.appendEventSpec(ctx, tx, evt); err == nil {
+				return nil
+			} else if !shouldFallbackLegacyEventsSchema(err) {
+				return err
+			}
 		}
-	}
 
-	id := evt.ID
-	if id == "" {
-		id = uuid.NewString()
-	}
-	taskID := sanitizeOptionalUUID(evt.TaskID)
-	entityID := sanitizeOptionalUUID(evt.EntityID())
-	createdAt := evt.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now()
-	}
+		id := evt.ID
+		if id == "" {
+			id = uuid.NewString()
+		}
+		taskID := sanitizeOptionalUUID(evt.TaskID)
+		entityID := sanitizeOptionalUUID(evt.EntityID())
+		createdAt := evt.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now()
+		}
 
-	const q = `
-		INSERT INTO events (id, type, source_agent, task_id, entity_id, payload, created_at)
-		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
-		ON CONFLICT (id) DO NOTHING
-	`
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	if _, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt); err != nil {
-		return fmt.Errorf("append event: %w", err)
-	}
-	return nil
+		const q = `
+			INSERT INTO events (id, type, source_agent, task_id, entity_id, payload, created_at)
+			VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
+			ON CONFLICT (id) DO NOTHING
+		`
+		execFn := s.DB.ExecContext
+		if tx != nil {
+			execFn = tx.ExecContext
+		}
+		if _, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt); err != nil {
+			return fmt.Errorf("append event: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
@@ -319,21 +322,58 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 }
 
 func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, evt events.Event, agentIDs []string) error {
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin event tx: %w", err)
+	return withEventStoreRetry(ctx, nil, func() error {
+		tx, err := s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin event tx: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if err := s.appendEventSpec(ctx, tx, evt); err != nil {
+			return err
+		}
+		if err := s.insertEventDeliveriesSpec(ctx, tx, evt.ID, agentIDs); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit event tx: %w", err)
+		}
+		return nil
+	})
+}
+
+func withEventStoreRetry(ctx context.Context, tx *sql.Tx, fn func() error) error {
+	if fn == nil {
+		return nil
 	}
-	defer func() { _ = tx.Rollback() }()
-	if err := s.appendEventSpec(ctx, tx, evt); err != nil {
-		return err
+	attempts := 1
+	if tx == nil {
+		attempts = 3
 	}
-	if err := s.insertEventDeliveriesSpec(ctx, tx, evt.ID, agentIDs); err != nil {
-		return err
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+		lastErr = fn()
+		if !isTransientEventStoreConnectionError(lastErr) {
+			return lastErr
+		}
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit event tx: %w", err)
+	return lastErr
+}
+
+func isTransientEventStoreConnectionError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return nil
+	if errors.Is(err, sql.ErrConnDone) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "bad connection")
 }
 
 func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {

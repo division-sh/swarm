@@ -1,7 +1,7 @@
 trigger:
   event: candidate.submitted
   payload:
-    entity_id: ent-001
+    entity_id: 11111111-1111-1111-1111-111111111111
     name: unique-item
     score: 55
   entity_fields_before:

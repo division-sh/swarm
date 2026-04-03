@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -191,6 +192,10 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); !ok {
 		t.Fatal("expected activated flow agent config")
 	}
+	cfg, _ := am.GetAgentConfig("reviewer-inst-1")
+	if got := strings.TrimSpace(cfg.EntityID); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
+		t.Fatalf("agent entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
+	}
 }
 
 func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
@@ -218,8 +223,8 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	if autoEmit == nil {
 		t.Fatalf("published events = %#v, want review/inst-1/task.started", bus.published)
 	}
-	if got := autoEmit.EntityID(); got != "ent-1" {
-		t.Fatalf("published entity_id = %q, want ent-1", got)
+	if got := autoEmit.EntityID(); got != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
+		t.Fatalf("published entity_id = %q, want %q", got, runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
 }
 
@@ -250,6 +255,12 @@ func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	got := instances.upserts[0]
 	if got.StorageRef != "review/inst-1" {
 		t.Fatalf("storage_ref = %q, want review/inst-1", got.StorageRef)
+	}
+	if got.SubjectID != "ent-1" {
+		t.Fatalf("subject_id = %q, want ent-1", got.SubjectID)
+	}
+	if got.Metadata["entity_id"] != runtimepipeline.FlowInstanceEntityID("review/inst-1") {
+		t.Fatalf("metadata entity_id = %#v, want %q", got.Metadata["entity_id"], runtimepipeline.FlowInstanceEntityID("review/inst-1"))
 	}
 	if got.Config["name"] != "alpha" {
 		t.Fatalf("config name = %#v, want alpha", got.Config["name"])
@@ -344,6 +355,13 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
 		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
 	}
+	var payload map[string]any
+	if err := json.Unmarshal(cfg.Config, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(config): %v", err)
+	}
+	if got := anySliceToStrings(payload["emit_events"]); len(got) != 1 || got[0] != "analyzer-flow/analysis.done" {
+		t.Fatalf("emit_events = %#v, want [analyzer-flow/analysis.done]", got)
+	}
 	if len(store.upserts) != 1 || store.upserts[0].Config.ID != "analyzer" {
 		t.Fatalf("persisted agents = %#v, want analyzer", store.upserts)
 	}
@@ -421,7 +439,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 			MaxTurnsPerTask: 7,
 		},
 		map[string]string{"instance_id": "inst-1"},
-		map[string]struct{}{},
+		map[string]struct{}{"task.completed": {}, "review.failed": {}},
 		map[string]any{},
 	)
 	if err != nil {
@@ -437,8 +455,8 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	if got := anySliceToStrings(payload["tools"]); len(got) != 2 || got[0] != "schedule" || got[1] != "check_status" {
 		t.Fatalf("tools = %#v, want [schedule check_status]", got)
 	}
-	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "task.completed" || got[1] != "review.failed" {
-		t.Fatalf("emit_events = %#v, want [task.completed review.failed]", got)
+	if got := anySliceToStrings(payload["emit_events"]); len(got) != 2 || got[0] != "review/inst-1/task.completed" || got[1] != "review/inst-1/review.failed" {
+		t.Fatalf("emit_events = %#v, want [review/inst-1/task.completed review/inst-1/review.failed]", got)
 	}
 	nativeTools, ok := payload["native_tools"].(map[string]any)
 	if !ok || nativeTools["bash"] != true || nativeTools["file_io"] != true {

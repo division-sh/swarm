@@ -317,6 +317,9 @@ func (r *AnthropicAPIRuntime) persistTurn(ctx context.Context, turn AgentTurnRec
 	if r.turns == nil {
 		return
 	}
+	if len(turn.TurnBlocks) == 0 {
+		turn.TurnBlocks = BuildTurnBlocks(turn)
+	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
 		// Turn telemetry should not break runtime path.
 		logPublisherRuntime(ctx, r.events, "error", "persist_api_turn_failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)

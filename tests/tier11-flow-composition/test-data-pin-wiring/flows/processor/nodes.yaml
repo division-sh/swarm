@@ -5,6 +5,7 @@ processor-node:
   produces: [process.done]
   event_handlers:
     process.run:
+      create_entity: true
       guard:
         entity.task_config: { exists: true }
       data_accumulation:

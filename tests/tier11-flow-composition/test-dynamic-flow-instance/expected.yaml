@@ -1,7 +1,7 @@
 trigger:
   event: spawn.requested
   payload:
-    entity_id: ent-001
+    entity_id: 11111111-1111-1111-1111-111111111111
     worker_id: w-001
 
 expected:

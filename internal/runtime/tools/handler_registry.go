@@ -36,6 +36,7 @@ func (e *Executor) registerMailboxHandlers(handlers map[string]ToolHandler) {
 
 func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
 	handlers["get_entity"] = e.execGetEntity
+	handlers["get_subject_status"] = e.execGetSubjectStatus
 	handlers["save_entity_field"] = e.execSaveEntityField
 	handlers["create_entity"] = e.execCreateEntity
 	handlers["query_entities"] = e.execQueryEntities

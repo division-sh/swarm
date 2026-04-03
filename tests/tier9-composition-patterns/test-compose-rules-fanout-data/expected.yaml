@@ -1,7 +1,7 @@
 trigger:
   event: batch.requested
   payload:
-    entity_id: ent-001
+    entity_id: 11111111-1111-1111-1111-111111111111
     mode: parallel
     items:
       - id: a

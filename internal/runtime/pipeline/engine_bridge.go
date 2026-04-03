@@ -280,16 +280,38 @@ func resolveHandlerEntityIDForFlow(
 ) (string, events.Event) {
 	entityID = strings.TrimSpace(entityID)
 	if handler.CreateEntity {
-		entityID = uuid.NewString()
+		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
+		newEntityID := uuid.NewString()
+		subjectID := ""
+		if state != nil && state.Metadata != nil {
+			subjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
+		}
+		if subjectID == "" {
+			subjectID = sourceEntityID
+		}
+		if subjectID == "" {
+			subjectID = newEntityID
+		}
+		entityID = newEntityID
 		if state != nil {
 			state.EntityID = entityID
 			state.Stage = ""
 			state.Status = ""
-			state.Metadata = nil
+			state.Metadata = map[string]any{"subject_id": subjectID}
+			if sourceEntityID != "" {
+				state.Metadata["parent_entity_id"] = sourceEntityID
+			}
 		}
 		return entityID, evt
 	}
 	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
+	if strings.TrimSpace(flowID) == "" && state != nil {
+		subjectID := strings.TrimSpace(asString(state.Metadata["subject_id"]))
+		if subjectID != "" && subjectID != entityID {
+			entityID = subjectID
+			state.EntityID = subjectID
+		}
+	}
 	if state != nil && strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}

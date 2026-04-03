@@ -28,6 +28,7 @@ type ExactSchedulePersistence interface {
 
 type WorkflowInstance struct {
 	InstanceID        string
+	SubjectID         string
 	StorageRef        string
 	WorkflowName      string
 	WorkflowVersion   string
@@ -118,6 +119,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 		instance.Metadata = map[string]any{}
 	}
 	instance.StorageRef = strings.TrimSpace(instance.StorageRef)
+	instance.SubjectID = strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"])))
 	storageRef := workflowInstanceStorageRef(instance)
 	if storageRef == "" {
 		return nil
@@ -168,6 +170,7 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (Wo
 		fieldsRaw    []byte
 		configRaw    []byte
 		accRaw       []byte
+		subjectID    sql.NullString
 		flowInstance string
 		entityType   string
 		slug         sql.NullString
@@ -176,6 +179,7 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (Wo
 	err := dbQueryRowContext(ctx, s.db, `
 		SELECT
 			es.entity_id::text,
+			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
 			es.current_state,
@@ -197,6 +201,7 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (Wo
 		LIMIT 1
 	`, pqStringArray(keys)).Scan(
 		&item.InstanceID,
+		&subjectID,
 		&item.WorkflowName,
 		&item.WorkflowVersion,
 		&item.CurrentState,
@@ -218,10 +223,11 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (Wo
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
+	item.SubjectID = strings.TrimSpace(subjectID.String)
 	if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance)
+	item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance, item.SubjectID)
 	item.StorageRef = strings.TrimSpace(flowInstance)
 	item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
 	timers, err := s.loadWorkflowTimersSpec(ctx, keys[0])
@@ -243,6 +249,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			es.entity_id::text,
+			es.subject_id::text,
 			COALESCE(fi.flow_template, ''),
 			COALESCE(fi.config->>'workflow_version', ''),
 			es.current_state,
@@ -273,6 +280,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 			fieldsRaw    []byte
 			configRaw    []byte
 			accRaw       []byte
+			subjectID    sql.NullString
 			flowInstance string
 			entityType   string
 			slug         sql.NullString
@@ -280,6 +288,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		)
 		if err := rows.Scan(
 			&item.InstanceID,
+			&subjectID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
 			&item.CurrentState,
@@ -297,10 +306,11 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		); err != nil {
 			return nil, err
 		}
+		item.SubjectID = strings.TrimSpace(subjectID.String)
 		if err := json.Unmarshal(accRaw, &item.StateBuckets); err != nil {
 			return nil, err
 		}
-		item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance)
+		item.Metadata = workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw, slug.String, name.String, entityType, flowInstance, item.SubjectID)
 		item.StorageRef = strings.TrimSpace(flowInstance)
 		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
 		item.TransitionHistory = workflowInstanceTransitionHistory(item.Metadata)
@@ -372,16 +382,17 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, slug, name,
+			entity_id, subject_id, flow_instance, entity_type, slug, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, NULLIF($4,''), NULLIF($5,''),
-			$6, $7::jsonb, $8::jsonb, $9::jsonb, 1,
-			$10, now(), now()
+			$1::uuid, NULLIF($2,'')::uuid, $3, $4, NULLIF($5,''), NULLIF($6,''),
+			$7, $8::jsonb, $9::jsonb, $10::jsonb, 1,
+			$11, now(), now()
 		)
 		ON CONFLICT (entity_id) DO UPDATE SET
+			subject_id = COALESCE(entity_state.subject_id, EXCLUDED.subject_id),
 			flow_instance = EXCLUDED.flow_instance,
 			entity_type = EXCLUDED.entity_type,
 			slug = EXCLUDED.slug,
@@ -393,7 +404,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			revision = entity_state.revision + 1,
 			entered_state_at = EXCLUDED.entered_state_at,
 			updated_at = now()
-	`, rowID, storageRef, entityType, slug, name, instance.CurrentState,
+	`, rowID, instance.SubjectID, storageRef, entityType, slug, name, instance.CurrentState,
 		jsonOrDefault(gatesJSON, "{}"),
 		jsonOrDefault(fieldsJSON, "{}"),
 		jsonOrDefault(accumulatorState, "{}"),
@@ -489,7 +500,7 @@ func (s *WorkflowInstanceStore) deleteSpec(ctx context.Context, keys []string) e
 }
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {
-	rows, err := dbQueryContext(ctx, s.db, `
+	rows, err := dbQueryContext(withoutSQLTxContext(ctx), s.db, `
 		SELECT
 			timer_name,
 			fire_event,
@@ -525,7 +536,7 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, enti
 	return out, rows.Err()
 }
 
-func workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw []byte, slug, name, entityType, flowInstance string) map[string]any {
+func workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw []byte, slug, name, entityType, flowInstance, subjectID string) map[string]any {
 	metadata := map[string]any{}
 	var fields map[string]any
 	if len(fieldsRaw) > 0 {
@@ -546,13 +557,16 @@ func workflowInstanceMetadataFromSpec(fieldsRaw, gatesRaw, configRaw []byte, slu
 	if strings.TrimSpace(flowInstance) != "" {
 		metadata["storage_ref"] = strings.TrimSpace(flowInstance)
 	}
+	if strings.TrimSpace(subjectID) != "" {
+		metadata["subject_id"] = strings.TrimSpace(subjectID)
+	}
 	var gates map[string]any
 	if len(gatesRaw) > 0 && json.Unmarshal(gatesRaw, &gates) == nil && len(gates) > 0 {
 		metadata["gates"] = gates
 	}
 	var config map[string]any
 	if len(configRaw) > 0 && json.Unmarshal(configRaw, &config) == nil {
-		for _, key := range []string{"instance_id", "flow_path", "storage_ref", "instance_kind", "template_version", "last_source_event", "status"} {
+		for _, key := range []string{"instance_id", "flow_path", "storage_ref", "instance_kind", "template_version", "last_source_event", "status", "parent_entity_id"} {
 			if value, ok := config[key]; ok {
 				metadata[key] = value
 			}
@@ -597,7 +611,7 @@ func workflowInstanceConfigPayload(instance WorkflowInstance, storageRef string)
 		config[key] = value
 	}
 	metadata := cloneStringAnyMap(instance.Metadata)
-	for _, key := range []string{"flow_path", "instance_kind", "template_version", "status", "last_source_event"} {
+	for _, key := range []string{"flow_path", "instance_kind", "template_version", "status", "last_source_event", "parent_entity_id"} {
 		if value, ok := metadata[key]; ok {
 			config[key] = value
 		}
@@ -615,7 +629,7 @@ func workflowInstanceEntityProjection(metadata map[string]any) (map[string]any, 
 	slug := strings.TrimSpace(asString(metadata["slug"]))
 	name := strings.TrimSpace(asString(metadata["name"]))
 	entityType := strings.TrimSpace(asString(metadata["entity_type"]))
-	for _, key := range []string{"slug", "name", "entity_type", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "workflow_version", "transition_history"} {
+	for _, key := range []string{"slug", "name", "entity_type", "subject_id", "parent_entity_id", "instance_id", "storage_ref", "flow_path", "instance_kind", "template_version", "workflow_version", "transition_history"} {
 		delete(metadata, key)
 	}
 	if entityType == "" {
@@ -725,6 +739,10 @@ func workflowInstanceRowID(ref string) string {
 		}
 	}
 	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(ref)).String()
+}
+
+func FlowInstanceEntityID(ref string) string {
+	return workflowInstanceRowID(ref)
 }
 
 func containsString(items []string, target string) bool {

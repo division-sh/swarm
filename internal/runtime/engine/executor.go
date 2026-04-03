@@ -928,6 +928,12 @@ func (e *Executor) buildTimerIntents(frame *executionFrame) []TimerIntent {
 }
 
 func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
+	if frame.result.StateMutation.Metadata == nil {
+		frame.result.StateMutation.Metadata = cloneStringAnyMap(frame.state.State.Metadata)
+	}
+	if frame.result.StateMutation.StateBuckets == nil {
+		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateBuckets)
+	}
 	if err := e.deps.StateRepo.SaveState(ctx, frame.req.EntityID, frame.result.StateMutation); err != nil {
 		return err
 	}
@@ -1243,13 +1249,21 @@ func (e *Executor) newEmitIntent(frame *executionFrame, eventType string, payloa
 			createdAt = last.Add(time.Nanosecond)
 		}
 	}
+	entityID := strings.TrimSpace(firstNonEmpty(
+		asString(payload["entity_id"]),
+		frame.req.EntityID.String(),
+	))
+	evt := events.Event{
+		Type:       events.EventType(strings.TrimSpace(eventType)),
+		Payload:    encoded,
+		ChainDepth: chainDepth,
+		CreatedAt:  createdAt,
+	}
+	if entityID != "" {
+		evt = evt.WithEntityID(entityID)
+	}
 	return EmitIntent{
-		Event: events.Event{
-			Type:       events.EventType(strings.TrimSpace(eventType)),
-			Payload:    encoded,
-			ChainDepth: chainDepth,
-			CreatedAt:  createdAt,
-		}.WithEntityID(frame.req.EntityID.String()),
+		Event:         evt,
 		ChainDepth:    chainDepth,
 		ParentEventID: strings.TrimSpace(frame.req.Event.ID),
 	}, nil

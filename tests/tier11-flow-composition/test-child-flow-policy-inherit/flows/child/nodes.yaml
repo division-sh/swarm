@@ -5,6 +5,7 @@ child-checker:
   produces: [check.passed]
   event_handlers:
     check.requested:
+      create_entity: true
       guard:
         id: threshold_check
         check: "payload.score >= policy.threshold"

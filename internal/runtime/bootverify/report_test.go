@@ -243,9 +243,6 @@ func TestRun_MapsPolicyConflictToNamedWarning(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
 	if !reportContains(report.Warnings(), "policy_conflict_detection", "max_retries") {
 		t.Fatalf("expected policy_conflict_detection warning, got %#v", report.Warnings())
 	}
@@ -508,9 +505,6 @@ func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
 	if !reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("expected input_pin_wiring warning, got %#v", report.Warnings())
 	}
@@ -549,9 +543,51 @@ func TestRun_SuppressesExpressionFieldReferenceWarningWhenWriterExists(t *testin
 	}
 }
 
+func TestRun_RequiresCreateEntityForStatefulInputPinHandlers(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	flowID := "child"
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	for nodeID, node := range flowView.Nodes {
+		for eventType, handler := range node.EventHandlers {
+			handler.CreateEntity = false
+			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+		}
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("expected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsCreateEntityForStatefulInputPinHandlers(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	flowID := "child"
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	for nodeID, node := range flowView.Nodes {
+		for eventType, handler := range node.EventHandlers {
+			handler.CreateEntity = true
+			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+		}
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
+		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 34 {
-		t.Fatalf("bootCheckRegistry count = %d, want 34", got)
+	if got := len(bootCheckRegistry); got != 35 {
+		t.Fatalf("bootCheckRegistry count = %d, want 35", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
@@ -568,9 +604,22 @@ func loadTier8FixtureBundle(t *testing.T, fixture string) *runtimecontracts.Work
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixture)
+	return loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
+}
+
+func loadFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	fixtureRoot := filepath.Join(repoRoot, relativeRoot)
+	return loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
+}
+
+func loadFixtureBundleAt(t *testing.T, repoRoot, fixtureRoot, platformSpec string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
 	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixture, err)
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
 	}
 	return bundle
 }

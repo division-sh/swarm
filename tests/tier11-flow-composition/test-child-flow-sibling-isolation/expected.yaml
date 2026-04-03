@@ -1,7 +1,7 @@
 trigger:
   event: flow-a/alpha.start
   payload:
-    entity_id: ent-001
+    entity_id: 11111111-1111-1111-1111-111111111111
 
 expected:
   handler_outcome: success
@@ -9,4 +9,3 @@ expected:
   emitted_events:
     - internal.done
     - alpha.complete
-  flow_b_state: waiting

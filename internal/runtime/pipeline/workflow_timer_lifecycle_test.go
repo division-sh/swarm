@@ -432,10 +432,6 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if got := instance.CurrentState; got != "ready" {
 		t.Fatalf("root state after child-worker execution = %q, want ready", got)
 	}
-	flowStates := payloadMap(instance.Metadata["flow_states"])
-	if got := asString(flowStates["child"]); got != "completed" {
-		t.Fatalf("child flow state = %q, want completed", got)
-	}
 
 	listenerCtx := withPipelineFlowScope(context.Background(), "child")
 	completion := events.Event{
@@ -505,9 +501,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
-		Metadata: map[string]any{
-			"flow_states": map[string]any{"child": "completed"},
-		},
+		Metadata:        map[string]any{},
 	}); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

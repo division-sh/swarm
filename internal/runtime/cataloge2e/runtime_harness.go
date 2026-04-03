@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,6 +148,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
+	waitForCatalogHarnessDB(t, db)
 
 	cfg := testRuntimeConfig()
 	cfg.LLM.RuntimeMode = "api"
@@ -351,12 +353,67 @@ func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payl
 
 	ctx, cancel := context.WithTimeout(h.ctx, timeout)
 	defer cancel()
-	if err := h.rt.Bus.Publish(ctx, evt); err != nil {
+	if err := h.publishBusEvent(ctx, evt); err != nil {
 		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(eventType), err)
 	}
 	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
 		h.t.Fatalf("WaitForQuiescence(%s): %v", strings.TrimSpace(eventType), err)
 	}
+}
+
+func (h *runtimeHarness) publishBusEvent(ctx context.Context, evt events.Event) error {
+	h.t.Helper()
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(150 * time.Millisecond):
+			}
+		}
+		if err := h.rt.Bus.Publish(ctx, evt); err != nil {
+			lastErr = err
+			if isTransientCatalogPublishError(err) {
+				continue
+			}
+			return err
+		}
+		return nil
+	}
+	return lastErr
+}
+
+func isTransientCatalogPublishError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, sql.ErrConnDone) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "bad connection")
+}
+
+func waitForCatalogHarnessDB(t testing.TB, db *sql.DB) {
+	t.Helper()
+	if db == nil {
+		t.Fatal("catalog harness db is nil")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt < 25; attempt++ {
+		lastErr = db.PingContext(ctx)
+		if lastErr == nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("catalog harness db ping: %v", lastErr)
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	t.Fatalf("catalog harness db ping: %v", lastErr)
 }
 
 func (h *runtimeHarness) rootAutoEmitOnCreateEvent() string {

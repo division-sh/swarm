@@ -77,6 +77,23 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 		sharedPostgres.lifecycle.Unlock()
 		t.Fatalf("initialize postgres %q: %v", dbName, err)
 	}
+	if err := db.Close(); err != nil {
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
+		t.Fatalf("close bootstrap postgres %q: %v", dbName, err)
+	}
+	db, err = sql.Open("postgres", dsn)
+	if err != nil {
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
+		t.Fatalf("reopen postgres %q: %v", dbName, err)
+	}
+	if err := waitForTestDatabase(context.Background(), db, 30*time.Second); err != nil {
+		_ = db.Close()
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
+		t.Fatalf("reopen ping postgres %q: %v", dbName, err)
+	}
 	sharedPostgres.lifecycle.Unlock()
 
 	released := false
@@ -100,6 +117,30 @@ func StartPostgres(t *testing.T) (dsn string, db *sql.DB, cleanup func()) {
 
 	t.Cleanup(release)
 	return dsn, db, release
+}
+
+func waitForTestDatabase(ctx context.Context, db *sql.DB, timeout time.Duration) error {
+	if db == nil {
+		return fmt.Errorf("db is nil")
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	for attempt := 0; attempt < 25; attempt++ {
+		lastErr = db.PingContext(ctx)
+		if lastErr == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return lastErr
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	return lastErr
 }
 
 func (s *sharedPostgresState) startLocked() error {

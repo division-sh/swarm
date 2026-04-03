@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -35,18 +36,18 @@ type FlowInstanceDeactivationRequest struct {
 
 type FlowInstanceDeactivator func(context.Context, FlowInstanceDeactivationRequest) error
 
-func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCtx workflowTriggerContext, plan handlerExecutionPlan) bool {
+func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCtx workflowTriggerContext, plan handlerExecutionPlan) error {
 	if pc == nil || pc.instanceActivator == nil {
-		return false
+		return fmt.Errorf("flow instance activator is not configured")
 	}
 	templateID := strings.TrimSpace(plan.Template)
 	if templateID == "" {
-		return false
+		return fmt.Errorf("flow instance template is required")
 	}
 	if source := pc.SemanticSource(); source != nil {
 		schema, ok := source.FlowSchemaByID(templateID)
 		if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-			return false
+			return fmt.Errorf("flow template %s is not a template flow", templateID)
 		}
 	}
 	entityID := workflowEventEntityID(triggerCtx.Event)
@@ -74,7 +75,10 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	if plan.ConfigFrom != nil {
 		req.Config = resolveFlowInstanceConfig(plan.ConfigFrom, payload, entity)
 	}
-	return pc.instanceActivator(ctx, req) == nil
+	if err := pc.instanceActivator(ctx, req); err != nil {
+		return err
+	}
+	return nil
 }
 
 func resolveFlowInstanceConfig(spec *runtimecontracts.ConfigFromSpec, payload, entity map[string]any) map[string]any {
@@ -175,7 +179,7 @@ func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID s
 	}
 }
 
-func (pc *PipelineCoordinator) handlerEmitPayload(_ context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
+func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
 	payload := parsePayloadMap(triggerCtx.Event.Payload)
 	// Only carry contract-visible entity fields into emitted payloads; internal
 	// workflow metadata such as gates, evidence, and runtime bookkeeping should
@@ -187,7 +191,18 @@ func (pc *PipelineCoordinator) handlerEmitPayload(_ context.Context, triggerCtx 
 	for key, value := range payload {
 		out[key] = value
 	}
-	entityID := workflowEventEntityIDWithPayload(triggerCtx.Event, payload)
+	entityID := strings.TrimSpace(firstNonEmptyString(
+		triggerCtx.State.EntityID,
+		workflowEventEntityIDWithPayload(triggerCtx.Event, payload),
+	))
+	if workflowEmitTargetsParentEntity(pc.SemanticSource(), pipelineFlowScope(ctx), eventType) {
+		entityID = strings.TrimSpace(firstNonEmptyString(
+			asString(triggerCtx.State.Metadata["parent_entity_id"]),
+			triggerCtx.Event.EntityID(),
+			workflowEventEntityIDWithPayload(triggerCtx.Event, payload),
+			entityID,
+		))
+	}
 	if entityID != "" {
 		out["entity_id"] = entityID
 	}
@@ -198,6 +213,37 @@ func (pc *PipelineCoordinator) handlerEmitPayload(_ context.Context, triggerCtx 
 		out["current_state"] = state
 	}
 	return out
+}
+
+func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventType string) bool {
+	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || eventType == "" || flowID == "" {
+		return false
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return false
+	}
+	return workflowFlowScopeHasOutputEvent(scope, eventType)
+}
+
+func workflowFlowScopeHasOutputEvent(scope semanticview.FlowScope, eventType string) bool {
+	flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+	localEvent := eventType
+	if flowPath != "" {
+		prefix := flowPath + "/"
+		if strings.HasPrefix(localEvent, prefix) {
+			localEvent = strings.TrimPrefix(localEvent, prefix)
+		}
+	}
+	localEvent = strings.Trim(strings.TrimSpace(localEvent), "/")
+	for _, candidate := range scope.OutputEvents {
+		if strings.TrimSpace(candidate) == localEvent {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {

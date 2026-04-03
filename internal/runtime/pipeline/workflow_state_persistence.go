@@ -5,8 +5,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"swarm/internal/runtime/semanticview"
 )
 
 func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {
@@ -23,9 +21,11 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 	if err != nil || !ok {
 		return state
 	}
-	metadata := cloneStringAnyMap(instance.Metadata)
-	state.Stage = workflowScopedStateValue(pc.SemanticSource(), pipelineFlowScope(ctx), metadata, instance.CurrentState)
-	state.Metadata = metadata
+	state.Stage = NormalizeWorkflowStateID(strings.TrimSpace(instance.CurrentState))
+	state.Metadata = cloneStringAnyMap(instance.Metadata)
+	if state.Metadata == nil {
+		state.Metadata = map[string]any{}
+	}
 	return state
 }
 
@@ -42,11 +42,9 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 	current := pc.currentWorkflowState(ctx, entityID)
 	currentState := strings.TrimSpace(string(current.Stage))
 	source := pc.SemanticSource()
-	flowID := pipelineFlowScope(ctx)
-	stateKey := workflowScopedStateKey(source, flowID)
 	if err := pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		enteredStateAt := time.Now().UTC()
-		if flowID == "" && strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
+		if strings.TrimSpace(instance.CurrentState) == nextState && !instance.EnteredStageAt.IsZero() {
 			enteredStateAt = instance.EnteredStageAt
 		}
 		if strings.TrimSpace(instance.WorkflowName) == "" {
@@ -62,11 +60,9 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		if sourceEvent != "" {
 			metadata["last_source_event"] = sourceEvent
 		}
-		instance.Metadata = workflowWithScopedState(metadata, stateKey, nextState)
-		if flowID == "" {
-			instance.CurrentState = nextState
-			instance.EnteredStageAt = enteredStateAt
-		}
+		instance.Metadata = metadata
+		instance.CurrentState = nextState
+		instance.EnteredStageAt = enteredStateAt
 		if currentState != "" && currentState != nextState {
 			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(currentState, nextState, sourceEvent))
 		} else if currentState == "" && len(instance.TransitionHistory) == 0 {
@@ -106,6 +102,84 @@ func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, en
 			metadata["gates"] = gates
 		}
 		instance.Metadata = metadata
+	})
+}
+
+func (pc *PipelineCoordinator) projectWorkflowSubjectGates(ctx context.Context, entityID string) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return nil
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+	if err != nil || !ok {
+		if err != nil {
+			return err
+		}
+		flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+		if flowID == "" || pc.SemanticSource() == nil {
+			return nil
+		}
+		flowPath := strings.Trim(strings.TrimSpace(pc.SemanticSource().FlowPath(flowID)), "/")
+		if flowPath == "" {
+			flowPath = flowID
+		}
+		if flowPath == "" {
+			return nil
+		}
+		instance, ok, err = pc.workflowStore.Load(ctx, flowPath)
+		if err != nil || !ok {
+			return err
+		}
+	}
+	subjectID := strings.TrimSpace(firstNonEmptyString(instance.SubjectID, asString(instance.Metadata["subject_id"]), entityID))
+	if subjectID == "" || subjectID == entityID {
+		return nil
+	}
+	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	if flowPath == "" {
+		flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+		if flowID != "" {
+			if pc.SemanticSource() != nil {
+				flowPath = strings.Trim(strings.TrimSpace(pc.SemanticSource().FlowPath(flowID)), "/")
+			}
+			if flowPath == "" {
+				flowPath = flowID
+			}
+		}
+	}
+	if flowPath == "" {
+		return nil
+	}
+	prefix := flowPath + "/"
+	scoped := map[string]bool{}
+	for key, value := range workflowStateGatesAsBools(instance.Metadata) {
+		if strings.HasPrefix(strings.TrimSpace(key), prefix) {
+			scoped[strings.TrimSpace(key)] = value
+		}
+	}
+	return pc.workflowStore.Mutate(ctx, subjectID, func(subject *WorkflowInstance) {
+		metadata := cloneStringAnyMap(subject.Metadata)
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		gates := workflowStateGatesAsBools(metadata)
+		for key := range gates {
+			if strings.HasPrefix(strings.TrimSpace(key), prefix) {
+				delete(gates, key)
+			}
+		}
+		for key, value := range scoped {
+			gates[key] = value
+		}
+		if len(gates) == 0 {
+			delete(metadata, "gates")
+		} else {
+			metadata["gates"] = workflowBoolGatesAsMap(gates)
+		}
+		subject.Metadata = metadata
 	})
 }
 
@@ -186,67 +260,4 @@ func workflowTransitionRecord(fromState, toState, sourceEvent string) WorkflowTr
 		)
 	}
 	return record
-}
-
-const workflowRootStateKey = "$root"
-
-func workflowScopedStateValue(source semanticview.Source, flowID string, metadata map[string]any, fallback string) WorkflowStateID {
-	fallback = strings.TrimSpace(string(NormalizeWorkflowStateID(fallback)))
-	stateKey := workflowScopedStateKey(source, flowID)
-	if scoped := strings.TrimSpace(workflowScopedStateFromMetadata(metadata, stateKey)); scoped != "" {
-		return NormalizeWorkflowStateID(scoped)
-	}
-	if initial := strings.TrimSpace(workflowScopedInitialState(source, flowID)); initial != "" {
-		return NormalizeWorkflowStateID(initial)
-	}
-	return NormalizeWorkflowStateID(fallback)
-}
-
-func workflowScopedStateKey(source semanticview.Source, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		return workflowRootStateKey
-	}
-	if source != nil {
-		if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
-			return flowPath
-		}
-	}
-	return flowID
-}
-
-func workflowScopedInitialState(source semanticview.Source, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil {
-		return ""
-	}
-	if flowID == "" {
-		return strings.TrimSpace(source.WorkflowInitialStage())
-	}
-	return strings.TrimSpace(source.FlowInitialStage(flowID))
-}
-
-func workflowScopedStateFromMetadata(metadata map[string]any, stateKey string) string {
-	stateKey = strings.TrimSpace(stateKey)
-	if stateKey == "" || len(metadata) == 0 {
-		return ""
-	}
-	raw := payloadMap(metadata["flow_states"])
-	if len(raw) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(asString(raw[stateKey]))
-}
-
-func workflowWithScopedState(metadata map[string]any, stateKey, nextState string) map[string]any {
-	metadata = cloneStringAnyMap(metadata)
-	stateKey = strings.TrimSpace(stateKey)
-	nextState = strings.TrimSpace(nextState)
-	if stateKey == "" || nextState == "" {
-		return metadata
-	}
-	flowStates := payloadMap(metadata["flow_states"])
-	flowStates[stateKey] = nextState
-	metadata["flow_states"] = flowStates
-	return metadata
 }

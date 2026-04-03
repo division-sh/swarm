@@ -205,6 +205,10 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 					AgentID:   "agent-1",
 					UpdatedAt: now.Format(time.RFC3339),
 					Messages:  []any{map[string]any{"role": "assistant", "content": "hi"}},
+					Turns: []ConversationTurn{{
+						TurnID:                 "turn-1",
+						AssistantVisibleOutput: "done",
+					}},
 					RuntimeState: map[string]any{
 						"summary":   "summarized",
 						"last_turn": map[string]any{"parse_ok": true},
@@ -245,11 +249,11 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 		},
 		Instances: stubInstances{
 			rows: []runtimepipeline.WorkflowInstance{
-				{InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
-				{InstanceID: "wf-2", WorkflowName: "order", CurrentState: "done", UpdatedAt: now.Add(-time.Minute)},
+				{InstanceID: "wf-1", SubjectID: "subj-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
+				{InstanceID: "wf-2", SubjectID: "subj-1", WorkflowName: "order", CurrentState: "done", UpdatedAt: now.Add(-time.Minute)},
 			},
 			byID: map[string]runtimepipeline.WorkflowInstance{
-				"wf-1": {InstanceID: "wf-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
+				"wf-1": {InstanceID: "wf-1", SubjectID: "subj-1", WorkflowName: "order", CurrentState: "active", UpdatedAt: now},
 			},
 		},
 		Runtime: &stubRuntimeControl{},
@@ -273,7 +277,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("unmarshal conversation detail: %v", err)
 	}
-	if detail.AgentID != "agent-1" || len(detail.Messages) != 1 {
+	if detail.AgentID != "agent-1" || len(detail.Messages) != 1 || len(detail.Turns) != 1 {
 		t.Fatalf("unexpected conversation detail: %+v", detail)
 	}
 
@@ -327,6 +331,27 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/instances/aggregate?group_by=subject_id&subject_id=subj-1", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("instance aggregate by subject status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/subjects/subj-1/status", nil)
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subject status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var subject subjectStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &subject); err != nil {
+		t.Fatalf("unmarshal subject status: %v", err)
+	}
+	if subject.SubjectID != "subj-1" || subject.LatestState != "active" || subject.EntityCount != 2 {
+		t.Fatalf("unexpected subject status: %+v", subject)
+	}
+
+	rec = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -369,6 +394,8 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief","last_turn":{"parse_ok":true},"provider_session_id":"sess-1"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
+	toolCallsPayload := `[{"name":"schedule","arguments":{"delay_seconds":1209600}}]`
+	responsePayload := `{"result":"14-day review scheduled.","raw":"{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":[{\"type\":\"text\",\"text\":\"{\\\"status\\\":\\\"scheduled\\\"}\"}]}]}}\n{\"type\":\"result\",\"result\":\"14-day review scheduled.\"}"}`
 
 	mock.ExpectQuery("SELECT\\s+agent_id,.*FROM agent_sessions").
 		WithArgs(25).
@@ -387,11 +414,23 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 		t.Fatalf("expected metadata to retain provider_session_id: %+v", items[0].Metadata)
 	}
 
-	mock.ExpectQuery("SELECT\\s+agent_id,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM agent_sessions").
+	mock.ExpectQuery("SELECT\\s+session_id::text,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM agent_sessions").
 		WithArgs("agent-1").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"agent_id", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
-		}).AddRow("agent-1", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
+			"session_id", "agent_id", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "scoring/vertical.marginal", "",
+			[]byte(`["schedule"]`), []byte(toolCallsPayload), []byte(`["vertical.marginal_review_due"]`), []byte(`{"runtime-tools":"ok"}`), []byte(`["mcp__runtime-tools__schedule"]`), []byte(`["mcp__runtime-tools__schedule"]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(responsePayload), []byte(`[]`), true, 92282, 0, "", now,
+		))
 
 	item, ok, err := reader.Get(context.Background(), "agent-1")
 	if err != nil {
@@ -400,12 +439,81 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected conversation to exist")
 	}
-	if item.AgentID != "agent-1" || len(item.Messages) != 1 {
+	if item.AgentID != "agent-1" || item.SessionID != "sess-1" || len(item.Messages) != 1 || len(item.Turns) != 1 {
 		t.Fatalf("unexpected detail: %+v", item)
 	}
 	lastTurn, ok := item.RuntimeState["last_turn"].(map[string]any)
 	if !ok || lastTurn["parse_ok"] != true {
 		t.Fatalf("expected runtime_state.last_turn parse_ok=true, got %+v", item.RuntimeState)
+	}
+	if item.Turns[0].AssistantVisibleOutput != "14-day review scheduled." {
+		t.Fatalf("assistant_visible_output = %q", item.Turns[0].AssistantVisibleOutput)
+	}
+	if len(item.Turns[0].ToolResults) != 1 {
+		t.Fatalf("tool_results = %#v", item.Turns[0].ToolResults)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db)
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"brief"}`
+	messagePayload := `[{"role":"assistant","content":"hello"}]`
+	turnBlocksPayload := `[
+		{"kind":"dispatch","title":"scoring/vertical.marginal","data":{"trigger_event_id":"evt-1"}},
+		{"kind":"tool_use","tool_name":"schedule","input":{"delay_seconds":1209600},"data":{"tool_use_id":"toolu_1"}},
+		{"kind":"tool_result","tool_name":"schedule","output":{"status":"scheduled"},"data":{"tool_use_id":"toolu_1"}},
+		{"kind":"assistant_text","text":"Parking for manual review."},
+		{"kind":"outcome","text":"14-day review scheduled."}
+	]`
+
+	mock.ExpectQuery("SELECT\\s+session_id::text,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM agent_sessions").
+		WithArgs("agent-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "sess-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "sess-1", "task", "global", "entity-1", "evt-1", "scoring/vertical.marginal", "",
+			[]byte(`["schedule"]`), []byte(`[]`), []byte(`[]`), []byte(`{"runtime-tools":"ok"}`), []byte(`["mcp__runtime-tools__schedule"]`), []byte(`["mcp__runtime-tools__schedule"]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"stale fallback text"}`), []byte(turnBlocksPayload), true, 92282, 0, "", now,
+		))
+
+	item, ok, err := reader.Get(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if !ok || len(item.Turns) != 1 {
+		t.Fatalf("unexpected detail: %+v", item)
+	}
+	if item.Turns[0].AssistantVisibleOutput != "Parking for manual review." {
+		t.Fatalf("assistant_visible_output = %q", item.Turns[0].AssistantVisibleOutput)
+	}
+	if item.Turns[0].Outcome != "14-day review scheduled." {
+		t.Fatalf("outcome = %q", item.Turns[0].Outcome)
+	}
+	if len(item.Turns[0].ToolResults) != 1 {
+		t.Fatalf("tool_results = %#v", item.Turns[0].ToolResults)
+	}
+	result, _ := item.Turns[0].ToolResults[0].(map[string]any)
+	if result["tool_name"] != "schedule" {
+		t.Fatalf("tool_result = %#v", result)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -421,7 +529,7 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 	defer db.Close()
 
 	reader := NewSQLConversationReader(db)
-	mock.ExpectQuery("SELECT\\s+agent_id,.*FROM agent_sessions").
+	mock.ExpectQuery("SELECT\\s+session_id::text,.*FROM agent_sessions").
 		WithArgs("missing-agent").
 		WillReturnError(sql.ErrNoRows)
 

@@ -54,15 +54,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if flowPath == "" {
 		flowPath = runtimepipeline.DeriveFlowInstancePath(req.ContractBundle, templateID, instanceID)
 	}
-	if am.workspaces != nil {
-		if err := am.workspaces.EnsureEntityWorkspace(ctx, entityID); err != nil {
-			return fmt.Errorf("ensure entity workspace: %w", err)
-		}
-	}
-	if am.store != nil {
-		if err := am.store.EnsureEntitySchema(ctx, entityID); err != nil {
-			return fmt.Errorf("ensure entity schema: %w", err)
-		}
+	sourceEntityID := entityID
+	flowEntityID := strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
+	if flowEntityID == "" {
+		return fmt.Errorf("derive flow entity id for %s", flowPath)
 	}
 	if am.workflowInstances != nil {
 		initialState := strings.TrimSpace(schema.InitialState)
@@ -74,15 +69,18 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 		if err := am.workflowInstances.Upsert(ctx, runtimepipeline.WorkflowInstance{
 			InstanceID:      instanceID,
+			SubjectID:       strings.TrimSpace(sourceEntityID),
 			StorageRef:      flowPath,
 			WorkflowName:    templateID,
 			WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 			CurrentState:    initialState,
 			Config:          cloneFlowConfig(req.Config),
 			Metadata: map[string]any{
-				"entity_id":   entityID,
-				"instance_id": instanceID,
-				"flow_path":   flowPath,
+				"entity_id":        flowEntityID,
+				"instance_id":      instanceID,
+				"flow_path":        flowPath,
+				"subject_id":       strings.TrimSpace(sourceEntityID),
+				"parent_entity_id": strings.TrimSpace(sourceEntityID),
 			},
 		}); err != nil {
 			return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
@@ -102,7 +100,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 
 	for _, key := range agentKeys {
 		entry := scope.Agents[key]
-		cfg, err := buildFlowAgentConfig(req.ContractBundle, templateID, instanceID, entityID, flowPath, key, entry, vars, localEvents, req.Config)
+		cfg, err := buildFlowAgentConfig(req.ContractBundle, templateID, instanceID, flowEntityID, flowPath, key, entry, vars, localEvents, req.Config)
 		if err != nil {
 			return err
 		}
@@ -129,10 +127,12 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			eventType = strings.Trim(flowPath+"/"+eventType, "/")
 		}
 		payload := map[string]any{
-			"entity_id":   entityID,
-			"instance_id": instanceID,
-			"template_id": templateID,
-			"flow_path":   flowPath,
+			"entity_id":        flowEntityID,
+			"instance_id":      instanceID,
+			"template_id":      templateID,
+			"flow_path":        flowPath,
+			"subject_id":       strings.TrimSpace(sourceEntityID),
+			"parent_entity_id": strings.TrimSpace(sourceEntityID),
 		}
 		for key, value := range req.Config {
 			key = strings.TrimSpace(key)
@@ -153,7 +153,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			SourceAgent: "flow-instance-activator",
 			Payload:     encoded,
 			CreatedAt:   time.Now().UTC(),
-		}).WithEntityID(entityID)); err != nil {
+		}).WithEntityID(flowEntityID)); err != nil {
 			return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
 		}
 	}
@@ -223,10 +223,12 @@ func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, 
 	if templateID == "" || instanceID == "" || entityID == "" {
 		return fmt.Errorf("template_id, instance_id, and entity_id are required")
 	}
+	flowPath := strings.Trim(templateID+"/"+instanceID, "/")
+	flowEntityID := strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
 	am.mu.RLock()
 	agentIDs := make([]string, 0, len(am.agentCfg))
 	for agentID, cfg := range am.agentCfg {
-		if strings.TrimSpace(cfg.Mode) != templateID || strings.TrimSpace(cfg.EntityID) != entityID {
+		if strings.TrimSpace(cfg.Mode) != templateID || strings.TrimSpace(cfg.EntityID) != flowEntityID {
 			continue
 		}
 		agentIDs = append(agentIDs, agentID)
@@ -308,7 +310,7 @@ func buildFlowAgentConfig(
 	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
 		cfgPayload["native_tools"] = nativeTools
 	}
-	if emitEvents := normalizedConfiguredEventList(entry.EmitEvents, vars); len(emitEvents) > 0 {
+	if emitEvents := normalizedFlowAgentEmitEvents(entry.EmitEvents, vars, localEvents, strings.Trim(flowPath, "/"), templateID, instanceID); len(emitEvents) > 0 {
 		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
 	}
 	rawConfig, err := json.Marshal(cfgPayload)
@@ -470,7 +472,7 @@ func buildStaticFlowAgentConfig(
 	if nativeTools := normalizedConfiguredNativeTools(entry.NativeTools); len(nativeTools) > 0 {
 		cfgPayload["native_tools"] = nativeTools
 	}
-	if emitEvents := normalizedConfiguredEventList(entry.EmitEvents, vars); len(emitEvents) > 0 {
+	if emitEvents := normalizedStaticFlowEmitEvents(entry.EmitEvents, vars, localEvents, flowPath); len(emitEvents) > 0 {
 		cfgPayload["emit_events"] = append([]string{}, emitEvents...)
 	}
 	if _, ok := cfgPayload["system_prompt"]; !ok {
@@ -520,6 +522,41 @@ func resolveRequiredAgentEntry(agents map[string]runtimecontracts.AgentRegistryE
 		}
 	}
 	return "", runtimecontracts.AgentRegistryEntry{}, false
+}
+
+func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath, templateID, instanceID string) []string {
+	rendered := normalizedConfiguredEventList(events, vars)
+	if len(rendered) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(rendered))
+	for _, eventType := range rendered {
+		if _, ok := localEvents[eventType]; ok {
+			if scoped := strings.Trim(strings.TrimSpace(templateID)+"/"+strings.TrimSpace(instanceID)+"/"+strings.TrimSpace(eventType), "/"); scoped != "" {
+				out = append(out, scoped)
+				continue
+			}
+		}
+		out = append(out, eventType)
+	}
+	return dedupeStrings(out)
+}
+
+func normalizedStaticFlowEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath string) []string {
+	rendered := normalizedConfiguredEventList(events, vars)
+	if len(rendered) == 0 {
+		return nil
+	}
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+	out := make([]string, 0, len(rendered))
+	for _, eventType := range rendered {
+		if _, ok := localEvents[eventType]; ok && flowPath != "" {
+			out = append(out, strings.Trim(flowPath+"/"+strings.TrimSpace(eventType), "/"))
+			continue
+		}
+		out = append(out, eventType)
+	}
+	return dedupeStrings(out)
 }
 
 func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEntry) map[string]struct{} {

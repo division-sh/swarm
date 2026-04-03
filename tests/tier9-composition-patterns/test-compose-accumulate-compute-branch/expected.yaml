@@ -1,6 +1,6 @@
 trigger:
   event: score.submitted
-  payload: { entity_id: ent-001, value: 81 }
+  payload: { entity_id: 11111111-1111-1111-1111-111111111111, value: 81 }
 expected:
   handler_outcome: success
   entity_state: high

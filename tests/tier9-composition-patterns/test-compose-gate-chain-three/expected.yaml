@@ -1,11 +1,11 @@
 trigger:
   sequence:
     - event: step.a_done
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: step.b_done
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: step.c_done
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
 expected:
   handler_outcome: success
   entity_state: released

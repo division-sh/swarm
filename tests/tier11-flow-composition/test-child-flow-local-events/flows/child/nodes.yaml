@@ -5,6 +5,7 @@ child-intake:
   produces: [child.internal]
   event_handlers:
     child.start:
+      create_entity: true
       advances_to: processing
       emits: child.internal
 

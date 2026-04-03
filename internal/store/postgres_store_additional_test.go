@@ -1362,6 +1362,55 @@ func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t
 	}
 }
 
+func TestManagerStore_AppendAgentTurn_PersistsTurnBlocksWhenColumnExists(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	if _, err := db.ExecContext(ctx, `ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS turn_blocks JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+		t.Fatalf("add turn_blocks column: %v", err)
+	}
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		ScopeKey:  "global",
+		Mode:      "task",
+		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation: %v", err)
+	}
+
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:     "a1",
+		RuntimeMode: "task",
+		SessionID:   sessionID,
+		TurnBlocks: []runtimellm.TurnBlock{
+			{Kind: "dispatch", Title: "scoring/vertical.marginal"},
+			{Kind: "tool_use", ToolName: "schedule", Input: map[string]any{"delay_seconds": 1209600}},
+			{Kind: "outcome", Text: "14-day review scheduled."},
+		},
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"result":"14-day review scheduled."}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn: %v", err)
+	}
+
+	var got string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(turn_blocks::text, '[]') FROM agent_turns WHERE session_id = $1::uuid ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&got); err != nil {
+		t.Fatalf("load turn_blocks: %v", err)
+	}
+	if !strings.Contains(got, `"dispatch"`) || !strings.Contains(got, `"schedule"`) || !strings.Contains(got, `"14-day review scheduled."`) {
+		t.Fatalf("turn_blocks = %s", got)
+	}
+}
+
 func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

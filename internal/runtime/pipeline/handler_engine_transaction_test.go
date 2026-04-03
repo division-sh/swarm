@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -14,8 +15,8 @@ import (
 )
 
 type recordingPipelineBus struct {
-	mu        sync.Mutex
-	publishes []events.Event
+	mu         sync.Mutex
+	publishes  []events.Event
 	publishErr error
 }
 
@@ -275,6 +276,34 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 	}
 }
 
+func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "pipeline.complete"},
+	}
+	const inboundEntityID = "ent-child"
+	const subjectEntityID = "ent-root"
+	state := WorkflowState{
+		EntityID: inboundEntityID,
+		Metadata: map[string]any{
+			"subject_id": subjectEntityID,
+		},
+	}
+
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "", handler, inboundEntityID, events.Event{
+		Type: events.EventType("child/grandchild/task.done"),
+	}.WithEntityID(inboundEntityID), &state)
+
+	if gotID != subjectEntityID {
+		t.Fatalf("entityID = %q, want subject/root %q", gotID, subjectEntityID)
+	}
+	if got := gotEvt.EntityID(); got != inboundEntityID {
+		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
+	}
+	if state.EntityID != subjectEntityID {
+		t.Fatalf("state entity_id = %q, want %q", state.EntityID, subjectEntityID)
+	}
+}
+
 func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClearsState(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	const inboundEntityID = "ent-parent"
@@ -306,8 +335,14 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 	if state.Status != "" {
 		t.Fatalf("state status = %q, want cleared", state.Status)
 	}
-	if state.Metadata != nil {
-		t.Fatalf("state metadata = %#v, want nil", state.Metadata)
+	if state.Metadata == nil {
+		t.Fatal("state metadata = nil, want subject_id preserved")
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != inboundEntityID {
+		t.Fatalf("state subject_id = %q, want %q", got, inboundEntityID)
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); got != inboundEntityID {
+		t.Fatalf("state parent_entity_id = %q, want %q", got, inboundEntityID)
 	}
 }
 
@@ -315,7 +350,7 @@ func TestHandlerExecutionStateSnapshotCreateEntityStartsClean(t *testing.T) {
 	snapshot := handlerExecutionStateSnapshot(runtimecontracts.SystemNodeEventHandler{CreateEntity: true}, "ent-child", WorkflowState{
 		EntityID: "ent-parent",
 		Stage:    WorkflowStateID("queued"),
-		Metadata: map[string]any{"name": "Parent"},
+		Metadata: map[string]any{"subject_id": "ent-parent"},
 	})
 
 	if got := snapshot.EntityID.String(); got != "ent-child" {
@@ -325,10 +360,29 @@ func TestHandlerExecutionStateSnapshotCreateEntityStartsClean(t *testing.T) {
 		t.Fatalf("snapshot current_state = %q, want empty", snapshot.CurrentState)
 	}
 	if snapshot.Metadata == nil {
-		t.Fatal("snapshot metadata = nil, want empty map")
+		t.Fatal("snapshot metadata = nil, want subject metadata")
 	}
-	if len(snapshot.Metadata) != 0 {
-		t.Fatalf("snapshot metadata = %#v, want empty", snapshot.Metadata)
+	if got := strings.TrimSpace(asString(snapshot.Metadata["subject_id"])); got != "ent-parent" {
+		t.Fatalf("snapshot subject_id = %q, want ent-parent", got)
+	}
+}
+
+func TestResolveHandlerEntityIDForFlowCreateEntitySeedsFirstFlowSubjectID(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
+	state := WorkflowState{}
+
+	gotID, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", events.Event{
+		Type: events.EventType("vertical.discovered"),
+	}, &state)
+
+	if gotID == "" {
+		t.Fatal("expected fresh entity id")
+	}
+	if state.Metadata == nil {
+		t.Fatal("state metadata = nil, want subject_id")
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["subject_id"])); got != gotID {
+		t.Fatalf("state subject_id = %q, want %q", got, gotID)
 	}
 }
 

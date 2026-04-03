@@ -149,16 +149,17 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 			out.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 			out.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 			out.Metadata = cloneStringAnyMap(instance.Metadata)
-			out.CurrentState = strings.TrimSpace(string(workflowScopedStateValue(
-				r.coordinator.SemanticSource(),
-				pipelineFlowScope(ctx),
-				out.Metadata,
-				instance.CurrentState,
-			)))
+			if out.Metadata == nil {
+				out.Metadata = map[string]any{}
+			}
+			if strings.TrimSpace(instance.SubjectID) != "" {
+				out.Metadata["subject_id"] = strings.TrimSpace(instance.SubjectID)
+			}
+			out.CurrentState = strings.TrimSpace(instance.CurrentState)
 			out.Gates = workflowStateGatesForScope(
 				r.coordinator.SemanticSource(),
 				pipelineFlowScope(ctx),
-				instance.Metadata,
+				out.Metadata,
 			)
 			out.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
 			out.TimerState = make([]runtimeengine.TimerState, 0, len(instance.TimerState))
@@ -192,6 +193,11 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
 		}); err != nil {
 			return err
+		}
+		if len(mutation.Gates) > 0 || len(mutation.ClearGates) > 0 || strings.TrimSpace(mutation.SetGate) != "" {
+			if err := r.coordinator.projectWorkflowSubjectGates(ctx, entityID.String()); err != nil {
+				return err
+			}
 		}
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
@@ -545,7 +551,10 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 			InstanceIDPath: action.InstanceIDPath,
 			ConfigFrom:     action.ConfigFrom,
 		}
-		return pc.createFlowInstance(ctx, engineTriggerContext(execCtx.Request), plan), nil
+		if err := pc.createFlowInstance(ctx, engineTriggerContext(execCtx.Request), plan); err != nil {
+			return true, err
+		}
+		return true, nil
 	default:
 		return false, nil
 	}
@@ -581,7 +590,23 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 		out = map[string]any{}
 	}
 	for key, value := range payload {
+		if strings.TrimSpace(key) == "entity_id" {
+			continue
+		}
 		out[key] = value
+	}
+	entityID := strings.TrimSpace(asString(base["entity_id"]))
+	if workflowEmitTargetsParentEntity(pc.SemanticSource(), req.FlowID.String(), eventType) {
+		entityID = strings.TrimSpace(firstNonEmptyString(
+			asString(req.State.Metadata["parent_entity_id"]),
+			req.Event.EntityID(),
+			entityID,
+		))
+	} else if !req.EntityID.IsZero() {
+		entityID = strings.TrimSpace(req.EntityID.String())
+	}
+	if entityID != "" {
+		out["entity_id"] = entityID
 	}
 	return out, nil
 }
@@ -604,7 +629,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		instance.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
 	}
 	if strings.TrimSpace(instance.CurrentState) == "" {
-		instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowScopedInitialState(source, flowID), "pending"))
+		instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
 	}
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = time.Now().UTC()
@@ -633,6 +658,9 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	}
 	if mutation.Metadata != nil {
 		instance.Metadata = cloneStringAnyMap(mutation.Metadata)
+	}
+	if instance.Metadata != nil && strings.TrimSpace(instance.SubjectID) == "" {
+		instance.SubjectID = strings.TrimSpace(asString(instance.Metadata["subject_id"]))
 	}
 	if mutation.StateBuckets != nil {
 		instance.StateBuckets = cloneStringAnyMap(mutation.StateBuckets)
@@ -759,8 +787,8 @@ func workflowStateGatesAsBools(metadata map[string]any) map[string]bool {
 
 func workflowStateGatesForScope(source semanticview.Source, flowID string, metadata map[string]any) map[string]bool {
 	gates := workflowStateGatesAsBools(metadata)
-	scopeKey := workflowScopedStateKey(source, flowID)
-	if scopeKey == "" || scopeKey == workflowRootStateKey {
+	scopeKey := workflowScopeKey(source, flowID)
+	if scopeKey == "" {
 		return gates
 	}
 	prefix := scopeKey + "/"
@@ -796,11 +824,35 @@ func workflowScopedGateKey(source semanticview.Source, flowID, gate string) stri
 	if gate == "" || strings.Contains(gate, "/") {
 		return gate
 	}
-	scopeKey := workflowScopedStateKey(source, flowID)
-	if scopeKey == "" || scopeKey == workflowRootStateKey {
+	scopeKey := workflowScopeKey(source, flowID)
+	if scopeKey == "" {
 		return gate
 	}
 	return strings.Trim(scopeKey+"/"+gate, "/")
+}
+
+func workflowInitialStateForFlow(source semanticview.Source, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil {
+		return ""
+	}
+	if flowID == "" {
+		return strings.TrimSpace(source.WorkflowInitialStage())
+	}
+	return strings.TrimSpace(source.FlowInitialStage(flowID))
+}
+
+func workflowScopeKey(source semanticview.Source, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return ""
+	}
+	if source != nil {
+		if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
+			return flowPath
+		}
+	}
+	return flowID
 }
 
 func workflowBoolGatesAsMap(gates map[string]bool) map[string]any {

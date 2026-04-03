@@ -7,6 +7,9 @@ test-node:
     scores.ready:
       compute:
         operation: weighted_average
+        keys:
+          dimension_key: dimension
+          score_keys: [value]
         tiers:
           - dimensions: [a, b]
             weight: 0.6

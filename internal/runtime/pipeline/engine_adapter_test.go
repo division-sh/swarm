@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -104,6 +105,212 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	}
 }
 
+func TestProjectWorkflowSubjectGatesProjectsScopedChildGatesToSubjectEntity(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	subjectID := "11111111-1111-1111-1111-111111111111"
+	childStorageRef := "child"
+	childID := FlowInstanceEntityID(childStorageRef)
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      subjectID,
+		SubjectID:       subjectID,
+		StorageRef:      subjectID,
+		WorkflowName:    "root",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "idle",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+			"gates": map[string]any{
+				"root_ready": true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert subject: %v", err)
+	}
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childID,
+		SubjectID:       subjectID,
+		StorageRef:      childStorageRef,
+		WorkflowName:    "child",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "done",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+			"flow_path":  "child",
+			"gates": map[string]any{
+				"child/g_validated": true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert child: %v", err)
+	}
+
+	pc := &PipelineCoordinator{workflowStore: store}
+	child, ok, err := store.Load(context.Background(), childStorageRef)
+	if err != nil {
+		t.Fatalf("load child: %v", err)
+	}
+	if !ok {
+		t.Fatal("child entity missing before projection")
+	}
+	if got := strings.TrimSpace(asString(child.Metadata["flow_path"])); got != "child" {
+		t.Fatalf("child flow_path = %#v, want child (metadata=%#v)", child.Metadata["flow_path"], child.Metadata)
+	}
+	if gates := workflowStateGatesAsBools(child.Metadata); !gates["child/g_validated"] {
+		t.Fatalf("child gates before projection = %#v", gates)
+	}
+	if err := pc.projectWorkflowSubjectGates(context.Background(), childID); err != nil {
+		t.Fatalf("projectWorkflowSubjectGates: %v", err)
+	}
+
+	subject, ok, err := store.Load(context.Background(), subjectID)
+	if err != nil {
+		t.Fatalf("load subject: %v", err)
+	}
+	if !ok {
+		t.Fatal("subject entity missing after projection")
+	}
+	gates := workflowStateGatesAsBools(subject.Metadata)
+	if !gates["root_ready"] {
+		t.Fatalf("subject gates lost existing root gate: %#v", gates)
+	}
+	if !gates["child/g_validated"] {
+		t.Fatalf("subject gates missing projected child gate: %#v", gates)
+	}
+}
+
+func TestProjectWorkflowSubjectGatesFallsBackToFlowPathStorageRef(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	subjectID := "11111111-1111-1111-1111-111111111111"
+	logicalChildID := "22222222-2222-2222-2222-222222222222"
+	childStorageRef := "child"
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      subjectID,
+		SubjectID:       subjectID,
+		StorageRef:      subjectID,
+		WorkflowName:    "root",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "idle",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+		},
+	}); err != nil {
+		t.Fatalf("upsert subject: %v", err)
+	}
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      logicalChildID,
+		SubjectID:       subjectID,
+		StorageRef:      childStorageRef,
+		WorkflowName:    "child",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "done",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+			"flow_path":  "child",
+			"gates": map[string]any{
+				"child/g_validated": true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert child: %v", err)
+	}
+
+	pc := &PipelineCoordinator{
+		workflowStore: store,
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					FlowPrefix: map[string]string{
+						"child": "child",
+					},
+				},
+			},
+		},
+	}
+	ctx := withPipelineFlowScope(context.Background(), "child")
+	if err := pc.projectWorkflowSubjectGates(ctx, logicalChildID); err != nil {
+		t.Fatalf("projectWorkflowSubjectGates: %v", err)
+	}
+
+	subject, ok, err := store.Load(context.Background(), subjectID)
+	if err != nil {
+		t.Fatalf("load subject: %v", err)
+	}
+	if !ok {
+		t.Fatal("subject entity missing after projection")
+	}
+	gates := workflowStateGatesAsBools(subject.Metadata)
+	if !gates["child/g_validated"] {
+		t.Fatalf("subject gates missing projected child gate via flow-path fallback: %#v", gates)
+	}
+}
+
+func TestProjectWorkflowSubjectGatesFallsBackToFlowScopeWhenChildMetadataHasNoFlowPath(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	subjectID := "11111111-1111-1111-1111-111111111111"
+	childEntityID := "22222222-2222-2222-2222-222222222222"
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      subjectID,
+		SubjectID:       subjectID,
+		StorageRef:      subjectID,
+		WorkflowName:    "root",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "idle",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+		},
+	}); err != nil {
+		t.Fatalf("upsert subject: %v", err)
+	}
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childEntityID,
+		SubjectID:       subjectID,
+		StorageRef:      childEntityID,
+		WorkflowName:    "child",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "done",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+			"gates": map[string]any{
+				"child/g_validated": true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert child: %v", err)
+	}
+
+	pc := &PipelineCoordinator{
+		workflowStore: store,
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					FlowPrefix: map[string]string{
+						"child": "child",
+					},
+				},
+			},
+		},
+	}
+	ctx := withPipelineFlowScope(context.Background(), "child")
+	if err := pc.projectWorkflowSubjectGates(ctx, childEntityID); err != nil {
+		t.Fatalf("projectWorkflowSubjectGates: %v", err)
+	}
+
+	subject, ok, err := store.Load(context.Background(), subjectID)
+	if err != nil {
+		t.Fatalf("load subject: %v", err)
+	}
+	if !ok {
+		t.Fatal("subject entity missing after projection")
+	}
+	gates := workflowStateGatesAsBools(subject.Metadata)
+	if !gates["child/g_validated"] {
+		t.Fatalf("subject gates missing projected child gate via flow-scope fallback: %#v", gates)
+	}
+}
+
 func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -164,6 +371,21 @@ func TestApplyEngineStateMutationMirrorsAllowedMetadataFieldsWithoutDataAccumula
 	}
 	if got := entityProjection["scoring_rubric"]; got != "corpus_rubric" {
 		t.Fatalf("entity_projection scoring_rubric = %#v", got)
+	}
+}
+
+func TestApplyEngineStateMutationCapturesSubjectIDFromMetadata(t *testing.T) {
+	instance := &WorkflowInstance{}
+	mutation := runtimeengine.StateMutation{
+		Metadata: map[string]any{
+			"subject_id": "11111111-1111-1111-1111-111111111111",
+		},
+	}
+
+	applyEngineStateMutation(instance, mutation, nil, nil, "")
+
+	if got := instance.SubjectID; got != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("SubjectID = %q, want propagated subject id", got)
 	}
 }
 

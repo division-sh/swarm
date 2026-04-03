@@ -5,5 +5,6 @@ flow-a-node:
   produces: [invoice.created]
   event_handlers:
     flow-b/order.completed:
+      create_entity: true
       advances_to: done
       emits: invoice.created

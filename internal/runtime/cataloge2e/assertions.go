@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
@@ -187,68 +188,78 @@ func assertFlowState(t testing.TB, workflow *runtimepipeline.WorkflowInstanceSto
 	if !ok {
 		t.Fatalf("workflow instance %s not found for flow state assertion", entityID)
 	}
-	var semanticSource = runtimepipeline.DefaultWorkflowSemanticSourceOrNil()
-	if bundle != nil {
-		semanticSource = semanticview.Wrap(bundle)
-	}
-	got := string(runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState))
-	if semanticSource != nil {
-		got = strings.TrimSpace(catalogFlowScopedStateValue(semanticSource, bundle, strings.TrimSpace(flowID), cloneStringAnyMap(instance.Metadata), instance.CurrentState))
+	got := strings.TrimSpace(instance.CurrentState)
+	if flowID != "" {
+		matched, found, err := catalogFlowInstanceForSubject(workflow, semanticview.Wrap(bundle), strings.TrimSpace(entityID), strings.TrimSpace(flowID))
+		if err != nil {
+			t.Fatalf("load subject flow instance %s/%s: %v", entityID, flowID, err)
+		}
+		if !found {
+			t.Fatalf("subject flow instance for %s/%s not found", entityID, flowID)
+		}
+		got = strings.TrimSpace(matched.CurrentState)
 	}
 	if strings.TrimSpace(got) != wantState {
 		t.Fatalf("flow state %q = %q, want %q", strings.TrimSpace(flowID), strings.TrimSpace(got), wantState)
 	}
 }
 
-func catalogFlowScopedStateValue(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, flowID string, metadata map[string]any, fallback string) string {
-	fallback = strings.TrimSpace(string(runtimepipeline.NormalizeWorkflowStateID(fallback)))
-	stateKey := catalogFlowScopedStateKey(source, flowID)
-	if scoped := strings.TrimSpace(catalogFlowScopedStateFromMetadata(metadata, stateKey)); scoped != "" {
-		return scoped
+func catalogFlowInstanceForSubject(workflow *runtimepipeline.WorkflowInstanceStore, source semanticview.Source, subjectID, flowID string) (runtimepipeline.WorkflowInstance, bool, error) {
+	if workflow == nil {
+		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
-	if initial := strings.TrimSpace(catalogFlowScopedInitialState(source, bundle, flowID)); initial != "" {
-		return initial
+	rows, err := workflow.List(context.Background())
+	if err != nil {
+		return runtimepipeline.WorkflowInstance{}, false, err
 	}
-	return fallback
-}
-
-func catalogFlowScopedStateKey(source semanticview.Source, flowID string) string {
+	subjectID = strings.TrimSpace(subjectID)
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		return "$root"
-	}
-	if source != nil {
-		if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
-			return flowPath
+	candidates := map[string]struct{}{}
+	if flowID != "" {
+		candidates[flowID] = struct{}{}
+		if source != nil {
+			for _, scope := range source.FlowScopes() {
+				if strings.TrimSpace(scope.ID) == flowID || strings.Trim(strings.TrimSpace(scope.Path), "/") == flowID {
+					if id := strings.TrimSpace(scope.ID); id != "" {
+						candidates[id] = struct{}{}
+					}
+					if path := strings.Trim(strings.TrimSpace(scope.Path), "/"); path != "" {
+						candidates[path] = struct{}{}
+					}
+				}
+			}
 		}
 	}
-	return flowID
-}
-
-func catalogFlowScopedInitialState(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		if bundle != nil {
-			return strings.TrimSpace(bundle.WorkflowInitialStage())
+	for _, row := range rows {
+		if strings.TrimSpace(row.SubjectID) != subjectID {
+			continue
 		}
-		return ""
+		if len(candidates) > 0 {
+			rowWorkflow := strings.TrimSpace(row.WorkflowName)
+			rowStorage := strings.Trim(strings.TrimSpace(row.StorageRef), "/")
+			matched := false
+			for candidate := range candidates {
+				candidate = strings.Trim(candidate, "/")
+				switch {
+				case candidate == "":
+				case rowWorkflow == candidate:
+					matched = true
+				case rowStorage == candidate:
+					matched = true
+				case rowStorage != "" && strings.HasPrefix(rowStorage, candidate+"/"):
+					matched = true
+				}
+				if matched {
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		return row, true, nil
 	}
-	if source == nil {
-		return ""
-	}
-	return strings.TrimSpace(source.FlowInitialStage(flowID))
-}
-
-func catalogFlowScopedStateFromMetadata(metadata map[string]any, stateKey string) string {
-	stateKey = strings.TrimSpace(stateKey)
-	if stateKey == "" || len(metadata) == 0 {
-		return ""
-	}
-	raw := catalogPayloadMap(metadata["flow_states"])
-	if len(raw) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(asString(raw[stateKey]))
+	return runtimepipeline.WorkflowInstance{}, false, nil
 }
 
 func catalogPayloadMap(v any) map[string]any {
@@ -292,6 +303,7 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 
 func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs map[string]struct{}, entityID string, want []string, flowPrefix string, source semanticview.Source) {
 	t.Helper()
+	relevantEntityIDs := catalogSubjectEntityIDs(t, db, entityID)
 	rows, err := db.QueryContext(context.Background(), `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
@@ -320,7 +332,7 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 		if _, ok := publishedIDs[strings.TrimSpace(eventID)]; ok {
 			continue
 		}
-		if strings.TrimSpace(payloadEntityID) != strings.TrimSpace(entityID) {
+		if _, ok := relevantEntityIDs[strings.TrimSpace(payloadEntityID)]; !ok {
 			continue
 		}
 		eventName = strings.TrimSpace(eventName)
@@ -345,6 +357,45 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	if fmt.Sprintf("%q", got) != fmt.Sprintf("%q", want) {
 		t.Fatalf("emitted_events = %v, want %v", got, want)
 	}
+}
+
+func catalogSubjectEntityIDs(t testing.TB, db *sql.DB, entityID string) map[string]struct{} {
+	t.Helper()
+	entityID = strings.TrimSpace(entityID)
+	out := map[string]struct{}{}
+	if entityID == "" {
+		return out
+	}
+	out[entityID] = struct{}{}
+	if db == nil {
+		return out
+	}
+	if _, err := uuid.Parse(entityID); err != nil {
+		return out
+	}
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT entity_id::text
+		FROM entity_state
+		WHERE subject_id = $1::uuid
+	`, entityID)
+	if err != nil {
+		t.Fatalf("query subject entity ids for %s: %v", entityID, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var candidate string
+		if err := rows.Scan(&candidate); err != nil {
+			t.Fatalf("scan subject entity id: %v", err)
+		}
+		candidate = strings.TrimSpace(candidate)
+		if candidate != "" {
+			out[candidate] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate subject entity ids: %v", err)
+	}
+	return out
 }
 
 func normalizeCatalogObservedEventName(eventName, flowPrefix string, source semanticview.Source, want map[string]struct{}) string {

@@ -5,6 +5,7 @@ grandchild-node:
   produces: [grandchild.passed]
   event_handlers:
     grandchild.check:
+      create_entity: true
       guard:
         id: policy_merge_check
         check: "policy.threshold >= 60 AND policy.mode == 'relaxed'"

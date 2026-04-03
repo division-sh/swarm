@@ -5,5 +5,6 @@ child-worker:
   produces: [work.completed]
   event_handlers:
     work.requested:
+      create_entity: true
       advances_to: completed
       emits: work.completed

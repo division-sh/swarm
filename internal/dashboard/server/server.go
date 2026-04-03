@@ -45,16 +45,49 @@ type ConversationSummary struct {
 }
 
 type ConversationDetail struct {
-	AgentID      string         `json:"agent_id"`
-	ScopeKey     string         `json:"scope_key,omitempty"`
-	Scope        string         `json:"scope,omitempty"`
-	RuntimeMode  string         `json:"runtime_mode,omitempty"`
-	Status       string         `json:"status,omitempty"`
-	TurnCount    int            `json:"turn_count,omitempty"`
-	Summary      string         `json:"summary,omitempty"`
-	UpdatedAt    string         `json:"updated_at,omitempty"`
-	Messages     []any          `json:"messages"`
-	RuntimeState map[string]any `json:"runtime_state,omitempty"`
+	AgentID      string             `json:"agent_id"`
+	SessionID    string             `json:"session_id,omitempty"`
+	ScopeKey     string             `json:"scope_key,omitempty"`
+	Scope        string             `json:"scope,omitempty"`
+	RuntimeMode  string             `json:"runtime_mode,omitempty"`
+	Status       string             `json:"status,omitempty"`
+	TurnCount    int                `json:"turn_count,omitempty"`
+	Summary      string             `json:"summary,omitempty"`
+	UpdatedAt    string             `json:"updated_at,omitempty"`
+	Messages     []any              `json:"messages"`
+	Turns        []ConversationTurn `json:"turns,omitempty"`
+	RuntimeState map[string]any     `json:"runtime_state,omitempty"`
+}
+
+type ConversationTurn struct {
+	TurnID                 string         `json:"turn_id"`
+	AgentID                string         `json:"agent_id,omitempty"`
+	SessionID              string         `json:"session_id,omitempty"`
+	RuntimeMode            string         `json:"runtime_mode,omitempty"`
+	ScopeKey               string         `json:"scope_key,omitempty"`
+	EntityID               string         `json:"entity_id,omitempty"`
+	TriggerEventID         string         `json:"trigger_event_id,omitempty"`
+	TriggerEventType       string         `json:"trigger_event_type,omitempty"`
+	TaskID                 string         `json:"task_id,omitempty"`
+	AvailableTools         []any          `json:"available_tools,omitempty"`
+	ToolCalls              []any          `json:"tool_calls,omitempty"`
+	ToolResults            []any          `json:"tool_results,omitempty"`
+	TurnBlocks             []any          `json:"turn_blocks,omitempty"`
+	EmittedEvents          []any          `json:"emitted_events,omitempty"`
+	MCPServers             map[string]any `json:"mcp_servers,omitempty"`
+	MCPToolsListed         []any          `json:"mcp_tools_listed,omitempty"`
+	MCPToolsVisible        []any          `json:"mcp_tools_visible,omitempty"`
+	RequestPayload         map[string]any `json:"request_payload,omitempty"`
+	ResponsePayload        map[string]any `json:"response_payload,omitempty"`
+	AssistantVisibleOutput string         `json:"assistant_visible_output,omitempty"`
+	ReasoningBlocks        []string       `json:"reasoning_blocks,omitempty"`
+	ProgressUpdates        []string       `json:"progress_updates,omitempty"`
+	Outcome                string         `json:"outcome,omitempty"`
+	ParseOK                bool           `json:"parse_ok"`
+	LatencyMS              int            `json:"latency_ms,omitempty"`
+	RetryCount             int            `json:"retry_count,omitempty"`
+	Error                  string         `json:"error,omitempty"`
+	CreatedAt              string         `json:"created_at,omitempty"`
 }
 
 type ConversationReader interface {
@@ -139,6 +172,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/instances/aggregate", h.handleInstanceAggregate)
 	mux.HandleFunc("GET /api/instances/{id}", h.handleInstanceDetail)
 	mux.HandleFunc("GET /api/instances", h.handleInstances)
+	mux.HandleFunc("GET /api/subjects/{id}/status", h.handleSubjectStatus)
 	mux.HandleFunc("GET /api/runtime/logs", h.handleRuntimeLogs)
 	mux.HandleFunc("GET /api/runtime/incidents", h.handleRuntimeIncidents)
 	mux.HandleFunc("POST /api/runtime/actions", h.handleRuntimeAction)
@@ -198,6 +232,25 @@ type genericAgent struct {
 type instanceAggregateGroup struct {
 	Key   string `json:"key"`
 	Count int    `json:"count"`
+}
+
+type subjectStatusEntity struct {
+	EntityID     string `json:"entity_id"`
+	SubjectID    string `json:"subject_id,omitempty"`
+	WorkflowName string `json:"workflow_name,omitempty"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	CurrentState string `json:"current_state,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
+}
+
+type subjectStatusResponse struct {
+	SubjectID      string                   `json:"subject_id"`
+	LatestEntityID string                   `json:"latest_entity_id,omitempty"`
+	LatestFlow     string                   `json:"latest_flow,omitempty"`
+	LatestState    string                   `json:"latest_state,omitempty"`
+	EntityCount    int                      `json:"entity_count"`
+	StatesByFlow   []instanceAggregateGroup `json:"states_by_flow,omitempty"`
+	Entities       []subjectStatusEntity    `json:"entities"`
 }
 
 type controlResult struct {
@@ -746,9 +799,85 @@ func (h *Handler) handleRuntimeAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) handleSubjectStatus(w http.ResponseWriter, r *http.Request) {
+	if h.instances == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("instance reader is not configured"))
+		return
+	}
+	subjectID := strings.TrimSpace(r.PathValue("id"))
+	if subjectID == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("subject id is required"))
+		return
+	}
+	rows, err := h.instances.List(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
+	}
+	filtered := make([]runtimepipeline.WorkflowInstance, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.SubjectID) == subjectID {
+			filtered = append(filtered, row)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].UpdatedAt.Equal(filtered[j].UpdatedAt) {
+			if filtered[i].CreatedAt.Equal(filtered[j].CreatedAt) {
+				return filtered[i].InstanceID < filtered[j].InstanceID
+			}
+			return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+		}
+		return filtered[i].UpdatedAt.After(filtered[j].UpdatedAt)
+	})
+	if len(filtered) == 0 {
+		writeJSONError(w, http.StatusNotFound, errors.New("subject not found"))
+		return
+	}
+	resp := subjectStatusResponse{
+		SubjectID:      subjectID,
+		LatestEntityID: strings.TrimSpace(filtered[0].InstanceID),
+		LatestFlow:     strings.TrimSpace(filtered[0].WorkflowName),
+		LatestState:    strings.TrimSpace(filtered[0].CurrentState),
+		EntityCount:    len(filtered),
+		Entities:       make([]subjectStatusEntity, 0, len(filtered)),
+	}
+	byFlowState := make(map[string]int, len(filtered))
+	for _, row := range filtered {
+		resp.Entities = append(resp.Entities, subjectStatusEntity{
+			EntityID:     strings.TrimSpace(row.InstanceID),
+			SubjectID:    strings.TrimSpace(row.SubjectID),
+			WorkflowName: strings.TrimSpace(row.WorkflowName),
+			FlowInstance: strings.TrimSpace(row.StorageRef),
+			CurrentState: strings.TrimSpace(row.CurrentState),
+			UpdatedAt:    formatTime(row.UpdatedAt),
+		})
+		key := strings.TrimSpace(row.WorkflowName)
+		if key == "" {
+			key = "unknown"
+		}
+		state := strings.TrimSpace(row.CurrentState)
+		if state == "" {
+			state = "unknown"
+		}
+		byFlowState[key+":"+state]++
+	}
+	resp.StatesByFlow = make([]instanceAggregateGroup, 0, len(byFlowState))
+	for key, count := range byFlowState {
+		resp.StatesByFlow = append(resp.StatesByFlow, instanceAggregateGroup{Key: key, Count: count})
+	}
+	sort.Slice(resp.StatesByFlow, func(i, j int) bool {
+		if resp.StatesByFlow[i].Count == resp.StatesByFlow[j].Count {
+			return resp.StatesByFlow[i].Key < resp.StatesByFlow[j].Key
+		}
+		return resp.StatesByFlow[i].Count > resp.StatesByFlow[j].Count
+	})
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func filterInstances(rows []runtimepipeline.WorkflowInstance, r *http.Request) []runtimepipeline.WorkflowInstance {
 	workflowName := strings.TrimSpace(r.URL.Query().Get("workflow_name"))
 	currentState := strings.TrimSpace(r.URL.Query().Get("current_state"))
+	subjectID := strings.TrimSpace(r.URL.Query().Get("subject_id"))
 	entityID := strings.TrimSpace(r.URL.Query().Get("entity_id"))
 	limit := intQuery(r, "limit", 0)
 	out := make([]runtimepipeline.WorkflowInstance, 0, len(rows))
@@ -757,6 +886,9 @@ func filterInstances(rows []runtimepipeline.WorkflowInstance, r *http.Request) [
 			continue
 		}
 		if currentState != "" && row.CurrentState != currentState {
+			continue
+		}
+		if subjectID != "" && strings.TrimSpace(row.SubjectID) != subjectID {
 			continue
 		}
 		if entityID != "" && row.InstanceID != entityID {
@@ -788,6 +920,11 @@ func aggregateKey(row runtimepipeline.WorkflowInstance, groupBy string) string {
 			return "unknown"
 		}
 		return row.WorkflowVersion
+	case "subject_id":
+		if strings.TrimSpace(row.SubjectID) == "" {
+			return "unknown"
+		}
+		return row.SubjectID
 	case "current_state":
 		fallthrough
 	default:

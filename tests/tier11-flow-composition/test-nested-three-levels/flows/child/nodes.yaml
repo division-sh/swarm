@@ -5,6 +5,7 @@ child-relay:
   produces: [grandchild/micro.start]
   event_handlers:
     step.begin:
+      create_entity: true
       emits: grandchild/micro.start
 
 child-aggregator:

@@ -1,9 +1,9 @@
 trigger:
   sequence:
     - event: review.done
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: review.insufficient
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
 expected:
   handler_outcome: terminal_reject
   entity_state: approved

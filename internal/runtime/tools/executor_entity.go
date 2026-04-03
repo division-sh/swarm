@@ -13,10 +13,12 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/uuid"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/semanticview"
 )
 
 var entityStateTopLevelFields = map[string]struct{}{
 	"entity_id":        {},
+	"subject_id":       {},
 	"flow_instance":    {},
 	"entity_type":      {},
 	"name":             {},
@@ -49,14 +51,68 @@ func (e *Executor) execGetEntity(ctx context.Context, _ models.AgentConfig, inpu
 	return entity, nil
 }
 
-func (e *Executor) execSaveEntityField(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
+func (e *Executor) execGetSubjectStatus(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
+	db, _, payload, err := e.entityToolDependencies(input)
+	if err != nil {
+		return nil, err
+	}
+	subjectID, err := parseEntityID(payload["subject_id"])
+	if err != nil {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_get_subject_status.subject_id", false, err.Error())
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	rows, err := queryEntityStateRows(ctx, db, " WHERE subject_id = $1::uuid ORDER BY updated_at DESC, created_at DESC, entity_id DESC", subjectID)
+	if err != nil {
+		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_get_subject_status.query", true, err, "query subject status")
+	}
+	entities := make([]map[string]any, 0, len(rows))
+	allTerminal := len(rows) > 0
+	latestFlow := ""
+	latestState := ""
+	for idx, row := range rows {
+		flowInstance := strings.Trim(strings.TrimSpace(asString(row["flow_instance"])), "/")
+		flowID := subjectStatusFlowID(source, flowInstance)
+		state := strings.TrimSpace(asString(row["current_state"]))
+		terminal := subjectStatusTerminal(source, flowID, state)
+		if !terminal {
+			allTerminal = false
+		}
+		if idx == 0 {
+			latestFlow = flowID
+			latestState = state
+		}
+		entities = append(entities, map[string]any{
+			"entity_id": strings.TrimSpace(asString(row["entity_id"])),
+			"flow":      flowID,
+			"state":     state,
+			"terminal":  terminal,
+		})
+	}
+	return map[string]any{
+		"subject_id":   subjectID,
+		"entities":     entities,
+		"all_terminal": allTerminal,
+		"latest_flow":  latestFlow,
+		"latest_state": latestState,
+	}, nil
+}
+
+func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	db, schema, payload, err := e.entityToolDependencies(input)
 	if err != nil {
 		return nil, err
 	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
 	entityID, err := parseEntityID(payload["entity_id"])
 	if err != nil {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.entity_id", false, err.Error())
+	}
+	if err := enforceEntityWriteOwnership(ctx, db, source, actor, entityID); err != nil {
+		return nil, err
 	}
 	fieldName := strings.TrimSpace(asString(payload["field"]))
 	if fieldName == "" {
@@ -96,6 +152,62 @@ func (e *Executor) execSaveEntityField(ctx context.Context, _ models.AgentConfig
 	}, nil
 }
 
+func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanticview.Source, actor models.AgentConfig, entityID string) error {
+	flowRoot := actorFlowOwnershipRoot(source, actor.ID)
+	if flowRoot == "" || db == nil {
+		return nil
+	}
+	var flowInstance sql.NullString
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE entity_id = $1::uuid`, entityID).Scan(&flowInstance); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return WrapRuntimeError("query_failed", "tool-executor", "entity_write_ownership.lookup", true, err, "load entity ownership")
+	}
+	targetFlow := strings.Trim(flowInstance.String, "/")
+	if targetFlow == "" || entityFlowOwnedBy(flowRoot, targetFlow) {
+		return nil
+	}
+	return NewRuntimeError(
+		"cross_flow_write_forbidden",
+		"tool-executor",
+		"entity_write_ownership.enforce",
+		false,
+		"actor %s cannot write entity %s owned by flow_instance %s",
+		strings.TrimSpace(actor.ID),
+		entityID,
+		targetFlow,
+	)
+}
+
+func actorFlowOwnershipRoot(source semanticview.Source, actorID string) string {
+	actorID = strings.TrimSpace(actorID)
+	if source == nil || actorID == "" {
+		return ""
+	}
+	contractSource, ok := source.AgentContractSource(actorID)
+	if !ok {
+		return ""
+	}
+	flowID := strings.TrimSpace(contractSource.FlowID)
+	if flowID == "" {
+		return ""
+	}
+	if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
+		return flowPath
+	}
+	return flowID
+}
+
+func entityFlowOwnedBy(flowRoot, targetFlow string) bool {
+	flowRoot = strings.Trim(flowRoot, "/")
+	targetFlow = strings.Trim(targetFlow, "/")
+	if flowRoot == "" || targetFlow == "" {
+		return true
+	}
+	return targetFlow == flowRoot || strings.HasPrefix(targetFlow, flowRoot+"/")
+}
+
 func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
 	db, schema, payload, err := e.entityToolDependencies(input)
 	if err != nil {
@@ -115,6 +227,13 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 	entityType := strings.TrimSpace(asString(payload["entity_type"]))
 	if entityType == "" {
 		entityType = "default"
+	}
+	subjectID := strings.TrimSpace(asString(payload["subject_id"]))
+	if subjectID == "" {
+		subjectID = entityID
+	}
+	if _, err := uuid.Parse(subjectID); err != nil {
+		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_create_entity.subject_id", false, "subject_id must be uuid")
 	}
 	name := strings.TrimSpace(asString(payload["name"]))
 	currentState := strings.TrimSpace(asString(payload["initial_state"]))
@@ -157,20 +276,21 @@ func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, i
 	now := time.Now().UTC()
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			entity_id, flow_instance, entity_type, name,
+			entity_id, subject_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2, $3, NULLIF($4, ''),
-			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
-			$7, $7, $7
+			$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''),
+			$6, '{}'::jsonb, $7::jsonb, '{}'::jsonb, 1,
+			$8, $8, $8
 		)
-	`, entityID, flowInstance, entityType, name, currentState, string(fieldsJSON), now); err != nil {
+	`, entityID, subjectID, flowInstance, entityType, name, currentState, string(fieldsJSON), now); err != nil {
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_create_entity.insert", false, err, "create entity %s", entityID)
 	}
 	return map[string]any{
 		"entity_id":     entityID,
+		"subject_id":    subjectID,
 		"current_state": currentState,
 		"created_at":    now.Format(time.RFC3339Nano),
 	}, nil
@@ -183,6 +303,11 @@ func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig,
 	}
 	filterSQL := make([]string, 0, 4)
 	args := make([]any, 0, 4)
+	currentStateFilter := strings.TrimSpace(asString(payload["current_state"]))
+	if subjectID := strings.TrimSpace(asString(payload["subject_id"])); subjectID != "" {
+		args = append(args, subjectID)
+		filterSQL = append(filterSQL, fmt.Sprintf("subject_id = $%d::uuid", len(args)))
+	}
 	if flowInstance := strings.Trim(strings.TrimSpace(asString(payload["flow_instance"])), "/"); flowInstance != "" {
 		args = append(args, flowInstance)
 		filterSQL = append(filterSQL, fmt.Sprintf("flow_instance = $%d", len(args)))
@@ -190,10 +315,6 @@ func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig,
 	if entityType := strings.TrimSpace(asString(payload["entity_type"])); entityType != "" {
 		args = append(args, entityType)
 		filterSQL = append(filterSQL, fmt.Sprintf("entity_type = $%d", len(args)))
-	}
-	if currentState := strings.TrimSpace(asString(payload["current_state"])); currentState != "" {
-		args = append(args, currentState)
-		filterSQL = append(filterSQL, fmt.Sprintf("current_state = $%d", len(args)))
 	}
 	if rawFilter, ok := payload["filter"]; ok && rawFilter != nil {
 		filterObject := map[string]any{}
@@ -229,17 +350,29 @@ func (e *Executor) execSearchEntities(ctx context.Context, _ models.AgentConfig,
 	if offset < 0 {
 		offset = 0
 	}
-
-	totalQuery := "SELECT COUNT(*) FROM entity_state" + whereClause
-	var total int
-	if err := db.QueryRowContext(ctx, totalQuery, args...).Scan(&total); err != nil {
-		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.total", true, err, "count entity_state rows")
-	}
-
-	args = append(args, limit, offset)
-	rows, err := queryEntityStateRows(ctx, db, whereClause+fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...)
+	rows, err := queryEntityStateRows(ctx, db, whereClause+" ORDER BY created_at DESC", args...)
 	if err != nil {
 		return nil, WrapRuntimeError("query_failed", "tool-executor", "exec_search_entities.query", true, err, "search entity_state")
+	}
+	if currentStateFilter != "" {
+		filtered := make([]map[string]any, 0, len(rows))
+		for _, row := range rows {
+			if currentStateFilter != "" && strings.TrimSpace(asString(row["current_state"])) != currentStateFilter {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	total := len(rows)
+	if offset >= len(rows) {
+		rows = []map[string]any{}
+	} else {
+		end := offset + limit
+		if end > len(rows) {
+			end = len(rows)
+		}
+		rows = rows[offset:end]
 	}
 	return map[string]any{
 		"results": rows,
@@ -371,7 +504,10 @@ func loadEntityState(ctx context.Context, db *sql.DB, entityID string) (map[stri
 		return nil, false, err
 	}
 	entity, err := decodeEntityJSONMap(raw)
-	return entity, err == nil, err
+	if err != nil {
+		return nil, false, err
+	}
+	return entity, true, nil
 }
 
 func entityStateRowQuery(suffix string) string {
@@ -380,6 +516,7 @@ func entityStateRowQuery(suffix string) string {
 		FROM (
 			SELECT
 				entity_id::text AS entity_id,
+				subject_id::text AS subject_id,
 				COALESCE(flow_instance, '') AS flow_instance,
 				COALESCE(entity_type, '') AS entity_type,
 				name,
@@ -398,7 +535,7 @@ func entityStateRowQuery(suffix string) string {
 
 func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args ...any) ([]map[string]any, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
+		SELECT entity_id::text, subject_id::text, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
 		       COALESCE(gates, '{}'::jsonb), COALESCE(fields, '{}'::jsonb), COALESCE(accumulator, '{}'::jsonb),
 		       revision, entered_state_at, created_at, updated_at
 		FROM entity_state`+suffix, args...)
@@ -410,12 +547,14 @@ func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args .
 	out := make([]map[string]any, 0)
 	for rows.Next() {
 		var entityID, flowInstance, entityType, currentState string
+		var subjectID sql.NullString
 		var name sql.NullString
 		var gatesRaw, fieldsRaw, accumulatorRaw []byte
 		var revision int
 		var enteredStateAt, createdAt, updatedAt time.Time
 		if err := rows.Scan(
 			&entityID,
+			&subjectID,
 			&flowInstance,
 			&entityType,
 			&name,
@@ -444,6 +583,7 @@ func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args .
 		}
 		row := map[string]any{
 			"entity_id":        entityID,
+			"subject_id":       nullStringValue(subjectID),
 			"flow_instance":    flowInstance,
 			"entity_type":      entityType,
 			"name":             nullStringValue(name),
@@ -464,6 +604,10 @@ func queryEntityStateRows(ctx context.Context, db *sql.DB, suffix string, args .
 func entityStateBaseQuery(payload map[string]any, includeFlowInstance bool) (string, []any) {
 	clauses := make([]string, 0, 2)
 	args := make([]any, 0, 2)
+	if subjectID := strings.TrimSpace(asString(payload["subject_id"])); subjectID != "" {
+		args = append(args, subjectID)
+		clauses = append(clauses, fmt.Sprintf("subject_id = $%d::uuid", len(args)))
+	}
 	if entityType := strings.TrimSpace(asString(payload["entity_type"])); entityType != "" {
 		args = append(args, entityType)
 		clauses = append(clauses, fmt.Sprintf("entity_type = $%d", len(args)))
@@ -752,6 +896,39 @@ func cloneEntityRows(rows []map[string]any) []map[string]any {
 		out = append(out, cloned)
 	}
 	return out
+}
+
+func subjectStatusFlowID(source semanticview.Source, flowInstance string) string {
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if flowInstance == "" || source == nil {
+		return flowInstance
+	}
+	if _, ok := source.FlowScopeByID(flowInstance); ok {
+		return flowInstance
+	}
+	for flowID := range source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		if strings.Trim(source.FlowPath(flowID), "/") == flowInstance {
+			return flowID
+		}
+	}
+	return flowInstance
+}
+
+func subjectStatusTerminal(source semanticview.Source, flowID, state string) bool {
+	state = strings.TrimSpace(state)
+	if source == nil || flowID == "" || state == "" {
+		return false
+	}
+	for _, terminal := range source.FlowTerminalStages(flowID) {
+		if strings.EqualFold(strings.TrimSpace(terminal), state) {
+			return true
+		}
+	}
+	return false
 }
 
 func mapKeys(values map[string]any) []string {

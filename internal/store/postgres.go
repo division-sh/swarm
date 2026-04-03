@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"swarm/internal/config"
 	_ "github.com/lib/pq"
+	"swarm/internal/config"
 )
 
 type PostgresStore struct {
@@ -87,5 +87,35 @@ func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTa
 		return fmt.Errorf("commit schema ddl tx: %w", err)
 	}
 	committed = true
+	if err := s.ensureSchemaCompatibilityColumns(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return nil
+	}
+	if !tableExists(ctx, s.DB, "agent_turns") {
+		goto ensureEntityState
+	}
+	if !columnExists(ctx, s.DB, "agent_turns", "turn_blocks") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS turn_blocks JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
+			return fmt.Errorf("ensure agent_turns.turn_blocks column: %w", err)
+		}
+	}
+ensureEntityState:
+	if !tableExists(ctx, s.DB, "entity_state") {
+		return nil
+	}
+	if !columnExists(ctx, s.DB, "entity_state", "subject_id") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE entity_state ADD COLUMN IF NOT EXISTS subject_id UUID`); err != nil {
+			return fmt.Errorf("ensure entity_state.subject_id column: %w", err)
+		}
+	}
+	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_entity_subject ON entity_state(subject_id) WHERE subject_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("ensure entity_state.subject_id index: %w", err)
+	}
 	return nil
 }

@@ -5,6 +5,7 @@ b-node:
   produces: [b.done]
   event_handlers:
     b.start:
+      create_entity: true
       data_accumulation:
         writes:
           - source_field: shared_field

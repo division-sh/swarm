@@ -1,17 +1,17 @@
 trigger:
   sequence:
     - event: phase.init
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: phase.activate
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: phase.start
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: phase.stabilize
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: phase.wind_down
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
     - event: phase.close
-      payload: { entity_id: ent-001 }
+      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
 expected:
   handler_outcome: success
   entity_state: closed
