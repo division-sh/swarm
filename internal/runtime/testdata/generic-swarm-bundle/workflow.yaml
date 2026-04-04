@@ -37,10 +37,9 @@ workflow:
         source_event: item.created
         writes:
           - target_field: status
-            value:
-              literal: collecting
+            value: collecting
           - target_field: priority
-            source_field: payload.priority
+            source_field: priority
     - id: complete-intake
       from: collecting
       to: ready
@@ -50,10 +49,9 @@ workflow:
         source_event: item.processed
         writes:
           - target_field: status
-            value:
-              literal: ready
+            value: ready
           - target_field: results
-            source_field: payload.result
+            source_field: result
     - id: approve-item
       from: ready
       to: approved
@@ -63,7 +61,7 @@ workflow:
         source_event: item.review_requested
         writes:
           - target_field: score
-            source_field: payload.score
+            source_field: score
     - id: deliver-item
       from: approved
       to: completed

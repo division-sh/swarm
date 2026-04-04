@@ -58,7 +58,7 @@ func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Minted Entity"}},
+				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
 			},
 		},
 	}

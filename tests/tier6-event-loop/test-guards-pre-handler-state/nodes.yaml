@@ -9,6 +9,8 @@ processor:
         id: counter_check
         check: "entity.counter < 3"
       data_accumulation:
-        counter: "entity.counter + 1"
+        writes:
+          - target_field: counter
+            expression: entity.counter + 1
       advances_to: processing
       emits: process.done

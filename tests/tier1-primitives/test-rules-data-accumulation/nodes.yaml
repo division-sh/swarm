@@ -7,10 +7,10 @@ test-node:
     item.received:
       rules:
         type_a:
-          condition: "payload.kind == a"
+          condition: "payload.kind == 'a'"
           data_accumulation:
-            writes: [value]
-            source: payload.value
+            writes:
+              - value
   state_schema:
     fields:
       value: integer

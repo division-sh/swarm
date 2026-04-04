@@ -10,5 +10,7 @@ processor:
         check: "entity.attempt_count < policy.max_attempts"
         on_fail: "escalate:attempt.limit_hit"
       data_accumulation:
-        attempt_count: "entity.attempt_count + 1"
+        writes:
+          - target_field: attempt_count
+            expression: entity.attempt_count + 1
       emits: attempt.processed

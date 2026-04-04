@@ -12,7 +12,7 @@ resolver:
             writes:
               - source_field: value_a
                 target_field: resolved_value
-              - source_field: resolution_method
+              - target_field: resolution_method
                 value: "first"
           advances_to: resolved
           emits: conflict.resolved
@@ -22,7 +22,7 @@ resolver:
             writes:
               - source_field: value_b
                 target_field: resolved_value
-              - source_field: resolution_method
+              - target_field: resolution_method
                 value: "best"
           advances_to: resolved
           emits: conflict.resolved
@@ -34,7 +34,7 @@ resolver:
                 target_field: resolved_value_a
               - source_field: value_b
                 target_field: resolved_value_b
-              - source_field: resolution_method
+              - target_field: resolution_method
                 value: "merged"
           advances_to: resolved
           emits: conflict.resolved

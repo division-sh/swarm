@@ -7,7 +7,7 @@ config-writer:
     job.start:
       data_accumulation:
         writes:
-          - source_field: task_config
+          - target_field: task_config
             value:
               mode: "{{payload.mode}}"
               threshold: "{{payload.threshold}}"

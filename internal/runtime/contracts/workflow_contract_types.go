@@ -219,13 +219,12 @@ type ClearSpec struct {
 type PayloadTransformSpec struct {
 	Mappings map[string]string `yaml:"mappings"`
 	Fields   map[string]string `yaml:"fields"`
-	Entries  []TransformSpec   `yaml:"-"`
+	Entries  []TransformSpec   `yaml:"entries,omitempty"`
 }
 type TransformSpec struct {
 	Target     string
 	TargetPath paths.Path
-	Source     string
-	SourcePath paths.Path
+	Value      ExpressionValue `yaml:"value,omitempty"`
 }
 type TransformBinding = TransformSpec
 
@@ -234,7 +233,7 @@ func (p PayloadTransformSpec) TransformEntries() []TransformSpec {
 	if len(mappings) == 0 && len(p.Fields) > 0 {
 		mappings = p.Fields
 	}
-	out := make([]TransformSpec, 0, len(mappings))
+	out := make([]TransformSpec, 0, len(mappings)+len(p.Entries))
 	for target, source := range mappings {
 		cleanTarget := strings.TrimSpace(target)
 		cleanSource := strings.TrimSpace(source)
@@ -244,9 +243,18 @@ func (p PayloadTransformSpec) TransformEntries() []TransformSpec {
 		out = append(out, TransformSpec{
 			Target:     cleanTarget,
 			TargetPath: paths.Parse(cleanTarget),
-			Source:     cleanSource,
-			SourcePath: paths.Parse(cleanSource),
+			Value:      CELExpression(cleanSource),
 		})
+	}
+	for _, entry := range p.Entries {
+		if strings.TrimSpace(entry.Target) == "" {
+			continue
+		}
+		clone := entry
+		clone.Target = strings.TrimSpace(clone.Target)
+		clone.TargetPath = paths.Parse(clone.Target)
+		clone.Value.hydrate()
+		out = append(out, clone)
 	}
 	return out
 }
@@ -368,13 +376,59 @@ type PolicyDocument = flowmodel.PolicyDocument
 type PolicyValue = flowmodel.PolicyValue
 type ContractURIRegistry = flowmodel.URIRegistry
 type ContractURIRef = flowmodel.URIRef
+type ExpressionKind string
+
+const (
+	ExpressionKindLiteral ExpressionKind = "literal"
+	ExpressionKindRef     ExpressionKind = "ref"
+	ExpressionKindCEL     ExpressionKind = "cel"
+)
+
 type ExpressionValue struct {
-	Literal any    `yaml:"literal,omitempty"`
-	CEL     string `yaml:"cel,omitempty"`
+	Kind    ExpressionKind `yaml:"kind,omitempty"`
+	Literal any            `yaml:"literal,omitempty"`
+	Ref     string         `yaml:"ref,omitempty"`
+	RefPath paths.Path     `yaml:"-"`
+	CEL     string         `yaml:"cel,omitempty"`
 }
 
 func (e ExpressionValue) IsZero() bool {
-	return strings.TrimSpace(e.CEL) == "" && e.Literal == nil
+	return e.Kind == "" && strings.TrimSpace(e.CEL) == "" && strings.TrimSpace(e.Ref) == "" && e.Literal == nil
+}
+
+func LiteralExpression(value any) ExpressionValue {
+	return ExpressionValue{Kind: ExpressionKindLiteral, Literal: value}
+}
+
+func RefExpression(ref string) ExpressionValue {
+	expr := ExpressionValue{Kind: ExpressionKindRef, Ref: strings.TrimSpace(ref)}
+	expr.hydrate()
+	return expr
+}
+
+func CELExpression(expression string) ExpressionValue {
+	return ExpressionValue{Kind: ExpressionKindCEL, CEL: strings.TrimSpace(expression)}
+}
+
+func (e *ExpressionValue) hydrate() {
+	if e == nil {
+		return
+	}
+	e.Ref = strings.TrimSpace(e.Ref)
+	e.CEL = strings.TrimSpace(e.CEL)
+	e.RefPath = paths.Parse(e.Ref)
+}
+
+func (e ExpressionValue) HasLiteralValue() bool {
+	return e.Kind == ExpressionKindLiteral
+}
+
+func (e ExpressionValue) HasRefValue() bool {
+	return e.Kind == ExpressionKindRef
+}
+
+func (e ExpressionValue) HasCELValue() bool {
+	return e.Kind == ExpressionKindCEL
 }
 
 type FlowVariable struct {
@@ -605,7 +659,19 @@ func (w WorkflowDataWrite) Target() string {
 	}
 }
 func (w WorkflowDataWrite) HasLiteralValue() bool {
-	return w.Value.Literal != nil
+	return w.Value.HasLiteralValue()
+}
+
+func (w WorkflowDataWrite) SourceExpression() ExpressionValue {
+	if !w.Value.IsZero() {
+		return w.Value
+	}
+	source := strings.TrimSpace(w.Source())
+	if source == "" {
+		return ExpressionValue{}
+	}
+	expr := RefExpression("payload." + source)
+	return expr
 }
 func (a WorkflowDataAccumulation) TargetFields() []string {
 	if len(a.Writes) == 0 {

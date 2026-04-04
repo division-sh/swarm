@@ -8,7 +8,7 @@ a-node:
       create_entity: true
       data_accumulation:
         writes:
-          - source_field: shared_field
+          - target_field: shared_field
             value:
               source: flow-a
       advances_to: done

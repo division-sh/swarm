@@ -408,8 +408,8 @@ func payloadTransformReferencesEntity(spec *runtimecontracts.PayloadTransformSpe
 	if spec == nil {
 		return false
 	}
-	for _, expr := range spec.Fields {
-		if strings.HasPrefix(strings.TrimSpace(expr), "entity.") {
+	for _, entry := range spec.TransformEntries() {
+		if entry.Value.Kind == runtimecontracts.ExpressionKindCEL && strings.HasPrefix(strings.TrimSpace(entry.Value.CEL), "entity.") {
 			return true
 		}
 	}

@@ -12,6 +12,6 @@ router:
     child/validation.done:
       guard:
         id: check_child_gate
-        check: gates['child/g_validated'] == true
+        check: entity.gates['child/g_validated'] == true
       advances_to: done
       emits: validate.passed

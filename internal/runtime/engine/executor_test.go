@@ -641,12 +641,12 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
 			identity.NormalizeGuardKey("registry_guard"): {
 				Key:   identity.NormalizeGuardKey("registry_guard"),
-				Check: "metadata.allowed == true",
+				Check: "entity.allowed == true",
 			},
 		}},
 	}, stubEvaluator{bools: map[string]bool{
-		"payload.score > 5":             true,
-		"vars.metadata.allowed == true": true,
+		"payload.score > 5":   true,
+		"entity.allowed == true": true,
 	}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -782,7 +782,7 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
 					TargetField: "metadata.final_source",
-					Value:       runtimecontracts.ExpressionValue{Literal: "handler"},
+					Value:       runtimecontracts.LiteralExpression("handler"),
 				}},
 			},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -790,10 +790,10 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 					Writes: []runtimecontracts.WorkflowDataWrite{{
 						TargetField: "metadata.final_source",
-						Value:       runtimecontracts.ExpressionValue{Literal: "rule"},
+						Value:       runtimecontracts.LiteralExpression("rule"),
 					}, {
 						TargetField: "metadata.rule_only",
-						Value:       runtimecontracts.ExpressionValue{Literal: "applied"},
+						Value:       runtimecontracts.LiteralExpression("applied"),
 					}},
 				},
 			}},
@@ -941,8 +941,8 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{
-					{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Test Vertical"}},
-					{TargetField: "dimensions_requested", Value: runtimecontracts.ExpressionValue{Literal: []string{"a", "b"}}},
+					{TargetField: "name", Value: runtimecontracts.LiteralExpression("Test Vertical")},
+					{TargetField: "dimensions_requested", Value: runtimecontracts.LiteralExpression([]string{"a", "b"})},
 				},
 			},
 			Rules: []runtimecontracts.HandlerRuleEntry{
@@ -950,7 +950,7 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 					Condition: "payload.mode == 'corpus'",
 					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 						Writes: []runtimecontracts.WorkflowDataWrite{
-							{TargetField: "scoring_rubric", Value: runtimecontracts.ExpressionValue{Literal: "corpus_rubric"}},
+							{TargetField: "scoring_rubric", Value: runtimecontracts.LiteralExpression("corpus_rubric")},
 						},
 					},
 				},
@@ -1223,7 +1223,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		Outbox:     stubOutbox{},
 		Dispatcher: stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
-		"vars.metadata.gates.review == false": true,
+		"entity.gates.review == false": true,
 	}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1236,7 +1236,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
 			Guard: &runtimecontracts.GuardSpec{
-				Check: "metadata.gates.review == false",
+				Check: "entity.gates.review == false",
 			},
 		},
 		State: StateSnapshot{

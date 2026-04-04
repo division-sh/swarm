@@ -75,15 +75,6 @@ func dedupIdentifier(base BaseContext, state ExecutionState, evt events.Event, s
 	return arrivalIdentifier(evt, base.Payload.Raw())
 }
 
-func rewriteExpression(expression string) string {
-	replacer := strings.NewReplacer(
-		"metadata.", "vars.metadata.",
-		"accumulated.", "vars.accumulated.",
-		"fan_out.", "vars.fan_out.",
-	)
-	return replacer.Replace(strings.TrimSpace(expression))
-}
-
 func lookupPath(source map[string]any, path string) (any, bool) {
 	source = cloneStringAnyMap(source)
 	return lookupParsedPath(source, paths.Parse(path))
@@ -127,95 +118,45 @@ func resolveParsedRef(base BaseContext, state ExecutionState, ref paths.Path) (a
 }
 
 func resolveContractPath(base BaseContext, state ExecutionState, parsed paths.Path, raw string) (any, bool) {
+	if parsed.IsZero() {
+		parsed = paths.Parse(strings.TrimSpace(raw))
+	}
 	if parsed.HasExplicitRoot() {
 		return resolveParsedRef(base, state, parsed)
 	}
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil, false
-	}
-	value := resolveRef(base, state, raw)
-	return value, value != nil
+	return nil, false
 }
 
 func resolveRef(base BaseContext, state ExecutionState, ref string) any {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
+	parsed := paths.Parse(strings.TrimSpace(ref))
+	if !parsed.HasExplicitRoot() {
 		return nil
 	}
-	switch {
-	case strings.HasPrefix(ref, "entity."):
-		value, _ := base.Entity.Lookup(paths.Parse(strings.TrimPrefix(ref, "entity.")))
-		return value
-	case strings.HasPrefix(ref, "payload."):
-		value, _ := base.Payload.Lookup(paths.Parse(strings.TrimPrefix(ref, "payload.")))
-		return value
-	case strings.HasPrefix(ref, "policy."):
-		value, _ := base.Policy.Lookup(paths.Parse(strings.TrimPrefix(ref, "policy.")))
-		return value
-	case strings.HasPrefix(ref, "metadata."):
-		value, _ := base.Metadata.Lookup(paths.Parse(strings.TrimPrefix(ref, "metadata.")))
-		return value
-	case strings.HasPrefix(ref, "gates."):
-		value, _ := base.Gates.Lookup(paths.Parse(strings.TrimPrefix(ref, "gates.")))
-		return value
-	case strings.HasPrefix(ref, "accumulated."):
-		value, _ := state.AccumulatedBucket().Lookup(paths.Parse(strings.TrimPrefix(ref, "accumulated.")))
-		return value
-	case strings.HasPrefix(ref, "fan_out."):
-		value, _ := state.FanOutBucket().Lookup(paths.Parse(strings.TrimPrefix(ref, "fan_out.")))
-		return value
-	case strings.HasPrefix(ref, "computed."):
-		value, _ := state.ComputedBucket().Lookup(paths.Parse(strings.TrimPrefix(ref, "computed.")))
-		return value
-	default:
-		if value, ok := base.Payload.Lookup(paths.Parse(ref)); ok {
-			return value
-		}
-		if value, ok := base.Metadata.Lookup(paths.Parse(ref)); ok {
-			return value
-		}
-		if value, ok := state.AccumulatedBucket().Lookup(paths.Parse(ref)); ok {
-			return value
-		}
-		if value, ok := state.FanOutBucket().Lookup(paths.Parse(ref)); ok {
-			return value
-		}
-		if value, ok := state.ComputedBucket().Lookup(paths.Parse(ref)); ok {
-			return value
-		}
-		return nil
-	}
+	value, _ := resolveParsedRef(base, state, parsed)
+	return value
 }
 
-func resolveRefOrLiteral(base BaseContext, state ExecutionState, ref string) any {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil
+func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecontracts.ExpressionValue) (any, bool, error) {
+	if expr.IsZero() {
+		return nil, false, nil
 	}
-	if unquoted, err := strconv.Unquote(ref); err == nil {
-		return unquoted
-	}
-	if len(ref) >= 2 {
-		if (strings.HasPrefix(ref, "'") && strings.HasSuffix(ref, "'")) || (strings.HasPrefix(ref, "\"") && strings.HasSuffix(ref, "\"")) {
-			return ref[1 : len(ref)-1]
+	switch expr.Kind {
+	case runtimecontracts.ExpressionKindLiteral:
+		return expr.Literal, true, nil
+	case runtimecontracts.ExpressionKindRef:
+		if value, ok := resolveParsedRef(base, state, expr.RefPath); ok {
+			return value, true, nil
 		}
+		return nil, false, nil
+	case runtimecontracts.ExpressionKindCEL:
+		value, err := evalDataAccumulationExpression(base, state, expr.CEL)
+		if err != nil {
+			return nil, false, err
+		}
+		return value, true, nil
+	default:
+		return nil, false, fmt.Errorf("unsupported expression kind %q", expr.Kind)
 	}
-	switch strings.ToLower(ref) {
-	case "true":
-		return true
-	case "false":
-		return false
-	case "null":
-		return nil
-	}
-	if value := resolveRef(base, state, ref); value != nil {
-		return value
-	}
-	if parsed, err := strconv.ParseFloat(ref, 64); err == nil {
-		return parsed
-	}
-	return ref
 }
 
 func setValuePath(target map[string]any, path string, value any) {
@@ -247,23 +188,22 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 		if target == "" {
 			continue
 		}
-		if write.HasLiteralValue() {
+		switch {
+		case write.Value.HasLiteralValue():
 			snapshot.SetMetadata(target, write.Value.Literal)
-			continue
-		}
-		if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
-			if value, err := evalDataAccumulationExpression(base, state, expr); err == nil {
-				snapshot.SetMetadata(target, value)
+		case write.Value.HasCELValue():
+			value, err := evalDataAccumulationExpression(base, state, write.Value.CEL)
+			if err != nil {
 				continue
 			}
-			snapshot.SetMetadata(target, resolveRefOrLiteral(base, state, expr))
-			continue
-		}
-		source := strings.TrimSpace(write.Source())
-		if source != "" {
-			if value, ok := resolveContractPath(base, state, write.SourcePath, source); ok {
-				snapshot.SetMetadata(target, value)
+			snapshot.SetMetadata(target, value)
+		default:
+			source := strings.TrimSpace(write.Source())
+			if source == "" {
 				continue
+			}
+			if value, ok := lookupPath(cloneStringAnyMap(base.Payload.Raw()), source); ok {
+				snapshot.SetMetadata(target, value)
 			}
 		}
 	}
@@ -286,14 +226,10 @@ func evalDataAccumulationExpression(base BaseContext, state ExecutionState, expr
 		return nil, err
 	}
 	out, _, err := program.Eval(map[string]any{
-		"entity":      cloneStringAnyMap(base.Entity.Raw()),
-		"payload":     cloneStringAnyMap(base.Payload.Raw()),
-		"policy":      cloneStringAnyMap(base.Policy.Raw()),
-		"metadata":    cloneStringAnyMap(base.Metadata.Raw()),
-		"gates":       cloneStringAnyMap(base.Gates.Raw()),
-		"accumulated": cloneStringAnyMap(state.Accumulated),
-		"fan_out":     cloneStringAnyMap(state.FanOut),
-		"computed":    cloneStringAnyMap(state.Computed),
+		"entity":  cloneStringAnyMap(base.Entity.Raw()),
+		"payload": cloneStringAnyMap(base.Payload.Raw()),
+		"policy":  cloneStringAnyMap(base.Policy.Raw()),
+		"fan_out": cloneStringAnyMap(state.FanOut),
 	})
 	if err != nil {
 		return nil, err
@@ -307,11 +243,7 @@ func dataAccumulationEnv() (*cel.Env, error) {
 			cel.Variable("entity", cel.DynType),
 			cel.Variable("payload", cel.DynType),
 			cel.Variable("policy", cel.DynType),
-			cel.Variable("metadata", cel.DynType),
-			cel.Variable("gates", cel.DynType),
-			cel.Variable("accumulated", cel.DynType),
 			cel.Variable("fan_out", cel.DynType),
-			cel.Variable("computed", cel.DynType),
 		)
 	})
 	return dataExpressionEnv, dataExpressionEnvErr
@@ -346,20 +278,18 @@ func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontr
 	if spec == nil {
 		return nil
 	}
-	entries := spec.Entries
-	if len(entries) == 0 {
-		entries = spec.TransformEntries()
-	}
+	entries := spec.TransformEntries()
 	if len(entries) == 0 {
 		return nil
 	}
 	payload := map[string]any{}
 	for _, entry := range entries {
-		value := resolveRefOrLiteral(base, state, entry.Source)
-		if entry.SourcePath.HasExplicitRoot() {
-			if resolved, ok := resolveParsedRef(base, state, entry.SourcePath); ok {
-				value = resolved
-			}
+		if !entry.Value.HasCELValue() {
+			continue
+		}
+		value, err := evalDataAccumulationExpression(base, state, entry.Value.CEL)
+		if err != nil {
+			continue
 		}
 		setParsedValuePath(payload, entry.TargetPath, value)
 	}

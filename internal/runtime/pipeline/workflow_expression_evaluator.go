@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -24,7 +23,8 @@ type workflowExpressionContext struct {
 	Entity           map[string]any
 	Payload          map[string]any
 	Policy           map[string]any
-	Vars             map[string]any
+	Accumulated      any
+	FanOut           map[string]any
 	QueryEntityCount func(string) (int, error)
 }
 
@@ -39,7 +39,8 @@ func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 		cel.Variable("entity", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
-		cel.Variable("vars", cel.DynType),
+		cel.Variable("accumulated", cel.DynType),
+		cel.Variable("fan_out", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -71,10 +72,11 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		return false, err
 	}
 	out, _, err := program.Eval(map[string]any{
-		"entity":  cloneStringAnyMap(normalizedCtx.Entity),
-		"payload": cloneStringAnyMap(normalizedCtx.Payload),
-		"policy":  cloneStringAnyMap(normalizedCtx.Policy),
-		"vars":    cloneStringAnyMap(normalizedCtx.Vars),
+		"entity":      cloneStringAnyMap(normalizedCtx.Entity),
+		"payload":     cloneStringAnyMap(normalizedCtx.Payload),
+		"policy":      cloneStringAnyMap(normalizedCtx.Policy),
+		"accumulated": normalizedCtx.Accumulated,
+		"fan_out":     cloneStringAnyMap(normalizedCtx.FanOut),
 	})
 	if err != nil {
 		return false, err
@@ -120,7 +122,8 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			Entity:           cloneStringAnyMap(ctx.Entity),
 			Payload:          cloneStringAnyMap(ctx.Payload),
 			Policy:           cloneStringAnyMap(ctx.Policy),
-			Vars:             cloneStringAnyMap(ctx.Vars),
+			Accumulated:      cloneAccumulatedItems(ctx.Accumulated),
+			FanOut:           cloneStringAnyMap(ctx.FanOut),
 			QueryEntityCount: ctx.QueryEntityCount,
 		}, nil
 	}
@@ -148,7 +151,8 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		Entity:           cloneStringAnyMap(ctx.Entity),
 		Payload:          cloneStringAnyMap(ctx.Payload),
 		Policy:           cloneStringAnyMap(ctx.Policy),
-		Vars:             workflowExpressionVars(ctx),
+		Accumulated:      cloneAccumulatedItems(ctx.Accumulated),
+		FanOut:           cloneStringAnyMap(ctx.FanOut),
 		QueryEntityCount: ctx.QueryEntityCount,
 	}
 	normalized = workflowExpressionPolicyPlaceholder.ReplaceAllStringFunc(normalized, func(token string) string {
@@ -171,7 +175,6 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	if err != nil {
 		return "", workflowExpressionContext{}, err
 	}
-	normalized = rewriteWorkflowExpressionIdentifiers(normalized, normalizedCtx.Vars)
 	return normalized, normalizedCtx, nil
 }
 
@@ -263,10 +266,29 @@ func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionCont
 		return workflowExpressionLookupPath(ctx.Payload, strings.TrimPrefix(ref, "payload."))
 	case strings.HasPrefix(ref, "policy."):
 		return workflowExpressionLookupPath(ctx.Policy, strings.TrimPrefix(ref, "policy."))
-	case strings.HasPrefix(ref, "vars."):
-		return workflowExpressionLookupPath(ctx.Vars, strings.TrimPrefix(ref, "vars."))
+	case strings.HasPrefix(ref, "fan_out."):
+		return workflowExpressionLookupPath(ctx.FanOut, strings.TrimPrefix(ref, "fan_out."))
 	default:
 		return nil, false
+	}
+}
+
+func cloneAccumulatedItems(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return []any{}
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if object, ok := item.(map[string]any); ok {
+				out = append(out, cloneStringAnyMap(object))
+				continue
+			}
+			out = append(out, item)
+		}
+		return out
+	default:
+		return typed
 	}
 }
 
@@ -385,37 +407,6 @@ func workflowExpressionListValues(value ref.Val) []any {
 	}
 }
 
-func workflowExpressionVars(ctx workflowExpressionContext) map[string]any {
-	vars := cloneStringAnyMap(ctx.Vars)
-	if vars == nil {
-		vars = map[string]any{}
-	}
-	for key, value := range ctx.Policy {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if _, exists := vars[key]; !exists {
-			vars[key] = value
-		}
-	}
-	for key, value := range ctx.Entity {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		vars[key] = value
-	}
-	for key, value := range ctx.Payload {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		vars[key] = value
-	}
-	return vars
-}
-
 func workflowExpressionPolicyValue(policy map[string]any, key string) (any, bool) {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -463,165 +454,4 @@ func workflowExpressionLiteral(value any) string {
 	default:
 		return fmt.Sprintf("%v", value)
 	}
-}
-
-func rewriteWorkflowExpressionIdentifiers(expression string, vars map[string]any) string {
-	if expression == "" {
-		return expression
-	}
-	lambdaBindings := workflowExpressionLambdaBindings(expression)
-	var out strings.Builder
-	inSingle := false
-	inDouble := false
-	for idx := 0; idx < len(expression); {
-		ch := rune(expression[idx])
-		if ch == '"' && !inSingle {
-			inDouble = !inDouble
-			out.WriteByte(expression[idx])
-			idx++
-			continue
-		}
-		if ch == '\'' && !inDouble {
-			inSingle = !inSingle
-			out.WriteByte(expression[idx])
-			idx++
-			continue
-		}
-		if ch == '\\' && idx+1 < len(expression) {
-			out.WriteByte(expression[idx])
-			idx++
-			out.WriteByte(expression[idx])
-			idx++
-			continue
-		}
-		if inSingle || inDouble {
-			out.WriteByte(expression[idx])
-			idx++
-			continue
-		}
-		if !workflowExpressionIdentStart(ch) {
-			out.WriteByte(expression[idx])
-			idx++
-			continue
-		}
-		start := idx
-		idx++
-		for idx < len(expression) && workflowExpressionIdentPart(rune(expression[idx])) {
-			idx++
-		}
-		token := expression[start:idx]
-		prev := workflowExpressionPrevNonSpace(expression, start-1)
-		next := workflowExpressionNextNonSpace(expression, idx)
-		if _, bound := lambdaBindings[token]; bound {
-			out.WriteString(token)
-			continue
-		}
-		if workflowExpressionShouldRewriteToken(token, prev, next) {
-			if _, exists := vars[token]; !exists {
-				vars[token] = token
-			}
-			out.WriteString("vars.")
-			out.WriteString(token)
-			continue
-		}
-		out.WriteString(token)
-	}
-	return out.String()
-}
-
-func workflowExpressionLambdaBindings(expression string) map[string]struct{} {
-	bindings := map[string]struct{}{}
-	if expression == "" {
-		return bindings
-	}
-	macros := []string{"filter", "map", "all", "exists", "exists_one"}
-	for idx := 0; idx < len(expression); idx++ {
-		if expression[idx] != '.' {
-			continue
-		}
-		macro := ""
-		for _, candidate := range macros {
-			if strings.HasPrefix(expression[idx+1:], candidate) {
-				macro = candidate
-				break
-			}
-		}
-		if macro == "" {
-			continue
-		}
-		pos := idx + 1 + len(macro)
-		for pos < len(expression) && unicode.IsSpace(rune(expression[pos])) {
-			pos++
-		}
-		if pos >= len(expression) || expression[pos] != '(' {
-			continue
-		}
-		pos++
-		for pos < len(expression) && unicode.IsSpace(rune(expression[pos])) {
-			pos++
-		}
-		start := pos
-		if start >= len(expression) || !workflowExpressionIdentStart(rune(expression[start])) {
-			continue
-		}
-		pos++
-		for pos < len(expression) && workflowExpressionIdentPart(rune(expression[pos])) {
-			pos++
-		}
-		binding := strings.TrimSpace(expression[start:pos])
-		if binding == "" {
-			continue
-		}
-		for pos < len(expression) && unicode.IsSpace(rune(expression[pos])) {
-			pos++
-		}
-		if pos < len(expression) && expression[pos] == ',' {
-			bindings[binding] = struct{}{}
-		}
-	}
-	return bindings
-}
-
-func workflowExpressionShouldRewriteToken(token string, prev rune, next rune) bool {
-	switch strings.TrimSpace(token) {
-	case "", "entity", "payload", "policy", "vars", "true", "false", "null":
-		return false
-	}
-	if prev == '.' {
-		return false
-	}
-	if next == '(' {
-		return false
-	}
-	return true
-}
-
-func workflowExpressionIdentStart(ch rune) bool {
-	return ch == '_' || unicode.IsLetter(ch)
-}
-
-func workflowExpressionIdentPart(ch rune) bool {
-	return ch == '_' || unicode.IsLetter(ch) || unicode.IsDigit(ch)
-}
-
-func workflowExpressionPrevNonSpace(expression string, idx int) rune {
-	for idx >= 0 {
-		ch := rune(expression[idx])
-		if !unicode.IsSpace(ch) {
-			return ch
-		}
-		idx--
-	}
-	return 0
-}
-
-func workflowExpressionNextNonSpace(expression string, idx int) rune {
-	for idx < len(expression) {
-		ch := rune(expression[idx])
-		if !unicode.IsSpace(ch) {
-			return ch
-		}
-		idx++
-	}
-	return 0
 }

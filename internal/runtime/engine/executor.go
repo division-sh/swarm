@@ -515,7 +515,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 		if accumulation, ok := extraVars["accumulation"].(map[string]any); ok {
 			ctx = WithAccumulated(ctx, accumulation)
 		}
-		return e.evaluator.EvalBool(rewriteExpression(expression), ctx)
+		return e.evaluator.EvalBool(expression, ctx)
 	})
 	if err == ErrNotImplemented {
 		return false, nil
@@ -1030,6 +1030,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.Metadata))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
+	ctx.Computed = values.Wrap(cloneStringAnyMap(frame.state.Computed))
 	return ctx
 }
 
@@ -1122,7 +1123,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	id = strings.TrimSpace(id)
 	check = strings.TrimSpace(check)
 	if check != "" {
-		passed, err := e.evaluator.EvalBool(rewriteExpression(check), e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(check, e.currentContext(frame))
 		if err == nil {
 			evaluated := []string{check}
 			if id != "" {
@@ -1146,7 +1147,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 		return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
 	}
 	if strings.TrimSpace(entry.Check) != "" {
-		passed, err := e.evaluator.EvalBool(rewriteExpression(entry.Check), e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(entry.Check, e.currentContext(frame))
 		if err == nil {
 			return passed, []string{id}, nil
 		}
@@ -1171,7 +1172,7 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 		if condition == "" || strings.EqualFold(condition, "else") {
 			return rule, nil
 		}
-		passed, err := e.evaluator.EvalBool(rewriteExpression(condition), e.currentContext(frame))
+		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame))
 		if err == ErrNotImplemented {
 			continue
 		}

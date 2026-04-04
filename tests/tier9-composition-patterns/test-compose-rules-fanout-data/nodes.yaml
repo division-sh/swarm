@@ -11,15 +11,16 @@ dispatcher:
           fan_out:
             items_from: payload.items
           data_accumulation:
-            dispatch_count:
-              source: fan_out.count
+            writes:
+              - target_field: dispatch_count
+                expression: fan_out.count
           advances_to: dispatched
           emits: batch.dispatched
         - name: sequential
           condition: "payload.mode == 'sequential'"
           data_accumulation:
             writes:
-              - source_field: dispatch_count
+              - target_field: dispatch_count
                 value: 1
           advances_to: dispatched
           emits: batch.dispatched
@@ -27,7 +28,7 @@ dispatcher:
           condition: "else"
           data_accumulation:
             writes:
-              - source_field: dispatch_count
+              - target_field: dispatch_count
                 value: 0
           advances_to: dispatched
           emits: batch.dispatched
