@@ -19,6 +19,10 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 	if s == nil || s.DB == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(item.Type) == "" {
 		return "", fmt.Errorf("mailbox item type is required")
 	}
@@ -34,56 +38,22 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 	if len(item.Context) == 0 {
 		item.Context = []byte("{}")
 	}
-	if err := s.insertMailboxItemSpec(ctx, item); err == nil {
+	if caps.Mailbox == SchemaFlavorCanonical {
+		if err := s.insertMailboxItemSpec(ctx, item); err != nil {
+			return "", err
+		}
 		return item.ID, nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return "", err
 	}
-
-	const q = `
-		INSERT INTO mailbox (
-			id, event_id, entity_id, from_agent, type, priority, status,
-			context, summary, timeout_at, created_at
-		)
-		VALUES (
-			$1::uuid,
-			NULLIF($2,'')::uuid,
-			NULLIF($3,'')::uuid,
-			NULLIF($4,''),
-			$5,
-			$6,
-			$7,
-			$8::jsonb,
-			NULLIF($9,''),
-			$10,
-			now()
-		)
-	`
-	var timeout any
-	if !item.TimeoutAt.IsZero() {
-		timeout = item.TimeoutAt
-	}
-	_, err := s.DB.ExecContext(ctx, q,
-		item.ID,
-		item.EventID,
-		coalesceMailboxEntityID(item),
-		item.FromAgent,
-		item.Type,
-		item.Priority,
-		item.Status,
-		string(item.Context),
-		item.Summary,
-		timeout,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert mailbox item: %w", err)
-	}
-	return item.ID, nil
+	return "", unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 50
@@ -94,43 +64,19 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, err
 	}
-	if items, err := s.listMailboxItemsSpec(ctx, status, limit); err == nil {
-		return items, nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return nil, err
+	if caps.Mailbox == SchemaFlavorCanonical {
+		return s.listMailboxItemsSpec(ctx, status, limit)
 	}
-
-	const q = `
-		SELECT
-			id::text,
-			COALESCE(event_id::text, ''),
-			COALESCE(entity_id::text, ''),
-			COALESCE(from_agent, ''),
-			type,
-			COALESCE(priority, 'normal'),
-			COALESCE(status, 'pending'),
-			COALESCE(notified, false),
-			COALESCE(context, '{}'::jsonb),
-			COALESCE(summary, ''),
-			timeout_at,
-			COALESCE(decision, ''),
-			COALESCE(decision_notes, '')
-		FROM mailbox
-		WHERE status = $1
-		ORDER BY created_at ASC
-		LIMIT $2
-	`
-	rows, err := s.DB.QueryContext(ctx, q, status, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query mailbox items: %w", err)
-	}
-	defer rows.Close()
-	return scanLegacyMailboxItems(rows)
+	return nil, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
 	if s == nil || s.DB == nil {
 		return 0, fmt.Errorf("postgres store is required")
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return 0, err
 	}
 	if strings.TrimSpace(status) == "" {
 		status = "pending"
@@ -139,20 +85,22 @@ func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (i
 		return 0, err
 	}
 	var n int
-	if err := s.countMailboxItemsSpec(ctx, status, &n); err == nil {
+	if caps.Mailbox == SchemaFlavorCanonical {
+		if err := s.countMailboxItemsSpec(ctx, status, &n); err != nil {
+			return 0, err
+		}
 		return n, nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return 0, err
 	}
-	if err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailbox WHERE status = $1`, status).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count mailbox items: %w", err)
-	}
-	return n, nil
+	return 0, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return runtimetools.MailboxItem{}, fmt.Errorf("postgres store is required")
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return runtimetools.MailboxItem{}, err
 	}
 	if strings.TrimSpace(id) == "" {
 		return runtimetools.MailboxItem{}, fmt.Errorf("mailbox id is required")
@@ -160,61 +108,19 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (runtimet
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return runtimetools.MailboxItem{}, err
 	}
-	if item, err := s.getMailboxItemSpec(ctx, id); err == nil {
-		return item, nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return runtimetools.MailboxItem{}, err
+	if caps.Mailbox == SchemaFlavorCanonical {
+		return s.getMailboxItemSpec(ctx, id)
 	}
-
-	const q = `
-		SELECT
-			id::text,
-			COALESCE(event_id::text, ''),
-			COALESCE(entity_id::text, ''),
-			COALESCE(from_agent, ''),
-			type,
-			COALESCE(priority, 'normal'),
-			COALESCE(status, 'pending'),
-			COALESCE(notified, false),
-			COALESCE(context, '{}'::jsonb),
-			COALESCE(summary, ''),
-			timeout_at,
-			COALESCE(decision, ''),
-			COALESCE(decision_notes, '')
-		FROM mailbox
-		WHERE id = $1::uuid
-	`
-	var it runtimetools.MailboxItem
-	var timeout sql.NullTime
-	if err := s.DB.QueryRowContext(ctx, q, id).Scan(
-		&it.ID,
-		&it.EventID,
-		&it.EntityID,
-		&it.FromAgent,
-		&it.Type,
-		&it.Priority,
-		&it.Status,
-		&it.Notified,
-		&it.Context,
-		&it.Summary,
-		&timeout,
-		&it.Decision,
-		&it.DecisionNotes,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			return runtimetools.MailboxItem{}, fmt.Errorf("mailbox item not found: %s", id)
-		}
-		return runtimetools.MailboxItem{}, fmt.Errorf("get mailbox item: %w", err)
-	}
-	if timeout.Valid {
-		it.TimeoutAt = timeout.Time
-	}
-	return it, nil
+	return runtimetools.MailboxItem{}, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) DecideMailboxItem(ctx context.Context, id, status, decision, notes string) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(status) == "" || strings.TrimSpace(decision) == "" {
 		return fmt.Errorf("mailbox id, status, and decision are required")
@@ -222,92 +128,36 @@ func (s *PostgresStore) DecideMailboxItem(ctx context.Context, id, status, decis
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return err
 	}
-	if err := s.decideMailboxItemSpec(ctx, id, status, decision, notes); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return err
+	if caps.Mailbox == SchemaFlavorCanonical {
+		return s.decideMailboxItemSpec(ctx, id, status, decision, notes)
 	}
-
-	switch status {
-	case "decided", "expired", "cancelled":
-	default:
-		return fmt.Errorf("invalid mailbox status: %s", status)
-	}
-	const q = `
-		UPDATE mailbox
-		SET status = $2,
-		    decision = $3,
-		    decision_notes = NULLIF($4,''),
-		    decided_at = now()
-		WHERE id = $1::uuid
-		  AND status = 'pending'
-	`
-	res, err := s.DB.ExecContext(ctx, q, id, status, decision, notes)
-	if err != nil {
-		return fmt.Errorf("decide mailbox item: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("mailbox item is not pending or not found: %s", id)
-	}
-	return nil
+	return unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 200
 	}
-	if items, err := s.expireMailboxItemsSpec(ctx, limit); err == nil {
-		return items, nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return nil, err
+	if caps.Mailbox == SchemaFlavorCanonical {
+		return s.expireMailboxItemsSpec(ctx, limit)
 	}
-
-	const q = `
-		WITH due AS (
-			SELECT id
-			FROM mailbox
-			WHERE status = 'pending'
-			  AND timeout_at IS NOT NULL
-			  AND timeout_at <= now()
-			ORDER BY timeout_at ASC
-			LIMIT $1
-		)
-		UPDATE mailbox m
-		SET status = 'expired',
-		    decision = COALESCE(NULLIF(m.decision, ''), ''),
-		    decision_notes = COALESCE(NULLIF(m.decision_notes, ''), 'Timed out without human decision'),
-		    decided_at = COALESCE(m.decided_at, now())
-		FROM due
-		WHERE m.id = due.id
-		RETURNING
-			m.id::text,
-			COALESCE(m.event_id::text, ''),
-			COALESCE(m.entity_id::text, ''),
-			COALESCE(m.from_agent, ''),
-			m.type,
-			COALESCE(m.priority, 'normal'),
-			COALESCE(m.status, 'expired'),
-			COALESCE(m.notified, false),
-			COALESCE(m.context, '{}'::jsonb),
-			COALESCE(m.summary, ''),
-			m.timeout_at,
-			COALESCE(m.decision, ''),
-			COALESCE(m.decision_notes, '')
-	`
-	rows, err := s.DB.QueryContext(ctx, q, limit)
-	if err != nil {
-		return nil, fmt.Errorf("expire mailbox items: %w", err)
-	}
-	defer rows.Close()
-	return scanLegacyMailboxItems(rows)
+	return nil, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]runtimetools.MailboxItem, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if limit <= 0 {
 		limit = 50
@@ -315,40 +165,10 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
 		return nil, err
 	}
-	if items, err := s.listUnnotifiedCriticalMailboxItemsSpec(ctx, limit); err == nil {
-		return items, nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return nil, err
+	if caps.Mailbox == SchemaFlavorCanonical {
+		return s.listUnnotifiedCriticalMailboxItemsSpec(ctx, limit)
 	}
-
-	const q = `
-		SELECT
-			id::text,
-			COALESCE(event_id::text, ''),
-			COALESCE(entity_id::text, ''),
-			COALESCE(from_agent, ''),
-			type,
-			COALESCE(priority, 'normal'),
-			COALESCE(status, 'pending'),
-			COALESCE(notified, false),
-			COALESCE(context, '{}'::jsonb),
-			COALESCE(summary, ''),
-			timeout_at,
-			COALESCE(decision, ''),
-			COALESCE(decision_notes, '')
-		FROM mailbox
-		WHERE status = 'pending'
-		  AND priority = 'critical'
-		  AND COALESCE(notified, false) = false
-		ORDER BY created_at ASC
-		LIMIT $1
-	`
-	rows, err := s.DB.QueryContext(ctx, q, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query unnotified critical mailbox items: %w", err)
-	}
-	defer rows.Close()
-	return scanLegacyMailboxItems(rows)
+	return nil, unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func coalesceMailboxEntityID(item runtimetools.MailboxItem) string {
@@ -359,23 +179,17 @@ func (s *PostgresStore) MarkMailboxItemNotified(ctx context.Context, id string) 
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required")
 	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("mailbox id is required")
 	}
-	if err := s.markMailboxItemNotifiedSpec(ctx, id); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyMailboxSchema(err) {
-		return err
+	if caps.Mailbox == SchemaFlavorCanonical {
+		return s.markMailboxItemNotifiedSpec(ctx, id)
 	}
-	const q = `
-		UPDATE mailbox
-		SET notified = true
-		WHERE id = $1::uuid
-	`
-	if _, err := s.DB.ExecContext(ctx, q, id); err != nil {
-		return fmt.Errorf("mark mailbox item notified: %w", err)
-	}
-	return nil
+	return unsupportedSchemaCapability("mailbox", caps.Mailbox)
 }
 
 func (s *PostgresStore) insertMailboxItemSpec(ctx context.Context, item runtimetools.MailboxItem) error {
@@ -684,19 +498,4 @@ func denormalizeMailboxStatus(status, decision string) string {
 func mailboxListFilter(status string) (string, string) {
 	status = strings.TrimSpace(status)
 	return `status = $1`, status
-}
-
-func shouldFallbackLegacyMailboxSchema(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `item_id`) ||
-		strings.Contains(msg, `item_type`) ||
-		strings.Contains(msg, `source_event_id`) ||
-		strings.Contains(msg, `severity`) ||
-		strings.Contains(msg, `payload`) ||
-		strings.Contains(msg, `expires_at`) ||
-		strings.Contains(msg, `decision_notes`) ||
-		strings.Contains(msg, `notified`)
 }

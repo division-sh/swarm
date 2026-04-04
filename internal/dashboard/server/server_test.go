@@ -19,6 +19,7 @@ import (
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	runtimetools "swarm/internal/runtime/tools"
+	"swarm/internal/store"
 )
 
 type builderRPCResponse = builderpkg.RPCResponse
@@ -390,7 +391,12 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db)
+	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: false,
+		},
+	})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief","last_turn":{"parse_ok":true},"provider_session_id":"sess-1"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
@@ -465,7 +471,12 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db)
+	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Turns:      store.SchemaFlavorCanonical,
+			TurnBlocks: true,
+		},
+	})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
@@ -528,7 +539,7 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db)
+	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{})
 	mock.ExpectQuery("SELECT\\s+session_id::text,.*FROM agent_sessions").
 		WithArgs("missing-agent").
 		WillReturnError(sql.ErrNoRows)
@@ -539,6 +550,39 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 	}
 	if ok {
 		t.Fatalf("expected missing conversation")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetSkipsTurnsWithoutCapability(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"brief"}`
+	messagePayload := `[{"role":"assistant","content":"hello"}]`
+
+	mock.ExpectQuery("SELECT\\s+session_id::text,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM agent_sessions").
+		WithArgs("agent-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("sess-1", "agent-1", "global", "global", "session", "active", 1, []byte(summaryState), []byte(messagePayload), now))
+
+	item, ok, err := reader.Get(context.Background(), "agent-1")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected conversation to exist")
+	}
+	if len(item.Turns) != 0 {
+		t.Fatalf("turns = %#v", item.Turns)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations: %v", err)

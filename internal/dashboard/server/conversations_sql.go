@@ -7,17 +7,20 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"swarm/internal/store"
 )
 
 type SQLConversationReader struct {
-	db *sql.DB
+	db   *sql.DB
+	caps store.StoreSchemaCapabilities
 }
 
-func NewSQLConversationReader(db *sql.DB) *SQLConversationReader {
+func NewSQLConversationReader(db *sql.DB, caps store.StoreSchemaCapabilities) *SQLConversationReader {
 	if db == nil {
 		return nil
 	}
-	return &SQLConversationReader{db: db}
+	return &SQLConversationReader{db: db, caps: caps}
 }
 
 func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]ConversationSummary, error) {
@@ -200,7 +203,10 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 	if agentID == "" || sessionID == "" {
 		return []ConversationTurn{}, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `
+	if r.caps.Conversations.Turns != store.SchemaFlavorCanonical {
+		return []ConversationTurn{}, nil
+	}
+	query := `
 		SELECT
 			turn_id::text,
 			agent_id,
@@ -229,9 +235,9 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 		WHERE agent_id = $1
 		  AND session_id = $2::uuid
 		ORDER BY created_at ASC, turn_id ASC
-	`, agentID, sessionID)
-	if err != nil && shouldIgnoreConversationTurnBlocksColumn(err) {
-		rows, err = r.db.QueryContext(ctx, `
+	`
+	if !r.caps.Conversations.TurnBlocks {
+		query = `
 		SELECT
 			turn_id::text,
 			agent_id,
@@ -260,12 +266,10 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 		WHERE agent_id = $1
 		  AND session_id = $2::uuid
 		ORDER BY created_at ASC, turn_id ASC
-	`, agentID, sessionID)
+		`
 	}
+	rows, err := r.db.QueryContext(ctx, query, agentID, sessionID)
 	if err != nil {
-		if shouldIgnoreConversationTurnsQuery(err) {
-			return []ConversationTurn{}, nil
-		}
 		return nil, err
 	}
 	defer rows.Close()
@@ -591,23 +595,6 @@ func firstReadableString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func shouldIgnoreConversationTurnsQuery(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `relation "agent_turns" does not exist`) ||
-		strings.Contains(msg, `column "session_id" does not exist`)
-}
-
-func shouldIgnoreConversationTurnBlocksColumn(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `column "turn_blocks" does not exist`)
 }
 
 func compactMap(in map[string]any, keys ...string) map[string]any {

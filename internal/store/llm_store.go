@@ -10,14 +10,23 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	runtimellm "swarm/internal/runtime/llm"
 	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if rec.AgentID == "" || rec.RuntimeMode == "" || rec.SessionID == "" {
 		return fmt.Errorf("agent_id, runtime_mode, and session_id are required")
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	}
+	if caps.Conversations.Turns != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
 	}
 	runtimeMode := runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode)
 
@@ -69,8 +78,8 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.RetryCount,
 		rec.Error,
 	}
-	if columnExists(ctx, s.DB, "agent_sessions", "run_id") {
-		if err := s.ensureRunRow(ctx, nil, runID); err != nil {
+	if caps.Conversations.SessionRunID {
+		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 			return err
 		}
 		updateQ = `
@@ -132,8 +141,8 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}
 	}
 
-	hasRunID := columnExists(ctx, s.DB, "agent_turns", "run_id")
-	hasTurnBlocks := columnExists(ctx, s.DB, "agent_turns", "turn_blocks")
+	hasRunID := caps.Conversations.TurnRunID
+	hasTurnBlocks := caps.Conversations.TurnBlocks
 
 	insertTurn := `
 		INSERT INTO agent_turns (
@@ -242,7 +251,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}
 	}
 	if hasRunID {
-		if err := s.ensureRunRow(ctx, nil, runID); err != nil {
+		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 			return err
 		}
 		insertTurn = `
@@ -357,16 +366,19 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}
 	}
 	if _, err := s.DB.ExecContext(ctx, insertTurn, insertArgs...); err != nil {
-		var pgErr *pq.Error
-		if errors.As(err, &pgErr) && pgErr.Code == "42P01" {
-			return nil
-		}
 		return fmt.Errorf("insert agent turn: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	}
 	scopeKey := strings.TrimSpace(rec.ScopeKey)
 	if scopeKey == "" {
 		scopeKey = strings.TrimSpace(rec.SessionID)
@@ -408,8 +420,8 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 		"global",
 		runtimesessions.RuntimeModeTask,
 	}
-	if columnExists(ctx, s.DB, "agent_sessions", "run_id") {
-		if err := s.ensureRunRow(ctx, nil, rec.RunID); err != nil {
+	if caps.Conversations.SessionRunID {
+		if err := s.ensureRunRow(ctx, caps, nil, rec.RunID); err != nil {
 			return err
 		}
 		q = `
@@ -489,6 +501,13 @@ func normalizeJSONObject(v any) string {
 }
 
 func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	}
 	if strings.TrimSpace(rec.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
@@ -573,8 +592,8 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			summary,
 			status,
 		}
-		if columnExists(ctx, s.DB, "agent_sessions", "run_id") {
-			if err := s.ensureRunRow(ctx, nil, runID); err != nil {
+		if caps.Conversations.SessionRunID {
+			if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 				return err
 			}
 			q = `
@@ -677,8 +696,8 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		status,
 		sessionID,
 	}
-	if columnExists(ctx, s.DB, "agent_sessions", "run_id") {
-		if err := s.ensureRunRow(ctx, nil, runID); err != nil {
+	if caps.Conversations.SessionRunID {
+		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 			return err
 		}
 		q = `
@@ -747,6 +766,13 @@ func nullUUIDString(raw string) string {
 }
 
 func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, err
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return runtimellm.ConversationRecord{}, false, unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
@@ -779,7 +805,7 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	rec.Mode = mode
 
 	var rawMessages []byte
-	err := s.DB.QueryRowContext(ctx, q, agentID, mode, resolved.ScopeKey).Scan(
+	err = s.DB.QueryRowContext(ctx, q, agentID, mode, resolved.ScopeKey).Scan(
 		&rec.ScopeKey,
 		&rawMessages,
 		&rec.Summary,
