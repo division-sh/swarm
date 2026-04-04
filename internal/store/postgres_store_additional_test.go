@@ -1348,8 +1348,8 @@ func TestManagerStore_Conversations_AndAgentTurns_PersistRunIDWhenColumnsExist(t
 	}
 
 	var gotSessionRunID, gotTurnRunID string
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(run_id::text, '') FROM agent_sessions WHERE session_id = $1::uuid`, sessionID).Scan(&gotSessionRunID); err != nil {
-		t.Fatalf("load session run_id: %v", err)
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(run_id::text, '') FROM agent_conversation_audits WHERE session_id = $1::uuid`, sessionID).Scan(&gotSessionRunID); err != nil {
+		t.Fatalf("load audit run_id: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(run_id::text, '') FROM agent_turns WHERE session_id = $1::uuid ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&gotTurnRunID); err != nil {
 		t.Fatalf("load turn run_id: %v", err)
@@ -1438,8 +1438,8 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 	}
 
 	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'a1' AND runtime_mode = 'task'`).Scan(&count); err != nil {
-		t.Fatalf("count task sessions: %v", err)
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_conversation_audits WHERE agent_id = 'a1' AND runtime_mode = 'task'`).Scan(&count); err != nil {
+		t.Fatalf("count task audits: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("expected one persisted task audit row, got %d", count)
@@ -1460,7 +1460,7 @@ func TestManagerStore_StatelessConversationPersistsAuditRowWithoutReload(t *test
 	var parseOK bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false)
-		FROM agent_sessions
+		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
 	`, sessionID).Scan(&parseOK); err != nil {
 		t.Fatalf("load task runtime_state: %v", err)
@@ -1514,7 +1514,7 @@ func TestManagerStore_TaskConversationUpsertIsIdempotentBySessionID(t *testing.T
 	var count, turnCount int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*), COALESCE(MAX(turn_count), 0)
-		FROM agent_sessions
+		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
 	`, sessionID).Scan(&count, &turnCount); err != nil {
 		t.Fatalf("load task audit row: %v", err)
@@ -1550,8 +1550,8 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 	var scope, scopeKey string
 	var parseOK bool
 	if err := db.QueryRowContext(ctx, `
-		SELECT scope, scope_key, COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false)
-		FROM agent_sessions
+		SELECT scope, COALESCE(scope_key, ''), COALESCE((runtime_state->'last_turn'->>'parse_ok')::boolean, false)
+		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
 	`, sessionID).Scan(&scope, &scopeKey, &parseOK); err != nil {
 		t.Fatalf("load synthesized task audit row: %v", err)
@@ -1559,8 +1559,8 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 	if scope != "global" {
 		t.Fatalf("expected synthesized task audit scope=global, got %q", scope)
 	}
-	if scopeKey != sessionID {
-		t.Fatalf("expected synthesized task scope_key=%q, got %q", sessionID, scopeKey)
+	if scopeKey != "" {
+		t.Fatalf("expected synthesized task scope_key to stay empty, got %q", scopeKey)
 	}
 	if !parseOK {
 		t.Fatal("expected synthesized task audit row to record last_turn telemetry")
@@ -1584,7 +1584,7 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 		SELECT
 			COUNT(*),
 			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND runtime_mode = 'task')
-		FROM agent_sessions
+		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
 	`, sessionID).Scan(&count, &turns); err != nil {
 		t.Fatalf("count synthesized task persistence: %v", err)
@@ -1855,6 +1855,17 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed conversation: %v", err)
 	}
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: uuid.NewString(),
+		AgentID:   "agent-cleanup-1",
+		Mode:      "task",
+		Messages:  []llm.Message{{Role: "assistant", Content: "done"}},
+		Summary:   "task",
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("seed task audit: %v", err)
+	}
 	if err := pg.MarkAgentTerminated(ctx, "agent-cleanup-1"); err != nil {
 		t.Fatalf("MarkAgentTerminated: %v", err)
 	}
@@ -1862,6 +1873,7 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	var (
 		agentStatus string
 		sessStatus  string
+		auditStatus string
 	)
 	if err := db.QueryRowContext(ctx, `SELECT status FROM agents WHERE agent_id = $1`, "agent-cleanup-1").Scan(&agentStatus); err != nil {
 		t.Fatalf("read agent status: %v", err)
@@ -1869,11 +1881,17 @@ func TestPostgresStore_MarkAgentTerminated_CleansRuntimeState(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT status FROM agent_sessions WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`, "agent-cleanup-1").Scan(&sessStatus); err != nil {
 		t.Fatalf("read session status: %v", err)
 	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM agent_conversation_audits WHERE agent_id = $1 ORDER BY created_at DESC LIMIT 1`, "agent-cleanup-1").Scan(&auditStatus); err != nil {
+		t.Fatalf("read audit status: %v", err)
+	}
 	if agentStatus != "terminated" {
 		t.Fatalf("expected terminated agent status, got %q", agentStatus)
 	}
 	if sessStatus != "terminated" {
 		t.Fatalf("expected terminated session status, got %q", sessStatus)
+	}
+	if auditStatus != "terminated" {
+		t.Fatalf("expected terminated audit status, got %q", auditStatus)
 	}
 }
 

@@ -1118,18 +1118,25 @@ engine:
       universal_tools: 'The following tools are auto-granted to all agents without explicit tools listing: agent_message,
         mailbox_send, get_entity, save_entity_field, query_entities, query_metrics, search_entities. These are "universal"
         tools. See tool_model.agent_tool_filtering.universal_tools for the authoritative list.'
-    task_mode_audit: 'Agents in task conversation_mode DO get an agent_sessions row. The conversation transcript (reasoning,
-      tool calls, results) is persisted after each invocation for audit and debugging. However, the transcript is write-only —
-      it is NEVER loaded back for subsequent invocations. Each event invocation starts with a fresh context. Task mode means
-      "no memory between invocations", not "no record of what happened." The persisted transcript enables the builder Run tab
-      to show agent reasoning details regardless of conversation_mode. Rows may be archived per retention policy.'
-    provider_session_ids: External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in agent_sessions.runtime_state.provider_session_id,
-      NOT in session_id. session_id is the platform-owned UUID primary key. The provider ID is an implementation detail that
-      may change if the provider is swapped.
+    task_mode_audit: 'Agents in task conversation_mode do NOT create agent_sessions rows. Task mode is
+      stateless — no live session, no session lookup, no session persistence. The conversation transcript
+      (reasoning, tool calls, results) is persisted after each invocation to agent_conversation_audits
+      (write-only audit table) and agent_turns (per-turn append-only log). The transcript is NEVER loaded
+      back for subsequent invocations. Each event invocation starts with a fresh context. Task mode means
+      "no memory between invocations" AND "no live session row." The persisted audit snapshot enables the
+      builder Run tab to show agent reasoning details. Rows may be archived per retention policy.'
+    provider_session_ids: 'External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in
+      runtime_state.provider_session_id — in agent_sessions for session/session_per_entity modes, in
+      agent_conversation_audits for task mode. NOT in session_id or audit_id. Those are platform-owned
+      UUID primary keys. The provider ID is an implementation detail that may change if the provider is swapped.'
     conversation_mode_values:
-      task: Stateless between invocations. Transcript persisted (write-only) for audit. Never reloaded. Each invocation starts fresh.
-      session: Persistent session across events. Conversation history maintained and reused. Agent accumulates context.
-      session_per_entity: One session per agent × entity. Context preserved and reused per entity.
+      task: 'Stateless between invocations. No agent_sessions row. Audit snapshot persisted to
+        agent_conversation_audits (write-only). Per-turn history in agent_turns. Never reloaded.
+        Each invocation starts fresh.'
+      session: 'Persistent session across events. Live session row in agent_sessions. Conversation
+        history maintained and reused. Agent accumulates context.'
+      session_per_entity: 'One session per agent × entity. Live session row in agent_sessions per entity.
+        Context preserved and reused per entity.'
       stateless: Alias for task. Accepted by the loader, normalized to task internally.
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
@@ -2397,17 +2404,17 @@ platform_tables:
         \ NULL,\n    INDEX idx_agents_role (role),\n    INDEX idx_agents_status (status),\n    INDEX idx_agents_parent (parent_agent_id)\
         \ WHERE parent_agent_id IS NOT NULL\n);"
     agent_sessions:
-      description: 'Agent conversation sessions. Supports three scopes: entity (one session per agent × entity), flow (one
-        session per agent × flow instance), global (one session per agent, shared across all entities). scope_key is the lookup
-        key used by the runtime: for entity scope it is the entity_id, for flow scope it is the flow_instance path, for global
-        scope it is the literal "global". runtime_mode matches the agent conversation_mode from contracts. lease_holder/lease_expires_at
-        for distributed session locking.'
+      description: 'Live reusable agent conversation sessions. Used ONLY by session and session_per_entity
+        conversation modes. Task mode does NOT create rows here — task-mode audit goes to
+        agent_conversation_audits instead. Supports three scopes: entity (one session per agent × entity),
+        flow (one session per agent × flow instance), global (one session per agent, shared across all
+        entities). scope_key is the lookup key. lease_holder/lease_expires_at for distributed session locking.'
       ddl: "CREATE TABLE agent_sessions (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),\n\
         \    entity_id         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT NOT NULL,\n    scope         \
         \    TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),\n    conversation      JSONB NOT\
-        \ NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL DEFAULT\
-        \ 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n    runtime_state     JSONB NOT NULL\
+        \ NULL DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL\
+        \ CHECK (runtime_mode IN ('session', 'session_per_entity')),\n    runtime_state     JSONB NOT NULL\
         \ DEFAULT '{}',\n    lease_holder      TEXT,\n    lease_expires_at  TIMESTAMPTZ,\n    status            TEXT NOT\
         \ NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    created_at        TIMESTAMPTZ\
         \ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    UNIQUE (agent_id, scope_key),\n\
@@ -2418,13 +2425,15 @@ platform_tables:
         entity: entity_id NOT NULL, flow_instance NOT NULL, scope_key = entity_id. One session per agent per entity.
         flow: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
         global: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
-      lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key). The scope_key is derived from runtime_mode: task
-        → no session (stateless), session_per_entity → scope_key = entity_id, session → scope_key = flow_instance or "global"
-        depending on agent declaration.'
+      lookup_pattern: 'Runtime acquires sessions via (agent_id, scope_key). The scope_key is derived from
+        conversation_mode: task → no session lookup, no agent_sessions row (audit goes to
+        agent_conversation_audits). session_per_entity → scope_key = entity_id. session → scope_key =
+        flow_instance or "global" depending on agent declaration.'
     agent_turns:
       description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
-        attempted tool calls, emitted event names, and sanitized request/response payloads. Complements agent_sessions.runtime_state.last_turn
-        with a queryable historical record.'
+        attempted tool calls, emitted event names, and sanitized request/response payloads. Used by all conversation modes.
+        For task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this
+        complements the live session with a queryable historical record.'
       ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \             UUID REFERENCES runs(run_id),\n    agent_id           TEXT NOT NULL,\n    session_id         UUID\
         \ NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
@@ -2438,6 +2447,38 @@ platform_tables:
         \ NOW(),\n    INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_agent_turns_session\
         \ (session_id, created_at),\n    INDEX idx_agent_turns_agent (agent_id, created_at),\n    INDEX idx_agent_turns_event\
         \ (trigger_event_id) WHERE trigger_event_id IS NOT NULL\n);"
+    agent_conversation_audits:
+      description: 'Write-only audit table for task-mode conversation snapshots. One row per task-mode
+        agent invocation. The conversation transcript is persisted here after each invocation for debugging
+        and the builder Run tab. This table is NEVER read back for subsequent invocations — it is purely
+        for audit/debug. Dashboard/readers distinguish live sessions (agent_sessions) from task audits
+        (agent_conversation_audits) by table, not by convention.'
+      ddl: "CREATE TABLE agent_conversation_audits (\n    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n\
+        \    run_id            UUID REFERENCES runs(run_id),\n    agent_id          TEXT NOT NULL,\n    entity_id\
+        \         UUID,\n    flow_instance     TEXT,\n    scope_key         TEXT,\n    scope             TEXT\
+        \ NOT NULL DEFAULT 'global' CHECK (scope IN ('entity', 'flow', 'global')),\n    conversation      JSONB NOT NULL\
+        \ DEFAULT '[]',\n    turn_count        INTEGER NOT NULL DEFAULT 0,\n    runtime_mode      TEXT NOT NULL DEFAULT\
+        \ 'task' CHECK (runtime_mode = 'task'),\n    runtime_state     JSONB NOT NULL DEFAULT '{}',\n    status\
+        \            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'terminated')),\n    created_at\
+        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \    INDEX idx_audits_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_audits_agent (agent_id,\
+        \ created_at),\n    INDEX idx_audits_entity (entity_id) WHERE entity_id IS NOT NULL\n);"
+      primary_key: 'session_id — shared identifier with agent_turns.session_id. Task-mode turns reference
+        the audit row via the same session_id, matching the runtime''s existing linking model.'
+      status_lifecycle: 'Task audit rows remain active for dashboard/reader visibility. The status values
+        (active, suspended, terminated) match the agent_sessions status model for consistency. Dashboard
+        readers query status = active to find visible task-mode audit records. The runtime does NOT
+        transition task audits to completed/failed — they stay active as part of the visible audit surface.'
+      scope_model: 'scope_key is nullable. scope defaults to global. Task-mode invocations may produce
+        audit rows without a specific scope key (e.g., root-level agents with no entity or flow context).
+        When entity_id or flow_instance is available, the runtime sets scope_key and scope accordingly.'
+      write_only: 'This table is append/update only from the runtime perspective. The runtime writes the
+        audit row after each task-mode invocation. It is NEVER read back to construct agent context.
+        Readers are: dashboard API, flight recorder queries, debug tools.'
+      relationship_to_agent_turns: 'agent_conversation_audits holds the full conversation snapshot per
+        invocation. agent_turns holds the per-turn structured execution log. Both are audit surfaces.
+        agent_turns is more granular (one row per turn). agent_conversation_audits captures the complete
+        conversation context (all messages, all tool results) in one row.'
     routing_rules:
       description: 'Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the
         need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard
@@ -2689,6 +2730,7 @@ run_model:
       - events.run_id
       - event_deliveries.run_id
       - agent_sessions.run_id
+      - agent_conversation_audits.run_id
       - agent_turns.run_id
       - entity_mutations.run_id
       propagation_rule: 'Child event run_id = parent event run_id. The bus publish path reads run_id from

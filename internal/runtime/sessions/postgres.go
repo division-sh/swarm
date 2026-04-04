@@ -68,10 +68,11 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 		FROM agent_sessions
 		WHERE agent_id = $1
 		  AND scope_key = $2
+		  AND runtime_mode = $3
 		ORDER BY created_at DESC
 		LIMIT 1
 		FOR UPDATE
-	`, agentID, resolved.ScopeKey).Scan(
+	`, agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(
 		&r.sessionID,
 		&r.scopeKey,
 		&r.status,
@@ -135,8 +136,9 @@ func (sr *PostgresRegistry) Acquire(ctx context.Context, agentID, runtimeMode, l
 			    updated_at = now()
 			WHERE agent_id = $8
 			  AND scope_key = $9
+			  AND runtime_mode = $10
 			RETURNING session_id::text, scope_key, lease_expires_at
-		`, sessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, lockOwner, now.Add(sr.lockTTL), agentID, resolved.ScopeKey).Scan(&r.sessionID, &r.scopeKey, &expires); err != nil {
+		`, sessionID, resolved.EntityID, resolved.FlowInstance, resolved.Scope, resolved.RuntimeMode, lockOwner, now.Add(sr.lockTTL), agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(&r.sessionID, &r.scopeKey, &expires); err != nil {
 			return nil, fmt.Errorf("reactivate session row: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -240,11 +242,12 @@ func (sr *PostgresRegistry) Rotate(ctx context.Context, agentID, runtimeMode, lo
 		FROM agent_sessions
 		WHERE agent_id = $1
 		  AND scope_key = $2
+		  AND runtime_mode = $3
 		  AND status = 'active'
 		ORDER BY created_at DESC
 		LIMIT 1
 		FOR UPDATE
-	`, agentID, resolved.ScopeKey).Scan(&currentSessionID, &existingOwner, &existingExpiry); err != nil {
+	`, agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(&currentSessionID, &existingOwner, &existingExpiry); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("no active session to rotate for agent=%s", agentID)
 		}
@@ -348,11 +351,12 @@ func (sr *PostgresRegistry) AdoptSessionID(ctx context.Context, agentID, runtime
 		FROM agent_sessions
 		WHERE agent_id = $1
 		  AND scope_key = $2
+		  AND runtime_mode = $3
 		  AND status = 'active'
 		ORDER BY created_at DESC
 		LIMIT 1
 		FOR UPDATE
-	`, agentID, resolved.ScopeKey).Scan(&sessionID, &existingOwner, &existingExpiry); err != nil {
+	`, agentID, resolved.ScopeKey, resolved.RuntimeMode).Scan(&sessionID, &existingOwner, &existingExpiry); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("no active session to adopt for agent=%s", agentID)
 		}
@@ -397,6 +401,9 @@ func (sr *PostgresRegistry) ScopeKeyEnabledForTest() bool {
 
 func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
 	runtimeMode = strings.TrimSpace(runtimeMode)
+	if runtimeMode != "" && IsStatelessRuntimeMode(runtimeMode) {
+		return nil
+	}
 	if runtimeMode == "" {
 		_, err := sr.db.Exec(`
 			UPDATE agent_sessions
@@ -405,6 +412,7 @@ func (sr *PostgresRegistry) ResetAll(runtimeMode string) error {
 			    lease_expires_at = NULL,
 			    updated_at = now()
 			WHERE status = 'active'
+			  AND runtime_mode IN ('session', 'session_per_entity')
 		`)
 		if err != nil {
 			return fmt.Errorf("reset all sessions: %w", err)

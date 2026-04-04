@@ -76,20 +76,23 @@ func (sr *InMemoryRegistry) Acquire(_ context.Context, agentID, runtimeMode, loc
 	if agentID == "" || runtimeMode == "" || lockOwner == "" {
 		return nil, errors.New("agentID, runtimeMode, and lockOwner are required")
 	}
-	scopeKey = strings.TrimSpace(scopeKey)
+	resolved := ResolveScope(runtimeMode, scopeKey)
+	if resolved.Stateless {
+		return nil, errors.New("task-scoped sessions are stateless")
+	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
 	now := time.Now()
-	key := registryKey(agentID, runtimeMode, scopeKey)
+	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
 	rec, ok := sr.byKey[key]
 	if !ok || rec.Status != "active" {
 		rec = &Record{
 			SessionID:   uuid.NewString(),
 			AgentID:     agentID,
-			RuntimeMode: runtimeMode,
-			ScopeKey:    scopeKey,
+			RuntimeMode: resolved.RuntimeMode,
+			ScopeKey:    resolved.ScopeKey,
 			Status:      "active",
 		}
 		sr.byKey[key] = rec
@@ -138,11 +141,15 @@ func (sr *InMemoryRegistry) Release(_ context.Context, lease *Lease) error {
 }
 
 func (sr *InMemoryRegistry) Rotate(_ context.Context, agentID, runtimeMode, lockOwner, summary, scopeKey string) (*Lease, error) {
+	resolved := ResolveScope(runtimeMode, scopeKey)
+	if resolved.Stateless {
+		return nil, errors.New("task-scoped sessions are stateless")
+	}
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 
-	scopeKey = strings.TrimSpace(scopeKey)
-	key := registryKey(agentID, runtimeMode, scopeKey)
+	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
 	rec, ok := sr.byKey[key]
 	if !ok {
 		return nil, fmt.Errorf("session for agent %s not found", agentID)
@@ -175,9 +182,14 @@ func (sr *InMemoryRegistry) Rotate(_ context.Context, agentID, runtimeMode, lock
 }
 
 func (sr *InMemoryRegistry) IncrementTurn(_ context.Context, agentID, runtimeMode, sessionID, scopeKey string) error {
+	resolved := ResolveScope(runtimeMode, scopeKey)
+	if resolved.Stateless {
+		return errors.New("task-scoped sessions are stateless")
+	}
+
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
-	key := registryKey(agentID, runtimeMode, strings.TrimSpace(scopeKey))
+	key := registryKey(agentID, resolved.RuntimeMode, resolved.ScopeKey)
 	if rec, ok := sr.byKey[key]; ok {
 		if rec.SessionID != sessionID {
 			return fmt.Errorf("session mismatch: have=%s want=%s", rec.SessionID, sessionID)
@@ -197,7 +209,10 @@ func (sr *InMemoryRegistry) AdoptSessionID(_ context.Context, agentID, runtimeMo
 	if agentID == "" || runtimeMode == "" || lockOwner == "" || newSessionID == "" {
 		return errors.New("agentID, runtimeMode, lockOwner, and newSessionID are required")
 	}
-	scopeKey = strings.TrimSpace(scopeKey)
+	resolved := ResolveScope(runtimeMode, scopeKey)
+	if resolved.Stateless {
+		return nil
+	}
 
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
@@ -210,10 +225,10 @@ func (sr *InMemoryRegistry) AdoptSessionID(_ context.Context, agentID, runtimeMo
 		if candidate == nil {
 			continue
 		}
-		if candidate.AgentID != agentID || candidate.RuntimeMode != runtimeMode {
+		if candidate.AgentID != agentID || candidate.RuntimeMode != resolved.RuntimeMode {
 			continue
 		}
-		if scopeKey != "" && candidate.ScopeKey != scopeKey {
+		if resolved.ScopeKey != "" && candidate.ScopeKey != resolved.ScopeKey {
 			continue
 		}
 		if candidate.LockOwner == lockOwner {
@@ -255,6 +270,9 @@ func (sr *InMemoryRegistry) Snapshot(agentID string) (*Record, bool) {
 
 func (sr *InMemoryRegistry) ResetAll(runtimeMode string) error {
 	runtimeMode = strings.TrimSpace(runtimeMode)
+	if runtimeMode != "" && IsStatelessRuntimeMode(runtimeMode) {
+		return nil
+	}
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	if runtimeMode == "" {

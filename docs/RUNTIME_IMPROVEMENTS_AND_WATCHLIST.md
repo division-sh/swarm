@@ -1443,19 +1443,19 @@ Likely causes:
 
 Current mitigations:
 
-- `runtime_mode` and synthetic scope values
-- dashboard-side filtering/reconstruction
+- issue `#3` introduces a first-class audit persistence surface for task-mode conversation snapshots
+- dashboard readers now label live-session versus turn-audit rows explicitly instead of inferring from `agent_sessions`
 
 Still brittle because:
 
-- one table is carrying two incompatible concepts
-- downstream readers must remember hidden exceptions
+- the authoritative YAML platform spec still needs an explicit update to describe the split model
+- older databases may still contain pre-split task rows until migrated forward
 
 Improvement items:
 
-- separate live session state from turn/transcript audit state
-- or introduce an explicit persisted session kind with dedicated reader APIs
-- stop treating stateless audit rows as leaseable/live session records
+- keep `agent_sessions` reserved for live leaseable session state only
+- keep task-mode snapshots in the dedicated audit persistence surface
+- remove remaining stale documentation/spec drift describing the mixed model
 
 ### Timer and accumulation-timeout identity still depends on string mini-languages
 

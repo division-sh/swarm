@@ -65,3 +65,13 @@ func TestInMemorySessionRegistryAdoptSessionID(t *testing.T) {
 		t.Fatalf("expected adopted provider session id, got %q", rec.ProviderSessionID)
 	}
 }
+
+func TestInMemorySessionRegistry_TaskModeIsStateless(t *testing.T) {
+	sr := NewInMemoryRegistry(0)
+	if _, err := sr.Acquire(context.Background(), "agent-a", RuntimeModeTask, "worker-a", ""); err == nil {
+		t.Fatal("expected task mode acquire to reject stateless sessions")
+	}
+	if err := sr.ResetAll(RuntimeModeTask); err != nil {
+		t.Fatalf("ResetAll(task): %v", err)
+	}
+}

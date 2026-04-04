@@ -11,6 +11,11 @@ import (
 	"swarm/internal/store"
 )
 
+const (
+	conversationKindLiveSession = "live_session"
+	conversationKindTurnAudit   = "turn_audit"
+)
+
 type SQLConversationReader struct {
 	db        *sql.DB
 	capSource conversationCapabilitySource
@@ -34,9 +39,19 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := r.db.QueryContext(ctx, `
+	caps, err := r.resolveCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sources := conversationQuerySources(caps)
+	if len(sources) == 0 {
+		return []ConversationSummary{}, nil
+	}
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
+			session_id,
 			agent_id,
+			kind,
 			COALESCE(scope_key, ''),
 			COALESCE(scope, ''),
 			COALESCE(runtime_mode, ''),
@@ -44,11 +59,12 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 			COALESCE(turn_count, 0),
 			COALESCE(runtime_state, '{}'::jsonb),
 			updated_at
-		FROM agent_sessions
-		WHERE status = 'active'
+		FROM (
+			%s
+		) conversations
 		ORDER BY updated_at DESC, agent_id ASC
 		LIMIT $1
-	`, limit)
+	`, strings.Join(sources, "\nUNION ALL\n")), limit)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -76,11 +92,20 @@ func (r *SQLConversationReader) Get(ctx context.Context, agentID string) (Conver
 	if agentID == "" {
 		return ConversationDetail{}, false, nil
 	}
+	caps, err := r.resolveCapabilities(ctx)
+	if err != nil {
+		return ConversationDetail{}, false, err
+	}
+	sources := conversationQuerySources(caps)
+	if len(sources) == 0 {
+		return ConversationDetail{}, false, nil
+	}
 
-	row := r.db.QueryRowContext(ctx, `
+	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT
-			session_id::text,
+			session_id,
 			agent_id,
+			kind,
 			COALESCE(scope_key, ''),
 			COALESCE(scope, ''),
 			COALESCE(runtime_mode, ''),
@@ -89,12 +114,13 @@ func (r *SQLConversationReader) Get(ctx context.Context, agentID string) (Conver
 			COALESCE(runtime_state, '{}'::jsonb),
 			COALESCE(conversation, '[]'::jsonb),
 			updated_at
-		FROM agent_sessions
+		FROM (
+			%s
+		) conversations
 		WHERE agent_id = $1
-		  AND status = 'active'
 		ORDER BY updated_at DESC, created_at DESC
 		LIMIT 1
-	`, agentID)
+	`, strings.Join(sources, "\nUNION ALL\n")), agentID)
 
 	item, err := scanConversationDetail(row)
 	if err == sql.ErrNoRows {
@@ -120,7 +146,9 @@ func scanConversationSummary(scanner rowScanner) (ConversationSummary, error) {
 		runtimeStateRaw []byte
 	)
 	if err := scanner.Scan(
+		&item.SessionID,
 		&item.AgentID,
+		&item.Kind,
 		&item.ScopeKey,
 		&item.Scope,
 		&item.RuntimeMode,
@@ -149,6 +177,7 @@ func scanConversationDetail(scanner rowScanner) (ConversationDetail, error) {
 	if err := scanner.Scan(
 		&item.SessionID,
 		&item.AgentID,
+		&item.Kind,
 		&item.ScopeKey,
 		&item.Scope,
 		&item.RuntimeMode,
@@ -298,9 +327,60 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 
 func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
 	if r == nil || r.capSource == nil {
-		return store.StoreSchemaCapabilities{}, nil
+		return store.StoreSchemaCapabilities{
+			Conversations: store.ConversationSchemaCapabilities{
+				Sessions:   store.SchemaFlavorCanonical,
+				Audits:     store.SchemaFlavorCanonical,
+				Turns:      store.SchemaFlavorCanonical,
+				TurnBlocks: true,
+			},
+		}, nil
 	}
 	return r.capSource.ResolveSchemaCapabilities(ctx)
+}
+
+func conversationQuerySources(caps store.StoreSchemaCapabilities) []string {
+	sources := []string{}
+	if caps.Conversations.Sessions == store.SchemaFlavorCanonical {
+		sources = append(sources, `
+			SELECT
+				session_id::text AS session_id,
+				agent_id,
+				'live_session' AS kind,
+				scope_key,
+				scope,
+				runtime_mode,
+				status,
+				turn_count,
+				runtime_state,
+				conversation,
+				updated_at,
+				created_at
+			FROM agent_sessions
+			WHERE status = 'active'
+			  AND runtime_mode IN ('session', 'session_per_entity')
+		`)
+	}
+	if caps.Conversations.Audits == store.SchemaFlavorCanonical {
+		sources = append(sources, `
+			SELECT
+				session_id::text AS session_id,
+				agent_id,
+				'turn_audit' AS kind,
+				scope_key,
+				scope,
+				runtime_mode,
+				status,
+				turn_count,
+				runtime_state,
+				conversation,
+				updated_at,
+				created_at
+			FROM agent_conversation_audits
+			WHERE status = 'active'
+		`)
+	}
+	return sources
 }
 
 func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {

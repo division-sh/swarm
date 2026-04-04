@@ -28,8 +28,10 @@ type EventSchemaCapabilities struct {
 
 type ConversationSchemaCapabilities struct {
 	Sessions     SchemaFlavor
+	Audits       SchemaFlavor
 	Turns        SchemaFlavor
 	SessionRunID bool
+	AuditRunID   bool
 	TurnRunID    bool
 	TurnBlocks   bool
 }
@@ -165,6 +167,14 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 			},
 			nil,
 		),
+		Audits: detectSchemaFlavor(catalog, "agent_conversation_audits",
+			[]string{
+				"session_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
+				"conversation", "turn_count", "runtime_mode", "runtime_state", "status",
+				"created_at", "updated_at",
+			},
+			nil,
+		),
 		Turns: detectSchemaFlavor(catalog, "agent_turns",
 			[]string{
 				"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id",
@@ -176,6 +186,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 			nil,
 		),
 		SessionRunID: catalog.hasColumns("agent_sessions", "run_id"),
+		AuditRunID:   catalog.hasColumns("agent_conversation_audits", "run_id"),
 		TurnRunID:    catalog.hasColumns("agent_turns", "run_id"),
 		TurnBlocks:   catalog.hasColumns("agent_turns", "turn_blocks"),
 	}

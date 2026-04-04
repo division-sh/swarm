@@ -33,7 +33,9 @@ type InstanceReader interface {
 }
 
 type ConversationSummary struct {
+	SessionID   string         `json:"session_id,omitempty"`
 	AgentID     string         `json:"agent_id"`
+	Kind        string         `json:"kind,omitempty"`
 	ScopeKey    string         `json:"scope_key,omitempty"`
 	Scope       string         `json:"scope,omitempty"`
 	RuntimeMode string         `json:"runtime_mode,omitempty"`
@@ -47,6 +49,7 @@ type ConversationSummary struct {
 type ConversationDetail struct {
 	AgentID      string             `json:"agent_id"`
 	SessionID    string             `json:"session_id,omitempty"`
+	Kind         string             `json:"kind,omitempty"`
 	ScopeKey     string             `json:"scope_key,omitempty"`
 	Scope        string             `json:"scope,omitempty"`
 	RuntimeMode  string             `json:"runtime_mode,omitempty"`
