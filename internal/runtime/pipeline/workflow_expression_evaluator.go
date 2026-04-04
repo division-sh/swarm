@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -72,11 +73,11 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		return false, err
 	}
 	out, _, err := program.Eval(map[string]any{
-		"entity":      cloneStringAnyMap(normalizedCtx.Entity),
-		"payload":     cloneStringAnyMap(normalizedCtx.Payload),
-		"policy":      cloneStringAnyMap(normalizedCtx.Policy),
+		"entity":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Entity)),
+		"payload":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Payload)),
+		"policy":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Policy)),
 		"accumulated": normalizedCtx.Accumulated,
-		"fan_out":     cloneStringAnyMap(normalizedCtx.FanOut),
+		"fan_out":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.FanOut)),
 	})
 	if err != nil {
 		return false, err
@@ -287,6 +288,30 @@ func cloneAccumulatedItems(value any) any {
 			out = append(out, item)
 		}
 		return out
+	default:
+		return typed
+	}
+}
+
+func workflowNormalizeCELInput(value any) any {
+	switch typed := value.(type) {
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, workflowNormalizeCELInput(item))
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = workflowNormalizeCELInput(item)
+		}
+		return out
+	case float64:
+		if math.Trunc(typed) == typed && typed <= math.MaxInt && typed >= math.MinInt {
+			return int(typed)
+		}
+		return typed
 	default:
 		return typed
 	}

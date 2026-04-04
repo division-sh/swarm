@@ -226,10 +226,10 @@ func evalDataAccumulationExpression(base BaseContext, state ExecutionState, expr
 		return nil, err
 	}
 	out, _, err := program.Eval(map[string]any{
-		"entity":  cloneStringAnyMap(base.Entity.Raw()),
-		"payload": cloneStringAnyMap(base.Payload.Raw()),
-		"policy":  cloneStringAnyMap(base.Policy.Raw()),
-		"fan_out": cloneStringAnyMap(state.FanOut),
+		"entity":  normalizedCELInputMap(base.Entity.Raw()),
+		"payload": normalizedCELInputMap(base.Payload.Raw()),
+		"policy":  normalizedCELInputMap(base.Policy.Raw()),
+		"fan_out": normalizedCELInputMap(state.FanOut),
 	})
 	if err != nil {
 		return nil, err
@@ -267,6 +267,11 @@ func normalizeCELValue(value any) any {
 			out[key] = normalizeCELValue(item)
 		}
 		return out
+	case float64:
+		if math.Trunc(typed) == typed && typed <= math.MaxInt && typed >= math.MinInt {
+			return int(typed)
+		}
+		return typed
 	case int64:
 		return int(typed)
 	default:
@@ -274,13 +279,24 @@ func normalizeCELValue(value any) any {
 	}
 }
 
-func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) map[string]any {
+func normalizedCELInputMap(source map[string]any) map[string]any {
+	if len(source) == 0 {
+		return map[string]any{}
+	}
+	normalized, _ := normalizeCELValue(cloneStringAnyMap(source)).(map[string]any)
+	if normalized == nil {
+		return map[string]any{}
+	}
+	return normalized
+}
+
+func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) (map[string]any, error) {
 	if spec == nil {
-		return nil
+		return nil, nil
 	}
 	entries := spec.TransformEntries()
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 	payload := map[string]any{}
 	for _, entry := range entries {
@@ -289,11 +305,11 @@ func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontr
 		}
 		value, err := evalDataAccumulationExpression(base, state, entry.Value.CEL)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("payload transform target %s: %w", entry.Target, err)
 		}
 		setParsedValuePath(payload, entry.TargetPath, value)
 	}
-	return payload
+	return payload, nil
 }
 
 func nextChainDepth(current, max int) (int, error) {

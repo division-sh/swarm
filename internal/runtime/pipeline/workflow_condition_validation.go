@@ -7,7 +7,17 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
-func ValidateConditionCEL(expression string) error {
+type WorkflowConditionContext string
+
+const (
+	WorkflowConditionContextGuard      WorkflowConditionContext = "guard"
+	WorkflowConditionContextRule       WorkflowConditionContext = "rule"
+	WorkflowConditionContextOnComplete WorkflowConditionContext = "on_complete"
+	WorkflowConditionContextFilter     WorkflowConditionContext = "filter"
+	WorkflowConditionContextCount      WorkflowConditionContext = "count"
+)
+
+func ValidateConditionCEL(expression string, context WorkflowConditionContext) error {
 	expression = strings.TrimSpace(expression)
 	if expression == "" || strings.EqualFold(expression, "else") {
 		return nil
@@ -19,7 +29,7 @@ func ValidateConditionCEL(expression string) error {
 	if normalized == "" {
 		return fmt.Errorf("workflow expression is empty")
 	}
-	env, err := celValidationEnv()
+	env, err := celValidationEnv(context)
 	if err != nil {
 		return err
 	}
@@ -30,14 +40,11 @@ func ValidateConditionCEL(expression string) error {
 	return nil
 }
 
-func celValidationEnv() (*cel.Env, error) {
-	return cel.NewEnv(
+func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {
+	options := []cel.EnvOption{
 		cel.Variable("entity", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
-		cel.Variable("accumulated", cel.DynType),
-		cel.Variable("fan_out", cel.DynType),
-		cel.Variable("item", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -46,10 +53,20 @@ func celValidationEnv() (*cel.Env, error) {
 				cel.FunctionBinding(workflowExpressionCountGE),
 			),
 		),
-	)
+	}
+	switch context {
+	case WorkflowConditionContextOnComplete:
+		options = append(options, cel.Variable("accumulated", cel.DynType))
+	case WorkflowConditionContextFilter, WorkflowConditionContextCount:
+		options = append(options,
+			cel.Variable("accumulated", cel.DynType),
+			cel.Variable("item", cel.DynType),
+		)
+	}
+	return cel.NewEnv(options...)
 }
 
-func WorkflowConditionMissingRecognizedPrefix(expression string) bool {
+func WorkflowConditionMissingRecognizedPrefix(expression string, context WorkflowConditionContext) bool {
 	expression = strings.TrimSpace(expression)
 	if expression == "" || strings.EqualFold(expression, "else") {
 		return false
@@ -58,18 +75,26 @@ func WorkflowConditionMissingRecognizedPrefix(expression string) bool {
 	case "true", "false", "null":
 		return false
 	}
-	for _, prefix := range []string{
-		"payload.",
-		"entity.",
-		"policy.",
-		"accumulated.",
-		"fan_out.",
-		"item.",
-		"query_entities(",
-	} {
+	for _, prefix := range workflowConditionRecognizedPrefixes(context) {
 		if strings.Contains(expression, prefix) {
 			return false
 		}
 	}
 	return true
+}
+
+func workflowConditionRecognizedPrefixes(context WorkflowConditionContext) []string {
+	prefixes := []string{
+		"payload.",
+		"entity.",
+		"policy.",
+		"query_entities(",
+	}
+	switch context {
+	case WorkflowConditionContextOnComplete:
+		prefixes = append(prefixes, "accumulated.")
+	case WorkflowConditionContextFilter, WorkflowConditionContextCount:
+		prefixes = append(prefixes, "accumulated.", "item.")
+	}
+	return prefixes
 }

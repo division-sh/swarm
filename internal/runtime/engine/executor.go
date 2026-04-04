@@ -800,7 +800,10 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 func (e *Executor) stepTransform(frame *executionFrame) error {
 	// Resolve payload transforms against the current execution context so
 	// data_accumulation and rule-selected writes are visible to emitted payloads.
-	transformed := payloadTransform(e.currentContext(frame), frame.state, frame.req.Handler.PayloadTransform)
+	transformed, err := payloadTransform(e.currentContext(frame), frame.state, frame.req.Handler.PayloadTransform)
+	if err != nil {
+		return err
+	}
 	if len(transformed) == 0 {
 		return nil
 	}

@@ -645,7 +645,7 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 			},
 		}},
 	}, stubEvaluator{bools: map[string]bool{
-		"payload.score > 5":   true,
+		"payload.score > 5":      true,
 		"entity.allowed == true": true,
 	}})
 	if err != nil {
@@ -994,6 +994,45 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	ctx, ok := payload["discovery_context"].(map[string]any)
 	if !ok || ctx["source"] != "corpus" {
 		t.Fatalf("discovery_context = %#v", payload["discovery_context"])
+	}
+}
+
+func TestExecutor_PayloadTransformCELFailureReturnsError(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "vertical-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event: events.Event{
+			ID:      "evt-1",
+			Type:    "vertical.discovered",
+			Payload: json.RawMessage(`{"mode":"corpus"}`),
+		},
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			PayloadTransform: &runtimecontracts.PayloadTransformSpec{
+				Fields: map[string]string{
+					"missing": "payload.discovery_context.source",
+				},
+			},
+			Emits: runtimecontracts.EventEmission{Single: "scoring.requested"},
+		},
+		State: StateSnapshot{CurrentState: "pending", Metadata: map[string]any{}, StateBuckets: map[string]any{}},
+	})
+	if err == nil {
+		t.Fatal("expected payload transform CEL failure to return an error")
+	}
+	if !strings.Contains(err.Error(), "payload transform target missing") {
+		t.Fatalf("error = %v, want payload transform target context", err)
 	}
 }
 

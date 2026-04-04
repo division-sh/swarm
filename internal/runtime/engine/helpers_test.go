@@ -105,13 +105,16 @@ func TestSetValuePathAndPayloadTransform(t *testing.T) {
 		Payload: values.Wrap(map[string]any{"score": 9}),
 	}
 	state := ExecutionState{}
-	transformed := payloadTransform(base, state, &runtimecontracts.PayloadTransformSpec{
+	transformed, err := payloadTransform(base, state, &runtimecontracts.PayloadTransformSpec{
 		Mappings: map[string]string{
 			"nested.score":   "payload.score",
 			"nested.state":   "entity.current_state",
 			"literal.string": `"hello"`,
 		},
 	})
+	if err != nil {
+		t.Fatalf("payloadTransform(...) error = %v", err)
+	}
 	nested, ok := transformed["nested"].(map[string]any)
 	if !ok {
 		t.Fatalf("nested transform missing: %#v", transformed)
@@ -125,6 +128,24 @@ func TestSetValuePathAndPayloadTransform(t *testing.T) {
 	literal, ok := transformed["literal"].(map[string]any)
 	if !ok || literal["string"] != "hello" {
 		t.Fatalf("literal transform wrong: %#v", transformed)
+	}
+}
+
+func TestPayloadTransform_NormalizesWholeNumberJSONInputs(t *testing.T) {
+	base := BaseContext{
+		Payload: values.Wrap(map[string]any{"raw_score": 25.0}),
+	}
+	transformed, err := payloadTransform(base, ExecutionState{}, &runtimecontracts.PayloadTransformSpec{
+		Entries: []runtimecontracts.TransformSpec{{
+			Target: "score",
+			Value:  runtimecontracts.CELExpression("payload.raw_score * 2"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("payloadTransform(...) error = %v", err)
+	}
+	if got := transformed["score"]; got != 50 {
+		t.Fatalf("score = %#v, want 50", got)
 	}
 }
 
