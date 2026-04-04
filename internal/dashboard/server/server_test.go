@@ -81,6 +81,15 @@ type stubObservability struct {
 	incidents   []incidentRecord
 }
 
+type stubConversationCaps struct {
+	caps store.StoreSchemaCapabilities
+	err  error
+}
+
+func (s stubConversationCaps) ResolveSchemaCapabilities(context.Context) (store.StoreSchemaCapabilities, error) {
+	return s.caps, s.err
+}
+
 func (s stubObservability) ListEvents(context.Context, EventFilter, int) ([]eventRecord, error) {
 	return s.events, nil
 }
@@ -391,12 +400,12 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
 			Turns:      store.SchemaFlavorCanonical,
 			TurnBlocks: false,
 		},
-	})
+	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief","last_turn":{"parse_ok":true},"provider_session_id":"sess-1"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
@@ -471,12 +480,12 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
 		Conversations: store.ConversationSchemaCapabilities{
 			Turns:      store.SchemaFlavorCanonical,
 			TurnBlocks: true,
 		},
-	})
+	}})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
@@ -539,7 +548,7 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{})
+	reader := NewSQLConversationReader(db, stubConversationCaps{})
 	mock.ExpectQuery("SELECT\\s+session_id::text,.*FROM agent_sessions").
 		WithArgs("missing-agent").
 		WillReturnError(sql.ErrNoRows)
@@ -563,7 +572,7 @@ func TestSQLConversationReader_GetSkipsTurnsWithoutCapability(t *testing.T) {
 	}
 	defer db.Close()
 
-	reader := NewSQLConversationReader(db, store.StoreSchemaCapabilities{})
+	reader := NewSQLConversationReader(db, stubConversationCaps{})
 	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
 	summaryState := `{"summary":"brief"}`
 	messagePayload := `[{"role":"assistant","content":"hello"}]`

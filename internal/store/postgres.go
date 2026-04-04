@@ -54,11 +54,7 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
-	if err := s.DB.PingContext(ctx); err != nil {
-		return err
-	}
-	_, err := s.BindSchemaCapabilities(ctx)
-	return err
+	return s.DB.PingContext(ctx)
 }
 
 func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTableDDL) error {

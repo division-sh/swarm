@@ -252,6 +252,10 @@ func (s *PostgresStore) SchemaCapabilities() StoreSchemaCapabilities {
 	return s.schemaCaps
 }
 
+func (s *PostgresStore) ResolveSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
+	return s.schemaCapabilities(ctx)
+}
+
 func unsupportedSchemaCapability(subject string, flavor SchemaFlavor) error {
 	switch flavor {
 	case SchemaFlavorUnavailable:
