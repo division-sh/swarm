@@ -315,7 +315,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 		item.StorageRef = strings.TrimSpace(flowInstance)
 		item.InstanceID = workflowInstanceLogicalID(item.InstanceID, item.Metadata)
 		item.TransitionHistory = workflowInstanceTransitionHistory(item.Metadata)
-		timers, err := s.loadWorkflowTimersSpec(ctx, workflowInstanceRowID(item.StorageRef))
+		timers, err := s.loadWorkflowTimersSpec(ctx, runtimeflowidentity.EntityID(item.StorageRef))
 		if err != nil {
 			return nil, err
 		}
@@ -763,38 +763,15 @@ func workflowInstanceLogicalID(fallback string, metadata map[string]any) string 
 }
 
 func workflowInstanceLookupKeys(ref string) []string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil
-	}
-	keys := make([]string, 0, 2)
-	if parsed, err := uuid.Parse(ref); err == nil {
-		keys = append(keys, parsed.String())
-	}
-	if rowID := workflowInstanceRowID(ref); rowID != "" && !containsString(keys, rowID) {
-		keys = append(keys, rowID)
-	}
-	return keys
+	return runtimeflowidentity.LookupKeys(ref)
 }
 
 func workflowInstanceRowID(ref string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ""
-	}
-	if strings.Contains(ref, "/") {
-		return runtimeflowidentity.EntityID(ref)
-	}
-	if !strings.Contains(ref, "/") {
-		if parsed, err := uuid.Parse(ref); err == nil {
-			return parsed.String()
-		}
-	}
-	return uuid.NewSHA1(workflowInstancePathNamespace, []byte(ref)).String()
+	return runtimeflowidentity.EntityID(ref)
 }
 
 func FlowInstanceEntityID(ref string) string {
-	return workflowInstanceRowID(ref)
+	return runtimeflowidentity.EntityID(ref)
 }
 
 func containsString(items []string, target string) bool {

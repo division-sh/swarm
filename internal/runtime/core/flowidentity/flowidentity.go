@@ -8,6 +8,8 @@ import (
 	"swarm/internal/runtime/semanticview"
 )
 
+var flowInstanceEntityNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("flow-instance-entity"))
+
 type Identity struct {
 	TemplateID   string
 	ScopeKey     string
@@ -42,17 +44,38 @@ func InstancePath(source semanticview.Source, flowID, instanceID string) string 
 	}
 }
 
-func EntityID(instancePath string) string {
-	ref := strings.Trim(strings.TrimSpace(instancePath), "/")
+func normalizeRef(ref string) string {
+	return strings.Trim(strings.TrimSpace(ref), "/")
+}
+
+func EntityID(ref string) string {
+	ref = normalizeRef(ref)
 	if ref == "" {
 		return ""
 	}
-	namespace := uuid.NewSHA1(uuid.NameSpaceOID, []byte("flow-instance-entity"))
-	return uuid.NewSHA1(namespace, []byte(ref)).String()
+	if parsed, err := uuid.Parse(ref); err == nil {
+		return parsed.String()
+	}
+	return uuid.NewSHA1(flowInstanceEntityNamespace, []byte(ref)).String()
+}
+
+func LookupKeys(ref string) []string {
+	ref = normalizeRef(ref)
+	if ref == "" {
+		return nil
+	}
+	keys := make([]string, 0, 2)
+	if parsed, err := uuid.Parse(ref); err == nil {
+		keys = append(keys, parsed.String())
+	}
+	if entityID := EntityID(ref); entityID != "" && !contains(keys, entityID) {
+		keys = append(keys, entityID)
+	}
+	return keys
 }
 
 func LogicalInstanceID(instancePath string) string {
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	instancePath = normalizeRef(instancePath)
 	if instancePath == "" {
 		return ""
 	}
@@ -77,7 +100,7 @@ func Derive(source semanticview.Source, flowID, instanceID string) Identity {
 }
 
 func SemanticScopeFromInstancePath(instancePath string) string {
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	instancePath = normalizeRef(instancePath)
 	if instancePath == "" {
 		return ""
 	}
@@ -128,4 +151,14 @@ func OwnedByScope(ownerScope, targetInstancePath string) bool {
 		return true
 	}
 	return ownerScope == targetScope
+}
+
+func contains(items []string, target string) bool {
+	target = strings.TrimSpace(target)
+	for _, item := range items {
+		if strings.TrimSpace(item) == target {
+			return true
+		}
+	}
+	return false
 }
