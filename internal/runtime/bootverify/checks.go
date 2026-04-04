@@ -436,8 +436,9 @@ func (c *checkerContext) conditionExpressions() []Finding {
 					})
 				}
 			}
-			for _, expr := range handlerConditions(handler) {
-				if conditionMissingRecognizedPrefixLocal(expr) {
+			for _, cond := range handlerConditions(handler) {
+				expr := cond.Expression
+				if conditionMissingRecognizedPrefixLocal(expr, cond.Context) {
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
 						CheckID:  "condition_expression_validation",
 						Severity: "error",
@@ -445,7 +446,7 @@ func (c *checkerContext) conditionExpressions() []Finding {
 						Location: nodeID,
 					})
 				}
-				if err := validateConditionCELLocal(expr); err != nil {
+				if err := validateConditionCELLocal(expr, cond.Context); err != nil {
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
 						CheckID:  "condition_expression_validation",
 						Severity: "error",
@@ -1435,8 +1436,8 @@ func (c *checkerContext) conditionPolicyAlignment() []Finding {
 		resolvedPolicy := policyValueMap(c.source.ResolvedPolicyForNode(nodeID))
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerConditions(handler) {
-				for _, ref := range policyReferences(expr) {
+			for _, cond := range handlerConditions(handler) {
+				for _, ref := range policyReferences(cond.Expression) {
 					if policyFieldExists(resolvedPolicy, ref) {
 						continue
 					}
@@ -1462,8 +1463,8 @@ func (c *checkerContext) conditionPayloadAlignment() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			payloadFields := eventPayloadFields(c.source, eventType)
-			for _, expr := range handlerConditions(handler) {
-				for _, ref := range payloadReferences(expr) {
+			for _, cond := range handlerConditions(handler) {
+				for _, ref := range payloadReferences(cond.Expression) {
 					if len(payloadFields) > 0 && !payloadFieldExists(payloadFields, ref) {
 						c.conditionPayloadFindings = append(c.conditionPayloadFindings, Finding{
 							CheckID:  "condition_payload_alignment",
@@ -2663,38 +2664,69 @@ type expressionReference struct {
 	Expression string
 }
 
-func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []string {
-	out := make([]string, 0, 8)
+type handlerCondition struct {
+	Expression string
+	Context    runtimepipeline.WorkflowConditionContext
+}
+
+func handlerConditions(handler runtimecontracts.SystemNodeEventHandler) []handlerCondition {
+	out := make([]handlerCondition, 0, 10)
 	if handler.Guard != nil {
 		if check := strings.TrimSpace(handler.Guard.Check); check != "" {
-			out = append(out, check)
+			out = append(out, handlerCondition{
+				Expression: check,
+				Context:    runtimepipeline.WorkflowConditionContextGuard,
+			})
 		}
 		for _, item := range handler.Guard.Checks {
 			if check := strings.TrimSpace(item.Check); check != "" {
-				out = append(out, check)
+				out = append(out, handlerCondition{
+					Expression: check,
+					Context:    runtimepipeline.WorkflowConditionContextGuard,
+				})
 			}
 		}
 	}
 	for _, rule := range handler.Rules {
 		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-			out = append(out, condition)
+			out = append(out, handlerCondition{
+				Expression: condition,
+				Context:    runtimepipeline.WorkflowConditionContextRule,
+			})
 		}
 	}
 	for _, rule := range handler.OnComplete {
 		if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-			out = append(out, condition)
+			out = append(out, handlerCondition{
+				Expression: condition,
+				Context:    runtimepipeline.WorkflowConditionContextOnComplete,
+			})
 		}
 	}
 	if handler.Accumulate != nil {
 		for _, rule := range handler.Accumulate.OnComplete {
 			if condition := strings.TrimSpace(rule.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-				out = append(out, condition)
+				out = append(out, handlerCondition{
+					Expression: condition,
+					Context:    runtimepipeline.WorkflowConditionContextOnComplete,
+				})
 			}
 		}
 	}
 	if handler.Filter != nil {
 		if condition := strings.TrimSpace(handler.Filter.Condition); condition != "" {
-			out = append(out, condition)
+			out = append(out, handlerCondition{
+				Expression: condition,
+				Context:    runtimepipeline.WorkflowConditionContextFilter,
+			})
+		}
+	}
+	if handler.Count != nil {
+		if condition := strings.TrimSpace(handler.Count.Condition); condition != "" {
+			out = append(out, handlerCondition{
+				Expression: condition,
+				Context:    runtimepipeline.WorkflowConditionContextCount,
+			})
 		}
 	}
 	return out
@@ -3546,12 +3578,12 @@ func handlerGuardOnFailLocal(spec *runtimecontracts.GuardSpec) string {
 	return strings.TrimSpace(spec.OnFail)
 }
 
-func conditionMissingRecognizedPrefixLocal(expression string) bool {
-	return runtimepipeline.WorkflowConditionMissingRecognizedPrefix(expression)
+func conditionMissingRecognizedPrefixLocal(expression string, context runtimepipeline.WorkflowConditionContext) bool {
+	return runtimepipeline.WorkflowConditionMissingRecognizedPrefix(expression, context)
 }
 
-func validateConditionCELLocal(expression string) error {
-	return runtimepipeline.ValidateConditionCEL(expression)
+func validateConditionCELLocal(expression string, context runtimepipeline.WorkflowConditionContext) error {
+	return runtimepipeline.ValidateConditionCEL(expression, context)
 }
 
 func participantExistsLocal(source semanticview.Source, participant string) bool {

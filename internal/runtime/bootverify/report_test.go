@@ -441,6 +441,50 @@ func TestRun_MapsBareConditionToConditionExpressionValidation(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsFanOutNamespaceInGuardConditions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Guard: &runtimecontracts.GuardSpec{Check: "fan_out.count > 0"},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "condition_expression_validation", "fan_out.count > 0") {
+		t.Fatalf("expected fan_out guard condition to fail validation, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsItemNamespaceOutsideFilterConditions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Rules: []runtimecontracts.HandlerRuleEntry{{
+							Condition: "item.score > 0",
+						}},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "condition_expression_validation", "item.score > 0") {
+		t.Fatalf("expected rule item condition to fail validation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PreservesPermissionMismatchWarningsDuringMigration(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-permission-tool-mismatch")
 

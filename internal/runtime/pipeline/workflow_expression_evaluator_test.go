@@ -17,8 +17,23 @@ func TestNormalizeWorkflowExpressionStringLiterals(t *testing.T) {
 }
 
 func TestValidateConditionCEL_RequiresExplicitScope(t *testing.T) {
-	if err := ValidateConditionCEL(`entity.priority == "high" && payload.decision == approve`); err == nil {
+	if err := ValidateConditionCEL(`entity.priority == "high" && payload.decision == approve`, WorkflowConditionContextGuard); err == nil {
 		t.Fatal("expected unscoped identifier to fail validation")
+	}
+}
+
+func TestValidateConditionCEL_RejectsFanOutOutsideDataAccumulationExpressions(t *testing.T) {
+	if err := ValidateConditionCEL(`fan_out.count > 0`, WorkflowConditionContextGuard); err == nil {
+		t.Fatal("expected fan_out to be rejected in guard conditions")
+	}
+}
+
+func TestValidateConditionCEL_AllowsItemOnlyInFilterLikeContexts(t *testing.T) {
+	if err := ValidateConditionCEL(`item.score > 50`, WorkflowConditionContextFilter); err != nil {
+		t.Fatalf("expected filter item scope to validate, got %v", err)
+	}
+	if err := ValidateConditionCEL(`item.score > 50`, WorkflowConditionContextRule); err == nil {
+		t.Fatal("expected item scope to be rejected in rule conditions")
 	}
 }
 
