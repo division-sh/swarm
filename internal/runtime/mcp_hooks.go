@@ -164,6 +164,7 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 	}
 	logger.Log(ctx, RuntimeLogEntry{
 		Level:     strings.ToLower(strings.TrimSpace(level)),
+		Message:   runtimeMCPMessage(action, detail, errText),
 		Component: "mcp-gateway",
 		Action:    strings.TrimSpace(action),
 		AgentID:   strings.TrimSpace(agentID),
@@ -175,4 +176,62 @@ func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, ag
 
 func runtimeMCPAfterToolSuccess(logger *RuntimeLogger, ctx context.Context, r *http.Request, toolName string) {
 	_, _, _, _ = logger, ctx, r, toolName
+}
+
+func runtimeMCPMessage(action string, detail map[string]any, errText string) string {
+	action = strings.TrimSpace(action)
+	toolName := strings.TrimSpace(runtimeMCPDetailString(detail, "tool_name"))
+	switch action {
+	case "tool.authorize_failed":
+		return "Tool gateway authorization failed"
+	case "mcp.authorize_failed":
+		return "MCP authorization failed"
+	case "mcp.tools.call.invalid":
+		return "MCP tools/call request was invalid"
+	case "tool.context_error":
+		return "Tool gateway context resolution failed"
+	case "mcp.tools.call.context_error":
+		return "MCP tool context resolution failed"
+	case "tool.execute.denied":
+		if toolName != "" {
+			return "Tool gateway denied execution for " + toolName
+		}
+		return "Tool gateway denied tool execution"
+	case "mcp.tools.call.denied":
+		if toolName != "" {
+			return "MCP tool call was denied for " + toolName
+		}
+		return "MCP tool call was denied"
+	case "mcp.tools.call.exec_error":
+		if toolName != "" {
+			return "MCP tool execution failed for " + toolName
+		}
+		return "MCP tool execution failed"
+	case "mcp.tools.call.success":
+		if toolName != "" {
+			return "MCP tool execution succeeded for " + toolName
+		}
+		return "MCP tool execution succeeded"
+	case "mcp.context.fallback_used":
+		return "MCP context fallback was used"
+	case "mcp.context.fallback_blocked":
+		return "MCP context fallback was blocked"
+	case "tool.context.fallback_used":
+		return "Tool context fallback was used"
+	case "tool.context.fallback_blocked":
+		return "Tool context fallback was blocked"
+	default:
+		if strings.TrimSpace(errText) != "" {
+			return "MCP gateway runtime log recorded an error"
+		}
+		return "MCP gateway runtime log recorded an event"
+	}
+}
+
+func runtimeMCPDetailString(detail map[string]any, key string) string {
+	if len(detail) == 0 {
+		return ""
+	}
+	value, _ := detail[strings.TrimSpace(key)].(string)
+	return strings.TrimSpace(value)
 }

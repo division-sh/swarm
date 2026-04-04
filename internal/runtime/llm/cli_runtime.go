@@ -180,7 +180,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
-			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", s.AgentID, s.ID, entityID, map[string]any{
+			logPublisherRuntime(ctx, r.events, "warn", "session_lease_heartbeat_failed", "Refreshing the CLI session lease heartbeat failed", s.AgentID, s.ID, entityID, map[string]any{
 				"runtime_mode": resolved.RuntimeMode,
 				"scope_key":    resolved.ScopeKey,
 			}, heartbeatErr)
@@ -394,7 +394,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		oldSessionID := strings.TrimSpace(s.ProviderSessionID)
 		if !resolved.Stateless {
 			if err := adoptRegistrySessionID(ctx, r.sessions, s.AgentID, resolved.RuntimeMode, lease.LockOwner, sid, resolved.ScopeKey); err != nil {
-				logPublisherRuntime(ctx, r.events, "warn", "adopt_cli_provider_session_failed", s.AgentID, s.ID, entityID, map[string]any{
+				logPublisherRuntime(ctx, r.events, "warn", "adopt_cli_provider_session_failed", "Adopting the CLI provider session failed", s.AgentID, s.ID, entityID, map[string]any{
 					"old_provider_session_id": oldSessionID,
 					"new_provider_session_id": sid,
 				}, err)
@@ -438,7 +438,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		if err := r.budget.RecordEntityLLMUsage(ctx, entityID, s.AgentID, "cli_test", usage, false, map[string]any{
 			"session_id": s.ID,
 		}); err != nil {
-			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", s.AgentID, s.ID, entityID, nil, err)
+			logPublisherRuntime(ctx, r.events, "warn", "record_cli_llm_usage_failed", "Recording CLI LLM usage failed", s.AgentID, s.ID, entityID, nil, err)
 		}
 	}
 

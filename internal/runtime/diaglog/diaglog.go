@@ -10,6 +10,7 @@ import (
 
 type RunEntry struct {
 	Level       string
+	Message     string
 	Component   string
 	Action      string
 	EventID     string
@@ -20,6 +21,7 @@ type RunEntry struct {
 	Correlation map[string]string
 	Detail      any
 	Error       string
+	StackTrace  string
 	DurationUS  int
 }
 

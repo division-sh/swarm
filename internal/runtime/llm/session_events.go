@@ -16,7 +16,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		return
 	}
 	if err := publisher.MarkDeliveryInProgress(ctx, session.AgentID, session.ID); err != nil {
-		logPublisherRuntime(ctx, publisher, "error", "mark_delivery_in_progress_failed", session.AgentID, session.ID, "", nil, err)
+		logPublisherRuntime(ctx, publisher, "error", "mark_delivery_in_progress_failed", "Marking the agent delivery in progress failed", session.AgentID, session.ID, "", nil, err)
 	}
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	payload := map[string]any{
@@ -31,7 +31,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		logPublisherRuntime(ctx, publisher, "error", "marshal_agent_started_payload_failed", session.AgentID, session.ID, "", map[string]any{
+		logPublisherRuntime(ctx, publisher, "error", "marshal_agent_started_payload_failed", "Marshalling the agent-started payload failed", session.AgentID, session.ID, "", map[string]any{
 			"event_type": strings.TrimSpace(string(eventType)),
 		}, err)
 		return
@@ -47,7 +47,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		evt = evt.WithEntityID(entityID)
 	}
 	if err := publisher.Publish(ctx, evt); err != nil {
-		logPublisherRuntime(ctx, publisher, "error", "publish_agent_started_failed", session.AgentID, session.ID, evt.EntityID(), map[string]any{
+		logPublisherRuntime(ctx, publisher, "error", "publish_agent_started_failed", "Publishing the agent-started event failed", session.AgentID, session.ID, evt.EntityID(), map[string]any{
 			"event_type": strings.TrimSpace(string(eventType)),
 		}, err)
 	}

@@ -15,6 +15,7 @@ import (
 	models "swarm/internal/runtime/core/actors"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -114,7 +115,7 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err != nil {
 		return nil, NewRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.entity_id", false, err.Error())
 	}
-	if err := enforceEntityWriteOwnership(ctx, db, source, actor, entityID); err != nil {
+	if err := enforceEntityWriteOwnership(ctx, db, source, actor, entityID, e.runtimeLogSink()); err != nil {
 		return nil, err
 	}
 	fieldName := strings.TrimSpace(asString(payload["field"]))
@@ -199,7 +200,7 @@ func nullableJSONBytes(raw []byte) any {
 	return json.RawMessage(append([]byte(nil), raw...))
 }
 
-func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanticview.Source, actor models.AgentConfig, entityID string) error {
+func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanticview.Source, actor models.AgentConfig, entityID string, logger runtimeToolLogSink) error {
 	flowRoot := actorFlowOwnershipRoot(source, actor.ID)
 	if flowRoot == "" || db == nil {
 		return nil
@@ -214,6 +215,27 @@ func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanti
 	targetFlow := strings.Trim(flowInstance.String, "/")
 	if targetFlow == "" || entityFlowOwnedBy(flowRoot, targetFlow) {
 		return nil
+	}
+	if logger != nil {
+		logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level:     "warn",
+			Message:   "Entity write was denied because the target entity belongs to a different flow",
+			Component: "tool-executor",
+			Action:    "entity_write_denied",
+			AgentID:   strings.TrimSpace(actor.ID),
+			EntityID:  strings.TrimSpace(entityID),
+			Detail: map[string]any{
+				"denial_layer":       "executor",
+				"denial_reason":      "cross_flow_write_forbidden",
+				"tool_name":          "save_entity_field",
+				"actor_id":           strings.TrimSpace(actor.ID),
+				"actor_role":         strings.TrimSpace(actor.Role),
+				"turn_flow":          strings.TrimSpace(flowRoot),
+				"entity_owner_flow":  targetFlow,
+				"write_target_id":    strings.TrimSpace(entityID),
+				"ownership_relation": "foreign",
+			},
+		})
 	}
 	return NewRuntimeError(
 		"cross_flow_write_forbidden",

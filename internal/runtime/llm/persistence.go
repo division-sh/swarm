@@ -21,6 +21,7 @@ type AgentTurnRecord struct {
 	AvailableTools     []string
 	ToolCalls          []ToolCall
 	EmittedEvents      []string
+	FlightRecorder     []runtimebus.FlightRecorderEntry
 	PublishDiagnostics []runtimebus.PublishDiagnostic
 	MCPServers         map[string]string
 	MCPToolsListed     []string
@@ -109,6 +110,11 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 	if len(rec.PublishDiagnostics) == 0 {
 		if eventRec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && eventRec != nil {
 			rec.PublishDiagnostics = append([]runtimebus.PublishDiagnostic(nil), eventRec.SnapshotPublishes()...)
+		}
+	}
+	if len(rec.FlightRecorder) == 0 {
+		if eventRec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && eventRec != nil {
+			rec.FlightRecorder = append([]runtimebus.FlightRecorderEntry(nil), eventRec.SnapshotFlightRecorder()...)
 		}
 	}
 	return rec

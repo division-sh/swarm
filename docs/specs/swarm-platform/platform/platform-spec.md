@@ -1854,9 +1854,8 @@ CREATE TABLE schema_version (
 - `produced_by_type`: platform
 - `payload_fields`:
   - `log_level`: string (debug, info, warn, error, fatal)
-  - `component`: string (boot, event_loop, timer_engine, agent_manager, etc.)
-  - `message`: string
-  - `details`: object (structured context)
+  - `message`: human-readable summary written by the producer; not a machine key
+  - `details`: structured source of truth; includes component, action, error, timing, and runtime context fields
   - `stack_trace`: string (for errors only)
 
 - `note`: Queryable via: SELECT * FROM events WHERE event_name = "platform.runtime_log" AND payload->>log_level = "error"

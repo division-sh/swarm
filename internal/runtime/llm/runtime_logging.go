@@ -13,7 +13,7 @@ type RuntimeLogSink interface {
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
 }
 
-func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, agentID, sessionID, entityID string, detail any, err error) {
+func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, message, agentID, sessionID, entityID string, detail any, err error) {
 	if logger == nil {
 		return
 	}
@@ -24,6 +24,7 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, ag
 	}
 	diaglog.RunLog(ctx, logger, runtimepipeline.RuntimeLogEntry{
 		Level:     strings.TrimSpace(level),
+		Message:   strings.TrimSpace(message),
 		Component: "llm-runtime",
 		Action:    strings.TrimSpace(action),
 		EventID:   strings.TrimSpace(inbound.ID),
@@ -36,7 +37,7 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level, action, ag
 	})
 }
 
-func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, action, agentID, sessionID, entityID string, detail any, err error) {
+func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, action, message, agentID, sessionID, entityID string, detail any, err error) {
 	if publisher == nil {
 		return
 	}
@@ -44,21 +45,21 @@ func logPublisherRuntime(ctx context.Context, publisher EventPublisher, level, a
 	if !ok || logger == nil {
 		return
 	}
-	logRunRuntime(ctx, logger, level, action, agentID, sessionID, entityID, detail, err)
+	logRunRuntime(ctx, logger, level, action, message, agentID, sessionID, entityID, detail, err)
 }
 
-func logSessionRuntime(ctx context.Context, sink any, action, agentID, sessionID string, detail any) {
+func logSessionRuntime(ctx context.Context, sink any, action, message, agentID, sessionID string, detail any) {
 	if logger, ok := sink.(RuntimeLogSink); ok && logger != nil {
-		logRunRuntime(ctx, logger, "info", action, agentID, sessionID, "", detail, nil)
+		logRunRuntime(ctx, logger, "info", action, message, agentID, sessionID, "", detail, nil)
 		return
 	}
 	if publisher, ok := sink.(EventPublisher); ok && publisher != nil {
-		logPublisherRuntime(ctx, publisher, "info", action, agentID, sessionID, "", detail, nil)
+		logPublisherRuntime(ctx, publisher, "info", action, message, agentID, sessionID, "", detail, nil)
 	}
 }
 
 func LogSessionRotatedForRun(ctx context.Context, sink any, agentID, runtimeMode, oldSessionID, newSessionID, scopeKey, reason string, turnCount, parseFailures int) {
-	logSessionRuntime(ctx, sink, "session_rotated", agentID, newSessionID, map[string]any{
+	logSessionRuntime(ctx, sink, "session_rotated", "LLM session was rotated", agentID, newSessionID, map[string]any{
 		"runtime_mode":   strings.TrimSpace(runtimeMode),
 		"old_session_id": strings.TrimSpace(oldSessionID),
 		"new_session_id": strings.TrimSpace(newSessionID),
@@ -70,7 +71,7 @@ func LogSessionRotatedForRun(ctx context.Context, sink any, agentID, runtimeMode
 }
 
 func LogSessionAdoptedForRun(ctx context.Context, sink any, agentID, runtimeMode, oldSessionID, newSessionID, scopeKey string) {
-	logSessionRuntime(ctx, sink, "session_adopted", agentID, newSessionID, map[string]any{
+	logSessionRuntime(ctx, sink, "session_adopted", "LLM session was adopted", agentID, newSessionID, map[string]any{
 		"runtime_mode":   strings.TrimSpace(runtimeMode),
 		"old_session_id": strings.TrimSpace(oldSessionID),
 		"new_session_id": strings.TrimSpace(newSessionID),

@@ -142,6 +142,33 @@ func (am *AgentManager) runtimeContext() context.Context {
 	return context.Background()
 }
 
+func (am *AgentManager) InFlightCount() int {
+	if am == nil {
+		return 0
+	}
+	am.inFlightMu.Lock()
+	defer am.inFlightMu.Unlock()
+	return len(am.inFlight)
+}
+
+func (am *AgentManager) WaitForQuiescence(ctx context.Context) error {
+	if am == nil {
+		return nil
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if am.InFlightCount() == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
 func (am *AgentManager) PublishEvent(ctx context.Context, evt events.Event) error {
 	if am == nil || am.bus == nil {
 		return errors.New("event bus is not configured")

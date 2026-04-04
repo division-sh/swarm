@@ -2431,9 +2431,11 @@ platform_tables:
         flow_instance or "global" depending on agent declaration.'
     agent_turns:
       description: 'Append-only per-turn agent execution audit log. Records the triggering event context, visible tools,
-        attempted tool calls, emitted event names, and sanitized request/response payloads. Used by all conversation modes.
-        For task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this
-        complements the live session with a queryable historical record.'
+        attempted tool calls, emitted event names, canonical per-turn turn_blocks, and sanitized request/response payloads.
+        turn_blocks is the ordered per-turn projection/surface for the flight recorder. It is populated from the canonical
+        platform.runtime_log stream plus turn-local publish/tool transcript context. Used by all conversation modes. For
+        task mode, this is the primary per-turn audit record (no agent_sessions row exists). For session modes, this complements
+        the live session with a queryable historical record.'
       ddl: "CREATE TABLE agent_turns (\n    turn_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \             UUID REFERENCES runs(run_id),\n    agent_id           TEXT NOT NULL,\n    session_id         UUID\
         \ NOT NULL,\n    runtime_mode       TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode IN ('task', 'session', 'session_per_entity')),\n\
@@ -2441,7 +2443,7 @@ platform_tables:
         \   UUID,\n    trigger_event_type TEXT,\n    task_id            TEXT,\n    available_tools    JSONB NOT NULL DEFAULT\
         \ '[]',\n    tool_calls         JSONB NOT NULL DEFAULT '[]',\n    emitted_events     JSONB NOT NULL DEFAULT '[]',\n\
         \    mcp_servers        JSONB NOT NULL DEFAULT '{}',\n    mcp_tools_listed   JSONB NOT NULL DEFAULT '[]',\n    mcp_tools_visible\
-        \  JSONB NOT NULL DEFAULT '[]',\n    request_payload    JSONB,\n    response_payload   JSONB,\n    parse_ok      \
+        \  JSONB NOT NULL DEFAULT '[]',\n    request_payload    JSONB,\n    response_payload   JSONB,\n    turn_blocks      JSONB NOT NULL DEFAULT '[]',\n    parse_ok      \
         \     BOOLEAN NOT NULL DEFAULT FALSE,\n    latency_ms         INTEGER NOT NULL DEFAULT 0,\n    retry_count       \
         \ INTEGER NOT NULL DEFAULT 0,\n    error              TEXT,\n    created_at         TIMESTAMPTZ NOT NULL DEFAULT\
         \ NOW(),\n    INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,\n    INDEX idx_agent_turns_session\
@@ -2636,10 +2638,14 @@ platform_tables:
       produced_by_type: platform
       payload_fields:
         log_level: string (debug, info, warn, error, fatal)
-        component: string (boot, event_loop, timer_engine, agent_manager, etc.)
-        message: string
-        details: object (structured context)
+        message: human-readable summary written by the producer; not a machine key
+        details: object (structured source of truth; includes component, action, error, timing, and runtime context fields)
         stack_trace: string (for errors only)
+      design_rules:
+      - message is for humans; details is the machine-readable source of truth
+      - component and action live in details, not as top-level runtime_log fields
+      - error text lives in details.error; message may summarize the failure but is not the raw error string
+      - readers and debug UIs should filter and render structured runtime diagnostics from details
       note: 'Queryable via: SELECT * FROM events WHERE event_name = "platform.runtime_log" AND payload->>log_level = "error"'
     pipeline_transition_encoding:
       table: event_receipts

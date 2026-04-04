@@ -56,7 +56,7 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 		}()
 		for {
 			if _, err := eb.SweepUndispatched(ctx, cfg.Lookback, cfg.Limit); err != nil {
-				eb.logRuntime(ctx, "warn", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{
+				eb.logRuntime(ctx, "warn", "Outbox sweep failed", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{
 					"lookback_seconds": int(cfg.Lookback / time.Second),
 					"limit":            cfg.Limit,
 				}, err.Error(), 0)

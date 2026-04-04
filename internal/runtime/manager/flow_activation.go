@@ -161,6 +161,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			if err := am.bus.Publish(context.Background(), autoEmitEvent); err != nil {
 				am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
 					Level:     "warn",
+					Message:   "Auto-emitting the flow activation event failed",
 					Component: "flow_activation",
 					Action:    "auto_emit_failed",
 					EventType: autoEmit,

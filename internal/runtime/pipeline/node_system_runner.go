@@ -227,6 +227,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 			if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 				logger.LogRuntime(ctx, RuntimeLogEntry{
 					Level:     "error",
+					Message:   "Persisting the system node dead letter failed",
 					Component: n.nodeID,
 					Action:    "dead_letter_persist_failed",
 					EventID:   strings.TrimSpace(evt.ID),
@@ -248,6 +249,7 @@ func (n *systemNodeRunner) emitDeadLetter(ctx context.Context, evt events.Event,
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",
+				Message:   "Publishing the system node dead letter failed",
 				Component: n.nodeID,
 				Action:    "dead_letter_publish_failed",
 				EventID:   strings.TrimSpace(evt.ID),
@@ -336,6 +338,7 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
 				Level:     "error",
+				Message:   "Marking the system node event as processed failed",
 				Component: n.nodeID,
 				Action:    "mark_processed_failed",
 				EventID:   eventID,

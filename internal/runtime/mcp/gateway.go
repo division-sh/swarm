@@ -110,7 +110,8 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := g.authorize(r); err != nil {
 		g.logMCP(r, "warn", "tool.authorize_failed", err, map[string]any{
-			"path": strings.TrimSpace(r.URL.Path),
+			"path":         strings.TrimSpace(r.URL.Path),
+			"denial_layer": "gateway",
 		})
 		WriteJSON(w, http.StatusUnauthorized, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
 		return
@@ -147,11 +148,18 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 
 	ctx, err := g.toolExecutionContext(r, actor, toolName)
 	if err != nil {
+		g.logMCP(r, "warn", "tool.context_error", err, map[string]any{
+			"tool_name": toolName,
+		})
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
 		return
 	}
 	if !toolAllowedInContext(ctx, toolName) {
 		err := g.newRuntimeError(ErrCodeToolNotAllowed, "tool.execute.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
+		g.logMCP(r, "warn", "tool.execute.denied", err, map[string]any{
+			"tool_name":    toolName,
+			"denial_layer": "gateway",
+		})
 		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: g.formatError(err)})
 		return
 	}
@@ -183,7 +191,8 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 
 	if err := g.authorize(r); err != nil {
 		g.logMCP(r, "warn", "mcp.authorize_failed", err, map[string]any{
-			"method": strings.TrimSpace(reqMethodForLog(r)),
+			"method":       strings.TrimSpace(reqMethodForLog(r)),
+			"denial_layer": "gateway",
 		})
 		WriteRPCError(w, nil, -32001, g.formatError(err))
 		return
@@ -248,8 +257,9 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		if !toolAllowedInContext(ctx, toolName) {
 			err := g.newRuntimeError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
 			g.logMCP(r, "warn", "mcp.tools.call.denied", err, map[string]any{
-				"method":    "tools/call",
-				"tool_name": toolName,
+				"method":       "tools/call",
+				"tool_name":    toolName,
+				"denial_layer": "gateway",
 			})
 			WriteRPCResult(w, req.ID, map[string]any{
 				"content": []map[string]any{{"type": "text", "text": g.formatError(err)}},

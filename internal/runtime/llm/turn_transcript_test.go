@@ -81,3 +81,43 @@ func TestBuildTurnBlocks_IncludesPublishDiagnostics(t *testing.T) {
 		t.Fatalf("publish block routed_recipients = %#v", blocks[1].Data["routed_recipients"])
 	}
 }
+
+func TestBuildTurnBlocks_IncludesSpecShapedRuntimeLogFlightRecorderEntries(t *testing.T) {
+	rec := AgentTurnRecord{
+		FlightRecorder: []runtimebus.FlightRecorderEntry{
+			{
+				Kind:     "runtime_log",
+				LogLevel: "warn",
+				Message:  "Tool execution was denied for save_entity_field",
+				Details: map[string]any{
+					"component":     "tool-executor",
+					"action":        "tool_execution_denied",
+					"tool_name":     "save_entity_field",
+					"denial_layer":  "executor",
+					"denial_reason": "cross_flow_write_forbidden",
+				},
+			},
+		},
+	}
+
+	blocks := BuildTurnBlocks(rec)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks = %#v", blocks)
+	}
+	if blocks[0].Kind != "runtime_log" {
+		t.Fatalf("kind = %q, want runtime_log", blocks[0].Kind)
+	}
+	if blocks[0].Title != "Tool execution was denied for save_entity_field" {
+		t.Fatalf("title = %q", blocks[0].Title)
+	}
+	if got := asString(blocks[0].Data["log_level"]); got != "warn" {
+		t.Fatalf("log_level = %q", got)
+	}
+	details, ok := blocks[0].Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("details = %#v", blocks[0].Data["details"])
+	}
+	if details["denial_layer"] != "executor" {
+		t.Fatalf("details.denial_layer = %#v", details["denial_layer"])
+	}
+}
