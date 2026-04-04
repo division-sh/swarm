@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -621,6 +622,28 @@ func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T)
 	}
 }
 
+func TestRun_ReportsCrossFlowPinAmbiguityWithoutEscapeHatch(t *testing.T) {
+	root := writeCrossFlowPinAmbiguityFixture(t, false)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
+		t.Fatalf("expected cross_flow_pin_ambiguity_validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsCrossFlowPinAmbiguityWithScopedEscapeHatch(t *testing.T) {
+	root := writeCrossFlowPinAmbiguityFixture(t, true)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
+		t.Fatalf("unexpected cross_flow_pin_ambiguity_validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsStatelessFlowInputPinHandlersWithoutCreateEntity(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
@@ -688,12 +711,131 @@ func TestRun_AllowsBackpropInputPinHandlersWithoutCreateEntity(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 35 {
-		t.Fatalf("bootCheckRegistry count = %d, want 35", got)
+	if got := len(bootCheckRegistry); got != 36 {
+		t.Fatalf("bootCheckRegistry count = %d, want 36", got)
 	}
 	if got := len(supplementalChecks); got != 2 {
 		t.Fatalf("supplementalChecks count = %d, want 2", got)
 	}
+}
+
+func repoRootForBootverifyTest(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
+}
+
+func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: pin-ambiguity
+version: "1.0.0"
+platform: ">=1.6.0"
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+flows:
+  - id: producer_a
+    flow: producer_a
+    mode: static
+  - id: producer_b
+    flow: producer_b
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pin-ambiguity\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	for _, flowID := range []string{"producer_a", "producer_b"} {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
+name: `+flowID+`
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: []
+  outputs:
+    events:
+      - ticket.ready
+`)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), `
+ticket.ready:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	}
+
+	subscription := "ticket.ready"
+	if scoped {
+		subscription = "producer_a/ticket.ready"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, done]
+pins:
+  inputs:
+    events:
+      - ticket.ready
+  outputs:
+    events:
+      - consumer.started
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+ticket.ready:
+  payload:
+    properties:
+      entity_id:
+        type: string
+consumer.started:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to:
+    - `+subscription+`
+  event_handlers:
+    ticket.ready:
+      create_entity: true
+      advances_to: done
+      emits: consumer.started
+`)
+
+	return root
 }
 
 func loadTier8Fixture(t *testing.T, fixture string) semanticview.Source {

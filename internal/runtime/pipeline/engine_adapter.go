@@ -617,7 +617,8 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 		out[key] = value
 	}
 	entityID := strings.TrimSpace(asString(base["entity_id"]))
-	if workflowEmitTargetsParentEntity(pc.SemanticSource(), req.FlowID.String(), eventType) {
+	if workflowEmitTargetsParentEntity(pc.SemanticSource(), req.FlowID.String(), eventType) &&
+		strings.TrimSpace(asString(req.State.Metadata["flow_path"])) != "" {
 		entityID = strings.TrimSpace(firstNonEmptyString(
 			asString(req.State.Metadata["parent_entity_id"]),
 			req.Event.EntityID(),

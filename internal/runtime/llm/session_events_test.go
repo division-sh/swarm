@@ -286,6 +286,22 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
 	recorder.Append(events.Event{Type: events.EventType("discovery/category.assessed")})
 	recorder.Append(events.Event{Type: events.EventType("discovery/scan_complete")})
+	recorder.AppendPublish(runtimebus.PublishDiagnostic{
+		EventID:   "44444444-4444-4444-4444-444444444444",
+		EventType: "discovery/category.assessed",
+		EntityID:  "22222222-2222-2222-2222-222222222222",
+		RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{
+			{
+				ID:             "scan-orchestrator",
+				Type:           "node",
+				Path:           "discovery",
+				MatchedPattern: "producer/category.assessed",
+				RouteSource:    "pin_auto_wire",
+				LocalizedEvent: "category.assessed",
+			},
+		},
+		SubscriptionRecipients: []string{"direct-agent"},
+	})
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 
 	session := &Session{
@@ -343,5 +359,14 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	}
 	if len(rec.EmittedEvents) != 2 || rec.EmittedEvents[0] != "discovery/category.assessed" || rec.EmittedEvents[1] != "discovery/scan_complete" {
 		t.Fatalf("emitted_events = %#v", rec.EmittedEvents)
+	}
+	if len(rec.PublishDiagnostics) != 1 {
+		t.Fatalf("publish_diagnostics = %#v", rec.PublishDiagnostics)
+	}
+	if rec.PublishDiagnostics[0].EventType != "discovery/category.assessed" {
+		t.Fatalf("publish_diagnostics[0].event_type = %q", rec.PublishDiagnostics[0].EventType)
+	}
+	if len(rec.PublishDiagnostics[0].RoutedRecipients) != 1 || rec.PublishDiagnostics[0].RoutedRecipients[0].LocalizedEvent != "category.assessed" {
+		t.Fatalf("publish_diagnostics[0].routed_recipients = %#v", rec.PublishDiagnostics[0].RoutedRecipients)
 	}
 }

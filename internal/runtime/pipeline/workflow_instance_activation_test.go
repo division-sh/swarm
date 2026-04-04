@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -112,6 +113,7 @@ func TestHandlerEmitPayload_UsesParentEntityForOutputPinsAndLocalEntityForIntern
 		State: WorkflowState{
 			EntityID: "ent-child",
 			Metadata: map[string]any{
+				"flow_path":        "child/inst-1",
 				"subject_id":       "ent-parent",
 				"parent_entity_id": "ent-parent",
 			},
@@ -140,6 +142,48 @@ func TestHandlerEmitPayload_UsesParentEntityForOutputPinsAndLocalEntityForIntern
 	}
 }
 
+func TestHandlerEmitPayload_RootFlowOutputUsesLocalEntity(t *testing.T) {
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `name: test
+version: 1.0.0
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`,
+		"flows/scoring/schema.yaml": `name: scoring
+pins:
+  outputs:
+    events:
+      - scoring.requested
+`,
+		"flows/scoring/nodes.yaml": `scoring-node:
+  id: scoring-node
+  execution_type: system_node
+  event_handlers: {}
+`,
+	})
+	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}}
+	trigger := workflowTriggerContext{
+		Event: events.Event{
+			Type:    events.EventType("vertical.discovered"),
+			Payload: []byte(`{"entity_id":"ent-root"}`),
+		}.WithEntityID("ent-root"),
+		State: WorkflowState{
+			EntityID: "ent-child",
+			Metadata: map[string]any{
+				"subject_id":       "ent-root",
+				"parent_entity_id": "ent-root",
+			},
+		},
+	}
+
+	payload := pc.handlerEmitPayload(withPipelineFlowScope(context.Background(), "scoring"), trigger, "scoring/scoring.requested")
+	if got := asString(payload["entity_id"]); got != "ent-child" {
+		t.Fatalf("root flow output payload entity_id = %q, want ent-child", got)
+	}
+}
+
 func loadWorkflowFixtureSource(t *testing.T, fixture string) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadWorkflowFixtureBundle(t, fixture))
@@ -156,3 +200,34 @@ func loadWorkflowFixtureBundle(t *testing.T, fixture string) *runtimecontracts.W
 	}
 	return bundle
 }
+
+func loadWorkflowTempSource(t *testing.T, files map[string]string) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	for rel, body := range files {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	if err != nil {
+		t.Fatalf("load temp bundle: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+type staticSemanticWorkflowModule struct {
+	source semanticview.Source
+}
+
+func (m staticSemanticWorkflowModule) SemanticSource() semanticview.Source { return m.source }
+func (staticSemanticWorkflowModule) WorkflowDefinition() *WorkflowDefinition { return nil }
+func (staticSemanticWorkflowModule) WorkflowNodes() []WorkflowNode          { return nil }
+func (staticSemanticWorkflowModule) GuardRegistry() GuardRegistry           { return nil }
+func (staticSemanticWorkflowModule) ActionRegistry() ActionRegistry         { return nil }

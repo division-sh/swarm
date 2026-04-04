@@ -187,7 +187,7 @@ func IsEmitToolAllowedForRole(role, toolName string) bool {
 		return false
 	}
 	for _, evt := range runtimeauthority.Active().ProducerEventsForRole(role) {
-		if strings.TrimSpace(evt) == eventType {
+		if emitEventTypesEquivalent(evt, eventType) {
 			return true
 		}
 	}
@@ -200,7 +200,7 @@ func IsEmitToolAllowedForConfig(raw json.RawMessage, toolName string) bool {
 		return false
 	}
 	for _, configured := range configuredEmitEvents(raw) {
-		if strings.TrimSpace(configured) == eventType {
+		if emitEventTypesEquivalent(configured, eventType) {
 			return true
 		}
 	}
@@ -210,6 +210,18 @@ func IsEmitToolAllowedForConfig(raw json.RawMessage, toolName string) bool {
 func eventTypeFromEmitToolName(toolName string) (string, bool) {
 	ensureEventSchemaRegistry()
 	return EventTypeFromEmitToolName(normalizeNativeToolName(toolName), emitToolToEvent)
+}
+
+func emitEventTypesEquivalent(left, right string) bool {
+	left = strings.TrimSpace(left)
+	right = strings.TrimSpace(right)
+	if left == "" || right == "" {
+		return false
+	}
+	if left == right {
+		return true
+	}
+	return localEmitEventType(left) == localEmitEventType(right)
 }
 
 func schemaForEventType(eventType string) EmitSchema {

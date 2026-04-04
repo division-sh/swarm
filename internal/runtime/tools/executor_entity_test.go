@@ -214,6 +214,64 @@ func TestEntityTools_SaveEntityField_JSONBRoundTripsPlainTextWithoutBase64(t *te
 	}
 }
 
+func TestEntityTools_SaveEntityField_LogsMutationRow(t *testing.T) {
+	ctx, exec, db := newEntityToolTestHarness(t)
+	entityID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"flow_instance": "review/inst-1",
+		"fields": map[string]any{
+			"status": "open",
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "status",
+		"value":     "closed",
+	}); err != nil {
+		t.Fatalf("save_entity_field: %v", err)
+	}
+
+	var (
+		field      string
+		oldValue   string
+		newValue   string
+		writerType string
+		step       string
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(field, ''),
+			COALESCE(old_value::text, ''),
+			COALESCE(new_value::text, ''),
+			COALESCE(writer_type, ''),
+			COALESCE(handler_step, '')
+		FROM entity_mutations
+		WHERE entity_id = $1::uuid AND field = 'status'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, entityID).Scan(&field, &oldValue, &newValue, &writerType, &step); err != nil {
+		t.Fatalf("load entity mutation: %v", err)
+	}
+	if field != "status" {
+		t.Fatalf("mutation field = %q, want status", field)
+	}
+	if oldValue != `"open"` {
+		t.Fatalf("mutation old_value = %s, want \"open\"", oldValue)
+	}
+	if newValue != `"closed"` {
+		t.Fatalf("mutation new_value = %s, want \"closed\"", newValue)
+	}
+	if writerType != "agent" {
+		t.Fatalf("mutation writer_type = %q, want agent", writerType)
+	}
+	if step != "save_entity_field" {
+		t.Fatalf("mutation handler_step = %q, want save_entity_field", step)
+	}
+}
+
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 	ctx, exec, db := newEntityToolTestHarness(t)
 	entityID := uuid.NewString()

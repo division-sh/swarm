@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	"swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
@@ -389,11 +390,24 @@ func (eb *EventBus) buildDeliveryPlan(ctx context.Context, evt events.Event) (ev
 	if evt.Type == events.EventType("platform.runtime_log") {
 		return plan, nil
 	}
+	plan.RoutedRecipients = eb.resolveRoutedSubscribers(string(evt.Type))
+	plan.SubscribedRecipients = eb.resolveSubscribedRecipients(string(evt.Type))
 	plan.Recipients = uniqueStrings(append(
-		eb.resolveRoutedRecipients(string(evt.Type)),
-		eb.resolveSubscribedRecipients(string(evt.Type))...,
+		subscriberIDs(plan.RoutedRecipients),
+		plan.SubscribedRecipients...,
 	))
+	plan.ExtraDetail = map[string]any{
+		"routed_recipients_count":       len(plan.RoutedRecipients),
+		"subscription_recipients_count": len(plan.SubscribedRecipients),
+	}
+	if described := publishDiagnosticRecipientMaps(eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients)); len(described) > 0 {
+		plan.ExtraDetail["routed_recipients"] = described
+	}
+	if direct := uniqueStrings(plan.SubscribedRecipients); len(direct) > 0 {
+		plan.ExtraDetail["subscription_recipients"] = direct
+	}
 	plan.PersistedRecipients = eb.persistableRecipients(ctx, plan.Recipients)
+	eb.recordPublishDiagnostic(ctx, evt, plan)
 	return plan, nil
 }
 
@@ -426,6 +440,126 @@ func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipient
 		detail[k] = v
 	}
 	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", 0)
+}
+
+func subscriberIDs(in []Subscriber) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, subscriber := range in {
+		id := strings.TrimSpace(subscriber.ID)
+		if id == "" {
+			continue
+		}
+		out = append(out, id)
+	}
+	return uniqueStrings(out)
+}
+
+func publishDiagnosticRecipientMaps(in []PublishDiagnosticRecipient) []map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(in))
+	for _, recipient := range in {
+		item := map[string]any{
+			"id": recipient.ID,
+		}
+		if v := strings.TrimSpace(recipient.Type); v != "" {
+			item["type"] = v
+		}
+		if v := strings.TrimSpace(recipient.Path); v != "" {
+			item["path"] = v
+		}
+		if v := strings.TrimSpace(recipient.MatchedPattern); v != "" {
+			item["matched_pattern"] = v
+		}
+		if v := strings.TrimSpace(recipient.RouteSource); v != "" {
+			item["route_source"] = v
+		}
+		if v := strings.TrimSpace(recipient.LocalizedEvent); v != "" {
+			item["localized_event"] = v
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (eb *EventBus) describeSubscribersForEvent(eventType string, in []Subscriber) []PublishDiagnosticRecipient {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]PublishDiagnosticRecipient, 0, len(in))
+	for _, subscriber := range in {
+		id := strings.TrimSpace(subscriber.ID)
+		if id == "" {
+			continue
+		}
+		item := PublishDiagnosticRecipient{
+			ID:             id,
+			Type:           strings.TrimSpace(subscriber.Type),
+			Path:           strings.TrimSpace(subscriber.Path),
+			MatchedPattern: strings.TrimSpace(subscriber.MatchPattern),
+			RouteSource:    strings.TrimSpace(subscriber.RouteSource),
+		}
+		if localized := eb.localizedSubscriberEvent(eventType, subscriber); localized != "" {
+			item.LocalizedEvent = localized
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscriber) string {
+	if strings.TrimSpace(subscriber.Type) != "node" {
+		return ""
+	}
+	candidates := []string{eventType, subscriber.MatchPattern}
+	if eb != nil && eb.semanticSource != nil {
+		flowID := strings.TrimSpace(routeFirstPathSegment(subscriber.Path))
+		if flowID != "" {
+			for _, input := range eventidentity.NormalizeList(eb.semanticSource.FlowInputEvents(flowID)) {
+				if input == "" {
+					continue
+				}
+				for _, candidate := range candidates {
+					normalized := eventidentity.Normalize(candidate)
+					if normalized == input || strings.HasSuffix(normalized, "/"+input) {
+						return input
+					}
+				}
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		normalized := eventidentity.Normalize(candidate)
+		if leaf := eventidentity.LeafName(normalized); leaf != "" && leaf != normalized {
+			return leaf
+		}
+	}
+	return ""
+}
+
+func (eb *EventBus) recordPublishDiagnostic(ctx context.Context, evt events.Event, plan eventDeliveryPlan) {
+	rec, ok := EmittedEventsRecorderFromContext(ctx)
+	if !ok || rec == nil {
+		return
+	}
+	rec.AppendPublish(PublishDiagnostic{
+		EventID:                strings.TrimSpace(evt.ID),
+		EventType:              strings.TrimSpace(string(evt.Type)),
+		EntityID:               strings.TrimSpace(evt.EntityID()),
+		ParentEventID:          strings.TrimSpace(evt.ParentEventID),
+		RoutedRecipients:       eb.describeSubscribersForEvent(string(evt.Type), plan.RoutedRecipients),
+		SubscriptionRecipients: uniqueStrings(plan.SubscribedRecipients),
+	})
 }
 
 // PublishDirect persists an event and delivers it to the specified recipients

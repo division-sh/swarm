@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/eventidentity"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/semanticview"
 )
@@ -195,7 +196,8 @@ func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCt
 		triggerCtx.State.EntityID,
 		workflowEventEntityIDWithPayload(triggerCtx.Event, payload),
 	))
-	if workflowEmitTargetsParentEntity(pc.SemanticSource(), pipelineFlowScope(ctx), eventType) {
+	if workflowEmitTargetsParentEntity(pc.SemanticSource(), pipelineFlowScope(ctx), eventType) &&
+		strings.TrimSpace(asString(triggerCtx.State.Metadata["flow_path"])) != "" {
 		entityID = strings.TrimSpace(firstNonEmptyString(
 			asString(triggerCtx.State.Metadata["parent_entity_id"]),
 			triggerCtx.Event.EntityID(),
@@ -229,14 +231,7 @@ func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventTy
 }
 
 func workflowFlowScopeHasOutputEvent(scope semanticview.FlowScope, eventType string) bool {
-	flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-	localEvent := eventType
-	if flowPath != "" {
-		prefix := flowPath + "/"
-		if strings.HasPrefix(localEvent, prefix) {
-			localEvent = strings.TrimPrefix(localEvent, prefix)
-		}
-	}
+	localEvent := eventidentity.LocalizeForFlow(scope.Path, scope.OutputEvents, eventType)
 	localEvent = strings.Trim(strings.TrimSpace(localEvent), "/")
 	for _, candidate := range scope.OutputEvents {
 		if strings.TrimSpace(candidate) == localEvent {

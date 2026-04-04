@@ -21,6 +21,7 @@ type ProjectScope struct {
 type FlowScope struct {
 	ID            string
 	Path          string
+	PackageKey    string
 	Mode          string
 	PromptsDir    string
 	InputEvents   []string
@@ -66,6 +67,7 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 	return FlowScope{
 		ID:            strings.TrimSpace(view.Paths.ID),
 		Path:          strings.Trim(strings.TrimSpace(view.Path), "/"),
+		PackageKey:    strings.TrimSpace(view.Paths.PackageKey),
 		Mode:          flowModeFromView(view),
 		PromptsDir:    strings.TrimSpace(view.Paths.PromptsDir),
 		InputEvents:   append([]string{}, view.Schema.Pins.Inputs.Events...),

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"swarm/internal/runtime/core/eventidentity"
 )
 
 const maxDiscoveredPackageDepth = 99
@@ -388,53 +390,7 @@ func handlerPatternMatches(pattern, eventType string) bool {
 }
 
 func contractRouteMatches(pattern, eventType string) bool {
-	switch {
-	case pattern == "", pattern == "*":
-		return true
-	default:
-		return contractRouteSegmentsMatch(contractSplitRouteSegments(pattern), contractSplitRouteSegments(eventType))
-	}
-}
-
-func contractSplitRouteSegments(raw string) []string {
-	raw = strings.Trim(strings.TrimSpace(raw), "/")
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, "/")
-}
-
-func contractRouteSegmentsMatch(pattern, event []string) bool {
-	if len(pattern) == 0 {
-		return len(event) == 0
-	}
-	head := strings.TrimSpace(pattern[0])
-	switch head {
-	case "**":
-		if len(pattern) == 1 {
-			return true
-		}
-		for i := 0; i <= len(event); i++ {
-			if contractRouteSegmentsMatch(pattern[1:], event[i:]) {
-				return true
-			}
-		}
-		return false
-	case "*":
-		if len(event) == 0 {
-			return false
-		}
-		return contractRouteSegmentsMatch(pattern[1:], event[1:])
-	default:
-		if len(event) == 0 {
-			return false
-		}
-		matched, err := filepath.Match(head, event[0])
-		if err != nil || !matched {
-			return false
-		}
-		return contractRouteSegmentsMatch(pattern[1:], event[1:])
-	}
+	return eventidentity.MatchPattern(pattern, eventType)
 }
 func sortedContractKeys[T any](m map[string]T) []string {
 	if len(m) == 0 {

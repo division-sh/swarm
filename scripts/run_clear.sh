@@ -87,8 +87,28 @@ SQL
 
 echo "Starting Swarm with contracts ${CONTRACTS_ROOT}..."
 : > "${LOG_FILE}"
-nohup go run ./cmd/swarm -contracts "${CONTRACTS_ROOT}" -health-addr "${HEALTH_ADDR}" >"${LOG_FILE}" 2>&1 &
-launcher_pid=$!
+launcher_pid="$(
+  LOG_FILE="${LOG_FILE}" CONTRACTS_ROOT="${CONTRACTS_ROOT}" HEALTH_ADDR="${HEALTH_ADDR}" python3 - <<'PY'
+import os
+import subprocess
+import sys
+
+log_file = os.environ["LOG_FILE"]
+contracts_root = os.environ["CONTRACTS_ROOT"]
+health_addr = os.environ["HEALTH_ADDR"]
+
+with open(os.devnull, "rb", buffering=0) as devnull, open(log_file, "ab", buffering=0) as out:
+    proc = subprocess.Popen(
+        ["go", "run", "./cmd/swarm", "-contracts", contracts_root, "-health-addr", health_addr],
+        stdin=devnull,
+        stdout=out,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+print(proc.pid)
+PY
+)"
 echo "${launcher_pid}" > "${PID_FILE}"
 
 ready=0

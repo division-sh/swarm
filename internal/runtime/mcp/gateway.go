@@ -222,7 +222,11 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		allowed := ParseAllowedToolsFromRequest(r)
 		if len(allowed) > 0 {
+			normalizedToolName := normalizeGatewayToolName(toolName)
 			if _, ok := allowed[toolName]; !ok {
+				if _, ok := allowed[normalizedToolName]; ok {
+					goto toolAllowed
+				}
 				err := g.newRuntimeError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
 				g.logMCP(r, "warn", "mcp.tools.call.denied", err, map[string]any{
 					"method":    "tools/call",
@@ -235,6 +239,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	toolAllowed:
 		ctx, err := g.mcpExecutionContext(r, toolName)
 		if err != nil {
 			g.logMCP(r, "warn", "mcp.tools.call.context_error", err, map[string]any{

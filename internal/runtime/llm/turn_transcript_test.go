@@ -1,6 +1,10 @@
 package llm
 
-import "testing"
+import (
+	"testing"
+
+	runtimebus "swarm/internal/runtime/bus"
+)
 
 func TestBuildTurnBlocks_CorrelatesToolResultsWithToolUse(t *testing.T) {
 	rec := AgentTurnRecord{
@@ -36,5 +40,44 @@ func TestBuildTurnBlocks_CorrelatesToolResultsWithToolUse(t *testing.T) {
 	}
 	if !sawToolUse || !sawToolResult || !sawOutcome {
 		t.Fatalf("blocks missing expected kinds: %#v", blocks)
+	}
+}
+
+func TestBuildTurnBlocks_IncludesPublishDiagnostics(t *testing.T) {
+	rec := AgentTurnRecord{
+		TriggerEventType: "scan.requested",
+		EntityID:         "ent-1",
+		PublishDiagnostics: []runtimebus.PublishDiagnostic{
+			{
+				EventID:   "evt-1",
+				EventType: "scoring/vertical.shortlisted",
+				EntityID:  "ent-1",
+				RoutedRecipients: []runtimebus.PublishDiagnosticRecipient{
+					{
+						ID:             "validation-orchestrator",
+						Type:           "node",
+						Path:           "validation",
+						MatchedPattern: "scoring/vertical.shortlisted",
+						RouteSource:    "subscription",
+						LocalizedEvent: "vertical.shortlisted",
+					},
+				},
+			},
+		},
+	}
+
+	blocks := BuildTurnBlocks(rec)
+	if len(blocks) < 2 {
+		t.Fatalf("expected dispatch and publish blocks, got %#v", blocks)
+	}
+	if blocks[1].Kind != "publish" {
+		t.Fatalf("blocks[1].kind = %q, want publish", blocks[1].Kind)
+	}
+	if blocks[1].Title != "scoring/vertical.shortlisted" {
+		t.Fatalf("blocks[1].title = %q", blocks[1].Title)
+	}
+	routed, ok := blocks[1].Data["routed_recipients"].([]runtimebus.PublishDiagnosticRecipient)
+	if !ok || len(routed) != 1 || routed[0].LocalizedEvent != "vertical.shortlisted" {
+		t.Fatalf("publish block routed_recipients = %#v", blocks[1].Data["routed_recipients"])
 	}
 }

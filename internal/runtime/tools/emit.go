@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/eventidentity"
 	llm "swarm/internal/runtime/llm"
 	runtimesharedjson "swarm/internal/runtime/sharedjson"
 )
@@ -18,14 +19,7 @@ func EmitToolName(eventType string) string {
 }
 
 func localEmitEventType(eventType string) string {
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	if eventType == "" {
-		return ""
-	}
-	if idx := strings.LastIndex(eventType, "/"); idx >= 0 {
-		return strings.TrimSpace(eventType[idx+1:])
-	}
-	return eventType
+	return eventidentity.LeafName(eventType)
 }
 
 func EventTypeFromEmitToolName(toolName string, toolToEvent map[string]string) (string, bool) {

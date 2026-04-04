@@ -20,6 +20,7 @@ func BuildTurnBlocks(rec AgentTurnRecord) []TurnBlock {
 	if dispatch := buildDispatchBlock(rec); dispatch.Kind != "" {
 		blocks = append(blocks, dispatch)
 	}
+	blocks = append(blocks, buildPublishBlocks(rec)...)
 	if len(rec.ResponseRaw) == 0 {
 		return normalizeTurnBlocks(blocks)
 	}
@@ -51,6 +52,43 @@ func buildDispatchBlock(rec AgentTurnRecord) TurnBlock {
 		Title: strings.TrimSpace(rec.TriggerEventType),
 		Data:  data,
 	}
+}
+
+func buildPublishBlocks(rec AgentTurnRecord) []TurnBlock {
+	if len(rec.PublishDiagnostics) == 0 {
+		return nil
+	}
+	blocks := make([]TurnBlock, 0, len(rec.PublishDiagnostics))
+	for _, diag := range rec.PublishDiagnostics {
+		eventType := strings.TrimSpace(diag.EventType)
+		if eventType == "" {
+			continue
+		}
+		data := map[string]any{}
+		if v := strings.TrimSpace(diag.EventID); v != "" {
+			data["event_id"] = v
+		}
+		if v := strings.TrimSpace(diag.EntityID); v != "" {
+			data["entity_id"] = v
+		}
+		if v := strings.TrimSpace(diag.ParentEventID); v != "" {
+			data["parent_event_id"] = v
+		}
+		if len(diag.RoutedRecipients) > 0 {
+			data["routed_recipients"] = diag.RoutedRecipients
+			data["routed_recipients_count"] = len(diag.RoutedRecipients)
+		}
+		if len(diag.SubscriptionRecipients) > 0 {
+			data["subscription_recipients"] = diag.SubscriptionRecipients
+			data["subscription_recipients_count"] = len(diag.SubscriptionRecipients)
+		}
+		blocks = append(blocks, TurnBlock{
+			Kind:  "publish",
+			Title: eventType,
+			Data:  data,
+		})
+	}
+	return blocks
 }
 
 func parseTurnBlocksFromRaw(raw []byte) []TurnBlock {

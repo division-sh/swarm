@@ -79,6 +79,23 @@ func TestPersistAndDispatch_DoesNotDispatchOnTransactionFailure(t *testing.T) {
 	}
 }
 
+func TestPersistAndDispatch_DoesNotDispatchWhenOutboxFails(t *testing.T) {
+	runner := &recordingRunner{}
+	outbox := &recordingOutbox{err: errors.New("save failed")}
+	dispatcher := &recordingDispatcher{}
+	intents := []EmitIntent{{ChainDepth: 2}}
+
+	if err := PersistAndDispatch(context.Background(), runner, outbox, dispatcher, intents); err == nil {
+		t.Fatal("expected error")
+	}
+	if len(outbox.calls) != 1 || outbox.calls[0] != "outbox" {
+		t.Fatalf("unexpected outbox calls: %v", outbox.calls)
+	}
+	if len(dispatcher.calls) != 0 {
+		t.Fatalf("dispatch should not run on outbox failure: %v", dispatcher.calls)
+	}
+}
+
 func TestClassifyFailure(t *testing.T) {
 	if got := ClassifyFailure(nil); got != FailureNone {
 		t.Fatalf("nil failure class = %v", got)

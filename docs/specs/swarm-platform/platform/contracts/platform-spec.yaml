@@ -132,17 +132,26 @@ contract_formats:
   event_schema:
     description: Each workflow defines event payload schemas in events.yaml. Events are keyed by event name. Each entry contains
       a payload object mapping field names to types (string, integer, object, array, boolean). The platform uses these schemas
-      to validate emit tool calls at runtime. Routing, consumers, and delivery are NOT declared in events.yaml — the platform
-      derives routing from agents.yaml (subscriptions, emit_events) and nodes.yaml (subscribes_to, event_handlers).
+      to validate emit tool calls at runtime. Routing is NOT declared in events.yaml — see
+      engine.cross_flow_routing for the routing model.
     format:
       event_name:
         payload:
           field_name: type (string | integer | boolean | object | array)
     routing_derivation:
-      owning_node: If a system node subscribes_to the event → that node owns it
-      dual_delivery: If a node AND agents subscribe → route to both
-      consuming: If only a node subscribes → route to node only
-      passthrough: If no node subscribes → pure agent delivery
+      description: 'Routing is derived from two sources depending on scope:'
+      intra_flow: 'Within a flow, routing derives from local subscriptions — agents.yaml subscriptions,
+        nodes.yaml subscribes_to, and event_handlers keys. The platform matches local event names
+        against local subscriber declarations.'
+      cross_flow: 'Between flows, routing derives from pins by default — source flow pins.outputs.events
+        matched against target flow pins.inputs.events. See engine.cross_flow_routing for details.
+        Explicit scoped subscriptions (e.g., scoring/vertical.shortlisted) are an escape hatch for
+        cases where auto-wiring is insufficient.'
+      delivery_rules:
+        owning_node: If a system node subscribes_to the event → that node owns it
+        dual_delivery: If a node AND agents subscribe → route to both
+        consuming: If only a node subscribes → route to node only
+        passthrough: If no node subscribes → pure agent delivery
   persistence_model:
     description: Agents do not have raw database access. The platform provides typed persistence tools auto-generated from
       the entity_schema in package.yaml. For each field group in the entity schema, the platform generates save/get tools
@@ -656,6 +665,66 @@ engine:
       format: '{root}://{path}/{name}'
       example: myapp://intake/order.ready
       when: Only needed when multiple root flows run on the same platform instance.
+  event_identity:
+    description: 'Canonical event identity model. An event has multiple projections depending on context.
+      The platform MUST use a single resolver module for all identity operations — contract loading,
+      route derivation, boot verification, handler lookup, emit authorization, and tool generation.'
+    projections:
+      local_name: 'The event name as declared in events.yaml and handler keys within a flow.
+        No slashes. Examples: vertical.shortlisted, score.dimension_complete.'
+      external_name: 'The flow-qualified event name as seen by other flows and the event bus.
+        Format: {flow_id}/{local_name}. Examples: scoring/vertical.shortlisted, validation/research.completed.'
+      root_name: 'Events emitted at root level (no flow scope). Same as local_name — no prefix.
+        Examples: scan.requested, vertical.resumed, system.started.'
+    resolution_rules:
+      contracts_always_local: 'Node subscribes_to, handler keys, agent subscriptions within a flow,
+        and event definitions in events.yaml always use local names. No flow prefixes in contract
+        authoring except for explicit cross-flow escape hatches.'
+      bus_always_external: 'The event bus stores and routes events using external names. An event
+        emitted by a node in the scoring flow is stored as scoring/vertical.shortlisted in the events
+        table.'
+      handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
+        localize the event name before looking up the handler. Localization matches against the target
+        node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
+        applies to both pin-auto-wired events and explicit scoped subscription escape hatches.
+        Example: scoring/vertical.shortlisted → vertical.shortlisted when delivered to a validation
+        node that declares vertical.shortlisted in any of those surfaces.'
+      root_events_are_global: 'Events emitted at root level have no flow prefix. They are routable
+        to any flow that declares them as input pins or has agents/nodes subscribing by local name.'
+    canonical_resolver: 'The platform MUST provide a single resolver module used by all subsystems:
+      Localize(flowID, eventName) → local name. Externalize(flowID, eventName) → external name.
+      Match(pattern, eventName) → bool. ResolveInputAlias(flowID, eventName) → local handler key.
+      No subsystem may implement its own name resolution logic.'
+  cross_flow_routing:
+    description: 'Pin-based auto-wiring is the default cross-flow routing model. Contracts express
+      local names and interface pins. The platform derives cross-flow routes at boot.'
+    auto_wiring:
+      description: 'At boot, the platform resolves cross-flow routes from declared pins:
+        1. For each flow, collect pins.outputs.events (events this flow emits to the outside).
+        2. For each flow, collect pins.inputs.events (events this flow receives from outside).
+        3. For each input pin event name, find all flows that declare the same name as an output pin.
+        4. Create a route: source flow output → target flow input.
+        5. The handler key in the target flow uses the local name (no prefix).'
+      ambiguity: 'If an input pin event name matches output pins from multiple flows, boot MUST fail
+        unless the contract disambiguates explicitly (via a scoped subscription as escape hatch).'
+      root_events: 'Events emitted at root level (no flow scope) are automatically routable to any
+        flow that declares them as input pins. No ambiguity — root events have no flow prefix.'
+    escape_hatch:
+      description: 'For cases where auto-wiring is insufficient, contracts may use explicit scoped
+        subscriptions in node subscribes_to. Example: scoring/vertical.shortlisted as a subscription
+        bypasses auto-wiring and creates a direct route. This is an escape hatch, not the default
+        authoring model.'
+      when_needed:
+      - 'Ambiguous pin names: two flows both output the same event name, and the target flow needs
+        only one.'
+      - 'Non-pin events: subscribing to an internal event from another flow that is not declared as
+        an output pin.'
+    contract_authoring_rules:
+      handler_keys: Always local names. Never flow-prefixed.
+      subscribes_to: Local names by default. Flow-prefixed only as escape hatch.
+      emit_events: Always local names. The platform externalizes at emission time.
+      events_yaml: Always local names. Flow-scoped at load time.
+      pins: Always local names. The platform matches across flows by name.
     wildcards:
       description: Pattern matching for subscriptions across flow instances.
       patterns:

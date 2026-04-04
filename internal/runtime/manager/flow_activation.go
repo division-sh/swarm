@@ -12,6 +12,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/eventidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -122,10 +123,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("event bus does not support derived flow-instance routing for %s", flowPath)
 	}
 	if autoEmit := strings.TrimSpace(schema.AutoEmitOnCreate.Event); autoEmit != "" {
-		eventType := autoEmit
-		if !strings.Contains(eventType, "/") {
-			eventType = strings.Trim(flowPath+"/"+eventType, "/")
-		}
+		eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
 		payload := map[string]any{
 			"entity_id":        flowEntityID,
 			"instance_id":      instanceID,
@@ -440,9 +438,7 @@ func buildStaticFlowAgentConfig(
 		if subscription == "" {
 			continue
 		}
-		if _, ok := localEvents[subscription]; ok && flowPath != "" {
-			subscription = strings.Trim(flowPath+"/"+subscription, "/")
-		}
+		subscription = eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), subscription)
 		rendered = append(rendered, subscription)
 	}
 	rendered = dedupeStrings(rendered)
@@ -530,14 +526,9 @@ func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, loca
 		return nil
 	}
 	out := make([]string, 0, len(rendered))
+	instancePath := strings.Trim(strings.TrimSpace(templateID)+"/"+strings.TrimSpace(instanceID), "/")
 	for _, eventType := range rendered {
-		if _, ok := localEvents[eventType]; ok {
-			if scoped := strings.Trim(strings.TrimSpace(templateID)+"/"+strings.TrimSpace(instanceID)+"/"+strings.TrimSpace(eventType), "/"); scoped != "" {
-				out = append(out, scoped)
-				continue
-			}
-		}
-		out = append(out, eventType)
+		out = append(out, eventidentity.ExternalizeForFlow(instancePath, localEventList(localEvents), eventType))
 	}
 	return dedupeStrings(out)
 }
@@ -550,13 +541,23 @@ func normalizedStaticFlowEmitEvents(events []string, vars map[string]string, loc
 	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	out := make([]string, 0, len(rendered))
 	for _, eventType := range rendered {
-		if _, ok := localEvents[eventType]; ok && flowPath != "" {
-			out = append(out, strings.Trim(flowPath+"/"+strings.TrimSpace(eventType), "/"))
-			continue
-		}
-		out = append(out, eventType)
+		out = append(out, eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), eventType))
 	}
 	return dedupeStrings(out)
+}
+
+func localEventList(localEvents map[string]struct{}) []string {
+	if len(localEvents) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(localEvents))
+	for eventType := range localEvents {
+		if strings.TrimSpace(eventType) != "" {
+			out = append(out, strings.TrimSpace(eventType))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEntry) map[string]struct{} {

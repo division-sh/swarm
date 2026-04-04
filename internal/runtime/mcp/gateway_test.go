@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"swarm/internal/events"
-	models "swarm/internal/runtime/core/actors"
 	runtimebus "swarm/internal/runtime/bus"
+	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
 )
 
@@ -213,6 +213,46 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 	}
 	if !strings.Contains(duplicate.Body.String(), "duplicate emit already executed this turn") {
 		t.Fatalf("duplicate body = %s", duplicate.Body.String())
+	}
+}
+
+func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *testing.T) {
+	callCount := 0
+	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
+		callCount++
+		return map[string]any{"ok": true, "name": name, "input": input}, nil
+	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+
+	PutTurnContextForTest("ctx-prefixed-emit", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	t.Cleanup(func() { UnregisterTurnContext("ctx-prefixed-emit") })
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "mcp__runtime-tools__emit_score_dimension_complete",
+			"arguments": map[string]any{"dimension": "build_complexity", "score": 32},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-prefixed-emit&allowed_tools=emit_score_dimension_complete", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if callCount != 1 {
+		t.Fatalf("executor call count = %d, want 1", callCount)
+	}
+	if strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
 

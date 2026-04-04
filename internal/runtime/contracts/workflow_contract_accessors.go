@@ -2,6 +2,7 @@ package contracts
 
 import (
 	flowmodel "swarm/internal/runtime/flowmodel"
+	"swarm/internal/runtime/core/eventidentity"
 	"sort"
 	"strings"
 )
@@ -482,15 +483,7 @@ func (b *WorkflowContractBundle) localizeNodeEventType(nodeID, eventType string)
 	if flowPath == "" {
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	if flowPath == "" || eventType == "" {
-		return eventType
-	}
-	prefix := flowPath + "/"
-	if !strings.HasPrefix(eventType, prefix) {
-		return eventType
-	}
-	return strings.TrimPrefix(eventType, prefix)
+	return eventidentity.LocalizeForFlow(flowPath, b.FlowInputEvents(flowID), eventType)
 }
 
 func (b *WorkflowContractBundle) externalizeNodeEventType(nodeID, eventType string) string {
@@ -501,7 +494,7 @@ func (b *WorkflowContractBundle) externalizeNodeEventType(nodeID, eventType stri
 	if flowID == "" {
 		return strings.TrimSpace(eventType)
 	}
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
+	eventType = eventidentity.Normalize(eventType)
 	if eventType == "" {
 		return eventType
 	}
@@ -511,17 +504,11 @@ func (b *WorkflowContractBundle) externalizeNodeEventType(nodeID, eventType stri
 		}
 		return eventType
 	}
-	if !b.flowHasLocalEvent(flowID, eventType) {
-		return eventType
-	}
 	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
 	if flowPath == "" {
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
-	if flowPath == "" {
-		return eventType
-	}
-	return flowPath + "/" + eventType
+	return eventidentity.ExternalizeForFlow(flowPath, b.flowLocalEvents(flowID), eventType)
 }
 
 func (b *WorkflowContractBundle) externalizeDescendantEventType(flowID, eventType string) (string, bool) {
@@ -537,25 +524,44 @@ func (b *WorkflowContractBundle) externalizeDescendantEventType(flowID, eventTyp
 	if flowPath == "" {
 		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
 	}
-	if flowPath == "" || strings.HasPrefix(eventType, flowPath+"/") {
-		return "", false
-	}
+	descendants := make(map[string]map[string]struct{})
 	for _, view := range b.FlowViews() {
 		descendantPath := strings.Trim(strings.TrimSpace(view.Path), "/")
-		if descendantPath == "" || !strings.HasPrefix(descendantPath, flowPath+"/") {
+		if descendantPath == "" {
 			continue
 		}
-		relativePath := strings.TrimPrefix(descendantPath, flowPath+"/")
-		if relativePath == "" || !strings.HasPrefix(eventType, relativePath+"/") {
+		localEvents := make(map[string]struct{})
+		for _, candidate := range b.flowLocalEvents(strings.TrimSpace(view.Paths.ID)) {
+			localEvents[strings.TrimSpace(candidate)] = struct{}{}
+		}
+		if len(localEvents) == 0 {
 			continue
 		}
-		localEvent := strings.TrimPrefix(eventType, relativePath+"/")
-		if !b.flowHasLocalEvent(strings.TrimSpace(view.Paths.ID), localEvent) {
-			continue
-		}
-		return flowPath + "/" + eventType, true
+		descendants[descendantPath] = localEvents
 	}
-	return "", false
+	return eventidentity.ExternalizeDescendantForFlow(flowPath, eventType, descendants)
+}
+
+func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
+	flowID = strings.TrimSpace(flowID)
+	if b == nil || flowID == "" {
+		return nil
+	}
+	view, ok := b.FlowViewByID(flowID)
+	if !ok || view == nil {
+		return nil
+	}
+	out := make([]string, 0, len(view.Events)+1)
+	for eventType := range view.Events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out = append(out, eventType)
+		}
+	}
+	if autoEmit := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); autoEmit != "" {
+		out = append(out, autoEmit)
+	}
+	return out
 }
 
 func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler SystemNodeEventHandler) SystemNodeEventHandler {

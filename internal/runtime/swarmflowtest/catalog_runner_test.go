@@ -48,6 +48,7 @@ type catalogExpectedDocument struct {
 		ErrorContains          string                              `yaml:"error_contains"`
 		HandlerOutcome         string                              `yaml:"handler_outcome"`
 		ChainDepthExceeded     bool                                `yaml:"chain_depth_exceeded"`
+		SubjectID              string                              `yaml:"subject_id"`
 		EntityState            string                              `yaml:"entity_state"`
 		EmittedEvents          []string                            `yaml:"emitted_events"`
 		EntityFields           map[string]any                      `yaml:"entity_fields"`
@@ -63,15 +64,21 @@ type catalogExpectedDocument struct {
 		ToolResolution         map[string]any                      `yaml:"tool_resolution"`
 		TemplateInstances      any                                 `yaml:"template_instances"`
 		Entities               map[string]catalogExpectedPerEntity `yaml:"entities"`
+		FlowEntities           map[string]catalogExpectedPerEntity `yaml:"flow_entities"`
 		ParentState            string                              `yaml:"parent_state"`
 		FlowBState             string                              `yaml:"flow_b_state"`
 	} `yaml:"expected"`
 }
 
 type catalogExpectedPerEntity struct {
-	HandlerOutcome string   `yaml:"handler_outcome"`
-	EntityState    string   `yaml:"entity_state"`
-	EmittedEvents  []string `yaml:"emitted_events"`
+	HandlerOutcome string         `yaml:"handler_outcome"`
+	Exists         *bool          `yaml:"exists"`
+	SubjectID      string         `yaml:"subject_id"`
+	EntityState    string         `yaml:"entity_state"`
+	EntityFields   map[string]any `yaml:"entity_fields"`
+	Gates          map[string]any `yaml:"gates"`
+	EmittedEvents  []string       `yaml:"emitted_events"`
+	DeadLetter     bool           `yaml:"dead_letter"`
 }
 
 type catalogRunResult struct {

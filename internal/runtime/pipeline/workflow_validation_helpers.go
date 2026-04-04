@@ -1,11 +1,11 @@
 package pipeline
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/eventidentity"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -108,53 +108,7 @@ func runtimecontractsHandlerPatternMatches(pattern, eventType string) bool {
 }
 
 func workflowRouteMatches(pattern, eventType string) bool {
-	switch {
-	case pattern == "", pattern == "*":
-		return true
-	default:
-		return workflowRouteSegmentsMatch(workflowSplitRouteSegments(pattern), workflowSplitRouteSegments(eventType))
-	}
-}
-
-func workflowSplitRouteSegments(raw string) []string {
-	raw = strings.Trim(strings.TrimSpace(raw), "/")
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, "/")
-}
-
-func workflowRouteSegmentsMatch(pattern, event []string) bool {
-	if len(pattern) == 0 {
-		return len(event) == 0
-	}
-	head := strings.TrimSpace(pattern[0])
-	switch head {
-	case "**":
-		if len(pattern) == 1 {
-			return true
-		}
-		for i := 0; i <= len(event); i++ {
-			if workflowRouteSegmentsMatch(pattern[1:], event[i:]) {
-				return true
-			}
-		}
-		return false
-	case "*":
-		if len(event) == 0 {
-			return false
-		}
-		return workflowRouteSegmentsMatch(pattern[1:], event[1:])
-	default:
-		if len(event) == 0 {
-			return false
-		}
-		matched, err := filepath.Match(head, event[0])
-		if err != nil || !matched {
-			return false
-		}
-		return workflowRouteSegmentsMatch(pattern[1:], event[1:])
-	}
+	return eventidentity.MatchPattern(pattern, eventType)
 }
 
 func normalizeStringSet(values []string) map[string]struct{} {

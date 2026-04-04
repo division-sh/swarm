@@ -252,6 +252,33 @@ func TestToolAuthorizer_ExplicitEmitEventsAllowEmitTool(t *testing.T) {
 	}
 }
 
+func TestToolAuthorizer_ScopedEmitEventsAllowLocalEmitTool(t *testing.T) {
+	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"discovery/category.assessed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"entity_id": {Type: "string"},
+					},
+				},
+			},
+		},
+	}))
+	raw, err := json.Marshal(map[string]any{
+		"emit_events": []string{"discovery/category.assessed"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	err = NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+		ID:     "market-research-agent",
+		Config: raw,
+	}, "emit_category_assessed")
+	if err != nil {
+		t.Fatalf("expected scoped configured emit tool to be allowed: %v", err)
+	}
+}
+
 func TestToolAuthorizer_AllowsMCPPrefixedEmitToolAlias(t *testing.T) {
 	InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{

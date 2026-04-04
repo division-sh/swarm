@@ -19,8 +19,27 @@ func InboundEventFromContext(ctx context.Context) (events.Event, bool) {
 }
 
 type EmittedEventsRecorder struct {
-	mu     sync.Mutex
-	events []events.Event
+	mu        sync.Mutex
+	events    []events.Event
+	publishes []PublishDiagnostic
+}
+
+type PublishDiagnosticRecipient struct {
+	ID             string `json:"id"`
+	Type           string `json:"type,omitempty"`
+	Path           string `json:"path,omitempty"`
+	MatchedPattern string `json:"matched_pattern,omitempty"`
+	RouteSource    string `json:"route_source,omitempty"`
+	LocalizedEvent string `json:"localized_event,omitempty"`
+}
+
+type PublishDiagnostic struct {
+	EventID                string                       `json:"event_id"`
+	EventType              string                       `json:"event_type"`
+	EntityID               string                       `json:"entity_id,omitempty"`
+	ParentEventID          string                       `json:"parent_event_id,omitempty"`
+	RoutedRecipients       []PublishDiagnosticRecipient `json:"routed_recipients,omitempty"`
+	SubscriptionRecipients []string                     `json:"subscription_recipients,omitempty"`
 }
 
 func NewEmittedEventsRecorder() *EmittedEventsRecorder {
@@ -57,5 +76,25 @@ func (r *EmittedEventsRecorder) Snapshot() []events.Event {
 	defer r.mu.Unlock()
 	out := make([]events.Event, len(r.events))
 	copy(out, r.events)
+	return out
+}
+
+func (r *EmittedEventsRecorder) AppendPublish(diag PublishDiagnostic) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.publishes = append(r.publishes, diag)
+	r.mu.Unlock()
+}
+
+func (r *EmittedEventsRecorder) SnapshotPublishes() []PublishDiagnostic {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]PublishDiagnostic, len(r.publishes))
+	copy(out, r.publishes)
 	return out
 }

@@ -88,7 +88,7 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	}
 }
 
-func TestDeriveRouteTable_InputPinsStayAtParentScope(t *testing.T) {
+func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -127,9 +127,12 @@ func TestDeriveRouteTable_InputPinsStayAtParentScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("scan.requested")
+	got := rt.Resolve("producer/scan.requested")
 	if len(got) != 1 || got[0].ID != "scan-orchestrator" {
-		t.Fatalf("Resolve(scan.requested) = %#v, want scan-orchestrator", got)
+		t.Fatalf("Resolve(producer/scan.requested) = %#v, want scan-orchestrator", got)
+	}
+	if got := rt.Resolve("scan.requested"); len(got) != 0 {
+		t.Fatalf("Resolve(scan.requested) = %#v, want none", got)
 	}
 	if got := rt.Resolve("discovery/scan.requested"); len(got) != 0 {
 		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want none", got)

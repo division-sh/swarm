@@ -1,64 +1,18 @@
 package bus
 
 import (
-	"path"
 	"regexp"
 	"strings"
 
 	"swarm/internal/events"
+	"swarm/internal/runtime/core/eventidentity"
 )
 
 var eventTypeTokenPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
 var eventPathSegmentPattern = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 func RouteMatches(pattern, eventType string) bool {
-	switch {
-	case pattern == "", pattern == "*":
-		return true
-	default:
-		return routeSegmentsMatch(splitRouteSegments(pattern), splitRouteSegments(eventType))
-	}
-}
-
-func splitRouteSegments(raw string) []string {
-	raw = strings.Trim(strings.TrimSpace(raw), "/")
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, "/")
-}
-
-func routeSegmentsMatch(pattern, event []string) bool {
-	if len(pattern) == 0 {
-		return len(event) == 0
-	}
-	head := strings.TrimSpace(pattern[0])
-	switch head {
-	case "**":
-		if len(pattern) == 1 {
-			return true
-		}
-		for i := 0; i <= len(event); i++ {
-			if routeSegmentsMatch(pattern[1:], event[i:]) {
-				return true
-			}
-		}
-		return false
-	case "*":
-		if len(event) == 0 {
-			return false
-		}
-		return routeSegmentsMatch(pattern[1:], event[1:])
-	default:
-		if len(event) == 0 {
-			return false
-		}
-		ok, err := path.Match(head, event[0])
-		if err != nil || !ok {
-			return false
-		}
-		return routeSegmentsMatch(pattern[1:], event[1:])
-	}
+	return eventidentity.MatchPattern(pattern, eventType)
 }
 
 func AppendUniqueEventType(in []events.EventType, v events.EventType) []events.EventType {

@@ -10,28 +10,29 @@ import (
 )
 
 type AgentTurnRecord struct {
-	AgentID          string
-	RuntimeMode      string
-	SessionID        string
-	ScopeKey         string
-	RunID            string
-	EntityID         string
-	TriggerEventID   string
-	TriggerEventType string
-	AvailableTools   []string
-	ToolCalls        []ToolCall
-	EmittedEvents    []string
-	MCPServers       map[string]string
-	MCPToolsListed   []string
-	MCPToolsVisible  []string
-	TaskID           string
-	RequestPayload   []byte
-	ResponseRaw      []byte
-	TurnBlocks       []TurnBlock
-	ParseOK          bool
-	Latency          time.Duration
-	RetryCount       int
-	Error            string
+	AgentID            string
+	RuntimeMode        string
+	SessionID          string
+	ScopeKey           string
+	RunID              string
+	EntityID           string
+	TriggerEventID     string
+	TriggerEventType   string
+	AvailableTools     []string
+	ToolCalls          []ToolCall
+	EmittedEvents      []string
+	PublishDiagnostics []runtimebus.PublishDiagnostic
+	MCPServers         map[string]string
+	MCPToolsListed     []string
+	MCPToolsVisible    []string
+	TaskID             string
+	RequestPayload     []byte
+	ResponseRaw        []byte
+	TurnBlocks         []TurnBlock
+	ParseOK            bool
+	Latency            time.Duration
+	RetryCount         int
+	Error              string
 }
 
 type TurnPersistence interface {
@@ -103,6 +104,11 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 				seen[name] = struct{}{}
 				rec.EmittedEvents = append(rec.EmittedEvents, name)
 			}
+		}
+	}
+	if len(rec.PublishDiagnostics) == 0 {
+		if eventRec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && eventRec != nil {
+			rec.PublishDiagnostics = append([]runtimebus.PublishDiagnostic(nil), eventRec.SnapshotPublishes()...)
 		}
 	}
 	return rec

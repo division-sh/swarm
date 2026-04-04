@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/core/eventidentity"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -137,6 +138,9 @@ type checkerContext struct {
 	inputPinLoaded   bool
 	inputPinFindings []Finding
 
+	crossFlowPinAmbiguityLoaded   bool
+	crossFlowPinAmbiguityFindings []Finding
+
 	flowBoundaryCreateEntityLoaded   bool
 	flowBoundaryCreateEntityFindings []Finding
 
@@ -179,6 +183,7 @@ var bootCheckRegistry = []Check{
 	{ID: "write_pin_ownership_validation", Severity: "error", Run: checkWritePinOwnershipValidation},
 	{ID: "gate_schema_validation", Severity: "error", Run: checkGateSchemaValidation},
 	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
+	{ID: "cross_flow_pin_ambiguity_validation", Severity: "error", Run: checkCrossFlowPinAmbiguityValidation},
 	{ID: "flow_boundary_create_entity_validation", Severity: "error", Run: checkFlowBoundaryCreateEntityValidation},
 }
 
@@ -244,6 +249,9 @@ func checkTimerValidation(c *checkerContext) []Finding               { return c.
 func checkWritePinOwnershipValidation(c *checkerContext) []Finding   { return c.writePinOwnership() }
 func checkGateSchemaValidation(c *checkerContext) []Finding          { return c.gateSchemaValidation() }
 func checkInputPinWiring(c *checkerContext) []Finding                { return c.inputPinWiring() }
+func checkCrossFlowPinAmbiguityValidation(c *checkerContext) []Finding {
+	return c.crossFlowPinAmbiguityValidation()
+}
 func checkFlowBoundaryCreateEntityValidation(c *checkerContext) []Finding {
 	return c.flowBoundaryCreateEntityValidation()
 }
@@ -479,6 +487,9 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 				eventType = strings.TrimSpace(eventType)
 				for _, expr := range handlerEntityExpressions(handler) {
 					for _, field := range entityReferences(expr.Expression) {
+						if bootverifyBuiltinEntityField(field) {
+							continue
+						}
 						if _, ok := writers[field]; ok {
 							continue
 						}
@@ -500,6 +511,15 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 	}
 
 	return c.entityRefFindings
+}
+
+func bootverifyBuiltinEntityField(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "entity_id", "current_state", "workflow_name", "workflow_version", "gates":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *checkerContext) transitionOwnership() []Finding {
@@ -758,6 +778,99 @@ func (c *checkerContext) inputPinWiring() []Finding {
 	}
 
 	return c.inputPinFindings
+}
+
+func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
+	if c.crossFlowPinAmbiguityLoaded {
+		return c.crossFlowPinAmbiguityFindings
+	}
+	c.crossFlowPinAmbiguityLoaded = true
+	for flowID := range c.source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		for _, eventType := range c.source.FlowInputEvents(flowID) {
+			eventType = strings.TrimSpace(eventType)
+			if eventType == "" {
+				continue
+			}
+			producers := crossFlowInputProducerFlows(c.source, flowID, eventType)
+			if len(producers) <= 1 {
+				continue
+			}
+			if flowHasScopedInputEscapeHatch(c.source, flowID, eventType) {
+				continue
+			}
+			c.crossFlowPinAmbiguityFindings = append(c.crossFlowPinAmbiguityFindings, Finding{
+				CheckID:  "cross_flow_pin_ambiguity_validation",
+				Severity: "error",
+				Message:  fmt.Sprintf("flow %s input pin %s is ambiguous across producer flows %s; add an explicit scoped subscription escape hatch", flowID, eventType, strings.Join(producers, ", ")),
+				Location: flowID,
+			})
+		}
+	}
+	return c.crossFlowPinAmbiguityFindings
+}
+
+func crossFlowInputProducerFlows(source semanticview.Source, targetFlowID, eventType string) []string {
+	targetFlowID = strings.TrimSpace(targetFlowID)
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || targetFlowID == "" || eventType == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 4)
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		if flowID == "" || flowID == targetFlowID {
+			continue
+		}
+		for _, output := range scope.OutputEvents {
+			if strings.TrimSpace(output) != eventType {
+				continue
+			}
+			if _, ok := seen[flowID]; ok {
+				continue
+			}
+			seen[flowID] = struct{}{}
+			out = append(out, flowID)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func flowHasScopedInputEscapeHatch(source semanticview.Source, flowID, eventType string) bool {
+	flowID = strings.TrimSpace(flowID)
+	eventType = strings.TrimSpace(eventType)
+	if source == nil || flowID == "" || eventType == "" {
+		return false
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return false
+	}
+	for _, node := range scope.Nodes {
+		for _, sub := range eventidentity.NormalizeList(node.SubscribesTo) {
+			if strings.Contains(sub, "/") && strings.HasSuffix(sub, "/"+eventType) {
+				return true
+			}
+		}
+	}
+	for _, agent := range scope.Agents {
+		for _, sub := range eventidentity.NormalizeList(agent.Subscriptions) {
+			if strings.Contains(sub, "/") && strings.HasSuffix(sub, "/"+eventType) {
+				return true
+			}
+		}
+		for _, sub := range eventidentity.NormalizeList(agent.SubscribesTo) {
+			if strings.Contains(sub, "/") && strings.HasSuffix(sub, "/"+eventType) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
@@ -3455,13 +3568,20 @@ func nodeSubscribesToEventLocal(source semanticview.Source, nodeID, eventType st
 	if source == nil {
 		return false
 	}
-	node, ok := source.NodeEntries()[strings.TrimSpace(nodeID)]
+	nodeID = strings.TrimSpace(nodeID)
+	node, ok := source.NodeEntries()[nodeID]
 	if !ok {
 		return false
 	}
-	eventType = strings.TrimSpace(eventType)
+	eventType = eventidentity.Normalize(eventType)
+	if contractSource, ok := source.NodeContractSource(nodeID); ok {
+		flowID := strings.TrimSpace(contractSource.FlowID)
+		if flowID != "" {
+			eventType = eventidentity.LocalizeForFlow(source.FlowPath(flowID), source.FlowInputEvents(flowID), eventType)
+		}
+	}
 	for _, subscribed := range node.SubscribesTo {
-		subscribed = strings.TrimSpace(subscribed)
+		subscribed = eventidentity.Normalize(subscribed)
 		if subscribed == eventType || handlerPatternMatchesLocal(subscribed, eventType) {
 			return true
 		}
@@ -3485,53 +3605,7 @@ func handlerPatternMatchesLocal(pattern, eventType string) bool {
 }
 
 func routeMatchesLocal(pattern, eventType string) bool {
-	switch {
-	case pattern == "", pattern == "*":
-		return true
-	default:
-		return routeSegmentsMatchLocal(splitRouteSegmentsLocal(pattern), splitRouteSegmentsLocal(eventType))
-	}
-}
-
-func splitRouteSegmentsLocal(raw string) []string {
-	raw = strings.Trim(strings.TrimSpace(raw), "/")
-	if raw == "" {
-		return nil
-	}
-	return strings.Split(raw, "/")
-}
-
-func routeSegmentsMatchLocal(pattern, event []string) bool {
-	if len(pattern) == 0 {
-		return len(event) == 0
-	}
-	head := strings.TrimSpace(pattern[0])
-	switch head {
-	case "**":
-		if len(pattern) == 1 {
-			return true
-		}
-		for i := 0; i <= len(event); i++ {
-			if routeSegmentsMatchLocal(pattern[1:], event[i:]) {
-				return true
-			}
-		}
-		return false
-	case "*":
-		if len(event) == 0 {
-			return false
-		}
-		return routeSegmentsMatchLocal(pattern[1:], event[1:])
-	default:
-		if len(event) == 0 {
-			return false
-		}
-		matched, err := filepath.Match(head, event[0])
-		if err != nil || !matched {
-			return false
-		}
-		return routeSegmentsMatchLocal(pattern[1:], event[1:])
-	}
+	return eventidentity.MatchPattern(pattern, eventType)
 }
 
 func writePinOwnersLocal(source semanticview.Source) map[string][]string {

@@ -252,6 +252,29 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 	}
 }
 
+func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testing.T) {
+	state := &StateSnapshot{Metadata: map[string]any{}}
+	base := BaseContext{
+		Entity: values.Wrap(map[string]any{
+			"revision_count": 0,
+		}),
+	}
+	spec := runtimecontracts.WorkflowDataAccumulation{
+		Writes: []runtimecontracts.WorkflowDataWrite{
+			{
+				TargetField: "entity.revision_count",
+				Value:       runtimecontracts.ExpressionValue{CEL: "entity.revision_count + 1"},
+			},
+		},
+	}
+
+	applyDataAccumulationToState(base, ExecutionState{}, state, spec)
+
+	if got := state.Metadata["revision_count"]; got != 1.0 && got != 1 {
+		t.Fatalf("revision_count = %#v, want 1", got)
+	}
+}
+
 func TestComputeWeightedAverageReadsFlattenedAccumulatorItems(t *testing.T) {
 	acc := &Accumulator{
 		Items: []map[string]any{

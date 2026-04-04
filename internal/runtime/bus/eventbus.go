@@ -56,6 +56,8 @@ type eventDeliveryPlan struct {
 	Event               events.Event
 	Recipients          []string
 	PersistedRecipients []string
+	RoutedRecipients    []Subscriber
+	SubscribedRecipients []string
 	ExtraDetail         map[string]any
 	ContradictionReason string
 	BlockedByCycle      bool

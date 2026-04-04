@@ -228,6 +228,32 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 }
 
+func TestNormalizedStaticFlowEmitEvents_ExternalizesLocalEvents(t *testing.T) {
+	got := normalizedStaticFlowEmitEvents(
+		[]string{"analysis.done", "shared.event"},
+		nil,
+		map[string]struct{}{"analysis.done": {}},
+		"analyzer-flow",
+	)
+	if len(got) != 2 || got[0] != "analyzer-flow/analysis.done" || got[1] != "shared.event" {
+		t.Fatalf("normalizedStaticFlowEmitEvents = %#v", got)
+	}
+}
+
+func TestNormalizedFlowAgentEmitEvents_ExternalizesInstanceLocalEvents(t *testing.T) {
+	got := normalizedFlowAgentEmitEvents(
+		[]string{"task.started", "shared.event"},
+		nil,
+		map[string]struct{}{"task.started": {}},
+		"review/inst-1",
+		"review",
+		"inst-1",
+	)
+	if len(got) != 2 || got[0] != "review/inst-1/task.started" || got[1] != "shared.event" {
+		t.Fatalf("normalizedFlowAgentEmitEvents = %#v", got)
+	}
+}
+
 func TestActivateFlowInstancePersistsFlowInstanceConfig(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
