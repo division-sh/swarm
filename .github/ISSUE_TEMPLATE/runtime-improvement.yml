@@ -72,6 +72,17 @@ body:
       required: true
 
   - type: textarea
+    id: spec_authority
+    attributes:
+      label: Platform Spec Reference
+      description: Link the authoritative platform spec section(s), or write `spec update required`.
+      placeholder: |
+        Example:
+        docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#L123
+    validations:
+      required: true
+
+  - type: textarea
     id: scope
     attributes:
       label: Scope

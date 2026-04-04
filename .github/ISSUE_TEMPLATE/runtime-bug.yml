@@ -83,6 +83,17 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: spec_authority
+    attributes:
+      label: Platform Spec Reference
+      description: Link the authoritative platform spec section(s), or write `no direct spec section yet`.
+      placeholder: |
+        Example:
+        docs/specs/swarm-platform/platform/contracts/platform-spec.yaml#L123
+    validations:
+      required: true
+
   - type: checkboxes
     id: smell_flags
     attributes:
@@ -147,4 +158,3 @@ body:
         - label: no product-specific rule is embedded into shared runtime semantics
         - label: targeted tests exist
         - label: watchlist was updated
-

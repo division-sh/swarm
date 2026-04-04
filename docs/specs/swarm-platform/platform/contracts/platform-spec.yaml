@@ -380,6 +380,16 @@ handler_specification:
         not_available_in: 'guard.check — guards run before accumulation. data_accumulation.expression — runs
           before accumulation. rules.condition — rules are an alternative to on_complete, not used after
           accumulation.'
+      fan_out:
+        resolves_to: 'Handler context produced by the fan_out step. fan_out.count is the number of items
+          that were dispatched. Populated after fan_out executes, before data_accumulation.'
+        available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
+          state. Example: expression: fan_out.count writes the dispatch count to an entity field for
+          downstream accumulation tracking (expected_from: entity.search_expected_count).'
+        not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
+          fields written by data_accumulation instead.'
+        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    expression:\
+          \ fan_out.count"
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
@@ -409,34 +419,38 @@ handler_specification:
     data_accumulation:
       field: data_accumulation
       type: object
-      purpose: Write event payload fields to entity.
+      purpose: Write fields to entity state from event payloads, literal values, or computed expressions.
       sub_fields:
-        writes: 'list — field names (direct mapping: payload.X → entity.X) OR objects ({source_field: X, target_field: Y}
-          for rename mapping) OR objects ({source_field: X, value: V} for literal value)'
-        source_event: 'string — which event the payload comes from (default: current event). CANONICAL name — use this, not
-          "source".'
-      canonical_shape:
-        description: One canonical shape. This is the only accepted shape.
-        canonical:
-          format: "data_accumulation:\n  writes:\n    - field_name                          # direct: payload.field_name →\
-            \ entity.field_name\n    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key\n\
-            \      target_field: entity_key\n  source_event: event_name                # optional: defaults to the trigger\
-            \ event"
-          rules:
-          - writes is always a list
-          - each item is either a string (direct name match) or a {source_field, target_field} object (mapped)
-          - source_event is optional — if omitted, the trigger event is the source
-          - the source_event payload must contain all referenced fields (verified at boot)
-        format: "data_accumulation:\n  writes:\n    - field_name                          # direct: payload.field_name → entity.field_name\n\
-          \    - source_field: payload_key           # mapped: payload.payload_key → entity.target_key\n      target_field:\
-          \ entity_key\n    - target_field: entity_key            # computed: CEL expression → entity.target_key\n      expression:\
-          \ \"entity.counter + 1\"\n  source_event: event_name                # optional: defaults to the trigger event"
-        rules:
-        - computed writes use {target_field, expression} — expression is CEL evaluated against handler context (entity, payload,
-          policy)
-        - source_event is optional. When omitted, the trigger event is the source. When present, it must be a valid event
-          name in events.yaml. It is NOT a path expression — use data_accumulation.writes with {source_field, target_field}
-          for field mapping.
+        writes: list of write items (see write_item_forms below)
+        source_event: 'string — which event the payload comes from (default: current trigger event).
+          CANONICAL field name — use source_event, not "source".'
+      write_item_forms:
+        description: 'Each item in writes is one of three forms. No other forms are accepted.'
+        direct:
+          shape: 'field_name (bare string)'
+          meaning: 'payload.field_name → entity.field_name. Direct name match.'
+          example: '- geography'
+        mapped:
+          shape: '{source_field: payload_key, target_field: entity_key}'
+          meaning: 'payload.payload_key → entity.entity_key. Renamed mapping.'
+          example: "- source_field: vertical_name\n  target_field: name"
+        computed:
+          shape: '{target_field: entity_key, expression: CEL_expression}'
+          meaning: 'CEL expression evaluated against handler context → entity.entity_key.'
+          context: 'expression is evaluated against: entity, payload, policy, fan_out. The fan_out
+            namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
+            accumulated is NOT available — data_accumulation runs before accumulation completes.'
+          example: "- target_field: revision_count\n  expression: entity.revision_count + 1"
+      rules:
+      - writes is always a list
+      - each item is exactly one of the three forms above
+      - source_event is optional — if omitted, the trigger event is the source
+      - source_event payload must contain all fields referenced by direct and mapped writes (verified at boot)
+      - computed writes do not reference source_event — they use the handler context directly
+      example: "data_accumulation:\n  writes:\n  - geography                              # direct\n\
+        \  - source_field: vertical_name             # mapped\n    target_field: name\n  - target_field:\
+        \ expected_count              # computed\n    expression: fan_out.count\n  source_event: scan.requested\
+        \               # optional"
     emits:
       field: emits
       type: string or list of strings

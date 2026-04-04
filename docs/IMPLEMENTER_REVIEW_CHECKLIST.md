@@ -8,6 +8,8 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 
 ## Stop-Ship Questions
 
+- Does this change agree with the platform spec, or does it make a spec/implementation mismatch explicit?
+- If the semantics were unclear, did the implementer stop and escalate instead of inferring locally?
 - Is the semantic owner of this behavior explicit and singular?
 - Did this change reduce semantic drift instead of adding another local interpretation?
 - Did this avoid heuristic fallback for core semantics?
@@ -18,6 +20,9 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 
 ## Architecture Purity
 
+- Is the platform spec still the authoritative source for the semantics touched here?
+- If code and spec disagreed, was that disagreement resolved explicitly rather than patched around?
+- If there may be a spec gap, was that gap surfaced explicitly instead of silently filled by implementation choice?
 - Is the change improving the model instead of patching around a model gap?
 - If a concept matters in multiple layers, is there one canonical implementation?
 - Are invalid or ambiguous cases failing closed rather than being normalized silently?

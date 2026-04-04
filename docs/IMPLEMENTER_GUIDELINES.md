@@ -18,6 +18,52 @@ The default bias of this codebase should be:
 - one shared model over many local interpretations
 - clean migration over compatibility clutter
 - core/runtime generality over product-specific leakage
+- platform/spec authority over local implementer interpretation
+
+## Platform Spec Authority
+
+The platform spec is the authoritative source for platform/runtime semantics.
+
+Primary authority:
+
+- `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml`
+
+Supporting authority:
+
+- the related platform docs and implementation plans in `docs/`
+- only insofar as they clarify or sequence work without contradicting the platform spec
+
+Default rule:
+
+- if runtime behavior, contracts, or refactors touch platform semantics, implementers must treat the platform spec as the source of truth
+
+Practical implication:
+
+- do not invent local semantic rules because the current implementation happens to work that way
+- do not preserve a runtime quirk if it conflicts with the spec
+- do not resolve ambiguity by choosing the easiest implementation path
+
+If code and spec disagree:
+
+- stop and make the disagreement explicit
+- determine whether:
+  - the implementation is wrong and should be fixed to match the spec
+  - or the spec is incomplete/wrong and needs an explicit update
+- do not silently patch around the mismatch
+
+If semantics are unclear or there may be a spec gap:
+
+- stop and ask
+- do not infer the intended platform behavior locally
+- do not “fill in” the missing semantics with the easiest implementation
+- treat uncertainty itself as a design/specification issue that must be resolved explicitly
+
+Exception standard:
+
+- if a temporary deviation from the spec is unavoidable, it must be documented explicitly in:
+  - code
+  - tests
+  - and the relevant issue/plan/watchlist documents
 
 ## Rules
 
