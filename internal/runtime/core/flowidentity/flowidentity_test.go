@@ -5,6 +5,63 @@ import (
 	"testing"
 )
 
+func TestEntityID_UsesCanonicalRefDerivation(t *testing.T) {
+	const uuidRef = "11111111-1111-1111-1111-111111111111"
+	if got := EntityID(uuidRef); got != uuidRef {
+		t.Fatalf("EntityID(%q) = %q, want preserved uuid", uuidRef, got)
+	}
+
+	if got := EntityID("child"); got == "" || got == "child" {
+		t.Fatalf("EntityID(child) = %q, want canonical hashed id", got)
+	}
+
+	pathID := EntityID("child/inst-1")
+	if pathID == "" || pathID == "child/inst-1" {
+		t.Fatalf("EntityID(child/inst-1) = %q, want canonical hashed id", pathID)
+	}
+	if got := EntityID("/child/inst-1/"); got != pathID {
+		t.Fatalf("EntityID(/child/inst-1/) = %q, want %q", got, pathID)
+	}
+}
+
+func TestLookupKeys_UsesCanonicalEntityID(t *testing.T) {
+	cases := []struct {
+		name string
+		ref  string
+		want []string
+	}{
+		{
+			name: "uuid ref",
+			ref:  "11111111-1111-1111-1111-111111111111",
+			want: []string{"11111111-1111-1111-1111-111111111111"},
+		},
+		{
+			name: "bare non-uuid ref",
+			ref:  "child",
+			want: []string{EntityID("child")},
+		},
+		{
+			name: "path ref",
+			ref:  "child/inst-1",
+			want: []string{EntityID("child/inst-1")},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := LookupKeys(tc.ref)
+			if len(got) != len(tc.want) {
+				t.Fatalf("LookupKeys(%q) len = %d, want %d (%v)", tc.ref, len(got), len(tc.want), got)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("LookupKeys(%q)[%d] = %q, want %q", tc.ref, i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestSemanticScopeFromInstancePath(t *testing.T) {
 	cases := []struct {
 		path string
