@@ -58,6 +58,25 @@ If semantics are unclear or there may be a spec gap:
 - do not “fill in” the missing semantics with the easiest implementation
 - treat uncertainty itself as a design/specification issue that must be resolved explicitly
 
+For in-flight semantic changes:
+
+- do not update the authoritative `platform-spec.yaml` on `main` before the matching implementation exists
+- if a workstream needs a proposed semantic change, use a review-spec draft file first
+- only update the authoritative `platform-spec.yaml` in the same branch that makes the semantic change true in code/tests
+
+Default review-spec convention:
+
+- draft files live in a dedicated local-only review directory
+- name them with a workstream-specific suffix, for example:
+  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-audit-split.yaml`
+  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.expression-model.yaml`
+
+Rule:
+
+- `platform-spec.yaml` must describe the semantics that are actually true on `main`
+- review-spec drafts may describe proposed future semantics, but they are not authoritative until merged with the implementation
+- review-spec drafts are local working files and should stay gitignored until their contents are ready to be copied into the authoritative YAML on an implementation branch
+
 Exception standard:
 
 - if a temporary deviation from the spec is unavoidable, it must be documented explicitly in:

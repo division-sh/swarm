@@ -32,6 +32,36 @@ Use these layers of truth:
 The watchlist is the backlog and memory.
 GitHub issues are the active execution units.
 
+## Spec Change Workflow
+
+When a workstream requires a platform semantic change:
+
+1. Keep `docs/specs/swarm-platform/platform/contracts/platform-spec.yaml` authoritative for `main`.
+2. Do not put future semantics onto `main` ahead of code.
+3. Use a review-spec draft file while the semantic change is still in design or implementation.
+4. Land the authoritative YAML update in the same issue branch/PR as the matching implementation.
+
+Default review-spec convention:
+
+- store draft files in a dedicated local-only review directory
+- name them with a workstream-specific suffix, for example:
+  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.session-audit-split.yaml`
+  - `docs/specs/swarm-platform/platform/contracts/review/platform-spec.schema-capabilities.yaml`
+
+Default rule:
+
+- review-spec draft: proposed future semantics
+- authoritative YAML: semantics that are already true on `main`
+- review-spec drafts stay gitignored until the matching implementation branch is ready to copy the finalized semantics into the authoritative YAML
+
+If code on `main` and a proposed spec update would disagree:
+
+- the proposed spec change stays in a review-spec draft
+- the implementation branch becomes the convergence point for:
+  - code
+  - tests
+  - authoritative YAML update
+
 ## Default Working Model
 
 One implementer should own:
