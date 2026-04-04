@@ -84,12 +84,12 @@ func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]Conversa
 	return out, nil
 }
 
-func (r *SQLConversationReader) Get(ctx context.Context, agentID string) (ConversationDetail, bool, error) {
+func (r *SQLConversationReader) Get(ctx context.Context, sessionID string) (ConversationDetail, bool, error) {
 	if r == nil || r.db == nil {
 		return ConversationDetail{}, false, nil
 	}
-	agentID = strings.TrimSpace(agentID)
-	if agentID == "" {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		return ConversationDetail{}, false, nil
 	}
 	caps, err := r.resolveCapabilities(ctx)
@@ -117,10 +117,9 @@ func (r *SQLConversationReader) Get(ctx context.Context, agentID string) (Conver
 		FROM (
 			%s
 		) conversations
-		WHERE agent_id = $1
-		ORDER BY updated_at DESC, created_at DESC
+		WHERE session_id = $1
 		LIMIT 1
-	`, strings.Join(sources, "\nUNION ALL\n")), agentID)
+	`, strings.Join(sources, "\nUNION ALL\n")), sessionID)
 
 	item, err := scanConversationDetail(row)
 	if err == sql.ErrNoRows {

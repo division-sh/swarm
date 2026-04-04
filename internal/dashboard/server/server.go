@@ -95,7 +95,7 @@ type ConversationTurn struct {
 
 type ConversationReader interface {
 	List(ctx context.Context, limit int) ([]ConversationSummary, error)
-	Get(ctx context.Context, agentID string) (ConversationDetail, bool, error)
+	Get(ctx context.Context, sessionID string) (ConversationDetail, bool, error)
 }
 
 type ObservabilityReader interface {
@@ -166,7 +166,7 @@ func NewHandler(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/agents/{id}/actions/restart", h.handleAgentRestart)
 	mux.HandleFunc("POST /api/agents/{id}/actions/replay", h.handleAgentReplay)
 	mux.HandleFunc("GET /api/conversations", h.handleConversations)
-	mux.HandleFunc("GET /api/conversations/{agentID}", h.handleConversationDetail)
+	mux.HandleFunc("GET /api/conversations/{sessionID}", h.handleConversationDetail)
 	mux.HandleFunc("GET /api/events", h.handleEvents)
 	mux.HandleFunc("GET /api/events/flow", h.handleFlowEvents)
 	mux.HandleFunc("GET /api/events/{id}", h.handleEventDetail)
@@ -432,12 +432,12 @@ func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusNotImplemented, errors.New("conversation reader is not configured"))
 		return
 	}
-	agentID := strings.TrimSpace(r.PathValue("agentID"))
-	if agentID == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("agent id is required"))
+	sessionID := strings.TrimSpace(r.PathValue("sessionID"))
+	if sessionID == "" {
+		writeJSONError(w, http.StatusBadRequest, errors.New("session id is required"))
 		return
 	}
-	row, ok, err := h.conversations.Get(r.Context(), agentID)
+	row, ok, err := h.conversations.Get(r.Context(), sessionID)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, err)
 		return
