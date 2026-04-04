@@ -61,16 +61,16 @@ func (s stubInstances) Load(_ context.Context, instanceID string) (runtimepipeli
 }
 
 type stubConversations struct {
-	list    []ConversationSummary
-	byAgent map[string]ConversationDetail
+	list      []ConversationSummary
+	bySession map[string]ConversationDetail
 }
 
 func (s stubConversations) List(context.Context, int) ([]ConversationSummary, error) {
 	return s.list, nil
 }
 
-func (s stubConversations) Get(_ context.Context, agentID string) (ConversationDetail, bool, error) {
-	item, ok := s.byAgent[agentID]
+func (s stubConversations) Get(_ context.Context, sessionID string) (ConversationDetail, bool, error) {
+	item, ok := s.bySession[sessionID]
 	return item, ok, nil
 }
 
@@ -210,9 +210,10 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 				Summary:   "summarized",
 				UpdatedAt: now.Format(time.RFC3339),
 			}},
-			byAgent: map[string]ConversationDetail{
-				"agent-1": {
+			bySession: map[string]ConversationDetail{
+				"sess-1": {
 					AgentID:   "agent-1",
+					SessionID: "sess-1",
 					UpdatedAt: now.Format(time.RFC3339),
 					Messages:  []any{map[string]any{"role": "assistant", "content": "hi"}},
 					Turns: []ConversationTurn{{
@@ -277,7 +278,7 @@ func TestHandler_ConversationsAndAggregates(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/conversations/agent-1", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/conversations/sess-1", nil)
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("conversation detail status=%d body=%s", rec.Code, rec.Body.String())
@@ -434,7 +435,7 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 	}
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
-		WithArgs("agent-1").
+		WithArgs("sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
 		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
@@ -451,7 +452,7 @@ func TestSQLConversationReader_ListAndGet(t *testing.T) {
 			[]byte(`{"message":{"content":"dispatch"}}`), []byte(responsePayload), []byte(`[]`), true, 92282, 0, "", now,
 		))
 
-	item, ok, err := reader.Get(context.Background(), "agent-1")
+	item, ok, err := reader.Get(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatalf("get conversation: %v", err)
 	}
@@ -506,7 +507,7 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 	]`
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
-		WithArgs("agent-1").
+		WithArgs("sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
 		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 3, []byte(summaryState), []byte(messagePayload), now))
@@ -523,7 +524,7 @@ func TestSQLConversationReader_GetPrefersCanonicalTurnBlocks(t *testing.T) {
 			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"stale fallback text"}`), []byte(turnBlocksPayload), true, 92282, 0, "", now,
 		))
 
-	item, ok, err := reader.Get(context.Background(), "agent-1")
+	item, ok, err := reader.Get(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatalf("get conversation: %v", err)
 	}
@@ -581,7 +582,7 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 	}
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
-		WithArgs("agent-1").
+		WithArgs("audit-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
 		}).AddRow("audit-1", "agent-1", "turn_audit", "", "global", "task", "active", 1, []byte(summaryState), []byte(messagePayload), now))
@@ -598,7 +599,7 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"done"}`), []byte(`[]`), true, 25, 0, "", now,
 		))
 
-	item, ok, err := reader.Get(context.Background(), "agent-1")
+	item, ok, err := reader.Get(context.Background(), "audit-1")
 	if err != nil {
 		t.Fatalf("get conversation: %v", err)
 	}
@@ -607,6 +608,54 @@ func TestSQLConversationReader_ListAndGet_TaskAudit(t *testing.T) {
 	}
 	if len(item.Messages) != 1 || len(item.Turns) != 1 || item.Turns[0].Outcome != "done" {
 		t.Fatalf("unexpected task audit payload: %+v", item)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations: %v", err)
+	}
+}
+
+func TestSQLConversationReader_GetUsesSessionIDNotAgentID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	reader := NewSQLConversationReader(db, stubConversationCaps{caps: store.StoreSchemaCapabilities{
+		Conversations: store.ConversationSchemaCapabilities{
+			Audits: store.SchemaFlavorCanonical,
+			Turns:  store.SchemaFlavorCanonical,
+		},
+	}})
+	now := time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC)
+	summaryState := `{"summary":"older audit"}`
+	messagePayload := `[{"role":"assistant","content":"older"}]`
+
+	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
+		WithArgs("audit-older").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
+		}).AddRow("audit-older", "agent-1", "turn_audit", "", "global", "task", "active", 1, []byte(summaryState), []byte(messagePayload), now))
+
+	mock.ExpectQuery("SELECT\\s+turn_id::text,.*FROM agent_turns").
+		WithArgs("agent-1", "audit-older").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"turn_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id", "trigger_event_id", "trigger_event_type", "task_id",
+			"available_tools", "tool_calls", "emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
+			"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms", "retry_count", "error", "created_at",
+		}).AddRow(
+			"turn-1", "agent-1", "audit-older", "task", "", "", "evt-1", "task.run", "task-1",
+			[]byte(`[]`), []byte(`[]`), []byte(`[]`), []byte(`{}`), []byte(`[]`), []byte(`[]`),
+			[]byte(`{"message":{"content":"dispatch"}}`), []byte(`{"result":"older"}`), []byte(`[]`), true, 25, 0, "", now,
+		))
+
+	item, ok, err := reader.Get(context.Background(), "audit-older")
+	if err != nil {
+		t.Fatalf("get conversation: %v", err)
+	}
+	if !ok || item.SessionID != "audit-older" || item.Summary != "older audit" {
+		t.Fatalf("unexpected detail: %+v", item)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -628,10 +677,10 @@ func TestSQLConversationReader_GetMissing(t *testing.T) {
 		},
 	}})
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*FROM \\(").
-		WithArgs("missing-agent").
+		WithArgs("missing-session").
 		WillReturnError(sql.ErrNoRows)
 
-	_, ok, err := reader.Get(context.Background(), "missing-agent")
+	_, ok, err := reader.Get(context.Background(), "missing-session")
 	if err != nil {
 		t.Fatalf("expected nil error for missing conversation, got %v", err)
 	}
@@ -660,12 +709,12 @@ func TestSQLConversationReader_GetSkipsTurnsWithoutCapability(t *testing.T) {
 	messagePayload := `[{"role":"assistant","content":"hello"}]`
 
 	mock.ExpectQuery("SELECT\\s+session_id,\\s+agent_id,\\s+kind,.*COALESCE\\(conversation, '\\[\\]'::jsonb\\).*FROM \\(").
-		WithArgs("agent-1").
+		WithArgs("sess-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"session_id", "agent_id", "kind", "scope_key", "scope", "runtime_mode", "status", "turn_count", "runtime_state", "conversation", "updated_at",
 		}).AddRow("sess-1", "agent-1", "live_session", "global", "global", "session", "active", 1, []byte(summaryState), []byte(messagePayload), now))
 
-	item, ok, err := reader.Get(context.Background(), "agent-1")
+	item, ok, err := reader.Get(context.Background(), "sess-1")
 	if err != nil {
 		t.Fatalf("get conversation: %v", err)
 	}
