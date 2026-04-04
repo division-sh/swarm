@@ -62,6 +62,33 @@ If code on `main` and a proposed spec update would disagree:
   - tests
   - authoritative YAML update
 
+## Spec Gap Resolution Workflow
+
+Use this sequence whenever an implementer believes they found a spec ambiguity or gap:
+
+1. The implementer surfaces the ambiguity or suspected spec gap.
+2. The lead reviewer evaluates it first.
+3. If it is not a real gap, the implementer proceeds with the clarified interpretation.
+4. If it is a real gap, escalate to the spec writer.
+5. The spec writer works in a review-spec draft, not in the authoritative YAML on `main`.
+6. The lead reviewer reviews the draft spec.
+7. If the draft is approved, copy the reviewed draft into the relevant implementer worktree.
+8. The implementer uses that reviewed draft as the target semantic contract.
+9. When code, tests, and reviewed draft semantics align, the implementer updates the authoritative
+   `platform-spec.yaml` in their branch by applying the approved semantic delta.
+10. The PR lands with:
+    - code
+    - tests
+    - authoritative spec update
+    together.
+
+Rules:
+
+- implementers do not invent missing platform semantics locally
+- spec writers do not put future semantics onto `main` ahead of implementation
+- reviewed drafts are the staging area for semantic changes
+- the implementation branch is the convergence point where reviewed draft semantics become authoritative
+
 ## Default Working Model
 
 One implementer should own:
@@ -140,6 +167,48 @@ And every review should ask:
 - did this avoid heuristic fallback?
 - did this avoid product leakage?
 - did this keep core logic elegant rather than branch-heavy?
+
+## Pull Request Standards
+
+Default rule:
+
+- do not use draft PRs
+
+Why:
+
+- draft PRs add coordination friction
+- they create unnecessary extra state in a workflow that is already issue-scoped and review-driven
+- the issue, worktree, branch, and direct reviewer feedback already provide enough staging structure
+
+PR opening rule:
+
+- open a normal PR only when the branch is ready for actual review
+- if the work is not ready for review yet, keep working locally on the issue branch instead of opening a draft PR
+
+PR title rule:
+
+- every PR title must include:
+  - the implementer identifier
+  - the issue number
+  - the workstream title
+
+Canonical title format:
+
+- `[agent-x][issue #123] Short workstream title`
+
+Examples:
+
+- `[agent-a][issue #12] Separate semantic flow scope from concrete flow-instance path`
+- `[agent-c][issue #10] Introduce a typed persisted runtime descriptor for agents`
+
+Default rule:
+
+- PR titles should be operationally readable from the GitHub list view alone
+- no generic titles such as:
+  - `fix stuff`
+  - `runtime cleanup`
+  - `[codex] update`
+- the title should make ownership and workstream identity obvious without opening the PR
 
 ## Coordination Rules
 

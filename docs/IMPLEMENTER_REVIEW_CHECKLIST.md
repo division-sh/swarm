@@ -64,6 +64,9 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 
 ## Final Merge Check
 
+- Was this opened as a normal reviewable PR rather than a draft PR?
+- Does the PR title follow the required format:
+  - `[agent-x][issue #123] Short workstream title`
 - Would another implementer understand the canonical owner of this behavior from the code alone?
 - Would this change still make sense if two more implementers touched the same subsystem next week?
 - Did this patch make the codebase more elegant, more unified, and easier to reason about?

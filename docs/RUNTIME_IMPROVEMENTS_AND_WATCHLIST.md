@@ -806,6 +806,12 @@ Improvement items:
 
 ### Flight recorder is missing or incomplete
 
+Status:
+
+- materially addressed at the 2026-04-04 checkpoint via issue `#4` / PR `#13`
+- canonical per-turn flight-recorder entries now flow through `platform.runtime_log` and `agent_turns.turn_blocks`
+- keep this section as a regression guard and for remaining spec/debug-surface follow-up, not as an unstarted initiative
+
 Symptoms:
 
 - root cause can only be reconstructed from scattered logs
@@ -1292,6 +1298,11 @@ Improvement items:
 
 ### Store behavior depends on implicit schema-shape fallbacks
 
+Status:
+
+- core initiative completed at the 2026-04-04 checkpoint via issue `#1` / PR `#5`
+- keep this section as historical context and as a guard against regression, not as an active architecture initiative
+
 Symptoms:
 
 - persistence behavior changes based on which columns happen to exist
@@ -1543,6 +1554,10 @@ Improvement items:
 - remove alternate UUID namespaces for flow-instance-derived entity ids
 - add direct tests proving all non-UUID flow-instance refs converge to the same entity id across runtime and store helpers
 
+Status:
+
+- completed at 2026-04-04 checkpoint via issue `#7` / PR `#9`
+
 ### Instance path resolution still has conflicting fallback precedence
 
 Symptoms:
@@ -1711,11 +1726,13 @@ Improvement items:
    - proved critical by: offered/visible/allowed/callable tool sets can still diverge depending on which normalization/auth layer was consulted
    - status: completed at 2026-04-04 checkpoint as part of tool invocation unification
 5. Better structured denial diagnostics with layer attribution.
+   - status: completed at 2026-04-04 checkpoint via issue `#4` / PR `#13`
 6. Add a per-turn structured flight recorder as the primary debugging surface.
    - proved critical by: over-broad parent retargeting rewrote top-level flow outputs
    - proved critical by: flow-control event emitted in the wrong lifecycle phase (`opco.teardown_requested` on a scoring-only subject)
    - proved critical by: `data_accumulation` arithmetic expressions failed silently and left revision counters at `0`
    - proved critical by: validation agents advanced the workflow after denied writes and later sessions anchored on stale operator-fix instructions
+   - status: completed at 2026-04-04 checkpoint via issue `#4` / PR `#13`
 7. Audit and prove mutation-log completeness for all `entity_state` write paths.
    - proved critical by: revision-loop debugging required proving whether declarative writes became persisted field deltas
    - proved critical by: state transitions occurred on run `51b45b57-d82a-4d89-84c7-d0a3a7222fef` while `entity_mutations` remained completely empty
@@ -1733,6 +1750,7 @@ Improvement items:
    - proved critical by: nested template subscribers were later materialized against semantic template scope instead of exact instance path, leaving instance-local subscriptions on the wrong namespace
 13. Replace implicit store schema fallback logic with an explicit schema-capability boundary.
    - proved critical by: event/store persistence still routes through legacy paths by matching SQL error substrings and ad hoc `columnExists(...)` checks
+   - status: completed at 2026-04-04 checkpoint via issue `#1` / PR `#5`
 14. Introduce a typed persisted runtime descriptor for agents instead of reconstructing control semantics from opaque config JSON.
    - proved critical by: manager, authority, workspace, and store paths all re-decode control semantics like `flow_path`, subscriptions, and `manager_fallback` from raw config payloads
 15. Replace the engine helper fallback interpreter with an explicit typed expression model.
@@ -1743,6 +1761,7 @@ Improvement items:
    - proved critical by: stateless task-mode turns still back-project into `agent_sessions`, forcing dashboards and recovery logic to distinguish real sessions from observability shims after the fact
 18. Unify flow-instance entity-id derivation across runtime and store layers.
    - proved critical by: residual store-side row-id derivation still carries a separate namespace branch that can disagree with centralized `flowidentity.EntityID(...)`
+   - status: completed at 2026-04-04 checkpoint via issue `#7` / PR `#9`
 19. Replace flat expression-context merging with explicit scoped variable semantics.
    - proved critical by: expression context still relies on silent overwrite precedence across `vars`, `policy`, `entity`, and `payload`
 20. Implement canonical tool-execution telemetry as a first-class runtime surface.
