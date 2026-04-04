@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	runtimecontracts "swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
+	runtimecontracts "swarm/internal/runtime/contracts"
 )
 
 func TestLoadFromDir_DefaultAndModeVariant(t *testing.T) {

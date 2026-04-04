@@ -1,10 +1,10 @@
 package contracts
 
 import (
-	flowmodel "swarm/internal/runtime/flowmodel"
-	"swarm/internal/runtime/core/eventidentity"
 	"sort"
 	"strings"
+	"swarm/internal/runtime/core/eventidentity"
+	flowmodel "swarm/internal/runtime/flowmodel"
 )
 
 func (b *WorkflowContractBundle) WorkflowName() string {

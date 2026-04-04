@@ -14,9 +14,9 @@ type chatTestAgent struct {
 	calls     int
 }
 
-func (a *chatTestAgent) ID() string                              { return a.id }
-func (a *chatTestAgent) Type() string                            { return "stub" }
-func (a *chatTestAgent) Subscriptions() []events.EventType       { return nil }
+func (a *chatTestAgent) ID() string                        { return a.id }
+func (a *chatTestAgent) Type() string                      { return "stub" }
+func (a *chatTestAgent) Subscriptions() []events.EventType { return nil }
 func (a *chatTestAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	return nil, nil
 }

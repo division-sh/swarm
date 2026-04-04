@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	runtimesharding "swarm/internal/runtime/core/sharding"
 	"gopkg.in/yaml.v3"
+	runtimesharding "swarm/internal/runtime/core/sharding"
 )
 
 // Config contains platform-generic runtime configuration.

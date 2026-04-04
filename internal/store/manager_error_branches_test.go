@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {

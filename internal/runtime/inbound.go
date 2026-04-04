@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
-	"github.com/google/uuid"
 )
 
 type InboundPersistence interface {
@@ -53,9 +53,9 @@ func (t *InboundTarget) NormalizeEntity() {
 }
 
 type InboundGateway struct {
-	mux   *http.ServeMux
-	bus   *runtimebus.EventBus
-	store InboundPersistence
+	mux    *http.ServeMux
+	bus    *runtimebus.EventBus
+	store  InboundPersistence
 	logger *RuntimeLogger
 }
 
@@ -65,9 +65,9 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, stores .
 		store = stores[0]
 	}
 	g := &InboundGateway{
-		mux:   http.NewServeMux(),
-		bus:   bus,
-		store: store,
+		mux:    http.NewServeMux(),
+		bus:    bus,
+		store:  store,
 		logger: logger,
 	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)

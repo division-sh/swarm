@@ -29,8 +29,7 @@ var tier5LifecycleFixtures = []string{
 	"test-wildcard-subscription",
 }
 
-var tier5ExcludedFixtures = map[string]catalogExcludedFixture{
-}
+var tier5ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier5LifecycleCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)

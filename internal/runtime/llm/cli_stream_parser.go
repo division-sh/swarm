@@ -8,16 +8,16 @@ import (
 )
 
 type cliStreamAccumulator struct {
-	raw             bytes.Buffer
-	message         Message
-	toolCalls       []ToolCall
-	streamedCalls   []cliRecordedToolCall
-	sessionID       string
-	resultText      string
-	pending         map[int]*cliPendingToolCall
+	raw              bytes.Buffer
+	message          Message
+	toolCalls        []ToolCall
+	streamedCalls    []cliRecordedToolCall
+	sessionID        string
+	resultText       string
+	pending          map[int]*cliPendingToolCall
 	completedToolIDs map[string]struct{}
-	mcpServers      map[string]string
-	mcpVisibleTools []string
+	mcpServers       map[string]string
+	mcpVisibleTools  []string
 }
 
 type cliPendingToolCall struct {

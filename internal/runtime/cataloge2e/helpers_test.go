@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"swarm/internal/config"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
-	"gopkg.in/yaml.v3"
 )
 
 func repoRootFromCatalogE2E(t testing.TB) string {

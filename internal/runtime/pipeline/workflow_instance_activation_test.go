@@ -226,8 +226,8 @@ type staticSemanticWorkflowModule struct {
 	source semanticview.Source
 }
 
-func (m staticSemanticWorkflowModule) SemanticSource() semanticview.Source { return m.source }
+func (m staticSemanticWorkflowModule) SemanticSource() semanticview.Source   { return m.source }
 func (staticSemanticWorkflowModule) WorkflowDefinition() *WorkflowDefinition { return nil }
-func (staticSemanticWorkflowModule) WorkflowNodes() []WorkflowNode          { return nil }
-func (staticSemanticWorkflowModule) GuardRegistry() GuardRegistry           { return nil }
-func (staticSemanticWorkflowModule) ActionRegistry() ActionRegistry         { return nil }
+func (staticSemanticWorkflowModule) WorkflowNodes() []WorkflowNode           { return nil }
+func (staticSemanticWorkflowModule) GuardRegistry() GuardRegistry            { return nil }
+func (staticSemanticWorkflowModule) ActionRegistry() ActionRegistry          { return nil }

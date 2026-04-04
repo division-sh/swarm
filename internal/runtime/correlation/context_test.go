@@ -9,9 +9,9 @@ import (
 
 func TestCorrelateEvent_InheritsRunAndParentWithoutGeneratingTrace(t *testing.T) {
 	inbound := events.Event{
-		ID:      "evt-parent",
-		Type:    events.EventType("task.started"),
-		RunID:   "run-123",
+		ID:    "evt-parent",
+		Type:  events.EventType("task.started"),
+		RunID: "run-123",
 	}
 	ctx := WithInboundEvent(context.Background(), inbound)
 

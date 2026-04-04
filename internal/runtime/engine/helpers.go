@@ -342,7 +342,6 @@ func normalizeCELValue(value any) any {
 	}
 }
 
-
 func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) map[string]any {
 	if spec == nil {
 		return nil

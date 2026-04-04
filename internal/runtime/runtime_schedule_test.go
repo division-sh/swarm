@@ -87,7 +87,7 @@ func (semanticOnlyWorkflowRuntime) WorkflowInstanceStore() runtimepipeline.Workf
 func (semanticOnlyWorkflowRuntime) TransitionEvaluator() runtimepipeline.TransitionEvaluator {
 	return nil
 }
-func (semanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry { return nil }
+func (semanticOnlyWorkflowRuntime) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
 func (semanticOnlyWorkflowRuntime) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
 func TestEnsureRecurringWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *testing.T) {

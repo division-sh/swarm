@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
-	"github.com/google/uuid"
 )
 
 type engineOutbox struct {

@@ -143,8 +143,8 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	agent := &traceRecordingAgent{}
 	am := NewAgentManager(nil, nil)
 	evt := events.Event{
-		ID:      "evt-123",
-		Type:    events.EventType("discovery/market_research.scan_assigned"),
+		ID:   "evt-123",
+		Type: events.EventType("discovery/market_research.scan_assigned"),
 	}
 	if err := am.processEvent(context.Background(), agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)

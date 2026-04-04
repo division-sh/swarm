@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"swarm/internal/runtime/diaglog"
 	runtimebus "swarm/internal/runtime/bus"
+	"swarm/internal/runtime/diaglog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 

@@ -14,10 +14,10 @@ func TestCatalogSubjectEntityIDs_UsesResolvedSubjectID(t *testing.T) {
 	grandchildID := "33333333-3333-3333-3333-333333333333"
 
 	for _, stmt := range []struct {
-		entityID    string
-		subjectID   string
-		flow        string
-		state       string
+		entityID  string
+		subjectID string
+		flow      string
+		state     string
 	}{
 		{entityID: rootID, subjectID: rootID, flow: rootID, state: "done"},
 		{entityID: childID, subjectID: rootID, flow: "child", state: "completed"},

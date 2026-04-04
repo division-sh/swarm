@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"swarm/internal/config"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	"swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func portFromDSN(t *testing.T, dsn string) int {

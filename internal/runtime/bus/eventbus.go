@@ -53,15 +53,15 @@ const deliverySendTimeout = 250 * time.Millisecond
 var ErrStaleRuntimeEpoch = errors.New("stale runtime epoch")
 
 type eventDeliveryPlan struct {
-	Event               events.Event
-	Recipients          []string
-	PersistedRecipients []string
-	RoutedRecipients    []Subscriber
+	Event                events.Event
+	Recipients           []string
+	PersistedRecipients  []string
+	RoutedRecipients     []Subscriber
 	SubscribedRecipients []string
-	ExtraDetail         map[string]any
-	ContradictionReason string
-	BlockedByCycle      bool
-	CycleEscalation     *events.Event
+	ExtraDetail          map[string]any
+	ContradictionReason  string
+	BlockedByCycle       bool
+	CycleEscalation      *events.Event
 }
 
 func NewEventBus(store EventStore) (*EventBus, error) {

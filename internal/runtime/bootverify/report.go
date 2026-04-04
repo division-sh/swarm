@@ -22,8 +22,8 @@ type Report struct {
 }
 
 type Options struct {
-	Credentials        runtimecredentials.Store
-	CheckMCPReachable  bool
+	Credentials       runtimecredentials.Store
+	CheckMCPReachable bool
 }
 
 func Run(ctx context.Context, source semanticview.Source, opts Options) Report {

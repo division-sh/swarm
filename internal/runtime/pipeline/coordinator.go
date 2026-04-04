@@ -340,7 +340,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			if err := runtimedeadletters.Insert(ctx, pc.db, rec); err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID), strings.TrimSpace(string(trigger.Type)), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
-					"handler_node":          nodeID,
+					"handler_node":           nodeID,
 				}, err)
 			}
 		}
@@ -377,7 +377,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID), strings.TrimSpace(string(trigger.Type)), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
-					"handler_node":          nodeID,
+					"handler_node":           nodeID,
 				}, err)
 			}
 		}

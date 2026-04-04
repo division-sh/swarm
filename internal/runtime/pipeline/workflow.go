@@ -62,17 +62,17 @@ func WorkflowStateTransition(from, to WorkflowStateID) (WorkflowTransition, bool
 type WorkflowGuard func(state WorkflowState, transition WorkflowTransition) bool
 
 type WorkflowTransition struct {
-	Name             string                                    `json:"name"`
-	From             []WorkflowStateID                         `json:"from"`
-	To               WorkflowStateID                           `json:"to"`
-	Reason           string                                    `json:"reason,omitempty"`
-	Trigger          string                                    `json:"trigger,omitempty"`
-	Node             string                                    `json:"node,omitempty"`
-	GuardIDs         []string                                  `json:"guard_ids,omitempty"`
-	AllowTerminalExit bool                                     `json:"allow_terminal_exit,omitempty"`
-	Guard            WorkflowGuard                             `json:"-"`
-	Actions          []WorkflowAction                          `json:"actions,omitempty"`
-	DataAccumulation runtimecontracts.WorkflowDataAccumulation `json:"data_accumulation,omitempty"`
+	Name              string                                    `json:"name"`
+	From              []WorkflowStateID                         `json:"from"`
+	To                WorkflowStateID                           `json:"to"`
+	Reason            string                                    `json:"reason,omitempty"`
+	Trigger           string                                    `json:"trigger,omitempty"`
+	Node              string                                    `json:"node,omitempty"`
+	GuardIDs          []string                                  `json:"guard_ids,omitempty"`
+	AllowTerminalExit bool                                      `json:"allow_terminal_exit,omitempty"`
+	Guard             WorkflowGuard                             `json:"-"`
+	Actions           []WorkflowAction                          `json:"actions,omitempty"`
+	DataAccumulation  runtimecontracts.WorkflowDataAccumulation `json:"data_accumulation,omitempty"`
 }
 
 type WorkflowDefinition struct {
@@ -373,17 +373,17 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 			guardIDs = append(guardIDs, guard)
 		}
 		transitions = append(transitions, WorkflowTransition{
-			Name:             id,
-			From:             workflowTransitionFromStages(transition.From),
-			To:               WorkflowStateID(to),
-			Reason:           strings.TrimSpace(transition.Trigger),
-			Trigger:          strings.TrimSpace(transition.Trigger),
-			Node:             strings.TrimSpace(transition.Node),
-			GuardIDs:         guardIDs,
+			Name:              id,
+			From:              workflowTransitionFromStages(transition.From),
+			To:                WorkflowStateID(to),
+			Reason:            strings.TrimSpace(transition.Trigger),
+			Trigger:           strings.TrimSpace(transition.Trigger),
+			Node:              strings.TrimSpace(transition.Node),
+			GuardIDs:          guardIDs,
 			AllowTerminalExit: transition.AllowTerminalExit,
-			Guard:            alwaysWorkflowGuard,
-			Actions:          actions,
-			DataAccumulation: transition.DataAccumulation,
+			Guard:             alwaysWorkflowGuard,
+			Actions:           actions,
+			DataAccumulation:  transition.DataAccumulation,
 		})
 	}
 	return NewWorkflowDefinition(name, stages, transitions), nil

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimesessions "swarm/internal/runtime/sessions"
-	"github.com/google/uuid"
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {

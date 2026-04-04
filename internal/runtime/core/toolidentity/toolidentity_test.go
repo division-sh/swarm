@@ -31,12 +31,12 @@ func TestIsEmitToolName(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]bool{
-		"emit_scan_done":                        true,
-		"mcp__runtime-tools__emit_scan_done":    true,
-		"read_file":                             false,
-		"mcp__runtime-tools__read_file":         false,
-		"Write":                                 false,
-		"mcp__runtime-tools__write_file":        false,
+		"emit_scan_done":                     true,
+		"mcp__runtime-tools__emit_scan_done": true,
+		"read_file":                          false,
+		"mcp__runtime-tools__read_file":      false,
+		"Write":                              false,
+		"mcp__runtime-tools__write_file":     false,
 	}
 
 	for raw, want := range tests {

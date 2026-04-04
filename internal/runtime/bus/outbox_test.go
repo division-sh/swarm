@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeengine "swarm/internal/runtime/engine"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/store"
-	"github.com/DATA-DOG/go-sqlmock"
 )
 
 type recordingEventStore struct {
