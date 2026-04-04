@@ -1,0 +1,9 @@
+root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to: [start.all]
+  produces: [work.begin]
+  event_handlers:
+    start.all:
+      advances_to: done
+      emits: work.begin

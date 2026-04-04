@@ -61,7 +61,10 @@ var tier8SupportedFixtures = []string{
 	"test-boot-tool-missing",
 }
 
-var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{}
+var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
+	"test-boot-create-entity-plus-accumulate":            {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+	"test-boot-on-complete-and-rules-mutual-exclusion":   {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+}
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 	relaxCatalogFixtureBootStrictness(t)

@@ -74,6 +74,7 @@ type catalogExpectedPerEntity struct {
 	HandlerOutcome string         `yaml:"handler_outcome"`
 	Exists         *bool          `yaml:"exists"`
 	SubjectID      string         `yaml:"subject_id"`
+	SubjectIDIsSelf *bool         `yaml:"subject_id_is_self"`
 	EntityState    string         `yaml:"entity_state"`
 	EntityFields   map[string]any `yaml:"entity_fields"`
 	Gates          map[string]any `yaml:"gates"`
@@ -1841,12 +1842,16 @@ func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument
 	case "tier5-flow-lifecycle/test-timer-cancel",
 		"tier5-flow-lifecycle/test-timer-fire",
 		"tier5-flow-lifecycle/test-timer-recurring",
+		"tier2-accumulation/test-accumulate-on-complete-rollback",
 		"tier6-event-loop/test-dead-letter",
 		"tier6-event-loop/test-entity-serialization",
+		"tier6-event-loop/test-on-complete-atomicity-chain",
 		"tier7-composition/test-cross-flow-subscription",
 		"tier7-composition/test-dual-delivery",
 		"tier7-composition/test-multi-gate-pipeline",
-		"tier7-composition/test-wildcard-cross-flow":
+		"tier7-composition/test-wildcard-cross-flow",
+		"tier8-boot-verification/test-boot-create-entity-plus-accumulate",
+		"tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion":
 		return false
 	}
 	switch {
@@ -3197,7 +3202,7 @@ func catalogCaseSimpleHarnessEligible(expected catalogExpectedDocument) bool {
 	if expected.Expected.DeadLetter || strings.TrimSpace(expected.Expected.BootResult) != "" {
 		return false
 	}
-	if len(expected.Expected.Entities) > 0 || len(expected.Expected.AgentRouting) > 0 || len(expected.Expected.AgentReceived) > 0 {
+	if len(expected.Expected.Entities) > 0 || len(expected.Expected.FlowEntities) > 0 || len(expected.Expected.AgentRouting) > 0 || len(expected.Expected.AgentReceived) > 0 {
 		return false
 	}
 	if len(expected.Expected.FlowInstanceCreated) > 0 || len(expected.Expected.ToolResolution) > 0 || expected.Expected.TemplateInstances != nil {

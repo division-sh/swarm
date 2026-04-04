@@ -1,0 +1,6 @@
+score.requested:
+  payload:
+    entity_id: string
+score.done:
+  payload:
+    entity_id: string

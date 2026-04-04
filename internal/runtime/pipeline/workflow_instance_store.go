@@ -6,12 +6,12 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 )
 
@@ -751,11 +751,11 @@ func workflowInstanceLogicalID(fallback string, metadata map[string]any) string 
 		return logicalID
 	}
 	if flowPath := strings.TrimSpace(asString(metadata["flow_path"])); flowPath != "" {
-		return strings.TrimSpace(path.Base(flowPath))
+		return runtimeflowidentity.LogicalInstanceID(flowPath)
 	}
 	if storageRef := strings.TrimSpace(asString(metadata["storage_ref"])); storageRef != "" {
 		if strings.Contains(storageRef, "/") {
-			return strings.TrimSpace(path.Base(storageRef))
+			return runtimeflowidentity.LogicalInstanceID(storageRef)
 		}
 		return storageRef
 	}
@@ -781,6 +781,9 @@ func workflowInstanceRowID(ref string) string {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return ""
+	}
+	if strings.Contains(ref, "/") {
+		return runtimeflowidentity.EntityID(ref)
 	}
 	if !strings.Contains(ref, "/") {
 		if parsed, err := uuid.Parse(ref); err == nil {

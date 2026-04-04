@@ -1,0 +1,28 @@
+scorer:
+  id: scorer
+  execution_type: system_node
+  subscribes_to: [score.received]
+  produces: [batch.scored]
+  event_handlers:
+    score.received:
+      accumulate:
+        expected_from: entity.expected_count
+        completion: all
+      on_complete:
+        - condition: "true"
+          advances_to: scored
+          emits: batch.scored
+
+verifier:
+  id: verifier
+  execution_type: system_node
+  subscribes_to: [batch.scored]
+  produces: [scores.verified]
+  event_handlers:
+    batch.scored:
+      guard:
+        id: confirm_scored_state
+        check: "entity.current_state == \"scored\""
+        on_fail: reject
+      advances_to: verified
+      emits: scores.verified

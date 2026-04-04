@@ -138,30 +138,12 @@ func (pc *PipelineCoordinator) projectWorkflowSubjectGates(ctx context.Context, 
 	if subjectID == "" || subjectID == entityID {
 		return nil
 	}
-	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
-	scopeKey := ""
-	if workflowName := strings.TrimSpace(instance.WorkflowName); workflowName != "" {
-		scopeKey = strings.TrimSpace(workflowScopeKey(pc.SemanticSource(), workflowName))
-	}
+	scopeKey := workflowInstanceScopeKey(pc.SemanticSource(), instance, strings.TrimSpace(pipelineFlowScope(ctx)))
 	if scopeKey == "" {
-		scopeKey = flowPath
-		if idx := strings.Index(scopeKey, "/"); idx > 0 {
-			scopeKey = strings.TrimSpace(scopeKey[:idx])
-		}
-	}
-	if flowPath == "" {
 		flowID := strings.TrimSpace(pipelineFlowScope(ctx))
 		if flowID != "" {
-			if pc.SemanticSource() != nil {
-				flowPath = strings.Trim(strings.TrimSpace(pc.SemanticSource().FlowPath(flowID)), "/")
-			}
-			if flowPath == "" {
-				flowPath = flowID
-			}
+			scopeKey = strings.TrimSpace(workflowScopeKey(pc.SemanticSource(), flowID))
 		}
-	}
-	if scopeKey == "" {
-		scopeKey = flowPath
 	}
 	if scopeKey == "" {
 		return nil

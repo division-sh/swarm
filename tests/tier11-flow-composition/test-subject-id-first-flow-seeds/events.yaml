@@ -1,0 +1,15 @@
+job.created:
+  payload:
+    entity_id: string
+work.assigned:
+  payload:
+    entity_id: string
+job.done:
+  payload:
+    entity_id: string
+intake/work.assigned:
+  payload:
+    entity_id: string
+intake/item.processed:
+  payload:
+    entity_id: string

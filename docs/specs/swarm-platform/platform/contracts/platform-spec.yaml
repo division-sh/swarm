@@ -67,6 +67,30 @@ vocabulary:
     - nodes.yaml
     - events.yaml
     - schema.yaml
+  flow_identity:
+    description: 'A flow has two distinct identity concepts that are NOT interchangeable.'
+    flow_scope_key:
+      description: 'Semantic namespace derived from the flow''s position in the contract tree.
+        Identifies the flow TYPE and its logical position, not a specific running instance.
+        Example: scoring, validation, operating/build. Used for: gate projection namespaces,
+        ownership comparisons, event scoping, contract-level references.'
+      examples:
+      - scoring
+      - validation
+      - operating/build
+    flow_instance_path:
+      description: 'Concrete running instance identity. Includes the instance ID for template flows.
+        Identifies a specific execution. Example: operating/vert-001. Used for: entity_state.flow_instance,
+        routing_rules.flow_instance, instance lifecycle management.'
+      examples:
+      - scoring (static flow — scope key and instance path are the same)
+      - operating/vert-001 (template instance — scope key is "operating", instance path includes the ID)
+    not_interchangeable: 'These are not interchangeable. Using instance path where scope key is needed
+      causes prefix-based ownership bugs. Using scope key where instance path is needed causes
+      cross-instance state leakage. The runtime MUST use the correct identity for each context.'
+    flow_entity_id: 'The canonical entity identity within a flow is derived from the concrete instance
+      path. One flow instance produces one entity_state row. The runtime MUST NOT maintain multiple
+      competing identities for the same flow instance row.'
   state:
     description: 'A named state in a workflow. An entity (e.g. a ticket, an order, a document) is always in exactly one
       state. States belong to phases for grouping. Some states are terminal (no outgoing transitions).
@@ -824,7 +848,8 @@ engine:
     - step: 3
       name: construct_paths
       action: 'For each flow, construct hierarchical paths for its nodes, agents, and events. Local names become absolute
-        paths: {flow_instance_path}/{local_name}.'
+        paths using the semantic contract path (flow_scope_key): {flow_scope_key}/{local_name}. This happens at boot
+        before any template instances exist — concrete instance paths are materialized later at create_flow_instance time.'
     - step: 4
       name: register_templates
       action: 'For flows declared as mode: template, register the template but create no instances. The template is available
@@ -2203,6 +2228,40 @@ flow_model:
     killed_across_flows: 'killed is a terminal state in every flow. When a downstream flow kills an entity,
       it emits entity.killed + entity.killed_backprop. Upstream flows handle killed_backprop and advance
       their own entity to killed. Each flow kills its own entity. No shared mutation.'
+    ownership_semantics:
+      description: 'Entity write ownership is determined by exact semantic flow scope (flow_scope_key),
+        not by path prefix matching or instance path.'
+      rules:
+      - 'A flow owns entities whose SemanticScope(flow_instance_path) == flow_scope_key. For static
+        flows, flow_instance_path IS the scope key. For template instances, the semantic scope is derived
+        by stripping the instance ID. No prefix matching. No other flow may write to those entities.'
+      - 'Parent flows do NOT own descendant flow instance writes. scoring does not own validation
+        entities. Root does not own child flow entities.'
+      - 'Sibling flows do NOT own each other. scoring and validation are peers — neither can write
+        to the other''s entities.'
+      - 'No prefix-based ownership inference. The runtime MUST NOT treat "scoring" as owning
+        "scoring-extended" or any other flow whose scope_key happens to share a prefix.'
+      - 'These semantics hold at arbitrary depth. A three-level flow (root/child/grandchild) follows
+        the same rules as a two-level flow. No special cases for depth.'
+    gate_projection:
+      description: 'Gates are projected (namespaced) by semantic flow scope, not by full instance path.'
+      rule: 'Gate storage and projection use flow_scope_key. Example: child flow "build" declares gate
+        g_validated. The gate is stored/projected as build/g_validated, not build/<instance-id>/g_validated.
+        This ensures gate references are stable across instance IDs and consistent between static and
+        template flows.'
+    parent_retarget_semantics:
+      description: 'When a child flow emits an output event, the platform may retarget the event to the
+        parent flow''s entity context. This is called parent retargeting.'
+      rules:
+      - 'Only true child-flow output boundaries retarget upward. An event emitted by a child flow node
+        that is declared in the child''s pins.outputs.events is retargeted to the parent entity context.'
+      - 'Top-level flow outputs do NOT retarget. If a root-level flow emits an output event, it stays
+        on the emitting flow''s entity. The presence of parent_entity_id metadata alone is NOT sufficient
+        to trigger retargeting.'
+      - 'Already-retargeted events are NOT retargeted again. If a grandchild output was retargeted to
+        the child context, and the child then emits it as its own output, the second retarget goes to
+        the grandparent — but the same event is never retargeted twice in one hop.'
+      - 'These semantics hold recursively at depth N. No special handling for specific depths.'
     subject_lifecycle_query:
       description: 'Platform tool for querying the full lifecycle of a business object across flows.'
       tool_name: get_subject_status

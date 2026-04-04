@@ -1,0 +1,9 @@
+work.begin:
+  payload:
+    entity_id: string
+internal.step2:
+  payload:
+    entity_id: string
+alpha.done:
+  payload:
+    entity_id: string

@@ -9,6 +9,7 @@ import (
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/semanticview"
 )
@@ -163,21 +164,7 @@ func resolveFlowInstanceSegments(root map[string]any, segments []string) (any, b
 }
 
 func DeriveFlowInstancePath(source semanticview.Source, templateID, instanceID string) string {
-	basePath := strings.Trim(strings.TrimSpace(templateID), "/")
-	if source != nil {
-		if resolved := strings.Trim(strings.TrimSpace(source.FlowPath(templateID)), "/"); resolved != "" {
-			basePath = resolved
-		}
-	}
-	instanceID = strings.Trim(strings.TrimSpace(instanceID), "/")
-	switch {
-	case basePath == "":
-		return instanceID
-	case instanceID == "":
-		return basePath
-	default:
-		return basePath + "/" + instanceID
-	}
+	return runtimeflowidentity.InstancePath(source, templateID, instanceID)
 }
 
 func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCtx workflowTriggerContext, eventType string) map[string]any {
@@ -192,19 +179,15 @@ func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCt
 	for key, value := range payload {
 		out[key] = value
 	}
-	entityID := strings.TrimSpace(firstNonEmptyString(
+	entityID := resolveEmittedEntityID(
+		pc.SemanticSource(),
+		pipelineFlowScope(ctx),
+		eventType,
+		triggerCtx.State,
+		triggerCtx.Event,
 		triggerCtx.State.EntityID,
 		workflowEventEntityIDWithPayload(triggerCtx.Event, payload),
-	))
-	if workflowEmitTargetsParentEntity(pc.SemanticSource(), pipelineFlowScope(ctx), eventType) &&
-		strings.TrimSpace(asString(triggerCtx.State.Metadata["flow_path"])) != "" {
-		entityID = strings.TrimSpace(firstNonEmptyString(
-			asString(triggerCtx.State.Metadata["parent_entity_id"]),
-			triggerCtx.Event.EntityID(),
-			workflowEventEntityIDWithPayload(triggerCtx.Event, payload),
-			entityID,
-		))
-	}
+	)
 	if entityID != "" {
 		out["entity_id"] = entityID
 	}

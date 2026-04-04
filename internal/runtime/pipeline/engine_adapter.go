@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path"
 	"strings"
 	"time"
 
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/identity"
 	runtimeregistry "swarm/internal/runtime/core/registry"
 	runtimeengine "swarm/internal/runtime/engine"
@@ -619,15 +619,17 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 		}
 		out[key] = value
 	}
-	entityID := strings.TrimSpace(asString(base["entity_id"]))
-	if workflowEmitTargetsParentEntity(pc.SemanticSource(), req.FlowID.String(), eventType) &&
-		strings.TrimSpace(asString(req.State.Metadata["flow_path"])) != "" {
-		entityID = strings.TrimSpace(firstNonEmptyString(
-			asString(req.State.Metadata["parent_entity_id"]),
-			req.Event.EntityID(),
-			entityID,
-		))
-	} else if !req.EntityID.IsZero() {
+	state := workflowStateFromEngine(req.State)
+	entityID := resolveEmittedEntityID(
+		pc.SemanticSource(),
+		req.FlowID.String(),
+		eventType,
+		*state,
+		req.Event,
+		req.EntityID.String(),
+		asString(base["entity_id"]),
+	)
+	if entityID == "" && !req.EntityID.IsZero() {
 		entityID = strings.TrimSpace(req.EntityID.String())
 	}
 	if entityID != "" {
@@ -730,19 +732,19 @@ func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.C
 	if templateID == "" || !pc.isTerminalFlowState(templateID, nextState) {
 		return nil
 	}
-	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
-	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
-	if instanceID == "" && flowPath != "" {
-		instanceID = strings.TrimSpace(path.Base(flowPath))
+	source := pc.SemanticSource()
+	if source != nil {
+		schema, ok := source.FlowSchemaByID(templateID)
+		if !ok || !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			return nil
+		}
 	}
-	if instanceID == "" {
+	flowPath, instanceID, ok := workflowInstanceMaterializedIdentity(instance)
+	if !ok {
 		return nil
 	}
-	if flowPath == "" {
-		flowPath = DeriveFlowInstancePath(pc.SemanticSource(), templateID, instanceID)
-	}
 	return pc.instanceDeactivator(ctx, FlowInstanceDeactivationRequest{
-		ContractBundle: pc.SemanticSource(),
+		ContractBundle: source,
 		TemplateID:     templateID,
 		InstanceID:     instanceID,
 		EntityID:       entityID,
@@ -818,15 +820,11 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	if strings.TrimSpace(instance.WorkflowName) == flowID {
 		return true
 	}
-	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
-	if flowPath == "" && source != nil {
-		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	}
-	if flowPath == "" {
+	targetPath := workflowInstancePath(instance)
+	if targetPath == "" {
 		return false
 	}
-	storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
-	return storageRef == flowPath || strings.HasPrefix(storageRef, flowPath+"/")
+	return runtimeflowidentity.OwnedByFlow(source, flowID, targetPath)
 }
 
 func workflowStateGatesForScope(source semanticview.Source, flowID string, metadata map[string]any) map[string]bool {
@@ -887,16 +885,7 @@ func workflowInitialStateForFlow(source semanticview.Source, flowID string) stri
 }
 
 func workflowScopeKey(source semanticview.Source, flowID string) string {
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		return ""
-	}
-	if source != nil {
-		if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
-			return flowPath
-		}
-	}
-	return flowID
+	return runtimeflowidentity.ScopeKey(source, flowID)
 }
 
 func workflowBoolGatesAsMap(gates map[string]bool) map[string]any {

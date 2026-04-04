@@ -1,0 +1,10 @@
+beta-intake:
+  id: beta-intake
+  execution_type: system_node
+  subscribes_to: [work.begin]
+  produces: [beta.done]
+  event_handlers:
+    work.begin:
+      create_entity: true
+      advances_to: active
+      emits: beta.done

@@ -1,0 +1,8 @@
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: [job.created]
+  outputs:
+    events: [job.done]

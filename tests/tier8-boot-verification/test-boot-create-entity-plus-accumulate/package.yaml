@@ -1,0 +1,11 @@
+name: test-boot-create-entity-plus-accumulate
+version: 1.0.0
+description: >
+  Boot verification: handler declares both create_entity and accumulate.
+  This is prohibited — create_entity mints a new entity_id on every
+  invocation, but accumulate needs the same entity across events.
+platform_version: ">=1.5.0"
+flows: []
+entity_schema:
+  core:
+    expected_count: integer

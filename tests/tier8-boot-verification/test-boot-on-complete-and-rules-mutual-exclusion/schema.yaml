@@ -1,0 +1,8 @@
+initial_state: pending
+terminal_states: [done, routed]
+states: [pending, done, routed]
+pins:
+  inputs:
+    events: [task.submitted]
+  outputs:
+    events: [task.completed, task.routed]

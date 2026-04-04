@@ -1,0 +1,5 @@
+name: flow-a
+version: 1.0.0
+description: Sibling A — creates entity, then advances further via internal event.
+platform_version: ">=1.6.0"
+flows: []

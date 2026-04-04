@@ -1,0 +1,15 @@
+trigger:
+  event: task.started
+  payload:
+    entity_id: ent-001
+    ready: true
+    batch_id: batch-42
+
+expected:
+  handler_outcome: success
+  entity_state: done
+  entity_fields:
+    batch_id: batch-42
+  emitted_events:
+    - phase.advanced
+    - task.done

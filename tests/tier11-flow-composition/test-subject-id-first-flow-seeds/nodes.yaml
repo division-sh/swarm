@@ -1,0 +1,9 @@
+dispatcher:
+  id: dispatcher
+  execution_type: system_node
+  subscribes_to: [job.created]
+  produces: [work.assigned]
+  event_handlers:
+    job.created:
+      advances_to: done
+      emits: work.assigned

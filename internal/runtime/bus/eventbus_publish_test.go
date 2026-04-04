@@ -1010,3 +1010,60 @@ func TestEventBusPublish_RecordsNestedDescendantLocalizedEvent(t *testing.T) {
 		t.Fatalf("localized_event = %q, want grandchild/micro.done", got)
 	}
 }
+
+func TestEventBusPublish_RecordsNestedTemplateInstanceLocalizedEvent(t *testing.T) {
+	grandchild := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+		},
+		Path: "child/grandchild",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				ID:           "worker-{instance_id}",
+				SubscribesTo: []string{"micro.done"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"micro.done": {},
+		},
+	}
+	child := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Path:     "child",
+		Children: []runtimecontracts.FlowContractView{grandchild},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child":      &root.Children[0],
+				"grandchild": &root.Children[0].Children[0],
+			},
+		},
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstance(runtimecontracts.SystemNodeContract{}, "child/grandchild/inst-1"); err != nil {
+		t.Fatalf("AddFlowInstance: %v", err)
+	}
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	if err := eb.Publish(ctx, (events.Event{
+		Type: "child/grandchild/inst-1/micro.done",
+	}).WithEntityID("ent-grandchild")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	diags := recorder.SnapshotPublishes()
+	if len(diags) != 1 || len(diags[0].RoutedRecipients) != 1 {
+		t.Fatalf("publish diagnostics = %#v", diags)
+	}
+	if got := diags[0].RoutedRecipients[0].LocalizedEvent; got != "micro.done" {
+		t.Fatalf("localized_event = %q, want micro.done", got)
+	}
+}

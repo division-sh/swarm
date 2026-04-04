@@ -1,0 +1,9 @@
+name: flow-a
+initial_state: new
+terminal_states: [processed]
+states: [new, active, processed]
+pins:
+  inputs:
+    events: [work.begin]
+  outputs:
+    events: [alpha.done]

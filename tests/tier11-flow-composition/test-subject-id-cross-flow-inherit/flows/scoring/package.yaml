@@ -1,0 +1,5 @@
+name: scoring
+version: 1.0.0
+description: Child flow that receives items for scoring. Inherits subject_id from parent.
+platform_version: ">=1.6.0"
+flows: []

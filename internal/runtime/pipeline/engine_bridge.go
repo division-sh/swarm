@@ -293,14 +293,7 @@ func resolveHandlerEntityIDForFlow(
 	if handler.CreateEntity {
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 		instanceID := uuid.NewString()
-		newEntityID := instanceID
-		flowPath := ""
-		if strings.TrimSpace(flowID) != "" {
-			flowPath = strings.TrimSpace(DeriveFlowInstancePath(source, flowID, instanceID))
-			if flowPath != "" {
-				newEntityID = FlowInstanceEntityID(flowPath)
-			}
-		}
+		identity := deriveFlowInstanceIdentity(source, flowID, instanceID)
 		subjectID := ""
 		if state != nil && state.Metadata != nil {
 			subjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
@@ -309,19 +302,19 @@ func resolveHandlerEntityIDForFlow(
 			subjectID = sourceEntityID
 		}
 		if subjectID == "" {
-			subjectID = newEntityID
+			subjectID = identity.EntityID
 		}
-		entityID = newEntityID
+		entityID = identity.EntityID
 		if state != nil {
 			state.EntityID = entityID
 			state.Stage = ""
 			state.Status = ""
 			state.Metadata = map[string]any{"subject_id": subjectID}
-			if flowPath != "" {
-				state.Metadata["flow_path"] = flowPath
-				state.Metadata["storage_ref"] = flowPath
+			if identity.InstancePath != "" {
+				state.Metadata["flow_path"] = identity.InstancePath
+				state.Metadata["storage_ref"] = identity.InstancePath
 			}
-			state.Metadata["instance_id"] = instanceID
+			state.Metadata["instance_id"] = identity.InstanceID
 			if sourceEntityID != "" {
 				state.Metadata["parent_entity_id"] = sourceEntityID
 			}
@@ -330,21 +323,12 @@ func resolveHandlerEntityIDForFlow(
 	}
 	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
 	if flowID != "" && state != nil {
-		currentFlowPath := strings.Trim(strings.TrimSpace(flowID), "/")
-		if source != nil {
-			if resolved := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); resolved != "" {
-				currentFlowPath = resolved
-			}
-		}
+		currentFlowPath := strings.TrimSpace(workflowScopeKey(source, flowID))
 		inboundFlowPath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
-		if currentFlowPath != "" && inboundFlowPath != "" && inboundFlowPath != currentFlowPath &&
-			strings.HasPrefix(inboundFlowPath, currentFlowPath+"/") {
-			remainder := strings.Trim(strings.TrimPrefix(inboundFlowPath, currentFlowPath+"/"), "/")
-			if strings.Contains(remainder, "/") {
-				if parentEntityID := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); parentEntityID != "" {
-					entityID = parentEntityID
-					state.EntityID = parentEntityID
-				}
+		if isDescendantFlowInstance(currentFlowPath, inboundFlowPath) {
+			if parentEntityID := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); parentEntityID != "" {
+				entityID = parentEntityID
+				state.EntityID = parentEntityID
 			}
 		}
 	}

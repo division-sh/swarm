@@ -83,6 +83,16 @@ func assertSubjectFlowEntities(t testing.TB, workflow *runtimepipeline.WorkflowI
 				t.Fatalf("subject flow instance %s/%s subject_id = %q, want %q", subjectID, flowID, gotSubjectID, wantSubjectID)
 			}
 		}
+		if expected.SubjectIDIsSelf != nil {
+			gotSubjectID := strings.TrimSpace(got.SubjectID)
+			gotEntityID := strings.TrimSpace(got.InstanceID)
+			if *expected.SubjectIDIsSelf && gotSubjectID != gotEntityID {
+				t.Fatalf("subject flow instance %s/%s subject_id = %q, want self entity_id %q", subjectID, flowID, gotSubjectID, gotEntityID)
+			}
+			if !*expected.SubjectIDIsSelf && gotSubjectID == gotEntityID {
+				t.Fatalf("subject flow instance %s/%s subject_id unexpectedly equals entity_id %q", subjectID, flowID, gotEntityID)
+			}
+		}
 		if wantState := strings.TrimSpace(expected.EntityState); wantState != "" {
 			if gotState := strings.TrimSpace(got.CurrentState); gotState != wantState {
 				t.Fatalf("subject flow instance %s/%s state = %q, want %q", subjectID, flowID, gotState, wantState)
@@ -120,6 +130,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
 		}
 		assertEntitySubjectID(t, h.workflow, entityID, want.SubjectID)
+		assertEntitySubjectIDSelf(t, h.workflow, entityID, want.SubjectIDIsSelf)
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
 		assertGates(t, h.workflow, entityID, want.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
@@ -145,6 +156,31 @@ func assertEntitySubjectID(t testing.TB, workflow *runtimepipeline.WorkflowInsta
 	}
 	if got := strings.TrimSpace(instance.SubjectID); got != wantSubjectID {
 		t.Fatalf("entity %s subject_id = %q, want %q", entityID, got, wantSubjectID)
+	}
+}
+
+func assertEntitySubjectIDSelf(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID string, wantSelf *bool) {
+	t.Helper()
+	if wantSelf == nil {
+		return
+	}
+	if workflow == nil {
+		t.Fatal("workflow instance store is required")
+	}
+	instance, ok, err := workflow.Load(context.Background(), strings.TrimSpace(entityID))
+	if err != nil {
+		t.Fatalf("load workflow instance %s for subject self assertion: %v", entityID, err)
+	}
+	if !ok {
+		t.Fatalf("workflow instance %s not found for subject self assertion", entityID)
+	}
+	gotSubjectID := strings.TrimSpace(instance.SubjectID)
+	gotEntityID := strings.TrimSpace(instance.InstanceID)
+	if *wantSelf && gotSubjectID != gotEntityID {
+		t.Fatalf("entity %s subject_id = %q, want self entity_id %q", entityID, gotSubjectID, gotEntityID)
+	}
+	if !*wantSelf && gotSubjectID == gotEntityID {
+		t.Fatalf("entity %s subject_id unexpectedly equals entity_id %q", entityID, gotEntityID)
 	}
 }
 

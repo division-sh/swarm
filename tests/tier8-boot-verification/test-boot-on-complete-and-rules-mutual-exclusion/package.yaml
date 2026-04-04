@@ -1,0 +1,8 @@
+name: test-boot-on-complete-and-rules-mutual-exclusion
+version: 1.0.0
+description: >
+  Boot verification: handler declares both on_complete and rules.
+  These are mutually exclusive branching strategies per spec
+  handler_specification.on_complete_vs_rules.
+platform_version: ">=1.1.0"
+flows: []

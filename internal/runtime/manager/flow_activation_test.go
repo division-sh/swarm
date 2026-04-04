@@ -113,6 +113,46 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	}
 }
 
+func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
+	grandchild := &runtimecontracts.FlowContractView{
+		Path:  "child/grandchild",
+		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": {
+				ID:            "worker-{instance_id}",
+				Type:          "generic",
+				Role:          "worker",
+				Subscriptions: []string{"micro.started"},
+			},
+		},
+	}
+	child := &runtimecontracts.FlowContractView{
+		Path:     "child",
+		Paths:    runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Children: []runtimecontracts.FlowContractView{*grandchild},
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{*child},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child":      child,
+				"grandchild": grandchild,
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"grandchild": {
+				Mode: "template",
+				Pins: runtimecontracts.FlowPins{
+					Inputs: runtimecontracts.FlowInputPins{Events: []string{"micro.started"}},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
+	}
+}
+
 func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 	analysisFlow := &runtimecontracts.FlowContractView{
 		Path:  "analyzer-flow",
@@ -384,7 +424,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := am.DeactivateFlowInstance(context.Background(), "review", "inst-1", "ent-1"); err != nil {
+	if err := am.DeactivateFlowInstance(context.Background(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 	if _, ok := am.GetAgentConfig("reviewer-inst-1"); ok {
@@ -392,6 +432,55 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	}
 	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
 		t.Fatalf("removed pairs = %#v, want [review/inst-1]", bus.removedPairs)
+	}
+}
+
+func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := NewAgentManager(bus, nil)
+	bundle := testNestedFlowBundle()
+
+	err := am.ActivateFlowInstance(context.Background(), runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		TemplateID:     "grandchild",
+		InstanceID:     "inst-1",
+		EntityID:       "ent-1",
+		FlowPath:       "child/grandchild/inst-1",
+	})
+	if err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if err := am.DeactivateFlowInstance(context.Background(), "grandchild", "inst-1", "child/grandchild/inst-1", "ent-1"); err != nil {
+		t.Fatalf("DeactivateFlowInstance: %v", err)
+	}
+	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "child/grandchild/inst-1" {
+		t.Fatalf("removed pairs = %#v, want [child/grandchild/inst-1]", bus.removedPairs)
+	}
+}
+
+func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t *testing.T) {
+	cfg, err := buildFlowAgentConfig(
+		semanticview.Wrap(testNestedFlowBundle()),
+		"grandchild",
+		"inst-1",
+		"ent-1",
+		"child/grandchild/inst-1",
+		"worker",
+		runtimecontracts.AgentRegistryEntry{
+			ID:            "worker-{instance_id}",
+			Type:          "generic",
+			Role:          "worker",
+			Subscriptions: []string{"micro.started"},
+		},
+		map[string]string{"instance_id": "inst-1"},
+		map[string]struct{}{"micro.started": {}},
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("buildFlowAgentConfig: %v", err)
+	}
+	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "child/grandchild/inst-1/micro.started" {
+		t.Fatalf("subscriptions = %#v, want [child/grandchild/inst-1/micro.started]", cfg.Subscriptions)
 	}
 }
 

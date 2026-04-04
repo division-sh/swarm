@@ -383,7 +383,7 @@ func NewRuntime(ctx context.Context, cfg *config.Config, stores Stores, opts Run
 		rt.Manager.SetWorkflowInstanceStore(rt.Pipeline.WorkflowInstanceStore())
 		rt.Pipeline.SetInstanceActivator(rt.Manager.ActivateFlowInstance)
 		rt.Pipeline.SetInstanceDeactivator(func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
-			return rt.Manager.DeactivateFlowInstance(ctx, req.TemplateID, req.InstanceID, req.EntityID)
+			return rt.Manager.DeactivateFlowInstance(ctx, req.TemplateID, req.InstanceID, req.FlowPath, req.EntityID)
 		})
 	}
 	if rt.Pipeline != nil {

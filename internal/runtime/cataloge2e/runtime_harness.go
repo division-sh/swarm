@@ -66,6 +66,7 @@ type catalogEntityExpected struct {
 	HandlerOutcome string          `yaml:"handler_outcome"`
 	Exists         *bool           `yaml:"exists"`
 	SubjectID      string          `yaml:"subject_id"`
+	SubjectIDIsSelf *bool          `yaml:"subject_id_is_self"`
 	EntityState    string          `yaml:"entity_state"`
 	EntityFields   map[string]any  `yaml:"entity_fields"`
 	Gates          map[string]bool `yaml:"gates"`

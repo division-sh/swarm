@@ -1,0 +1,20 @@
+alpha-intake:
+  id: alpha-intake
+  execution_type: system_node
+  subscribes_to: [work.begin]
+  produces: [internal.step2]
+  event_handlers:
+    work.begin:
+      create_entity: true
+      advances_to: active
+      emits: internal.step2
+
+alpha-processor:
+  id: alpha-processor
+  execution_type: system_node
+  subscribes_to: [internal.step2]
+  produces: [alpha.done]
+  event_handlers:
+    internal.step2:
+      advances_to: processed
+      emits: alpha.done

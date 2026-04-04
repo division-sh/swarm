@@ -1,0 +1,8 @@
+initial_state: ready
+terminal_states: [dispatched]
+states: [ready, dispatched]
+pins:
+  inputs:
+    events: [item.discovered]
+  outputs:
+    events: [item.dispatched]

@@ -13,6 +13,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/uuid"
 	models "swarm/internal/runtime/core/actors"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	"swarm/internal/runtime/semanticview"
 )
@@ -239,19 +240,11 @@ func actorFlowOwnershipRoot(source semanticview.Source, actorID string) string {
 	if flowID == "" {
 		return ""
 	}
-	if flowPath := strings.Trim(source.FlowPath(flowID), "/"); flowPath != "" {
-		return flowPath
-	}
-	return flowID
+	return runtimeflowidentity.ScopeKey(source, flowID)
 }
 
 func entityFlowOwnedBy(flowRoot, targetFlow string) bool {
-	flowRoot = strings.Trim(flowRoot, "/")
-	targetFlow = strings.Trim(targetFlow, "/")
-	if flowRoot == "" || targetFlow == "" {
-		return true
-	}
-	return targetFlow == flowRoot || strings.HasPrefix(targetFlow, flowRoot+"/")
+	return runtimeflowidentity.OwnedByScope(flowRoot, targetFlow)
 }
 
 func (e *Executor) execCreateEntity(ctx context.Context, _ models.AgentConfig, input any) (any, error) {

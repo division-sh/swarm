@@ -88,6 +88,29 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	}
 }
 
+func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	if err := eb.AddFlowInstance(runtimecontracts.SystemNodeContract{
+		ID:           "worker-{instance_id}",
+		Produces:     []string{"micro.started"},
+		SubscribesTo: []string{"micro.started"},
+	}, "child/grandchild/inst-1"); err != nil {
+		t.Fatalf("AddFlowInstance: %v", err)
+	}
+	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 1 || got[0].ID != "worker-inst-1" {
+		t.Fatalf("resolved subscribers after add = %#v", got)
+	}
+	if err := eb.RemoveFlowInstance("child/grandchild", "inst-1"); err != nil {
+		t.Fatalf("RemoveFlowInstance: %v", err)
+	}
+	if got := eb.RouteTable().Resolve("child/grandchild/inst-1/micro.started"); len(got) != 0 {
+		t.Fatalf("resolved subscribers after remove = %#v, want none", got)
+	}
+}
+
 func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
@@ -230,5 +253,60 @@ func TestDeriveRouteTable_DescendantSubscriptionsExternalizeWithinParentFlow(t *
 	}
 	if got := rt.Resolve("grandchild/micro.done"); len(got) != 0 {
 		t.Fatalf("Resolve(grandchild/micro.done) = %#v, want none", got)
+	}
+}
+
+func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *testing.T) {
+	grandchild := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+		},
+		Path: "child/grandchild",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				ID:           "worker-{instance_id}",
+				SubscribesTo: []string{"micro.started"},
+				Produces:     []string{"micro.started"},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"micro.started": {},
+		},
+	}
+	child := runtimecontracts.FlowContractView{
+		Paths:    runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Path:     "child",
+		Children: []runtimecontracts.FlowContractView{grandchild},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child":      &root.Children[0],
+				"grandchild": &root.Children[0].Children[0],
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	if err := rt.AddFlowInstance(runtimecontracts.SystemNodeContract{}, "child/grandchild/inst-1"); err != nil {
+		t.Fatalf("AddFlowInstance: %v", err)
+	}
+	routes := rt.MaterializedRoutes("child/grandchild/inst-1")
+	if len(routes) != 1 {
+		t.Fatalf("MaterializedRoutes = %#v, want 1 route", routes)
+	}
+	if routes[0].TemplateID != "child/grandchild" {
+		t.Fatalf("TemplateID = %q, want child/grandchild", routes[0].TemplateID)
+	}
+	if routes[0].InstanceID != "inst-1" {
+		t.Fatalf("InstanceID = %q, want inst-1", routes[0].InstanceID)
+	}
+	if routes[0].SourceFlow != "child/grandchild" {
+		t.Fatalf("SourceFlow = %q, want child/grandchild", routes[0].SourceFlow)
 	}
 }

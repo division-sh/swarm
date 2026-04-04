@@ -1,0 +1,24 @@
+start.all:
+  payload:
+    entity_id: string
+work.begin:
+  payload:
+    entity_id: string
+all.done:
+  payload:
+    entity_id: string
+flow-a/work.begin:
+  payload:
+    entity_id: string
+flow-a/internal.step2:
+  payload:
+    entity_id: string
+flow-a/alpha.done:
+  payload:
+    entity_id: string
+flow-b/work.begin:
+  payload:
+    entity_id: string
+flow-b/beta.done:
+  payload:
+    entity_id: string

@@ -13,6 +13,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
@@ -52,11 +53,15 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("flow schema not found: %s", templateID)
 	}
 	flowPath := strings.Trim(strings.TrimSpace(req.FlowPath), "/")
+	identity := runtimepipeline.DeriveFlowInstanceIdentity(req.ContractBundle, templateID, instanceID)
 	if flowPath == "" {
-		flowPath = runtimepipeline.DeriveFlowInstancePath(req.ContractBundle, templateID, instanceID)
+		flowPath = identity.InstancePath
 	}
 	sourceEntityID := entityID
-	flowEntityID := strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
+	flowEntityID := strings.TrimSpace(identity.EntityID)
+	if strings.TrimSpace(flowPath) != strings.TrimSpace(identity.InstancePath) {
+		flowEntityID = strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
+	}
 	if flowEntityID == "" {
 		return fmt.Errorf("derive flow entity id for %s", flowPath)
 	}
@@ -78,7 +83,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			Config:          cloneFlowConfig(req.Config),
 			Metadata: map[string]any{
 				"entity_id":        flowEntityID,
-				"instance_id":      instanceID,
+				"instance_id":      identity.InstanceID,
 				"flow_path":        flowPath,
 				"subject_id":       strings.TrimSpace(sourceEntityID),
 				"parent_entity_id": strings.TrimSpace(sourceEntityID),
@@ -126,7 +131,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		eventType := eventidentity.ExternalizeForFlow(flowPath, []string{autoEmit}, autoEmit)
 		payload := map[string]any{
 			"entity_id":        flowEntityID,
-			"instance_id":      instanceID,
+			"instance_id":      identity.InstanceID,
 			"template_id":      templateID,
 			"flow_path":        flowPath,
 			"subject_id":       strings.TrimSpace(sourceEntityID),
@@ -229,22 +234,26 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 	return nil
 }
 
-func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, entityID string) error {
+func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, instanceID, flowPath, entityID string) error {
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
 	templateID = strings.TrimSpace(templateID)
 	instanceID = strings.TrimSpace(instanceID)
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	entityID = strings.TrimSpace(entityID)
-	if templateID == "" || instanceID == "" || entityID == "" {
-		return fmt.Errorf("template_id, instance_id, and entity_id are required")
+	if templateID == "" || instanceID == "" || flowPath == "" || entityID == "" {
+		return fmt.Errorf("template_id, instance_id, flow_path, and entity_id are required")
 	}
-	flowPath := strings.Trim(templateID+"/"+instanceID, "/")
 	flowEntityID := strings.TrimSpace(runtimepipeline.FlowInstanceEntityID(flowPath))
+	scopeKey := strings.TrimSpace(runtimeflowidentity.SemanticScopeFromInstancePath(flowPath))
+	if scopeKey == "" {
+		return fmt.Errorf("derive scope key for flow path %s", flowPath)
+	}
 	am.mu.RLock()
 	agentIDs := make([]string, 0, len(am.agentCfg))
 	for agentID, cfg := range am.agentCfg {
-		if strings.TrimSpace(cfg.Mode) != templateID || strings.TrimSpace(cfg.EntityID) != flowEntityID {
+		if strings.TrimSpace(cfg.EntityID) != flowEntityID {
 			continue
 		}
 		agentIDs = append(agentIDs, agentID)
@@ -257,9 +266,9 @@ func (am *AgentManager) DeactivateFlowInstance(ctx context.Context, templateID, 
 		}
 	}
 	if remover, ok := am.bus.(flowInstanceRouteRemover); ok && remover != nil {
-		return remover.RemoveFlowInstance(templateID, instanceID)
+		return remover.RemoveFlowInstance(scopeKey, instanceID)
 	}
-	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s/%s", templateID, instanceID)
+	return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", flowPath)
 }
 
 func buildFlowAgentConfig(
@@ -289,7 +298,7 @@ func buildFlowAgentConfig(
 			continue
 		}
 		if _, ok := localEvents[subscription]; ok {
-			subscription = templateID + "/" + instanceID + "/" + subscription
+			subscription = eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), subscription)
 		}
 		rendered = append(rendered, subscription)
 	}

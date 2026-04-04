@@ -1304,8 +1304,10 @@ Improvement items:
    - proved critical by: `research.completed` and `spec.draft_ready` were emitted while `business_brief` and `mvp_spec` were still absent from entity state
 11. Introduce a first-class flow-instance model instead of passing identity/scope semantics through loosely-related strings.
    - proved critical by: canonical flow-entity ids fixed nested descendant routing but exposed child-gate projection still using instance paths as if they were scope keys
+   - proved critical by: root terminal workflow rows were later misclassified as flow-instance teardown targets because deactivation still inferred identity from generic workflow rows instead of explicit flow-instance metadata
 12. Separate semantic flow scope from concrete flow-instance path everywhere.
    - proved critical by: child gates were stored under `child/...` while projection filtered using `child/<instance-id>/...`
+   - proved critical by: nested template subscribers were later materialized against semantic template scope instead of exact instance path, leaving instance-local subscriptions on the wrong namespace
 
 ### Medium Priority
 
@@ -1425,6 +1427,39 @@ Fix:
   - instanced child-flow gate projection
   - gated child-flow completion advancing the root
   - root output boundary behavior in boot fixtures
+
+### Root terminal workflow rows were misclassified as flow-instance teardowns
+
+Root cause:
+
+- terminal-state deactivation logic loaded any workflow row by `entity_id`
+- root workflow rows and flow-instance rows share the same store
+- the old code then fell back from missing flow-instance metadata to generic `StorageRef`
+- for root entities, that meant plain entity ids like `ent-001` were treated as if they were flow-instance paths
+- manager teardown then tried to derive semantic scope from a non-flow path and killed otherwise-valid root handlers
+
+Fix:
+
+- only allow terminal flow-instance deactivation for explicit template flow instances
+- require materialized flow-instance identity (`flow_path`, template-mode schema, logical instance id) before teardown
+- root workflow rows no longer participate in flow-instance deactivation
+
+### Nested template subscribers were materialized against semantic scope instead of concrete instance path
+
+Root cause:
+
+- template-flow subscriber patterns were pre-resolved once against semantic scope like:
+  - `child/grandchild/...`
+- when a concrete template instance was later materialized, the runtime reused those pre-resolved patterns unchanged
+- instance-local subscriptions therefore stayed on the template namespace instead of the real instance namespace like:
+  - `child/grandchild/<instance-id>/...`
+- nested template instances could then exist correctly but still fail local delivery because their subscriptions were attached to the wrong path
+
+Fix:
+
+- keep template subscriber intent in raw form
+- resolve subscriber patterns at `AddFlowInstance(...)` time against the exact concrete instance path
+- persist and remove materialized instance routes using semantic scope key + logical instance id, not first-path-segment heuristics
 
 ### Cross-flow qualified event reached the flow but failed local handler lookup
 

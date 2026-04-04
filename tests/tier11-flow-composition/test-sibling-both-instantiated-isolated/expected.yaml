@@ -1,0 +1,12 @@
+trigger:
+  event: start.all
+  payload:
+    entity_id: 11111111-1111-1111-1111-111111111111
+
+expected:
+  handler_outcome: success
+  flow_entities:
+    flow-a:
+      entity_state: processed
+    flow-b:
+      entity_state: active

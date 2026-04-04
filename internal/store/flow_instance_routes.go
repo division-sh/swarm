@@ -112,7 +112,7 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimebu
 	}
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
-			COALESCE(NULLIF(source_flow, ''), split_part(flow_instance, '/', 1)),
+			COALESCE(NULLIF(source_flow, ''), regexp_replace(flow_instance, '/[^/]+$', '')),
 			split_part(flow_instance, '/', array_length(string_to_array(flow_instance, '/'), 1)),
 			flow_instance
 		FROM routing_rules

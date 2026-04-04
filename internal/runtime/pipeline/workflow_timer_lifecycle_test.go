@@ -640,9 +640,9 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	}
 	const (
 		rootEntityID  = "11111111-1111-1111-1111-111111111111"
-		childRowID    = "dd7e0cdc-de71-508b-bd31-f4a4d901fd52"
 		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
 	)
+	childRowID := FlowInstanceEntityID(childFlowPath)
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
@@ -718,9 +718,9 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTx
 	}
 	const (
 		rootEntityID  = "11111111-1111-1111-1111-111111111111"
-		childRowID    = "dd7e0cdc-de71-508b-bd31-f4a4d901fd52"
 		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
 	)
+	childRowID := FlowInstanceEntityID(childFlowPath)
 	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
 		InstanceID:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),

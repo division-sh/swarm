@@ -1,0 +1,9 @@
+name: intake
+initial_state: new
+terminal_states: [processed]
+states: [new, processed]
+pins:
+  inputs:
+    events: [work.assigned]
+  outputs:
+    events: [item.processed]

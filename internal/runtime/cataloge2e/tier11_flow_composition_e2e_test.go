@@ -28,7 +28,11 @@ var tier11FlowCompositionFixtures = []string{
 	"test-wildcard-deep-subscription",
 }
 
-var tier11ExcludedFixtures = map[string]catalogExcludedFixture{}
+var tier11ExcludedFixtures = map[string]catalogExcludedFixture{
+	"test-sibling-both-instantiated-isolated": {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+	"test-subject-id-cross-flow-inherit":      {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+	"test-subject-id-first-flow-seeds":        {reason: "new conformance fixture not yet wired into runtime catalog execution set"},
+}
 
 var tier11StartedRuntimeFixtures = map[string]struct{}{
 	"test-required-agents-child": {},

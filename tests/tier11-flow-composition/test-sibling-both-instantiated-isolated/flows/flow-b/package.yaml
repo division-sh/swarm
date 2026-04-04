@@ -1,0 +1,5 @@
+name: flow-b
+version: 1.0.0
+description: Sibling B — creates entity but has no second handler. Should stay in initial post-create state.
+platform_version: ">=1.6.0"
+flows: []

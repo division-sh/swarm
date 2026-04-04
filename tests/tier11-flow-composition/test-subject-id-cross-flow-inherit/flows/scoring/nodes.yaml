@@ -1,0 +1,10 @@
+score-handler:
+  id: score-handler
+  execution_type: system_node
+  subscribes_to: [score.requested]
+  produces: [score.done]
+  event_handlers:
+    score.requested:
+      create_entity: true
+      advances_to: scored
+      emits: score.done

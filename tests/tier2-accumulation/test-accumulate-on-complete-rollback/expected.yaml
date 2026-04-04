@@ -1,0 +1,17 @@
+trigger:
+  sequence:
+    - event: score.received
+      payload: { entity_id: ent-001, score: 80 }
+    - event: score.received
+      payload: { entity_id: ent-001, score: 90 }
+    - event: score.received
+      payload: { entity_id: ent-001, score: 70 }
+  entity_fields_before:
+    expected_count: 3
+
+expected:
+  handler_outcome: success
+  entity_state: verified
+  emitted_events:
+    - batch.scored
+    - scores.verified

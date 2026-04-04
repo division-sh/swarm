@@ -180,6 +180,54 @@ func TestProjectWorkflowSubjectGatesProjectsScopedChildGatesToSubjectEntity(t *t
 	}
 }
 
+func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:           "root",
+			InitialStage:   "pending",
+			TerminalStages: []string{"done"},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"root": {},
+		},
+	}
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &pipelineFixtureWorkflowModule{
+			source:   semanticview.Wrap(bundle),
+			workflow: NewWorkflowDefinition("root", []WorkflowStage{{Name: "pending"}, {Name: "done", Terminal: true}}, nil),
+		},
+	})
+	deactivated := false
+	pc.SetInstanceDeactivator(func(context.Context, FlowInstanceDeactivationRequest) error {
+		deactivated = true
+		return nil
+	})
+
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "root",
+		WorkflowVersion: "v-test",
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"subject_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed root instance: %v", err)
+	}
+
+	if err := pc.maybeDeactivateTerminalFlowInstance(context.Background(), entityID, "done"); err != nil {
+		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
+	}
+	if deactivated {
+		t.Fatal("expected root workflow entity to skip flow-instance deactivation")
+	}
+}
+
 func TestProjectWorkflowSubjectGatesFallsBackToFlowPathStorageRef(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := NewWorkflowInstanceStore(db)
@@ -377,6 +425,69 @@ func TestProjectWorkflowSubjectGatesUsesFlowScopeKeyForInstancedChildPaths(t *te
 	}
 }
 
+func TestProjectWorkflowSubjectGatesUsesDeepFlowScopeKeyForInstancedPaths(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	subjectID := "11111111-1111-1111-1111-111111111111"
+	flowPath := DeriveFlowInstancePath(source, "grandchild", "inst-1")
+	entityID := FlowInstanceEntityID(flowPath)
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      subjectID,
+		SubjectID:       subjectID,
+		StorageRef:      subjectID,
+		WorkflowName:    "root",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "idle",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+		},
+	}); err != nil {
+		t.Fatalf("upsert subject: %v", err)
+	}
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      entityID,
+		SubjectID:       subjectID,
+		StorageRef:      flowPath,
+		WorkflowName:    "grandchild",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "done",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+			"flow_path":  flowPath,
+			"gates": map[string]any{
+				"child/grandchild/g_ready": true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert deep child: %v", err)
+	}
+
+	pc := &PipelineCoordinator{
+		workflowStore: store,
+		module:        &previewWorkflowModule{bundle: bundle},
+	}
+	if err := pc.projectWorkflowSubjectGates(context.Background(), entityID); err != nil {
+		t.Fatalf("projectWorkflowSubjectGates: %v", err)
+	}
+
+	subject, ok, err := store.Load(context.Background(), subjectID)
+	if err != nil {
+		t.Fatalf("load subject: %v", err)
+	}
+	if !ok {
+		t.Fatal("subject entity missing after projection")
+	}
+	gates := workflowStateGatesAsBools(subject.Metadata)
+	if !gates["child/grandchild/g_ready"] {
+		t.Fatalf("subject gates missing projected deep-scope gate from instanced flow path: %#v", gates)
+	}
+}
+
 func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -409,6 +520,23 @@ func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.
 	}
 	if instance.EnteredStageAt.IsZero() {
 		t.Fatal("expected EnteredStageAt to be initialized")
+	}
+}
+
+func TestWorkflowStateGatesForScopeLocalizesDeepScope(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+
+	got := workflowStateGatesForScope(source, "grandchild", map[string]any{
+		"gates": map[string]any{
+			"child/grandchild/g_ready": true,
+		},
+	})
+
+	if !got["child/grandchild/g_ready"] {
+		t.Fatalf("scoped gate missing from result: %#v", got)
+	}
+	if !got["g_ready"] {
+		t.Fatalf("local gate alias missing from deep scope result: %#v", got)
 	}
 }
 
@@ -710,9 +838,9 @@ func TestPipelineEnginePayloadShaper_PreservesSourceEntityFieldAcrossCrossFlowOu
 	}
 
 	output, err := shaper.ShapeEmitPayload(context.Background(), req, "child/child.done", map[string]any{
-		"entity_id": "ent-child",
+		"entity_id":   "ent-child",
 		"vertical_id": "ent-child",
-		"result": "accepted",
+		"result":      "accepted",
 	})
 	if err != nil {
 		t.Fatalf("ShapeEmitPayload output: %v", err)

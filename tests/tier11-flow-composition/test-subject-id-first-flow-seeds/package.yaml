@@ -1,0 +1,10 @@
+name: test-subject-id-first-flow-seeds
+version: 1.0.0
+description: >
+  First flow in a chain uses create_entity. When no source entity exists,
+  subject_id must equal the newly created entity_id (self-origin).
+platform_version: ">=1.6.0"
+flows:
+- id: intake
+  flow: intake
+  mode: static
