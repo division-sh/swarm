@@ -554,83 +554,96 @@ func loadRunStatusReport(ctx context.Context, db *sql.DB, runID string, opts run
 	}
 
 	if report.RunID != "" {
-		logLevels := []string{"warn", "error"}
-		if opts.LogsAllLevels {
-			logLevels = []string{"info", "warn", "error"}
-		}
-		componentFilter := strings.TrimSpace(opts.Component)
-		if err := db.QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE event_name = 'platform.runtime_log'
-			  AND payload->>'run_id' = $1
-			  AND payload->>'level' = ANY($2::text[])
-			  AND ($3 = '' OR payload->>'component' = $3)
-		`, report.RunID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
-			return runStatusReport{}, fmt.Errorf("load runtime log summary: %w", err)
-		}
-		logSummaryRows, err := db.QueryContext(ctx, `
-			SELECT
-				COALESCE(payload->>'level', ''),
-				COALESCE(payload->>'component', ''),
-				COALESCE(payload->>'action', ''),
-				COUNT(*)
-			FROM events
-			WHERE event_name = 'platform.runtime_log'
-			  AND payload->>'run_id' = $1
-			  AND payload->>'level' = ANY($2::text[])
-			  AND ($3 = '' OR payload->>'component' = $3)
-			GROUP BY payload->>'level', payload->>'component', payload->>'action'
-			ORDER BY COUNT(*) DESC, payload->>'component', payload->>'action'
-			LIMIT 12
-		`, report.RunID, pq.Array(logLevels), componentFilter)
-		if err != nil {
-			return runStatusReport{}, fmt.Errorf("load runtime log rollup: %w", err)
-		}
-		defer logSummaryRows.Close()
-		for logSummaryRows.Next() {
-			var item runStatusRuntimeSummary
-			if err := logSummaryRows.Scan(&item.Level, &item.Component, &item.Action, &item.Count); err != nil {
-				return runStatusReport{}, fmt.Errorf("scan runtime log rollup: %w", err)
-			}
-			report.RuntimeLogSummary = append(report.RuntimeLogSummary, item)
-		}
-		if err := logSummaryRows.Err(); err != nil {
-			return runStatusReport{}, fmt.Errorf("read runtime log rollup: %w", err)
-		}
-		logRows, err := db.QueryContext(ctx, `
-			SELECT
-				COALESCE(payload->>'level', ''),
-				COALESCE(payload->>'component', ''),
-				COALESCE(payload->>'action', ''),
-				COALESCE(payload->>'error', ''),
-				created_at
-			FROM events
-			WHERE event_name = 'platform.runtime_log'
-			  AND payload->>'run_id' = $1
-			  AND payload->>'level' = ANY($2::text[])
-			  AND ($3 = '' OR payload->>'component' = $3)
-			ORDER BY created_at DESC
-			LIMIT $4
-		`, report.RunID, pq.Array(logLevels), componentFilter, logLimitForStatus(opts))
-		if err != nil {
-			return runStatusReport{}, fmt.Errorf("load runtime logs: %w", err)
-		}
-		defer logRows.Close()
-		for logRows.Next() {
-			var item runStatusRuntimeLog
-			if err := logRows.Scan(&item.Level, &item.Component, &item.Action, &item.Error, &item.CreatedAt); err != nil {
-				return runStatusReport{}, fmt.Errorf("scan runtime logs: %w", err)
-			}
-			report.RuntimeLogs = append(report.RuntimeLogs, item)
-		}
-		if err := logRows.Err(); err != nil {
-			return runStatusReport{}, fmt.Errorf("read runtime logs: %w", err)
+		if err := loadRunStatusRuntimeLogs(ctx, db, report.RunID, opts, &report); err != nil {
+			return runStatusReport{}, err
 		}
 	}
 	report.Heuristics = deriveRunStatusHeuristics(report)
 
 	return report, nil
+}
+
+func loadRunStatusRuntimeLogs(ctx context.Context, db *sql.DB, runID string, opts runStatusOptions, report *runStatusReport) error {
+	if db == nil {
+		return errors.New("db is required")
+	}
+	if report == nil {
+		return errors.New("report is required")
+	}
+	logLevels := []string{"warn", "error"}
+	if opts.LogsAllLevels {
+		logLevels = []string{"info", "warn", "error"}
+	}
+	componentFilter := strings.TrimSpace(opts.Component)
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE event_name = 'platform.runtime_log'
+		  AND payload->'details'->>'run_id' = $1
+		  AND payload->>'log_level' = ANY($2::text[])
+		  AND ($3 = '' OR payload->'details'->>'component' = $3)
+	`, runID, pq.Array(logLevels), componentFilter).Scan(&report.WarnErrorLogCount); err != nil {
+		return fmt.Errorf("load runtime log summary: %w", err)
+	}
+	logSummaryRows, err := db.QueryContext(ctx, `
+		SELECT
+			COALESCE(payload->>'log_level', ''),
+			COALESCE(payload->'details'->>'component', ''),
+			COALESCE(payload->'details'->>'action', ''),
+			COUNT(*)
+		FROM events
+		WHERE event_name = 'platform.runtime_log'
+		  AND payload->'details'->>'run_id' = $1
+		  AND payload->>'log_level' = ANY($2::text[])
+		  AND ($3 = '' OR payload->'details'->>'component' = $3)
+		GROUP BY payload->>'log_level', payload->'details'->>'component', payload->'details'->>'action'
+		ORDER BY COUNT(*) DESC, payload->'details'->>'component', payload->'details'->>'action'
+		LIMIT 12
+	`, runID, pq.Array(logLevels), componentFilter)
+	if err != nil {
+		return fmt.Errorf("load runtime log rollup: %w", err)
+	}
+	defer logSummaryRows.Close()
+	for logSummaryRows.Next() {
+		var item runStatusRuntimeSummary
+		if err := logSummaryRows.Scan(&item.Level, &item.Component, &item.Action, &item.Count); err != nil {
+			return fmt.Errorf("scan runtime log rollup: %w", err)
+		}
+		report.RuntimeLogSummary = append(report.RuntimeLogSummary, item)
+	}
+	if err := logSummaryRows.Err(); err != nil {
+		return fmt.Errorf("read runtime log rollup: %w", err)
+	}
+	logRows, err := db.QueryContext(ctx, `
+		SELECT
+			COALESCE(payload->>'log_level', ''),
+			COALESCE(payload->'details'->>'component', ''),
+			COALESCE(payload->'details'->>'action', ''),
+			COALESCE(payload->'details'->>'error', ''),
+			created_at
+		FROM events
+		WHERE event_name = 'platform.runtime_log'
+		  AND payload->'details'->>'run_id' = $1
+		  AND payload->>'log_level' = ANY($2::text[])
+		  AND ($3 = '' OR payload->'details'->>'component' = $3)
+		ORDER BY created_at DESC
+		LIMIT $4
+	`, runID, pq.Array(logLevels), componentFilter, logLimitForStatus(opts))
+	if err != nil {
+		return fmt.Errorf("load runtime logs: %w", err)
+	}
+	defer logRows.Close()
+	for logRows.Next() {
+		var item runStatusRuntimeLog
+		if err := logRows.Scan(&item.Level, &item.Component, &item.Action, &item.Error, &item.CreatedAt); err != nil {
+			return fmt.Errorf("scan runtime logs: %w", err)
+		}
+		report.RuntimeLogs = append(report.RuntimeLogs, item)
+	}
+	if err := logRows.Err(); err != nil {
+		return fmt.Errorf("read runtime logs: %w", err)
+	}
+	return nil
 }
 
 func logLimitForStatus(opts runStatusOptions) int {
