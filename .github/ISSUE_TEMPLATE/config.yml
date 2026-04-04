@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Implementer Guidelines
+    url: https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_GUIDELINES.md
+    about: Read before opening or implementing runtime issues.
+  - name: Implementer Review Checklist
+    url: https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_REVIEW_CHECKLIST.md
+    about: Use this checklist before merging non-trivial changes.
+  - name: Runtime Watchlist
+    url: https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md
+    about: Use this as the source backlog for runtime bugs and improvements.

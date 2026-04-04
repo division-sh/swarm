@@ -1,0 +1,156 @@
+name: Runtime Improvement
+description: Propose a runtime architecture improvement, cleanup initiative, or backlog item from the watchlist.
+title: "[runtime improvement] "
+labels:
+  - enhancement
+  - runtime
+  - architecture
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for runtime architecture improvements and refactor initiatives.
+
+        This template is intended for items derived from:
+        - [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md)
+        - implementation plans in `docs/`
+
+        Every improvement issue should define:
+        - the semantic owner
+        - the scope boundary
+        - the acceptance criteria
+        - the forbidden shortcuts
+
+  - type: input
+    id: source_backlog_item
+    attributes:
+      label: Source Backlog Item
+      description: Which watchlist item or plan item does this come from?
+      placeholder: |
+        Example:
+        RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md - High Priority #15
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Describe the architectural problem this issue addresses.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why_now
+    attributes:
+      label: Why This Matters
+      description: Why should this be prioritized now? Tie it to real incidents, debugging cost, or architectural leverage.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_smell
+    attributes:
+      label: Current Smell
+      description: What exact smell pattern is present now?
+      placeholder: |
+        Examples:
+        - distributed semantics
+        - heuristic fallback
+        - product leakage
+        - branch-heavy core logic
+        - duplicate semantic ownership
+    validations:
+      required: true
+
+  - type: textarea
+    id: canonical_owner
+    attributes:
+      label: Target Canonical Owner
+      description: What module, abstraction, or compiled semantic artifact should own the logic after this work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What files/modules are in scope? What is explicitly out of scope?
+      placeholder: |
+        In scope:
+        - ...
+
+        Out of scope:
+        - ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Define concrete “done” conditions.
+      placeholder: |
+        - one canonical semantic owner exists
+        - no alternate meaningful path remains
+        - targeted tests are green
+        - full suite is green
+    validations:
+      required: true
+
+  - type: textarea
+    id: test_plan
+    attributes:
+      label: Test Plan
+      description: Which focused invariants and broader regression tests prove completion?
+    validations:
+      required: true
+
+  - type: textarea
+    id: observability
+    attributes:
+      label: Observability / Diagnostics
+      description: What runtime decision or operator signal should become clearer after this work?
+    validations:
+      required: false
+
+  - type: textarea
+    id: forbidden_shortcuts
+    attributes:
+      label: Forbidden Shortcuts
+      description: Explicitly state what implementers must not do.
+      placeholder: |
+        - no heuristic fallback
+        - no product-specific exceptions in core runtime
+        - no second semantic implementation in a sibling layer
+        - no branch-heavy patch that preserves the old smell
+    validations:
+      required: true
+
+  - type: textarea
+    id: worktree_scope
+    attributes:
+      label: Suggested Ownership Boundary
+      description: For multi-implementer work, define the recommended write surface and coordination boundary.
+      placeholder: |
+        Primary files/modules:
+        - ...
+
+        Avoid editing:
+        - ...
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: merge_constraints
+    attributes:
+      label: Merge Constraints
+      description: This issue should not be considered complete unless these are true.
+      options:
+        - label: implementation follows IMPLEMENTER_GUIDELINES.md
+        - label: IMPLEMENTER_REVIEW_CHECKLIST.md was applied
+        - label: no new fallback semantics were introduced
+        - label: no product leakage into shared runtime code was introduced
+        - label: duplicate semantic logic was removed or reduced
+        - label: targeted tests exist
+        - label: full relevant suite is green

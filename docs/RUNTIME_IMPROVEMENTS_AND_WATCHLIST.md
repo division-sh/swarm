@@ -74,6 +74,12 @@ Follow this protocol whenever a runtime debugging session finds a real issue.
    - If getting tests green starts taking disproportionately long, evaluate whether that difficulty points to a missing abstraction or duplicated semantics.
    - If yes, record the architectural seam here instead of treating it as “just test cleanup”.
 
+10. Record product leakage and semantic duplication explicitly.
+   - If a debugging session reveals:
+     - product-specific behavior leaking into shared runtime layers
+     - or more than one semantically meaningful implementation of the same rule
+   - record that here as an architectural issue, not as an isolated bug only.
+
 ## Incident Template
 
 Use this shape whenever adding a new incident:

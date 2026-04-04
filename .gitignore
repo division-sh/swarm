@@ -20,3 +20,6 @@ internal/dashboard/ui/dist
 /empire
 /empire.exe
 *.test
+
+# Local parallel implementer worktrees
+worktrees/

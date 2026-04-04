@@ -1,0 +1,150 @@
+name: Runtime Bug
+description: Report a concrete runtime bug, production incident, conformance failure, or recurring operational failure pattern.
+title: "[runtime bug] "
+labels:
+  - bug
+  - runtime
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for real runtime bugs and concrete failure patterns.
+
+        Before submitting:
+        - check [IMPLEMENTER_GUIDELINES.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_GUIDELINES.md)
+        - check [IMPLEMENTER_REVIEW_CHECKLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/IMPLEMENTER_REVIEW_CHECKLIST.md)
+        - link the related entry in [RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md](https://github.com/yazzaoui/Swarm/blob/main/docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md) when applicable
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What actually happened? Use concrete runtime behavior, test failure, run ID, or operator-visible symptom.
+      placeholder: |
+        Example:
+        validation agents emit `research.completed` but `business_brief` is still absent from entity state
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Why does this matter operationally or architecturally?
+      placeholder: |
+        Example:
+        causes false progression, hides real persistence failure, and burns agent turn budget
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Concrete evidence only. Include tests, logs, run IDs, code references, screenshots, or exact error text.
+      placeholder: |
+        - run id:
+        - failing test:
+        - log excerpt:
+        - file references:
+    validations:
+      required: true
+
+  - type: textarea
+    id: likely_cause
+    attributes:
+      label: Likely Cause
+      description: Initial hypothesis before full root-cause confirmation.
+      placeholder: |
+        Example:
+        duplicated authorization semantics between gateway and executor
+    validations:
+      required: false
+
+  - type: textarea
+    id: root_cause
+    attributes:
+      label: Actual Root Cause
+      description: Fill this once confirmed. If unknown, write `unknown yet`.
+      placeholder: |
+        Example:
+        context handling still depended on a gateway-private fallback list instead of the canonical capability model
+    validations:
+      required: true
+
+  - type: textarea
+    id: canonical_owner
+    attributes:
+      label: Canonical Owner
+      description: Which module or model should own this semantic after the fix?
+      placeholder: |
+        Example:
+        internal/runtime/core/toolcapabilities
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: smell_flags
+    attributes:
+      label: Architecture Smell Flags
+      description: Check all that apply.
+      options:
+        - label: heuristic fallback
+        - label: duplicate semantic implementation
+        - label: product-specific leakage into runtime
+        - label: branch-heavy control flow
+        - label: compatibility logic in hot path
+        - label: missing observability
+        - label: missing typed descriptor / abstraction
+
+  - type: textarea
+    id: fix_shape
+    attributes:
+      label: Proposed Fix Shape
+      description: Describe the fix at the architectural level, not just the local patch.
+      placeholder: |
+        Example:
+        centralize this decision in one shared policy helper and remove the duplicate gateway path
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_should_have_caught_it
+    attributes:
+      label: What Should Have Caught It
+      description: Which invariant, test, boot check, or observability surface should have surfaced this earlier?
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Required Tests
+      description: List the focused invariants and any broader regression coverage needed.
+      placeholder: |
+        - focused unit/conformance test:
+        - integration/fixture regression:
+    validations:
+      required: true
+
+  - type: input
+    id: watchlist_link
+    attributes:
+      label: Watchlist Link
+      description: Link the relevant section in docs/RUNTIME_IMPROVEMENTS_AND_WATCHLIST.md or write `new entry needed`.
+      placeholder: https://github.com/...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: merge_constraints
+    attributes:
+      label: Merge Constraints
+      description: This issue should not be considered fixed unless these are true.
+      options:
+        - label: fix removes semantic duplication instead of adding another local patch
+        - label: no new heuristic fallback is introduced
+        - label: no product-specific rule is embedded into shared runtime semantics
+        - label: targeted tests exist
+        - label: watchlist was updated
+
