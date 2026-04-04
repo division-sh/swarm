@@ -1038,6 +1038,9 @@ func buildStores(ctx context.Context, storeMode string, cfg *config.Config) (sto
 		if err := pg.Ping(ctx); err != nil {
 			return storeBundle{}, err
 		}
+		if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+			return storeBundle{}, err
+		}
 		return storeBundle{
 			Postgres:          pg,
 			SQLDB:             pg.DB,
@@ -1244,7 +1247,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 	if stores.Postgres != nil {
 		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
 		mailbox = stores.Postgres
-		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB, stores.Postgres.SchemaCapabilities())
+		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB, stores.Postgres)
 		observability = dashboardserver.NewSQLObservabilityReader(stores.Postgres.DB)
 	}
 	if supervisor != nil {

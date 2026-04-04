@@ -12,15 +12,19 @@ import (
 )
 
 type SQLConversationReader struct {
-	db   *sql.DB
-	caps store.StoreSchemaCapabilities
+	db        *sql.DB
+	capSource conversationCapabilitySource
 }
 
-func NewSQLConversationReader(db *sql.DB, caps store.StoreSchemaCapabilities) *SQLConversationReader {
+type conversationCapabilitySource interface {
+	ResolveSchemaCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error)
+}
+
+func NewSQLConversationReader(db *sql.DB, capSource conversationCapabilitySource) *SQLConversationReader {
 	if db == nil {
 		return nil
 	}
-	return &SQLConversationReader{db: db, caps: caps}
+	return &SQLConversationReader{db: db, capSource: capSource}
 }
 
 func (r *SQLConversationReader) List(ctx context.Context, limit int) ([]ConversationSummary, error) {
@@ -203,7 +207,11 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 	if agentID == "" || sessionID == "" {
 		return []ConversationTurn{}, nil
 	}
-	if r.caps.Conversations.Turns != store.SchemaFlavorCanonical {
+	caps, err := r.resolveCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if caps.Conversations.Turns != store.SchemaFlavorCanonical {
 		return []ConversationTurn{}, nil
 	}
 	query := `
@@ -236,7 +244,7 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 		  AND session_id = $2::uuid
 		ORDER BY created_at ASC, turn_id ASC
 	`
-	if !r.caps.Conversations.TurnBlocks {
+	if !caps.Conversations.TurnBlocks {
 		query = `
 		SELECT
 			turn_id::text,
@@ -286,6 +294,13 @@ func (r *SQLConversationReader) loadConversationTurns(ctx context.Context, agent
 		return nil, err
 	}
 	return out, nil
+}
+
+func (r *SQLConversationReader) resolveCapabilities(ctx context.Context) (store.StoreSchemaCapabilities, error) {
+	if r == nil || r.capSource == nil {
+		return store.StoreSchemaCapabilities{}, nil
+	}
+	return r.capSource.ResolveSchemaCapabilities(ctx)
 }
 
 func scanConversationTurn(scanner rowScanner) (ConversationTurn, error) {
