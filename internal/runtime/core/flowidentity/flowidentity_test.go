@@ -62,6 +62,59 @@ func TestLookupKeys_UsesCanonicalEntityID(t *testing.T) {
 	}
 }
 
+func TestSemanticScope_DistinguishesStaticAndInstancedPaths(t *testing.T) {
+	cases := []struct {
+		path string
+		want string
+	}{
+		{path: "", want: ""},
+		{path: "child", want: "child"},
+		{path: "child/inst-1", want: "child"},
+		{path: "child/grandchild/inst-1", want: "child/grandchild"},
+	}
+	for _, tc := range cases {
+		if got := SemanticScope(tc.path); got != tc.want {
+			t.Fatalf("SemanticScope(%q) = %q, want %q", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
+	cases := []struct {
+		name         string
+		workflowName string
+		flowPath     string
+		wantScope    string
+		wantPath     string
+	}{
+		{
+			name:         "static flow row uses semantic scope as path",
+			workflowName: "child",
+			wantScope:    "child",
+			wantPath:     "child",
+		},
+		{
+			name:         "template flow row keeps concrete path",
+			workflowName: "grandchild",
+			flowPath:     "child/grandchild/inst-1",
+			wantScope:    "child/grandchild",
+			wantPath:     "child/grandchild/inst-1",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := StoredCoordinates(nil, tc.workflowName, tc.flowPath)
+			if got.ScopeKey != tc.wantScope {
+				t.Fatalf("StoredCoordinates(%q, %q).ScopeKey = %q, want %q", tc.workflowName, tc.flowPath, got.ScopeKey, tc.wantScope)
+			}
+			if got.InstancePath != tc.wantPath {
+				t.Fatalf("StoredCoordinates(%q, %q).InstancePath = %q, want %q", tc.workflowName, tc.flowPath, got.InstancePath, tc.wantPath)
+			}
+		})
+	}
+}
+
 func TestSemanticScopeFromInstancePath(t *testing.T) {
 	cases := []struct {
 		path string

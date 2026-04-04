@@ -802,14 +802,12 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	if flowID == "" {
 		return true
 	}
-	if strings.TrimSpace(instance.WorkflowName) == flowID {
-		return true
-	}
-	targetPath := workflowInstancePath(instance)
-	if targetPath == "" {
+	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
+	targetScope := workflowInstanceScopeKey(source, instance)
+	if ownerScope == "" || targetScope == "" {
 		return false
 	}
-	return runtimeflowidentity.OwnedByFlow(source, flowID, targetPath)
+	return ownerScope == targetScope
 }
 
 func workflowStateGatesForScope(source semanticview.Source, flowID string, metadata map[string]any) map[string]bool {

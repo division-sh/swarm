@@ -31,23 +31,20 @@ func deriveFlowInstanceIdentity(source semanticview.Source, flowID, instanceID s
 	return DeriveFlowInstanceIdentity(source, flowID, instanceID)
 }
 
-func workflowInstanceScopeKey(source semanticview.Source, instance WorkflowInstance, fallbackFlowID string) string {
-	return runtimeflowidentity.InstanceScopeKey(
+func workflowInstanceCoordinates(source semanticview.Source, instance WorkflowInstance) runtimeflowidentity.Coordinates {
+	return runtimeflowidentity.StoredCoordinates(
 		source,
 		strings.TrimSpace(instance.WorkflowName),
-		workflowInstancePath(instance),
-		fallbackFlowID,
+		workflowInstanceMaterializedPath(instance),
 	)
 }
 
-func workflowInstancePath(instance WorkflowInstance) string {
-	if flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/"); flowPath != "" {
-		return flowPath
-	}
-	if storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/"); storageRef != "" {
-		return storageRef
-	}
-	return strings.Trim(strings.TrimSpace(asString(instance.Metadata["storage_ref"])), "/")
+func workflowInstanceScopeKey(source semanticview.Source, instance WorkflowInstance) string {
+	return workflowInstanceCoordinates(source, instance).ScopeKey
+}
+
+func workflowInstancePath(source semanticview.Source, instance WorkflowInstance) string {
+	return workflowInstanceCoordinates(source, instance).InstancePath
 }
 
 func workflowInstanceMaterializedPath(instance WorkflowInstance) string {
@@ -58,7 +55,7 @@ func workflowInstanceLogicalIDFromInstance(instance WorkflowInstance) string {
 	if instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"])); instanceID != "" {
 		return instanceID
 	}
-	return runtimeflowidentity.LogicalInstanceID(workflowInstancePath(instance))
+	return runtimeflowidentity.LogicalInstanceID(workflowInstanceMaterializedPath(instance))
 }
 
 func workflowInstanceMaterializedIdentity(instance WorkflowInstance) (flowPath string, instanceID string, ok bool) {
