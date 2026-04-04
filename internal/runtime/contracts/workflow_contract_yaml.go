@@ -673,12 +673,12 @@ func (e *ExpressionValue) UnmarshalYAML(node *yaml.Node) error {
 		*e = expr
 		return nil
 	case yaml.MappingNode:
-	var aux struct {
-		Kind       ExpressionKind `yaml:"kind"`
-		Literal    any    `yaml:"literal"`
-		Ref        string `yaml:"ref"`
-		CEL        string `yaml:"cel"`
-			Expression string `yaml:"expression"`
+		var aux struct {
+			Kind       ExpressionKind `yaml:"kind"`
+			Literal    any            `yaml:"literal"`
+			Ref        string         `yaml:"ref"`
+			CEL        string         `yaml:"cel"`
+			Expression string         `yaml:"expression"`
 		}
 		if err := node.Decode(&aux); err != nil {
 			return err
@@ -751,8 +751,8 @@ func (t *TransformSpec) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("unsupported payload transform entry yaml node kind %d", node.Kind)
 	}
 	var aux struct {
-		Target     string     `yaml:"target"`
-		Expression string     `yaml:"expression"`
+		Target     string `yaml:"target"`
+		Expression string `yaml:"expression"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
