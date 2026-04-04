@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/semanticview"
 )
@@ -71,6 +72,58 @@ func TestPrintRunStatusReport(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("status output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestLoadRunStatusRuntimeLogs_UsesSpecShapedPayload(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	summaryCount := sqlmock.NewRows([]string{"count"}).AddRow(2)
+	mock.ExpectQuery(`SELECT COUNT\(\*\)\s+FROM events`).
+		WithArgs("run-123", sqlmock.AnyArg(), "tool-executor").
+		WillReturnRows(summaryCount)
+
+	rollupRows := sqlmock.NewRows([]string{"log_level", "component", "action", "count"}).
+		AddRow("warn", "tool-executor", "tool_execution_denied", 2)
+	mock.ExpectQuery(`SELECT\s+COALESCE\(payload->>'log_level', ''\)`).
+		WithArgs("run-123", sqlmock.AnyArg(), "tool-executor").
+		WillReturnRows(rollupRows)
+
+	logRows := sqlmock.NewRows([]string{"log_level", "component", "action", "error", "created_at"}).
+		AddRow("warn", "tool-executor", "tool_execution_denied", "tool not allowed", time.Unix(1700000000, 0).UTC())
+	mock.ExpectQuery(`SELECT\s+COALESCE\(payload->>'log_level', ''\)`).
+		WithArgs("run-123", sqlmock.AnyArg(), "tool-executor", 100).
+		WillReturnRows(logRows)
+
+	var report runStatusReport
+	err = loadRunStatusRuntimeLogs(context.Background(), db, "run-123", runStatusOptions{
+		LogsOnly:  true,
+		Component: "tool-executor",
+	}, &report)
+	if err != nil {
+		t.Fatalf("loadRunStatusRuntimeLogs: %v", err)
+	}
+	if report.WarnErrorLogCount != 2 {
+		t.Fatalf("WarnErrorLogCount = %d, want 2", report.WarnErrorLogCount)
+	}
+	if len(report.RuntimeLogSummary) != 1 {
+		t.Fatalf("RuntimeLogSummary len = %d, want 1", len(report.RuntimeLogSummary))
+	}
+	if got := report.RuntimeLogSummary[0]; got.Level != "warn" || got.Component != "tool-executor" || got.Action != "tool_execution_denied" || got.Count != 2 {
+		t.Fatalf("RuntimeLogSummary[0] = %#v", got)
+	}
+	if len(report.RuntimeLogs) != 1 {
+		t.Fatalf("RuntimeLogs len = %d, want 1", len(report.RuntimeLogs))
+	}
+	if got := report.RuntimeLogs[0]; got.Level != "warn" || got.Component != "tool-executor" || got.Action != "tool_execution_denied" || got.Error != "tool not allowed" {
+		t.Fatalf("RuntimeLogs[0] = %#v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
