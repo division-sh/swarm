@@ -103,6 +103,22 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 			t.Fatalf("expected provider native Read to be allowed: %v", authErr)
 		}
 	})
+
+	t.Run("actor config tool aliases are canonicalized", func(t *testing.T) {
+		raw, err := json.Marshal(map[string]any{
+			"tools": []string{"Read"},
+		})
+		if err != nil {
+			t.Fatalf("json.Marshal: %v", err)
+		}
+		authErr := NewToolAuthorizer(nil).Authorize(context.Background(), models.AgentConfig{
+			ID:     "ops-9",
+			Config: raw,
+		}, "read_file")
+		if authErr != nil {
+			t.Fatalf("expected aliased configured tool to be allowed: %v", authErr)
+		}
+	})
 }
 
 func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {

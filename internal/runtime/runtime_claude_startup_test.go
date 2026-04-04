@@ -9,6 +9,7 @@ import (
 
 	"swarm/internal/config"
 	runtimeactors "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 	llm "swarm/internal/runtime/llm"
 	runtimemanager "swarm/internal/runtime/manager"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -103,6 +104,23 @@ func (startupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition {
 	return []llm.ToolDefinition{{Name: "query_entities"}}
 }
 
+func (startupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []llm.ToolDefinition {
+	return []llm.ToolDefinition{{Name: "query_entities"}}
+}
+
+func (startupProbeToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{
+			Name:               name,
+			Visible:            true,
+			Callable:           true,
+			ContextRequirement: toolcapabilities.ContextRequirementActorContext,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
 type emptyStartupProbeToolExecutor struct{}
 
 func (emptyStartupProbeToolExecutor) Execute(context.Context, string, any) (any, error) {
@@ -110,6 +128,18 @@ func (emptyStartupProbeToolExecutor) Execute(context.Context, string, any) (any,
 }
 
 func (emptyStartupProbeToolExecutor) ToolDefinitions() []llm.ToolDefinition { return nil }
+
+func (emptyStartupProbeToolExecutor) ToolDefinitionsForActor(runtimeactors.AgentConfig) []llm.ToolDefinition {
+	return nil
+}
+
+func (emptyStartupProbeToolExecutor) ToolCapabilitiesForActor(_ runtimeactors.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{Name: name})
+	}
+	return toolcapabilities.NewSet(caps)
+}
 
 func TestValidateClaudeMCPToolsForManagedAgents_AcceptsVisibleTools(t *testing.T) {
 	cfg := &config.Config{}

@@ -13,6 +13,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	llm "swarm/internal/runtime/llm"
 	runtimepipeline "swarm/internal/runtime/pipeline"
@@ -304,6 +305,48 @@ func (boardEmitExecutor) Execute(ctx context.Context, name string, input any) (a
 	return map[string]any{"ok": true, "name": name, "input": input}, nil
 }
 
+func (boardEmitExecutor) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return []llm.ToolDefinition{{Name: "emit_scan_requested"}}
+}
+
+func (boardEmitExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		kind := toolcapabilities.KindStandard
+		if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{Name: name, Kind: kind, Visible: true, Callable: true})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+type actorScopedFactoryToolExec struct{}
+
+func (actorScopedFactoryToolExec) Execute(context.Context, string, any) (any, error) {
+	return map[string]any{"ok": true}, nil
+}
+
+func (actorScopedFactoryToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		kind := toolcapabilities.KindStandard
+		if strings.HasPrefix(strings.TrimSpace(name), "emit_") {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{Name: name, Kind: kind, Visible: true, Callable: true})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+func (actorScopedFactoryToolExec) ToolDefinitionsForActor(cfg models.AgentConfig) []llm.ToolDefinition {
+	return []llm.ToolDefinition{
+		{Name: "query_entities"},
+		{Name: "emit_scan_requested"},
+		{Name: "scoped_" + strings.TrimSpace(cfg.ID)},
+	}
+}
+
 func TestBoardStep_ReturnsErrorWhenDirectiveDoesNotAct(t *testing.T) {
 	agent := NewLLMAgent(
 		models.AgentConfig{ID: "coordinator-1", Role: "coordinator"},
@@ -367,6 +410,39 @@ func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
 	)
 	if agent.conversation.Mode != llm.TaskScoped {
 		t.Fatalf("conversation mode = %v, want task", agent.conversation.Mode)
+	}
+}
+
+func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
+	factory := NewLLMAgentFactory(nil, actorScopedFactoryToolExec{}, []llm.ToolDefinition{
+		{Name: "global_only"},
+	})
+	agent, err := factory(models.AgentConfig{
+		ID: "analysis-agent",
+		Config: mustAgentConfigJSON(t, map[string]any{
+			"system_prompt": "You are here.",
+			"tools":         []string{"query_entities"},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("factory error: %v", err)
+	}
+	llmAgent, ok := agent.(*LLMAgent)
+	if !ok {
+		t.Fatalf("agent type = %T, want *LLMAgent", agent)
+	}
+	names := make([]string, 0, len(llmAgent.conversation.Tools))
+	for _, tool := range llmAgent.conversation.Tools {
+		names = append(names, tool.Name)
+	}
+	if !containsString(names, "query_entities") {
+		t.Fatalf("expected actor-scoped tool in conversation, got %v", names)
+	}
+	if containsString(names, "global_only") {
+		t.Fatalf("expected global fallback tool to be absent when actor-scoped definitions exist, got %v", names)
+	}
+	if !containsString(names, "scoped_analysis-agent") {
+		t.Fatalf("expected precomposed actor-scoped tool to survive local filtering, got %v", names)
 	}
 }
 

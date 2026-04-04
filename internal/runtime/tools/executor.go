@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"swarm/internal/config"
 	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "swarm/internal/runtime/credentials"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
@@ -43,6 +45,10 @@ type Executor struct {
 	dispatcher      *ToolDispatcher
 	oneShotMu       sync.Mutex
 	oneShotEmits    map[string]struct{}
+}
+
+type runtimeToolLogSink interface {
+	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry)
 }
 
 func NewExecutor(bus EventPublisher, scheduler Scheduler, manager Manager, stores ...SchedulePersistence) *Executor {
@@ -151,9 +157,6 @@ func (e *Executor) SetConfig(cfg *config.Config) {
 
 func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool, error) {
 	name = normalizeNativeToolName(name)
-	if tool, ok := nativeFallbackRegisteredTool(actor, name); ok {
-		return tool, true, nil
-	}
 	e.mu.RLock()
 	source := e.workflowSource
 	client := e.mcpClient
@@ -162,7 +165,7 @@ func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) 
 	if client != nil {
 		discovered = client.DiscoveredTools()
 	}
-	return resolveRegisteredToolForActor(source, actor.ID, name, discovered)
+	return resolveRegisteredToolForActor(source, actor, name, discovered)
 }
 
 func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
@@ -174,17 +177,61 @@ func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
 	return defs
 }
 
+func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolDefinition {
+	e.mu.RLock()
+	source := e.workflowSource
+	client := e.mcpClient
+	e.mu.RUnlock()
+	var discovered map[string]runtimemcp.DiscoveredTool
+	if client != nil {
+		discovered = client.DiscoveredTools()
+	}
+	entries, err := registeredToolsForActor(source, actor, discovered)
+	if err != nil {
+		processWarn("tool-executor", "failed to load actor-scoped contract tool definitions: %v", err)
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	filtered := make([]llm.ToolDefinition, 0, len(names))
+	for _, name := range names {
+		entry := entries[name]
+		if !classifyToolAuthorization(actor, name).allowed {
+			continue
+		}
+		filtered = append(filtered, llm.ToolDefinition{
+			Name:        name,
+			Description: strings.TrimSpace(entry.Description),
+			Schema:      deepCloneJSONValue(entry.InputSchema),
+		})
+	}
+	filtered = append(filtered, GenerateEmitToolsForActor(actor, func(_ string, component string, format string, args ...any) {
+		processWarn(component, format, args...)
+	})...)
+	return filtered
+}
+
+func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return capabilitySetForActor(actor, names, requestAllowed)
+}
+
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
 	actor, ok := ActorFromContext(ctx)
 	if !ok {
-		return nil, errors.New("missing actor context for tool execution")
+		err := errors.New("missing actor context for tool execution")
+		e.emitToolExecutionEvent(ctx, models.AgentConfig{}, name, input, nil, err, 0, "context")
+		return nil, err
 	}
 	name = normalizeNativeToolName(strings.TrimSpace(name))
 	if err := e.authorizeToolUsage(ctx, actor, name); err != nil {
+		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "authorize")
 		return nil, err
 	}
 	if err := e.validateRuntimeToolInput(name, input); err != nil {
-		return nil, WrapRuntimeError(
+		wrapped := WrapRuntimeError(
 			"invalid_tool_input",
 			"tool-executor",
 			"execute.validate_runtime_tool_input",
@@ -192,11 +239,13 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 			err,
 			"runtime tool input validation failed",
 		)
+		e.emitToolExecutionEvent(ctx, actor, name, input, nil, wrapped, 0, "validate")
+		return nil, wrapped
 	}
 	input = normalizeRuntimeToolInput(name, input)
 	start := time.Now()
 	out, err := e.dispatchTool(ctx, actor, name, input)
-	e.emitToolExecutionEvent(ctx, actor, name, input, out, err, time.Since(start))
+	e.emitToolExecutionEvent(ctx, actor, name, input, out, err, time.Since(start), "dispatch")
 	return out, err
 }
 
@@ -276,180 +325,7 @@ func toolAllowsLegacySubsetFallback(name string) bool {
 }
 
 func normalizeRuntimeToolInput(name string, input any) any {
-	if strings.TrimSpace(name) == "" || strings.HasPrefix(strings.TrimSpace(name), "emit_") {
-		return input
-	}
-	var payload map[string]any
-	if err := decodeToolInput(input, &payload); err != nil || payload == nil {
-		return input
-	}
-
-	switch name {
-	case "read_file":
-		if strings.TrimSpace(asString(payload["path"])) == "" {
-			if filePath := strings.TrimSpace(asString(payload["file_path"])); filePath != "" {
-				payload["path"] = filePath
-			}
-		}
-	case "write_file":
-		if strings.TrimSpace(asString(payload["path"])) == "" {
-			if filePath := strings.TrimSpace(asString(payload["file_path"])); filePath != "" {
-				payload["path"] = filePath
-			}
-		}
-	case "agent_message":
-		if strings.TrimSpace(asString(payload["to"])) == "" {
-			if target := strings.TrimSpace(asString(payload["target_agent_id"])); target != "" {
-				payload["to"] = target
-			}
-		}
-		if strings.TrimSpace(asString(payload["target_agent_id"])) == "" {
-			if to := strings.TrimSpace(asString(payload["to"])); to != "" {
-				payload["target_agent_id"] = to
-			}
-		}
-		if strings.TrimSpace(asString(payload["message"])) == "" {
-			if data, ok := payload["payload"].(map[string]any); ok {
-				if msg := strings.TrimSpace(asString(data["message"])); msg != "" {
-					payload["message"] = msg
-				}
-			}
-			if strings.TrimSpace(asString(payload["message"])) == "" {
-				payload["message"] = "runtime_tool"
-			}
-		}
-	case "schedule":
-		if strings.TrimSpace(asString(payload["action"])) == "" {
-			if eventType := strings.TrimSpace(asString(payload["event_type"])); eventType != "" {
-				payload["action"] = eventType
-			}
-		}
-		if strings.TrimSpace(asString(payload["event_type"])) == "" {
-			if action := strings.TrimSpace(asString(payload["action"])); action != "" {
-				payload["event_type"] = action
-			}
-		}
-		if asInt(payload["delay_seconds"]) <= 0 {
-			if at := strings.TrimSpace(asString(payload["at"])); at != "" {
-				if parsed, err := time.Parse(time.RFC3339, at); err == nil {
-					delay := int(time.Until(parsed).Seconds())
-					if delay < 0 {
-						delay = 0
-					}
-					payload["delay_seconds"] = delay
-				}
-			}
-		}
-		if payload["payload"] == nil && payload["context"] != nil {
-			payload["payload"] = payload["context"]
-		}
-		if strings.TrimSpace(asString(payload["at"])) == "" {
-			if rawDelay, ok := payload["delay_seconds"]; ok {
-				delaySeconds := asInt(rawDelay)
-				if delaySeconds < 0 {
-					delaySeconds = 0
-				}
-				payload["mode"] = "once"
-				payload["at"] = time.Now().Add(time.Duration(delaySeconds) * time.Second).UTC().Format(time.RFC3339)
-			}
-		}
-	case "agent_hire":
-		if strings.TrimSpace(asString(payload["agent_id"])) == "" {
-			if config, ok := payload["config"].(map[string]any); ok {
-				payload["agent_id"] = strings.TrimSpace(asString(config["id"]))
-			}
-		}
-		if strings.TrimSpace(asString(payload["role"])) == "" {
-			if config, ok := payload["config"].(map[string]any); ok {
-				payload["role"] = strings.TrimSpace(asString(config["role"]))
-			}
-		}
-		if payload["config"] == nil {
-			config := map[string]any{
-				"id":   strings.TrimSpace(asString(payload["agent_id"])),
-				"role": strings.TrimSpace(asString(payload["role"])),
-			}
-			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
-				config["mode"] = mode
-			}
-			if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
-				config["entity_id"] = entityID
-			}
-			rawConfig := map[string]any{}
-			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
-				rawConfig["model_tier"] = modelTier
-			}
-			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
-				rawConfig["system_prompt"] = systemPrompt
-			}
-			if len(rawConfig) > 0 {
-				config["config"] = rawConfig
-			}
-			payload["config"] = config
-		}
-	case "agent_fire":
-		if strings.TrimSpace(asString(payload["reason"])) == "" {
-			payload["reason"] = "runtime_tool"
-		}
-	case "agent_reconfigure":
-		if payload["config"] == nil {
-			config := map[string]any{}
-			if modelTier := strings.TrimSpace(asString(payload["model_tier"])); modelTier != "" {
-				config["model_tier"] = modelTier
-			}
-			if systemPrompt := strings.TrimSpace(asString(payload["system_prompt"])); systemPrompt != "" {
-				config["system_prompt"] = systemPrompt
-			}
-			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
-				config["max_turns_per_task"] = maxTurns
-			}
-			payload["config"] = config
-		}
-	case "mailbox_send":
-		if mailboxType, err := NormalizeMailboxType(asString(payload["type"])); err == nil && mailboxType != "" {
-			payload["type"] = mailboxType
-		}
-		if priority, err := NormalizeMailboxPriority(asString(payload["priority"])); err == nil && priority != "" {
-			payload["priority"] = priority
-		}
-		if strings.TrimSpace(asString(payload["subject"])) == "" {
-			if summary := strings.TrimSpace(asString(payload["summary"])); summary != "" {
-				payload["subject"] = summary
-			}
-		}
-		if payload["payload"] == nil && payload["context"] != nil {
-			payload["payload"] = payload["context"]
-		}
-		if strings.TrimSpace(asString(payload["summary"])) == "" {
-			if subject := strings.TrimSpace(asString(payload["subject"])); subject != "" {
-				payload["summary"] = subject
-			}
-		}
-		if payload["context"] == nil && payload["payload"] != nil {
-			payload["context"] = payload["payload"]
-		}
-	case "human_task_request":
-		if entityID := strings.TrimSpace(asString(payload["entity_id"])); entityID != "" {
-			payload["entity_id"] = entityID
-		}
-		if strings.TrimSpace(asString(payload["deadline"])) == "" &&
-			strings.TrimSpace(asString(payload["deadline_at"])) == "" &&
-			strings.TrimSpace(asString(payload["deadline_rfc3339"])) == "" {
-			if hours := asInt(payload["deadline_hours"]); hours > 0 {
-				payload["deadline_at"] = time.Now().Add(time.Duration(hours) * time.Hour).UTC().Format(time.RFC3339)
-			}
-		}
-	case "human_task_decide":
-		switch strings.ToLower(strings.TrimSpace(asString(payload["decision"]))) {
-		case "approve":
-			payload["decision"] = "approved"
-		case "reject":
-			payload["decision"] = "rejected"
-		case "defer":
-			payload["decision"] = "deferred"
-		}
-	}
-	return payload
+	return canonicalRuntimeToolInput(name, input)
 }
 
 func (e *Executor) emitToolExecutionEvent(
@@ -460,8 +336,48 @@ func (e *Executor) emitToolExecutionEvent(
 	result any,
 	execErr error,
 	latency time.Duration,
+	phase string,
 ) {
-	_, _, _, _, _, _, _ = ctx, actor, toolName, input, result, execErr, latency
+	if e == nil || e.bus == nil {
+		return
+	}
+	logger, ok := e.bus.(runtimeToolLogSink)
+	if !ok || logger == nil {
+		return
+	}
+	toolName = normalizeNativeToolName(toolName)
+	level := "info"
+	action := "tool_execution_succeeded"
+	if execErr != nil {
+		level = "warn"
+		if errors.Is(execErr, ErrToolNotAllowed) {
+			action = "tool_execution_denied"
+		} else {
+			action = "tool_execution_failed"
+		}
+	}
+	detail := map[string]any{
+		"tool_name":     toolName,
+		"phase":         strings.TrimSpace(phase),
+		"ok":            execErr == nil,
+		"input_summary": SafeTelemetryText(input),
+	}
+	if strings.TrimSpace(actor.Role) != "" {
+		detail["actor_role"] = strings.TrimSpace(actor.Role)
+	}
+	if result != nil {
+		detail["result_summary"] = SafeTelemetryText(result)
+	}
+	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+		Level:      level,
+		Component:  "tool-executor",
+		Action:     action,
+		AgentID:    strings.TrimSpace(actor.ID),
+		EntityID:   strings.TrimSpace(actor.EffectiveEntityID()),
+		Detail:     detail,
+		Error:      toolExecErrorText(execErr),
+		DurationUS: int(latency / time.Microsecond),
+	})
 }
 
 func toolExecErrorText(err error) string {
@@ -472,6 +388,15 @@ func toolExecErrorText(err error) string {
 }
 
 func (e *Executor) authorizeToolUsage(ctx context.Context, actor models.AgentConfig, toolName string) error {
+	if set, ok := toolcapabilities.FromContext(ctx); ok {
+		if cap, ok := set.Capability(toolName); ok {
+			if cap.Callable {
+				return nil
+			}
+			return fmt.Errorf("%w: tool %s is not allowed for agent %s", ErrToolNotAllowed, toolName, actor.ID)
+		}
+		return fmt.Errorf("%w: tool %s is not offered for agent %s", ErrToolNotAllowed, toolName, actor.ID)
+	}
 	if e.authorizer == nil {
 		return nil
 	}
@@ -483,35 +408,6 @@ func (e *Executor) dispatchTool(ctx context.Context, actor models.AgentConfig, n
 		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
 	return e.dispatcher.Dispatch(ctx, actor, name, input)
-}
-
-func extractAllowedTools(actor models.AgentConfig) (map[string]struct{}, bool) {
-	allowed := make(map[string]struct{})
-	if len(actor.Config) == 0 || !json.Valid(actor.Config) {
-		return allowed, false
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(actor.Config, &parsed); err != nil {
-		return allowed, false
-	}
-	found := false
-	raw, ok := parsed["tools"]
-	if !ok {
-		return allowed, false
-	}
-	arr, ok := raw.([]any)
-	if !ok {
-		return allowed, false
-	}
-	for _, item := range arr {
-		name := strings.TrimSpace(asString(item))
-		if name == "" {
-			continue
-		}
-		found = true
-		allowed[name] = struct{}{}
-	}
-	return allowed, found
 }
 
 func (e *Executor) getManager() Manager {

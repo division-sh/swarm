@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolidentity"
 )
 
 const (
@@ -128,7 +129,7 @@ func ParseToolListHeader(raw string) map[string]struct{} {
 	}
 	out := map[string]struct{}{}
 	for _, p := range strings.Split(raw, ",") {
-		name := strings.TrimSpace(p)
+		name := toolidentity.CanonicalName(p)
 		if name == "" {
 			continue
 		}

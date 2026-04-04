@@ -150,6 +150,58 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 	}
 }
 
+func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"check_domain": {
+				Description: "Check domain availability",
+				HandlerType: "http",
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"domain": {Type: "string"},
+					},
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    "https://example.test",
+				},
+			},
+		},
+	})
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	defs := exec.ToolDefinitionsForActor(models.AgentConfig{
+		ID: "agent-1",
+		Config: mustToolConfigJSON(t, map[string]any{
+			"tools": []string{"check_domain"},
+			"native_tools": map[string]any{
+				"file_io": true,
+			},
+		}),
+	})
+
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	if !containsToolName(names, "check_domain") {
+		t.Fatalf("expected actor registry to include configured contract tool, got %v", names)
+	}
+	if !containsToolName(names, "read_file") || !containsToolName(names, "write_file") {
+		t.Fatalf("expected actor registry to include enabled native file tools, got %v", names)
+	}
+}
+
+func containsToolName(names []string, want string) bool {
+	for _, name := range names {
+		if name == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestValidateToolImplementations_RejectsMalformedHTTPTool(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{

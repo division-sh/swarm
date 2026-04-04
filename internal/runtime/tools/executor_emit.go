@@ -24,17 +24,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			toolName,
 		)
 	}
-	if !IsEmitToolAllowedForRole(actor.Role, toolName) && !IsEmitToolAllowedForConfig(actor.Config, toolName) {
-		return nil, NewRuntimeError(
-			"emit_tool_not_allowed",
-			"tool-executor",
-			"handle_emit_tool.authorize",
-			false,
-			"event type %q is not allowed for role %q",
-			eventType,
-			canonicalRuntimeRole(actor.Role),
-		)
-	}
 	if e.bus == nil {
 		return nil, NewRuntimeError(
 			"dependency_unavailable",

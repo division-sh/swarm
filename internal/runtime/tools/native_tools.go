@@ -5,9 +5,11 @@ import (
 	"strings"
 
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolidentity"
+	llm "swarm/internal/runtime/llm"
 )
 
-const runtimeToolsMCPPrefix = "mcp__runtime-tools__"
+const runtimeToolsMCPPrefix = toolidentity.RuntimeToolsMCPPrefix
 
 func nativeFallbackRegisteredTool(actor models.AgentConfig, name string) (RegisteredTool, bool) {
 	name = strings.TrimSpace(name)
@@ -86,22 +88,23 @@ func nativeToolCapabilityEnabledForActor(actor models.AgentConfig, capability st
 }
 
 func normalizeNativeToolName(name string) string {
-	name = strings.TrimSpace(name)
-	if strings.HasPrefix(name, runtimeToolsMCPPrefix) {
-		name = strings.TrimPrefix(name, runtimeToolsMCPPrefix)
+	return toolidentity.CanonicalName(name)
+}
+
+func nativeFallbackToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolDefinition {
+	defs := make([]llm.ToolDefinition, 0, 4)
+	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
+		tool, ok := nativeFallbackRegisteredTool(actor, name)
+		if !ok {
+			continue
+		}
+		defs = append(defs, llm.ToolDefinition{
+			Name:        tool.Name,
+			Description: strings.TrimSpace(tool.Description),
+			Schema:      deepCloneJSONValue(tool.InputSchema),
+		})
 	}
-	switch name {
-	case "Bash":
-		return "bash"
-	case "WebSearch":
-		return "web_search"
-	case "Read":
-		return "read_file"
-	case "Write", "Edit":
-		return "write_file"
-	default:
-		return name
-	}
+	return defs
 }
 
 func nativeToolNameForCapability(capability string) []string {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/sessions"
 )
 
@@ -36,9 +38,15 @@ type ToolExecutor interface {
 	Execute(ctx context.Context, name string, input any) (any, error)
 }
 
+type CapabilityAwareToolExecutor interface {
+	ToolExecutor
+	ToolCapabilitiesForActor(models.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
+}
+
 type executedToolCall struct {
-	Name string
-	OK   bool
+	Name     string
+	OK       bool
+	Terminal bool
 }
 
 type Conversation struct {
@@ -53,7 +61,7 @@ type Conversation struct {
 	Mode         ConversationMode
 
 	runtime       Runtime
-	toolExecutor  ToolExecutor
+	toolExecutor  CapabilityAwareToolExecutor
 	maxToolRounds int
 }
 
@@ -88,7 +96,7 @@ func NewConversation(agentID, taskID, systemPrompt string, tools []ToolDefinitio
 	}
 }
 
-func (c *Conversation) SetToolExecutor(executor ToolExecutor) {
+func (c *Conversation) SetToolExecutor(executor CapabilityAwareToolExecutor) {
 	c.toolExecutor = executor
 }
 
@@ -194,9 +202,11 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 }
 
 func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (string, []executedToolCall) {
+	ctx = c.withToolCapabilities(ctx)
 	results := make([]map[string]any, 0, len(calls))
 	executed := make([]executedToolCall, 0, len(calls))
 	for _, tc := range calls {
+		terminal := toolIsTerminalInContext(ctx, tc.Name)
 		out, err := c.safeExecuteTool(ctx, tc.Name, tc.Arguments)
 		entry := map[string]any{
 			"name": tc.Name,
@@ -210,10 +220,11 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		}
 		results = append(results, entry)
 		executed = append(executed, executedToolCall{
-			Name: strings.TrimSpace(tc.Name),
-			OK:   err == nil,
+			Name:     strings.TrimSpace(tc.Name),
+			OK:       err == nil,
+			Terminal: terminal,
 		})
-		if err != nil && !isTerminalEmitToolCall(tc.Name) {
+		if err != nil && !terminal {
 			break
 		}
 	}
@@ -241,19 +252,11 @@ func shouldTerminateAfterToolCalls(calls []executedToolCall) bool {
 		return false
 	}
 	for _, call := range calls {
-		if !call.OK || !isTerminalEmitToolCall(call.Name) {
+		if !call.OK || !call.Terminal {
 			return false
 		}
 	}
 	return true
-}
-
-func isTerminalEmitToolCall(name string) bool {
-	name = strings.TrimSpace(name)
-	if strings.HasPrefix(name, "mcp__runtime-tools__") {
-		name = strings.TrimPrefix(name, "mcp__runtime-tools__")
-	}
-	return strings.HasPrefix(name, "emit_")
 }
 
 func (c *Conversation) safeExecuteTool(ctx context.Context, name string, input any) (out any, err error) {
@@ -263,7 +266,45 @@ func (c *Conversation) safeExecuteTool(ctx context.Context, name string, input a
 			out = nil
 		}
 	}()
+	ctx = c.withToolCapabilities(ctx)
 	return c.toolExecutor.Execute(ctx, name, input)
+}
+
+func toolIsTerminalInContext(ctx context.Context, name string) bool {
+	set, ok := toolcapabilities.FromContext(ctx)
+	if !ok {
+		return false
+	}
+	cap, ok := set.Capability(name)
+	if !ok {
+		return false
+	}
+	return cap.Kind == toolcapabilities.KindEmit
+}
+
+func (c *Conversation) withToolCapabilities(ctx context.Context) context.Context {
+	if c == nil || c.toolExecutor == nil || ctx == nil {
+		return ctx
+	}
+	actor, ok := models.ActorFromContext(ctx)
+	if !ok {
+		return ctx
+	}
+	if c.toolExecutor == nil {
+		return ctx
+	}
+	names := make([]string, 0, len(c.Tools))
+	for _, def := range c.Tools {
+		name := strings.TrimSpace(def.Name)
+		if name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return ctx
+	}
+	return toolcapabilities.WithContext(ctx, c.toolExecutor.ToolCapabilitiesForActor(actor, names, nil))
 }
 
 func clampToolResult(result any) any {

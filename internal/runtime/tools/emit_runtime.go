@@ -11,6 +11,7 @@ import (
 	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
 	"swarm/internal/runtime/semanticview"
 )
@@ -155,6 +156,13 @@ func GenerateEmitToolsForEvents(eventTypes []string, warn func(string, string, s
 
 func GenerateEmitToolsForConfig(raw json.RawMessage, warn func(string, string, string, ...any)) []llm.ToolDefinition {
 	return GenerateEmitToolsForEvents(configuredEmitEvents(raw), warn)
+}
+
+func GenerateEmitToolsForActor(actor models.AgentConfig, warn func(string, string, string, ...any)) []llm.ToolDefinition {
+	if configured := configuredEmitEvents(actor.Config); len(configured) > 0 {
+		return GenerateEmitToolsForEvents(configured, warn)
+	}
+	return GenerateEmitToolsForRole(actor.Role, warn)
 }
 
 func GeneratedEmitSchemasForAgentRoles() []string {

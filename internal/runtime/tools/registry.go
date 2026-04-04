@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
+	models "swarm/internal/runtime/core/actors"
 	llm "swarm/internal/runtime/llm"
 	runtimemcp "swarm/internal/runtime/mcp"
 	"swarm/internal/runtime/semanticview"
@@ -98,39 +99,64 @@ func registeredToolsForRuntime(source semanticview.Source, discovered map[string
 	return entries, nil
 }
 
-func resolveRegisteredToolForActor(source semanticview.Source, actorID, toolName string, discovered map[string]runtimemcp.DiscoveredTool) (RegisteredTool, bool, error) {
+func registeredToolsForActor(source semanticview.Source, actor models.AgentConfig, discovered map[string]runtimemcp.DiscoveredTool) (map[string]RegisteredTool, error) {
+	entries, err := registeredToolsForRuntime(source, discovered)
+	if err != nil {
+		return nil, err
+	}
+	candidates := map[string]struct{}{}
+	for name := range entries {
+		candidates[strings.TrimSpace(name)] = struct{}{}
+	}
+	if allowed, _ := extractAllowedToolsFromConfig(actor); len(allowed) > 0 {
+		for name := range allowed {
+			candidates[strings.TrimSpace(name)] = struct{}{}
+		}
+	}
+	if source != nil && strings.TrimSpace(actor.ID) != "" {
+		for name := range candidates {
+			entry, ok := source.ToolEntryForAgent(strings.TrimSpace(actor.ID), strings.TrimSpace(name))
+			if !ok {
+				continue
+			}
+			registered, include, err := registeredToolFromContract(strings.TrimSpace(name), entry)
+			if err != nil {
+				return nil, err
+			}
+			if !include {
+				continue
+			}
+			entries[strings.TrimSpace(name)] = registered
+		}
+	}
+	for _, def := range nativeFallbackToolDefinitionsForActor(actor) {
+		name := strings.TrimSpace(def.Name)
+		if name == "" {
+			continue
+		}
+		tool, ok := nativeFallbackRegisteredTool(actor, name)
+		if !ok {
+			continue
+		}
+		entries[name] = tool
+	}
+	return entries, nil
+}
+
+func resolveRegisteredToolForActor(source semanticview.Source, actor models.AgentConfig, toolName string, discovered map[string]runtimemcp.DiscoveredTool) (RegisteredTool, bool, error) {
 	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
 		return RegisteredTool{}, false, nil
 	}
-	if tool, ok := builtinRegisteredTools()[toolName]; ok {
-		return tool, true, nil
+	entries, err := registeredToolsForActor(source, actor, discovered)
+	if err != nil {
+		return RegisteredTool{}, false, err
 	}
-	if discovered != nil {
-		if tool, ok := discovered[toolName]; ok {
-			schema, _ := tool.InputSchema.(map[string]any)
-			return RegisteredTool{
-				Name:          toolName,
-				Description:   strings.TrimSpace(tool.Description),
-				HandlerType:   implementationMCP,
-				InputSchema:   schema,
-				MCPServerName: strings.TrimSpace(tool.ServerName),
-				MCPRemoteName: strings.TrimSpace(tool.RemoteName),
-			}, true, nil
-		}
-	}
-	if source == nil {
-		return RegisteredTool{}, false, nil
-	}
-	entry, ok := source.ToolEntryForAgent(strings.TrimSpace(actorID), toolName)
-	if !ok {
-		entry, ok = source.ToolEntries()[toolName]
-	}
+	tool, ok := entries[toolName]
 	if !ok {
 		return RegisteredTool{}, false, nil
 	}
-	tool, include, err := registeredToolFromContract(toolName, entry)
-	return tool, include, err
+	return tool, true, nil
 }
 
 func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEntry) (RegisteredTool, bool, error) {

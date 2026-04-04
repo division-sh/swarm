@@ -6,6 +6,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 )
 
 type fakeRuntime struct {
@@ -66,6 +69,14 @@ func (f *fakeToolExec) Execute(_ context.Context, name string, input any) (any, 
 	return map[string]any{"name": name, "input": input}, nil
 }
 
+func (f *fakeToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{Name: name, Visible: true, Callable: true})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
 type selectiveToolExec struct {
 	results map[string]any
 	errors  map[string]error
@@ -83,10 +94,35 @@ func (s *selectiveToolExec) Execute(_ context.Context, name string, input any) (
 	return map[string]any{"name": name, "input": input}, nil
 }
 
+func (s *selectiveToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		kind := toolcapabilities.KindStandard
+		if strings.HasPrefix(strings.TrimSpace(name), "emit_") || strings.HasPrefix(strings.TrimSpace(name), "mcp__runtime-tools__emit_") {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:     name,
+			Kind:     kind,
+			Visible:  true,
+			Callable: true,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
 type panicToolExec struct{}
 
 func (panicToolExec) Execute(context.Context, string, any) (any, error) {
 	panic("boom")
+}
+
+func (panicToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{Name: name, Visible: true, Callable: true})
+	}
+	return toolcapabilities.NewSet(caps)
 }
 
 type largeToolExec struct {
@@ -97,6 +133,41 @@ func (l largeToolExec) Execute(context.Context, string, any) (any, error) {
 	return l.payload, nil
 }
 
+func (l largeToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		caps = append(caps, toolcapabilities.Capability{Name: name, Visible: true, Callable: true})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+type capabilityAwareToolExec struct {
+	captured toolcapabilities.Set
+}
+
+func (c *capabilityAwareToolExec) Execute(ctx context.Context, name string, input any) (any, error) {
+	set, _ := toolcapabilities.FromContext(ctx)
+	c.captured = set
+	return map[string]any{"name": name, "input": input}, nil
+}
+
+func (c *capabilityAwareToolExec) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, _ map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, name := range names {
+		kind := toolcapabilities.KindStandard
+		if strings.HasPrefix(strings.TrimSpace(name), "emit_") || strings.HasPrefix(strings.TrimSpace(name), "mcp__runtime-tools__emit_") {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:     name,
+			Kind:     kind,
+			Visible:  true,
+			Callable: true,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
 func testAsString(v any) string {
 	s, _ := v.(string)
 	return s
@@ -105,10 +176,10 @@ func testAsString(v any) string {
 func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 	rt := &fakeRuntime{}
 	te := &fakeToolExec{}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, SessionScoped, 10, rt)
 	c.SetToolExecutor(te)
 
-	resp, err := c.Step(context.Background(), "start")
+	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
 		t.Fatalf("step error: %v", err)
 	}
@@ -136,11 +207,35 @@ func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 	}
 }
 
+func TestConversationStep_AttachesCanonicalToolCapabilitySetToExecutionContext(t *testing.T) {
+	rt := &fakeRuntime{}
+	te := &capabilityAwareToolExec{}
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{
+		{Name: "echo"},
+		{Name: "emit_scan_requested"},
+	}, SessionScoped, 10, rt)
+	c.SetToolExecutor(te)
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:   "analysis-agent",
+		Role: "analysis",
+	})
+	if _, err := c.Step(ctx, "start"); err != nil {
+		t.Fatalf("step error: %v", err)
+	}
+	if _, ok := te.captured.Capability("echo"); !ok {
+		t.Fatalf("expected capability set to include echo, got %#v", te.captured.ByName)
+	}
+	if _, ok := te.captured.Capability("emit_scan_requested"); !ok {
+		t.Fatalf("expected capability set to include emit_scan_requested, got %#v", te.captured.ByName)
+	}
+}
+
 func TestConversationStep_NoExecutorReturnsInitialToolCall(t *testing.T) {
 	rt := &fakeRuntime{}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, SessionScoped, 10, rt)
 
-	resp, err := c.Step(context.Background(), "start")
+	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
 		t.Fatalf("step error: %v", err)
 	}
@@ -238,10 +333,10 @@ func TestConversationStep_TerminatesAfterSuccessfulEmitToolCalls(t *testing.T) {
 			"emit_scan_requested": map[string]any{"event_id": "evt-1", "status": "published"},
 		},
 	}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, SessionScoped, 10, rt)
 	c.SetToolExecutor(te)
 
-	resp, err := c.Step(context.Background(), "start")
+	resp, err := c.Step(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), "start")
 	if err != nil {
 		t.Fatalf("step error: %v", err)
 	}
@@ -271,7 +366,7 @@ func TestConversationStep_ContinuesWhenAnyNonEmitToolIsPresent(t *testing.T) {
 			"echo":                map[string]any{"ok": true},
 		},
 	}
-	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}, {Name: "echo"}}, SessionScoped, 10, rt)
 	c.SetToolExecutor(te)
 	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
 
@@ -282,7 +377,7 @@ func TestConversationStep_ContinuesWhenAnyNonEmitToolIsPresent(t *testing.T) {
 			{Name: "echo", Arguments: map[string]any{"text": "hello"}},
 		},
 	}
-	resp, err := c.resolveToolCalls(context.Background(), initial)
+	resp, err := c.resolveToolCalls(models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"}), initial)
 	if err != nil {
 		t.Fatalf("resolveToolCalls error: %v", err)
 	}
@@ -359,18 +454,20 @@ func TestConversationStep_DoesNotExecuteEmitAfterSaveFailureInSameRound(t *testi
 	}
 }
 
-func TestIsTerminalEmitToolCall(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		want bool
-	}{
-		{name: "emit_scan_requested", want: true},
-		{name: "mcp__runtime-tools__emit_scan_requested", want: true},
-		{name: "query_entities", want: false},
-		{name: "mcp__runtime-tools__query_entities", want: false},
-	} {
-		if got := isTerminalEmitToolCall(tc.name); got != tc.want {
-			t.Fatalf("isTerminalEmitToolCall(%q) = %v, want %v", tc.name, got, tc.want)
-		}
+func TestExecuteToolCalls_UsesCapabilityKindForTerminalBehavior(t *testing.T) {
+	te := &capabilityAwareToolExec{}
+	c := NewConversation("a1", "t1", "sys", []ToolDefinition{{Name: "emit_scan_requested"}}, SessionScoped, 10, &fakeRuntime{})
+	c.SetToolExecutor(te)
+
+	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"})
+	_, executed := c.executeToolCalls(ctx, []ToolCall{{Name: "emit_scan_requested", Arguments: map[string]any{"x": 1}}})
+	if len(executed) != 1 {
+		t.Fatalf("executed length = %d, want 1", len(executed))
+	}
+	if !executed[0].Terminal {
+		t.Fatalf("executed[0].Terminal = false, want true")
+	}
+	if !shouldTerminateAfterToolCalls(executed) {
+		t.Fatal("shouldTerminateAfterToolCalls = false, want true")
 	}
 }

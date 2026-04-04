@@ -13,6 +13,8 @@ import (
 	"swarm/internal/events"
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
+	"swarm/internal/runtime/core/toolidentity"
 	llm "swarm/internal/runtime/llm"
 )
 
@@ -20,6 +22,132 @@ type testToolExecutor func(context.Context, string, any) (any, error)
 
 func (f testToolExecutor) Execute(ctx context.Context, name string, input any) (any, error) {
 	return f(ctx, name, input)
+}
+
+func (f testToolExecutor) ToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{
+		{Name: "query_entities"},
+		{Name: "read_file"},
+		{Name: "write_file"},
+		{Name: "emit_scan_requested"},
+		{Name: "emit_score_dimension_complete"},
+	}
+}
+
+func (f testToolExecutor) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return f.ToolDefinitions()
+}
+
+func (f testToolExecutor) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, raw := range names {
+		name := toolidentity.CanonicalName(raw)
+		if name == "" {
+			continue
+		}
+		visible := true
+		callable := true
+		if len(requestAllowed) > 0 {
+			_, visible = requestAllowed[name]
+			callable = visible
+		}
+		requirement := toolcapabilities.ContextRequirementTurnContext
+		switch name {
+		case "query_entities", "read_file":
+			requirement = toolcapabilities.ContextRequirementActorContext
+		}
+		kind := toolcapabilities.KindStandard
+		if toolidentity.IsEmitToolName(name) {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:               name,
+			Kind:               kind,
+			Visible:            visible,
+			Callable:           callable,
+			ContextRequirement: requirement,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+type actorScopedToolExecutorStub struct {
+	defs      []llm.ToolDefinition
+	actorDefs []llm.ToolDefinition
+}
+
+func (s actorScopedToolExecutorStub) Execute(context.Context, string, any) (any, error) {
+	return map[string]any{"ok": true}, nil
+}
+
+func (s actorScopedToolExecutorStub) ToolDefinitions() []llm.ToolDefinition {
+	return append([]llm.ToolDefinition(nil), s.defs...)
+}
+
+func (s actorScopedToolExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return append([]llm.ToolDefinition(nil), s.actorDefs...)
+}
+
+func (s actorScopedToolExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, raw := range names {
+		name := toolidentity.CanonicalName(raw)
+		if name == "" {
+			continue
+		}
+		visible := true
+		if len(requestAllowed) > 0 {
+			_, visible = requestAllowed[name]
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:     name,
+			Visible:  visible,
+			Callable: visible,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
+}
+
+type capabilityAwareExecutorStub struct {
+	callCount int
+}
+
+func (s *capabilityAwareExecutorStub) Execute(context.Context, string, any) (any, error) {
+	s.callCount++
+	return map[string]any{"ok": true}, nil
+}
+
+func (s *capabilityAwareExecutorStub) ToolDefinitions() []llm.ToolDefinition {
+	return []llm.ToolDefinition{
+		{Name: "emit_score_dimension_complete", Description: "emit"},
+		{Name: "query_entities", Description: "query"},
+	}
+}
+
+func (s *capabilityAwareExecutorStub) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {
+	return s.ToolDefinitions()
+}
+
+func (s *capabilityAwareExecutorStub) ToolCapabilitiesForActor(_ models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	caps := make([]toolcapabilities.Capability, 0, len(names))
+	for _, raw := range names {
+		name := toolidentity.CanonicalName(raw)
+		callable := len(requestAllowed) == 0
+		if len(requestAllowed) > 0 {
+			_, callable = requestAllowed[name]
+		}
+		kind := toolcapabilities.KindStandard
+		if toolidentity.IsEmitToolName(name) {
+			kind = toolcapabilities.KindEmit
+		}
+		caps = append(caps, toolcapabilities.Capability{
+			Name:     name,
+			Kind:     kind,
+			Visible:  callable,
+			Callable: callable,
+		})
+	}
+	return toolcapabilities.NewSet(caps)
 }
 
 func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
@@ -52,6 +180,41 @@ func TestGatewayHydrateActorMergesResolvedConfig(t *testing.T) {
 	}
 	if len(hydrated.Permissions) != 1 || hydrated.Permissions[0] != "schedule" {
 		t.Fatalf("permissions = %#v", hydrated.Permissions)
+	}
+}
+
+func TestNormalizeGatewayToolNameCanonicalAliases(t *testing.T) {
+	tests := map[string]string{
+		"":                                   "",
+		"bash":                               "bash",
+		"Bash":                               "bash",
+		"web_search":                         "web_search",
+		"WebSearch":                          "web_search",
+		"Read":                               "read_file",
+		"read_file":                          "read_file",
+		"Write":                              "write_file",
+		"Edit":                               "write_file",
+		"mcp__runtime-tools__read_file":      "read_file",
+		"mcp__runtime-tools__write_file":     "write_file",
+		"mcp__runtime-tools__emit_scan_done": "emit_scan_done",
+	}
+
+	for raw, want := range tests {
+		if got := normalizeGatewayToolName(raw); got != want {
+			t.Fatalf("normalizeGatewayToolName(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestParseToolListHeaderCanonicalizesAliases(t *testing.T) {
+	allowed := ParseToolListHeader("Read, mcp__runtime-tools__write_file, emit_scan_done")
+	if len(allowed) != 3 {
+		t.Fatalf("allowed size = %d, want 3", len(allowed))
+	}
+	for _, name := range []string{"read_file", "write_file", "emit_scan_done"} {
+		if _, ok := allowed[name]; !ok {
+			t.Fatalf("expected canonical allowed tool %q in %#v", name, allowed)
+		}
 	}
 }
 
@@ -126,6 +289,73 @@ func TestGatewayMCPToolsForRequest_KeepsEmitToolsForDirectMCPContext(t *testing.
 		}
 	}
 	t.Fatalf("emit_scan_requested should remain visible for direct MCP context: %#v", tools)
+}
+
+func TestGatewayMCPToolsForRequest_PrefersActorScopedToolDefinitions(t *testing.T) {
+	g := NewGateway(actorScopedToolExecutorStub{
+		defs: []llm.ToolDefinition{
+			{Name: "workflow_custom_tool", Description: "global"},
+		},
+		actorDefs: []llm.ToolDefinition{
+			{Name: "query_entities", Description: "actor scoped"},
+		},
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{
+				ID:   agentID,
+				Role: "analysis",
+			}, true
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent", nil)
+	tools := g.mcpToolsForRequest(req)
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	}
+	if tools[0].Name != "query_entities" {
+		t.Fatalf("tool name = %q, want query_entities", tools[0].Name)
+	}
+}
+
+func TestGatewayMCPToolsForRequest_FiltersListedToolsThroughCanonicalCapabilitySet(t *testing.T) {
+	g := NewGateway(actorScopedToolExecutorStub{
+		actorDefs: []llm.ToolDefinition{
+			{Name: "query_entities", Description: "actor scoped"},
+			{Name: "read_file", Description: "reader"},
+		},
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent&allowed_tools=Read", nil)
+	tools := g.mcpToolsForRequest(req)
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1 (%#v)", len(tools), tools)
+	}
+	if tools[0].Name != "read_file" {
+		t.Fatalf("tool name = %q, want read_file", tools[0].Name)
+	}
+}
+
+func TestGatewayMCPToolsForRequest_DoesNotInventUnknownAllowedToolEntries(t *testing.T) {
+	g := NewGateway(actorScopedToolExecutorStub{
+		actorDefs: []llm.ToolDefinition{
+			{Name: "query_entities", Description: "actor scoped"},
+		},
+	}, "", GatewayHooks{
+		ResolveActorConfig: func(agentID string) (models.AgentConfig, bool) {
+			return models.AgentConfig{ID: agentID, Role: "analysis"}, true
+		},
+	})
+
+	req := httptest.NewRequest("POST", "/mcp?agent_id=analysis-agent&allowed_tools=does_not_exist", nil)
+	tools := g.mcpToolsForRequest(req)
+	if len(tools) != 0 {
+		t.Fatalf("tool count = %d, want 0 (%#v)", len(tools), tools)
+	}
 }
 
 func TestMarkEmitUsed(t *testing.T) {
@@ -217,11 +447,8 @@ func TestGatewayHandleMCP_AllowsDistinctEmitPayloadsPerTurn(t *testing.T) {
 }
 
 func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *testing.T) {
-	callCount := 0
-	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
-		callCount++
-		return map[string]any{"ok": true, "name": name, "input": input}, nil
-	}), "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	exec := &capabilityAwareExecutorStub{}
+	g := NewGateway(exec, "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
 
 	PutTurnContextForTest("ctx-prefixed-emit", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -248,10 +475,47 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if callCount != 1 {
-		t.Fatalf("executor call count = %d, want 1", callCount)
+	if exec.callCount != 1 {
+		t.Fatalf("executor call count = %d, want 1", exec.callCount)
 	}
 	if strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *testing.T) {
+	exec := &capabilityAwareExecutorStub{}
+	g := NewGateway(exec, "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+
+	PutTurnContextForTest("ctx-denied-allowlist", TurnContext{
+		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	t.Cleanup(func() { UnregisterTurnContext("ctx-denied-allowlist") })
+
+	body, err := json.Marshal(map[string]any{
+		"id":     "req-1",
+		"method": "tools/call",
+		"params": map[string]any{
+			"name":      "mcp__runtime-tools__emit_score_dimension_complete",
+			"arguments": map[string]any{"dimension": "build_complexity", "score": 32},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp?ctx_token=ctx-denied-allowlist&allowed_tools=query_entities", strings.NewReader(string(body)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if exec.callCount != 0 {
+		t.Fatalf("executor call count = %d, want 0", exec.callCount)
+	}
+	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }

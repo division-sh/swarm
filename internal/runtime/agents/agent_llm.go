@@ -31,7 +31,16 @@ type LLMAgent struct {
 	mu            sync.Mutex
 }
 
-func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor llm.ToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
+type actorScopedToolExecutor interface {
+	llm.CapabilityAwareToolExecutor
+	ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition
+}
+
+func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) *LLMAgent {
+	return newLLMAgent(cfg, modelRuntime, toolExecutor, tools, false)
+}
+
+func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, precomposed bool) *LLMAgent {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
 		if strings.TrimSpace(s) == "" {
@@ -42,9 +51,7 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 
 	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
 	systemPrompt = appendPromptPostamble(systemPrompt)
-	allowedToolSet, constrained := extractAllowedToolSet(cfg)
-	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
-	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
+	tools = composeConversationTools(cfg, modelRuntime, tools, precomposed)
 
 	maxTurns := 100
 	mode := llm.TaskScoped
@@ -68,6 +75,16 @@ func NewLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		conversation:  c,
 		promptCache:   promptCache,
 	}
+}
+
+func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, tools []llm.ToolDefinition, precomposed bool) []llm.ToolDefinition {
+	if precomposed {
+		return tools
+	}
+	allowedToolSet, constrained := extractAllowedToolSet(cfg)
+	tools = mergeTools(filterTools(tools, allowedToolSet, constrained), emitToolDefinitions(cfg))
+	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
+	return tools
 }
 
 func extractConversationConstraints(raw json.RawMessage) (*llm.ConversationMode, int) {
@@ -139,7 +156,7 @@ func asIntFromAny(v any) int {
 	}
 }
 
-func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor llm.ToolExecutor, tools []llm.ToolDefinition) runtimemanager.AgentFactory {
+func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition) runtimemanager.AgentFactory {
 	return func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
 			agentID := strings.TrimSpace(cfg.ID)
@@ -151,7 +168,9 @@ func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor llm.ToolExecutor,
 			}
 			return nil, errors.New("missing required system_prompt for agent " + agentID)
 		}
-		return NewLLMAgent(cfg, modelRuntime, toolExecutor, tools), nil
+		agentTools := tools
+		agentTools = toolExecutor.ToolDefinitionsForActor(cfg)
+		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, true), nil
 	}
 }
 

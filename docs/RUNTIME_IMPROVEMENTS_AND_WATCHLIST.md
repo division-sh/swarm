@@ -6,6 +6,11 @@ This is a living document for recurring runtime issues.
 
 It is expected to grow as new runtime failure patterns are discovered.
 
+Implementation baseline:
+
+- apply the rules in [IMPLEMENTER_GUIDELINES.md](/Users/youmew/dev/swarm/docs/IMPLEMENTER_GUIDELINES.md) when designing fixes and refactors
+- use this watchlist to record where the codebase still violates those rules or proves they matter
+
 It should be updated whenever:
 
 - a failure pattern reappears
@@ -64,6 +69,10 @@ Follow this protocol whenever a runtime debugging session finds a real issue.
 8. Update this file at the end of any debugging session that took real effort.
    - Default habit:
      - spend 2 minutes updating this file before moving on
+
+9. Treat unexpectedly hard test-fixing as an escalation signal.
+   - If getting tests green starts taking disproportionately long, evaluate whether that difficulty points to a missing abstraction or duplicated semantics.
+   - If yes, record the architectural seam here instead of treating it as “just test cleanup”.
 
 ## Incident Template
 
@@ -1275,18 +1284,426 @@ Improvement items:
   - entity owner flow
   - why the write was classified as foreign
 
+### Store behavior depends on implicit schema-shape fallbacks
+
+Symptoms:
+
+- persistence behavior changes based on which columns happen to exist
+- store paths retry with older SQL after apparently unrelated query errors
+- operational debugging depends on knowing whether a spec path or legacy path actually ran
+
+Likely causes:
+
+- store code probes schema capability on the fly
+- some persistence paths still fall back by matching SQL error strings
+- schema compatibility is embedded in hot runtime paths instead of one explicit boundary
+
+Current mitigations:
+
+- repeated `columnExists(...)` probes
+- legacy fallback helpers like:
+  - `shouldFallbackLegacyEventsSchema(...)`
+  - `shouldFallbackLegacyAgentsSchema(...)`
+  - `shouldFallbackLegacyTimersSchema(...)`
+
+Still brittle because:
+
+- runtime behavior is influenced by implicit database shape detection
+- spec and legacy persistence semantics can drift independently
+
+Improvement items:
+
+- introduce one explicit store schema-capability/version boundary
+- stop using SQL error-string matching as a runtime compatibility mechanism
+- negotiate schema behavior once per store/runtime startup, not ad hoc inside write paths
+
+### Expression evaluation still mixes explicit semantics with fallback interpretation
+
+Symptoms:
+
+- the same declarative string may be treated as:
+  - a CEL expression
+  - a ref
+  - a literal
+- fixes in expression handling often reveal hidden precedence assumptions
+- contract behavior is harder to predict than it looks from the YAML
+
+Likely causes:
+
+- engine helpers still interpret strings through layered fallback paths
+- unqualified refs search multiple buckets in order
+- failed CEL evaluation can degrade into non-CEL interpretation
+
+Current mitigations:
+
+- targeted fixes for arithmetic `data_accumulation`
+- focused tests around specific expression cases
+
+Still brittle because:
+
+- the runtime effectively has a mini language with implicit precedence
+- evaluation semantics are spread across helper functions rather than one typed expression model
+
+Improvement items:
+
+- make expression classes explicit:
+  - literal
+  - path ref
+  - CEL
+- remove semantic fallback from one expression class into another
+- make bucket lookup precedence explicit and test it directly
+
+### Opaque agent config still acts as a runtime control plane
+
+Symptoms:
+
+- runtime-significant behavior is reconstructed from raw agent config JSON
+- different subsystems decode the same config for:
+  - flow path
+  - subscriptions
+  - manager fallback
+  - workspace behavior
+  - tool/runtime mode
+- a config-shape change risks silent drift across manager, authority, workspace, and store code
+
+Likely causes:
+
+- agent config is carrying both:
+  - arbitrary agent payload
+  - typed control-plane semantics
+- there is no separate persisted runtime descriptor for agents
+
+Current mitigations:
+
+- repeated decode/normalize logic in each subsystem
+
+Still brittle because:
+
+- the real control plane is implicit inside opaque JSON
+- subsystems can stay “individually correct” while disagreeing semantically
+
+Improvement items:
+
+- introduce a typed persisted runtime descriptor for agent control semantics
+- separate opaque agent config payload from runtime-owned fields
+- stop re-deriving subscriptions/flow path/fallback semantics from arbitrary JSON blobs
+
+### Tool invocation semantics are still distributed across multiple layers
+
+Symptoms:
+
+- the same tool call can be:
+  - visible but rejected
+  - allowed only after normalization
+  - accepted at one layer and denied at another
+- context requirements are inferred differently by gateway, validator, authorizer, and executor
+- emit-event equivalence and native-tool registration still carry local compatibility logic
+
+Likely causes:
+
+- tool identity is still normalized in multiple places
+- transport visibility, authorization, validation, and execution each own part of the semantics
+- raw and canonical tool ids are treated as if they are interchangeable
+
+Current mitigations:
+
+- repeated normalization in gateway, validator, authorizer, and executor
+- context fallback for selected tools
+- duplicated payload/input compatibility rewrites
+
+Still brittle because:
+
+- one concept, “can this actor call this tool here with this payload,” has no single owner
+- failures surface far from the layer that silently changed semantics
+
+Improvement items:
+
+- introduce one canonical tool invocation policy / capability registry
+- move visibility, identity, auth, context requirements, and compatibility normalization behind that registry
+- stop allowing transport and execution layers to normalize tool semantics independently
+
+### Stateless turns are still back-projected into `agent_sessions`
+
+Symptoms:
+
+- task-mode turns still produce `agent_sessions` rows
+- dashboards and readers must infer which rows are true live sessions versus audit shims
+- session state and transcript/audit state are mixed in the same persistence surface
+
+Likely causes:
+
+- task mode still writes synthetic session-shaped rows for observability
+- readers depend on runtime mode and scope-key conventions to recover semantics after the fact
+
+Current mitigations:
+
+- `runtime_mode` and synthetic scope values
+- dashboard-side filtering/reconstruction
+
+Still brittle because:
+
+- one table is carrying two incompatible concepts
+- downstream readers must remember hidden exceptions
+
+Improvement items:
+
+- separate live session state from turn/transcript audit state
+- or introduce an explicit persisted session kind with dedicated reader APIs
+- stop treating stateless audit rows as leaseable/live session records
+
+### Timer and accumulation-timeout identity still depends on string mini-languages
+
+Symptoms:
+
+- timer lifecycle keys use raw trigger strings like `state:...` and `event:...`
+- timeout and accumulation bucket identity is assembled through concatenated strings
+- bucket identity can be recovered heuristically when payload identity is incomplete
+
+Likely causes:
+
+- timer trigger identity is not modeled as a typed runtime object
+- accumulation bucket references are still encoded and decoded by convention
+
+Current mitigations:
+
+- local parsing helpers
+- “best bucket” recovery when direct identity is missing
+
+Still brittle because:
+
+- correctness depends on string format stability and collision-free naming conventions
+- new timer modes increase the exception matrix rather than extending a typed model
+
+Improvement items:
+
+- introduce typed `TimerTrigger`, `TimerHandle`, and `AccumulatorBucketRef`
+- stop recovering timer/bucket identity via concatenated string conventions
+- make cancellation and timeout targeting consume canonical typed identity
+
+### Conversation summaries are still reconstructed heuristically from raw payloads
+
+Symptoms:
+
+- dashboard summaries replay raw transcript payloads and infer assistant output from multiple payload shapes
+- progress summaries depend on English prefix matching
+- observability silently degrades when transcript-related columns are absent
+
+Likely causes:
+
+- the dashboard is reconstructing runtime truth instead of reading a canonical persisted turn outcome model
+- transcript persistence still exposes raw material more reliably than explicit structured summary data
+
+Current mitigations:
+
+- SQL-side payload parsing
+- fallback summary extraction from raw transcript blobs
+
+Still brittle because:
+
+- debugging views can diverge from actual runtime behavior even when rows exist
+- the observability layer becomes another heuristic interpreter
+
+Improvement items:
+
+- persist one canonical turn transcript/outcome model from the runtime
+- stop reconstructing operator-facing summaries from raw transcript wire formats
+- make dashboard readers consumers of canonical persisted turn summaries rather than heuristic parsers
+
+### Residual entity-id derivation is still split across namespaces
+
+Symptoms:
+
+- the same logical flow-instance ref can still produce different entity ids depending on which derivation path is used
+- persistence/store helpers and centralized flow identity do not yet share one unconditional entity-id derivation path
+
+Likely causes:
+
+- store-side row-id derivation still has a residual local namespace branch
+- centralized `flowidentity.EntityID(...)` is not yet the only authority for non-UUID flow-instance refs
+
+Current mitigations:
+
+- most major runtime identity seams now use shared flow identity
+- tests cover canonical flow-instance identity at the runtime level
+
+Still brittle because:
+
+- one remaining split derivation path can silently break joins, lookups, deduplication, or cleanup logic
+- this is exactly the same distributed-identity pattern we just spent time removing elsewhere
+
+Improvement items:
+
+- collapse residual store-side entity-id derivation onto `flowidentity.EntityID(...)` or one shared derivation helper
+- remove alternate UUID namespaces for flow-instance-derived entity ids
+- add direct tests proving all non-UUID flow-instance refs converge to the same entity id across runtime and store helpers
+
+### Instance path resolution still has conflicting fallback precedence
+
+Symptoms:
+
+- different helpers can return different “canonical instance paths” for the same row if `flow_path` and `storage_ref` disagree
+- identity-oriented callers and persistence-oriented callers still prioritize different fields first
+
+Likely causes:
+
+- path resolution remains split between pipeline identity helpers and store/persistence helpers
+- the precedence order is still implicit and local to each function
+
+Current mitigations:
+
+- shared flow identity now covers many path/scope operations
+- full-suite tests protect the main runtime semantics
+
+Still brittle because:
+
+- identity and persistence can silently disagree about which instance they are targeting
+- divergent precedence reintroduces hidden semantics at the storage boundary
+
+Improvement items:
+
+- collapse instance-path resolution onto one canonical helper with explicit documented precedence
+- return provenance or fail if persisted fields disagree in impossible ways
+- remove path-resolution fallback ladders that can yield different answers for the same row
+
+### Expression variable context still depends on silent overwrite precedence
+
+Symptoms:
+
+- expression variables are built by merging multiple maps with different overwrite rules
+- collisions between `vars`, `policy`, `entity`, and `payload` can silently change expression meaning
+- the effective precedence hierarchy is implicit rather than contract-visible
+
+Likely causes:
+
+- expression context is still modeled as a flat merged map
+- different sources use different overwrite policies when added to the map
+
+Current mitigations:
+
+- namespaced access such as `entity.*` and `payload.*` exists in many places
+- targeted fixes and tests cover some specific expression bugs
+
+Still brittle because:
+
+- unqualified names can silently resolve to the “winning” source instead of failing or requiring namespacing
+- readers and contract authors cannot easily predict which source owns a colliding key
+
+Improvement items:
+
+- move toward explicit variable scopes:
+  - `entity.*`
+  - `payload.*`
+  - `policy.*`
+  - `vars.*`
+- detect and warn on conflicting flat merges until namespacing is complete
+- stop relying on undocumented overwrite precedence as expression semantics
+
+### Tool execution telemetry is still effectively absent
+
+Symptoms:
+
+- tool execution already captures actor, tool name, latency, input, result, and error at call sites
+- but runtime discards that data instead of emitting a canonical tool-execution record
+- tool debugging still starts from indirect symptoms rather than direct execution evidence
+
+Likely causes:
+
+- the execution hook exists but remains a stub
+- tool observability has not yet been treated as a first-class runtime surface
+
+Current mitigations:
+
+- partial turn/transcript evidence
+- indirect logs and downstream workflow symptoms
+
+Still brittle because:
+
+- operators cannot easily distinguish:
+  - tool never called
+  - tool called and failed
+  - tool succeeded but returned unexpected data
+- this makes tool-heavy workflow failures much more expensive to investigate
+
+Improvement items:
+
+- implement canonical tool-execution telemetry immediately, even if first version is structured logging
+- include:
+  - actor
+  - tool identity
+  - latency
+  - success/failure
+  - normalized input/output summary
+- wire this into the broader flight-recorder / observability initiative
+
+### Semantic source access still relies on a package-level ambient lookup
+
+Symptoms:
+
+- multiple subsystems retrieve semantic identity/routing state through a package-level default accessor
+- manager, workspace, and bus do not all share the same explicit injected semantic dependency
+
+Likely causes:
+
+- semantic-source ownership is still ambient rather than constructor-injected
+- some subsystems treat missing semantic source as “skip logic” while others keep going differently
+
+Current mitigations:
+
+- semantics appear effectively stable after boot in normal operation
+
+Still brittle because:
+
+- if semantic source mutability or reload ever changes, consumers can diverge in hard-to-see ways
+- ambient access makes subsystem contracts less explicit than they should be
+
+Improvement items:
+
+- verify whether semantic source is truly immutable after boot
+- if yes, still prefer explicit injection over package-level ambient access
+- if not, treat this as a higher-severity architecture bug and version/inject the dependency explicitly
+
+### Agent-to-entity scope still leaks through string suffix conventions
+
+Symptoms:
+
+- some routing/exclusion behavior still infers entity scoping from agent ids that end with `-{entityID}`
+- routing semantics depend on id naming conventions rather than explicit metadata
+
+Likely causes:
+
+- entity scope is not yet represented as first-class subscription/registration metadata
+
+Current mitigations:
+
+- current id formats make accidental collisions unlikely
+
+Still brittle because:
+
+- changing id format or adding unexpected suffix collisions can silently alter routing behavior
+- the actual scope rule is invisible at registration sites
+
+Improvement items:
+
+- introduce explicit entity-scope metadata on agent registration/subscription surfaces
+- stop inferring scope from string suffix patterns
+
 ## Improvement Backlog
 
 ### High Priority
 
-1. Canonical tool identity across the whole runtime.
+1. Canonical tool invocation model across the whole runtime.
+   - proved critical by: tool identity, visibility, authorization, context requirements, and compatibility normalization are still split across gateway, validator, authorizer, executor, and native-tool registration
+   - status: completed at 2026-04-04 checkpoint via canonical tool identity, capability policy, per-turn capability materialization, explicit context requirements, canonical telemetry, and strict runtime executor/offering contracts
 2. Canonical event identity across scoped/local/emit forms.
    - proved critical by: over-broad parent retargeting rewrote top-level flow outputs
    - proved critical by: flow-control event emitted in the wrong lifecycle phase (`opco.teardown_requested` on a scoring-only subject)
    - proved critical by: cross-flow validation handoff payload used `entity_id` for the target entity while prompts still treated it as the source scoring entity
 3. One shared authorization predicate for gateway and executor.
    - proved critical by: validation agents were denied writes to their own validation-owned entity
+   - status: materially addressed by the completed tool invocation unification checkpoint; keep only if a non-tool authorization seam remains
 4. Precomputed per-turn capability set instead of recomputing auth in multiple places.
+   - proved critical by: offered/visible/allowed/callable tool sets can still diverge depending on which normalization/auth layer was consulted
+   - status: completed at 2026-04-04 checkpoint as part of tool invocation unification
 5. Better structured denial diagnostics with layer attribution.
 6. Add a per-turn structured flight recorder as the primary debugging surface.
    - proved critical by: over-broad parent retargeting rewrote top-level flow outputs
@@ -1308,6 +1725,23 @@ Improvement items:
 12. Separate semantic flow scope from concrete flow-instance path everywhere.
    - proved critical by: child gates were stored under `child/...` while projection filtered using `child/<instance-id>/...`
    - proved critical by: nested template subscribers were later materialized against semantic template scope instead of exact instance path, leaving instance-local subscriptions on the wrong namespace
+13. Replace implicit store schema fallback logic with an explicit schema-capability boundary.
+   - proved critical by: event/store persistence still routes through legacy paths by matching SQL error substrings and ad hoc `columnExists(...)` checks
+14. Introduce a typed persisted runtime descriptor for agents instead of reconstructing control semantics from opaque config JSON.
+   - proved critical by: manager, authority, workspace, and store paths all re-decode control semantics like `flow_path`, subscriptions, and `manager_fallback` from raw config payloads
+15. Replace the engine helper fallback interpreter with an explicit typed expression model.
+   - proved critical by: declarative strings can still slide between CEL, ref, and literal semantics depending on parse/eval path and lookup order
+16. Make boot verification consume the compiled routing/semantic model instead of re-deriving local candidate sets.
+   - proved critical by: `bootverify` still maintains its own event candidate, localization, and wildcard matching logic instead of validating against one canonical semantic graph
+17. Separate live session state from conversation/turn audit state.
+   - proved critical by: stateless task-mode turns still back-project into `agent_sessions`, forcing dashboards and recovery logic to distinguish real sessions from observability shims after the fact
+18. Unify flow-instance entity-id derivation across runtime and store layers.
+   - proved critical by: residual store-side row-id derivation still carries a separate namespace branch that can disagree with centralized `flowidentity.EntityID(...)`
+19. Replace flat expression-context merging with explicit scoped variable semantics.
+   - proved critical by: expression context still relies on silent overwrite precedence across `vars`, `policy`, `entity`, and `payload`
+20. Implement canonical tool-execution telemetry as a first-class runtime surface.
+   - proved critical by: executor already collects actor, tool, latency, input, output, and error, but the current hook still discards it entirely
+   - status: completed at 2026-04-04 checkpoint on the runtime-log surface
 
 ### Medium Priority
 
@@ -1338,6 +1772,20 @@ Improvement items:
    - proved critical by: validation agent sessions degraded into “no action / operator must inject fields” after early write failures
 14. Centralize entity-target resolution for handler execution and emitted-event retargeting.
    - proved critical by: one correct entity-targeting fix later exposed a separate gate-projection and boundary-semantics mismatch in adjacent codepaths
+15. Unify store-side subscription/event matching with the canonical runtime matcher.
+   - proved critical by: store and receipt paths still have simpler local matching semantics that can drift from the bus/router matcher
+16. Make session/runtime scope invalid configurations fail closed instead of silently normalizing to task/global behavior.
+   - proved critical by: session scope semantics still silently collapse unknown modes into `task` and missing scopes into `global`
+17. Replace legacy route materialization adapters with canonical flow-instance route identity.
+   - proved critical by: route persistence and deletion still reconstruct template/instance identity from concrete paths instead of using one canonical instance identity
+18. Replace string-encoded timer and accumulation-timeout identity with typed runtime descriptors.
+   - proved critical by: timer trigger ids, timeout ids, and accumulation bucket targeting still rely on concatenated string conventions and heuristic bucket recovery
+19. Persist canonical turn summaries instead of reconstructing dashboard views from raw transcript payloads.
+   - proved critical by: conversation/debug surfaces still infer assistant output and progress state from raw payload shape and English prefix matching
+20. Replace ambient semantic-source lookup with explicit subsystem injection.
+   - proved critical by: manager, workspace, and bus still retrieve semantic state through a package-level accessor instead of one explicit injected dependency
+21. Replace string-suffix agent/entity scope inference with explicit metadata.
+   - proved critical by: some routing behavior still infers entity scoping from agent ids ending with `-{entityID}`
 
 ### Lower Priority
 

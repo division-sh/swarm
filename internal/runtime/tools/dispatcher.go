@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/toolcapabilities"
 )
 
 type ToolHandler func(ctx context.Context, actor models.AgentConfig, input any) (any, error)
@@ -44,7 +45,7 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
 	name = normalizeNativeToolName(name)
-	if strings.HasPrefix(name, "emit_") {
+	if toolKindPolicy(name) == toolcapabilities.KindEmit {
 		if d.emitHandler == nil {
 			return nil, fmt.Errorf("emit tool handler is not configured")
 		}
