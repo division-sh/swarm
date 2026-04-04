@@ -266,6 +266,25 @@ func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogE
 		func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
 	)
 }
+func (b *WorkflowContractBundle) ResolveFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool) {
+	if b == nil {
+		return EventCatalogEntry{}, "", false
+	}
+	catalog := b.ResolvedEventCatalog()
+	rawKey := eventidentity.Normalize(eventType)
+	if entry, ok := catalog[rawKey]; ok {
+		return entry, rawKey, true
+	}
+	resolvedKey := b.ResolveFlowEventReference(flowID, eventType)
+	if resolvedKey == rawKey {
+		return EventCatalogEntry{}, "", false
+	}
+	entry, ok := catalog[resolvedKey]
+	if !ok {
+		return EventCatalogEntry{}, "", false
+	}
+	return entry, resolvedKey, true
+}
 func clonePolicyDocument(in PolicyDocument) PolicyDocument {
 	return flowmodel.ClonePolicyDocument(in)
 }
@@ -357,6 +376,71 @@ func (b *WorkflowContractBundle) FlowWritePins(flowID string) []string {
 	}
 	return append([]string{}, b.Semantics.FlowWrites[strings.TrimSpace(flowID)]...)
 }
+func (b *WorkflowContractBundle) ResolveFlowEventReference(flowID, eventType string) string {
+	if b == nil {
+		return eventidentity.Normalize(eventType)
+	}
+	flowID = strings.TrimSpace(flowID)
+	eventType = eventidentity.Normalize(eventType)
+	if flowID == "" || eventType == "" {
+		return eventType
+	}
+	if strings.Contains(eventType, "/") {
+		if absolute, ok := b.externalizeDescendantEventType(flowID, eventType); ok {
+			return absolute
+		}
+		return eventType
+	}
+	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	return eventidentity.ExternalizeForFlow(flowPath, b.flowLocalEvents(flowID), eventType)
+}
+func (b *WorkflowContractBundle) ResolveFlowEventPattern(flowID, pattern string) string {
+	if b == nil {
+		return eventidentity.Normalize(pattern)
+	}
+	flowID = strings.TrimSpace(flowID)
+	pattern = eventidentity.Normalize(pattern)
+	if flowID == "" || pattern == "" {
+		return pattern
+	}
+	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	localEvents := make(map[string]struct{})
+	for _, eventType := range b.flowLocalEvents(flowID) {
+		localEvents[eventidentity.Normalize(eventType)] = struct{}{}
+	}
+	return eventidentity.ResolvePattern(flowPath, localEvents, pattern)
+}
+func (b *WorkflowContractBundle) FlowEventMatches(flowID, subscription, eventType string) bool {
+	if b == nil {
+		return false
+	}
+	subscription = eventidentity.Normalize(subscription)
+	eventType = eventidentity.Normalize(eventType)
+	if subscription == "" || eventType == "" {
+		return false
+	}
+	if strings.Contains(subscription, "*") {
+		return eventidentity.MatchPattern(b.ResolveFlowEventPattern(flowID, subscription), eventType)
+	}
+	if eventType == subscription || eventType == b.ResolveFlowEventReference(flowID, subscription) {
+		return true
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return false
+	}
+	flowPath := strings.Trim(strings.TrimSpace(b.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	return eventidentity.LocalizeForFlow(flowPath, b.FlowInputEvents(flowID), eventType) == subscription
+}
 func (b *WorkflowContractBundle) FlowRequiredAgents(flowID string) []FlowRequiredAgent {
 	if b == nil {
 		return nil
@@ -426,6 +510,25 @@ func (b *WorkflowContractBundle) NodeEventHandlers(nodeID string) map[string]Sys
 	for eventType, handler := range handlers {
 		out[eventType] = handler
 	}
+	return out
+}
+func (b *WorkflowContractBundle) NodeHandlerSubscriptions(nodeID string) []string {
+	if b == nil {
+		return nil
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	handlers, ok := b.Semantics.NodeHandlers[nodeID]
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(handlers))
+	for eventType := range handlers {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out = append(out, eventType)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (SystemNodeEventHandler, bool) {

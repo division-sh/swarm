@@ -32,15 +32,21 @@ type Source interface {
 	FlowInputEvents(flowID string) []string
 	FlowOutputEvents(flowID string) []string
 	FlowWritePins(flowID string) []string
+	WritePinOwners(pin string) []string
+	ResolveFlowEventReference(flowID, eventType string) string
+	ResolveFlowEventPattern(flowID, pattern string) string
+	FlowEventMatches(flowID, subscription, eventType string) bool
 	RequiredAgents() []runtimecontracts.FlowRequiredAgent
 	FlowRequiredAgents(flowID string) []runtimecontracts.FlowRequiredAgent
 	ResolvedPolicyForFlow(flowID string) runtimecontracts.PolicyDocument
 	ResolvedPolicyForNode(nodeID string) runtimecontracts.PolicyDocument
 	ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry
+	ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool)
 	DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic
 	RuntimeEventOwners(eventType string) []string
 	NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool)
 	AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool)
+	NodeHandlerSubscriptions(nodeID string) []string
 	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
 	NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool)
 	NodeEntries() map[string]runtimecontracts.SystemNodeContract
