@@ -44,6 +44,10 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"conversation", "turn_count", "runtime_mode", "runtime_state", "lease_holder",
 		"lease_expires_at", "status", "created_at", "updated_at",
 	)
+	addColumns("agent_conversation_audits",
+		"session_id", "run_id", "agent_id", "entity_id", "flow_instance", "scope_key", "scope",
+		"conversation", "turn_count", "runtime_mode", "runtime_state", "status", "created_at", "updated_at",
+	)
 	addColumns("agent_turns",
 		"turn_id", "run_id", "agent_id", "session_id", "runtime_mode", "scope_key", "entity_id",
 		"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
@@ -80,6 +84,9 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	}
 	if caps.Conversations.Sessions != SchemaFlavorCanonical || !caps.Conversations.SessionRunID {
 		t.Fatalf("session caps = %+v", caps.Conversations)
+	}
+	if caps.Conversations.Audits != SchemaFlavorCanonical || !caps.Conversations.AuditRunID {
+		t.Fatalf("audit caps = %+v", caps.Conversations)
 	}
 	if caps.Conversations.Turns != SchemaFlavorCanonical || !caps.Conversations.TurnRunID || !caps.Conversations.TurnBlocks {
 		t.Fatalf("turn caps = %+v", caps.Conversations)

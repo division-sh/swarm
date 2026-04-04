@@ -22,13 +22,30 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	if rec.AgentID == "" || rec.RuntimeMode == "" || rec.SessionID == "" {
 		return fmt.Errorf("agent_id, runtime_mode, and session_id are required")
 	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
 	if caps.Conversations.Turns != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_turns", caps.Conversations.Turns)
 	}
 	runtimeMode := runtimesessions.NormalizeConversationRuntimeMode(rec.RuntimeMode)
+	targetTable := "agent_sessions"
+	hasConversationRunID := caps.Conversations.SessionRunID
+	if runtimesessions.IsStatelessRuntimeMode(runtimeMode) {
+		if err := s.ensureConversationAuditTable(ctx); err != nil {
+			return err
+		}
+		caps, err = s.schemaCapabilities(ctx)
+		if err != nil {
+			return err
+		}
+		if caps.Conversations.Audits != SchemaFlavorCanonical {
+			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
+		}
+		targetTable = "agent_conversation_audits"
+		hasConversationRunID = caps.Conversations.AuditRunID
+	} else {
+		if caps.Conversations.Sessions != SchemaFlavorCanonical {
+			return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+		}
+	}
 
 	reqPayload := normalizeJSONPayload(rec.RequestPayload)
 	respPayload := normalizeJSONPayload(rec.ResponseRaw)
@@ -45,8 +62,8 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	}
 	runID := strings.TrimSpace(rec.RunID)
 
-	updateQ := `
-		UPDATE agent_sessions
+	updateQ := fmt.Sprintf(`
+		UPDATE %s
 		SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object(
 				'last_turn',
 				jsonb_build_object(
@@ -65,7 +82,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		  AND runtime_mode = $2
 		  AND session_id = $3::uuid
 		  AND status = 'active'
-	`
+	`, targetTable)
 	updateArgs := []any{
 		rec.AgentID,
 		runtimeMode,
@@ -78,12 +95,12 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		rec.RetryCount,
 		rec.Error,
 	}
-	if caps.Conversations.SessionRunID {
+	if hasConversationRunID {
 		if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 			return err
 		}
-		updateQ = `
-			UPDATE agent_sessions
+		updateQ = fmt.Sprintf(`
+			UPDATE %s
 			SET runtime_state = COALESCE(runtime_state, '{}'::jsonb) || jsonb_build_object(
 					'last_turn',
 					jsonb_build_object(
@@ -103,7 +120,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			  AND runtime_mode = $2
 			  AND session_id = $3::uuid
 			  AND status = 'active'
-		`
+		`, targetTable)
 		updateArgs = []any{
 			rec.AgentID,
 			runtimeMode,
@@ -127,7 +144,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	n, _ := res.RowsAffected()
 	if n == 0 {
 		if runtimeMode == runtimesessions.RuntimeModeTask {
-			if err := s.ensureTaskAuditSessionRow(ctx, rec); err != nil {
+			if err := s.ensureTaskConversationAuditRow(ctx, rec); err != nil {
 				return err
 			}
 			res, err = s.DB.ExecContext(ctx, updateQ, updateArgs...)
@@ -137,7 +154,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 			n, _ = res.RowsAffected()
 		}
 		if n == 0 {
-			return fmt.Errorf("no active session row found for agent=%s runtime=%s session=%s", rec.AgentID, rec.RuntimeMode, rec.SessionID)
+			return fmt.Errorf("no persisted conversation row found for agent=%s runtime=%s session=%s", rec.AgentID, rec.RuntimeMode, rec.SessionID)
 		}
 	}
 
@@ -371,20 +388,24 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 	return nil
 }
 
-func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
+func (s *PostgresStore) ensureTaskConversationAuditRow(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
 	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
+	if err := s.ensureConversationAuditTable(ctx); err != nil {
+		return err
+	}
+	caps, err = s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	if caps.Conversations.Audits != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 	}
 	scopeKey := strings.TrimSpace(rec.ScopeKey)
-	if scopeKey == "" {
-		scopeKey = strings.TrimSpace(rec.SessionID)
-	}
 	q := `
-		INSERT INTO agent_sessions (
+		INSERT INTO agent_conversation_audits (
 			session_id, agent_id, entity_id, flow_instance, scope_key, scope,
 			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
 		)
@@ -393,7 +414,7 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 			$2,
 			NULLIF($3,'')::uuid,
 			NULL,
-			$4,
+			NULLIF($4, ''),
 			$5,
 			'[]'::jsonb,
 			0,
@@ -406,6 +427,7 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 		ON CONFLICT (session_id) DO UPDATE SET
 			agent_id = EXCLUDED.agent_id,
 			entity_id = EXCLUDED.entity_id,
+			flow_instance = EXCLUDED.flow_instance,
 			scope_key = EXCLUDED.scope_key,
 			scope = EXCLUDED.scope,
 			runtime_mode = EXCLUDED.runtime_mode,
@@ -420,12 +442,12 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 		"global",
 		runtimesessions.RuntimeModeTask,
 	}
-	if caps.Conversations.SessionRunID {
+	if caps.Conversations.AuditRunID {
 		if err := s.ensureRunRow(ctx, caps, nil, rec.RunID); err != nil {
 			return err
 		}
 		q = `
-			INSERT INTO agent_sessions (
+			INSERT INTO agent_conversation_audits (
 				session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
 				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
 			)
@@ -435,7 +457,7 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 				$3,
 				NULLIF($4,'')::uuid,
 				NULL,
-				$5,
+				NULLIF($5, ''),
 				$6,
 				'[]'::jsonb,
 				0,
@@ -446,9 +468,10 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 				now()
 			)
 			ON CONFLICT (session_id) DO UPDATE SET
-				run_id = COALESCE(EXCLUDED.run_id, agent_sessions.run_id),
+				run_id = COALESCE(EXCLUDED.run_id, agent_conversation_audits.run_id),
 				agent_id = EXCLUDED.agent_id,
 				entity_id = EXCLUDED.entity_id,
+				flow_instance = EXCLUDED.flow_instance,
 				scope_key = EXCLUDED.scope_key,
 				scope = EXCLUDED.scope,
 				runtime_mode = EXCLUDED.runtime_mode,
@@ -468,7 +491,7 @@ func (s *PostgresStore) ensureTaskAuditSessionRow(ctx context.Context, rec runti
 	if _, err := s.DB.ExecContext(ctx, q,
 		args...,
 	); err != nil {
-		return fmt.Errorf("ensure task audit session row: %w", err)
+		return fmt.Errorf("ensure task conversation audit row: %w", err)
 	}
 	return nil
 }
@@ -501,15 +524,12 @@ func normalizeJSONObject(v any) string {
 }
 
 func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.ConversationRecord) error {
+	if strings.TrimSpace(rec.AgentID) == "" {
+		return fmt.Errorf("agent_id is required")
+	}
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
-	if strings.TrimSpace(rec.AgentID) == "" {
-		return fmt.Errorf("agent_id is required")
 	}
 	mode := runtimesessions.NormalizeConversationRuntimeMode(rec.Mode)
 	resolved := runtimesessions.ResolveScope(mode, rec.ScopeKey)
@@ -538,16 +558,23 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 	runID := nullUUIDString(rec.RunID)
 
 	if resolved.Stateless {
-		scopeKey := strings.TrimSpace(rec.ScopeKey)
-		if scopeKey == "" {
-			scopeKey = sessionID
+		if err := s.ensureConversationAuditTable(ctx); err != nil {
+			return err
 		}
+		caps, err = s.schemaCapabilities(ctx)
+		if err != nil {
+			return err
+		}
+		if caps.Conversations.Audits != SchemaFlavorCanonical {
+			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
+		}
+		scopeKey := strings.TrimSpace(rec.ScopeKey)
 		scope := strings.TrimSpace(resolved.Scope)
 		if scope == "" {
 			scope = "global"
 		}
 		q := `
-			INSERT INTO agent_sessions (
+			INSERT INTO agent_conversation_audits (
 				session_id, agent_id, entity_id, flow_instance, scope_key, scope,
 				conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
 			)
@@ -575,7 +602,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				conversation = EXCLUDED.conversation,
 				turn_count = EXCLUDED.turn_count,
 				runtime_mode = EXCLUDED.runtime_mode,
-				runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($10,'')),
+				runtime_state = COALESCE(agent_conversation_audits.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($10,'')),
 				status = EXCLUDED.status,
 				updated_at = now()
 		`
@@ -592,12 +619,12 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			summary,
 			status,
 		}
-		if caps.Conversations.SessionRunID {
+		if caps.Conversations.AuditRunID {
 			if err := s.ensureRunRow(ctx, caps, nil, runID); err != nil {
 				return err
 			}
 			q = `
-				INSERT INTO agent_sessions (
+				INSERT INTO agent_conversation_audits (
 					session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
 					conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
 				)
@@ -618,7 +645,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 					now()
 				)
 				ON CONFLICT (session_id) DO UPDATE SET
-					run_id = COALESCE(EXCLUDED.run_id, agent_sessions.run_id),
+					run_id = COALESCE(EXCLUDED.run_id, agent_conversation_audits.run_id),
 					agent_id = EXCLUDED.agent_id,
 					entity_id = EXCLUDED.entity_id,
 					flow_instance = EXCLUDED.flow_instance,
@@ -627,7 +654,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 					conversation = EXCLUDED.conversation,
 					turn_count = EXCLUDED.turn_count,
 					runtime_mode = EXCLUDED.runtime_mode,
-					runtime_state = COALESCE(agent_sessions.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($11,'')),
+					runtime_state = COALESCE(agent_conversation_audits.runtime_state, '{}'::jsonb) || jsonb_build_object('summary', NULLIF($11,'')),
 					status = EXCLUDED.status,
 					updated_at = now()
 			`
@@ -650,6 +677,9 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			return fmt.Errorf("insert stateless conversation: %w", err)
 		}
 		return nil
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 	}
 
 	q := `
@@ -766,13 +796,6 @@ func nullUUIDString(raw string) string {
 }
 
 func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mode, scopeKey string) (runtimellm.ConversationRecord, bool, error) {
-	caps, err := s.schemaCapabilities(ctx)
-	if err != nil {
-		return runtimellm.ConversationRecord{}, false, err
-	}
-	if caps.Conversations.Sessions != SchemaFlavorCanonical {
-		return runtimellm.ConversationRecord{}, false, unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
-	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return runtimellm.ConversationRecord{}, false, fmt.Errorf("agent_id is required")
@@ -782,6 +805,13 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, agentID, mod
 	resolved := runtimesessions.ResolveScope(mode, scopeKey)
 	if resolved.Stateless {
 		return runtimellm.ConversationRecord{}, false, nil
+	}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return runtimellm.ConversationRecord{}, false, err
+	}
+	if caps.Conversations.Sessions != SchemaFlavorCanonical {
+		return runtimellm.ConversationRecord{}, false, unsupportedSchemaCapability("agent_sessions", caps.Conversations.Sessions)
 	}
 
 	const q = `

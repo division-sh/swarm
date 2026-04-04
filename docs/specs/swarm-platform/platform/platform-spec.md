@@ -966,10 +966,10 @@ Specification for the platform engine — how it loads, validates, and executes 
   - `behavior`: Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates the payload, attaches sender context, and publishes the event.
   - `universal_tools`: Some tools are auto-granted to all agents without explicit tools_tier2 listing: agent_message, mailbox_send. These are "universal" tools.
 
-- `task_mode_stateless`: Agents in task conversation_mode do NOT get an agent_sessions row. Each event invocation is independent. No conversation history persisted. Debugging traces for task invocations: spend_ledger (cost per invocation) + events (what the agent emitted). Provider session IDs for task invocations are ephemeral and not stored.
+- `task_mode_audit`: Agents in task conversation_mode do NOT get an agent_sessions row. Each event invocation is independent at runtime, but the sanitized conversation snapshot and per-turn telemetry are still persisted for audit/debugging. Task-mode conversation snapshots live in a dedicated audit persistence surface and are never reloaded as live session state.
 - `provider_session_ids`: External LLM provider session IDs (e.g., Anthropic conversation ID) are stored in agent_sessions.runtime_state.provider_session_id, NOT in session_id. session_id is the platform-owned UUID primary key. The provider ID is an implementation detail that may change if the provider is swapped.
 - `conversation_mode_values`:
-  - `task`: Stateless. No session persisted. Each invocation is independent.
+  - `task`: Stateless live execution. No `agent_sessions` row is created. Audit snapshots may still be persisted separately.
   - `session`: Persistent session across events. Conversation history maintained.
   - `session_per_entity`: One session per agent × entity. Context preserved per entity.
   - `stateless`: Alias for task. Accepted by the loader, normalized to task internally.
@@ -1600,7 +1600,7 @@ CREATE TABLE agents (
 
 ### agent_sessions
 
-- `description`: Agent conversation sessions. Supports three scopes: entity (one session per agent × entity), flow (one session per agent × flow instance), global (one session per agent, shared across all entities). scope_key is the lookup key used by the runtime: for entity scope it is the entity_id, for flow scope it is the flow_instance path, for global scope it is the literal "global". runtime_mode matches the agent conversation_mode from contracts. lease_holder/lease_expires_at for distributed session locking.
+- `description`: Live agent conversation sessions only. Supports three scopes: entity (one session per agent × entity), flow (one session per agent × flow instance), global (one session per agent, shared across all entities). scope_key is the lookup key used by the runtime: for entity scope it is the entity_id, for flow scope it is the flow_instance path, for global scope it is the literal "global". lease_holder/lease_expires_at provide distributed session locking. Task-mode audit snapshots are not stored here.
 ### ddl
 
 ```sql
@@ -1634,6 +1634,34 @@ CREATE TABLE agent_sessions (
 - `flow`: entity_id NULL, flow_instance NOT NULL, scope_key = flow_instance. One session per agent per flow instance.
 - `global`: entity_id NULL, flow_instance NULL, scope_key = "global". One session per agent across the entire system.
 - `lookup_pattern`: Runtime acquires sessions via (agent_id, scope_key). The scope_key is derived from runtime_mode: task → no session (stateless), session_per_entity → scope_key = entity_id, session → scope_key = flow_instance or "global" depending on agent declaration.
+
+### agent_conversation_audits
+
+- `description`: Stateless/task-mode conversation snapshot store. Holds write-only audit snapshots and summary/runtime_state for turns that must remain observable but must not be treated as live, leaseable sessions. Session-shaped identifiers here are audit correlation keys, not live session ownership records.
+### ddl
+
+```sql
+CREATE TABLE agent_conversation_audits (
+    session_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id            UUID REFERENCES runs(run_id),
+    agent_id          TEXT NOT NULL REFERENCES agents(agent_id),
+    entity_id         UUID,
+    flow_instance     TEXT,
+    scope_key         TEXT,
+    scope             TEXT NOT NULL DEFAULT 'global',
+    conversation      JSONB NOT NULL DEFAULT '[]',
+    turn_count        INTEGER NOT NULL DEFAULT 0,
+    runtime_mode      TEXT NOT NULL DEFAULT 'task' CHECK (runtime_mode = 'task'),
+    runtime_state     JSONB NOT NULL DEFAULT '{}',
+    status            TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'terminated')),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    INDEX idx_agent_conversation_audits_run (run_id, updated_at) WHERE run_id IS NOT NULL,
+    INDEX idx_agent_conversation_audits_agent (agent_id, updated_at),
+    INDEX idx_agent_conversation_audits_entity (entity_id) WHERE entity_id IS NOT NULL,
+    INDEX idx_agent_conversation_audits_status (status, updated_at)
+);
+```
 ### routing_rules
 
 - `description`: Unified routing table for both contract-defined patterns and materialized instance routes. Replaces the need for a separate flow_instance_routes table. At boot: contract subscriptions inserted as pattern rows (is_wildcard may be true). On create_flow_instance: wildcard patterns expanded into concrete rows (is_materialized = true, materialized_from = parent rule_id). On flow instance termination: materialized rows set to inactive. Event dispatch: match concrete routes first (is_materialized = true, exact match), fall back to wildcard patterns.

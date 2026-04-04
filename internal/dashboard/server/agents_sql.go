@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimemanager "swarm/internal/runtime/manager"
+	runtimesessions "swarm/internal/runtime/sessions"
 )
 
 type SQLAgentReader struct {
@@ -117,6 +118,7 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 			FROM agent_sessions
 			WHERE agent_id = a.agent_id
 			  AND status = 'active'
+			  AND runtime_mode IN ($1, $2)
 			ORDER BY updated_at DESC, created_at DESC
 			LIMIT 1
 		) sess ON true
@@ -148,7 +150,7 @@ func (r *SQLAgentReader) loadAggregates(ctx context.Context) (map[string]agentRu
 		) f ON true
 		WHERE a.status NOT IN ('terminated', 'ephemeral')
 		ORDER BY a.created_at ASC, a.agent_id ASC
-	`)
+	`, runtimesessions.RuntimeModeSession, runtimesessions.RuntimeModeSessionPerEntity)
 	if err != nil {
 		return nil, fmt.Errorf("query agent aggregates: %w", err)
 	}

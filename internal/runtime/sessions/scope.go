@@ -62,6 +62,14 @@ func NormalizeConversationRuntimeMode(raw string) string {
 	}
 }
 
+func IsStatelessRuntimeMode(raw string) bool {
+	return NormalizeConversationRuntimeMode(raw) == RuntimeModeTask
+}
+
+func IsLiveSessionRuntimeMode(raw string) bool {
+	return !IsStatelessRuntimeMode(raw)
+}
+
 func ResolveScope(runtimeMode, scopeKey string) ResolvedScope {
 	mode := NormalizeConversationRuntimeMode(runtimeMode)
 	scopeKey = strings.TrimSpace(scopeKey)

@@ -98,6 +98,18 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 	if _, err := tx.ExecContext(ctx, qSessions, agentID); err != nil {
 		return fmt.Errorf("mark agent terminated sessions: %w", err)
 	}
+	if caps.Conversations.Audits == SchemaFlavorCanonical {
+		const qConversationAudits = `
+			UPDATE agent_conversation_audits
+			SET status = 'terminated',
+			    updated_at = now()
+			WHERE agent_id = $1
+			  AND status = 'active'
+		`
+		if _, err := tx.ExecContext(ctx, qConversationAudits, agentID); err != nil {
+			return fmt.Errorf("mark agent terminated conversation audits: %w", err)
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("mark agent terminated commit: %w", err)
