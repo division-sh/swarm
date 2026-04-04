@@ -10,6 +10,7 @@ import (
 	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
@@ -65,6 +66,25 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		)
 	}
 
+	entityIDSource := "payload"
+	if strings.TrimSpace(asString(payloadMap["entity_id"])) == "" {
+		switch {
+		case strings.TrimSpace(actor.EffectiveEntityID()) != "":
+			entityIDSource = "actor"
+		case strings.TrimSpace(inbound.EntityID()) != "":
+			entityIDSource = "inbound_event"
+		default:
+			entityIDSource = "none"
+		}
+	}
+	taskIDSource := "payload"
+	if strings.TrimSpace(asString(payloadMap["task_id"])) == "" {
+		if strings.TrimSpace(inbound.TaskID) != "" {
+			taskIDSource = "inbound_event"
+		} else {
+			taskIDSource = "none"
+		}
+	}
 	emitted := (events.Event{
 		ID:          uuid.NewString(),
 		Type:        events.EventType(eventType),
@@ -88,6 +108,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		}
 		emitted.Payload = mustJSON(payloadMap)
 	}
+	e.logEmitTargetResolution(ctx, actor, toolName, schemaEventType, eventType, emitted, entityIDSource, taskIDSource)
 	if err := e.bus.Publish(ctx, emitted); err != nil {
 		return nil, WrapRuntimeError(
 			"event_publish_failed",
@@ -109,6 +130,38 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		"event_id":   emitted.ID,
 		"event_type": eventType,
 	}, nil
+}
+
+func (e *Executor) logEmitTargetResolution(ctx context.Context, actor models.AgentConfig, toolName, requestedEventType, resolvedEventType string, emitted events.Event, entityIDSource, taskIDSource string) {
+	if e == nil || e.bus == nil {
+		return
+	}
+	logger, ok := e.bus.(runtimeToolLogSink)
+	if !ok || logger == nil {
+		return
+	}
+	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+		Level:     "info",
+		Message:   "Emit tool target was resolved",
+		Component: "tool-executor",
+		Action:    "emit_target_resolved",
+		AgentID:   strings.TrimSpace(actor.ID),
+		EntityID:  strings.TrimSpace(actor.EffectiveEntityID()),
+		Detail: map[string]any{
+			"tool_name":             strings.TrimSpace(toolName),
+			"requested_event_type":  strings.TrimSpace(requestedEventType),
+			"resolved_event_type":   strings.TrimSpace(resolvedEventType),
+			"emitted_event_id":      strings.TrimSpace(emitted.ID),
+			"emitted_event_type":    strings.TrimSpace(string(emitted.Type)),
+			"emitted_entity_id":     strings.TrimSpace(emitted.EntityID()),
+			"emitted_task_id":       strings.TrimSpace(emitted.TaskID),
+			"entity_id_source":      strings.TrimSpace(entityIDSource),
+			"task_id_source":        strings.TrimSpace(taskIDSource),
+			"actor_entity_id":       strings.TrimSpace(actor.EffectiveEntityID()),
+			"inbound_parent_event":  strings.TrimSpace(emitted.ParentEventID),
+			"context_entity_target": strings.TrimSpace(emitted.EntityID()),
+		},
+	})
 }
 
 func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eventType string) string {

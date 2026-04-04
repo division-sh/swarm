@@ -297,32 +297,32 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	query := fmt.Sprintf(`
 		SELECT
 			e.event_id::text,
-			COALESCE(e.payload->>'event_id', ''),
+			COALESCE(e.payload->'details'->>'event_id', ''),
 			e.created_at,
-			COALESCE(e.payload->>'level', ''),
-			COALESCE(e.payload->>'component', ''),
-			COALESCE(e.payload->>'action', ''),
-			COALESCE(e.payload->>'event_type', ''),
-			COALESCE(e.payload->>'parent_event_id', COALESCE(e.payload->'detail'->>'parent_event_id', '')),
-			COALESCE(e.payload->>'handler_id', COALESCE(e.payload->'detail'->>'handler_id', '')),
-			COALESCE(e.payload->>'error', ''),
-			COALESCE(e.payload->'detail'->>'error_code', ''),
-			COALESCE(e.payload->>'agent_id', ''),
-			COALESCE(e.payload->>'agent_id', ''),
-			COALESCE(e.payload->>'entity_id', ''),
-			COALESCE(e.payload->>'session_id', ''),
-			COALESCE(NULLIF(e.payload->>'duration_us', ''), '0')::int,
-			COALESCE(e.payload->'detail', '{}'::jsonb),
-			COALESCE(e.payload->'correlation', '{}'::jsonb),
-			COALESCE(e.payload->'detail'->>'message', COALESCE(e.payload->>'error', COALESCE(e.payload->>'action', COALESCE(e.payload->>'event_type', ''))))
+			COALESCE(e.payload->>'log_level', ''),
+			COALESCE(e.payload->'details'->>'component', ''),
+			COALESCE(e.payload->'details'->>'action', ''),
+			COALESCE(e.payload->'details'->>'event_name', COALESCE(e.payload->'details'->>'event_type', '')),
+			COALESCE(e.payload->'details'->>'parent_event_id', ''),
+			COALESCE(e.payload->'details'->>'handler_id', ''),
+			COALESCE(e.payload->'details'->>'error', ''),
+			COALESCE(e.payload->'details'->>'error_code', ''),
+			COALESCE(e.payload->'details'->>'agent_id', ''),
+			COALESCE(e.payload->'details'->>'agent_id', ''),
+			COALESCE(e.payload->'details'->>'entity_id', ''),
+			COALESCE(e.payload->'details'->>'session_id', ''),
+			COALESCE(NULLIF(e.payload->'details'->>'duration_us', ''), '0')::int,
+			COALESCE(e.payload->'details', '{}'::jsonb),
+			COALESCE(e.payload->'details'->'correlation', '{}'::jsonb),
+			COALESCE(e.payload->>'message', '')
 		FROM events e
 		WHERE e.event_name = 'platform.runtime_log'
-		  AND ($1 = '' OR COALESCE(e.payload->>'event_type', '') = $1 OR COALESCE(e.payload->>'action', '') = $1)
-		  AND ($2 = '' OR COALESCE(e.payload->>'agent_id', '') = $2)
-		  AND ($3 = '' OR COALESCE(e.payload->>'entity_id', '') = $3)
-		  AND ($4 = '' OR COALESCE(e.payload->>'component', '') = $4)
-		  AND ($5 = '' OR COALESCE(e.payload->>'level', '') = $5)
-		  AND ($6 = '' OR COALESCE(e.payload->'detail'->>'error_code', '') = $6)
+		  AND ($1 = '' OR COALESCE(e.payload->'details'->>'event_name', COALESCE(e.payload->'details'->>'event_type', '')) = $1 OR COALESCE(e.payload->'details'->>'action', '') = $1)
+		  AND ($2 = '' OR COALESCE(e.payload->'details'->>'agent_id', '') = $2)
+		  AND ($3 = '' OR COALESCE(e.payload->'details'->>'entity_id', '') = $3)
+		  AND ($4 = '' OR COALESCE(e.payload->'details'->>'component', '') = $4)
+		  AND ($5 = '' OR COALESCE(e.payload->>'log_level', '') = $5)
+		  AND ($6 = '' OR COALESCE(e.payload->'details'->>'error_code', '') = $6)
 		  AND ($7::timestamptz IS NULL OR e.created_at > $7)
 		ORDER BY e.created_at %s
 		LIMIT $8
@@ -385,20 +385,20 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 	rows, err := r.db.QueryContext(ctx, `
 		WITH logs AS (
 			SELECT
-				COALESCE(e.payload->'detail'->>'error_code', '') AS code,
-				COALESCE(e.payload->>'component', '') AS component,
-				COALESCE(e.payload->>'level', '') AS level,
-				COALESCE(e.payload->>'agent_id', '') AS agent_id,
-				COALESCE(e.payload->>'action', '') AS action,
-				COALESCE(e.payload->>'error', COALESCE(e.payload->'detail'->>'message', '')) AS error,
+				COALESCE(e.payload->'details'->>'error_code', '') AS code,
+				COALESCE(e.payload->'details'->>'component', '') AS component,
+				COALESCE(e.payload->>'log_level', '') AS level,
+				COALESCE(e.payload->'details'->>'agent_id', '') AS agent_id,
+				COALESCE(e.payload->'details'->>'action', '') AS action,
+				COALESCE(e.payload->'details'->>'error', COALESCE(e.payload->>'message', '')) AS error,
 				e.created_at
 			FROM events e
 			WHERE e.event_name = 'platform.runtime_log'
 			  AND e.created_at >= now() - make_interval(hours => $1)
-			  AND COALESCE(e.payload->'detail'->>'error_code', '') <> ''
-			  AND ($2 = '' OR COALESCE(e.payload->>'level', '') = $2)
-			  AND ($3 = '' OR COALESCE(e.payload->>'component', '') = $3)
-			  AND ($4 = FALSE OR COALESCE(e.payload->>'component', '') LIKE 'mcp%%')
+			  AND COALESCE(e.payload->'details'->>'error_code', '') <> ''
+			  AND ($2 = '' OR COALESCE(e.payload->>'log_level', '') = $2)
+			  AND ($3 = '' OR COALESCE(e.payload->'details'->>'component', '') = $3)
+			  AND ($4 = FALSE OR COALESCE(e.payload->'details'->>'component', '') LIKE 'mcp%%')
 		)
 		SELECT
 			code,

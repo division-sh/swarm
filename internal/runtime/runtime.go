@@ -76,6 +76,8 @@ type Runtime struct {
 
 var ()
 
+const runtimeQuiescenceStableChecks = 3
+
 func runtimeControlPlaneRecipient() string {
 	if recipient := controlPlaneRecipientFromSource(runtimepipeline.DefaultWorkflowSemanticSourceOrNil()); recipient != "" {
 		return recipient
@@ -99,6 +101,44 @@ func controlPlaneRecipientFromSource(source semanticview.Source) string {
 
 func DefaultControlPlaneRecipient() string {
 	return strings.TrimSpace(runtimeControlPlaneRecipient())
+}
+
+func (rt *Runtime) WaitForQuiescence(ctx context.Context) error {
+	if rt == nil {
+		return nil
+	}
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	stable := 0
+	for {
+		if rt.Bus != nil {
+			if err := rt.Bus.WaitForQuiescence(ctx); err != nil {
+				return err
+			}
+		}
+		if rt.Manager != nil {
+			if err := rt.Manager.WaitForQuiescence(ctx); err != nil {
+				return err
+			}
+		}
+		pendingDeliveries := 0
+		if rt.Bus != nil {
+			pendingDeliveries = rt.Bus.PendingAgentDeliveries()
+		}
+		if pendingDeliveries == 0 {
+			stable++
+			if stable >= runtimeQuiescenceStableChecks {
+				return nil
+			}
+		} else {
+			stable = 0
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {

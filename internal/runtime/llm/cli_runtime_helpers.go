@@ -23,7 +23,7 @@ func (r *ClaudeCLIRuntime) persistTurn(ctx context.Context, turn AgentTurnRecord
 		turn.TurnBlocks = BuildTurnBlocks(turn)
 	}
 	if err := r.turns.AppendAgentTurn(ctx, turn); err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "persist_cli_turn_failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
+		logPublisherRuntime(ctx, r.events, "error", "persist_cli_turn_failed", "Persisting the CLI agent turn failed", turn.AgentID, turn.SessionID, turn.EntityID, nil, err)
 	}
 }
 
@@ -49,7 +49,7 @@ func (r *ClaudeCLIRuntime) persistConversation(ctx context.Context, s *Session) 
 		TurnCount: s.TurnCount,
 		Status:    "active",
 	}); err != nil {
-		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", s.AgentID, s.ID, "", map[string]any{
+		logPublisherRuntime(ctx, r.events, "error", "persist_cli_conversation_failed", "Persisting the CLI conversation failed", s.AgentID, s.ID, "", map[string]any{
 			"conversation_mode": mode,
 			"scope_key":         strings.TrimSpace(s.ScopeKey),
 		}, err)

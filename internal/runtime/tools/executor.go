@@ -356,20 +356,13 @@ func (e *Executor) emitToolExecutionEvent(
 			action = "tool_execution_failed"
 		}
 	}
-	detail := map[string]any{
-		"tool_name":     toolName,
-		"phase":         strings.TrimSpace(phase),
-		"ok":            execErr == nil,
-		"input_summary": SafeTelemetryText(input),
-	}
+	detail := toolExecutionDiagnosticDetail(ctx, actor, toolName, input, result, execErr, phase)
 	if strings.TrimSpace(actor.Role) != "" {
 		detail["actor_role"] = strings.TrimSpace(actor.Role)
 	}
-	if result != nil {
-		detail["result_summary"] = SafeTelemetryText(result)
-	}
 	logger.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 		Level:      level,
+		Message:    toolExecutionMessage(toolName, execErr),
 		Component:  "tool-executor",
 		Action:     action,
 		AgentID:    strings.TrimSpace(actor.ID),
@@ -378,6 +371,95 @@ func (e *Executor) emitToolExecutionEvent(
 		Error:      toolExecErrorText(execErr),
 		DurationUS: int(latency / time.Microsecond),
 	})
+}
+
+func toolExecutionMessage(toolName string, execErr error) string {
+	toolName = strings.TrimSpace(toolName)
+	switch {
+	case execErr == nil:
+		if toolName == "" {
+			return "Tool execution succeeded"
+		}
+		return fmt.Sprintf("Tool %s executed successfully", toolName)
+	case errors.Is(execErr, ErrToolNotAllowed):
+		if toolName == "" {
+			return "Tool execution was denied"
+		}
+		return fmt.Sprintf("Tool %s execution was denied", toolName)
+	default:
+		if toolName == "" {
+			return "Tool execution failed"
+		}
+		return fmt.Sprintf("Tool %s execution failed", toolName)
+	}
+}
+
+func toolExecutionDiagnosticDetail(ctx context.Context, actor models.AgentConfig, toolName string, input any, result any, execErr error, phase string) map[string]any {
+	detail := map[string]any{
+		"tool_name":     toolName,
+		"phase":         strings.TrimSpace(phase),
+		"ok":            execErr == nil,
+		"input_summary": SafeTelemetryText(input),
+	}
+	if result != nil {
+		detail["result_summary"] = SafeTelemetryText(result)
+	}
+	if set, ok := toolcapabilities.FromContext(ctx); ok {
+		if cap, ok := set.Capability(toolName); ok {
+			if v := string(cap.Kind); v != "" {
+				detail["tool_kind"] = v
+			}
+			detail["visible"] = cap.Visible
+			detail["callable"] = cap.Callable
+			if v := string(cap.ContextRequirement); v != "" {
+				detail["context_requirement"] = v
+			}
+			if v := strings.TrimSpace(cap.AuthorizationClass); v != "" {
+				detail["authorization_class"] = v
+			}
+			if v := strings.TrimSpace(cap.DenialReason); v != "" {
+				detail["denial_reason"] = v
+			}
+			if execErr != nil && !cap.Callable {
+				detail["denial_layer"] = "executor"
+			}
+		} else {
+			decision := classifyToolAuthorization(actor, toolName)
+			detail["tool_kind"] = string(toolKindPolicy(toolName))
+			detail["context_requirement"] = string(toolContextRequirementPolicy(toolName))
+			if v := strings.TrimSpace(string(decision.class)); v != "" {
+				detail["authorization_class"] = v
+			}
+			if execErr != nil && !decision.allowed {
+				detail["denial_reason"] = "tool_not_allowed"
+				detail["denial_layer"] = "authorizer"
+			}
+		}
+	} else {
+		decision := classifyToolAuthorization(actor, toolName)
+		detail["tool_kind"] = string(toolKindPolicy(toolName))
+		detail["context_requirement"] = string(toolContextRequirementPolicy(toolName))
+		if v := strings.TrimSpace(string(decision.class)); v != "" {
+			detail["authorization_class"] = v
+		}
+		if execErr != nil && !decision.allowed {
+			detail["denial_reason"] = "tool_not_allowed"
+			detail["denial_layer"] = "authorizer"
+		}
+	}
+	if runtimeErr, ok := AsRuntimeError(execErr); ok {
+		if v := strings.TrimSpace(runtimeErr.Code); v != "" {
+			detail["runtime_error_code"] = v
+		}
+		if v := strings.TrimSpace(runtimeErr.Operation); v != "" {
+			detail["runtime_error_operation"] = v
+		}
+		if v := strings.TrimSpace(runtimeErr.Component); v != "" {
+			detail["runtime_error_component"] = v
+		}
+		detail["retryable"] = runtimeErr.Retryable
+	}
+	return detail
 }
 
 func toolExecErrorText(err error) string {
@@ -408,6 +490,17 @@ func (e *Executor) dispatchTool(ctx context.Context, actor models.AgentConfig, n
 		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
 	return e.dispatcher.Dispatch(ctx, actor, name, input)
+}
+
+func (e *Executor) runtimeLogSink() runtimeToolLogSink {
+	if e == nil || e.bus == nil {
+		return nil
+	}
+	logger, ok := e.bus.(runtimeToolLogSink)
+	if !ok || logger == nil {
+		return nil
+	}
+	return logger
 }
 
 func (e *Executor) getManager() Manager {

@@ -92,7 +92,7 @@ func (eb *EventBus) deliverToAgents(ctx context.Context, evt events.Event, agent
 		case <-ctx.Done():
 			return
 		case <-time.After(deliverySendTimeout):
-			eb.logRuntime(ctx, "warn", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
+			eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID, string(evt.Type), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
 				"timeout_ms": int(deliverySendTimeout / time.Millisecond),
 			}, "", 0)
 		}
@@ -220,7 +220,7 @@ func filterOutEntityScopedAgentIDs(in []string, entityID string) []string {
 }
 
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
-	eb.logRuntime(ctx, "warn", "eventbus", "contradiction", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
+	eb.logRuntime(ctx, "warn", "Event routing contradiction was detected", "eventbus", "contradiction", strings.TrimSpace(source.ID), strings.TrimSpace(string(source.Type)), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
 		"reason": strings.TrimSpace(reason),
 	}, "", 0)
 	return nil
@@ -239,13 +239,13 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 		return
 	}
 	if err := recorder.UpsertPipelineReceipt(ctx, eventID, status, errText); err != nil {
-		eb.logRuntime(ctx, "error", "eventbus", "pipeline_receipt_persist_failed", eventID, "", "", "", "", nil, map[string]any{
+		eb.logRuntime(ctx, "error", "Persisting the pipeline receipt failed", "eventbus", "pipeline_receipt_persist_failed", eventID, "", "", "", "", nil, map[string]any{
 			"status": status,
 		}, err.Error(), 0)
 	}
 }
 
-func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
+func (eb *EventBus) logRuntime(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
 	if eb == nil {
 		return
 	}
@@ -255,9 +255,9 @@ func (eb *EventBus) logRuntime(ctx context.Context, level, component, action, ev
 	if logger == nil {
 		return
 	}
-	logger.Log(ctx, level, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS)
+	logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS)
 }
 
 func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) {
-	eb.logRuntime(ctx, entry.Level, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, entry.Error, entry.DurationUS)
+	eb.logRuntime(ctx, entry.Level, entry.Message, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, entry.Error, entry.DurationUS)
 }

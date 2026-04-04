@@ -75,12 +75,13 @@ type runtimeLoggerHook struct {
 	logger *RuntimeLogger
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
+func (h runtimeLoggerHook) Log(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
 	if h.logger == nil {
 		return
 	}
 	h.logger.Log(ctx, RuntimeLogEntry{
 		Level:       level,
+		Message:     message,
 		Component:   component,
 		Action:      action,
 		EventID:     eventID,

@@ -12,6 +12,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimeactors "swarm/internal/runtime/core/actors"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/diaglog"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/sessions"
 )
@@ -302,6 +303,17 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 		},
 		SubscriptionRecipients: []string{"direct-agent"},
 	})
+	recorder.AppendRuntimeLog(diaglog.RunEntry{
+		Level:     "info",
+		Message:   "Emit tool target was resolved",
+		Component: "tool-executor",
+		Action:    "emit_target_resolved",
+		AgentID:   "market-research-agent",
+		EntityID:  "22222222-2222-2222-2222-222222222222",
+		Detail: map[string]any{
+			"tool_name": "emit_category_assessed",
+		},
+	})
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
 
 	session := &Session{
@@ -368,5 +380,11 @@ func TestEnrichTurnRecordIncludesTriggerToolsAndEmits(t *testing.T) {
 	}
 	if len(rec.PublishDiagnostics[0].RoutedRecipients) != 1 || rec.PublishDiagnostics[0].RoutedRecipients[0].LocalizedEvent != "category.assessed" {
 		t.Fatalf("publish_diagnostics[0].routed_recipients = %#v", rec.PublishDiagnostics[0].RoutedRecipients)
+	}
+	if len(rec.FlightRecorder) != 2 {
+		t.Fatalf("flight_recorder = %#v", rec.FlightRecorder)
+	}
+	if rec.FlightRecorder[1].Message != "Emit tool target was resolved" {
+		t.Fatalf("flight_recorder[1].message = %q", rec.FlightRecorder[1].Message)
 	}
 }

@@ -190,7 +190,7 @@ func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, a
 	resp, err = r.runWithPromptArg(ctx, args, target, prompt, meta)
 	if err == nil {
 		used.Used = true
-		logPublisherRuntime(ctx, r.events, "warn", "prompt_transport_fallback_used", "", "", "", nil, nil)
+		logPublisherRuntime(ctx, r.events, "warn", "prompt_transport_fallback_used", "CLI prompt transport fallback was used", "", "", "", nil, nil)
 	}
 	return resp, used, err
 }

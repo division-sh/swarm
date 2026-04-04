@@ -161,7 +161,7 @@ type recordedLogEntry struct {
 	Detail any
 }
 
-func (h *recordingLoggerHook) Log(_ context.Context, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) {
+func (h *recordingLoggerHook) Log(_ context.Context, _, _, _, action, _, _, _, _, _ string, _ map[string]string, detail any, _ string, _ int) {
 	h.entries = append(h.entries, recordedLogEntry{Action: action, Detail: detail})
 }
 

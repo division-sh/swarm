@@ -74,6 +74,9 @@ func TestExecutorTelemetry_LogsSuccess(t *testing.T) {
 	if log.Action != "tool_execution_succeeded" {
 		t.Fatalf("action = %q, want tool_execution_succeeded", log.Action)
 	}
+	if log.Message != "Tool check_domain executed successfully" {
+		t.Fatalf("message = %q", log.Message)
+	}
 	if log.AgentID != "agent-1" || log.EntityID != "entity-1" {
 		t.Fatalf("agent/entity = %q/%q", log.AgentID, log.EntityID)
 	}
@@ -106,12 +109,18 @@ func TestExecutorTelemetry_LogsDeniedExecution(t *testing.T) {
 	if log.Action != "tool_execution_denied" {
 		t.Fatalf("action = %q, want tool_execution_denied", log.Action)
 	}
+	if log.Message != "Tool workflow_custom_tool execution was denied" {
+		t.Fatalf("message = %q", log.Message)
+	}
 	detail, _ := log.Detail.(map[string]any)
 	if strings.TrimSpace(asString(detail["phase"])) != "authorize" {
 		t.Fatalf("phase = %#v, want authorize", detail["phase"])
 	}
 	if ok, _ := detail["ok"].(bool); ok {
 		t.Fatalf("ok = %#v, want false", detail["ok"])
+	}
+	if strings.TrimSpace(asString(detail["denial_layer"])) != "authorizer" {
+		t.Fatalf("denial_layer = %#v, want authorizer", detail["denial_layer"])
 	}
 }
 
@@ -158,6 +167,9 @@ func TestExecutorTelemetry_LogsExecutionFailure(t *testing.T) {
 	log := bus.logs[0]
 	if log.Action != "tool_execution_failed" {
 		t.Fatalf("action = %q, want tool_execution_failed", log.Action)
+	}
+	if log.Message != "Tool check_domain execution failed" {
+		t.Fatalf("message = %q", log.Message)
 	}
 	detail, _ := log.Detail.(map[string]any)
 	if strings.TrimSpace(asString(detail["phase"])) != "dispatch" {

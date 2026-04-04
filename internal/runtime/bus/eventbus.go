@@ -253,6 +253,19 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 	}
 }
 
+func (eb *EventBus) PendingAgentDeliveries() int {
+	if eb == nil {
+		return 0
+	}
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	pending := 0
+	for _, ch := range eb.agentChans {
+		pending += len(ch)
+	}
+	return pending
+}
+
 func (eb *EventBus) Subscribe(agentID string, eventTypes ...events.EventType) <-chan events.Event {
 	ch := make(chan events.Event, 128)
 	eb.mu.Lock()

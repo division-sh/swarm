@@ -364,7 +364,7 @@ func (eb *EventBus) publishDeferredNoIntercept(ctx context.Context, evt events.E
 }
 
 func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
-	eb.logRuntime(ctx, "debug", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
+	eb.logRuntime(ctx, "debug", "Event was published to the event bus", "eventbus", "published", evt.ID, string(evt.Type), evt.SourceAgent, evt.EntityID(), "", nil, map[string]any{
 		"type":            string(evt.Type),
 		"source":          evt.SourceAgent,
 		"parent_event_id": strings.TrimSpace(evt.ParentEventID),
@@ -448,7 +448,7 @@ func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipient
 	for k, v := range extra {
 		detail[k] = v
 	}
-	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", 0)
+	eb.logRuntime(ctx, "debug", "Event was delivered to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, detail, "", 0)
 }
 
 func subscriberIDs(in []Subscriber) []string {
@@ -616,7 +616,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	}
 	persisted = true
 	eb.deliverToAgents(ctx, evt, recipients)
-	eb.logRuntime(ctx, "debug", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
+	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID, string(evt.Type), "", evt.EntityID(), "", nil, map[string]any{
 		"direct":           true,
 		"recipients_count": len(recipients),
 		"parent_event_id":  strings.TrimSpace(evt.ParentEventID),

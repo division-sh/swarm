@@ -485,7 +485,15 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameWhenAllowedListUsesLocalName(t *
 
 func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *testing.T) {
 	exec := &capabilityAwareExecutorStub{}
-	g := NewGateway(exec, "", GatewayHooks{ResolveTurnContext: ResolveTurnContext})
+	var loggedAction string
+	var denialLayer string
+	g := NewGateway(exec, "", GatewayHooks{
+		ResolveTurnContext: ResolveTurnContext,
+		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+			loggedAction = action
+			denialLayer = strings.TrimSpace(asString(detail["denial_layer"]))
+		},
+	})
 
 	PutTurnContextForTest("ctx-denied-allowlist", TurnContext{
 		Actor:     models.AgentConfig{ID: "analysis-agent", Role: "analysis"},
@@ -517,6 +525,12 @@ func TestGatewayHandleMCP_RejectsToolWhenRequestAllowlistDoesNotIncludeIt(t *tes
 	}
 	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
 		t.Fatalf("body = %s", rec.Body.String())
+	}
+	if loggedAction != "mcp.tools.call.denied" {
+		t.Fatalf("logged action = %q", loggedAction)
+	}
+	if denialLayer != "gateway" {
+		t.Fatalf("denial_layer = %q, want gateway", denialLayer)
 	}
 }
 

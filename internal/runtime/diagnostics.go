@@ -9,12 +9,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	runtimebus "swarm/internal/runtime/bus"
 	runtimecorrelation "swarm/internal/runtime/correlation"
+	"swarm/internal/runtime/diaglog"
 )
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).
 type RuntimeLogEntry struct {
 	Level     string
+	Message   string
 	Component string
 	Action    string
 
@@ -27,6 +30,7 @@ type RuntimeLogEntry struct {
 
 	Detail     any
 	Error      string
+	StackTrace string
 	DurationUS int
 }
 
@@ -70,7 +74,7 @@ func NewRuntimeLogger(db *sql.DB) *RuntimeLogger {
 }
 
 func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
-	if l == nil || l.db == nil {
+	if l == nil {
 		return
 	}
 	level := strings.ToLower(strings.TrimSpace(e.Level))
@@ -86,6 +90,27 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) {
 		action = "unknown"
 	}
 	e.NormalizeEntityID()
+	if recorder, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && recorder != nil {
+		recorder.AppendRuntimeLog(diaglog.RunEntry{
+			Level:       e.Level,
+			Message:     e.Message,
+			Component:   e.Component,
+			Action:      e.Action,
+			EventID:     e.EventID,
+			EventType:   e.EventType,
+			AgentID:     e.AgentID,
+			EntityID:    e.EntityID,
+			SessionID:   e.SessionID,
+			Correlation: e.Correlation,
+			Detail:      e.Detail,
+			Error:       e.Error,
+			StackTrace:  e.StackTrace,
+			DurationUS:  e.DurationUS,
+		})
+	}
+	if l.db == nil {
+		return
+	}
 
 	detail := marshalJSONOrEmpty(e.Detail)
 	_ = logRuntimeEventSpec(withoutSQLTxContext(ctx), l.db, level, component, action, e, detail)
@@ -101,6 +126,7 @@ func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, deta
 	}
 	l.Log(ctx, RuntimeLogEntry{
 		Level:     "warn",
+		Message:   runtimeLogHelperMessage("warn", component, action),
 		Component: strings.TrimSpace(component),
 		Action:    strings.TrimSpace(action),
 		Detail:    detail,
@@ -118,11 +144,29 @@ func (l *RuntimeLogger) Error(ctx context.Context, component, action string, det
 	}
 	l.Log(ctx, RuntimeLogEntry{
 		Level:     "error",
+		Message:   runtimeLogHelperMessage("error", component, action),
 		Component: strings.TrimSpace(component),
 		Action:    strings.TrimSpace(action),
 		Detail:    detail,
 		Error:     errText,
 	})
+}
+
+func runtimeLogHelperMessage(level, component, action string) string {
+	component = strings.TrimSpace(component)
+	action = strings.TrimSpace(action)
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "error":
+		if component != "" {
+			return "Runtime error recorded by " + component
+		}
+		return "Runtime error recorded"
+	default:
+		if component != "" {
+			return "Runtime warning recorded by " + component
+		}
+		return "Runtime warning recorded"
+	}
 }
 
 type PipelineTransitionInput struct {
@@ -325,23 +369,7 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(asString(detailMap["handler_id"]))
 	}
-	payload := map[string]any{
-		"level":           level,
-		"component":       component,
-		"action":          action,
-		"event_id":        strings.TrimSpace(e.EventID),
-		"event_type":      strings.TrimSpace(e.EventType),
-		"agent_id":        strings.TrimSpace(e.AgentID),
-		"entity_id":       strings.TrimSpace(e.EffectiveEntityID()),
-		"session_id":      strings.TrimSpace(e.SessionID),
-		"run_id":          runID,
-		"parent_event_id": parentEventID,
-		"handler_id":      handlerID,
-		"correlation":     sanitizeStringMap(e.Correlation),
-		"detail":          json.RawMessage(detail),
-		"error":           strings.TrimSpace(e.Error),
-		"duration_us":     e.DurationUS,
-	}
+	payload := runtimeLogPayload(level, component, action, e, detailMap, runID, parentEventID, handlerID)
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -373,6 +401,66 @@ func logRuntimeEventSpec(ctx context.Context, db *sql.DB, level, component, acti
 		return err
 	}
 	return nil
+}
+
+func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detailMap map[string]any, runID, parentEventID, handlerID string) map[string]any {
+	details := map[string]any{}
+	for k, v := range detailMap {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		details[key] = v
+	}
+	if component = strings.TrimSpace(component); component != "" {
+		details["component"] = component
+	}
+	if action = strings.TrimSpace(action); action != "" {
+		details["action"] = action
+	}
+	if v := strings.TrimSpace(e.EventID); v != "" {
+		details["event_id"] = v
+	}
+	if v := strings.TrimSpace(e.EventType); v != "" {
+		details["event_name"] = v
+		details["event_type"] = v
+	}
+	if v := strings.TrimSpace(e.AgentID); v != "" {
+		details["agent_id"] = v
+	}
+	if v := strings.TrimSpace(e.EffectiveEntityID()); v != "" {
+		details["entity_id"] = v
+	}
+	if v := strings.TrimSpace(e.SessionID); v != "" {
+		details["session_id"] = v
+	}
+	if v := strings.TrimSpace(runID); v != "" {
+		details["run_id"] = v
+	}
+	if v := strings.TrimSpace(parentEventID); v != "" {
+		details["parent_event_id"] = v
+	}
+	if v := strings.TrimSpace(handlerID); v != "" {
+		details["handler_id"] = v
+	}
+	if corr := sanitizeStringMap(e.Correlation); len(corr) > 0 {
+		details["correlation"] = corr
+	}
+	if v := strings.TrimSpace(e.Error); v != "" {
+		details["error"] = v
+	}
+	if e.DurationUS > 0 {
+		details["duration_us"] = e.DurationUS
+	}
+	payload := map[string]any{
+		"log_level": strings.TrimSpace(level),
+		"message":   strings.TrimSpace(e.Message),
+		"details":   details,
+	}
+	if v := strings.TrimSpace(e.StackTrace); v != "" {
+		payload["stack_trace"] = v
+	}
+	return payload
 }
 
 func runtimeColumnExists(ctx context.Context, db *sql.DB, tableName, columnName string) bool {

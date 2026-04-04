@@ -3,6 +3,8 @@ package llm
 import (
 	"encoding/json"
 	"strings"
+
+	runtimebus "swarm/internal/runtime/bus"
 )
 
 type TurnBlock struct {
@@ -20,7 +22,7 @@ func BuildTurnBlocks(rec AgentTurnRecord) []TurnBlock {
 	if dispatch := buildDispatchBlock(rec); dispatch.Kind != "" {
 		blocks = append(blocks, dispatch)
 	}
-	blocks = append(blocks, buildPublishBlocks(rec)...)
+	blocks = append(blocks, buildFlightRecorderBlocks(rec)...)
 	if len(rec.ResponseRaw) == 0 {
 		return normalizeTurnBlocks(blocks)
 	}
@@ -89,6 +91,86 @@ func buildPublishBlocks(rec AgentTurnRecord) []TurnBlock {
 		})
 	}
 	return blocks
+}
+
+func buildFlightRecorderBlocks(rec AgentTurnRecord) []TurnBlock {
+	if len(rec.FlightRecorder) == 0 {
+		return buildPublishBlocks(rec)
+	}
+	blocks := make([]TurnBlock, 0, len(rec.FlightRecorder))
+	for _, entry := range rec.FlightRecorder {
+		switch strings.TrimSpace(entry.Kind) {
+		case "publish":
+			if block, ok := buildPublishBlock(entry); ok {
+				blocks = append(blocks, block)
+			}
+		case "runtime_log":
+			if block, ok := buildRuntimeLogBlock(entry); ok {
+				blocks = append(blocks, block)
+			}
+		}
+	}
+	return blocks
+}
+
+func buildPublishBlock(entry runtimebus.FlightRecorderEntry) (TurnBlock, bool) {
+	eventType := strings.TrimSpace(entry.EventType)
+	if eventType == "" {
+		return TurnBlock{}, false
+	}
+	data := map[string]any{}
+	if v := strings.TrimSpace(entry.EventID); v != "" {
+		data["event_id"] = v
+	}
+	if v := strings.TrimSpace(entry.EntityID); v != "" {
+		data["entity_id"] = v
+	}
+	if v := strings.TrimSpace(entry.ParentEventID); v != "" {
+		data["parent_event_id"] = v
+	}
+	if len(entry.RoutedRecipients) > 0 {
+		data["routed_recipients"] = entry.RoutedRecipients
+		data["routed_recipients_count"] = len(entry.RoutedRecipients)
+	}
+	if len(entry.SubscriptionRecipients) > 0 {
+		data["subscription_recipients"] = entry.SubscriptionRecipients
+		data["subscription_recipients_count"] = len(entry.SubscriptionRecipients)
+	}
+	return TurnBlock{
+		Kind:  "publish",
+		Title: eventType,
+		Data:  data,
+	}, true
+}
+
+func buildRuntimeLogBlock(entry runtimebus.FlightRecorderEntry) (TurnBlock, bool) {
+	message := strings.TrimSpace(entry.Message)
+	details, _ := entry.Details.(map[string]any)
+	if message == "" && len(details) == 0 {
+		return TurnBlock{}, false
+	}
+	data := map[string]any{}
+	if v := strings.TrimSpace(entry.LogLevel); v != "" {
+		data["log_level"] = v
+	}
+	if message != "" {
+		data["message"] = message
+	}
+	if entry.Details != nil {
+		data["details"] = entry.Details
+	}
+	if v := strings.TrimSpace(entry.StackTrace); v != "" {
+		data["stack_trace"] = v
+	}
+	title := message
+	if title == "" {
+		title = "runtime log"
+	}
+	return TurnBlock{
+		Kind:  "runtime_log",
+		Title: title,
+		Data:  data,
+	}, true
 }
 
 func parseTurnBlocksFromRaw(raw []byte) []TurnBlock {

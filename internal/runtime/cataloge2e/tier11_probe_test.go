@@ -105,10 +105,10 @@ func TestTier11Probe(t *testing.T) {
 			t.Logf("events=%v", eventsDump)
 			var runtimeLogs []string
 			logRows, err := h.db.QueryContext(context.Background(), `
-				SELECT COALESCE(payload->>'component',''),
-				       COALESCE(payload->>'action',''),
-				       COALESCE(payload->>'error',''),
-				       COALESCE(payload->>'detail','')
+				SELECT COALESCE(payload->'details'->>'component',''),
+				       COALESCE(payload->'details'->>'action',''),
+				       COALESCE(payload->'details'->>'error',''),
+				       COALESCE(payload->>'message','')
 				FROM events
 				WHERE event_name = 'platform.runtime_log'
 				ORDER BY created_at ASC, event_id ASC
@@ -116,9 +116,9 @@ func TestTier11Probe(t *testing.T) {
 			if err == nil {
 				defer logRows.Close()
 				for logRows.Next() {
-					var component, action, errText, detail string
-					if scanErr := logRows.Scan(&component, &action, &errText, &detail); scanErr == nil {
-						runtimeLogs = append(runtimeLogs, component+":"+action+" error="+errText+" detail="+detail)
+					var component, action, errText, message string
+					if scanErr := logRows.Scan(&component, &action, &errText, &message); scanErr == nil {
+						runtimeLogs = append(runtimeLogs, component+":"+action+" error="+errText+" message="+message)
 					}
 				}
 			}

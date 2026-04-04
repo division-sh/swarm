@@ -316,7 +316,7 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 			h.t.Fatalf("concurrent publish failed: %v", err)
 		}
 	}
-	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
+	if err := h.rt.WaitForQuiescence(ctx); err != nil {
 		h.t.Fatalf("WaitForQuiescence(concurrent): %v", err)
 	}
 }
@@ -362,7 +362,7 @@ func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payl
 	if err := h.publishBusEvent(ctx, evt); err != nil {
 		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(eventType), err)
 	}
-	if err := h.rt.Bus.WaitForQuiescence(ctx); err != nil {
+	if err := h.rt.WaitForQuiescence(ctx); err != nil {
 		h.t.Fatalf("WaitForQuiescence(%s): %v", strings.TrimSpace(eventType), err)
 	}
 }

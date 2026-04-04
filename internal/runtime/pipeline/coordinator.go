@@ -155,6 +155,7 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 			if _, err := pc.handleEventResult(ctx, evt); err != nil && pc.bus != nil {
 				pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 					Level:     "error",
+					Message:   "Workflow handler execution failed",
 					Component: runtimeWorkflowID,
 					Action:    "handler_error",
 					EventID:   strings.TrimSpace(evt.ID),
@@ -283,6 +284,7 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 	if pc.bus != nil {
 		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 			Level:     "error",
+			Message:   "Workflow handler execution failed",
 			Component: runtimeWorkflowID,
 			Action:    "handler_error",
 			EventID:   strings.TrimSpace(evt.ID),
@@ -395,6 +397,7 @@ func (pc *PipelineCoordinator) logRuntimeWarn(ctx context.Context, component, ac
 		}
 		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 			Level:     "warn",
+			Message:   "Workflow runtime warning was recorded",
 			Component: strings.TrimSpace(component),
 			Action:    strings.TrimSpace(action),
 			EventID:   strings.TrimSpace(eventID),
