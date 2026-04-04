@@ -534,7 +534,6 @@ func decodeWorkflowDataAccumulationShorthandWrite(target string, node *yaml.Node
 	default:
 		return WorkflowDataWrite{}, fmt.Errorf("workflow data accumulation shorthand writes are not supported; use writes list")
 	}
-	return write, nil
 }
 
 func (s *FilterSpec) UnmarshalYAML(node *yaml.Node) error {
