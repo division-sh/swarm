@@ -13,6 +13,10 @@ import (
 )
 
 func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.PersistedAgent) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if rec.Config.ID == "" {
 		return fmt.Errorf("agent id is required")
 	}
@@ -26,133 +30,35 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if !rec.StartedAt.IsZero() {
 		startedAt = rec.StartedAt
 	}
-
-	specErr := s.upsertAgentSpec(ctx, rec, cfgJSON, startedAt)
-	if specErr == nil {
-		return nil
+	switch caps.Agents {
+	case SchemaFlavorCanonical:
+		return s.upsertAgentSpec(ctx, rec, cfgJSON, startedAt)
+	default:
+		return unsupportedSchemaCapability("agents", caps.Agents)
 	}
-	if !shouldFallbackLegacyAgentsSchema(specErr) {
-		return fmt.Errorf("upsert agent %s: %w", rec.Config.ID, specErr)
-	}
-
-	const q = `
-		INSERT INTO agents (
-			id, type, role, mode, entity_id, parent_agent_id, status,
-			coordinator_id, config, budget_envelope, hired_by, template_version,
-			started_at, last_active_at
-		)
-		VALUES (
-			$1, $2, $3, $4, NULLIF($5,'')::uuid, NULLIF($6,''), $7,
-			NULLIF($8,''), $9::jsonb, NULLIF($10, 0), NULLIF($11,''), NULLIF($12,''),
-			COALESCE($13, now()), now()
-		)
-		ON CONFLICT (id) DO UPDATE SET
-			type = EXCLUDED.type,
-			role = EXCLUDED.role,
-			mode = EXCLUDED.mode,
-			entity_id = EXCLUDED.entity_id,
-			parent_agent_id = EXCLUDED.parent_agent_id,
-			status = EXCLUDED.status,
-			coordinator_id = EXCLUDED.coordinator_id,
-			config = EXCLUDED.config,
-			budget_envelope = EXCLUDED.budget_envelope,
-			hired_by = EXCLUDED.hired_by,
-			template_version = EXCLUDED.template_version,
-			last_active_at = now()
-	`
-	_, err = s.DB.ExecContext(ctx, q,
-		rec.Config.ID,
-		nullable(rec.Config.Type, "generic"),
-		rec.Config.Role,
-		nullable(rec.Config.Mode, "scoped"),
-		rec.Config.EffectiveEntityID(),
-		nullable(rec.ParentAgentID, rec.Config.ParentAgent),
-		nullable(rec.Status, "active"),
-		rec.CoordinatorID,
-		string(cfgJSON),
-		rec.Config.BudgetEnvelope,
-		rec.HiredBy,
-		rec.TemplateVersion,
-		startedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("upsert agent %s: %w", rec.Config.ID, err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	agents, err := s.loadAgentsSpec(ctx)
-	if err == nil {
-		return agents, nil
-	}
-	if !shouldFallbackLegacyAgentsSchema(err) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	const q = `
-		SELECT
-			id, type, role, mode,
-			COALESCE(entity_id::text, ''),
-			COALESCE(parent_agent_id, ''),
-			COALESCE(status, 'active'),
-			COALESCE(coordinator_id, ''),
-			config,
-			COALESCE(budget_envelope, 0),
-			COALESCE(hired_by, ''),
-			COALESCE(template_version, ''),
-			COALESCE(started_at, now())
-		FROM agents
-		WHERE status NOT IN ('terminated', 'ephemeral')
-		ORDER BY started_at ASC, id ASC
-	`
-	rows, err := s.DB.QueryContext(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("query agents: %w", err)
+	switch caps.Agents {
+	case SchemaFlavorCanonical:
+		return s.loadAgentsSpec(ctx)
+	default:
+		return nil, unsupportedSchemaCapability("agents", caps.Agents)
 	}
-	defer rows.Close()
-
-	var out []runtimemanager.PersistedAgent
-	for rows.Next() {
-		var rec runtimemanager.PersistedAgent
-		var cfgRaw []byte
-		if err := rows.Scan(
-			&rec.Config.ID,
-			&rec.Config.Type,
-			&rec.Config.Role,
-			&rec.Config.Mode,
-			&rec.Config.EntityID,
-			&rec.ParentAgentID,
-			&rec.Status,
-			&rec.CoordinatorID,
-			&cfgRaw,
-			&rec.Config.BudgetEnvelope,
-			&rec.HiredBy,
-			&rec.TemplateVersion,
-			&rec.StartedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan agent row: %w", err)
-		}
-
-		rec.Config.ParentAgent = rec.ParentAgentID
-		rec.Config.NormalizeEntityID()
-		rec.Config.Config = cfgRaw
-		rec.Config.Subscriptions = extractSubscriptions(cfgRaw)
-		rec.Config.Permissions = extractPermissions(cfgRaw)
-		out = append(out, rec)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read agents rows: %w", err)
-	}
-	return out, nil
 }
 
 func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string) error {
 	if strings.TrimSpace(agentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
-	useSpecAgents := columnExists(ctx, s.DB, "agents", "agent_id")
-	hasLegacyConversations := tableExists(ctx, s.DB, "conversations")
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("mark agent terminated begin tx: %w", err)
@@ -165,37 +71,19 @@ func (s *PostgresStore) MarkAgentTerminated(ctx context.Context, agentID string)
 		_ = tx.Rollback()
 	}()
 
-	const qAgentLegacy = `
-		UPDATE agents
-		SET status = 'terminated',
-		    last_active_at = now()
-		WHERE id = $1
-	`
 	const qAgentSpec = `
 			UPDATE agents
 			SET status = 'terminated',
 			    last_active_at = now()
 			WHERE agent_id = $1
 	`
-	qAgent := qAgentLegacy
-	if useSpecAgents {
-		qAgent = qAgentSpec
+	switch caps.Agents {
+	case SchemaFlavorCanonical:
+	default:
+		return unsupportedSchemaCapability("agents", caps.Agents)
 	}
-	if _, err := tx.ExecContext(ctx, qAgent, agentID); err != nil {
+	if _, err := tx.ExecContext(ctx, qAgentSpec, agentID); err != nil {
 		return fmt.Errorf("mark agent terminated: %w", err)
-	}
-
-	if hasLegacyConversations {
-		const qConversations = `
-			UPDATE conversations
-			SET status = 'terminated',
-			    updated_at = now()
-			WHERE agent_id = $1
-			  AND status = 'active'
-		`
-		if _, err := tx.ExecContext(ctx, qConversations, agentID); err != nil && !shouldIgnoreLegacyConversationTable(err) {
-			return fmt.Errorf("mark agent terminated conversations: %w", err)
-		}
 	}
 
 	const qSessions = `
@@ -469,34 +357,6 @@ func coalesce(vals ...string) string {
 	return ""
 }
 
-func shouldFallbackLegacyAgentsSchema(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `column "agent_id"`) ||
-		strings.Contains(msg, `column "id"`) ||
-		strings.Contains(msg, `column "model_tier"`) ||
-		strings.Contains(msg, `column "conversation_mode"`) ||
-		strings.Contains(msg, `column "llm_backend"`) ||
-		strings.Contains(msg, `column "flow_instance"`) ||
-		strings.Contains(msg, `column "subscriptions"`) ||
-		strings.Contains(msg, `column "permissions"`) ||
-		strings.Contains(msg, `column "emit_events"`) ||
-		strings.Contains(msg, `column "parent_agent_id"`) ||
-		strings.Contains(msg, `column "last_active_at"`) ||
-		strings.Contains(msg, `column "created_at"`)
-}
-
-func shouldIgnoreLegacyConversationTable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `relation "conversations" does not exist`) ||
-		strings.Contains(msg, `column "updated_at" does not exist`)
-}
-
 func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string) error {
 	if strings.TrimSpace(entityID) == "" {
 		return fmt.Errorf("entity_id is required")
@@ -522,31 +382,4 @@ func (s *PostgresStore) EnsureEntitySchema(ctx context.Context, entityID string)
 		return fmt.Errorf("create entity schema %s: %w", schema, err)
 	}
 	return nil
-}
-
-func tableExists(ctx context.Context, q rowQueryer, tableName string) bool {
-	if q == nil {
-		return false
-	}
-	var exists bool
-	if err := q.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM information_schema.tables
-			WHERE table_schema = 'public'
-			  AND table_name = $1
-		)
-	`, tableName).Scan(&exists); err != nil {
-		return false
-	}
-	return exists
-}
-
-func shouldFallbackLegacyEntityState(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `relation "entity_state" does not exist`) ||
-		strings.Contains(msg, `column "slug" does not exist`)
 }

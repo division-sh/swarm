@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -13,6 +14,10 @@ import (
 
 type PostgresStore struct {
 	DB *sql.DB
+
+	schemaCapsMu    sync.RWMutex
+	schemaCaps      StoreSchemaCapabilities
+	schemaCapsBound bool
 }
 
 func DSNFromConfig(cfg config.DatabaseConfig) string {
@@ -49,7 +54,11 @@ func NewPostgresStore(dsn string) (*PostgresStore, error) {
 }
 
 func (s *PostgresStore) Ping(ctx context.Context) error {
-	return s.DB.PingContext(ctx)
+	if err := s.DB.PingContext(ctx); err != nil {
+		return err
+	}
+	_, err := s.BindSchemaCapabilities(ctx)
+	return err
 }
 
 func (s *PostgresStore) EnsureSchemaTables(ctx context.Context, plans []SchemaTableDDL) error {
@@ -97,19 +106,23 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if s == nil || s.DB == nil {
 		return nil
 	}
-	if !tableExists(ctx, s.DB, "agent_turns") {
+	catalog, err := loadSchemaColumnCatalog(ctx, s.DB)
+	if err != nil {
+		return err
+	}
+	if !catalog.hasTable("agent_turns") {
 		goto ensureEntityState
 	}
-	if !columnExists(ctx, s.DB, "agent_turns", "turn_blocks") {
+	if !catalog.hasColumns("agent_turns", "turn_blocks") {
 		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE agent_turns ADD COLUMN IF NOT EXISTS turn_blocks JSONB NOT NULL DEFAULT '[]'::jsonb`); err != nil {
 			return fmt.Errorf("ensure agent_turns.turn_blocks column: %w", err)
 		}
 	}
 ensureEntityState:
-	if !tableExists(ctx, s.DB, "entity_state") {
+	if !catalog.hasTable("entity_state") {
 		return nil
 	}
-	if !columnExists(ctx, s.DB, "entity_state", "subject_id") {
+	if !catalog.hasColumns("entity_state", "subject_id") {
 		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE entity_state ADD COLUMN IF NOT EXISTS subject_id UUID`); err != nil {
 			return fmt.Errorf("ensure entity_state.subject_id column: %w", err)
 		}
@@ -117,5 +130,6 @@ ensureEntityState:
 	if _, err := s.DB.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_entity_subject ON entity_state(subject_id) WHERE subject_id IS NOT NULL`); err != nil {
 		return fmt.Errorf("ensure entity_state.subject_id index: %w", err)
 	}
-	return nil
+	_, err = s.BindSchemaCapabilities(ctx)
+	return err
 }

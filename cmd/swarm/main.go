@@ -1244,7 +1244,7 @@ func dashboardServerOptions(supervisor *runtimeProjectSupervisor, stores storeBu
 	if stores.Postgres != nil {
 		agents = dashboardserver.NewSQLAgentReader(stores.Postgres.DB, stores.Postgres, rotateAfterTurns)
 		mailbox = stores.Postgres
-		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB)
+		conversations = dashboardserver.NewSQLConversationReader(stores.Postgres.DB, stores.Postgres.SchemaCapabilities())
 		observability = dashboardserver.NewSQLObservabilityReader(stores.Postgres.DB)
 	}
 	if supervisor != nil {

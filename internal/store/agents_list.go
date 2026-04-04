@@ -11,20 +11,22 @@ func (s *PostgresStore) ListActiveAgentIDs(ctx context.Context) ([]string, error
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("db unavailable")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := `
 		SELECT agent_id
 		FROM agents
 		WHERE COALESCE(status, '') <> 'terminated'
 		ORDER BY agent_id ASC
-	`)
-	if err != nil && shouldFallbackLegacyAgentsSchema(err) {
-		rows, err = s.DB.QueryContext(ctx, `
-			SELECT id
-			FROM agents
-			WHERE COALESCE(status, '') <> 'terminated'
-			ORDER BY id ASC
-		`)
+	`
+	switch caps.Agents {
+	case SchemaFlavorCanonical:
+	default:
+		return nil, unsupportedSchemaCapability("agents", caps.Agents)
 	}
+	rows, err := s.DB.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

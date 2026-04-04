@@ -12,6 +12,10 @@ import (
 )
 
 func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return false, err
+	}
 	if strings.TrimSpace(providerEventID) == "" {
 		return false, fmt.Errorf("provider_event_id is required")
 	}
@@ -20,6 +24,12 @@ func (s *PostgresStore) RecordInboundEvent(ctx context.Context, providerEventID,
 	}
 	if strings.TrimSpace(provider) == "" {
 		return false, fmt.Errorf("provider is required")
+	}
+	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogIdempotencyKey {
+		if caps.Events.Log != SchemaFlavorCanonical {
+			return false, unsupportedSchemaCapability("events", caps.Events.Log)
+		}
+		return false, fmt.Errorf("store: inbound event recording requires canonical events.idempotency_key support")
 	}
 	return s.recordInboundEventSpec(ctx, providerEventID, entityID, provider)
 }
@@ -58,13 +68,24 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 }
 
 func (s *PostgresStore) PurgeInboundEventsBefore(ctx context.Context, before time.Time, limit int) (int, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return 0, err
+	}
 	if limit <= 0 {
 		limit = 1000
+	}
+	if caps.Events.Log != SchemaFlavorCanonical {
+		return 0, unsupportedSchemaCapability("events", caps.Events.Log)
 	}
 	return s.purgeInboundEventsSpec(ctx, before, limit)
 }
 
 func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID, entityID, provider string) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(providerEventID) == "" {
 		return fmt.Errorf("provider_event_id is required")
 	}
@@ -74,8 +95,14 @@ func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID,
 	if strings.TrimSpace(provider) == "" {
 		return fmt.Errorf("provider is required")
 	}
+	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogIdempotencyKey {
+		if caps.Events.Log != SchemaFlavorCanonical {
+			return unsupportedSchemaCapability("events", caps.Events.Log)
+		}
+		return fmt.Errorf("store: inbound event deletion requires canonical events.idempotency_key support")
+	}
 	idempotencyKey := inboundEventIdempotencyKey(providerEventID, entityID, provider)
-	_, err := s.DB.ExecContext(ctx, `
+	_, err = s.DB.ExecContext(ctx, `
 		DELETE FROM events
 		WHERE idempotency_key = $1
 		  AND event_name = 'platform.inbound_recorded'
@@ -88,6 +115,10 @@ func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID,
 }
 
 func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return false, err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin inbound event tx: %w", err)
@@ -134,7 +165,6 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 		return false, fmt.Errorf("marshal inbound event payload: %w", err)
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	hasRunID := columnExists(ctx, tx, "events", "run_id")
 	insertQ := `
 		INSERT INTO events (
 			event_name, entity_id, flow_instance, scope, payload,
@@ -146,8 +176,8 @@ func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEven
 		)
 	`
 	args := []any{entityID, string(payload), provider, idempotencyKey}
-	if hasRunID {
-		if err := s.ensureRunRow(ctx, tx, runID); err != nil {
+	if caps.Events.LogRunID {
+		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
 			return false, err
 		}
 		insertQ = `
@@ -201,17 +231,4 @@ func inboundEventIdempotencyKey(providerEventID, entityID, provider string) stri
 		strings.TrimSpace(entityID),
 		strings.TrimSpace(providerEventID),
 	}, ":")
-}
-
-func shouldFallbackLegacyInboundSchema(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `column "event_name"`) ||
-		strings.Contains(msg, `column "idempotency_key"`) ||
-		strings.Contains(msg, `column "produced_by_type"`) ||
-		strings.Contains(msg, `column "event_id"`) ||
-		strings.Contains(msg, `relation "entity_state" does not exist`) ||
-		strings.Contains(msg, `column "slug"`)
 }

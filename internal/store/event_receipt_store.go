@@ -14,31 +14,29 @@ import (
 )
 
 func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID, agentID, sessionID string) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
 		return fmt.Errorf("mark event delivery in progress: eventID and agentID required")
 	}
 	sessionID = sanitizeOptionalUUID(sessionID)
-	if err := s.markEventDeliveryInProgressSpec(ctx, eventID, agentID, sessionID); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
-		return err
+	switch caps.Events.Deliveries {
+	case SchemaFlavorCanonical:
+		return s.markEventDeliveryInProgressSpec(ctx, eventID, agentID, sessionID)
+	default:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	}
-
-	const q = `
-		UPDATE event_deliveries
-		SET status = 'in_progress'
-		WHERE event_id = $1::uuid
-		  AND agent_id = $2
-	`
-	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID); err != nil {
-		return fmt.Errorf("mark event delivery in progress: %w", err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
@@ -47,34 +45,19 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 	if status == "" {
 		return fmt.Errorf("upsert event receipt: status required")
 	}
-	if err := s.upsertAgentReceiptSpec(ctx, eventID, agentID, status, errText); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
-		return err
+	switch caps.Events.Receipts {
+	case SchemaFlavorCanonical:
+		return s.upsertAgentReceiptSpec(ctx, eventID, agentID, status, errText)
+	default:
+		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
-
-	const q = `
-		INSERT INTO event_receipts (event_id, agent_id, processed_at, status, retry_count, error)
-		VALUES ($1::uuid, $2, now(), $3, CASE WHEN $3 = 'error' THEN 1 ELSE 0 END, NULLIF($4,''))
-		ON CONFLICT (event_id, agent_id) DO UPDATE SET
-			processed_at = now(),
-			status = CASE
-				WHEN EXCLUDED.status = 'error' AND event_receipts.retry_count + 1 >= 2 THEN 'dead_letter'
-				ELSE EXCLUDED.status
-			END,
-			error = EXCLUDED.error,
-			retry_count = CASE
-				WHEN EXCLUDED.status = 'error' THEN event_receipts.retry_count + 1
-				ELSE event_receipts.retry_count
-			END
-	`
-	if _, err := s.DB.ExecContext(ctx, q, eventID, agentID, status, errText); err != nil {
-		return fmt.Errorf("upsert event receipt: %w", err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID string, since time.Time, limit int) ([]events.Event, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if agentID == "" {
 		return nil, nil
 	}
@@ -84,44 +67,17 @@ func (s *PostgresStore) ListPendingEventsForAgent(ctx context.Context, agentID s
 	if since.IsZero() {
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
-	if out, err := s.listPendingEventsForAgentSpec(ctx, agentID, since, limit); err == nil {
-		return out, nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
-		return nil, err
+	switch {
+	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Receipts == SchemaFlavorCanonical:
+		return s.listPendingEventsForAgentSpec(ctx, agentID, since, limit)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	case caps.Events.Receipts != SchemaFlavorCanonical:
+		return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
-
-	const q = `
-		SELECT
-			e.id::text, e.type, e.source_agent,
-			COALESCE(e.task_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			e.payload, e.created_at
-		FROM event_deliveries d
-		INNER JOIN events e ON e.id = d.event_id
-		LEFT JOIN event_receipts r
-			ON r.event_id = d.event_id
-			AND r.agent_id = d.agent_id
-		WHERE d.agent_id = $1
-		  AND e.created_at >= $2
-		  AND (
-				r.event_id IS NULL
-				OR (
-					r.status = 'error'
-					AND r.retry_count <= 1
-					AND (
-						(r.retry_count = 1 AND r.processed_at <= now() - interval '1 minute')
-					)
-				)
-			)
-		ORDER BY e.created_at ASC
-		LIMIT $3
-	`
-	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query pending events for %s: %w", agentID, err)
-	}
-	defer rows.Close()
-	return scanLegacyPendingEvents(rows)
+	return nil, nil
 }
 
 func (s *PostgresStore) ListPendingSubscribedEvents(
@@ -131,6 +87,10 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 	since time.Time,
 	limit int,
 ) ([]events.Event, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if agentID == "" || len(subscriptions) == 0 {
 		return nil, nil
 	}
@@ -141,94 +101,35 @@ func (s *PostgresStore) ListPendingSubscribedEvents(
 		since = time.Now().Add(-30 * 24 * time.Hour)
 	}
 
-	if out, err := s.listPendingSubscribedEventsSpec(ctx, agentID, subscriptions, since, limit); err == nil {
-		return out, nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
-		return nil, err
+	switch {
+	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Receipts == SchemaFlavorCanonical:
+		return s.listPendingSubscribedEventsSpec(ctx, agentID, subscriptions, since, limit)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	case caps.Events.Receipts != SchemaFlavorCanonical:
+		return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
-
-	const q = `
-		SELECT
-			e.id::text, e.type, e.source_agent,
-			COALESCE(e.task_id::text, ''),
-			COALESCE(e.entity_id::text, ''),
-			e.payload, e.created_at
-		FROM events e
-		LEFT JOIN event_receipts r
-			ON r.event_id = e.id
-			AND r.agent_id = $1
-		WHERE e.created_at >= $2
-		  AND (
-				NOT EXISTS (
-					SELECT 1
-					FROM event_deliveries d_any
-					WHERE d_any.event_id = e.id
-				)
-				OR EXISTS (
-					SELECT 1
-					FROM event_deliveries d_me
-					WHERE d_me.event_id = e.id
-					  AND d_me.agent_id = $1
-				)
-			)
-		  AND (
-				r.event_id IS NULL
-				OR (
-					r.status = 'error'
-					AND r.retry_count <= 1
-					AND (
-						(r.retry_count = 1 AND r.processed_at <= now() - interval '1 minute')
-					)
-				)
-			)
-		ORDER BY e.created_at ASC
-		LIMIT $3
-	`
-	rows, err := s.DB.QueryContext(ctx, q, agentID, since, limit)
-	if err != nil {
-		return nil, fmt.Errorf("query pending subscribed events for %s: %w", agentID, err)
-	}
-	defer rows.Close()
-
-	out, err := scanLegacyPendingEvents(rows)
-	if err != nil {
-		return nil, err
-	}
-	filtered := make([]events.Event, 0, len(out))
-	for _, evt := range out {
-		if matchesAnySubscription(string(evt.Type), subscriptions) {
-			filtered = append(filtered, evt)
-		}
-	}
-	return filtered, nil
+	return nil, nil
 }
 
 func (s *PostgresStore) GetEventReceipt(ctx context.Context, eventID, agentID string) (runtimemanager.EventReceipt, bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return runtimemanager.EventReceipt{}, false, err
+	}
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
 		return runtimemanager.EventReceipt{}, false, fmt.Errorf("event_id and agent_id are required")
 	}
-	if receipt, ok, err := s.getEventReceiptSpec(ctx, eventID, agentID); err == nil {
-		return receipt, ok, nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
-		return runtimemanager.EventReceipt{}, false, err
+	switch caps.Events.Receipts {
+	case SchemaFlavorCanonical:
+		return s.getEventReceiptSpec(ctx, eventID, agentID)
+	default:
+		return runtimemanager.EventReceipt{}, false, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
-
-	var r runtimemanager.EventReceipt
-	r.EventID = eventID
-	r.AgentID = agentID
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(status, 'processed'), COALESCE(retry_count, 0), COALESCE(error, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid AND agent_id = $2
-	`, eventID, agentID).Scan(&r.Status, &r.RetryCount, &r.Error); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimemanager.EventReceipt{}, false, nil
-		}
-		return runtimemanager.EventReceipt{}, false, fmt.Errorf("get event receipt: %w", err)
-	}
-	return r, true, nil
 }
 
 func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {

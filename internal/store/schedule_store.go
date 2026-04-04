@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -12,6 +11,10 @@ import (
 )
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
@@ -21,239 +24,93 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
 
-	if err := s.upsertScheduleSpec(ctx, sc); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyTimersSchema(err) {
-		return err
+	switch caps.Schedules {
+	case SchemaFlavorCanonical:
+		return s.upsertScheduleSpec(ctx, sc)
+	default:
+		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
-
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin schedule tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	payload := persistedSchedulePayload(sc)
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE schedules
-		SET active = false,
-		    cancelled_at = now()
-		WHERE agent_id = $1
-		  AND event_type = $2
-		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
-		  AND active = true
-	`, sc.AgentID, sc.EventType, sc.EntityID, strings.TrimSpace(sc.TaskID)); err != nil {
-		return fmt.Errorf("deactivate previous schedule: %w", err)
-	}
-
-	var atTime any
-	var nextFire any
-	if !sc.At.IsZero() {
-		atTime = sc.At
-		nextFire = sc.At
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO schedules (
-			agent_id, entity_id, event_type, mode, cron_expr,
-			at_time, next_fire_at, payload, active, created_at
-		)
-		VALUES (
-			$1, NULLIF($2,'')::uuid, $3, $4, NULLIF($5,''),
-			$6, $7, $8::jsonb, true, now()
-		)
-	`, sc.AgentID, sc.EntityID, sc.EventType, sc.Mode, sc.Cron, atTime, nextFire, string(payload)); err != nil {
-		return fmt.Errorf("insert schedule: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schedule tx: %w", err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) CancelSchedule(ctx context.Context, agentID, eventType string) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
-	if err := s.cancelScheduleSpec(ctx, agentID, eventType); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyTimersSchema(err) {
-		return err
+	switch caps.Schedules {
+	case SchemaFlavorCanonical:
+		return s.cancelScheduleSpec(ctx, agentID, eventType)
+	default:
+		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
-	_, err := s.DB.ExecContext(ctx, `
-		UPDATE schedules
-		SET active = false,
-		    cancelled_at = now()
-		WHERE agent_id = $1
-		  AND event_type = $2
-		  AND active = true
-	`, agentID, eventType)
-	if err != nil {
-		return fmt.Errorf("cancel schedule: %w", err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipeline.Schedule) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return fmt.Errorf("agent_id and event_type are required")
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
-	if err := s.cancelScheduleExactSpec(ctx, sc); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyTimersSchema(err) {
-		return err
+	switch caps.Schedules {
+	case SchemaFlavorCanonical:
+		return s.cancelScheduleExactSpec(ctx, sc)
+	default:
+		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
-	_, err := s.DB.ExecContext(ctx, `
-		UPDATE schedules
-		SET active = false,
-		    cancelled_at = now()
-		WHERE agent_id = $1
-		  AND event_type = $2
-		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
-		  AND active = true
-	`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
-	if err != nil {
-		return fmt.Errorf("cancel exact schedule: %w", err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
-	schedules, err := s.loadActiveSchedulesSpec(ctx)
-	if err == nil {
-		return schedules, nil
-	}
-	if !shouldFallbackLegacyTimersSchema(err) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
 		return nil, err
 	}
-
-	rows, err := s.DB.QueryContext(ctx, `
-		SELECT
-			agent_id,
-			event_type,
-			mode,
-			COALESCE(cron_expr, ''),
-			at_time,
-			COALESCE(entity_id::text, ''),
-			payload
-		FROM schedules
-		WHERE active = true
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query active schedules: %w", err)
+	switch caps.Schedules {
+	case SchemaFlavorCanonical:
+		return s.loadActiveSchedulesSpec(ctx)
+	default:
+		return nil, unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
-	defer rows.Close()
-
-	out := make([]runtimepipeline.Schedule, 0)
-	for rows.Next() {
-		var sc runtimepipeline.Schedule
-		var at sql.NullTime
-		if err := rows.Scan(
-			&sc.AgentID,
-			&sc.EventType,
-			&sc.Mode,
-			&sc.Cron,
-			&at,
-			&sc.EntityID,
-			&sc.Payload,
-		); err != nil {
-			return nil, fmt.Errorf("scan active schedule: %w", err)
-		}
-		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(sc.Payload)
-		if at.Valid {
-			sc.At = at.Time
-		}
-		out = append(out, sc)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active schedules: %w", err)
-	}
-	return out, nil
 }
 
 func (s *PostgresStore) MarkScheduleFired(ctx context.Context, sc runtimepipeline.Schedule) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return nil
 	}
-	if err := s.markScheduleFiredSpec(ctx, sc); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyTimersSchema(err) {
-		return err
+	switch caps.Schedules {
+	case SchemaFlavorCanonical:
+		return s.markScheduleFiredSpec(ctx, sc)
+	default:
+		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
-	if sc.Mode == "once" {
-		_, err := s.DB.ExecContext(ctx, `
-			UPDATE schedules
-			SET active = false,
-			    last_fired_at = now(),
-			    next_fire_at = NULL
-			WHERE agent_id = $1
-			  AND event_type = $2
-			  AND active = true
-		`, sc.AgentID, sc.EventType)
-		if err != nil {
-			return fmt.Errorf("mark once schedule fired: %w", err)
-		}
-		return nil
-	}
-	_, err := s.DB.ExecContext(ctx, `
-		UPDATE schedules
-		SET last_fired_at = now()
-		WHERE agent_id = $1
-		  AND event_type = $2
-		  AND active = true
-	`, sc.AgentID, sc.EventType)
-	if err != nil {
-		return fmt.Errorf("mark recurring schedule fired: %w", err)
-	}
-	return nil
 }
 
 func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepipeline.Schedule) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(sc.AgentID) == "" || strings.TrimSpace(sc.EventType) == "" {
 		return nil
 	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
-	if err := s.markScheduleFiredExactSpec(ctx, sc); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyTimersSchema(err) {
-		return err
+	switch caps.Schedules {
+	case SchemaFlavorCanonical:
+		return s.markScheduleFiredExactSpec(ctx, sc)
+	default:
+		return unsupportedSchemaCapability("timers/schedules", caps.Schedules)
 	}
-	if sc.Mode == "once" {
-		_, err := s.DB.ExecContext(ctx, `
-			UPDATE schedules
-			SET active = false,
-			    last_fired_at = now(),
-			    next_fire_at = NULL
-			WHERE agent_id = $1
-			  AND event_type = $2
-			  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-			  AND COALESCE(payload->>'__schedule_task_id', '') = $4
-			  AND active = true
-		`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
-		if err != nil {
-			return fmt.Errorf("mark exact once schedule fired: %w", err)
-		}
-		return nil
-	}
-	_, err := s.DB.ExecContext(ctx, `
-		UPDATE schedules
-		SET last_fired_at = now()
-		WHERE agent_id = $1
-		  AND event_type = $2
-		  AND entity_id IS NOT DISTINCT FROM NULLIF($3,'')::uuid
-		  AND COALESCE(payload->>'__schedule_task_id', '') = $4
-		  AND active = true
-	`, sc.AgentID, sc.EventType, entityID, strings.TrimSpace(sc.TaskID))
-	if err != nil {
-		return fmt.Errorf("mark exact schedule fired: %w", err)
-	}
-	return nil
 }
 
 func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
@@ -449,20 +306,6 @@ func (s *PostgresStore) markScheduleFiredExactSpec(ctx context.Context, sc runti
 		return fmt.Errorf("mark exact timer fired: %w", err)
 	}
 	return nil
-}
-
-func shouldFallbackLegacyTimersSchema(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, `relation "timers" does not exist`) ||
-		strings.Contains(msg, `column "owner_agent"`) ||
-		strings.Contains(msg, `column "fire_event"`) ||
-		strings.Contains(msg, `column "fire_payload"`) ||
-		strings.Contains(msg, `column "recurrence_cron"`) ||
-		strings.Contains(msg, `column "status"`) ||
-		strings.Contains(msg, `column "timer_name"`)
 }
 
 func extractPersistedScheduleTaskID(payload []byte) (string, []byte) {

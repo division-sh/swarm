@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -28,99 +27,39 @@ func (s *PostgresStore) BeginEventTx(ctx context.Context) (*sql.Tx, error) {
 }
 
 func (s *PostgresStore) AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	return withEventStoreRetry(ctx, tx, func() error {
-		evt = s.enrichEventCorrelation(ctx, chooseRowQueryer(s.DB, tx), evt)
-		if eventSchemaAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
-			if err := s.appendEventSpec(ctx, tx, evt); err == nil {
-				return nil
-			} else if !shouldFallbackLegacyEventsSchema(err) {
-				return err
-			}
+		evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, tx), evt)
+		switch caps.Events.Log {
+		case SchemaFlavorCanonical:
+			return s.appendEventSpec(ctx, caps, tx, evt)
+		default:
+			return unsupportedSchemaCapability("events", caps.Events.Log)
 		}
-
-		id := evt.ID
-		if id == "" {
-			id = uuid.NewString()
-		}
-		taskID := sanitizeOptionalUUID(evt.TaskID)
-		entityID := sanitizeOptionalUUID(evt.EntityID())
-		createdAt := evt.CreatedAt
-		if createdAt.IsZero() {
-			createdAt = time.Now()
-		}
-
-		const q = `
-			INSERT INTO events (id, type, source_agent, task_id, entity_id, payload, created_at)
-			VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
-			ON CONFLICT (id) DO NOTHING
-		`
-		execFn := s.DB.ExecContext
-		if tx != nil {
-			execFn = tx.ExecContext
-		}
-		if _, err := execFn(ctx, q, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt); err != nil {
-			return fmt.Errorf("append event: %w", err)
-		}
-		return nil
 	})
 }
 
 func (s *PostgresStore) PersistEventWithDeliveries(ctx context.Context, evt events.Event, agentIDs []string) error {
-	evt = s.enrichEventCorrelation(ctx, chooseRowQueryer(s.DB, nil), evt)
-	if err := s.persistEventWithDeliveriesSpec(ctx, evt, agentIDs); err == nil {
-		return nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
 		return err
 	}
-
-	id := evt.ID
-	if id == "" {
-		id = uuid.NewString()
-	}
-	taskID := sanitizeOptionalUUID(evt.TaskID)
-	entityID := sanitizeOptionalUUID(evt.EntityID())
-	createdAt := evt.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = time.Now()
-	}
-
-	tx, err := s.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin event tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	const insertEvent = `
-		INSERT INTO events (id, type, source_agent, task_id, entity_id, payload, created_at)
-		VALUES ($1::uuid, $2, $3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, $6, $7)
-		ON CONFLICT (id) DO NOTHING
-	`
-	if _, err := tx.ExecContext(ctx, insertEvent, id, string(evt.Type), evt.SourceAgent, taskID, entityID, evt.Payload, createdAt); err != nil {
-		return fmt.Errorf("append event: %w", err)
-	}
-
-	const insertDelivery = `
-		INSERT INTO event_deliveries (event_id, agent_id, created_at)
-		VALUES ($1::uuid, $2, now())
-		ON CONFLICT (event_id, agent_id) DO NOTHING
-	`
-	for _, agentID := range agentIDs {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, insertDelivery, id, agentID); err != nil {
-			return fmt.Errorf("insert event delivery (agent=%s): %w", agentID, err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit event tx: %w", err)
+	evt = s.enrichEventCorrelation(ctx, caps, chooseRowQueryer(s.DB, nil), evt)
+	switch {
+	case caps.Events.Log == SchemaFlavorCanonical && caps.Events.Deliveries == SchemaFlavorCanonical:
+		return s.persistEventWithDeliveriesSpec(ctx, caps, evt, agentIDs)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("events", caps.Events.Log)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
 	}
 	return nil
 }
 
-func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, q rowQueryer, evt events.Event) events.Event {
+func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, evt events.Event) events.Event {
 	parentID := strings.TrimSpace(evt.ParentEventID)
 	if parentID == "" {
 		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
@@ -131,7 +70,7 @@ func (s *PostgresStore) enrichEventCorrelation(ctx context.Context, q rowQueryer
 		}
 	}
 	if strings.TrimSpace(evt.RunID) == "" && parentID != "" {
-		if runID := lookupEventRunID(ctx, q, parentID); runID != "" {
+		if runID := lookupEventRunID(ctx, caps, q, parentID); runID != "" {
 			evt.RunID = runID
 		}
 	}
@@ -158,27 +97,17 @@ func (s *PostgresStore) InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx,
 	if len(agentIDs) == 0 {
 		return nil
 	}
-	if eventDeliveriesSpecAvailable(ctx, chooseRowQueryer(s.DB, tx)) {
-		if err := s.insertEventDeliveriesSpec(ctx, tx, eventID, agentIDs); err == nil {
-			return nil
-		} else if !shouldFallbackLegacyEventsSchema(err) {
-			return err
-		}
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
 	}
-
-	const q = `
-		INSERT INTO event_deliveries (event_id, agent_id, created_at)
-		VALUES ($1::uuid, $2, now())
-		ON CONFLICT (event_id, agent_id) DO NOTHING
-	`
-	execFn := s.DB.ExecContext
-	if tx != nil {
-		execFn = tx.ExecContext
-	}
-	for _, agentID := range agentIDs {
-		if _, err := execFn(ctx, q, eventID, agentID); err != nil {
-			return fmt.Errorf("insert event delivery (agent=%s): %w", agentID, err)
-		}
+	switch {
+	case caps.Events.Deliveries == SchemaFlavorCanonical && caps.Events.Log == SchemaFlavorCanonical:
+		return s.insertEventDeliveriesSpec(ctx, caps, tx, eventID, agentIDs)
+	case caps.Events.Deliveries != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	case caps.Events.Log != SchemaFlavorCanonical:
+		return unsupportedSchemaCapability("events", caps.Events.Log)
 	}
 	return nil
 }
@@ -188,6 +117,10 @@ func (s *PostgresStore) UpsertPipelineReceipt(ctx context.Context, eventID, stat
 }
 
 func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil
@@ -199,66 +132,81 @@ func (s *PostgresStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 	if strings.TrimSpace(errText) != "" && status == "processed" {
 		status = "error"
 	}
+	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
+		if caps.Events.Receipts != SchemaFlavorCanonical {
+			return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+		}
+		return unsupportedSchemaCapability("events", caps.Events.Log)
+	}
 	return s.upsertPipelineReceiptSpec(ctx, tx, eventID, status, errText)
 }
 
 func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, since time.Time, limit int) ([]events.Event, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 200
 	}
 	if since.IsZero() {
 		since = time.Now().Add(-24 * time.Hour)
 	}
-
+	if caps.Events.Receipts != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
+		if caps.Events.Receipts != SchemaFlavorCanonical {
+			return nil, unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
+		}
+		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
+	}
 	return s.listEventsMissingPipelineReceiptSpec(ctx, since, limit)
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return false, err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return false, nil
 	}
 	var exists bool
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)
-	`, eventID).Scan(&exists); err == nil {
-		return exists, nil
-	} else if !shouldFallbackLegacyEventsSchema(err) {
-		return false, fmt.Errorf("event exists lookup: %w", err)
+	query := `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`
+	switch caps.Events.Log {
+	case SchemaFlavorCanonical:
+	default:
+		return false, unsupportedSchemaCapability("events", caps.Events.Log)
 	}
-	if err := s.DB.QueryRowContext(ctx, `
-		SELECT EXISTS(SELECT 1 FROM events WHERE id = $1::uuid)
-	`, eventID).Scan(&exists); err != nil {
+	if err := s.DB.QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
 	return exists, nil
 }
 
 func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil, nil
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	query := `
 		SELECT subscriber_id
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		ORDER BY subscriber_id ASC
-	`, eventID)
+	`
+	switch caps.Events.Deliveries {
+	case SchemaFlavorCanonical:
+	default:
+		return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+	}
+	rows, err := s.DB.QueryContext(ctx, query, eventID)
 	if err != nil {
-		if !shouldFallbackLegacyEventsSchema(err) {
-			return nil, fmt.Errorf("list event delivery recipients: %w", err)
-		}
-		rows, err = s.DB.QueryContext(ctx, `
-			SELECT agent_id
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			ORDER BY agent_id ASC
-		`, eventID)
-		if err != nil {
-			return nil, fmt.Errorf("list event delivery recipients: %w", err)
-		}
+		return nil, fmt.Errorf("list event delivery recipients: %w", err)
 	}
 	defer rows.Close()
 
@@ -279,13 +227,12 @@ func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID
 	return recipients, nil
 }
 
-func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+func (s *PostgresStore) appendEventSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, evt events.Event) error {
 	id, runID, name, entityID, flowInstance, scope, payload, chainDepth, producedBy, producedByType, sourceEventID, createdAt := eventStorageEnvelope(evt)
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
 	}
-	hasRunID := columnExists(ctx, chooseRowQueryer(s.DB, tx), "events", "run_id")
 	q := `
 		INSERT INTO events (
 			event_id, event_name, entity_id, flow_instance, scope, payload,
@@ -298,8 +245,8 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 		ON CONFLICT (event_id) DO NOTHING
 	`
 	args := []any{id, name, entityID, flowInstance, scope, string(payload), chainDepth, producedBy, producedByType, sourceEventID, createdAt}
-	if hasRunID {
-		if err := s.ensureRunRow(ctx, tx, runID); err != nil {
+	if caps.Events.LogRunID {
+		if err := s.ensureRunRow(ctx, caps, tx, runID); err != nil {
 			return err
 		}
 		q = `
@@ -321,17 +268,17 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, evt eve
 	return nil
 }
 
-func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, evt events.Event, agentIDs []string) error {
+func (s *PostgresStore) persistEventWithDeliveriesSpec(ctx context.Context, caps StoreSchemaCapabilities, evt events.Event, agentIDs []string) error {
 	return withEventStoreRetry(ctx, nil, func() error {
 		tx, err := s.DB.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin event tx: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		if err := s.appendEventSpec(ctx, tx, evt); err != nil {
+		if err := s.appendEventSpec(ctx, caps, tx, evt); err != nil {
 			return err
 		}
-		if err := s.insertEventDeliveriesSpec(ctx, tx, evt.ID, agentIDs); err != nil {
+		if err := s.insertEventDeliveriesSpec(ctx, caps, tx, evt.ID, agentIDs); err != nil {
 			return err
 		}
 		if err := tx.Commit(); err != nil {
@@ -376,7 +323,7 @@ func isTransientEventStoreConnectionError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "bad connection")
 }
 
-func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error {
+func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, eventID string, agentIDs []string) error {
 	execFn := s.DB.ExecContext
 	if tx != nil {
 		execFn = tx.ExecContext
@@ -386,8 +333,7 @@ func (s *PostgresStore) insertEventDeliveriesSpec(ctx context.Context, tx *sql.T
 		VALUES ($1::uuid, 'agent', $2, 'matched_agent_subscription', now())
 		ON CONFLICT DO NOTHING
 	`
-	useRunID := columnExists(ctx, chooseRowQueryer(s.DB, tx), "event_deliveries", "run_id")
-	if useRunID {
+	if caps.Events.DeliveryRunID {
 		q = `
 			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, created_at)
 			SELECT e.run_id, e.event_id, 'agent', $2, 'matched_agent_subscription', now()
@@ -493,34 +439,6 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 	return out, nil
 }
 
-func shouldFallbackLegacyEventsSchema(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	fallback := strings.Contains(msg, `event_id`) ||
-		strings.Contains(msg, `run_id`) ||
-		strings.Contains(msg, `event_name`) ||
-		strings.Contains(msg, `produced_by`) ||
-		strings.Contains(msg, `produced_by_type`) ||
-		strings.Contains(msg, `subscriber_type`) ||
-		strings.Contains(msg, `subscriber_id`) ||
-		strings.Contains(msg, `active_session_id`) ||
-		strings.Contains(msg, `started_at`) ||
-		strings.Contains(msg, `reason_code`) ||
-		strings.Contains(msg, `scope`) ||
-		strings.Contains(msg, `flow_instance`) ||
-		strings.Contains(msg, `outcome`) ||
-		strings.Contains(msg, `side_effects`) ||
-		strings.Contains(msg, `duration_ms`) ||
-		strings.Contains(msg, `relation "event_receipts" does not exist`) ||
-		strings.Contains(msg, `relation "event_deliveries" does not exist`)
-	if fallback {
-		log.Printf("store legacy schema fallback triggered err=%v", err)
-	}
-	return fallback
-}
-
 func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
 	if tx != nil {
 		return tx
@@ -528,40 +446,9 @@ func chooseRowQueryer(db *sql.DB, tx *sql.Tx) rowQueryer {
 	return db
 }
 
-func eventSchemaAvailable(ctx context.Context, q rowQueryer) bool {
-	return columnExists(ctx, q, "events", "event_id")
-}
-
-func eventDeliveriesSpecAvailable(ctx context.Context, q rowQueryer) bool {
-	return columnExists(ctx, q, "event_deliveries", "subscriber_id")
-}
-
-func eventReceiptsSpecAvailable(ctx context.Context, q rowQueryer) bool {
-	return columnExists(ctx, q, "event_receipts", "subscriber_id")
-}
-
-func columnExists(ctx context.Context, q rowQueryer, tableName, columnName string) bool {
-	if q == nil {
-		return false
-	}
-	var exists bool
-	if err := q.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM information_schema.columns
-			WHERE table_schema = 'public'
-			  AND table_name = $1
-			  AND column_name = $2
-		)
-	`, tableName, columnName).Scan(&exists); err != nil {
-		return false
-	}
-	return exists
-}
-
-func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
+func lookupEventRunID(ctx context.Context, caps StoreSchemaCapabilities, q rowQueryer, eventID string) string {
 	eventID = strings.TrimSpace(eventID)
-	if q == nil || eventID == "" {
+	if q == nil || eventID == "" || caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID {
 		return ""
 	}
 	var runID string
@@ -576,9 +463,9 @@ func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string 
 	return strings.TrimSpace(runID)
 }
 
-func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID string) error {
+func (s *PostgresStore) ensureRunRow(ctx context.Context, caps StoreSchemaCapabilities, tx *sql.Tx, runID string) error {
 	runID = nullUUIDString(runID)
-	if runID == "" || !columnExists(ctx, chooseRowQueryer(s.DB, tx), "runs", "run_id") {
+	if runID == "" || !caps.Events.HasRuns {
 		return nil
 	}
 	execFn := s.DB.ExecContext

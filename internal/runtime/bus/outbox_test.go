@@ -88,8 +88,33 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	defer db.Close()
 
 	mock.ExpectBegin()
+	mock.ExpectQuery("FROM information_schema.columns").WillReturnRows(
+		sqlmock.NewRows([]string{"table_name", "column_name"}).
+			AddRow("events", "event_id").
+			AddRow("events", "event_name").
+			AddRow("events", "entity_id").
+			AddRow("events", "flow_instance").
+			AddRow("events", "scope").
+			AddRow("events", "payload").
+			AddRow("events", "chain_depth").
+			AddRow("events", "produced_by").
+			AddRow("events", "produced_by_type").
+			AddRow("events", "source_event_id").
+			AddRow("events", "created_at").
+			AddRow("event_deliveries", "event_id").
+			AddRow("event_deliveries", "subscriber_type").
+			AddRow("event_deliveries", "subscriber_id").
+			AddRow("event_deliveries", "status").
+			AddRow("event_deliveries", "retry_count").
+			AddRow("event_deliveries", "reason_code").
+			AddRow("event_deliveries", "last_error").
+			AddRow("event_deliveries", "active_session_id").
+			AddRow("event_deliveries", "started_at").
+			AddRow("event_deliveries", "delivered_at").
+			AddRow("event_deliveries", "created_at"),
+	)
 	mock.ExpectExec("INSERT INTO events").
-		WithArgs("evt-1", "custom.emitted", "", "", "", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("evt-1", "custom.emitted", "", "", "global", sqlmock.AnyArg(), 0, "", "platform", "", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO event_deliveries").
 		WithArgs("evt-1", "reviewer").
