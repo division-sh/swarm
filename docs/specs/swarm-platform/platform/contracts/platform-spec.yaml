@@ -425,7 +425,7 @@ handler_specification:
         source_event: 'string — which event the payload comes from (default: current trigger event).
           CANONICAL field name — use source_event, not "source".'
       write_item_forms:
-        description: 'Each item in writes is one of three forms. No other forms are accepted.'
+        description: 'Each item in writes is one of four forms. No other forms are accepted.'
         direct:
           shape: 'field_name (bare string)'
           meaning: 'payload.field_name → entity.field_name. Direct name match.'
@@ -434,6 +434,12 @@ handler_specification:
           shape: '{source_field: payload_key, target_field: entity_key}'
           meaning: 'payload.payload_key → entity.entity_key. Renamed mapping.'
           example: "- source_field: vertical_name\n  target_field: name"
+        literal:
+          shape: '{target_field: entity_key, value: constant}'
+          meaning: 'Write a constant value directly to entity.entity_key. No expression evaluation.'
+          example: "- target_field: revision_count\n  value: 0"
+          note: '{target_field, literal} is NOT valid. The field name is value, not literal.
+            value and expression are mutually exclusive — a write item MUST NOT have both.'
         computed:
           shape: '{target_field: entity_key, expression: CEL_expression}'
           meaning: 'CEL expression evaluated against handler context → entity.entity_key.'
@@ -441,15 +447,20 @@ handler_specification:
             namespace is available when the handler includes a fan_out step (e.g., fan_out.count).
             accumulated is NOT available — data_accumulation runs before accumulation completes.'
           example: "- target_field: revision_count\n  expression: entity.revision_count + 1"
+          note: 'value and expression are mutually exclusive. Use value for constants, expression
+            for dynamic computation. Do not use expression for simple constants — use value instead.'
       rules:
       - writes is always a list
-      - each item is exactly one of the three forms above
+      - each item is exactly one of the four forms above
+      - value and expression are mutually exclusive on the same write item (boot error if both present)
       - source_event is optional — if omitted, the trigger event is the source
       - source_event payload must contain all fields referenced by direct and mapped writes (verified at boot)
+      - literal writes do not reference source_event or handler context — the value is used as-is
       - computed writes do not reference source_event — they use the handler context directly
       example: "data_accumulation:\n  writes:\n  - geography                              # direct\n\
         \  - source_field: vertical_name             # mapped\n    target_field: name\n  - target_field:\
-        \ expected_count              # computed\n    expression: fan_out.count\n  source_event: scan.requested\
+        \ revision_count                # literal\n    value: 0\n  - target_field: expected_count\
+        \              # computed\n    expression: fan_out.count\n  source_event: scan.requested\
         \               # optional"
     emits:
       field: emits
