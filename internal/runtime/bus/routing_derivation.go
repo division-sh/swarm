@@ -488,6 +488,11 @@ func routeResolveSubscriberPatterns(source semanticview.Source, flowID string, i
 	if raw == "" {
 		return nil
 	}
+	if flowID != "" && strings.Contains(raw, "/") {
+		if absolute, ok := routeResolveDescendantPattern(source, flowID, raw); ok {
+			return []routeResolvedPattern{{EventPattern: absolute, RouteSource: "subscription"}}
+		}
+	}
 	if flowID == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "*/") || strings.HasPrefix(raw, "**/") || strings.Contains(raw, "/") || routeIsLocalEvent(localEvents, raw) {
 		pattern := routeResolvePattern(basePath, localEvents, raw)
 		if pattern == "" {
@@ -519,6 +524,51 @@ func routeFlowHasInputEvent(inputEvents []string, eventType string) bool {
 		}
 	}
 	return false
+}
+
+func routeResolveDescendantPattern(source semanticview.Source, flowID, eventType string) (string, bool) {
+	flowID = strings.TrimSpace(flowID)
+	eventType = eventidentity.Normalize(eventType)
+	if source == nil || flowID == "" || eventType == "" || !strings.Contains(eventType, "/") {
+		return "", false
+	}
+	flowPath := routeFlowPath(source, flowID)
+	if flowPath == "" {
+		return "", false
+	}
+	descendants := make(map[string]map[string]struct{})
+	for _, scope := range source.FlowScopes() {
+		descendantPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if descendantPath == "" {
+			continue
+		}
+		local := workflowScopeLocalEvents(scope)
+		if len(local) == 0 {
+			continue
+		}
+		descendants[descendantPath] = local
+	}
+	return eventidentity.ExternalizeDescendantForFlow(flowPath, eventType, descendants)
+}
+
+func workflowScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} {
+	out := make(map[string]struct{}, len(scope.Events)+len(scope.OutputEvents)+1)
+	for eventType := range scope.Events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	for _, eventType := range scope.OutputEvents {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
+		out[autoEmit] = struct{}{}
+	}
+	return out
 }
 
 func routeInputProducerPatterns(source semanticview.Source, targetFlowID, eventType string) []routeResolvedPattern {

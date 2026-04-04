@@ -228,6 +228,39 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 }
 
+func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	am := NewAgentManager(bus, nil)
+	bundle := testFlowBundle("task.started")
+	postCommit := make([]func(), 0, 1)
+	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommit)
+
+	err := am.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: semanticview.Wrap(bundle),
+		TemplateID:     "review",
+		InstanceID:     "inst-1",
+		EntityID:       "ent-1",
+		FlowPath:       "review/inst-1",
+	})
+	if err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("auto-emit published before post-commit flush: %#v", bus.published)
+	}
+	if len(postCommit) != 1 {
+		t.Fatalf("post-commit actions = %d, want 1", len(postCommit))
+	}
+
+	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	if len(bus.published) != 1 {
+		t.Fatalf("published events after post-commit = %d, want 1", len(bus.published))
+	}
+	if got := string(bus.published[0].Type); got != "review/inst-1/task.started" {
+		t.Fatalf("auto-emitted type = %q, want review/inst-1/task.started", got)
+	}
+}
+
 func TestNormalizedStaticFlowEmitEvents_ExternalizesLocalEvents(t *testing.T) {
 	got := normalizedStaticFlowEmitEvents(
 		[]string{"analysis.done", "shared.event"},

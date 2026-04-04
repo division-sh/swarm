@@ -129,25 +129,23 @@ func (eb *EventBus) publishTransactional(
 		}
 	}()
 
-	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
-	if err != nil {
-		return err
-	}
-	var inboundPlan eventDeliveryPlan
-	if passthrough {
-		inboundPlan, err = eb.buildDeliveryPlan(txctx, evt)
-		if err != nil {
-			return err
-		}
-	}
-
 	if err := txStore.AppendEventTx(txctx, tx, evt); err != nil {
 		return fmt.Errorf("persist event: %w", err)
 	}
-	if passthrough && len(inboundPlan.PersistedRecipients) > 0 {
+
+	inboundPlan, err := eb.buildDeliveryPlan(txctx, evt)
+	if err != nil {
+		return err
+	}
+	if len(inboundPlan.PersistedRecipients) > 0 {
 		if err := txStore.InsertEventDeliveriesTx(txctx, tx, evt.ID, inboundPlan.PersistedRecipients); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
 		}
+	}
+
+	passthrough, deferred, err := eb.runInterceptors(txctx, evt)
+	if err != nil {
+		return err
 	}
 	receiptStatus := "processed"
 	receiptErr := ""
@@ -155,14 +153,14 @@ func (eb *EventBus) publishTransactional(
 		receiptStatus = overrideStatus
 		receiptErr = overrideErr
 	}
-	if err := txStore.UpsertPipelineReceiptTx(txctx, tx, evt.ID, receiptStatus, receiptErr); err != nil {
-		return fmt.Errorf("persist pipeline receipt: %w", err)
-	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit publish tx: %w", err)
 	}
 	committed = true
+	if err := txStore.UpsertPipelineReceiptTx(ctx, nil, evt.ID, receiptStatus, receiptErr); err != nil {
+		return fmt.Errorf("persist pipeline receipt: %w", err)
+	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if deferredTransitions != nil {
 		runtimepipeline.FlushDeferredPipelineTransitions(ctx, *deferredTransitions)
@@ -282,20 +280,31 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		}
 		eb.markPipelineReceipt(ctx, evt.ID, status, errText)
 	}()
+	plan, err := eb.buildDeliveryPlan(ctx, evt)
+	if err != nil {
+		return err
+	}
+	if err := eb.persistEventRecord(ctx, evt, plan.PersistedRecipients); err != nil {
+		return err
+	}
+	persisted = true
 	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
 	if err != nil {
 		return err
 	}
 	if passthrough {
-		if err := eb.routeAndDeliver(ctx, evt); err != nil {
-			return err
+		if len(plan.Recipients) > 0 {
+			eb.deliverToAgents(ctx, evt, plan.Recipients)
+			eb.logDelivery(ctx, evt, plan.Recipients, plan.ExtraDetail)
 		}
-		persisted = true
-	} else {
-		if err := eb.persistEventRecord(ctx, evt, nil); err != nil {
-			return err
+		if plan.BlockedByCycle && plan.CycleEscalation != nil {
+			if err := eb.publishDeferred(ctx, *plan.CycleEscalation); err != nil {
+				return err
+			}
 		}
-		persisted = true
+		if strings.TrimSpace(plan.ContradictionReason) != "" {
+			_ = eb.emitContradiction(ctx, evt, plan.ContradictionReason)
+		}
 	}
 	eb.logPublished(ctx, evt, 0)
 	for _, d := range deferred {
@@ -525,15 +534,14 @@ func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscr
 	if eb != nil && eb.semanticSource != nil {
 		flowID := strings.TrimSpace(routeFirstPathSegment(subscriber.Path))
 		if flowID != "" {
-			for _, input := range eventidentity.NormalizeList(eb.semanticSource.FlowInputEvents(flowID)) {
-				if input == "" {
-					continue
-				}
-				for _, candidate := range candidates {
-					normalized := eventidentity.Normalize(candidate)
-					if normalized == input || strings.HasSuffix(normalized, "/"+input) {
-						return input
-					}
+			flowPath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+			if flowPath == "" {
+				flowPath = flowID
+			}
+			inputs := eventidentity.NormalizeList(eb.semanticSource.FlowInputEvents(flowID))
+			for _, candidate := range candidates {
+				if localized := eventidentity.LocalizeForFlow(flowPath, inputs, candidate); localized != "" && localized != eventidentity.Normalize(candidate) {
+					return localized
 				}
 			}
 		}

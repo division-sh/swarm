@@ -34,7 +34,7 @@ func runBootCatalogFixture(t *testing.T, fixtureRoot string) {
 		if len(report.Warnings()) > 0 {
 			t.Fatalf("expected clean boot warnings=[], got %#v", report.Warnings())
 		}
-		rt, err := newTier8Runtime(bundle)
+		rt, err := newTier8Runtime(t, bundle)
 		if err != nil {
 			t.Fatalf("NewRuntime: %v", err)
 		}
@@ -46,7 +46,7 @@ func runBootCatalogFixture(t *testing.T, fixtureRoot string) {
 		if !findingsContain(report.Warnings(), expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
 			t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
 		}
-		rt, err := newTier8Runtime(bundle)
+		rt, err := newTier8Runtime(t, bundle)
 		if err != nil {
 			t.Fatalf("NewRuntime: %v", err)
 		}
@@ -56,7 +56,7 @@ func runBootCatalogFixture(t *testing.T, fixtureRoot string) {
 			t.Fatal("expected validation error")
 		}
 		assertBootErrorMatches(t, findingsError(report.Errors()), expected)
-		if _, err := newTier8Runtime(bundle); err == nil {
+		if _, err := newTier8Runtime(t, bundle); err == nil {
 			t.Fatal("expected NewRuntime to fail for invalid boot fixture")
 		} else {
 			assertBootErrorMatches(t, err, expected)

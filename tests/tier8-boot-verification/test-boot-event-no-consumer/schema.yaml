@@ -5,4 +5,4 @@ pins:
   inputs:
     events: [task.requested]
   outputs:
-    events: [task.completed, orphan.unconsumed]
+    events: [task.completed]

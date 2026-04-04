@@ -90,6 +90,9 @@ func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.T
 	if r.db == nil {
 		return fn(pipelineEngineTx{ctx: ctx})
 	}
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		return fn(pipelineEngineTx{ctx: ctx, tx: tx})
+	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

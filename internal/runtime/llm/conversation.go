@@ -213,6 +213,9 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 			Name: strings.TrimSpace(tc.Name),
 			OK:   err == nil,
 		})
+		if err != nil && !isTerminalEmitToolCall(tc.Name) {
+			break
+		}
 	}
 	b, err := json.Marshal(results)
 	if err != nil {

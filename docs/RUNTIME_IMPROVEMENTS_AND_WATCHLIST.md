@@ -1070,6 +1070,54 @@ Improvement items:
 - keep harness reliability treated as first-class work
 - add smaller invariant tests so giant fixtures are not the only signal
 
+### One correct identity fix exposes another hidden coupling
+
+Symptoms:
+
+- a focused fix makes one failing test pass
+- nearby fixtures that used to pass now fail differently
+- each failure looks unrelated at first:
+  - wrong entity target
+  - root state not advancing
+  - child gate not visible
+  - root output boundary warning appears
+
+Likely causes:
+
+- event identity, entity identity, gate scope, and flow-instance scope are implemented in different places
+- one layer uses:
+  - semantic flow scope such as `child`
+- while another uses:
+  - concrete instance paths such as `child/<instance-id>`
+- behavior is still controlled by string heuristics instead of one typed model
+
+Current mitigations:
+
+- event identity logic is more centralized than before
+- focused regressions now cover:
+  - cross-flow localization
+  - flow-entity id creation
+  - child gate projection
+  - root output boundaries
+
+Still brittle because:
+
+- event names, entity ids, flow scope, and flow-instance paths are still not modeled as one coherent typed subsystem
+- fixing one seam can expose another seam that was only passing accidentally
+
+Improvement items:
+
+- introduce a first-class flow-instance descriptor covering:
+  - template id
+  - scope key
+  - instance path
+  - entity id
+  - parent entity id
+  - subject id
+- stop using instance paths as a proxy for semantic flow scope
+- centralize entity-target resolution and child/parent retargeting rules
+- add direct conformance tests for each identity/scope rule so catalog fixtures are not the first place these interactions appear
+
 ### Emitted event targets the wrong entity
 
 Symptoms:
@@ -1254,6 +1302,10 @@ Improvement items:
    - proved critical by: validation revision counters never incremented despite declarative `entity.revision_count + 1` expressions
 10. Enforce or validate persistence prerequisites before milestone emits.
    - proved critical by: `research.completed` and `spec.draft_ready` were emitted while `business_brief` and `mvp_spec` were still absent from entity state
+11. Introduce a first-class flow-instance model instead of passing identity/scope semantics through loosely-related strings.
+   - proved critical by: canonical flow-entity ids fixed nested descendant routing but exposed child-gate projection still using instance paths as if they were scope keys
+12. Separate semantic flow scope from concrete flow-instance path everywhere.
+   - proved critical by: child gates were stored under `child/...` while projection filtered using `child/<instance-id>/...`
 
 ### Medium Priority
 
@@ -1282,6 +1334,8 @@ Improvement items:
    - proved critical by: validation prompts treated payload `entity_id` as the source scoring entity while runtime used it as the target validation entity
 13. Add session-recovery policy for infrastructure-contaminated agent sessions.
    - proved critical by: validation agent sessions degraded into “no action / operator must inject fields” after early write failures
+14. Centralize entity-target resolution for handler execution and emitted-event retargeting.
+   - proved critical by: one correct entity-targeting fix later exposed a separate gate-projection and boundary-semantics mismatch in adjacent codepaths
 
 ### Lower Priority
 
@@ -1348,6 +1402,29 @@ Fix:
 - add regressions for:
   - child-flow output targeting parent entity
   - root-flow output staying on the local entity
+
+### Flow scope and flow-instance path were treated as interchangeable
+
+Root cause:
+
+- flow-scoped semantics use keys like:
+  - `child/g_validated`
+- but some runtime paths filtered and projected using concrete instance paths like:
+  - `child/<instance-id>`
+- after canonical flow-entity ids were introduced for flow-scoped entities, this mismatch became visible:
+  - child completion fired
+  - child gate existed
+  - root still did not advance because subject-gate projection looked under the wrong prefix
+- the same family also affected root output-boundary handling, where root outputs were not treated consistently with flow outputs
+
+Fix:
+
+- project scoped child gates using the semantic flow scope key, not the concrete instance path
+- treat root workflow outputs as legitimate output boundaries during boot verification
+- add focused regressions for:
+  - instanced child-flow gate projection
+  - gated child-flow completion advancing the root
+  - root output boundary behavior in boot fixtures
 
 ### Cross-flow qualified event reached the flow but failed local handler lookup
 

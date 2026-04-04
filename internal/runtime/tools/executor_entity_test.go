@@ -762,6 +762,37 @@ func TestEntityTools_SaveEntityFieldAllowsSameFlowWrite(t *testing.T) {
 	}
 }
 
+func TestEntityTools_SaveEntityFieldAllowsSameFlowWriteWithForeignSubject(t *testing.T) {
+	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+		ID:   "analyzer",
+		Role: "analyzer",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "save_entity_field", "get_entity"},
+		}),
+	}, bundle)
+	entityID := uuid.NewString()
+	subjectID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     entityID,
+		"subject_id":    subjectID,
+		"flow_instance": "analyzer-flow/inst-1",
+		"fields": map[string]any{
+			"status": "open",
+		},
+	}); err != nil {
+		t.Fatalf("create_entity: %v", err)
+	}
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": entityID,
+		"field":     "status",
+		"value":     "closed",
+	}); err != nil {
+		t.Fatalf("save_entity_field same flow with foreign subject: %v", err)
+	}
+}
+
 func TestEntityTools_GetEntityAllowsCrossFlowRead(t *testing.T) {
 	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
 	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
@@ -796,6 +827,65 @@ func TestEntityTools_GetEntityAllowsCrossFlowRead(t *testing.T) {
 	}
 	if got := strings.TrimSpace(asString(entity["current_state"])); got != "open" {
 		t.Fatalf("current_state = %q, want open", got)
+	}
+}
+
+func TestEntityTools_FlowOwnedActorCanReadForeignEntityAndWriteOwnEntity(t *testing.T) {
+	bundle := loadEntityToolFixtureBundle(t, "tests/tier11-flow-composition/test-required-agents-child")
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+		ID:   "analyzer",
+		Role: "analyzer",
+		Config: mustJSONRaw(t, map[string]any{
+			"tools": []string{"create_entity", "get_entity", "save_entity_field"},
+		}),
+	}, bundle)
+
+	scoringID := uuid.NewString()
+	validationID := uuid.NewString()
+	subjectID := uuid.NewString()
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     scoringID,
+		"subject_id":    subjectID,
+		"flow_instance": "other-flow/score-1",
+		"initial_state": "shortlisted",
+		"fields": map[string]any{
+			"name":            "Example Vertical",
+			"composite_score": 72,
+		},
+	}); err != nil {
+		t.Fatalf("create_entity scoring: %v", err)
+	}
+	if _, err := exec.Execute(ctx, "create_entity", map[string]any{
+		"entity_id":     validationID,
+		"subject_id":    subjectID,
+		"flow_instance": "analyzer-flow/validation-1",
+		"initial_state": "researching",
+		"fields": map[string]any{
+			"status": "open",
+		},
+	}); err != nil {
+		t.Fatalf("create_entity validation: %v", err)
+	}
+
+	out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": scoringID})
+	if err != nil {
+		t.Fatalf("get_entity scoring context: %v", err)
+	}
+	entity, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("expected entity map, got %#v", out)
+	}
+	fields, ok := entity["fields"].(map[string]any)
+	if !ok || strings.TrimSpace(asString(fields["name"])) != "Example Vertical" {
+		t.Fatalf("unexpected scoring fields: %#v", entity["fields"])
+	}
+
+	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+		"entity_id": validationID,
+		"field":     "status",
+		"value":     "researched",
+	}); err != nil {
+		t.Fatalf("save_entity_field validation target: %v", err)
 	}
 }
 

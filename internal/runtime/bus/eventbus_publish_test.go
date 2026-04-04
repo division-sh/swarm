@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +13,59 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimecorrelation "swarm/internal/runtime/correlation"
 	"swarm/internal/runtime/flowmodel"
+	runtimepipeline "swarm/internal/runtime/pipeline"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/store"
+	"swarm/internal/testutil"
 )
+
+type fixtureWorkflowModule struct {
+	source         semanticview.Source
+	workflow       *runtimepipeline.WorkflowDefinition
+	workflowNodes  []runtimepipeline.WorkflowNode
+	guardRegistry  runtimepipeline.GuardRegistry
+	actionRegistry runtimepipeline.ActionRegistry
+}
+
+func (m *fixtureWorkflowModule) SemanticSource() semanticview.Source {
+	return m.source
+}
+
+func (m *fixtureWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return m.workflow
+}
+
+func (m *fixtureWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
+	return append([]runtimepipeline.WorkflowNode(nil), m.workflowNodes...)
+}
+
+func (m *fixtureWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
+	return m.guardRegistry
+}
+
+func (m *fixtureWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
+	return m.actionRegistry
+}
+
+func newFixtureWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
+	t.Helper()
+	source := semanticview.Wrap(bundle)
+	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowDefinition: %v", err)
+	}
+	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	return &fixtureWorkflowModule{
+		source:         source,
+		workflow:       workflow,
+		workflowNodes:  workflowNodes,
+		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
+		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+	}
+}
 
 type waitInterceptor struct {
 	started chan struct{}
@@ -47,6 +99,57 @@ func (deferredChainInterceptor) Intercept(_ context.Context, evt events.Event) (
 		Type:      events.EventType(next),
 		CreatedAt: time.Now().UTC(),
 	}).WithEntityID(evt.EntityID())}, nil
+}
+
+type eventVisibleInTxInterceptor struct {
+	t       *testing.T
+	eventID string
+}
+
+func (i eventVisibleInTxInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, error) {
+	i.t.Helper()
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		i.t.Fatal("expected transactional publish context to expose sql tx")
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`, i.eventID).Scan(&count); err != nil {
+		i.t.Fatalf("query inbound event inside interceptor tx: %v", err)
+	}
+	if count != 1 {
+		i.t.Fatalf("inbound event visible inside interceptor tx count=%d, want 1", count)
+	}
+	return true, nil, nil
+}
+
+type deferredEventVisibleInterceptor struct {
+	t        *testing.T
+	store    *store.PostgresStore
+	eventID  string
+	checkFor events.EventType
+}
+
+func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	i.t.Helper()
+	if evt.Type == events.EventType("custom.root") {
+		return false, []events.Event{{
+			ID:        i.eventID,
+			Type:      i.checkFor,
+			CreatedAt: time.Now().UTC(),
+			Payload:   []byte(`{"entity_id":"ent-1"}`),
+		}}, nil
+	}
+	if evt.Type != i.checkFor {
+		return true, nil, nil
+	}
+	ok, err := i.store.EventExists(ctx, i.eventID)
+	if err != nil {
+		i.t.Fatalf("EventExists(%s): %v", i.eventID, err)
+	}
+	if !ok {
+		i.t.Fatalf("expected deferred event %s to be persisted before interceptors ran", i.eventID)
+	}
+	return true, nil, nil
 }
 
 type recordingLoggerHook struct {
@@ -181,6 +284,51 @@ func TestEventBusPublish_InterceptsMultiHopDeferredChains(t *testing.T) {
 	}
 	if got := store.eventTypes(); len(got) < 4 || got[0] != "custom.root" || got[1] != "custom.middle" || got[2] != "custom.leaf" || got[3] != "custom.final" {
 		t.Fatalf("persisted event types prefix = %v, want prefix [custom.root custom.middle custom.leaf custom.final]", got)
+	}
+}
+
+func TestEventBusPublishTransactional_PersistsInboundEventBeforeInterceptorsRun(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	eventID := "11111111-1111-1111-1111-111111111111"
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{eventVisibleInTxInterceptor{t: t, eventID: eventID}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:        eventID,
+		Type:      events.EventType("task.completed"),
+		CreatedAt: time.Now().UTC(),
+		Payload:   []byte(`{}`),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+}
+
+func TestEventBusPublishDeferred_PersistsInboundEventBeforeInterceptorsRun(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &store.PostgresStore{DB: db}
+	eventID := "22222222-2222-2222-2222-222222222222"
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{deferredEventVisibleInterceptor{
+			t:        t,
+			store:    pg,
+			eventID:  eventID,
+			checkFor: events.EventType("custom.middle"),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.Publish(context.Background(), events.Event{
+		ID:        "11111111-1111-1111-1111-111111111111",
+		Type:      events.EventType("custom.root"),
+		CreatedAt: time.Now().UTC(),
+		Payload:   []byte(`{"entity_id":"ent-1"}`),
+	}); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 }
 
@@ -454,5 +602,411 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 	}
 	if diags[0].RoutedRecipients[0].LocalizedEvent != "scan.requested" {
 		t.Fatalf("localized_event = %q", diags[0].RoutedRecipients[0].LocalizedEvent)
+	}
+}
+
+func TestEventBusPublish_NestedDescendantCompletionFlushesDeferredParentEvents(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	module := newFixtureWorkflowModule(t, bundle)
+	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
+	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return module })
+	t.Cleanup(func() {
+		if previous == nil {
+			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
+			return
+		}
+		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
+	})
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	var pc *runtimepipeline.PipelineCoordinator
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+
+	const rootEntityID = "11111111-1111-1111-1111-111111111111"
+	childEntityID := runtimepipeline.FlowInstanceEntityID("child/inst-1")
+	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild/inst-1")
+	store := runtimepipeline.NewWorkflowInstanceStore(db)
+	for _, instance := range []runtimepipeline.WorkflowInstance{
+		{
+			InstanceID:      rootEntityID,
+			SubjectID:       rootEntityID,
+			StorageRef:      rootEntityID,
+			WorkflowName:    bundle.WorkflowName(),
+			WorkflowVersion: bundle.WorkflowVersion(),
+			CurrentState:    "idle",
+			Metadata: map[string]any{
+				"entity_id":  rootEntityID,
+				"subject_id": rootEntityID,
+			},
+		},
+		{
+			InstanceID:      childEntityID,
+			SubjectID:       rootEntityID,
+			StorageRef:      "child/inst-1",
+			WorkflowName:    "child",
+			WorkflowVersion: bundle.WorkflowVersion(),
+			CurrentState:    "waiting",
+			Metadata: map[string]any{
+				"entity_id":        childEntityID,
+				"flow_path":        "child/inst-1",
+				"subject_id":       rootEntityID,
+				"parent_entity_id": rootEntityID,
+			},
+		},
+		{
+			InstanceID:      grandchildEntityID,
+			SubjectID:       rootEntityID,
+			StorageRef:      "child/grandchild/inst-1",
+			WorkflowName:    "grandchild",
+			WorkflowVersion: bundle.WorkflowVersion(),
+			CurrentState:    "finished",
+			Metadata: map[string]any{
+				"entity_id":        grandchildEntityID,
+				"flow_path":        "child/grandchild/inst-1",
+				"subject_id":       rootEntityID,
+				"parent_entity_id": childEntityID,
+			},
+		},
+	} {
+		if err := store.Upsert(context.Background(), instance); err != nil {
+			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
+		}
+	}
+
+	if err := eb.Publish(context.Background(), (events.Event{
+		ID:          "11111111-2222-3333-4444-555555555555",
+		Type:        events.EventType("child/grandchild/micro.done"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"` + grandchildEntityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(grandchildEntityID)); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+
+	child, found, err := store.Load(context.Background(), childEntityID)
+	if err != nil {
+		t.Fatalf("load child instance: %v", err)
+	}
+	if !found {
+		t.Fatal("expected child instance")
+	}
+	if got := strings.TrimSpace(child.CurrentState); got != "completed" {
+		t.Fatalf("child current_state = %q, want completed", got)
+	}
+
+	root, found, err := store.Load(context.Background(), rootEntityID)
+	if err != nil {
+		t.Fatalf("load root instance: %v", err)
+	}
+	if !found {
+		t.Fatal("expected root instance")
+	}
+	if got := strings.TrimSpace(root.CurrentState); got != "done" {
+		t.Fatalf("root current_state = %q, want done", got)
+	}
+
+	var emitted []string
+	rows, err := db.QueryContext(context.Background(), `SELECT event_name FROM events ORDER BY created_at ASC, event_id ASC`)
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan event: %v", err)
+		}
+		emitted = append(emitted, strings.TrimSpace(name))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate events: %v", err)
+	}
+	if !contains(emitted, "child/step.result") {
+		t.Fatalf("events = %v, want child/step.result", emitted)
+	}
+	if !contains(emitted, "pipeline.complete") {
+		t.Fatalf("events = %v, want pipeline.complete", emitted)
+	}
+}
+
+func contains(items []string, want string) bool {
+	for _, item := range items {
+		if strings.TrimSpace(item) == strings.TrimSpace(want) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesPipeline(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	module := newFixtureWorkflowModule(t, bundle)
+	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
+	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return module })
+	t.Cleanup(func() {
+		if previous == nil {
+			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
+			return
+		}
+		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
+	})
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	var pc *runtimepipeline.PipelineCoordinator
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+
+	const rootEntityID = "11111111-1111-1111-1111-111111111111"
+	if err := runtimepipeline.NewWorkflowInstanceStore(db).Upsert(context.Background(), runtimepipeline.WorkflowInstance{
+		InstanceID:      rootEntityID,
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "idle",
+	}); err != nil {
+		t.Fatalf("seed root instance: %v", err)
+	}
+
+	if err := eb.Publish(context.Background(), (events.Event{
+		ID:          "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+		Type:        events.EventType("pipeline.start"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"` + rootEntityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(rootEntityID)); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+
+	root, found, err := runtimepipeline.NewWorkflowInstanceStore(db).Load(context.Background(), rootEntityID)
+	if err != nil {
+		t.Fatalf("load root instance: %v", err)
+	}
+	if !found {
+		t.Fatal("expected root instance")
+	}
+	if got := strings.TrimSpace(root.CurrentState); got != "done" {
+		rows, _ := db.QueryContext(context.Background(), `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,'') FROM events ORDER BY created_at ASC, event_id ASC`)
+		dump := make([]string, 0)
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var name, entityID, flowInstance string
+				if scanErr := rows.Scan(&name, &entityID, &flowInstance); scanErr == nil {
+					dump = append(dump, name+" entity="+entityID+" flow="+flowInstance)
+				}
+			}
+		}
+		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
+		t.Fatalf("root current_state = %q, want done; events=%v instances=%#v", got, dump, instances)
+	}
+}
+
+func TestEventBusPublish_GatedChildFlowCompletionAdvancesRoot(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-gates-in-child-flow")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	module := newFixtureWorkflowModule(t, bundle)
+	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
+	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return module })
+	t.Cleanup(func() {
+		if previous == nil {
+			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
+			return
+		}
+		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
+	})
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg := &store.PostgresStore{DB: db}
+	var pc *runtimepipeline.PipelineCoordinator
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+
+	const rootEntityID = "11111111-1111-1111-1111-111111111111"
+	if err := runtimepipeline.NewWorkflowInstanceStore(db).Upsert(context.Background(), runtimepipeline.WorkflowInstance{
+		InstanceID:      rootEntityID,
+		SubjectID:       rootEntityID,
+		StorageRef:      rootEntityID,
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"entity_id":  rootEntityID,
+			"subject_id": rootEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed root instance: %v", err)
+	}
+
+	if err := eb.Publish(context.Background(), (events.Event{
+		ID:          "11111111-2222-3333-4444-555555555555",
+		Type:        events.EventType("validate.requested"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"` + rootEntityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(rootEntityID)); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := eb.WaitForQuiescence(context.Background()); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+
+	root, found, err := runtimepipeline.NewWorkflowInstanceStore(db).Load(context.Background(), rootEntityID)
+	if err != nil {
+		t.Fatalf("load root instance: %v", err)
+	}
+	if !found {
+		t.Fatal("expected root instance")
+	}
+	if got := strings.TrimSpace(root.CurrentState); got != "done" {
+		rows, _ := db.QueryContext(context.Background(), `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,''), COALESCE(payload::text,'') FROM events ORDER BY created_at ASC, event_id ASC`)
+		dump := make([]string, 0)
+		if rows != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var name, entityID, flowInstance, payload string
+				if scanErr := rows.Scan(&name, &entityID, &flowInstance, &payload); scanErr == nil {
+					dump = append(dump, name+" entity="+entityID+" flow="+flowInstance+" payload="+payload)
+				}
+			}
+		}
+		instances, _ := runtimepipeline.NewWorkflowInstanceStore(db).List(context.Background())
+		t.Fatalf("root current_state = %q, want done; root metadata=%#v events=%v instances=%#v", got, root.Metadata, dump, instances)
+	}
+}
+
+func TestEventBusPublish_RecordsNestedDescendantLocalizedEvent(t *testing.T) {
+	grandchild := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"micro.done"}},
+			},
+		},
+		Path: "child/grandchild",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"micro.done": {},
+		},
+	}
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"step.result"}},
+			},
+		},
+		Path: "child",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"child-aggregator": {
+				ID:           "child-aggregator",
+				SubscribesTo: []string{"grandchild/micro.done"},
+			},
+		},
+		Children: []runtimecontracts.FlowContractView{grandchild},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child":      &root.Children[0],
+				"grandchild": &root.Children[0].Children[0],
+			},
+		},
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	if err := eb.Publish(ctx, (events.Event{
+		Type: "child/grandchild/micro.done",
+	}).WithEntityID("ent-grandchild")); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	diags := recorder.SnapshotPublishes()
+	if len(diags) != 1 || len(diags[0].RoutedRecipients) != 1 {
+		t.Fatalf("publish diagnostics = %#v", diags)
+	}
+	if got := diags[0].RoutedRecipients[0].LocalizedEvent; got != "grandchild/micro.done" {
+		t.Fatalf("localized_event = %q, want grandchild/micro.done", got)
 	}
 }

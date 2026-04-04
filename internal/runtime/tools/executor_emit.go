@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	models "swarm/internal/runtime/core/actors"
+	"swarm/internal/runtime/core/eventidentity"
 )
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
@@ -126,6 +127,12 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 	if eventType == "" || strings.Contains(eventType, "/") {
 		return eventType
 	}
+	configured := configuredEmitEvents(actor.Config)
+	for _, candidate := range configured {
+		if strings.Contains(candidate, "/") && eventidentity.LeafName(candidate) == eventType {
+			return strings.TrimSpace(candidate)
+		}
+	}
 	flowID := strings.TrimSpace(actor.Mode)
 	if flowID == "" {
 		return eventType
@@ -145,15 +152,12 @@ func (e *Executor) resolveAgentScopedEmitEventType(actor models.AgentConfig, eve
 	if !ok {
 		return eventType
 	}
-	for _, candidate := range scope.OutputEvents {
-		if strings.TrimSpace(candidate) == eventType {
-			return eventType
-		}
+	localEvents := make([]string, 0, len(scope.OutputEvents)+len(scope.Events))
+	localEvents = append(localEvents, scope.OutputEvents...)
+	for candidate := range scope.Events {
+		localEvents = append(localEvents, candidate)
 	}
-	if _, ok := scope.Events[eventType]; ok {
-		return strings.Trim(flowPath+"/"+eventType, "/")
-	}
-	return eventType
+	return eventidentity.ExternalizeForFlow(flowPath, localEvents, eventType)
 }
 
 func configString(raw json.RawMessage, key string) string {

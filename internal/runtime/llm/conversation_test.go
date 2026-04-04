@@ -326,6 +326,39 @@ func TestConversationStep_ContinuesWhenEmitToolFails(t *testing.T) {
 	}
 }
 
+func TestConversationStep_DoesNotExecuteEmitAfterSaveFailureInSameRound(t *testing.T) {
+	rt := &scriptedRuntime{
+		responses: []*Response{{
+			Message: Message{Role: "assistant", Content: "should have stopped after save failure"},
+		}},
+	}
+	te := &selectiveToolExec{
+		results: map[string]any{
+			"emit_spec_draft_ready": map[string]any{"event_id": "evt-1", "status": "published"},
+		},
+		errors: map[string]error{
+			"save_entity_field": errors.New("cross_flow_write_forbidden"),
+		},
+	}
+	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 10, rt)
+	c.SetToolExecutor(te)
+	c.Session = &Session{ID: "sess-1", AgentID: "a1", RuntimeMode: "api"}
+
+	initial := &Response{
+		Message: Message{Role: "assistant", Content: "doing work"},
+		ToolCalls: []ToolCall{
+			{Name: "save_entity_field", Arguments: map[string]any{"field": "mvp_spec"}},
+			{Name: "emit_spec_draft_ready", Arguments: map[string]any{"entity_id": "validation-1"}},
+		},
+	}
+	if _, err := c.resolveToolCalls(context.Background(), initial); err != nil {
+		t.Fatalf("resolveToolCalls error: %v", err)
+	}
+	if len(te.calls) != 1 || te.calls[0] != "save_entity_field" {
+		t.Fatalf("tool calls = %#v, want only save_entity_field", te.calls)
+	}
+}
+
 func TestIsTerminalEmitToolCall(t *testing.T) {
 	for _, tc := range []struct {
 		name string

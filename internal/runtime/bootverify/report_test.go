@@ -175,7 +175,7 @@ func TestRun_MapsEventNoConsumerToNamedWarning(t *testing.T) {
 	if report.HasErrors() {
 		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "event_consumer_exists", "task.completed") {
+	if !reportContains(report.Warnings(), "event_consumer_exists", "orphan.unconsumed") {
 		t.Fatalf("expected event_consumer_exists warning, got %#v", report.Warnings())
 	}
 }

@@ -162,7 +162,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
 
-	if got, want := string(bus.event.Type), "vertical.discovered"; got != want {
+	if got, want := string(bus.event.Type), "discovery/vertical.discovered"; got != want {
 		t.Fatalf("published event type = %q, want %q", got, want)
 	}
 }

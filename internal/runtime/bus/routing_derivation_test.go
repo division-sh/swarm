@@ -179,3 +179,56 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 		t.Fatalf("Resolve(score.dimension_complete) = %#v, want none", got)
 	}
 }
+
+func TestDeriveRouteTable_DescendantSubscriptionsExternalizeWithinParentFlow(t *testing.T) {
+	grandchild := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"micro.done"}},
+			},
+		},
+		Path: "child/grandchild",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"micro.done": {},
+		},
+	}
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"step.begin"}},
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"step.result"}},
+			},
+		},
+		Path: "child",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"child-aggregator": {
+				ID:           "child-aggregator",
+				SubscribesTo: []string{"grandchild/micro.done"},
+			},
+		},
+		Children: []runtimecontracts.FlowContractView{grandchild},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"child":      &root.Children[0],
+				"grandchild": &root.Children[0].Children[0],
+			},
+		},
+	}
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := rt.Resolve("child/grandchild/micro.done")
+	if len(got) != 1 || got[0].ID != "child-aggregator" {
+		t.Fatalf("Resolve(child/grandchild/micro.done) = %#v, want child-aggregator", got)
+	}
+	if got := rt.Resolve("grandchild/micro.done"); len(got) != 0 {
+		t.Fatalf("Resolve(grandchild/micro.done) = %#v, want none", got)
+	}
+}

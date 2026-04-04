@@ -12,6 +12,7 @@ import (
 	runtimecontracts "swarm/internal/runtime/contracts"
 	runtimeengine "swarm/internal/runtime/engine"
 	"swarm/internal/runtime/semanticview"
+	"swarm/internal/testutil"
 )
 
 type recordingPipelineBus struct {
@@ -304,6 +305,68 @@ func TestResolveHandlerEntityIDForRootUsesSubjectEntityForFlowScopedInbound(t *t
 	}
 }
 
+func TestResolveHandlerEntityIDForFlowUsesParentEntityForDescendantScopedInbound(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "step.result"},
+	}
+	const inboundEntityID = "ent-grandchild"
+	const parentEntityID = "ent-child"
+	state := WorkflowState{
+		EntityID: inboundEntityID,
+		Metadata: map[string]any{
+			"flow_path":        "child/grandchild/inst-1",
+			"parent_entity_id": parentEntityID,
+			"subject_id":       "ent-root",
+		},
+	}
+
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, inboundEntityID, events.Event{
+		Type: events.EventType("child/grandchild/micro.done"),
+	}.WithEntityID(inboundEntityID), &state)
+
+	if gotID != parentEntityID {
+		t.Fatalf("entityID = %q, want parent %q", gotID, parentEntityID)
+	}
+	if got := gotEvt.EntityID(); got != inboundEntityID {
+		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
+	}
+	if state.EntityID != parentEntityID {
+		t.Fatalf("state entity_id = %q, want %q", state.EntityID, parentEntityID)
+	}
+}
+
+func TestResolveHandlerEntityIDForFlowDoesNotRetargetSameFlowInstancePath(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Emits: runtimecontracts.EventEmission{Single: "step.result"},
+	}
+	const (
+		entityID = "ent-child"
+		rootID   = "ent-root"
+	)
+	state := WorkflowState{
+		EntityID: entityID,
+		Metadata: map[string]any{
+			"flow_path":        "child/inst-1",
+			"parent_entity_id": rootID,
+			"subject_id":       rootID,
+		},
+	}
+
+	gotID, gotEvt := resolveHandlerEntityIDForFlow(nil, "child", handler, entityID, events.Event{
+		Type: events.EventType("child/grandchild/micro.done"),
+	}.WithEntityID(entityID), &state)
+
+	if gotID != entityID {
+		t.Fatalf("entityID = %q, want %q", gotID, entityID)
+	}
+	if got := gotEvt.EntityID(); got != entityID {
+		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, entityID)
+	}
+	if state.EntityID != entityID {
+		t.Fatalf("state entity_id = %q, want %q", state.EntityID, entityID)
+	}
+}
+
 func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClearsState(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	const inboundEntityID = "ent-parent"
@@ -343,6 +406,19 @@ func TestResolveHandlerEntityIDForFlowCreateEntityKeepsInboundReferenceAndClears
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); got != inboundEntityID {
 		t.Fatalf("state parent_entity_id = %q, want %q", got, inboundEntityID)
+	}
+	instanceID := strings.TrimSpace(asString(state.Metadata["instance_id"]))
+	if instanceID == "" {
+		t.Fatal("state instance_id is empty, want generated logical instance id")
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != "scoring/"+instanceID {
+		t.Fatalf("state flow_path = %q, want %q", got, "scoring/"+instanceID)
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring/"+instanceID {
+		t.Fatalf("state storage_ref = %q, want %q", got, "scoring/"+instanceID)
+	}
+	if wantEntityID := FlowInstanceEntityID("scoring/" + instanceID); gotID != wantEntityID {
+		t.Fatalf("entityID = %q, want persisted flow entity id %q", gotID, wantEntityID)
 	}
 }
 
@@ -459,6 +535,102 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 	}
 	if got := payload["label"]; got != "done" {
 		t.Fatalf("payload.label = %#v, want done", got)
+	}
+}
+
+func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionAdvancesParentFlow(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("expected workflow fixture bundle")
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	store := NewWorkflowInstanceStore(db)
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		db:             db,
+		module:         module,
+		workflowStore:  store,
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+
+	const (
+		rootEntityID = "11111111-1111-1111-1111-111111111111"
+	)
+	childEntityID := FlowInstanceEntityID("child/inst-1")
+	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childEntityID,
+		SubjectID:       rootEntityID,
+		StorageRef:      "child/inst-1",
+		WorkflowName:    "child",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "waiting",
+		Metadata: map[string]any{
+			"entity_id":        childEntityID,
+			"flow_path":        "child/inst-1",
+			"subject_id":       rootEntityID,
+			"parent_entity_id": rootEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed child instance: %v", err)
+	}
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      grandchildEntityID,
+		SubjectID:       rootEntityID,
+		StorageRef:      "child/grandchild/inst-1",
+		WorkflowName:    "grandchild",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "finished",
+		Metadata: map[string]any{
+			"entity_id":        grandchildEntityID,
+			"flow_path":        "child/grandchild/inst-1",
+			"subject_id":       rootEntityID,
+			"parent_entity_id": childEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed grandchild instance: %v", err)
+	}
+	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", (events.Event{
+		Type: events.EventType("child/grandchild/micro.done"),
+	}).WithEntityID(grandchildEntityID)); !handled {
+		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
+	}
+
+	handled, err := pc.dispatchWorkflowNodeEventResult(context.Background(), events.Event{
+		Type: events.EventType("child/grandchild/micro.done"),
+	}.WithEntityID(grandchildEntityID))
+	if err != nil {
+		t.Fatalf("executeNodeHandlerPlanResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handler to execute")
+	}
+	child, found, err := store.Load(context.Background(), childEntityID)
+	if err != nil {
+		t.Fatalf("load child instance: %v", err)
+	}
+	if !found {
+		t.Fatal("expected child instance")
+	}
+	if got := strings.TrimSpace(child.CurrentState); got != "completed" {
+		t.Fatalf("child current_state = %q, want completed", got)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("published count = %d, want 1", got)
+	}
+	if got := string(bus.publishedEvent(0).Type); got != "child/step.result" {
+		t.Fatalf("published type = %q, want child/step.result", got)
+	}
+	if got := bus.publishedEvent(0).EntityID(); got != rootEntityID {
+		t.Fatalf("published entity_id = %q, want %q", got, rootEntityID)
 	}
 }
 

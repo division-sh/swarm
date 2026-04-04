@@ -145,14 +145,32 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		if err != nil {
 			return fmt.Errorf("encode auto-emit payload %s: %w", autoEmit, err)
 		}
-		if err := am.bus.Publish(ctx, (events.Event{
+		autoEmitEvent := (events.Event{
 			ID:          uuid.NewString(),
 			Type:        events.EventType(eventType),
 			SourceAgent: "flow-instance-activator",
 			Payload:     encoded,
 			CreatedAt:   time.Now().UTC(),
-		}).WithEntityID(flowEntityID)); err != nil {
-			return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+		}).WithEntityID(flowEntityID)
+		publishAutoEmit := func() {
+			if err := am.bus.Publish(context.Background(), autoEmitEvent); err != nil {
+				am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+					Level:     "warn",
+					Component: "flow_activation",
+					Action:    "auto_emit_failed",
+					EventType: autoEmit,
+					EntityID:  flowEntityID,
+					Detail: map[string]any{
+						"flow_path": flowPath,
+					},
+					Error: err.Error(),
+				})
+			}
+		}
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, publishAutoEmit) {
+			if err := am.bus.Publish(ctx, autoEmitEvent); err != nil {
+				return fmt.Errorf("auto-emit %s: %w", autoEmit, err)
+			}
 		}
 	}
 	return nil

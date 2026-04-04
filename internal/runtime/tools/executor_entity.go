@@ -13,6 +13,7 @@ import (
 	"github.com/google/cel-go/common/types"
 	"github.com/google/uuid"
 	models "swarm/internal/runtime/core/actors"
+	runtimemutationlog "swarm/internal/runtime/mutationlog"
 	"swarm/internal/runtime/semanticview"
 )
 
@@ -131,8 +132,32 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 	if err != nil {
 		return nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_save_entity_field.value", false, err, "marshal value")
 	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.begin", true, err, "begin save entity field tx")
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var oldValue []byte
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(fields -> $2, 'null'::jsonb)
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+		FOR UPDATE
+	`, entityID, fieldName).Scan(&oldValue); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, NewRuntimeError("not_found", "tool-executor", "exec_save_entity_field.lookup", false, "entity %s not found", entityID)
+		}
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.lookup", true, err, "load current entity field %s", fieldName)
+	}
+
 	var revision int
-	if err := db.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 		UPDATE entity_state
 		SET
 			fields = jsonb_set(COALESCE(fields, '{}'::jsonb), ARRAY[$2], $3::jsonb, true),
@@ -141,16 +166,36 @@ func (e *Executor) execSaveEntityField(ctx context.Context, actor models.AgentCo
 		WHERE entity_id = $1::uuid
 		RETURNING revision
 	`, entityID, fieldName, string(valueJSON)).Scan(&revision); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, NewRuntimeError("not_found", "tool-executor", "exec_save_entity_field.update", false, "entity %s not found", entityID)
-		}
 		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.update", true, err, "save entity field %s", fieldName)
 	}
+	if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
+		EntityID:    entityID,
+		Field:       fieldName,
+		OldValue:    nullableJSONBytes(oldValue),
+		NewValue:    json.RawMessage(valueJSON),
+		WriterType:  "agent",
+		WriterID:    strings.TrimSpace(actor.ID),
+		HandlerStep: "save_entity_field",
+	}); err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.mutation_log", true, err, "record entity mutation %s", fieldName)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, WrapRuntimeError("write_failed", "tool-executor", "exec_save_entity_field.commit", true, err, "commit save entity field")
+	}
+	committed = true
 	return map[string]any{
 		"entity_id": entityID,
 		"field":     fieldName,
 		"revision":  revision,
 	}, nil
+}
+
+func nullableJSONBytes(raw []byte) any {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	return json.RawMessage(append([]byte(nil), raw...))
 }
 
 func enforceEntityWriteOwnership(ctx context.Context, db *sql.DB, source semanticview.Source, actor models.AgentConfig, entityID string) error {

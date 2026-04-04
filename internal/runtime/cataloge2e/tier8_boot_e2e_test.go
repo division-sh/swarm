@@ -64,7 +64,7 @@ var tier8SupportedFixtures = []string{
 var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{}
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
+	relaxCatalogFixtureBootStrictness(t)
 
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier8SupportedFixtures {
@@ -91,7 +91,7 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 				if len(report.Warnings()) > 0 {
 					t.Fatalf("expected clean boot warnings=[], got %#v", report.Warnings())
 				}
-				rt, err := newTier8Runtime(bundle)
+				rt, err := newTier8Runtime(t, bundle)
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
@@ -103,7 +103,7 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 				if !findingsContain(report.Warnings(), expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
 					t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
 				}
-				rt, err := newTier8Runtime(bundle)
+				rt, err := newTier8Runtime(t, bundle)
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
@@ -113,7 +113,7 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 					t.Fatal("expected validation error")
 				}
 				assertBootErrorMatches(t, findingsError(report.Errors()), expected)
-				if _, err := newTier8Runtime(bundle); err == nil {
+				if _, err := newTier8Runtime(t, bundle); err == nil {
 					t.Fatal("expected NewRuntime to fail for invalid boot fixture")
 				} else {
 					assertBootErrorMatches(t, err, expected)
@@ -160,7 +160,9 @@ func TestTier8BootCatalogFixtures_AreExplicitlyClassified(t *testing.T) {
 	}
 }
 
-func newTier8Runtime(bundle *runtimecontracts.WorkflowContractBundle) (*runtime.Runtime, error) {
+func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) (*runtime.Runtime, error) {
+	t.Helper()
+	relaxCatalogFixtureBootStrictness(t)
 	module, err := newFixtureWorkflowModule(bundle)
 	if err != nil {
 		return nil, err

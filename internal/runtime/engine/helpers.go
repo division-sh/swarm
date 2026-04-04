@@ -6,8 +6,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types/ref"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/core/identity"
@@ -16,6 +19,12 @@ import (
 )
 
 const handlerAccumulatorBucketKey = "handler_accumulators"
+
+var (
+	dataExpressionEnvOnce sync.Once
+	dataExpressionEnv     *cel.Env
+	dataExpressionEnvErr  error
+)
 
 type Accumulator struct {
 	Expected       []string         `json:"expected,omitempty"`
@@ -242,6 +251,14 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 			snapshot.SetMetadata(target, write.Value.Literal)
 			continue
 		}
+		if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
+			if value, err := evalDataAccumulationExpression(base, state, expr); err == nil {
+				snapshot.SetMetadata(target, value)
+				continue
+			}
+			snapshot.SetMetadata(target, resolveRefOrLiteral(base, state, expr))
+			continue
+		}
 		source := strings.TrimSpace(write.Source())
 		if source != "" {
 			if value, ok := resolveContractPath(base, state, write.SourcePath, source); ok {
@@ -249,14 +266,82 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 				continue
 			}
 		}
-		if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
-			snapshot.SetMetadata(target, resolveRefOrLiteral(base, state, expr))
-		}
 	}
 	if sourceEvent := strings.TrimSpace(spec.SourceEvent); sourceEvent != "" {
 		snapshot.SetMetadata("last_data_accumulation_source", sourceEvent)
 	}
 }
+
+func evalDataAccumulationExpression(base BaseContext, state ExecutionState, expression string) (any, error) {
+	env, err := dataAccumulationEnv()
+	if err != nil {
+		return nil, err
+	}
+	ast, issues := env.Compile(strings.TrimSpace(expression))
+	if issues != nil && issues.Err() != nil {
+		return nil, issues.Err()
+	}
+	program, err := env.Program(ast)
+	if err != nil {
+		return nil, err
+	}
+	out, _, err := program.Eval(map[string]any{
+		"entity":      cloneStringAnyMap(base.Entity.Raw()),
+		"payload":     cloneStringAnyMap(base.Payload.Raw()),
+		"policy":      cloneStringAnyMap(base.Policy.Raw()),
+		"metadata":    cloneStringAnyMap(base.Metadata.Raw()),
+		"gates":       cloneStringAnyMap(base.Gates.Raw()),
+		"accumulated": cloneStringAnyMap(state.Accumulated),
+		"fan_out":     cloneStringAnyMap(state.FanOut),
+		"computed":    cloneStringAnyMap(state.Computed),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return normalizeCELValue(out), nil
+}
+
+func dataAccumulationEnv() (*cel.Env, error) {
+	dataExpressionEnvOnce.Do(func() {
+		dataExpressionEnv, dataExpressionEnvErr = cel.NewEnv(
+			cel.Variable("entity", cel.DynType),
+			cel.Variable("payload", cel.DynType),
+			cel.Variable("policy", cel.DynType),
+			cel.Variable("metadata", cel.DynType),
+			cel.Variable("gates", cel.DynType),
+			cel.Variable("accumulated", cel.DynType),
+			cel.Variable("fan_out", cel.DynType),
+			cel.Variable("computed", cel.DynType),
+		)
+	})
+	return dataExpressionEnv, dataExpressionEnvErr
+}
+
+func normalizeCELValue(value any) any {
+	switch typed := value.(type) {
+	case nil:
+		return nil
+	case ref.Val:
+		return normalizeCELValue(typed.Value())
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, normalizeCELValue(item))
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = normalizeCELValue(item)
+		}
+		return out
+	case int64:
+		return int(typed)
+	default:
+		return typed
+	}
+}
+
 
 func payloadTransform(base BaseContext, state ExecutionState, spec *runtimecontracts.PayloadTransformSpec) map[string]any {
 	if spec == nil {

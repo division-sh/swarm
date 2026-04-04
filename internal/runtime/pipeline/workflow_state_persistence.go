@@ -139,6 +139,16 @@ func (pc *PipelineCoordinator) projectWorkflowSubjectGates(ctx context.Context, 
 		return nil
 	}
 	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	scopeKey := ""
+	if workflowName := strings.TrimSpace(instance.WorkflowName); workflowName != "" {
+		scopeKey = strings.TrimSpace(workflowScopeKey(pc.SemanticSource(), workflowName))
+	}
+	if scopeKey == "" {
+		scopeKey = flowPath
+		if idx := strings.Index(scopeKey, "/"); idx > 0 {
+			scopeKey = strings.TrimSpace(scopeKey[:idx])
+		}
+	}
 	if flowPath == "" {
 		flowID := strings.TrimSpace(pipelineFlowScope(ctx))
 		if flowID != "" {
@@ -150,10 +160,13 @@ func (pc *PipelineCoordinator) projectWorkflowSubjectGates(ctx context.Context, 
 			}
 		}
 	}
-	if flowPath == "" {
+	if scopeKey == "" {
+		scopeKey = flowPath
+	}
+	if scopeKey == "" {
 		return nil
 	}
-	prefix := flowPath + "/"
+	prefix := strings.Trim(scopeKey, "/") + "/"
 	scoped := map[string]bool{}
 	for key, value := range workflowStateGatesAsBools(instance.Metadata) {
 		if strings.HasPrefix(strings.TrimSpace(key), prefix) {

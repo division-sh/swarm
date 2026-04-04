@@ -187,6 +187,24 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if nodeID == "" {
 		return contractHandlerExecutionResult{}, nil
 	}
+	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
+	entityID := strings.TrimSpace(firstNonEmptyString(
+		workflowEventEntityID(triggerCtx.Event),
+		triggerCtx.State.EntityID,
+	))
+	originalEntityID := entityID
+	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
+	source := pc.SemanticSource()
+	entityID, triggerCtx.Event = resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
+	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
+		triggerCtx.State = pc.currentWorkflowState(ctx, entityID)
+		if strings.TrimSpace(triggerCtx.State.EntityID) == "" {
+			triggerCtx.State.EntityID = entityID
+		}
+	}
+	if !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
+		triggerCtx.State.EntityID = entityID
+	}
 	if terminalStateHandlerRejected(pc, triggerCtx.State, handler) {
 		outcome := &handlerExecutionOutcome{
 			Status:          HandlerOutcomeTerminalReject,
@@ -201,13 +219,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Handled:         true,
 		}, nil
 	}
-	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
-	entityID := strings.TrimSpace(firstNonEmptyString(
-		workflowEventEntityID(triggerCtx.Event),
-		triggerCtx.State.EntityID,
-	))
-	source := pc.SemanticSource()
-	entityID, triggerCtx.Event = resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
 	var (
 		parentEventCollector *[]events.Event
 		collectLocally       bool
@@ -281,7 +292,15 @@ func resolveHandlerEntityIDForFlow(
 	entityID = strings.TrimSpace(entityID)
 	if handler.CreateEntity {
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
-		newEntityID := uuid.NewString()
+		instanceID := uuid.NewString()
+		newEntityID := instanceID
+		flowPath := ""
+		if strings.TrimSpace(flowID) != "" {
+			flowPath = strings.TrimSpace(DeriveFlowInstancePath(source, flowID, instanceID))
+			if flowPath != "" {
+				newEntityID = FlowInstanceEntityID(flowPath)
+			}
+		}
 		subjectID := ""
 		if state != nil && state.Metadata != nil {
 			subjectID = strings.TrimSpace(asString(state.Metadata["subject_id"]))
@@ -298,6 +317,11 @@ func resolveHandlerEntityIDForFlow(
 			state.Stage = ""
 			state.Status = ""
 			state.Metadata = map[string]any{"subject_id": subjectID}
+			if flowPath != "" {
+				state.Metadata["flow_path"] = flowPath
+				state.Metadata["storage_ref"] = flowPath
+			}
+			state.Metadata["instance_id"] = instanceID
 			if sourceEntityID != "" {
 				state.Metadata["parent_entity_id"] = sourceEntityID
 			}
@@ -305,6 +329,25 @@ func resolveHandlerEntityIDForFlow(
 		return entityID, evt
 	}
 	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
+	if flowID != "" && state != nil {
+		currentFlowPath := strings.Trim(strings.TrimSpace(flowID), "/")
+		if source != nil {
+			if resolved := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); resolved != "" {
+				currentFlowPath = resolved
+			}
+		}
+		inboundFlowPath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
+		if currentFlowPath != "" && inboundFlowPath != "" && inboundFlowPath != currentFlowPath &&
+			strings.HasPrefix(inboundFlowPath, currentFlowPath+"/") {
+			remainder := strings.Trim(strings.TrimPrefix(inboundFlowPath, currentFlowPath+"/"), "/")
+			if strings.Contains(remainder, "/") {
+				if parentEntityID := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); parentEntityID != "" {
+					entityID = parentEntityID
+					state.EntityID = parentEntityID
+				}
+			}
+		}
+	}
 	if strings.TrimSpace(flowID) == "" && state != nil {
 		subjectID := strings.TrimSpace(asString(state.Metadata["subject_id"]))
 		if subjectID != "" && subjectID != entityID {

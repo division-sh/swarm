@@ -76,6 +76,8 @@ func TestTier11Probe(t *testing.T) {
 						"child/task.done",
 						"child/work.completed",
 						"analyzer-flow/analysis.done",
+						"child/grandchild/micro.done",
+						"child/step.result",
 						"flow-a/alpha.complete",
 						"child/child.done",
 					} {
@@ -101,6 +103,26 @@ func TestTier11Probe(t *testing.T) {
 				}
 			}
 			t.Logf("events=%v", eventsDump)
+			var runtimeLogs []string
+			logRows, err := h.db.QueryContext(context.Background(), `
+				SELECT COALESCE(payload->>'component',''),
+				       COALESCE(payload->>'action',''),
+				       COALESCE(payload->>'error',''),
+				       COALESCE(payload->>'detail','')
+				FROM events
+				WHERE event_name = 'platform.runtime_log'
+				ORDER BY created_at ASC, event_id ASC
+			`)
+			if err == nil {
+				defer logRows.Close()
+				for logRows.Next() {
+					var component, action, errText, detail string
+					if scanErr := logRows.Scan(&component, &action, &errText, &detail); scanErr == nil {
+						runtimeLogs = append(runtimeLogs, component+":"+action+" error="+errText+" detail="+detail)
+					}
+				}
+			}
+			t.Logf("runtime_logs=%v", runtimeLogs)
 			var receipts []string
 			receiptRows, err := h.db.QueryContext(context.Background(), `
 				SELECT subscriber_type, subscriber_id, outcome, COALESCE(flow_instance,''), COALESCE(entity_id::text,'')

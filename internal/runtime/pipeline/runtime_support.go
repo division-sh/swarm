@@ -333,6 +333,10 @@ func queuePipelinePostCommitAction(ctx context.Context, fn func()) bool {
 	return true
 }
 
+func QueuePipelinePostCommitAction(ctx context.Context, fn func()) bool {
+	return queuePipelinePostCommitAction(ctx, fn)
+}
+
 func flushPipelinePostCommitActions(actions []func()) {
 	for _, fn := range actions {
 		if fn != nil {

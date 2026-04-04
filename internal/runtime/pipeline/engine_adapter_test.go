@@ -312,6 +312,71 @@ func TestProjectWorkflowSubjectGatesFallsBackToFlowScopeWhenChildMetadataHasNoFl
 	}
 }
 
+func TestProjectWorkflowSubjectGatesUsesFlowScopeKeyForInstancedChildPaths(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	subjectID := "11111111-1111-1111-1111-111111111111"
+	childEntityID := FlowInstanceEntityID("child/inst-1")
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      subjectID,
+		SubjectID:       subjectID,
+		StorageRef:      subjectID,
+		WorkflowName:    "root",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "idle",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+		},
+	}); err != nil {
+		t.Fatalf("upsert subject: %v", err)
+	}
+	if err := store.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childEntityID,
+		SubjectID:       subjectID,
+		StorageRef:      "child/inst-1",
+		WorkflowName:    "child",
+		WorkflowVersion: "1.6.0",
+		CurrentState:    "done",
+		Metadata: map[string]any{
+			"subject_id": subjectID,
+			"flow_path":  "child/inst-1",
+			"gates": map[string]any{
+				"child/g_validated": true,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert child: %v", err)
+	}
+
+	pc := &PipelineCoordinator{
+		workflowStore: store,
+		module: &previewWorkflowModule{
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				Semantics: runtimecontracts.WorkflowSemanticView{
+					FlowPrefix: map[string]string{
+						"child": "child",
+					},
+				},
+			},
+		},
+	}
+	if err := pc.projectWorkflowSubjectGates(context.Background(), childEntityID); err != nil {
+		t.Fatalf("projectWorkflowSubjectGates: %v", err)
+	}
+
+	subject, ok, err := store.Load(context.Background(), subjectID)
+	if err != nil {
+		t.Fatalf("load subject: %v", err)
+	}
+	if !ok {
+		t.Fatal("subject entity missing after projection")
+	}
+	gates := workflowStateGatesAsBools(subject.Metadata)
+	if !gates["child/g_validated"] {
+		t.Fatalf("subject gates missing projected child gate from instanced flow path: %#v", gates)
+	}
+}
+
 func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{

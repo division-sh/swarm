@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
+	runtimemutationlog "swarm/internal/runtime/mutationlog"
 )
 
 type SchedulePersistence interface {
@@ -334,16 +335,27 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 }
 
 func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	committed := !ownedTx
+	if ownedTx {
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+	}
+
+	var previousState sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT current_state
+		FROM entity_state
+		WHERE entity_id = $1::uuid
+	`, rowID).Scan(&previousState); err != nil && err != sql.ErrNoRows {
+		return err
+	}
 
 	metadata := cloneStringAnyMap(instance.Metadata)
 	config := workflowInstanceConfigPayload(instance, storageRef)
@@ -412,6 +424,19 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	); err != nil {
 		return err
 	}
+	if strings.TrimSpace(previousState.String) != strings.TrimSpace(instance.CurrentState) {
+		if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
+			EntityID:    rowID,
+			Field:       "current_state",
+			OldValue:    nullStringValue(previousState),
+			NewValue:    strings.TrimSpace(instance.CurrentState),
+			WriterType:  "platform",
+			WriterID:    "workflow_instance_store",
+			HandlerStep: "current_state",
+		}); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM timers WHERE entity_id = $1::uuid AND flow_instance = $2`, rowID, storageRef); err != nil {
 		return err
 	}
@@ -443,24 +468,35 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return err
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		committed = true
 	}
-	committed = true
 	return nil
 }
 
+func nullStringValue(v sql.NullString) any {
+	if !v.Valid {
+		return nil
+	}
+	return strings.TrimSpace(v.String)
+}
+
 func (s *WorkflowInstanceStore) deleteSpec(ctx context.Context, keys []string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
 	if err != nil {
 		return err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
+	committed := !ownedTx
+	if ownedTx {
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(flow_instance, '') FROM entity_state WHERE entity_id = ANY($1::uuid[])`, pqStringArray(keys))
 	if err != nil {
 		return err
@@ -492,11 +528,24 @@ func (s *WorkflowInstanceStore) deleteSpec(ctx context.Context, keys []string) e
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return err
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		committed = true
 	}
-	committed = true
 	return nil
+}
+
+func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, error) {
+	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
+		return tx, false, nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	return tx, true, nil
 }
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {

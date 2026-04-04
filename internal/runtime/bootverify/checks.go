@@ -1344,10 +1344,19 @@ func eventRefProducedLocal(source semanticview.Source, ref eventRefLocal, emitte
 }
 
 func flowOutputBoundaryLocal(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
-	if flowID == "" || eventType == "" {
+	if eventType == "" {
 		return false
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
+			for _, output := range bundle.RootSchema.Pins.Outputs.Events {
+				if strings.TrimSpace(output) == eventType {
+					return true
+				}
+			}
+		}
 	}
 	for _, output := range source.FlowOutputEvents(flowID) {
 		if strings.TrimSpace(output) == eventType {

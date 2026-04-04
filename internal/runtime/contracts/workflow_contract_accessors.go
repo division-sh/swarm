@@ -433,8 +433,8 @@ func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (Sys
 		return SystemNodeEventHandler{}, false
 	}
 	nodeID = strings.TrimSpace(nodeID)
-	eventType = strings.TrimSpace(eventType)
-	eventType = b.localizeNodeEventType(nodeID, eventType)
+	rawEventType := strings.TrimSpace(eventType)
+	eventType = b.localizeNodeEventType(nodeID, rawEventType)
 	handlers, ok := b.Semantics.NodeHandlers[nodeID]
 	if !ok {
 		return SystemNodeEventHandler{}, false
@@ -442,9 +442,21 @@ func (b *WorkflowContractBundle) NodeEventHandler(nodeID, eventType string) (Sys
 	if handler, ok := handlers[eventType]; ok {
 		return b.externalizeNodeHandler(nodeID, handler), true
 	}
+	if rawEventType != "" && rawEventType != eventType {
+		if handler, ok := handlers[rawEventType]; ok {
+			return b.externalizeNodeHandler(nodeID, handler), true
+		}
+	}
 	for pattern, handler := range handlers {
 		if handlerPatternMatches(pattern, eventType) {
 			return b.externalizeNodeHandler(nodeID, handler), true
+		}
+	}
+	if rawEventType != "" && rawEventType != eventType {
+		for pattern, handler := range handlers {
+			if handlerPatternMatches(pattern, rawEventType) {
+				return b.externalizeNodeHandler(nodeID, handler), true
+			}
 		}
 	}
 	return SystemNodeEventHandler{}, false
@@ -453,16 +465,26 @@ func (b *WorkflowContractBundle) RuntimeEventOwners(eventType string) []string {
 	if b == nil {
 		return nil
 	}
-	eventType = strings.TrimSpace(eventType)
-	owners := append([]string{}, b.Semantics.EventOwners[eventType]...)
+	rawEventType := strings.TrimSpace(eventType)
+	owners := append([]string{}, b.Semantics.EventOwners[rawEventType]...)
 	for nodeID, handlers := range b.Semantics.NodeHandlers {
-		localEventType := b.localizeNodeEventType(nodeID, eventType)
+		localEventType := b.localizeNodeEventType(nodeID, rawEventType)
 		if _, ok := handlers[localEventType]; ok {
 			owners = appendIfMissingString(owners, nodeID)
 			continue
 		}
+		if rawEventType != "" && rawEventType != localEventType {
+			if _, ok := handlers[rawEventType]; ok {
+				owners = appendIfMissingString(owners, nodeID)
+				continue
+			}
+		}
 		for pattern := range handlers {
 			if handlerPatternMatches(pattern, localEventType) {
+				owners = appendIfMissingString(owners, nodeID)
+				break
+			}
+			if rawEventType != "" && rawEventType != localEventType && handlerPatternMatches(pattern, rawEventType) {
 				owners = appendIfMissingString(owners, nodeID)
 				break
 			}

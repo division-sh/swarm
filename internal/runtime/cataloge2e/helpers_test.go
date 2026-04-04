@@ -104,6 +104,14 @@ func testRuntimeConfig() *config.Config {
 	}
 }
 
+func relaxCatalogFixtureBootStrictness(t testing.TB) {
+	t.Helper()
+	if setter, ok := any(t).(interface{ Setenv(string, string) }); ok {
+		setter.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
+		setter.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
+	}
+}
+
 type fixtureWorkflowModule struct {
 	source         semanticview.Source
 	workflow       *runtimepipeline.WorkflowDefinition

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -522,5 +523,252 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	}
 	if len(emitted) != 1 || string(emitted[0].Type) != "job.done" {
 		t.Fatalf("emitted = %#v, want [job.done]", emitted)
+	}
+}
+
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionEmitsParentFlowResult(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	const rootEntityID = "11111111-1111-1111-1111-111111111111"
+	childEntityID := FlowInstanceEntityID("child/inst-1")
+	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childEntityID,
+		SubjectID:       rootEntityID,
+		StorageRef:      "child/inst-1",
+		WorkflowName:    "child",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "waiting",
+		Metadata: map[string]any{
+			"entity_id":        childEntityID,
+			"flow_path":        "child/inst-1",
+			"subject_id":       rootEntityID,
+			"parent_entity_id": rootEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed child instance: %v", err)
+	}
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      grandchildEntityID,
+		SubjectID:       rootEntityID,
+		StorageRef:      "child/grandchild/inst-1",
+		WorkflowName:    "grandchild",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "finished",
+		Metadata: map[string]any{
+			"entity_id":        grandchildEntityID,
+			"flow_path":        "child/grandchild/inst-1",
+			"subject_id":       rootEntityID,
+			"parent_entity_id": childEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed grandchild instance: %v", err)
+	}
+
+	passThrough, emitted, err := pc.Intercept(context.Background(), (events.Event{
+		ID:          "evt-nested-done",
+		Type:        events.EventType("child/grandchild/micro.done"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"` + grandchildEntityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(grandchildEntityID))
+	if err != nil {
+		t.Fatalf("Intercept: %v", err)
+	}
+	if !passThrough {
+		t.Fatal("expected nested descendant completion to remain visible downstream")
+	}
+	if len(emitted) != 1 || string(emitted[0].Type) != "child/step.result" {
+		t.Fatalf("emitted = %#v, want [child/step.result]", emitted)
+	}
+	if got := emitted[0].EntityID(); got != rootEntityID {
+		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
+	}
+
+	child, found, err := pc.workflowStore.Load(context.Background(), childEntityID)
+	if err != nil {
+		t.Fatalf("load child instance: %v", err)
+	}
+	if !found {
+		t.Fatal("expected child instance")
+	}
+	if got := strings.TrimSpace(child.CurrentState); got != "completed" {
+		t.Fatalf("child current_state = %q, want completed", got)
+	}
+}
+
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedToParentStillEmitsRootResult(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	const (
+		rootEntityID  = "11111111-1111-1111-1111-111111111111"
+		childRowID    = "dd7e0cdc-de71-508b-bd31-f4a4d901fd52"
+		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
+	)
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      rootEntityID,
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "idle",
+	}); err != nil {
+		t.Fatalf("seed root instance: %v", err)
+	}
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childRowID,
+		SubjectID:       rootEntityID,
+		StorageRef:      childFlowPath,
+		WorkflowName:    "child",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "waiting",
+		Metadata: map[string]any{
+			"entity_id":        childRowID,
+			"flow_path":        childFlowPath,
+			"subject_id":       rootEntityID,
+			"parent_entity_id": rootEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed child instance: %v", err)
+	}
+	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", (events.Event{
+		Type: events.EventType("child/grandchild/micro.done"),
+	}).WithEntityID(childRowID)); !handled {
+		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, want handled", handled, consume)
+	}
+
+	passThrough, emitted, err := pc.Intercept(context.Background(), (events.Event{
+		ID:          "evt-nested-done-parent-targeted",
+		Type:        events.EventType("child/grandchild/micro.done"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"` + childRowID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(childRowID))
+	if err != nil {
+		t.Fatalf("Intercept: %v", err)
+	}
+	if !passThrough {
+		t.Fatal("expected nested descendant completion to remain visible downstream")
+	}
+	if len(emitted) != 1 || string(emitted[0].Type) != "child/step.result" {
+		t.Fatalf("emitted = %#v, want [child/step.result]", emitted)
+	}
+	if got := emitted[0].EntityID(); got != rootEntityID {
+		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
+	}
+}
+
+func TestPipelineCoordinatorIntercept_NestedDescendantCompletionInsideOuterSQLTxStillEmitsRootResult(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("load bundle: %v", err)
+	}
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module: module,
+	})
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	const (
+		rootEntityID  = "11111111-1111-1111-1111-111111111111"
+		childRowID    = "dd7e0cdc-de71-508b-bd31-f4a4d901fd52"
+		childFlowPath = "child/9c38251c-4fba-4a18-9afc-774ede7cc866"
+	)
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      rootEntityID,
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "idle",
+	}); err != nil {
+		t.Fatalf("seed root instance: %v", err)
+	}
+	if err := pc.workflowStore.Upsert(context.Background(), WorkflowInstance{
+		InstanceID:      childRowID,
+		SubjectID:       rootEntityID,
+		StorageRef:      childFlowPath,
+		WorkflowName:    "child",
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "waiting",
+		Metadata: map[string]any{
+			"entity_id":        childRowID,
+			"flow_path":        childFlowPath,
+			"subject_id":       rootEntityID,
+			"parent_entity_id": rootEntityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed child instance: %v", err)
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	ctx := WithPipelineSQLTxContext(context.Background(), tx)
+
+	passThrough, emitted, err := pc.Intercept(ctx, (events.Event{
+		ID:          "evt-nested-done-tx",
+		Type:        events.EventType("child/grandchild/micro.done"),
+		SourceAgent: "cataloge2e",
+		Payload:     []byte(`{"entity_id":"` + childRowID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(childRowID))
+	if err != nil {
+		t.Fatalf("Intercept: %v", err)
+	}
+	if !passThrough {
+		t.Fatal("expected nested descendant completion to remain visible downstream")
+	}
+	if len(emitted) != 1 || string(emitted[0].Type) != "child/step.result" {
+		t.Fatalf("emitted = %#v, want [child/step.result]", emitted)
+	}
+	if got := emitted[0].EntityID(); got != rootEntityID {
+		t.Fatalf("emitted entity_id = %q, want %q", got, rootEntityID)
 	}
 }
