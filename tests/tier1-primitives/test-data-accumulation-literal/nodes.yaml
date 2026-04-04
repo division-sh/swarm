@@ -7,7 +7,7 @@ test-node:
     item.received:
       data_accumulation:
         writes:
-          - source_field: category
+          - target_field: category
             value: "premium"
         source_event: item.received
       advances_to: done

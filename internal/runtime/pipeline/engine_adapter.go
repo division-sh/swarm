@@ -27,14 +27,11 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		return false, runtimeengine.ErrNotImplemented
 	}
 	queryCtx := workflowExpressionContext{
-		Entity:  cloneStringAnyMap(ctx.Entity.Raw()),
-		Payload: cloneStringAnyMap(ctx.Payload.Raw()),
-		Policy:  cloneStringAnyMap(ctx.Policy.Raw()),
-		Vars: map[string]any{
-			"metadata":    cloneStringAnyMap(ctx.Metadata.Raw()),
-			"accumulated": accumulatedItemsForCEL(ctx.Accumulated.Raw()),
-			"fan_out":     cloneStringAnyMap(ctx.FanOut.Raw()),
-		},
+		Entity:      cloneStringAnyMap(ctx.Entity.Raw()),
+		Payload:     cloneStringAnyMap(ctx.Payload.Raw()),
+		Policy:      cloneStringAnyMap(ctx.Policy.Raw()),
+		Accumulated: accumulatedItemsForCEL(ctx.Accumulated.Raw()),
+		FanOut:      cloneStringAnyMap(ctx.FanOut.Raw()),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
@@ -47,7 +44,7 @@ func accumulatedItemsForCEL(raw map[string]any) any {
 		return []any{}
 	}
 	if items, ok := raw["items"].([]any); ok {
-		return append([]any(nil), items...)
+		return cloneAccumulatedItems(items)
 	}
 	if items, ok := raw["items"].([]map[string]any); ok {
 		out := make([]any, 0, len(items))
@@ -55,18 +52,6 @@ func accumulatedItemsForCEL(raw map[string]any) any {
 			out = append(out, cloneStringAnyMap(item))
 		}
 		return out
-	}
-	if items, ok := raw["items"]; ok {
-		return items
-	}
-	for _, value := range raw {
-		item, ok := value.(map[string]any)
-		if !ok {
-			continue
-		}
-		if nested, ok := item["items"]; ok {
-			return nested
-		}
 	}
 	return []any{}
 }

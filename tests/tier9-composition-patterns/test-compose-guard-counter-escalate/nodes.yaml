@@ -10,5 +10,7 @@ retrier:
         check: "entity.retry_count < policy.max_retries"
         on_fail: "escalate:limit.reached"
       data_accumulation:
-        retry_count: "entity.retry_count + 1"
+        writes:
+          - target_field: retry_count
+            expression: entity.retry_count + 1
       emits: retry.dispatched

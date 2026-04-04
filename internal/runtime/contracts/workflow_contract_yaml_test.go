@@ -147,12 +147,12 @@ store_as: entity.grouped
 func TestWorkflowDataWriteDecode_TreatsScalarValueAsLiteral(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := yaml.Unmarshal([]byte(`
-source_field: category
+target_field: category
 value: premium
 `), &write); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got := write.SourceField; got != "category" {
+	if got := write.SourceField; got != "" {
 		t.Fatalf("SourceField = %q", got)
 	}
 	if got := write.Target(); got != "category" {
@@ -166,16 +166,19 @@ value: premium
 	}
 }
 
-func TestWorkflowDataAccumulationDecode_PreservesShorthandWrites(t *testing.T) {
+func TestWorkflowDataAccumulationDecode_PreservesCanonicalWriteForms(t *testing.T) {
 	var spec WorkflowDataAccumulation
 	if err := yaml.Unmarshal([]byte(`
-stage_one_result: payload.result
-resolution_method: "first"
-dispatch_count:
-  source: fan_out.count
-result:
-  status: processed
-score_expr: "entity.score + 1"
+writes:
+  - stage_one_result
+  - source_field: result
+    target_field: stage_one_result_copy
+  - target_field: resolution_method
+    value: first
+  - target_field: dispatch_count
+    expression: fan_out.count
+  - target_field: score_expr
+    expression: entity.score + 1
 `), &spec); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -185,40 +188,36 @@ score_expr: "entity.score + 1"
 	if got := spec.Writes[0].Target(); got != "stage_one_result" {
 		t.Fatalf("Writes[0].Target() = %q", got)
 	}
-	if got := spec.Writes[0].Source(); got != "payload.result" {
+	if got := spec.Writes[0].Source(); got != "stage_one_result" {
 		t.Fatalf("Writes[0].Source() = %q", got)
 	}
-	if got := spec.Writes[1].Value.Literal; got != "first" {
-		t.Fatalf("Writes[1].Value.Literal = %#v", got)
+	if got := spec.Writes[1].Source(); got != "result" {
+		t.Fatalf("Writes[1].Source() = %q", got)
 	}
-	if got := spec.Writes[2].Source(); got != "fan_out.count" {
-		t.Fatalf("Writes[2].Source() = %q", got)
+	if got := spec.Writes[2].Value.Literal; got != "first" {
+		t.Fatalf("Writes[2].Value.Literal = %#v", got)
 	}
-	if status, ok := spec.Writes[3].Value.Literal.(map[string]any)["status"]; !ok || status != "processed" {
-		t.Fatalf("Writes[3].Value.Literal = %#v", spec.Writes[3].Value.Literal)
+	if got := spec.Writes[3].Value.CEL; got != "fan_out.count" {
+		t.Fatalf("Writes[3].Value.CEL = %q", got)
 	}
 	if got := spec.Writes[4].Value.CEL; got != "entity.score + 1" {
 		t.Fatalf("Writes[4].Value.CEL = %q", got)
 	}
 }
 
-func TestWorkflowDataAccumulationDecode_AppliesLegacySourceAlias(t *testing.T) {
+func TestWorkflowDataAccumulationDecode_RejectsLegacySourceAlias(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 writes: [value]
 source: payload.value
-`), &spec); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+`), &spec)
+	if err != nil {
+		if strings.Contains(err.Error(), "unsupported workflow data accumulation field") {
+			return
+		}
+		t.Fatalf("yaml.Unmarshal error = %v", err)
 	}
-	if got := len(spec.Writes); got != 1 {
-		t.Fatalf("len(Writes) = %d", got)
-	}
-	if got := spec.Writes[0].Source(); got != "payload.value" {
-		t.Fatalf("Writes[0].Source() = %q", got)
-	}
-	if got := spec.Writes[0].Target(); got != "value" {
-		t.Fatalf("Writes[0].Target() = %q", got)
-	}
+	t.Fatal("expected legacy source alias to be rejected")
 }
 
 func TestSystemNodeEventHandlerDecode_PreservesCreateEntity(t *testing.T) {
@@ -287,38 +286,30 @@ expression: policy.scoring_dimensions
 	}
 }
 
-func TestWorkflowDataWriteDecode_PreservesCELAliasInListForm(t *testing.T) {
+func TestWorkflowDataWriteDecode_PreservesLiteralValueAndExpressionForms(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := yaml.Unmarshal([]byte(`
 target_field: scoring_rubric
-cel: '''corpus_rubric'''
+expression: '"corpus_rubric"'
 `), &write); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := write.Target(); got != "scoring_rubric" {
 		t.Fatalf("Target() = %q", got)
 	}
-	if got := write.Value.CEL; got != "'corpus_rubric'" {
+	if got := write.Value.CEL; got != `"corpus_rubric"` {
 		t.Fatalf("Value.CEL = %q", got)
 	}
 }
 
-func TestWorkflowDataAccumulationDecode_PreservesExpressionAliasInShorthandMapping(t *testing.T) {
+func TestWorkflowDataAccumulationDecode_RejectsShorthandMapping(t *testing.T) {
 	var spec WorkflowDataAccumulation
-	if err := yaml.Unmarshal([]byte(`
+	err := yaml.Unmarshal([]byte(`
 dimensions_requested:
   expression: policy.scoring_dimensions
-`), &spec); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
-	if got := len(spec.Writes); got != 1 {
-		t.Fatalf("len(Writes) = %d", got)
-	}
-	if got := spec.Writes[0].Target(); got != "dimensions_requested" {
-		t.Fatalf("Target() = %q", got)
-	}
-	if got := spec.Writes[0].Value.CEL; got != "policy.scoring_dimensions" {
-		t.Fatalf("Value.CEL = %q", got)
+`), &spec)
+	if err == nil {
+		t.Fatal("expected shorthand mapping to be rejected")
 	}
 }
 
@@ -341,8 +332,9 @@ condition: "payload.mode == 'parallel'"
 fan_out:
   items_from: payload.items
 data_accumulation:
-  dispatch_count:
-    source: fan_out.count
+  writes:
+    - target_field: dispatch_count
+      expression: fan_out.count
 `), &rule); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -352,8 +344,8 @@ data_accumulation:
 	if got := rule.FanOut.ItemsFrom; got != "payload.items" {
 		t.Fatalf("FanOut.ItemsFrom = %q", got)
 	}
-	if got := rule.DataAccumulation.Writes[0].Source(); got != "fan_out.count" {
-		t.Fatalf("DataAccumulation source = %q", got)
+	if got := rule.DataAccumulation.Writes[0].Value.CEL; got != "fan_out.count" {
+		t.Fatalf("DataAccumulation expression = %q", got)
 	}
 }
 

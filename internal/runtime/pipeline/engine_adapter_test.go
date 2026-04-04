@@ -30,7 +30,7 @@ func TestApplyEngineStateMutationMirrorsDataAccumulationIntoEntityProjection(t *
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "research_context", SourceField: "payload.research_context"},
+				{TargetField: "research_context", SourceField: "research_context"},
 			},
 		},
 	}
@@ -502,7 +502,7 @@ func TestApplyEngineStateMutationInitializesWorkflowInstanceDefaults(t *testing.
 		},
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Test Vertical"}},
+				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Test Vertical")},
 			},
 		},
 	}
@@ -704,7 +704,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 	}
 }
 
-func TestPipelineEngineEvaluator_ExposesAccumulatedAsItemListForCEL(t *testing.T) {
+func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
 	eval := pipelineEngineEvaluator{evaluator: newWorkflowExpressionEvaluator()}
 	ok, err := eval.EvalBool(
 		`accumulated.filter(d, d.score >= 70 && d.tier == 1).size() >= 2`,
@@ -726,7 +726,7 @@ func TestPipelineEngineEvaluator_ExposesAccumulatedAsItemListForCEL(t *testing.T
 		t.Fatalf("EvalBool error = %v", err)
 	}
 	if !ok {
-		t.Fatal("expected CEL accumulated filter to match on flattened item list")
+		t.Fatal("expected CEL accumulated scope to expose the accumulated item list explicitly")
 	}
 }
 

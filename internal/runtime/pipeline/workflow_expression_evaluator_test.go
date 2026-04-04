@@ -16,11 +16,9 @@ func TestNormalizeWorkflowExpressionStringLiterals(t *testing.T) {
 	}
 }
 
-func TestRewriteWorkflowExpressionIdentifiers_DoesNotRewriteQuotedStrings(t *testing.T) {
-	got := rewriteWorkflowExpressionIdentifiers(`entity.priority == "high" && payload.decision == approve`, map[string]any{})
-	want := `entity.priority == "high" && payload.decision == vars.approve`
-	if got != want {
-		t.Fatalf("rewriteWorkflowExpressionIdentifiers(...) = %q, want %q", got, want)
+func TestValidateConditionCEL_RequiresExplicitScope(t *testing.T) {
+	if err := ValidateConditionCEL(`entity.priority == "high" && payload.decision == approve`); err == nil {
+		t.Fatal("expected unscoped identifier to fail validation")
 	}
 }
 
@@ -61,7 +59,7 @@ func TestNormalizeWorkflowExpression_PreservesCelLambdaBindings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalizeWorkflowExpression(...) error = %v", err)
 	}
-	want := `entity.score >= policy.minimum_score && vars.accumulated.filter(item, item.value >= 70 && item.level == 1).size() >= 2`
+	want := `entity.score >= policy.minimum_score && accumulated.filter(item, item.value >= 70 && item.level == 1).size() >= 2`
 	if got != want {
 		t.Fatalf("normalizeWorkflowExpression(...) = %q, want %q", got, want)
 	}

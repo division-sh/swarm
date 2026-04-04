@@ -174,7 +174,7 @@ func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t 
 	result, err := pc.executeNodeContractHandler(context.Background(), "node-a", runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Minted Entity"}},
+				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Minted Entity")},
 			},
 		},
 		Emits: runtimecontracts.EventEmission{Single: "custom.emitted"},
@@ -214,7 +214,7 @@ func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "Same Flow"}},
+				{TargetField: "name", Value: runtimecontracts.LiteralExpression("Same Flow")},
 			},
 		},
 	}
@@ -254,7 +254,7 @@ func TestResolveHandlerEntityIDForFlowPreservesCrossFlowEntityWithoutCreateEntit
 	handler := runtimecontracts.SystemNodeEventHandler{
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{
-				{TargetField: "name", Value: runtimecontracts.ExpressionValue{Literal: "New Flow Entity"}},
+				{TargetField: "name", Value: runtimecontracts.LiteralExpression("New Flow Entity")},
 			},
 		},
 	}
@@ -500,9 +500,11 @@ func TestExecuteNodeContractHandlerAppliesPayloadTransformToEmittedEvent(t *test
 		PayloadTransform: &runtimecontracts.PayloadTransformSpec{
 			Mappings: map[string]string{
 				"entity_id":     "payload.entity_id",
-				"summary.stage": "entity.stage",
-				"flags.ready":   "true",
-				"label":         `"done"`,
+				"summary.stage": "entity.current_state",
+			},
+			Entries: []runtimecontracts.TransformSpec{
+				{Target: "flags.ready", Value: runtimecontracts.CELExpression("true")},
+				{Target: "label", Value: runtimecontracts.CELExpression(`"done"`)},
 			},
 		},
 	}, workflowTriggerContext{

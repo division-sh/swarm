@@ -542,7 +542,7 @@ func TestRun_SuppressesExpressionFieldReferenceWarningWhenWriterExists(t *testin
 	handler.Condition = "entity.missing_score >= 70"
 	handler.DataAccumulation.Writes = append(handler.DataAccumulation.Writes, runtimecontracts.WorkflowDataWrite{
 		TargetField: "missing_score",
-		SourceField: "payload.score",
+		SourceField: "score",
 	})
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 

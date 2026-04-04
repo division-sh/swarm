@@ -7,6 +7,6 @@ test-node:
     filter.requested:
       query:
         entities: items
-        filter: "entity.status == active"
+        filter: "entity.status == 'active'"
       emits: filter.completed
       advances_to: filtered

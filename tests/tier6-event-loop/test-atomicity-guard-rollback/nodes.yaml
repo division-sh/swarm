@@ -9,7 +9,9 @@ processor:
         id: must_be_ready
         check: "entity.status == 'ready'"
       data_accumulation:
-        counter: "entity.counter + 1"
+        writes:
+          - target_field: counter
+            expression: entity.counter + 1
       sets_gate: g_processed
       advances_to: processed
       emits: process.done

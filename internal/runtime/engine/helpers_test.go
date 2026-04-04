@@ -66,15 +66,7 @@ func TestDedupIdentifier_DefaultsToEventIdentityBeforeSource(t *testing.T) {
 	}
 }
 
-func TestRewriteExpression_PrefixesWorkflowVars(t *testing.T) {
-	got := rewriteExpression(`metadata.flag && accumulated.count > 1 && fan_out.item == "x"`)
-	want := `vars.metadata.flag && vars.accumulated.count > 1 && vars.fan_out.item == "x"`
-	if got != want {
-		t.Fatalf("rewriteExpression = %q, want %q", got, want)
-	}
-}
-
-func TestResolveRefAndLiteral(t *testing.T) {
+func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	base := BaseContext{
 		Entity:   values.Wrap(map[string]any{"status": "ready"}),
 		Metadata: values.Wrap(map[string]any{"status": "ready"}),
@@ -96,37 +88,27 @@ func TestResolveRefAndLiteral(t *testing.T) {
 		"accumulated.count":    2,
 		"fan_out.item":         "fan",
 		"computed.grade":       "A",
-		"score":                7,
 	}
 	for ref, want := range cases {
 		if got := resolveRef(base, state, ref); got != want {
 			t.Fatalf("resolveRef(%q) = %#v, want %#v", ref, got, want)
 		}
 	}
-
-	if got := resolveRefOrLiteral(base, state, `"quoted"`); got != "quoted" {
-		t.Fatalf("resolveRefOrLiteral quoted = %#v", got)
-	}
-	if got := resolveRefOrLiteral(base, state, "true"); got != true {
-		t.Fatalf("resolveRefOrLiteral true = %#v", got)
-	}
-	if got := resolveRefOrLiteral(base, state, "4.5"); got != 4.5 {
-		t.Fatalf("resolveRefOrLiteral float = %#v", got)
+	if got := resolveRef(base, state, "score"); got != nil {
+		t.Fatalf("resolveRef(score) = %#v, want nil for unscoped ref", got)
 	}
 }
 
 func TestSetValuePathAndPayloadTransform(t *testing.T) {
 	base := BaseContext{
-		Payload:  values.Wrap(map[string]any{"score": 9}),
-		Metadata: values.Wrap(map[string]any{"state": "researching"}),
+		Entity:  values.Wrap(map[string]any{"current_state": "researching"}),
+		Payload: values.Wrap(map[string]any{"score": 9}),
 	}
-	state := ExecutionState{
-		Accumulated: map[string]any{"count": 3},
-	}
+	state := ExecutionState{}
 	transformed := payloadTransform(base, state, &runtimecontracts.PayloadTransformSpec{
 		Mappings: map[string]string{
 			"nested.score":   "payload.score",
-			"nested.count":   "accumulated.count",
+			"nested.state":   "entity.current_state",
 			"literal.string": `"hello"`,
 		},
 	})
@@ -137,8 +119,8 @@ func TestSetValuePathAndPayloadTransform(t *testing.T) {
 	if got := nested["score"]; got != 9 {
 		t.Fatalf("nested.score = %#v", got)
 	}
-	if got := nested["count"]; got != 3 {
-		t.Fatalf("nested.count = %#v", got)
+	if got := nested["state"]; got != "researching" {
+		t.Fatalf("nested.state = %#v", got)
 	}
 	literal, ok := transformed["literal"].(map[string]any)
 	if !ok || literal["string"] != "hello" {
@@ -157,9 +139,9 @@ func TestApplyDataAccumulationToState_NormalizesTargets(t *testing.T) {
 		SourceEvent: "task.completed",
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{TargetField: "entity.score", SourceField: "score"},
-			{TargetField: "metadata.status", SourceField: "nested.value"},
-			{TargetField: "literal", Value: runtimecontracts.ExpressionValue{Literal: "fixed"}},
-			{TargetField: "dispatch_count", SourceField: "fan_out.count"},
+			{TargetField: "status", SourceField: "nested.value"},
+			{TargetField: "literal", Value: runtimecontracts.LiteralExpression("fixed")},
+			{TargetField: "dispatch_count", Value: runtimecontracts.CELExpression("fan_out.count")},
 		},
 	}
 
@@ -232,11 +214,11 @@ func TestApplyDataAccumulationToState_AppliesExpressionOnlyWrites(t *testing.T) 
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{
 				TargetField: "entity.dimensions_requested",
-				Value:       runtimecontracts.ExpressionValue{CEL: "policy.scoring_dimensions"},
+				Value:       runtimecontracts.CELExpression("policy.scoring_dimensions"),
 			},
 			{
 				TargetField: "entity.scoring_rubric",
-				Value:       runtimecontracts.ExpressionValue{CEL: "'corpus_rubric'"},
+				Value:       runtimecontracts.CELExpression("'corpus_rubric'"),
 			},
 		},
 	}
@@ -263,7 +245,7 @@ func TestApplyDataAccumulationToState_EvaluatesArithmeticCELExpressions(t *testi
 		Writes: []runtimecontracts.WorkflowDataWrite{
 			{
 				TargetField: "entity.revision_count",
-				Value:       runtimecontracts.ExpressionValue{CEL: "entity.revision_count + 1"},
+				Value:       runtimecontracts.CELExpression("entity.revision_count + 1"),
 			},
 		},
 	}

@@ -10,7 +10,7 @@ processor-node:
         entity.task_config: { exists: true }
       data_accumulation:
         writes:
-          - source_field: result
+          - target_field: result
             value:
               status: processed
       advances_to: finished
