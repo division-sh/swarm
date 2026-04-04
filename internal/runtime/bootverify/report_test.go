@@ -564,6 +564,20 @@ func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
+	root := writeLocalizedEventRoutingFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, filepath.Join(repoRootForBootverifyTest(t), "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "event_producer_exists", "consumer/ticket.ready") {
+		t.Fatalf("unexpected event_producer_exists warning for localized flow input, got %#v", report.Warnings())
+	}
+	if reportContains(report.Warnings(), "event_consumer_exists", "producer/ticket.ready") {
+		t.Fatalf("unexpected event_consumer_exists warning for localized producer output, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -754,6 +768,20 @@ func TestRun_AllowsBackpropInputPinHandlersWithoutCreateEntity(t *testing.T) {
 	}
 }
 
+func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	rootNode := bundle.Nodes["dispatcher"]
+	rootNode.EventHandlers["child/task.feedback"] = runtimecontracts.SystemNodeEventHandler{}
+	bundle.Nodes["dispatcher"] = rootNode
+	bundle.Semantics.NodeHandlers["dispatcher"]["child/task.feedback"] = runtimecontracts.SystemNodeEventHandler{}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "single_node_per_event", "child/task.feedback") {
+		t.Fatalf("expected single_node_per_event error, got %#v", report.Errors())
+	}
+}
+
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
 	if got := len(bootCheckRegistry); got != 36 {
 		t.Fatalf("bootCheckRegistry count = %d, want 36", got)
@@ -877,6 +905,102 @@ consumer-node:
       create_entity: true
       advances_to: done
       emits: consumer.started
+`)
+
+	return root
+}
+
+func writeLocalizedEventRoutingFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: localized-event-routing
+version: "1.0.0"
+platform: ">=1.6.0"
+entity_schema:
+  groups:
+    - name: item
+      fields:
+        - name: item_id
+          type: string
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: localized-event-routing\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: []
+  outputs:
+    events:
+      - ticket.ready
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
+ticket.ready:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  subscribes_to:
+    - start
+  produces:
+    - ticket.ready
+  event_handlers:
+    start:
+      emits: ticket.ready
+`)
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, done]
+pins:
+  inputs:
+    events:
+      - ticket.ready
+  outputs:
+    events: []
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+ticket.ready:
+  payload:
+    properties:
+      entity_id:
+        type: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.ready
+  event_handlers:
+    ticket.ready:
+      create_entity: true
+      advances_to: done
 `)
 
 	return root

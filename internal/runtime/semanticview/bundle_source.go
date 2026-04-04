@@ -158,6 +158,16 @@ func (s bundleSource) FlowOutputEvents(flowID string) []string {
 	return s.bundle.FlowOutputEvents(flowID)
 }
 func (s bundleSource) FlowWritePins(flowID string) []string { return s.bundle.FlowWritePins(flowID) }
+func (s bundleSource) WritePinOwners(pin string) []string   { return s.bundle.WritePinOwners(pin) }
+func (s bundleSource) ResolveFlowEventReference(flowID, eventType string) string {
+	return s.bundle.ResolveFlowEventReference(flowID, eventType)
+}
+func (s bundleSource) ResolveFlowEventPattern(flowID, pattern string) string {
+	return s.bundle.ResolveFlowEventPattern(flowID, pattern)
+}
+func (s bundleSource) FlowEventMatches(flowID, subscription, eventType string) bool {
+	return s.bundle.FlowEventMatches(flowID, subscription, eventType)
+}
 func (s bundleSource) RequiredAgents() []runtimecontracts.FlowRequiredAgent {
 	return s.bundle.RootRequiredAgents()
 }
@@ -173,6 +183,9 @@ func (s bundleSource) ResolvedPolicyForNode(nodeID string) runtimecontracts.Poli
 func (s bundleSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.ResolvedEventCatalog()
 }
+func (s bundleSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
+	return s.bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+}
 func (s bundleSource) DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic {
 	return s.bundle.DerivedHandlerTransitions()
 }
@@ -184,6 +197,9 @@ func (s bundleSource) NodeContractSource(nodeID string) (runtimecontracts.Contra
 }
 func (s bundleSource) AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool) {
 	return s.bundle.AgentContractSource(agentID)
+}
+func (s bundleSource) NodeHandlerSubscriptions(nodeID string) []string {
+	return s.bundle.NodeHandlerSubscriptions(nodeID)
 }
 func (s bundleSource) NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler {
 	return s.bundle.NodeEventHandlers(nodeID)

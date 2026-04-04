@@ -617,7 +617,7 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 			})
 			continue
 		}
-		if handlers := c.source.NodeEventHandlers(owner); len(handlers) > 0 && nodeSubscribesToEventLocal(c.source, owner, eventType) {
+		if handlers := c.source.NodeEventHandlers(owner); len(handlers) > 0 {
 			if _, ok := c.source.NodeEventHandler(owner, eventType); !ok {
 				c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
 					CheckID:  "event_runtime_wiring_validation",
@@ -676,7 +676,21 @@ func (c *checkerContext) writePinOwnership() []Finding {
 		return c.writePinFindings
 	}
 	c.writePinLoaded = true
-	for pin, owners := range writePinOwnersLocal(c.source) {
+	pins := map[string]struct{}{}
+	for flowID := range c.source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		for _, pin := range c.source.FlowWritePins(flowID) {
+			pin = strings.TrimSpace(pin)
+			if pin != "" {
+				pins[pin] = struct{}{}
+			}
+		}
+	}
+	for _, pin := range sortedSetKeysLocal(pins) {
+		owners := c.source.WritePinOwners(pin)
 		if len(owners) <= 1 {
 			continue
 		}
@@ -1098,11 +1112,10 @@ func (c *checkerContext) eventWarnings() []Finding {
 	c.eventWarningLoaded = true
 	emittedRefs := map[string]eventRefLocal{}
 	subscribedRefs := map[string]eventRefLocal{}
-	emittedCandidates := map[string]struct{}{}
-	subscriptionPatterns := make([]string, 0)
+	subscriptionPatterns := map[string]eventRefLocal{}
 	for _, scope := range c.source.FlowScopes() {
 		if eventType := strings.TrimSpace(scope.AutoEmitEvent); eventType != "" {
-			addEventRefLocal(c.source, emittedRefs, emittedCandidates, scope.ID, eventType)
+			addEventRefLocal(emittedRefs, scope.ID, eventType)
 		}
 		for _, eventType := range scope.InputEvents {
 			eventType = strings.TrimSpace(eventType)
@@ -1110,14 +1123,14 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				subscriptionPatterns = append(subscriptionPatterns, eventPatternCandidatesLocal(c.source, scope.ID, eventType)...)
+				addEventRefLocal(subscriptionPatterns, scope.ID, eventType)
 			} else {
-				addEventRefLocal(c.source, subscribedRefs, nil, scope.ID, eventType)
+				addEventRefLocal(subscribedRefs, scope.ID, eventType)
 			}
 		}
 		for _, required := range c.source.FlowRequiredAgents(scope.ID) {
 			for _, eventType := range required.Emits {
-				addEventRefLocal(c.source, emittedRefs, emittedCandidates, scope.ID, eventType)
+				addEventRefLocal(emittedRefs, scope.ID, eventType)
 			}
 			for _, eventType := range required.SubscribesTo {
 				eventType = strings.TrimSpace(eventType)
@@ -1125,16 +1138,16 @@ func (c *checkerContext) eventWarnings() []Finding {
 					continue
 				}
 				if strings.Contains(eventType, "*") {
-					subscriptionPatterns = append(subscriptionPatterns, eventPatternCandidatesLocal(c.source, scope.ID, eventType)...)
+					addEventRefLocal(subscriptionPatterns, scope.ID, eventType)
 				} else {
-					addEventRefLocal(c.source, subscribedRefs, nil, scope.ID, eventType)
+					addEventRefLocal(subscribedRefs, scope.ID, eventType)
 				}
 			}
 		}
 	}
 	for _, required := range c.source.RequiredAgents() {
 		for _, eventType := range required.Emits {
-			addEventRefLocal(c.source, emittedRefs, emittedCandidates, "", eventType)
+			addEventRefLocal(emittedRefs, "", eventType)
 		}
 		for _, eventType := range required.SubscribesTo {
 			eventType = strings.TrimSpace(eventType)
@@ -1142,9 +1155,9 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				subscriptionPatterns = append(subscriptionPatterns, eventPatternCandidatesLocal(c.source, "", eventType)...)
+				addEventRefLocal(subscriptionPatterns, "", eventType)
 			} else {
-				addEventRefLocal(c.source, subscribedRefs, nil, "", eventType)
+				addEventRefLocal(subscribedRefs, "", eventType)
 			}
 		}
 	}
@@ -1157,34 +1170,38 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				subscriptionPatterns = append(subscriptionPatterns, eventPatternCandidatesLocal(c.source, flowID, eventType)...)
+				addEventRefLocal(subscriptionPatterns, flowID, eventType)
 			} else {
-				addEventRefLocal(c.source, subscribedRefs, nil, flowID, eventType)
+				addEventRefLocal(subscribedRefs, flowID, eventType)
 			}
 		}
-		for eventType, handler := range node.EventHandlers {
+		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				subscriptionPatterns = append(subscriptionPatterns, eventPatternCandidatesLocal(c.source, flowID, eventType)...)
+				addEventRefLocal(subscriptionPatterns, flowID, eventType)
 			} else {
-				addEventRefLocal(c.source, subscribedRefs, nil, flowID, eventType)
+				addEventRefLocal(subscribedRefs, flowID, eventType)
+			}
+			handler, ok := c.source.NodeEventHandler(nodeID, eventType)
+			if !ok {
+				continue
 			}
 			for _, emitted := range handlerEmits(handler) {
-				addEventRefLocal(c.source, emittedRefs, emittedCandidates, flowID, emitted)
+				addEventRefLocal(emittedRefs, flowID, emitted)
 			}
 		}
 		for _, timer := range node.Timers {
-			addEventRefLocal(c.source, emittedRefs, emittedCandidates, flowID, strings.TrimSpace(timer.Event))
+			addEventRefLocal(emittedRefs, flowID, strings.TrimSpace(timer.Event))
 		}
 	}
 	for agentID, agent := range c.source.AgentEntries() {
 		agentSource, _ := c.source.AgentContractSource(agentID)
 		flowID := strings.TrimSpace(agentSource.FlowID)
 		for _, eventType := range agent.EmitEvents {
-			addEventRefLocal(c.source, emittedRefs, emittedCandidates, flowID, eventType)
+			addEventRefLocal(emittedRefs, flowID, eventType)
 		}
 		for _, eventType := range append(append([]string{}, agent.Subscriptions...), agent.SubscribesTo...) {
 			eventType = strings.TrimSpace(eventType)
@@ -1192,13 +1209,12 @@ func (c *checkerContext) eventWarnings() []Finding {
 				continue
 			}
 			if strings.Contains(eventType, "*") {
-				subscriptionPatterns = append(subscriptionPatterns, eventPatternCandidatesLocal(c.source, flowID, eventType)...)
+				addEventRefLocal(subscriptionPatterns, flowID, eventType)
 			} else {
-				addEventRefLocal(c.source, subscribedRefs, nil, flowID, eventType)
+				addEventRefLocal(subscribedRefs, flowID, eventType)
 			}
 		}
 	}
-	subscriptionPatterns = uniqueNonEmptyStringsLocal(subscriptionPatterns)
 	catalog := c.source.ResolvedEventCatalog()
 	for _, key := range sortedSetKeysLocal(emittedRefs) {
 		ref := emittedRefs[key]
@@ -1215,7 +1231,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 			})
 			continue
 		}
-		if eventRefConsumedLocal(c.source, ref, entry, emittedCandidates, subscribedRefs, subscriptionPatterns) || eventHasExternalConsumerLocal(entry) || flowOutputBoundaryLocal(c.source, ref.FlowID, ref.Base) {
+		if eventRefConsumedLocal(c.source, eventKey, subscribedRefs, subscriptionPatterns) || len(c.source.RuntimeEventOwners(eventKey)) > 0 || eventHasExternalConsumerLocal(entry) || flowOutputBoundaryLocal(c.source, ref.FlowID, ref.Base) {
 			continue
 		}
 		c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -1231,7 +1247,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if !ok {
 			continue
 		}
-		if eventRefProducedLocal(c.source, ref, emittedCandidates) {
+		if eventRefProducedLocal(c.source, ref, emittedRefs) {
 			continue
 		}
 		if eventProducedExternallyLocal(entry) || strings.EqualFold(strings.TrimSpace(entry.Status), "planned") {
@@ -1252,7 +1268,7 @@ type eventRefLocal struct {
 	FlowID string
 }
 
-func addEventRefLocal(source semanticview.Source, refs map[string]eventRefLocal, candidates map[string]struct{}, flowID, eventType string) {
+func addEventRefLocal(refs map[string]eventRefLocal, flowID, eventType string) {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		return
@@ -1260,84 +1276,30 @@ func addEventRefLocal(source semanticview.Source, refs map[string]eventRefLocal,
 	ref := eventRefLocal{Base: eventType, FlowID: strings.TrimSpace(flowID)}
 	key := ref.FlowID + "::" + ref.Base
 	refs[key] = ref
-	if candidates == nil {
-		return
-	}
-	for _, candidate := range eventRefCandidatesLocal(source, ref.FlowID, ref.Base) {
-		candidates[candidate] = struct{}{}
-	}
-}
-
-func eventRefCandidatesLocal(source semanticview.Source, flowID, eventType string) []string {
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
-	if eventType == "" {
-		return nil
-	}
-	out := []string{eventType}
-	if strings.Contains(eventType, "/") {
-		return uniqueNonEmptyStringsLocal(out)
-	}
-	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(strings.TrimSpace(flowID))), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
-	}
-	if flowPath == "" {
-		return uniqueNonEmptyStringsLocal(out)
-	}
-	out = append(out, flowPath+"/"+eventType)
-	out = append(out, flowPath+"/__instance__/"+eventType)
-	return uniqueNonEmptyStringsLocal(out)
-}
-
-func eventPatternCandidatesLocal(source semanticview.Source, flowID, pattern string) []string {
-	pattern = strings.Trim(strings.TrimSpace(pattern), "/")
-	if pattern == "" {
-		return nil
-	}
-	out := []string{pattern}
-	if strings.Contains(pattern, "/") {
-		return uniqueNonEmptyStringsLocal(out)
-	}
-	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(strings.TrimSpace(flowID))), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
-	}
-	if flowPath == "" {
-		return uniqueNonEmptyStringsLocal(out)
-	}
-	out = append(out, flowPath+"/"+pattern)
-	out = append(out, flowPath+"/*/"+pattern)
-	return uniqueNonEmptyStringsLocal(out)
 }
 
 func resolvedEventEntryForRefLocal(source semanticview.Source, catalog map[string]runtimecontracts.EventCatalogEntry, ref eventRefLocal) (runtimecontracts.EventCatalogEntry, string, bool) {
-	for _, candidate := range eventRefCandidatesLocal(source, ref.FlowID, ref.Base) {
-		if entry, ok := catalog[candidate]; ok {
-			return entry, candidate, true
-		}
-	}
-	return runtimecontracts.EventCatalogEntry{}, "", false
+	_ = catalog
+	return source.ResolveFlowEventCatalogEntry(ref.FlowID, ref.Base)
 }
 
-func eventRefConsumedLocal(source semanticview.Source, ref eventRefLocal, entry runtimecontracts.EventCatalogEntry, emittedCandidates map[string]struct{}, subscribedRefs map[string]eventRefLocal, patterns []string) bool {
-	for _, candidate := range eventRefCandidatesLocal(source, ref.FlowID, ref.Base) {
-		for _, subscribed := range subscribedRefs {
-			for _, subscribedCandidate := range eventRefCandidatesLocal(source, subscribed.FlowID, subscribed.Base) {
-				if candidate == subscribedCandidate {
-					return true
-				}
-			}
+func eventRefConsumedLocal(source semanticview.Source, eventType string, subscribedRefs, patterns map[string]eventRefLocal) bool {
+	for _, subscribed := range subscribedRefs {
+		if source.FlowEventMatches(subscribed.FlowID, subscribed.Base, eventType) {
+			return true
 		}
-		if eventMatchesAnyPatternLocal(candidate, patterns) {
+	}
+	for _, pattern := range patterns {
+		if source.FlowEventMatches(pattern.FlowID, pattern.Base, eventType) {
 			return true
 		}
 	}
 	return false
 }
 
-func eventRefProducedLocal(source semanticview.Source, ref eventRefLocal, emittedCandidates map[string]struct{}) bool {
-	for _, candidate := range eventRefCandidatesLocal(source, ref.FlowID, ref.Base) {
-		if _, ok := emittedCandidates[candidate]; ok {
+func eventRefProducedLocal(source semanticview.Source, ref eventRefLocal, emittedRefs map[string]eventRefLocal) bool {
+	for _, emitted := range emittedRefs {
+		if source.FlowEventMatches(ref.FlowID, ref.Base, source.ResolveFlowEventReference(emitted.FlowID, emitted.Base)) {
 			return true
 		}
 	}
@@ -1353,14 +1315,14 @@ func flowOutputBoundaryLocal(source semanticview.Source, flowID, eventType strin
 	if flowID == "" {
 		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
 			for _, output := range bundle.RootSchema.Pins.Outputs.Events {
-				if strings.TrimSpace(output) == eventType {
+				if source.ResolveFlowEventReference("", output) == eventType {
 					return true
 				}
 			}
 		}
 	}
 	for _, output := range source.FlowOutputEvents(flowID) {
-		if strings.TrimSpace(output) == eventType {
+		if source.ResolveFlowEventReference(flowID, output) == eventType {
 			return true
 		}
 	}
@@ -1379,19 +1341,6 @@ func sortedSetKeysLocal[T any](m map[string]T) []string {
 	return out
 }
 
-func eventMatchesAnyPatternLocal(eventType string, patterns []string) bool {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return false
-	}
-	for _, pattern := range patterns {
-		if routeMatchesLocal(pattern, eventType) {
-			return true
-		}
-	}
-	return false
-}
-
 func eventHasExternalConsumerLocal(entry runtimecontracts.EventCatalogEntry) bool {
 	if len(entry.Consumer) > 0 || len(entry.ConsumerType) > 0 {
 		return true
@@ -1405,26 +1354,6 @@ func eventProducedExternallyLocal(entry runtimecontracts.EventCatalogEntry) bool
 	}
 	source := strings.ToLower(strings.TrimSpace(entry.Source))
 	return strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform")
-}
-
-func uniqueNonEmptyStringsLocal(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func (c *checkerContext) conditionPolicyAlignment() []Finding {
@@ -1901,28 +1830,35 @@ func (c *checkerContext) eventCycleDetection() []Finding {
 		return c.cycleFindings
 	}
 	c.cycleLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
+	for nodeID := range c.source.NodeEntries() {
 		nodeID = strings.TrimSpace(nodeID)
-		for eventType, handler := range node.EventHandlers {
+		nodeSource, _ := c.source.NodeContractSource(nodeID)
+		flowID := strings.TrimSpace(nodeSource.FlowID)
+		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue
 			}
+			trigger := c.source.ResolveFlowEventReference(flowID, eventType)
+			handler, ok := c.source.NodeEventHandler(nodeID, eventType)
+			if !ok {
+				continue
+			}
 			for _, emitted := range handlerEmits(handler) {
 				emitted = strings.TrimSpace(emitted)
-				if emitted == "" || emitted != eventType {
+				if emitted == "" || emitted != trigger {
 					continue
 				}
 				c.cycleFindings = append(c.cycleFindings, Finding{
 					CheckID:  "event_cycle_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s handler %s emits its own trigger event", nodeID, eventType),
+					Message:  fmt.Sprintf("node %s handler %s emits its own trigger event", nodeID, trigger),
 					Location: nodeID,
 				})
 			}
 		}
 	}
-	if err := detectEventCyclesLocal(c.source); err != nil {
+	if err := detectEventCyclesSemanticModel(c.source); err != nil {
 		c.cycleFindings = append(c.cycleFindings, Finding{
 			CheckID:  "event_cycle_detection",
 			Severity: "error",
@@ -2433,23 +2369,42 @@ func (c *checkerContext) singleNodePerEvent() []Finding {
 		return c.singleNodeFindings
 	}
 	c.singleNodeLoaded = true
-	owners := map[string][]string{}
-	for nodeID, node := range c.source.NodeEntries() {
-		for eventType := range node.EventHandlers {
+	eventNames := map[string]struct{}{}
+	type subscriptionOwner struct {
+		NodeID string
+		FlowID string
+		Event  string
+	}
+	subscriptions := make([]subscriptionOwner, 0)
+	for eventType := range c.source.ResolvedEventCatalog() {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" && !strings.Contains(eventType, "*") {
+			eventNames[eventType] = struct{}{}
+		}
+	}
+	for nodeID := range c.source.NodeEntries() {
+		sourceRef, _ := c.source.NodeContractSource(nodeID)
+		flowID := strings.TrimSpace(sourceRef.FlowID)
+		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" || strings.Contains(eventType, "*") {
 				continue
 			}
-			owners[eventType] = append(owners[eventType], strings.TrimSpace(nodeID))
+			subscriptions = append(subscriptions, subscriptionOwner{
+				NodeID: strings.TrimSpace(nodeID),
+				FlowID: flowID,
+				Event:  eventType,
+			})
+			eventNames[c.source.ResolveFlowEventReference(flowID, eventType)] = struct{}{}
 		}
 	}
-	eventNames := make([]string, 0, len(owners))
-	for eventType := range owners {
-		eventNames = append(eventNames, eventType)
-	}
-	sort.Strings(eventNames)
-	for _, eventType := range eventNames {
-		nodeIDs := owners[eventType]
+	for _, eventType := range sortedSetKeysLocal(eventNames) {
+		nodeIDs := make([]string, 0)
+		for _, subscription := range subscriptions {
+			if c.source.FlowEventMatches(subscription.FlowID, subscription.Event, eventType) {
+				nodeIDs = append(nodeIDs, subscription.NodeID)
+			}
+		}
 		if len(nodeIDs) <= 1 {
 			continue
 		}
@@ -3605,31 +3560,6 @@ func participantExistsLocal(source semanticview.Source, participant string) bool
 	return false
 }
 
-func nodeSubscribesToEventLocal(source semanticview.Source, nodeID, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	nodeID = strings.TrimSpace(nodeID)
-	node, ok := source.NodeEntries()[nodeID]
-	if !ok {
-		return false
-	}
-	eventType = eventidentity.Normalize(eventType)
-	if contractSource, ok := source.NodeContractSource(nodeID); ok {
-		flowID := strings.TrimSpace(contractSource.FlowID)
-		if flowID != "" {
-			eventType = eventidentity.LocalizeForFlow(source.FlowPath(flowID), source.FlowInputEvents(flowID), eventType)
-		}
-	}
-	for _, subscribed := range node.SubscribesTo {
-		subscribed = eventidentity.Normalize(subscribed)
-		if subscribed == eventType || handlerPatternMatchesLocal(subscribed, eventType) {
-			return true
-		}
-	}
-	return false
-}
-
 func handlerPatternMatchesLocal(pattern, eventType string) bool {
 	pattern = strings.TrimSpace(pattern)
 	eventType = strings.TrimSpace(eventType)
@@ -3647,32 +3577,6 @@ func handlerPatternMatchesLocal(pattern, eventType string) bool {
 
 func routeMatchesLocal(pattern, eventType string) bool {
 	return eventidentity.MatchPattern(pattern, eventType)
-}
-
-func writePinOwnersLocal(source semanticview.Source) map[string][]string {
-	out := map[string][]string{}
-	if source == nil {
-		return out
-	}
-	for flowID := range source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		for _, pin := range source.FlowWritePins(flowID) {
-			pin = strings.TrimSpace(pin)
-			if pin == "" {
-				continue
-			}
-			out[pin] = append(out[pin], flowID)
-		}
-	}
-	for pin, owners := range out {
-		normalizedOwners := append([]string{}, owners...)
-		sort.Strings(normalizedOwners)
-		out[pin] = normalizedOwners
-	}
-	return out
 }
 
 func stateSchemaGateNamesLocal(schema runtimecontracts.NodeGateStateSchema) map[string]struct{} {
@@ -3810,26 +3714,33 @@ func contractBundleUsesOwningNodeModel(source semanticview.Source) bool {
 	return false
 }
 
-func detectEventCyclesLocal(source semanticview.Source) error {
+func detectEventCyclesSemanticModel(source semanticview.Source) error {
 	if source == nil {
 		return nil
 	}
 	graph := map[string]map[string]struct{}{}
-	for _, node := range source.NodeEntries() {
-		for eventType, handler := range node.EventHandlers {
+	for nodeID := range source.NodeEntries() {
+		nodeSource, _ := source.NodeContractSource(nodeID)
+		flowID := strings.TrimSpace(nodeSource.FlowID)
+		for _, eventType := range source.NodeHandlerSubscriptions(nodeID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" || strings.Contains(eventType, "*") {
 				continue
 			}
+			trigger := source.ResolveFlowEventReference(flowID, eventType)
+			handler, ok := source.NodeEventHandler(nodeID, eventType)
+			if !ok {
+				continue
+			}
 			for _, emitted := range handlerEmits(handler) {
 				emitted = strings.TrimSpace(emitted)
-				if emitted == "" || strings.Contains(emitted, "*") || emitted == eventType {
+				if emitted == "" || strings.Contains(emitted, "*") || emitted == trigger {
 					continue
 				}
-				if graph[eventType] == nil {
-					graph[eventType] = map[string]struct{}{}
+				if graph[trigger] == nil {
+					graph[trigger] = map[string]struct{}{}
 				}
-				graph[eventType][emitted] = struct{}{}
+				graph[trigger][emitted] = struct{}{}
 			}
 		}
 	}
