@@ -18,6 +18,11 @@ type Identity struct {
 	EntityID     string
 }
 
+type Coordinates struct {
+	ScopeKey     string
+	InstancePath string
+}
+
 func ScopeKey(source semanticview.Source, flowID string) string {
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
@@ -85,17 +90,27 @@ func LogicalInstanceID(instancePath string) string {
 func Derive(source semanticview.Source, flowID, instanceID string) Identity {
 	flowID = strings.TrimSpace(flowID)
 	instanceID = strings.TrimSpace(instanceID)
-	instancePath := InstancePath(source, flowID, instanceID)
+	coordinates := DerivedCoordinates(source, flowID, instanceID)
+	instancePath := coordinates.InstancePath
 	entityID := strings.TrimSpace(instanceID)
 	if instancePath != "" {
 		entityID = EntityID(instancePath)
 	}
 	return Identity{
 		TemplateID:   flowID,
-		ScopeKey:     ScopeKey(source, flowID),
+		ScopeKey:     coordinates.ScopeKey,
 		InstanceID:   instanceID,
 		InstancePath: instancePath,
 		EntityID:     entityID,
+	}
+}
+
+func DerivedCoordinates(source semanticview.Source, flowID, instanceID string) Coordinates {
+	scopeKey := normalizeRef(ScopeKey(source, flowID))
+	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
+	return Coordinates{
+		ScopeKey:     scopeKey,
+		InstancePath: instancePath,
 	}
 }
 
@@ -111,21 +126,39 @@ func SemanticScopeFromInstancePath(instancePath string) string {
 	return strings.TrimSpace(instancePath[:idx])
 }
 
-func InstanceScopeKey(source semanticview.Source, workflowName, flowPath, fallbackFlowID string) string {
-	if workflowName = strings.TrimSpace(workflowName); workflowName != "" {
-		if scopeKey := strings.TrimSpace(ScopeKey(source, workflowName)); scopeKey != "" {
-			return scopeKey
-		}
+func SemanticScope(instancePath string) string {
+	instancePath = normalizeRef(instancePath)
+	if instancePath == "" {
+		return ""
 	}
-	if scopeKey := strings.TrimSpace(SemanticScopeFromInstancePath(flowPath)); scopeKey != "" {
+	if scopeKey := SemanticScopeFromInstancePath(instancePath); scopeKey != "" {
 		return scopeKey
 	}
-	return strings.TrimSpace(ScopeKey(source, fallbackFlowID))
+	return instancePath
+}
+
+func StoredCoordinates(source semanticview.Source, workflowName, materializedPath string) Coordinates {
+	instancePath := normalizeRef(materializedPath)
+	if instancePath == "" {
+		instancePath = normalizeRef(ScopeKey(source, workflowName))
+	}
+	return Coordinates{
+		ScopeKey:     normalizeRef(storedScopeKey(source, workflowName, instancePath)),
+		InstancePath: instancePath,
+	}
+}
+
+func StoredScopeKey(source semanticview.Source, workflowName, materializedPath string) string {
+	return StoredCoordinates(source, workflowName, materializedPath).ScopeKey
+}
+
+func StoredInstancePath(source semanticview.Source, workflowName, materializedPath string) string {
+	return StoredCoordinates(source, workflowName, materializedPath).InstancePath
 }
 
 func IsDescendant(scopeKey, instancePath string) bool {
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	scopeKey = normalizeRef(scopeKey)
+	instancePath = normalizeRef(instancePath)
 	if scopeKey == "" || instancePath == "" || instancePath == scopeKey {
 		return false
 	}
@@ -145,12 +178,20 @@ func OwnedByFlow(source semanticview.Source, ownerFlowID, targetInstancePath str
 }
 
 func OwnedByScope(ownerScope, targetInstancePath string) bool {
-	ownerScope = strings.TrimSpace(ownerScope)
-	targetScope := strings.TrimSpace(SemanticScopeFromInstancePath(targetInstancePath))
+	ownerScope = normalizeRef(ownerScope)
+	targetScope := SemanticScope(targetInstancePath)
 	if ownerScope == "" || strings.TrimSpace(targetInstancePath) == "" {
 		return true
 	}
 	return ownerScope == targetScope
+}
+
+func storedScopeKey(source semanticview.Source, workflowName, instancePath string) string {
+	instancePath = normalizeRef(instancePath)
+	if instancePath != "" {
+		return SemanticScope(instancePath)
+	}
+	return normalizeRef(ScopeKey(source, workflowName))
 }
 
 func contains(items []string, target string) bool {

@@ -134,6 +134,61 @@ func TestFlowInstanceIdentity_ResolveEmittedEntityID(t *testing.T) {
 	}
 }
 
+func TestWorkflowInstanceCoordinates_SeparateStaticScopeFromGenericStorageRef(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-gates-in-child-flow")
+
+	instance := WorkflowInstance{
+		WorkflowName: "child",
+		StorageRef:   "22222222-2222-2222-2222-222222222222",
+		Metadata: map[string]any{
+			"storage_ref": "22222222-2222-2222-2222-222222222222",
+		},
+	}
+
+	if got := workflowInstanceScopeKey(source, instance); got != "child" {
+		t.Fatalf("workflowInstanceScopeKey(static child) = %q, want child", got)
+	}
+	if got := workflowInstancePath(source, instance); got != "child" {
+		t.Fatalf("workflowInstancePath(static child) = %q, want child", got)
+	}
+}
+
+func TestWorkflowInstanceCoordinates_KeepNestedInstancePathDistinctFromScope(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+
+	instance := WorkflowInstance{
+		WorkflowName: "grandchild",
+		Metadata: map[string]any{
+			"flow_path": "child/grandchild/inst-1",
+		},
+	}
+
+	if got := workflowInstanceScopeKey(source, instance); got != "child/grandchild" {
+		t.Fatalf("workflowInstanceScopeKey(nested) = %q, want child/grandchild", got)
+	}
+	if got := workflowInstancePath(source, instance); got != "child/grandchild/inst-1" {
+		t.Fatalf("workflowInstancePath(nested) = %q, want child/grandchild/inst-1", got)
+	}
+}
+
+func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
+	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+
+	instance := WorkflowInstance{
+		WorkflowName: "grandchild",
+		Metadata: map[string]any{
+			"flow_path": "child/grandchild/inst-1",
+		},
+	}
+
+	if workflowInstanceOwnedByFlow(source, instance, "child") {
+		t.Fatal("did not expect child to own child/grandchild/inst-1")
+	}
+	if !workflowInstanceOwnedByFlow(source, instance, "grandchild") {
+		t.Fatal("expected grandchild to own child/grandchild/inst-1")
+	}
+}
+
 func mustEvent(eventType, entityID string) Event {
 	return Event{
 		Type: events.EventType(eventType),

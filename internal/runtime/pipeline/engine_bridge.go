@@ -323,9 +323,9 @@ func resolveHandlerEntityIDForFlow(
 	}
 	entityID, evt = ensureHandlerEntityID(source, handler, entityID, evt)
 	if flowID != "" && state != nil {
-		currentFlowPath := strings.TrimSpace(workflowScopeKey(source, flowID))
-		inboundFlowPath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
-		if isDescendantFlowInstance(currentFlowPath, inboundFlowPath) {
+		currentScopeKey := strings.TrimSpace(workflowScopeKey(source, flowID))
+		inboundInstancePath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
+		if isDescendantFlowInstance(currentScopeKey, inboundInstancePath) {
 			if parentEntityID := strings.TrimSpace(asString(state.Metadata["parent_entity_id"])); parentEntityID != "" {
 				entityID = parentEntityID
 				state.EntityID = parentEntityID
