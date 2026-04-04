@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,6 +114,11 @@ func TestListDescriptors_IndexesToolsAndMCPServers(t *testing.T) {
 func TestDefaultFilePath_UsesSwarmConfigDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, ".config"))
+	configRoot, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
 	path, err := DefaultFilePath()
 	if err != nil {
 		t.Fatalf("DefaultFilePath: %v", err)
@@ -123,7 +129,7 @@ func TestDefaultFilePath_UsesSwarmConfigDir(t *testing.T) {
 	if filepath.Base(filepath.Dir(path)) != "swarm" {
 		t.Fatalf("unexpected credential dir %q", filepath.Dir(path))
 	}
-	if !strings.HasPrefix(path, tmp) {
-		t.Fatalf("expected credential path under temp home %q, got %q", tmp, path)
+	if !strings.HasPrefix(path, configRoot) {
+		t.Fatalf("expected credential path under temp config dir %q, got %q", configRoot, path)
 	}
 }
