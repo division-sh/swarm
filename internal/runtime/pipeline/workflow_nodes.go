@@ -124,8 +124,9 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 		if !ok {
 			return nil, fmt.Errorf("system node %q missing from %s", nodeID, path)
 		}
-		subscriptions := make([]events.EventType, 0, len(entry.SubscribesTo))
-		for _, evt := range entry.SubscribesTo {
+		runtimeSubscriptions := source.NodeRuntimeSubscriptions(nodeID)
+		subscriptions := make([]events.EventType, 0, len(runtimeSubscriptions))
+		for _, evt := range runtimeSubscriptions {
 			for _, resolved := range workflowNodeSubscriptionAliases(source, nodeID, evt) {
 				if resolved == "" {
 					continue
@@ -202,7 +203,7 @@ func workflowFlowInputProducerAliases(source semanticview.Source, targetFlowID, 
 	if source == nil {
 		return nil
 	}
-	return source.FlowInputProducerPatterns(targetFlowID, eventType)
+	return append([]string{}, source.ResolveFlowInputAutoWire(targetFlowID, eventType).Patterns...)
 }
 
 func workflowFlowHasInputEvent(source semanticview.Source, flowID, eventType string) bool {

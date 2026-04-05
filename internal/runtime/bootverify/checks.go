@@ -542,7 +542,7 @@ func (c *checkerContext) transitionOwnership() []Finding {
 		if nodeID == "" {
 			continue
 		}
-		subs := stringSet(node.SubscribesTo)
+		subs := stringSet(c.source.NodeRuntimeSubscriptions(nodeID))
 		produces := stringSet(node.Produces)
 		for _, transitionID := range node.OwnedTransitions {
 			transitionID = strings.TrimSpace(transitionID)
@@ -810,7 +810,7 @@ func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
 			if eventType == "" {
 				continue
 			}
-			producers := crossFlowInputProducerFlows(c.source, flowID, eventType)
+			producers := c.source.ResolveFlowInputAutoWire(flowID, eventType).ProducerFlows
 			if len(producers) <= 1 {
 				continue
 			}
@@ -826,34 +826,6 @@ func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
 		}
 	}
 	return c.crossFlowPinAmbiguityFindings
-}
-
-func crossFlowInputProducerFlows(source semanticview.Source, targetFlowID, eventType string) []string {
-	targetFlowID = strings.TrimSpace(targetFlowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || targetFlowID == "" || eventType == "" {
-		return nil
-	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, 4)
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" || flowID == targetFlowID {
-			continue
-		}
-		for _, output := range scope.OutputEvents {
-			if strings.TrimSpace(output) != eventType {
-				continue
-			}
-			if _, ok := seen[flowID]; ok {
-				continue
-			}
-			seen[flowID] = struct{}{}
-			out = append(out, flowID)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 func flowHasScopedInputEscapeHatch(source semanticview.Source, flowID, eventType string) bool {
@@ -1554,11 +1526,11 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: nodeLabel,
 				})
 			}
-			if len(node.SubscribesTo) == 0 {
+			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing required field subscribes_to", nodeLabel),
+					Message:  fmt.Sprintf("node %s missing declared subscription surface", nodeLabel),
 					Location: nodeLabel,
 				})
 			}
@@ -1650,11 +1622,11 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 					Location: nodeLabel,
 				})
 			}
-			if len(node.SubscribesTo) == 0 {
+			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing required field subscribes_to", nodeLabel),
+					Message:  fmt.Sprintf("node %s missing declared subscription surface", nodeLabel),
 					Location: nodeLabel,
 				})
 			}

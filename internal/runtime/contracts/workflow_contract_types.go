@@ -89,6 +89,12 @@ type WorkflowSemanticView struct {
 	HandlerTransitions     []HandlerTransitionSemantic
 	HandlerTransitionIndex map[string]map[string]HandlerTransitionSemantic
 }
+
+type FlowInputAutoWireResolution struct {
+	EventType     string
+	Patterns      []string
+	ProducerFlows []string
+}
 type HandlerTransitionSemantic struct {
 	ID               string
 	NodeID           string

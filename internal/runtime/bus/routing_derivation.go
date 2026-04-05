@@ -323,7 +323,11 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, flowID s
 			Type: "node",
 			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
 		}
-		for _, rawPattern := range normalizeStringList(entry.SubscribesTo) {
+		patterns := normalizeStringList(entry.SubscribesTo)
+		if source != nil {
+			patterns = source.NodeRuntimeSubscriptions(nodeID)
+		}
+		for _, rawPattern := range patterns {
 			for _, resolved := range routeResolveSubscriberPatterns(source, flowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
@@ -381,7 +385,7 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 	if source == nil {
 		return false
 	}
-	return len(source.FlowInputProducerPatterns(flowID, eventType)) > 0
+	return len(source.ResolveFlowInputAutoWire(flowID, eventType).Patterns) > 0
 }
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {
@@ -423,13 +427,16 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 	}
 	for _, key := range sortedStringKeys(scope.Nodes) {
 		entry := scope.Nodes[key]
-		patterns := normalizeStringList(entry.SubscribesTo)
-		if len(patterns) == 0 {
-			continue
-		}
 		nodeID := strings.TrimSpace(entry.ID)
 		if nodeID == "" {
 			nodeID = strings.TrimSpace(key)
+		}
+		patterns := normalizeStringList(entry.SubscribesTo)
+		if source != nil {
+			patterns = source.NodeRuntimeSubscriptions(nodeID)
+		}
+		if len(patterns) == 0 {
+			continue
 		}
 		out = append(out, routeSubscriberTemplate{
 			IDTemplate:  nodeID,
@@ -490,7 +497,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, flowID string, i
 		return nil
 	}
 	if flowID != "" && source != nil && source.FlowHasInputEvent(flowID, raw) {
-		patterns := routeInputProducerPatterns(source, flowID, raw)
+		patterns := routeInputProducerPatterns(source.ResolveFlowInputAutoWire(flowID, raw))
 		if len(patterns) > 0 {
 			return patterns
 		}
@@ -527,13 +534,9 @@ func workflowScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} 
 	return out
 }
 
-func routeInputProducerPatterns(source semanticview.Source, targetFlowID, eventType string) []routeResolvedPattern {
-	if source == nil {
-		return nil
-	}
-	patterns := source.FlowInputProducerPatterns(targetFlowID, eventType)
-	out := make([]routeResolvedPattern, 0, len(patterns))
-	for _, pattern := range patterns {
+func routeInputProducerPatterns(resolution runtimecontracts.FlowInputAutoWireResolution) []routeResolvedPattern {
+	out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
+	for _, pattern := range resolution.Patterns {
 		pattern = eventidentity.Normalize(pattern)
 		if pattern == "" {
 			continue
