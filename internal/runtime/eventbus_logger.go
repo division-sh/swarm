@@ -8,10 +8,11 @@ import (
 
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
+	"swarm/internal/runtime/semanticview"
 	runtimetools "swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -19,6 +20,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, inte
 	return runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
 		Logger:              hook,
 		InterceptorProvider: interceptorProvider,
+		ContractBundle:      source,
 		PayloadValidator:    payloadValidator,
 	})
 }

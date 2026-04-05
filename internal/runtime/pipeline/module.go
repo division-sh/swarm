@@ -34,11 +34,3 @@ func defaultWorkflowModuleOrNil() WorkflowModule {
 func DefaultWorkflowModuleOrNil() WorkflowModule {
 	return defaultWorkflowModuleOrNil()
 }
-
-func DefaultWorkflowSemanticSourceOrNil() semanticview.Source {
-	module := defaultWorkflowModuleOrNil()
-	if module == nil {
-		return nil
-	}
-	return module.SemanticSource()
-}

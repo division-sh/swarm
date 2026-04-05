@@ -10,6 +10,7 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
 	runtimepipeline "swarm/internal/runtime/pipeline"
+	"swarm/internal/runtime/semanticview"
 	"swarm/internal/runtime/sessions"
 	workspace "swarm/internal/runtime/workspace"
 )
@@ -124,6 +125,7 @@ type StrategicContext = json.RawMessage
 type AgentManagerOptions struct {
 	Workspaces                workspace.Lifecycle
 	Sessions                  sessions.Registry
+	SemanticSource            semanticview.Source
 	RuntimeMode               string
 	Budget                    BudgetGuard
 	ThrottleSuppressPrefixes  []string
