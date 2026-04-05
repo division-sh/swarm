@@ -56,9 +56,6 @@ func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T)
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	previous := defaultWorkflowModuleFactory
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
-	t.Cleanup(func() { SetDefaultWorkflowModuleFactory(previous) })
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -123,9 +120,6 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	previous := defaultWorkflowModuleFactory
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
-	t.Cleanup(func() { SetDefaultWorkflowModuleFactory(previous) })
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -189,9 +183,6 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	previous := defaultWorkflowModuleFactory
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
-	t.Cleanup(func() { SetDefaultWorkflowModuleFactory(previous) })
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -407,9 +398,6 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	previous := defaultWorkflowModuleFactory
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
-	t.Cleanup(func() { SetDefaultWorkflowModuleFactory(previous) })
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -500,9 +488,6 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
 	}
-	previous := defaultWorkflowModuleFactory
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule { return module })
-	t.Cleanup(func() { SetDefaultWorkflowModuleFactory(previous) })
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 

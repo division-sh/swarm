@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
 )
 
 type ToolAuthorizer struct {
-	bus EventPublisher
+	bus      EventPublisher
+	classify func(models.AgentConfig, string) toolAuthorizationDecision
 }
 
 type toolOwnershipClass string
@@ -30,13 +33,18 @@ const (
 	toolAuthorizationDenied      toolAuthorizationClass = "denied"
 )
 
-func NewToolAuthorizer(bus EventPublisher) *ToolAuthorizer {
-	return &ToolAuthorizer{bus: bus}
+func NewToolAuthorizer(bus EventPublisher, classify func(models.AgentConfig, string) toolAuthorizationDecision) *ToolAuthorizer {
+	if classify == nil {
+		classify = func(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+			return classifyToolAuthorization(actor, toolName, runtimeauthority.NoopProvider(), nil)
+		}
+	}
+	return &ToolAuthorizer{bus: bus, classify: classify}
 }
 
 func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig, toolName string) error {
 	_ = ctx
-	decision := classifyToolAuthorization(actor, toolName)
+	decision := a.classify(actor, toolName)
 	if decision.allowed {
 		return nil
 	}

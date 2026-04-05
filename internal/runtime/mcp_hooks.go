@@ -96,7 +96,10 @@ func runtimeErrorEnvelope(raw string) string {
 	return runtimemcp.RuntimeErrorEnvelope(raw)
 }
 
-func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) runtimemcp.GatewayHooks {
+func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), emitRegistry *runtimetools.EmitRegistry) runtimemcp.GatewayHooks {
+	if emitRegistry == nil {
+		emitRegistry = runtimetools.NewEmitRegistry(nil, nil)
+	}
 	return runtimemcp.GatewayHooks{
 		RuntimeIngressPaused:      runtimebus.RuntimeIngressPaused,
 		FormatError:               FormatRuntimeError,
@@ -112,12 +115,12 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, resolveActorConfig func(strin
 		WithEmittedEventsRecorder: runtimebus.WithEmittedEventsRecorder,
 		ResolveTurnContext:        resolveMCPTurnContext,
 		EmitToolsForActor: func(actor runtimeactors.AgentConfig) []llm.ToolDefinition {
-			return runtimetools.GenerateEmitToolsForActor(actor, processWarnOnce)
+			return emitRegistry.GenerateEmitToolsForActor(actor, processWarnOnce)
 		},
 		EmitTools: func(role string) []llm.ToolDefinition {
-			return runtimetools.GenerateEmitToolsForRole(role, processWarnOnce)
+			return emitRegistry.GenerateEmitToolsForRole(role, processWarnOnce)
 		},
-		EmitSchemaForTool: runtimeGatewayEmitSchemaForTool,
+		EmitSchemaForTool: runtimeGatewayEmitSchemaForTool(emitRegistry),
 		Log: func(ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
 			runtimeMCPLog(logger, ctx, level, action, agentID, entityID, detail, errText)
 		},
@@ -134,28 +137,25 @@ func retryableFromGatewayError(err error) (bool, bool) {
 	return false, false
 }
 
-func runtimeGatewayEmitSchemaForTool(name string) (string, any, bool) {
-	if !strings.HasPrefix(name, "emit_") {
-		return "", nil, false
+func runtimeGatewayEmitSchemaForTool(emitRegistry *runtimetools.EmitRegistry) func(string) (string, any, bool) {
+	return func(name string) (string, any, bool) {
+		if !strings.HasPrefix(name, "emit_") || emitRegistry == nil {
+			return "", nil, false
+		}
+		evtType, mapped := emitRegistry.EventTypeFromToolName(name)
+		if !mapped {
+			return "", nil, false
+		}
+		evtSchema, ok := emitRegistry.EventSchemaSnapshot()[evtType]
+		if !ok {
+			return "", nil, false
+		}
+		desc := strings.TrimSpace(evtSchema.Description)
+		if desc == "" {
+			desc = "Emit event tool"
+		}
+		return desc, evtSchema.Schema, true
 	}
-	snapshot := runtimetools.EventSchemaSnapshot()
-	toolToEvent := make(map[string]string, len(snapshot))
-	for eventType := range snapshot {
-		toolToEvent[runtimetools.EmitToolName(eventType)] = eventType
-	}
-	evtType, mapped := runtimetools.EventTypeFromEmitToolName(name, toolToEvent)
-	if !mapped {
-		return "", nil, false
-	}
-	evtSchema, ok := snapshot[evtType]
-	if !ok {
-		return "", nil, false
-	}
-	desc := strings.TrimSpace(evtSchema.Description)
-	if desc == "" {
-		desc = "Emit event tool"
-	}
-	return desc, evtSchema.Schema, true
 }
 
 func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {

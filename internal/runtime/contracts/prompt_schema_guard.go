@@ -21,7 +21,7 @@ func ValidatePromptSchemaGuardsForBundle(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return fmt.Errorf("workflow contract bundle is required")
 	}
-	schemas := EventSchemaRegistry()
+	schemas := EventSchemaRegistryFromBundle(bundle)
 	cases := DerivePromptSchemaGuards(bundle)
 
 	for _, tc := range cases {

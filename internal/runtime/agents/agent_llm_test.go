@@ -36,7 +36,7 @@ func TestFormatEventForAgent_UsesConfiguredToolSummary(t *testing.T) {
 		Payload:     []byte(`{"item_id":"x"}`),
 	}).WithEntityID("entity-1")
 
-	formatted := formatEventForAgent(cfg, evt)
+	formatted := formatEventForAgent(cfg, evt, nil)
 	if !strings.Contains(formatted, "Available non-emit tools from your contract: get_entity, schedule") {
 		t.Fatalf("expected configured tool summary, got %q", formatted)
 	}
@@ -105,8 +105,6 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	runtimecontracts.SetActivePromptBundle(bundle)
-
 	agent := &LLMAgent{
 		cfg: models.AgentConfig{
 			ID:   "cos-entity-1",
@@ -115,8 +113,9 @@ func TestResolvePromptForMode_ExpandsConfigVariables(t *testing.T) {
 				"team_name": "Acme Ops",
 			}),
 		},
-		conversation: llm.NewConversation("cos-entity-1", "", "", nil, llm.SessionScoped, 10, nil),
-		promptCache:  map[string]string{},
+		conversation:   llm.NewConversation("cos-entity-1", "", "", nil, llm.SessionScoped, 10, nil),
+		promptCache:    map[string]string{},
+		promptResolver: runtimecontracts.NewBundlePromptResolver(bundle),
 	}
 
 	got := agent.resolvePromptForMode("")
@@ -229,7 +228,7 @@ func mustNewLLMAgent(t *testing.T, cfg models.AgentConfig, modelRuntime llm.Runt
 }
 
 func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
-	runtimetools.InitEventSchemaRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	emitRegistry := runtimetools.NewEmitRegistry(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"coord.done": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -241,8 +240,8 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 				},
 			},
 		},
-	}))
-	agent := mustNewLLMAgent(t,
+	}), nil)
+	agent, err := NewLLMAgentWithOptions(
 		models.AgentConfig{
 			ID:         "coordinator-1",
 			Role:       "coordinator",
@@ -256,7 +255,11 @@ func TestNewLLMAgent_UsesConfiguredEmitEventsAndAllowedTools(t *testing.T) {
 			{Name: "check_status"},
 			{Name: "agent_message"},
 		},
+		LLMAgentOptions{EmitRegistry: emitRegistry},
 	)
+	if err != nil {
+		t.Fatalf("NewLLMAgentWithOptions: %v", err)
+	}
 	names := make([]string, 0, len(agent.conversation.Tools))
 	for _, tool := range agent.conversation.Tools {
 		names = append(names, tool.Name)
@@ -428,7 +431,7 @@ func TestNewLLMAgent_DefaultsToTaskConversationMode(t *testing.T) {
 func TestNewLLMAgentFactory_PrefersActorScopedToolDefinitions(t *testing.T) {
 	factory := NewLLMAgentFactory(nil, actorScopedFactoryToolExec{}, []llm.ToolDefinition{
 		{Name: "global_only"},
-	})
+	}, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
 		ID:    "analysis-agent",
 		Tools: []string{"query_entities"},

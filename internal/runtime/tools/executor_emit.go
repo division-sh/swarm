@@ -7,13 +7,14 @@ import (
 
 	"github.com/google/uuid"
 	"swarm/internal/events"
+	runtimebus "swarm/internal/runtime/bus"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/eventidentity"
 	runtimepipeline "swarm/internal/runtime/pipeline"
 )
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
-	eventType, ok := eventTypeFromEmitToolName(toolName)
+	eventType, ok := e.emitRegistry.EventTypeFromToolName(toolName)
 	if !ok {
 		return nil, NewRuntimeError(
 			"invalid_emit_tool_name",
@@ -51,10 +52,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	schemaEventType := eventType
 	eventType = e.resolveAgentScopedEmitEventType(actor, eventType)
 
-	inbound, _ := InboundEventFromContext(ctx)
+	inbound, _ := runtimebus.InboundEventFromContext(ctx)
 	payloadMap = e.enrichEmitPayloadContext(actor, inbound, schemaEventType, payloadMap)
-	payloadMap = trimEmitPayloadToSchema(schemaEventType, payloadMap)
-	if err := ValidateEventPayloadAgainstSchema(schemaEventType, payloadMap); err != nil {
+	payloadMap = e.trimEmitPayloadToSchema(schemaEventType, payloadMap)
+	if err := e.emitRegistry.ValidateEventPayloadAgainstSchema(schemaEventType, payloadMap); err != nil {
 		return nil, WrapRuntimeError(
 			"schema_validation_failed",
 			"tool-executor",
@@ -121,7 +122,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		)
 	}
 
-	if rec, ok := EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
+	if rec, ok := runtimebus.EmittedEventsRecorderFromContext(ctx); ok && rec != nil {
 		rec.Append(emitted)
 	}
 	return map[string]any{

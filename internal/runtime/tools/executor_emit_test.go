@@ -59,10 +59,10 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 		},
 	}
 	source := semanticview.Wrap(bundle)
-	InitEventSchemaRegistry(source)
+	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ID:         "market-research-agent",
 		Role:       "market_research",
@@ -131,10 +131,10 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 		},
 	}
 	source := semanticview.Wrap(bundle)
-	InitEventSchemaRegistry(source)
+	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ID:         "discovery-coordinator",
 		Role:       "discovery_coordinator",

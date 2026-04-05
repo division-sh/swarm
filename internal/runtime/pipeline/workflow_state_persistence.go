@@ -64,9 +64,9 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		instance.CurrentState = nextState
 		instance.EnteredStageAt = enteredStateAt
 		if currentState != "" && currentState != nextState {
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(currentState, nextState, sourceEvent))
+			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentState, nextState, sourceEvent))
 		} else if currentState == "" && len(instance.TransitionHistory) == 0 {
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord("", nextState, sourceEvent))
+			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), "", nextState, sourceEvent))
 		}
 	}); err != nil {
 		return err
@@ -211,12 +211,12 @@ func (pc *PipelineCoordinator) lockWorkflowEntity(entityID string) func() {
 	return lock.Unlock
 }
 
-func workflowTransitionRecord(fromState, toState, sourceEvent string) WorkflowTransitionRecord {
+func workflowTransitionRecord(workflow *WorkflowDefinition, fromState, toState, sourceEvent string) WorkflowTransitionRecord {
 	fromState = strings.TrimSpace(string(NormalizeWorkflowStateID(fromState)))
 	toState = strings.TrimSpace(string(NormalizeWorkflowStateID(toState)))
 	sourceEvent = strings.TrimSpace(sourceEvent)
 	state := WorkflowState{Stage: NormalizeWorkflowStateID(fromState)}
-	transition, ok := DefaultPipelineWorkflow().Transition(state, NormalizeWorkflowStateID(toState))
+	transition, ok := WorkflowStateTransition(workflow, state.Stage, NormalizeWorkflowStateID(toState))
 	record := WorkflowTransitionRecord{
 		From:            fromState,
 		To:              toState,

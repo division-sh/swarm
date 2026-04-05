@@ -73,7 +73,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	}
 	module := opts.Module
 	if module == nil {
-		module = defaultWorkflowModule()
+		panic("pipeline: workflow module is required")
 	}
 	return &PipelineCoordinator{
 		bus:                 bus,
@@ -88,7 +88,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 }
 
 func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
-	return NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: defaultWorkflowModule()})
+	panic("pipeline: workflow module is required")
 }
 
 func (pc *PipelineCoordinator) SetTestSubscribeHook(fn func()) {

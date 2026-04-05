@@ -3,6 +3,7 @@ package tools
 import (
 	"strings"
 
+	runtimeauthority "swarm/internal/runtime/authority"
 	models "swarm/internal/runtime/core/actors"
 	"swarm/internal/runtime/core/toolcapabilities"
 	"swarm/internal/runtime/core/toolidentity"
@@ -15,7 +16,7 @@ type toolAuthorizationDecision struct {
 	constrained bool
 }
 
-func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAuthorizationDecision {
+func classifyToolAuthorization(actor models.AgentConfig, toolName string, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) toolAuthorizationDecision {
 	toolName = normalizeNativeToolName(toolName)
 	decision := toolAuthorizationDecision{
 		ownership: toolOwnershipForName(toolName),
@@ -33,7 +34,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 		}
 		return decision
 	}
-	if toolEmitAllowed(actor, toolName) {
+	if toolEmitAllowed(actor, toolName, provider, emitRegistry) {
 		decision.class = toolAuthorizationEmitAllowed
 		decision.allowed = true
 		return decision
@@ -53,8 +54,11 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string) toolAu
 	return decision
 }
 
-func toolEmitAllowed(actor models.AgentConfig, toolName string) bool {
-	return IsEmitToolAllowedForRole(actor.Role, toolName) || IsEmitToolAllowedForActor(actor, toolName)
+func toolEmitAllowed(actor models.AgentConfig, toolName string, provider runtimeauthority.Provider, emitRegistry *EmitRegistry) bool {
+	if emitRegistry == nil {
+		emitRegistry = NewEmitRegistry(nil, provider)
+	}
+	return emitRegistry.IsEmitToolAllowedForRole(actor.Role, toolName) || emitRegistry.IsEmitToolAllowedForActor(actor, toolName)
 }
 
 func toolKindPolicy(toolName string) toolcapabilities.ToolKind {

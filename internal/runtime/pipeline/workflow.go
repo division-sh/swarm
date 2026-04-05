@@ -43,16 +43,14 @@ func NormalizeWorkflowStateID(raw string) WorkflowStateID {
 	return WorkflowStateID(strings.TrimSpace(raw))
 }
 
-func CanTransitionWorkflowState(from, to WorkflowStateID) bool {
-	workflow := DefaultPipelineWorkflow()
+func CanTransitionWorkflowState(workflow *WorkflowDefinition, from, to WorkflowStateID) bool {
 	if workflow == nil {
 		return from == to
 	}
 	return workflow.CanTransition(WorkflowState{Stage: NormalizeWorkflowStateID(string(from))}, NormalizeWorkflowStateID(string(to)))
 }
 
-func WorkflowStateTransition(from, to WorkflowStateID) (WorkflowTransition, bool) {
-	workflow := DefaultPipelineWorkflow()
+func WorkflowStateTransition(workflow *WorkflowDefinition, from, to WorkflowStateID) (WorkflowTransition, bool) {
 	if workflow == nil {
 		return WorkflowTransition{}, false
 	}
@@ -294,10 +292,6 @@ func parseWorkflowTime(v any) time.Time {
 
 func workflowMetadataSnapshot(instance WorkflowInstance) map[string]any {
 	return cloneStringAnyMap(instance.Metadata)
-}
-
-func DefaultPipelineWorkflow() *WorkflowDefinition {
-	return defaultWorkflowModule().WorkflowDefinition()
 }
 
 func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, error) {

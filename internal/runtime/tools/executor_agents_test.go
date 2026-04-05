@@ -36,7 +36,7 @@ func (b *publishDirectBusStub) PublishDirect(_ context.Context, _ events.Event, 
 }
 
 func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
-	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"control": {
 				ID:   "control",
@@ -53,8 +53,7 @@ func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
 				ManagerFallback: "reviewer",
 			},
 		},
-	})))
-	defer runtimeauthority.SetProvider(nil)
+	}))
 
 	manager := managerStub{
 		agents: map[string]models.AgentConfig{
@@ -81,13 +80,13 @@ func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
 	}
 	target := manager.agents["worker"]
 
-	if err := authorizeManage(actor, target, manager); err != nil {
+	if err := authorizeManage(provider, actor, target, manager); err != nil {
 		t.Fatalf("expected ancestor manager to be allowed, got %v", err)
 	}
 }
 
 func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
-	runtimeauthority.SetProvider(runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	provider := runtimeauthority.NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"control": {
 				ID:    "control",
@@ -100,8 +99,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 				Tools: []string{"message_peers"},
 			},
 		},
-	})))
-	defer runtimeauthority.SetProvider(nil)
+	}))
 
 	bus := &publishDirectBusStub{}
 	manager := managerStub{
@@ -115,7 +113,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 			},
 		},
 	}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager})
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 	ctx := WithActor(context.Background(), models.AgentConfig{
 		ID:          "control",
 		Role:        "control",

@@ -25,13 +25,12 @@ func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, sour
 	})
 }
 
-func newRuntimePayloadValidator(strict bool, logger *RuntimeLogger) runtimebus.PayloadValidator {
+func newRuntimePayloadValidator(strict bool, logger *RuntimeLogger, schemas map[string]runtimecontracts.EventSchema) runtimebus.PayloadValidator {
 	return func(eventType string, payload []byte) error {
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
 			return nil
 		}
-		schemas := runtimecontracts.EventSchemaRegistry()
 		schema, ok := schemas[eventType]
 		if !ok {
 			return nil

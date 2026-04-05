@@ -27,6 +27,7 @@ import (
 	"swarm/internal/config"
 	dashboardserver "swarm/internal/dashboard/server"
 	"swarm/internal/runtime"
+	runtimeauthority "swarm/internal/runtime/authority"
 	runtimebootverify "swarm/internal/runtime/bootverify"
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -811,8 +812,8 @@ func verifyEmitSchemaCoverage(source semanticview.Source) error {
 	if source == nil {
 		return errors.New("semantic source is required")
 	}
-	runtimetools.InitEventSchemaRegistry(source)
-	if generated := runtimetools.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 && envBool("SWARM_EMIT_SCHEMA_STRICT", true) {
+	registry := runtimetools.NewEmitRegistry(source, runtimeauthority.NewSourceProvider(source))
+	if generated := registry.GeneratedEmitSchemasForAgentRoles(); len(generated) > 0 && envBool("SWARM_EMIT_SCHEMA_STRICT", true) {
 		sample := generated
 		if len(sample) > 10 {
 			sample = sample[:10]

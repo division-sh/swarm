@@ -40,13 +40,14 @@ func budgetExecutionScopeKey(actor models.AgentConfig) string {
 //
 // It is not accounting-grade. The intent is runaway-spend prevention.
 type BudgetTracker struct {
-	db          *sql.DB
-	bus         *runtimebus.EventBus
-	cfg         *config.Config
-	logger      *RuntimeLogger
-	mailbox     runtimetools.MailboxPersistence
-	mailboxFrom string
-	thresholds  budgetThresholds
+	db             *sql.DB
+	bus            *runtimebus.EventBus
+	cfg            *config.Config
+	logger         *RuntimeLogger
+	mailbox        runtimetools.MailboxPersistence
+	mailboxFrom    string
+	thresholds     budgetThresholds
+	terminalStates []string
 
 	mu        sync.Mutex
 	lastState map[string]string // key(scope|entity_id) => ok|warning|throttle|emergency
@@ -60,36 +61,17 @@ type budgetThresholds struct {
 	Emergency float64
 }
 
-var (
-	terminalInstanceStatesMu sync.RWMutex
-	terminalInstanceStates   []string
-)
-
-func SetTerminalInstanceStates(states []string) {
-	terminalInstanceStatesMu.Lock()
-	defer terminalInstanceStatesMu.Unlock()
-	terminalInstanceStates = normalizeBudgetStateList(states)
-}
-
-func TerminalInstanceStates() []string {
-	terminalInstanceStatesMu.RLock()
-	defer terminalInstanceStatesMu.RUnlock()
-	out := make([]string, len(terminalInstanceStates))
-	copy(out, terminalInstanceStates)
-	return out
-}
-
 func NewBudgetTracker(db *sql.DB, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source) *BudgetTracker {
-	SetTerminalInstanceStates(source.WorkflowTerminalStages())
 	return &BudgetTracker{
-		db:          db,
-		bus:         bus,
-		cfg:         cfg,
-		logger:      logger,
-		mailbox:     mailbox,
-		mailboxFrom: "runtime",
-		thresholds:  budgetThresholdsFromSource(source),
-		lastState:   make(map[string]string),
+		db:             db,
+		bus:            bus,
+		cfg:            cfg,
+		logger:         logger,
+		mailbox:        mailbox,
+		mailboxFrom:    "runtime",
+		thresholds:     budgetThresholdsFromSource(source),
+		terminalStates: normalizeBudgetStateList(source.WorkflowTerminalStages()),
+		lastState:      make(map[string]string),
 	}
 }
 
@@ -191,7 +173,7 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 		FROM entity_state
 		WHERE NOT (current_state = ANY($1::text[]))
 		ORDER BY created_at ASC
-	`, pq.Array(TerminalInstanceStates()))
+	`, pq.Array(t.TerminalInstanceStates()))
 	if err != nil {
 		return
 	}
@@ -207,6 +189,15 @@ func (t *BudgetTracker) EvaluateAll(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (t *BudgetTracker) TerminalInstanceStates() []string {
+	if t == nil {
+		return nil
+	}
+	out := make([]string, len(t.terminalStates))
+	copy(out, t.terminalStates)
+	return out
 }
 
 type SpendRecord struct {

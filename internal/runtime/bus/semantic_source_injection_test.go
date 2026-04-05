@@ -6,8 +6,6 @@ import (
 	runtimebus "swarm/internal/runtime/bus"
 	runtimecontracts "swarm/internal/runtime/contracts"
 	"swarm/internal/runtime/flowmodel"
-	runtimepipeline "swarm/internal/runtime/pipeline"
-	"swarm/internal/runtime/semanticview"
 )
 
 func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testing.T) {
@@ -30,7 +28,7 @@ func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testi
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{scoring}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
+	_ = &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -38,18 +36,6 @@ func TestNewEventBusWithOptions_DoesNotUseAmbientWorkflowSemanticSource(t *testi
 			},
 		},
 	}
-
-	previous := runtimepipeline.DefaultWorkflowModuleOrNil()
-	runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule {
-		return &fixtureWorkflowModule{source: semanticview.Wrap(bundle)}
-	})
-	t.Cleanup(func() {
-		if previous == nil {
-			runtimepipeline.SetDefaultWorkflowModuleFactory(nil)
-			return
-		}
-		runtimepipeline.SetDefaultWorkflowModuleFactory(func() runtimepipeline.WorkflowModule { return previous })
-	})
 
 	eb, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{})
 	if err != nil {

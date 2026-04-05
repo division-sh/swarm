@@ -10,8 +10,8 @@ import (
 )
 
 func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) {
-	SetActivePromptBundle(loadPromptTestBundle(t, repoRoot(t)))
-	prompt, found, err := LoadPromptForAgent(models.AgentConfig{
+	resolver := NewBundlePromptResolver(loadPromptTestBundle(t, repoRoot(t)))
+	prompt, found, err := resolver.LoadPromptForAgent(models.AgentConfig{
 		ID:   "cos-entity-1",
 		Role: "ops_lead",
 	}, "")
@@ -23,6 +23,47 @@ func TestLoadPromptForAgent_UsesPromptRefAndWorkspaceRoleFallback(t *testing.T) 
 	}
 	if !strings.Contains(prompt, "{{team_name}}") {
 		t.Fatalf("expected generic operations prompt template, got %q", prompt)
+	}
+}
+
+func TestBundlePromptResolver_KeepsBundleStateIsolated(t *testing.T) {
+	bundleA := loadPromptTestBundle(t, repoRoot(t))
+	bundleA.Policy.Values = map[string]PolicyValue{
+		"team_name": {Value: "alpha-team"},
+	}
+	bundleB := loadPromptTestBundle(t, repoRoot(t))
+	bundleB.Policy.Values = map[string]PolicyValue{
+		"team_name": {Value: "beta-team"},
+	}
+
+	promptA, found, err := NewBundlePromptResolver(bundleA).LoadPromptForAgent(models.AgentConfig{
+		ID:   "ops-lead",
+		Role: "ops_lead",
+	}, "")
+	if err != nil {
+		t.Fatalf("resolver A LoadPromptForAgent: %v", err)
+	}
+	if !found {
+		t.Fatal("expected prompt for resolver A")
+	}
+	promptB, found, err := NewBundlePromptResolver(bundleB).LoadPromptForAgent(models.AgentConfig{
+		ID:   "ops-lead",
+		Role: "ops_lead",
+	}, "")
+	if err != nil {
+		t.Fatalf("resolver B LoadPromptForAgent: %v", err)
+	}
+	if !found {
+		t.Fatal("expected prompt for resolver B")
+	}
+	if !strings.Contains(promptA, "alpha-team") {
+		t.Fatalf("resolver A prompt = %q, want alpha-team", promptA)
+	}
+	if !strings.Contains(promptB, "beta-team") {
+		t.Fatalf("resolver B prompt = %q, want beta-team", promptB)
+	}
+	if promptA == promptB {
+		t.Fatalf("expected isolated prompt resolution, got identical prompts %q", promptA)
 	}
 }
 

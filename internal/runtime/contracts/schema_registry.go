@@ -3,18 +3,12 @@ package contracts
 import (
 	"fmt"
 	"strings"
-	"sync"
 )
 
 type EventSchema struct {
 	Description string
 	Schema      map[string]any
 }
-
-var (
-	activeRegistryMu sync.RWMutex
-	activeRegistry   map[string]EventSchema
-)
 
 func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[string]EventSchema {
 	out := make(map[string]EventSchema, len(entries))
@@ -65,6 +59,13 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry) Even
 	}
 }
 
+func EventSchemaRegistryFromBundle(bundle *WorkflowContractBundle) map[string]EventSchema {
+	if bundle == nil {
+		return map[string]EventSchema{}
+	}
+	return EventSchemaRegistryFromCatalog(bundle.ResolvedEventCatalog())
+}
+
 func normalizeEventFieldType(raw string) (string, string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -82,18 +83,6 @@ func normalizeEventFieldType(raw string) (string, string) {
 		}
 	}
 	return raw, ""
-}
-
-func SetActiveEventSchemaRegistry(registry map[string]EventSchema) {
-	activeRegistryMu.Lock()
-	defer activeRegistryMu.Unlock()
-	activeRegistry = cloneEventSchemaRegistry(registry)
-}
-
-func EventSchemaRegistry() map[string]EventSchema {
-	activeRegistryMu.RLock()
-	defer activeRegistryMu.RUnlock()
-	return cloneEventSchemaRegistry(activeRegistry)
 }
 
 func cloneEventSchemaRegistry(in map[string]EventSchema) map[string]EventSchema {

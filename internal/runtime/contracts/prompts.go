@@ -16,40 +16,44 @@ import (
 	models "swarm/internal/runtime/core/actors"
 )
 
-var (
-	promptBundleOnce   sync.Once
-	promptBundle       *WorkflowContractBundle
-	promptBundleErr    error
-	activePromptMu     sync.RWMutex
-	activePromptBundle *WorkflowContractBundle
-
-	promptTemplateFieldPattern = regexp.MustCompile(`\{[^}]+\}`)
-	promptTokenPattern         = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)\}\}`)
-
-	promptVariablesMu sync.RWMutex
-	promptVariables   = map[string]map[string]any{}
-)
-
-func SetActivePromptBundle(bundle *WorkflowContractBundle) {
-	activePromptMu.Lock()
-	defer activePromptMu.Unlock()
-	activePromptBundle = bundle
-	promptVariablesMu.Lock()
-	promptVariables = map[string]map[string]any{}
-	promptVariablesMu.Unlock()
+type PromptResolver interface {
+	LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error)
 }
 
-func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
-	candidates, dirs := promptLookupPlan(cfg)
+type BundlePromptResolver struct {
+	bundle            *WorkflowContractBundle
+	repoRoot          string
+	promptVariablesMu sync.RWMutex
+	promptVariables   map[string]map[string]any
+}
+
+var (
+	promptTemplateFieldPattern = regexp.MustCompile(`\{[^}]+\}`)
+	promptTokenPattern         = regexp.MustCompile(`\{\{([a-zA-Z0-9_]+)\}\}`)
+)
+
+func NewBundlePromptResolver(bundle *WorkflowContractBundle) *BundlePromptResolver {
+	return &BundlePromptResolver{
+		bundle:          bundle,
+		repoRoot:        promptContractsRepoRoot(),
+		promptVariables: map[string]map[string]any{},
+	}
+}
+
+func (r *BundlePromptResolver) LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
+	candidates, dirs := r.promptLookupPlan(cfg)
 	repoRoot := promptContractsRepoRoot()
-	bundle, _ := promptWorkflowBundle()
+	if r != nil && strings.TrimSpace(r.repoRoot) != "" {
+		repoRoot = r.repoRoot
+	}
+	bundle := r.workflowBundle()
 	for _, agentID := range candidates {
 		record := bundleAgentRecord{}
 		if bundle != nil {
 			record, _ = bundleAgentRecordByLogicalID(bundle, agentID)
 		}
 		for _, dir := range dirs[agentID] {
-			prompt, found, err := loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, record.Source, cfg, mode)
+			prompt, found, err := r.loadPromptTemplateFromDir(repoRoot, dir, agentID, record.Entry, record.Source, cfg, mode)
 			if err != nil {
 				return "", false, err
 			}
@@ -61,10 +65,10 @@ func LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, erro
 	return "", false, nil
 }
 
-func promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {
+func (r *BundlePromptResolver) promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {
 	candidates := promptIDCandidates(cfg)
-	bundle, err := promptWorkflowBundle()
-	if err != nil || bundle == nil {
+	bundle := r.workflowBundle()
+	if bundle == nil {
 		dirs := make(map[string][]string, len(candidates))
 		for _, candidate := range candidates {
 			dirs[candidate] = nil
@@ -89,6 +93,13 @@ func promptLookupPlan(cfg models.AgentConfig) ([]string, map[string][]string) {
 		dirs[agentID] = bundleDirs
 	}
 	return resolved, dirs
+}
+
+func (r *BundlePromptResolver) workflowBundle() *WorkflowContractBundle {
+	if r == nil {
+		return nil
+	}
+	return r.bundle
 }
 
 func promptIDCandidates(cfg models.AgentConfig) []string {
@@ -268,28 +279,6 @@ func uniqueStrings(values ...string) []string {
 	return out
 }
 
-func promptWorkflowBundle() (*WorkflowContractBundle, error) {
-	activePromptMu.RLock()
-	active := activePromptBundle
-	activePromptMu.RUnlock()
-	if active != nil {
-		return active, nil
-	}
-	promptBundleOnce.Do(func() {
-		repoRoot := promptContractsRepoRoot()
-		contractsDir := DefaultWorkflowContractsDir(repoRoot)
-		if strings.TrimSpace(contractsDir) == "" {
-			return
-		}
-		promptBundle, promptBundleErr = LoadWorkflowContractBundleWithOverrides(
-			repoRoot,
-			contractsDir,
-			DefaultPlatformSpecFile(repoRoot),
-		)
-	})
-	return promptBundle, promptBundleErr
-}
-
 func promptContractsRepoRoot() string {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -303,6 +292,10 @@ func loadPromptForAgentFromDir(repoRoot, promptsDir, agentID, mode string) (stri
 }
 
 func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, cfg models.AgentConfig, mode string) (string, bool, error) {
+	return (*BundlePromptResolver)(nil).loadPromptTemplateFromDir(repoRoot, promptsDir, agentID, entry, source, cfg, mode)
+}
+
+func (r *BundlePromptResolver) loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry AgentRegistryEntry, source ContractItemSource, cfg models.AgentConfig, mode string) (string, bool, error) {
 	agentID = strings.TrimSpace(agentID)
 	mode = strings.TrimSpace(strings.ToLower(mode))
 	if agentID == "" || strings.TrimSpace(promptsDir) == "" {
@@ -319,7 +312,7 @@ func loadPromptTemplateFromDir(repoRoot, promptsDir, agentID string, entry Agent
 			}
 			return "", false, err
 		}
-		rendered, err := renderPromptWithRuntimeVariables(repoRoot, string(raw), source, cfg)
+		rendered, err := r.renderPromptWithRuntimeVariables(repoRoot, string(raw), source, cfg)
 		if err != nil {
 			return "", false, fmt.Errorf("render prompt %s: %w", filepath.Base(candidate), err)
 		}
@@ -367,35 +360,35 @@ func promptWorkspaceRoleRef(entry AgentRegistryEntry) string {
 	return workspaceClass + "-" + role
 }
 
-func renderPromptWithRuntimeVariables(repoRoot, promptText string, source ContractItemSource, cfg models.AgentConfig) (string, error) {
+func (r *BundlePromptResolver) renderPromptWithRuntimeVariables(repoRoot, promptText string, source ContractItemSource, cfg models.AgentConfig) (string, error) {
 	if !promptTokenPattern.MatchString(promptText) {
 		return promptText, nil
 	}
-	vars, err := promptRuntimeVariables(repoRoot, source, cfg)
+	vars, err := r.promptRuntimeVariables(repoRoot, source, cfg)
 	if err != nil {
 		return promptText, nil
 	}
 	return renderPromptTemplatePreservingUnknown(promptText, vars), nil
 }
 
-func promptRuntimeVariables(repoRoot string, source ContractItemSource, cfg models.AgentConfig) (map[string]any, error) {
-	bundle, err := promptWorkflowBundle()
-	if err != nil {
-		return nil, fmt.Errorf("load workflow contract bundle: %w", err)
-	}
+func (r *BundlePromptResolver) promptRuntimeVariables(repoRoot string, source ContractItemSource, cfg models.AgentConfig) (map[string]any, error) {
+	bundle := r.workflowBundle()
 	scopeKey := promptVariableScopeKey(source, cfg)
-	promptVariablesMu.RLock()
-	if vars, ok := promptVariables[scopeKey]; ok {
-		defer promptVariablesMu.RUnlock()
+	if r == nil {
+		return promptVariableValues(bundle, source, cfg), nil
+	}
+	r.promptVariablesMu.RLock()
+	if vars, ok := r.promptVariables[scopeKey]; ok {
+		defer r.promptVariablesMu.RUnlock()
 		return clonePromptVariables(vars), nil
 	}
-	promptVariablesMu.RUnlock()
+	r.promptVariablesMu.RUnlock()
 
 	vars := promptVariableValues(bundle, source, cfg)
 
-	promptVariablesMu.Lock()
-	promptVariables[scopeKey] = clonePromptVariables(vars)
-	promptVariablesMu.Unlock()
+	r.promptVariablesMu.Lock()
+	r.promptVariables[scopeKey] = clonePromptVariables(vars)
+	r.promptVariablesMu.Unlock()
 	return vars, nil
 }
 

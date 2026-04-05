@@ -15,7 +15,7 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	if e.mailboxStore == nil {
 		return nil, errors.New("mailbox store is not configured")
 	}
-	if err := authorizeMailboxSend(actor); err != nil {
+	if err := authorizeMailboxSend(e.authority, actor); err != nil {
 		return nil, err
 	}
 	var in struct {

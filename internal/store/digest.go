@@ -8,13 +8,25 @@ import (
 	"swarm/internal/runtime"
 )
 
+func (s *PostgresStore) requireTerminalInstanceStates() ([]string, error) {
+	states := s.EffectiveTerminalInstanceStates()
+	if len(states) == 0 {
+		return nil, fmt.Errorf("terminal instance states are required for digest reads")
+	}
+	return states, nil
+}
+
 func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
+	terminalStates, err := s.requireTerminalInstanceStates()
+	if err != nil {
+		return 0, err
+	}
 	var n int
-	err := s.DB.QueryRowContext(ctx, `
+	err = s.DB.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM entity_state
 		WHERE NOT (current_state = ANY($1::text[]))
-	`, pq.Array(runtime.TerminalInstanceStates())).Scan(&n)
+	`, pq.Array(terminalStates)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count active instances: %w", err)
 	}
@@ -22,6 +34,10 @@ func (s *PostgresStore) CountActiveInstances(ctx context.Context) (int, error) {
 }
 
 func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) ([]runtime.InstanceDigestRow, error) {
+	terminalStates, err := s.requireTerminalInstanceStates()
+	if err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = 10
 	}
@@ -37,7 +53,7 @@ func (s *PostgresStore) ListInstanceDigestRows(ctx context.Context, limit int) (
 		LIMIT $1
 	`
 
-	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(runtime.TerminalInstanceStates()))
+	rows, err := s.DB.QueryContext(ctx, q, limit, pq.Array(terminalStates))
 	if err != nil {
 		return nil, fmt.Errorf("list digest rows: %w", err)
 	}

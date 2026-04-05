@@ -28,6 +28,7 @@ type AgentManager struct {
 	store                    ManagerPersistence
 	sessions                 sessions.Registry
 	semanticSource           semanticview.Source
+	promptResolver           runtimecontracts.PromptResolver
 	budget                   BudgetGuard
 	runtimeMode              string
 	throttleSuppressPrefixes []string
@@ -98,6 +99,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		workspaces:               opts.Workspaces,
 		sessions:                 opts.Sessions,
 		semanticSource:           opts.SemanticSource,
+		promptResolver:           opts.PromptResolver,
 		runtimeMode:              strings.TrimSpace(opts.RuntimeMode),
 		budget:                   opts.Budget,
 		throttleSuppressPrefixes: throttleSuppressPrefixes,
@@ -294,7 +296,10 @@ func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
 }
 
 func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.AgentConfig, error) {
-	prompt, found, err := runtimecontracts.LoadPromptForAgent(cfg, "")
+	if am.promptResolver == nil {
+		return cfg, nil
+	}
+	prompt, found, err := am.promptResolver.LoadPromptForAgent(cfg, "")
 	if err != nil {
 		return cfg, fmt.Errorf(
 			"contract prompt load failed agent_id=%s role=%s: %w",

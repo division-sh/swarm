@@ -8,9 +8,6 @@ import (
 
 func TestMain(m *testing.M) {
 	flag.Parse()
-	SetDefaultWorkflowModuleFactory(func() WorkflowModule {
-		return NewGenericTestWorkflowModule()
-	})
 	if testing.Short() {
 		os.Exit(0)
 	}
