@@ -194,6 +194,20 @@ Reserved bracket prefixes:
 
 Use bracket prefixes only for those special non-standard issue classes.
 
+## PR Linking Rule
+
+Every implementation PR should link the owning GitHub issue in the PR description.
+
+Default rule:
+
+- if the PR fully completes the issue, include:
+  - `Closes #<number>`
+- if the PR is only one slice of a larger issue, include:
+  - `Part of #<number>`
+
+Do not leave issue linkage implicit in only the branch name or PR title.
+The PR description should carry the issue reference so merge behavior and traceability are explicit.
+
 ## GitHub Triage Model
 
 GitHub labels are the active queue taxonomy.
@@ -387,6 +401,11 @@ Review rule:
   - or obsolete after later changes
 - if the PR describes a narrow follow-up item in the same seam, reviewers should flag it and ask for it to be encompassed in the PR instead of creating another tiny issue
 - leave a follow-up separate only when it is meaningfully broader, riskier, or cross-boundary
+- after each substantive review pass, the reviewer should leave a short formal PR comment with:
+  - guideline check
+  - residual risk
+  - merge recommendation
+- merge should rely on the latest valid review state, not on a last-minute ritual comment added only because the PR is about to merge
 
 Follow-up rule:
 

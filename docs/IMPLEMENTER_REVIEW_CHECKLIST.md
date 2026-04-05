@@ -70,6 +70,9 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
 - Before merge recommendation, did the reviewer read the existing PR conversation comments and review comments for substantive concerns, and explicitly check whether they are still unresolved or already obsolete on the current head?
 - Does the PR description include:
   - a short human summary in plain language
+  - an explicit issue link:
+    - `Closes #...` for full completion
+    - or `Part of #...` for partial work
   - what changed
   - why this is needed
   - scope boundaries
@@ -81,7 +84,7 @@ If any answer below is "no", "not sure", or "this patch needs an exception", sto
   - meaningful additional scope
   - real cross-boundary coordination
   - or materially higher risk than the current PR
-- Before merge, did a reviewer leave a short PR conversation comment that checks this change against the relevant implementation rules?
+- After this substantive review pass, did the reviewer leave a short PR conversation comment that checks this change against the relevant implementation rules?
 - Did that PR comment explicitly call out only the rules that matter for this change, rather than mechanically filling a giant template?
 - Did that PR comment include:
   - the relevant guideline checks
@@ -129,7 +132,7 @@ Merge recommendation:
 ```
 
 Only comment on the rules that are actually relevant to the PR.
-The goal is to force explicit rule-based review, not to create a ritual template.
+The goal is to force explicit rule-based review after each real review pass, not to create a ritual template right before merge.
 
 Recommended PR description shape:
 
