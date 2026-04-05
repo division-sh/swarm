@@ -81,7 +81,7 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	if len(keys) == 0 {
 		return WorkflowInstance{}, false, nil
 	}
-	return s.loadSpec(ctx, keys)
+	return s.loadSpec(ctx, keys, false)
 }
 
 func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, error) {
@@ -136,7 +136,23 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 	if instanceID == "" || s == nil || s.db == nil || fn == nil {
 		return nil
 	}
-	instance, ok, err := s.Load(ctx, instanceID)
+	tx, ownedTx, err := workflowInstanceStoreTx(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	committed := !ownedTx
+	if ownedTx {
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+	}
+	ctx = withSQLTxContext(ctx, tx)
+	if err := lockWorkflowInstanceMutation(ctx, tx, instanceID); err != nil {
+		return err
+	}
+	instance, ok, err := s.loadSpec(ctx, workflowInstanceLookupKeys(instanceID), true)
 	if err != nil {
 		return err
 	}
@@ -144,14 +160,23 @@ func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, f
 		instance = WorkflowInstance{InstanceID: instanceID}
 	}
 	fn(&instance)
-	return s.Upsert(ctx, instance)
+	if err := s.Upsert(ctx, instance); err != nil {
+		return err
+	}
+	if ownedTx {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		committed = true
+	}
+	return nil
 }
 
 func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
 	return fmt.Errorf("workflow instance deletion is unsupported: entity_state writes must stay on the mutation-logged upsert path")
 }
 
-func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (WorkflowInstance, bool, error) {
+func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {
 	var (
 		item         WorkflowInstance
 		gatesRaw     []byte
@@ -164,7 +189,7 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (Wo
 		slug         sql.NullString
 		name         sql.NullString
 	)
-	err := dbQueryRowContext(ctx, s.db, `
+	query := `
 		SELECT
 			es.entity_id::text,
 			es.subject_id::text,
@@ -187,7 +212,11 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string) (Wo
 		WHERE es.entity_id = ANY($1::uuid[])
 		ORDER BY es.created_at DESC, es.entity_id DESC
 		LIMIT 1
-	`, pqStringArray(keys)).Scan(
+	`
+	if forUpdate {
+		query += ` FOR UPDATE OF es`
+	}
+	err := dbQueryRowContext(ctx, s.db, query, pqStringArray(keys)).Scan(
 		&item.InstanceID,
 		&subjectID,
 		&item.WorkflowName,
@@ -469,6 +498,20 @@ func workflowInstanceStoreTx(ctx context.Context, db *sql.DB) (*sql.Tx, bool, er
 	return tx, true, nil
 }
 
+func lockWorkflowInstanceMutation(ctx context.Context, tx *sql.Tx, instanceID string) error {
+	if tx == nil {
+		return nil
+	}
+	instanceID = strings.TrimSpace(instanceID)
+	if instanceID == "" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "workflow-instance:"+instanceID); err != nil {
+		return fmt.Errorf("lock workflow instance mutation: %w", err)
+	}
+	return nil
+}
+
 func loadTrackedEntityStateProjection(ctx context.Context, tx *sql.Tx, entityID string) (runtimemutationlog.EntityStateProjection, error) {
 	if tx == nil || strings.TrimSpace(entityID) == "" {
 		return runtimemutationlog.EntityStateProjection{}, nil
@@ -518,7 +561,7 @@ func jsonObjectMap(raw []byte) map[string]any {
 }
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, entityID string) ([]WorkflowTimerState, error) {
-	rows, err := dbQueryContext(withoutSQLTxContext(ctx), s.db, `
+	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			timer_name,
 			fire_event,
