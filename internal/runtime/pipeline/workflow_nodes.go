@@ -179,7 +179,7 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 		}
 		out = append(out, value)
 	}
-	appendAlias(workflowNodeExternalEventType(source, nodeID, eventType))
+	appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
 	contractSource, ok := source.NodeContractSource(nodeID)
 	if !ok {
 		return out
@@ -188,10 +188,10 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 	if flowID == "" {
 		return out
 	}
-	if !workflowFlowHasInputEvent(source, flowID, eventType) {
+	if !source.FlowHasInputEvent(flowID, eventType) {
 		return out
 	}
-	for _, pattern := range workflowFlowInputProducerAliases(source, flowID, eventType) {
+	for _, pattern := range source.FlowInputProducerPatterns(flowID, eventType) {
 		appendAlias(pattern)
 	}
 	appendAlias(eventType)
@@ -199,60 +199,17 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 }
 
 func workflowFlowInputProducerAliases(source semanticview.Source, targetFlowID, eventType string) []string {
-	targetFlowID = strings.TrimSpace(targetFlowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || targetFlowID == "" || eventType == "" {
+	if source == nil {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, 4)
-	appendAlias := func(value string) {
-		value = eventidentity.Normalize(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	for _, scope := range semanticview.ProjectScopes(source) {
-		if _, ok := scope.Events[eventType]; ok {
-			appendAlias(eventType)
-		}
-	}
-	for _, scope := range source.FlowScopes() {
-		if strings.TrimSpace(scope.ID) == targetFlowID {
-			continue
-		}
-		flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if flowPath == "" {
-			continue
-		}
-		for _, output := range scope.OutputEvents {
-			if strings.TrimSpace(output) != eventType {
-				continue
-			}
-			appendAlias(flowPath + "/" + eventType)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return source.FlowInputProducerPatterns(targetFlowID, eventType)
 }
 
 func workflowFlowHasInputEvent(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || flowID == "" || eventType == "" {
+	if source == nil {
 		return false
 	}
-	for _, candidate := range source.FlowInputEvents(flowID) {
-		if strings.TrimSpace(candidate) == eventType {
-			return true
-		}
-	}
-	return false
+	return source.FlowHasInputEvent(flowID, eventType)
 }
 
 func workflowRuntimeNodeIDs(source semanticview.Source) []string {
@@ -429,115 +386,10 @@ func workflowNodeRuntimePolicyEvents(source semanticview.Source, nodeID string, 
 }
 
 func workflowNodeExternalEventType(source semanticview.Source, nodeID, eventType string) string {
-	nodeID = strings.TrimSpace(nodeID)
-	eventType = eventidentity.Normalize(eventType)
-	if nodeID == "" || eventType == "" || source == nil {
-		return eventType
+	if source == nil {
+		return eventidentity.Normalize(eventType)
 	}
-	if strings.Contains(eventType, "/") {
-		if absolute, ok := workflowNodeExternalDescendantEventType(source, nodeID, eventType); ok {
-			return absolute
-		}
-		return eventType
-	}
-	contractSource, ok := source.NodeContractSource(nodeID)
-	if !ok {
-		return eventType
-	}
-	flowID := strings.TrimSpace(contractSource.FlowID)
-	if flowID == "" {
-		return eventType
-	}
-	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
-	}
-	return eventidentity.ExternalizeForFlow(flowPath, workflowFlowLocalEvents(source, flowID), eventType)
-}
-
-func workflowNodeExternalDescendantEventType(source semanticview.Source, nodeID, eventType string) (string, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	eventType = eventidentity.Normalize(eventType)
-	if nodeID == "" || eventType == "" || source == nil {
-		return "", false
-	}
-	contractSource, ok := source.NodeContractSource(nodeID)
-	if !ok {
-		return "", false
-	}
-	flowID := strings.TrimSpace(contractSource.FlowID)
-	if flowID == "" {
-		return "", false
-	}
-	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(flowID, "/")
-	}
-	descendants := make(map[string]map[string]struct{})
-	for _, scope := range source.FlowScopes() {
-		descendantPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if descendantPath == "" {
-			continue
-		}
-		localEvents := workflowFlowLocalEventSet(scope)
-		if len(localEvents) == 0 {
-			continue
-		}
-		descendants[descendantPath] = localEvents
-	}
-	return eventidentity.ExternalizeDescendantForFlow(flowPath, eventType, descendants)
-}
-
-func workflowFlowLocalEventSet(scope semanticview.FlowScope) map[string]struct{} {
-	out := make(map[string]struct{}, len(scope.Events)+1)
-	for eventType := range scope.Events {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
-		out[autoEmit] = struct{}{}
-	}
-	return out
-}
-
-func workflowFlowHasLocalEvent(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || flowID == "" || eventType == "" {
-		return false
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return false
-	}
-	if _, ok := scope.Events[eventType]; ok {
-		return true
-	}
-	return strings.TrimSpace(scope.AutoEmitEvent) == eventType
-}
-
-func workflowFlowLocalEvents(source semanticview.Source, flowID string) []string {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil || flowID == "" {
-		return nil
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return nil
-	}
-	out := make([]string, 0, len(scope.Events)+1)
-	for eventType := range scope.Events {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out = append(out, eventType)
-		}
-	}
-	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
-		out = append(out, autoEmit)
-	}
-	return out
+	return source.ResolveNodeEventReference(nodeID, eventType)
 }
 
 func workflowNodeTransitionTriggers(source semanticview.Source, nodeID string) map[string]bool {

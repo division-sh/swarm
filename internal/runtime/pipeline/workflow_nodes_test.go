@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "swarm/internal/runtime/contracts"
@@ -96,4 +97,18 @@ func TestWorkflowFlowInputProducerAliases_AutoWireCrossFlowInputPinsToProducerSc
 		}
 	}
 	t.Fatalf("aliases = %#v, want scoring/vertical.shortlisted", aliases)
+}
+
+func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
+	platformSpec := filepath.Join(repoRoot, "docs", "specs", "swarm-platform", "platform", "contracts", "platform-spec.yaml")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	if got := workflowNodeExternalEventType(semanticview.Wrap(bundle), "child-worker", "work.completed"); got != "child/work.completed" {
+		t.Fatalf("workflowNodeExternalEventType = %q, want child/work.completed", got)
+	}
 }

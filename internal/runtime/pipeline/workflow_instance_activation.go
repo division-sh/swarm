@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"swarm/internal/events"
 	runtimecontracts "swarm/internal/runtime/contracts"
-	"swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "swarm/internal/runtime/core/flowidentity"
 	"swarm/internal/runtime/core/paths"
 	"swarm/internal/runtime/semanticview"
@@ -202,27 +201,11 @@ func (pc *PipelineCoordinator) handlerEmitPayload(ctx context.Context, triggerCt
 }
 
 func workflowEmitTargetsParentEntity(source semanticview.Source, flowID, eventType string) bool {
-	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
 	flowID = strings.TrimSpace(flowID)
-	if source == nil || eventType == "" || flowID == "" {
+	if source == nil || flowID == "" {
 		return false
 	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return false
-	}
-	return workflowFlowScopeHasOutputEvent(scope, eventType)
-}
-
-func workflowFlowScopeHasOutputEvent(scope semanticview.FlowScope, eventType string) bool {
-	localEvent := eventidentity.LocalizeForFlow(scope.Path, scope.OutputEvents, eventType)
-	localEvent = strings.Trim(strings.TrimSpace(localEvent), "/")
-	for _, candidate := range scope.OutputEvents {
-		if strings.TrimSpace(candidate) == localEvent {
-			return true
-		}
-	}
-	return false
+	return source.FlowHasOutputEvent(flowID, eventType)
 }
 
 func workflowEntityMetadataPayload(source semanticview.Source, metadata map[string]any) map[string]any {

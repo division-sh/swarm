@@ -278,8 +278,9 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 
 func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
 	added := make([]string, 0, len(localEvents))
+	scope := routeEventIdentityScope(basePath, localEvents, nil)
 	for _, eventType := range sortedStringKeys(localEvents) {
-		absolute := routeResolvePattern(basePath, localEvents, eventType)
+		absolute := scope.ResolveEvent(eventType, nil)
 		if absolute == "" || strings.Contains(absolute, "*") {
 			continue
 		}
@@ -379,27 +380,10 @@ func routeFlowLocalEventSet(source semanticview.Source, scope semanticview.FlowS
 }
 
 func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || flowID == "" || eventType == "" {
+	if source == nil {
 		return false
 	}
-	for _, scope := range semanticview.ProjectScopes(source) {
-		if _, ok := scope.Events[eventType]; ok {
-			return true
-		}
-	}
-	for _, scope := range source.FlowScopes() {
-		if strings.TrimSpace(scope.ID) == flowID {
-			continue
-		}
-		for _, candidate := range scope.OutputEvents {
-			if strings.TrimSpace(candidate) == eventType {
-				return true
-			}
-		}
-	}
-	return false
+	return len(source.FlowInputProducerPatterns(flowID, eventType)) > 0
 }
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {
@@ -493,14 +477,6 @@ func routeFlowIDForPath(source semanticview.Source, flowPath string) string {
 	return ""
 }
 
-func routeResolvePattern(basePath string, localEvents map[string]struct{}, raw string) string {
-	return eventidentity.ResolvePattern(basePath, localEvents, raw)
-}
-
-func routeIsLocalEvent(localEvents map[string]struct{}, raw string) bool {
-	return eventidentity.IsLocalEvent(localEvents, raw)
-}
-
 func routeResolvedPatternsForList(source semanticview.Source, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, patterns []string) []routeResolvedPattern {
 	out := make([]routeResolvedPattern, 0, len(patterns))
 	for _, raw := range patterns {
@@ -515,25 +491,14 @@ func routeResolveSubscriberPatterns(source semanticview.Source, flowID string, i
 	if raw == "" {
 		return nil
 	}
-	if flowID != "" && strings.Contains(raw, "/") {
-		if absolute, ok := routeResolveDescendantPattern(source, flowID, raw); ok {
-			return []routeResolvedPattern{{EventPattern: absolute, RouteSource: "subscription"}}
-		}
-	}
-	if flowID == "" || strings.Contains(raw, "://") || strings.HasPrefix(raw, "*/") || strings.HasPrefix(raw, "**/") || strings.Contains(raw, "/") || routeIsLocalEvent(localEvents, raw) {
-		pattern := routeResolvePattern(basePath, localEvents, raw)
-		if pattern == "" {
-			return nil
-		}
-		return []routeResolvedPattern{{EventPattern: pattern, RouteSource: "subscription"}}
-	}
-	if routeFlowHasInputEvent(inputEvents, raw) {
+	if flowID != "" && source != nil && source.FlowHasInputEvent(flowID, raw) {
 		patterns := routeInputProducerPatterns(source, flowID, raw)
 		if len(patterns) > 0 {
 			return patterns
 		}
 	}
-	pattern := routeResolvePattern(basePath, localEvents, raw)
+	scope := routeEventIdentityScope(basePath, localEvents, inputEvents)
+	pattern := scope.ResolveSubscriptionPattern(raw, routeDescendantScopes(source, flowID))
 	if pattern == "" {
 		return nil
 	}
@@ -541,41 +506,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, flowID string, i
 }
 
 func routeFlowHasInputEvent(inputEvents []string, eventType string) bool {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return false
-	}
-	for _, input := range inputEvents {
-		if strings.TrimSpace(input) == eventType {
-			return true
-		}
-	}
-	return false
-}
-
-func routeResolveDescendantPattern(source semanticview.Source, flowID, eventType string) (string, bool) {
-	flowID = strings.TrimSpace(flowID)
-	eventType = eventidentity.Normalize(eventType)
-	if source == nil || flowID == "" || eventType == "" || !strings.Contains(eventType, "/") {
-		return "", false
-	}
-	flowPath := routeFlowPath(source, flowID)
-	if flowPath == "" {
-		return "", false
-	}
-	descendants := make(map[string]map[string]struct{})
-	for _, scope := range source.FlowScopes() {
-		descendantPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if descendantPath == "" {
-			continue
-		}
-		local := workflowScopeLocalEvents(scope)
-		if len(local) == 0 {
-			continue
-		}
-		descendants[descendantPath] = local
-	}
-	return eventidentity.ExternalizeDescendantForFlow(flowPath, eventType, descendants)
+	return eventidentity.Scope{InputEvents: inputEvents}.HasInput(eventType)
 }
 
 func workflowScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} {
@@ -599,46 +530,56 @@ func workflowScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} 
 }
 
 func routeInputProducerPatterns(source semanticview.Source, targetFlowID, eventType string) []routeResolvedPattern {
-	targetFlowID = strings.TrimSpace(targetFlowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || targetFlowID == "" || eventType == "" {
+	if source == nil {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	out := make([]routeResolvedPattern, 0, 4)
-	appendPattern := func(value string) {
-		value = eventidentity.Normalize(value)
-		if value == "" {
-			return
+	patterns := source.FlowInputProducerPatterns(targetFlowID, eventType)
+	out := make([]routeResolvedPattern, 0, len(patterns))
+	for _, pattern := range patterns {
+		pattern = eventidentity.Normalize(pattern)
+		if pattern == "" {
+			continue
 		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
 		out = append(out, routeResolvedPattern{
-			EventPattern: value,
+			EventPattern: pattern,
 			RouteSource:  "pin_auto_wire",
 		})
 	}
-	for _, scope := range semanticview.ProjectScopes(source) {
-		if _, ok := scope.Events[eventType]; ok {
-			appendPattern(eventType)
-		}
+	return out
+}
+
+func routeEventIdentityScope(basePath string, localEvents map[string]struct{}, inputEvents []string) eventidentity.Scope {
+	return eventidentity.Scope{
+		Path:        strings.Trim(strings.TrimSpace(basePath), "/"),
+		LocalEvents: sortedStringKeys(localEvents),
+		InputEvents: append([]string{}, inputEvents...),
 	}
+}
+
+func routeDescendantScopes(source semanticview.Source, flowID string) []eventidentity.DescendantScope {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "" {
+		return nil
+	}
+	parentPath := eventidentity.Normalize(source.FlowPath(flowID))
+	if parentPath == "" {
+		return nil
+	}
+	out := make([]eventidentity.DescendantScope, 0)
 	for _, scope := range source.FlowScopes() {
-		if strings.TrimSpace(scope.ID) == targetFlowID {
+		descendantPath := eventidentity.Normalize(scope.Path)
+		if descendantPath == "" || !strings.HasPrefix(descendantPath, parentPath+"/") {
 			continue
 		}
-		for _, output := range scope.OutputEvents {
-			if strings.TrimSpace(output) != eventType {
-				continue
-			}
-			appendPattern(routeFlowPath(source, scope.ID) + "/" + eventType)
+		localEvents := sortedStringKeys(workflowScopeLocalEvents(scope))
+		if len(localEvents) == 0 {
+			continue
 		}
+		out = append(out, eventidentity.DescendantScope{
+			Path:        descendantPath,
+			LocalEvents: localEvents,
+		})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].EventPattern < out[j].EventPattern
-	})
 	return out
 }
 

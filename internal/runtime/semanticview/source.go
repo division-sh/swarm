@@ -33,6 +33,9 @@ type Source interface {
 	FlowOutputEvents(flowID string) []string
 	FlowWritePins(flowID string) []string
 	WritePinOwners(pin string) []string
+	FlowHasInputEvent(flowID, eventType string) bool
+	FlowHasOutputEvent(flowID, eventType string) bool
+	FlowInputProducerPatterns(flowID, eventType string) []string
 	ResolveFlowEventReference(flowID, eventType string) string
 	ResolveFlowEventPattern(flowID, pattern string) string
 	FlowEventMatches(flowID, subscription, eventType string) bool
@@ -46,6 +49,7 @@ type Source interface {
 	RuntimeEventOwners(eventType string) []string
 	NodeContractSource(nodeID string) (runtimecontracts.ContractItemSource, bool)
 	AgentContractSource(agentID string) (runtimecontracts.ContractItemSource, bool)
+	ResolveNodeEventReference(nodeID, eventType string) string
 	NodeHandlerSubscriptions(nodeID string) []string
 	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
 	NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool)
