@@ -503,16 +503,24 @@ func decodeToolInput(input any, out any) error {
 	return nil
 }
 
-func (e *Executor) SetMailboxStore(store MailboxPersistence) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.mailboxStore = store
+func (e *Executor) mailboxStoreDependency() (MailboxPersistence, error) {
+	e.mu.RLock()
+	store := e.mailboxStore
+	e.mu.RUnlock()
+	if store == nil {
+		return nil, errors.New("mailbox store is not configured")
+	}
+	return store, nil
 }
 
-func (e *Executor) SetSQLDB(db *sql.DB) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.sqlDB = db
+func (e *Executor) sqlDBDependency() (*sql.DB, error) {
+	e.mu.RLock()
+	db := e.sqlDB
+	e.mu.RUnlock()
+	if db == nil {
+		return nil, errors.New("sql db is not configured")
+	}
+	return db, nil
 }
 
 func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error {

@@ -14,13 +14,13 @@ import (
 )
 
 func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	db, err := e.sqlDBDependency()
+	if err != nil {
+		return nil, err
+	}
 	e.mu.RLock()
-	db := e.sqlDB
 	cfg := e.cfg
 	e.mu.RUnlock()
-	if db == nil {
-		return nil, errors.New("sql db is not configured")
-	}
 	var in struct {
 		EntityID        string `json:"entity_id"`
 		Category        string `json:"category"`
@@ -97,13 +97,13 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 }
 
 func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	db, err := e.sqlDBDependency()
+	if err != nil {
+		return nil, err
+	}
 	e.mu.RLock()
-	db := e.sqlDB
 	cfg := e.cfg
 	e.mu.RUnlock()
-	if db == nil {
-		return nil, errors.New("sql db is not configured")
-	}
 	if !runtimeauthority.ProviderOrNoop(e.authority).CanDecideHumanTasks(actor.Role) {
 		return nil, fmt.Errorf("role %s is not authorized to decide human tasks", actor.Role)
 	}

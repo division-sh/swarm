@@ -12,8 +12,9 @@ import (
 )
 
 func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	if e.mailboxStore == nil {
-		return nil, errors.New("mailbox store is not configured")
+	store, err := e.mailboxStoreDependency()
+	if err != nil {
+		return nil, err
 	}
 	if err := authorizeMailboxSend(e.authority, actor); err != nil {
 		return nil, err
@@ -67,7 +68,7 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 		timeout = parsed
 	}
 
-	id, err := e.mailboxStore.InsertMailboxItem(ctx, MailboxItem{
+	id, err := store.InsertMailboxItem(ctx, MailboxItem{
 		EventID:   in.EventID,
 		EntityID:  in.EntityID,
 		FromAgent: actor.ID,

@@ -30,13 +30,13 @@ var entityStateTopLevelFields = map[string]struct{}{
 }
 
 func (e *Executor) entityToolDependencies(input any) (*sql.DB, entityToolSchema, map[string]any, error) {
-	e.mu.RLock()
-	db := e.sqlDB
-	source := e.workflowSource
-	e.mu.RUnlock()
-	if db == nil {
+	db, err := e.sqlDBDependency()
+	if err != nil {
 		return nil, entityToolSchema{}, nil, NewRuntimeError("dependency_unavailable", "tool-executor", "entity_tool.db", true, "sql database is not configured")
 	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
 	payload := map[string]any{}
 	if err := decodeToolInput(input, &payload); err != nil {
 		return nil, entityToolSchema{}, nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "entity_tool.decode", false, err, "decode entity tool input")
