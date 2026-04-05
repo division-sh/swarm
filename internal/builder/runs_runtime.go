@@ -267,18 +267,20 @@ type runtimeLoggerHook struct {
 	hub  *runHub
 }
 
-func (h runtimeLoggerHook) Log(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) {
+func (h runtimeLoggerHook) Log(ctx context.Context, level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
 	entry := runtimepkg.RuntimeLogEntry{
 		Level: level, Message: message, Component: component, Action: action, EventID: eventID, EventType: eventType,
 		AgentID: agentID, EntityID: entityID, SessionID: sessionID, Correlation: correlation,
 		Detail: detail, Error: errText, DurationUS: durationUS,
 	}
+	var persistErr error
 	if h.base != nil {
-		h.base.Log(ctx, entry)
+		persistErr = h.base.Log(ctx, entry)
 	}
 	if h.hub != nil {
 		h.hub.handleRuntimeLog(entry)
 	}
+	return persistErr
 }
 
 var _ runtimebus.LoggerHook = runtimeLoggerHook{}
