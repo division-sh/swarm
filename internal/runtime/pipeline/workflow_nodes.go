@@ -440,7 +440,7 @@ func (pc *PipelineCoordinator) BackgroundNodes(bus systemNodeBus, db *sql.DB) []
 			continue
 		}
 		if executor := pc.backgroundWorkflowExecutor(strings.TrimSpace(node.ID)); executor != nil {
-			if bg := newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, retryBase); bg != nil {
+			if bg := newBackgroundWorkflowNodeWithRetryBase(executor, bus, db, pc.eventReceiptsCapability, retryBase); bg != nil {
 				out = append(out, bg)
 			}
 		}

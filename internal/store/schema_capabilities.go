@@ -147,8 +147,9 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		),
 		Receipts: detectSchemaFlavor(catalog, "event_receipts",
 			[]string{
-				"event_id", "subscriber_type", "subscriber_id", "entity_id", "flow_instance",
-				"outcome", "reason_code", "side_effects", "processed_at",
+				"receipt_id", "event_id", "subscriber_type", "subscriber_id", "entity_id", "flow_instance",
+				"outcome", "reason_code", "state_before", "state_after", "side_effects",
+				"duration_ms", "idempotency_key", "processed_at",
 			},
 			[]string{"event_id", "agent_id", "processed_at", "status", "retry_count", "error"},
 		),
@@ -265,6 +266,25 @@ func (s *PostgresStore) SchemaCapabilities() StoreSchemaCapabilities {
 
 func (s *PostgresStore) ResolveSchemaCapabilities(ctx context.Context) (StoreSchemaCapabilities, error) {
 	return s.schemaCapabilities(ctx)
+}
+
+func (s *PostgresStore) CanonicalRuntimeLogCapability(ctx context.Context) (bool, bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	if caps.Events.Log != SchemaFlavorCanonical {
+		return false, false, nil
+	}
+	return true, caps.Events.LogRunID, nil
+}
+
+func (s *PostgresStore) CanonicalEventReceiptsCapability(ctx context.Context) (bool, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return false, err
+	}
+	return caps.Events.Receipts == SchemaFlavorCanonical, nil
 }
 
 func unsupportedSchemaCapability(subject string, flavor SchemaFlavor) error {

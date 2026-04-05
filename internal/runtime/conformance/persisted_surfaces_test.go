@@ -108,7 +108,7 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 
 	entityID := uuid.NewString()
 	parentEventID := uuid.NewString()
-	logger := runtimepkg.NewRuntimeLogger(db)
+	logger := runtimepkg.NewRuntimeLogger(db, pg)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",

@@ -17,6 +17,15 @@ import (
 	"swarm/internal/testutil"
 )
 
+type eventReceiptsCapabilityStub struct {
+	enabled bool
+	err     error
+}
+
+func (s eventReceiptsCapabilityStub) resolve(context.Context) (bool, error) {
+	return s.enabled, s.err
+}
+
 func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
@@ -158,6 +167,76 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	}
 	if got := asInt(payload["retry_count"]); got != 0 {
 		t.Fatalf("retry_count = %d, want 0", got)
+	}
+}
+
+func TestSystemNodeRunner_FailsClosedWithoutCanonicalEventReceiptsCapability(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	entityID := uuid.NewString()
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		Type:        "source.evt",
+		SourceAgent: "src",
+		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(entityID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+		return nil
+	}, eventReceiptsCapabilityStub{}.resolve)
+	runner.ProcessEventForTest(ctx, evt)
+
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid`, evt.ID).Scan(&count); err != nil {
+		t.Fatalf("count event_receipts: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("event_receipts rows = %d, want 0 without canonical capability", count)
+	}
+}
+
+func TestSystemNodeRunner_UsesCanonicalEventReceiptsCapabilityForIdempotency(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	entityID := uuid.NewString()
+	evt := (events.Event{
+		ID:          uuid.NewString(),
+		Type:        "source.evt",
+		SourceAgent: "src",
+		Payload:     []byte(`{"entity_id":"` + entityID + `"}`),
+		CreatedAt:   time.Now().UTC(),
+	}).WithEntityID(entityID)
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2, $3::uuid, 'runtime', 'entity', $4::jsonb, 'src', 'agent', now())
+	`, evt.ID, string(evt.Type), entityID, string(evt.Payload)); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	attempts := 0
+	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
+		attempts++
+		return nil
+	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
+	runner.ProcessEventForTest(ctx, evt)
+	runner.ProcessEventForTest(ctx, evt)
+
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 after idempotent receipt", attempts)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id = 'node-a'`, evt.ID).Scan(&count); err != nil {
+		t.Fatalf("count event_receipts: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("event_receipts rows = %d, want 1", count)
 	}
 }
 

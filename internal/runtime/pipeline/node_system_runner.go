@@ -32,21 +32,22 @@ type systemNodeRunner struct {
 	retryLimit int
 	backoffFn  func(int) time.Duration
 
-	subscriptionsFn func() []events.EventType
-	handleFn        func(context.Context, events.Event) error
-	overrideHandle  func(context.Context, events.Event) error
-	onSubscribe     func()
+	subscriptionsFn         func() []events.EventType
+	handleFn                func(context.Context, events.Event) error
+	overrideHandle          func(context.Context, events.Event) error
+	onSubscribe             func()
+	eventReceiptsCapability func(context.Context) (bool, error)
 
-	ledgerMu      sync.Mutex
-	ledgerChecked bool
-	ledgerEnabled bool
+	receiptsMu      sync.Mutex
+	receiptsChecked bool
+	receiptsEnabled bool
 }
 
-func newSystemNodeRunner(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error) *systemNodeRunner {
-	return newSystemNodeRunnerWithRetryBase(nodeID, bus, db, subscriptionsFn, handleFn, 0)
+func newSystemNodeRunner(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
+	return newSystemNodeRunnerWithRetryBase(nodeID, bus, db, subscriptionsFn, handleFn, 0, eventReceiptsCapability...)
 }
 
-func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration) *systemNodeRunner {
+func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.DB, subscriptionsFn func() []events.EventType, handleFn func(context.Context, events.Event) error, retryBase time.Duration, eventReceiptsCapability ...func(context.Context) (bool, error)) *systemNodeRunner {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" || bus == nil || handleFn == nil {
 		return nil
@@ -54,14 +55,19 @@ func newSystemNodeRunnerWithRetryBase(nodeID string, bus systemNodeBus, db *sql.
 	if retryBase <= 0 {
 		retryBase = time.Second
 	}
+	var receiptsCapability func(context.Context) (bool, error)
+	if len(eventReceiptsCapability) > 0 {
+		receiptsCapability = eventReceiptsCapability[0]
+	}
 	return &systemNodeRunner{
-		nodeID:          nodeID,
-		bus:             bus,
-		db:              db,
-		retryLimit:      DefaultSystemNodeRetryLimit,
-		backoffFn:       func(attempt int) time.Duration { return defaultSystemNodeBackoff(retryBase, attempt) },
-		subscriptionsFn: subscriptionsFn,
-		handleFn:        handleFn,
+		nodeID:                  nodeID,
+		bus:                     bus,
+		db:                      db,
+		retryLimit:              DefaultSystemNodeRetryLimit,
+		backoffFn:               func(attempt int) time.Duration { return defaultSystemNodeBackoff(retryBase, attempt) },
+		subscriptionsFn:         subscriptionsFn,
+		handleFn:                handleFn,
+		eventReceiptsCapability: receiptsCapability,
 	}
 }
 
@@ -274,30 +280,19 @@ func (n *systemNodeRunner) isProcessed(ctx context.Context, evt events.Event) bo
 	if n == nil || n.db == nil || eventID == "" {
 		return false
 	}
-	if !n.ledgerAvailable(ctx) {
+	if !n.eventReceiptsAvailable(ctx) {
 		return false
 	}
 	var ok bool
-	if eventReceiptsAvailable(ctx, n.db) {
-		err := n.db.QueryRowContext(ctx, `
-			SELECT EXISTS(
-				SELECT 1
-				FROM event_receipts
-				WHERE subscriber_type = 'node'
-				  AND subscriber_id = $1
-				  AND idempotency_key = $2
-			)
-		`, n.nodeID, systemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
-		if err == nil {
-			return ok
-		}
-	}
 	err := n.db.QueryRowContext(ctx, `
 		SELECT EXISTS(
-			SELECT 1 FROM system_node_ledger
-			WHERE event_id = $1::uuid AND node_id = $2
+			SELECT 1
+			FROM event_receipts
+			WHERE subscriber_type = 'node'
+			  AND subscriber_id = $1
+			  AND idempotency_key = $2
 		)
-	`, eventID, n.nodeID).Scan(&ok)
+	`, n.nodeID, systemNodeReceiptIdempotencyKey(n.nodeID, eventID)).Scan(&ok)
 	return err == nil && ok
 }
 
@@ -306,34 +301,24 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	if n == nil || n.db == nil || eventID == "" {
 		return
 	}
-	if !n.ledgerAvailable(ctx) {
+	if !n.eventReceiptsAvailable(ctx) {
 		return
 	}
-	if eventReceiptsAvailable(ctx, n.db) {
-		sideEffects, _ := json.Marshal(map[string]any{
-			"idempotency_key": systemNodeReceiptIdempotencyKey(n.nodeID, eventID),
-		})
-		_, err := n.db.ExecContext(ctx, `
-			INSERT INTO event_receipts (
-				event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-				outcome, reason_code, side_effects, idempotency_key, processed_at
-			)
-			SELECT
-				e.event_id, 'node', $2, e.entity_id, e.flow_instance,
-				'no_op', 'idempotent_no_op', $3::jsonb, $4, now()
-			FROM events e
-			WHERE e.event_id = $1::uuid
-			ON CONFLICT (event_id, subscriber_id) DO NOTHING
-		`, eventID, n.nodeID, string(sideEffects), systemNodeReceiptIdempotencyKey(n.nodeID, eventID))
-		if err == nil {
-			return
-		}
-	}
+	sideEffects, _ := json.Marshal(map[string]any{
+		"idempotency_key": systemNodeReceiptIdempotencyKey(n.nodeID, eventID),
+	})
 	if _, err := n.db.ExecContext(ctx, `
-		INSERT INTO system_node_ledger (event_id, node_id, processed_at)
-		VALUES ($1::uuid, $2, now())
-		ON CONFLICT (event_id, node_id) DO NOTHING
-	`, eventID, n.nodeID); err != nil {
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, idempotency_key, processed_at
+		)
+		SELECT
+			e.event_id, 'node', $2, e.entity_id, e.flow_instance,
+			'no_op', 'idempotent_no_op', $3::jsonb, $4, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_id) DO NOTHING
+	`, eventID, n.nodeID, string(sideEffects), systemNodeReceiptIdempotencyKey(n.nodeID, eventID)); err != nil {
 		slog.Error("system node mark processed failed", "node_id", n.nodeID, "event_id", eventID, "error", err)
 		if logger, ok := n.bus.(systemNodeRuntimeLogger); ok && logger != nil {
 			logger.LogRuntime(ctx, RuntimeLogEntry{
@@ -350,27 +335,24 @@ func (n *systemNodeRunner) markProcessed(ctx context.Context, evt events.Event) 
 	}
 }
 
-func (n *systemNodeRunner) ledgerAvailable(ctx context.Context) bool {
+func (n *systemNodeRunner) eventReceiptsAvailable(ctx context.Context) bool {
 	if n == nil || n.db == nil {
 		return false
 	}
-	n.ledgerMu.Lock()
-	defer n.ledgerMu.Unlock()
-	if n.ledgerChecked {
-		return n.ledgerEnabled
+	n.receiptsMu.Lock()
+	defer n.receiptsMu.Unlock()
+	if n.receiptsChecked {
+		return n.receiptsEnabled
 	}
-	var exists bool
-	if err := n.db.QueryRowContext(ctx, `
-		SELECT (
-			to_regclass('public.event_receipts') IS NOT NULL
-			OR to_regclass('public.system_node_ledger') IS NOT NULL
-		)
-	`).Scan(&exists); err != nil {
-		exists = false
+	enabled := false
+	if n.eventReceiptsCapability != nil {
+		if ok, err := n.eventReceiptsCapability(ctx); err == nil {
+			enabled = ok
+		}
 	}
-	n.ledgerChecked = true
-	n.ledgerEnabled = exists
-	return n.ledgerEnabled
+	n.receiptsChecked = true
+	n.receiptsEnabled = enabled
+	return n.receiptsEnabled
 }
 
 func (n *systemNodeRunner) String() string {
@@ -399,25 +381,6 @@ func defaultSystemNodeBackoff(base time.Duration, attempt int) time.Duration {
 		return 30 * base
 	}
 	return d
-}
-
-func eventReceiptsAvailable(ctx context.Context, db *sql.DB) bool {
-	if db == nil {
-		return false
-	}
-	var exists bool
-	if err := db.QueryRowContext(ctx, `
-		SELECT EXISTS(
-			SELECT 1
-			FROM information_schema.columns
-			WHERE table_schema = 'public'
-			  AND table_name = 'event_receipts'
-			  AND column_name = 'subscriber_id'
-		)
-	`).Scan(&exists); err != nil {
-		return false
-	}
-	return exists
 }
 
 func systemNodeReceiptIdempotencyKey(nodeID, eventID string) string {

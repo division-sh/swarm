@@ -48,25 +48,27 @@ type PipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module              WorkflowModule
-	workflowStore       *WorkflowInstanceStore
-	expressionEval      *workflowExpressionEvaluator
-	instanceActivator   FlowInstanceActivator
-	instanceDeactivator FlowInstanceDeactivator
-	timerScheduler      *Scheduler
-	timerScheduleStore  SchedulePersistence
+	module                  WorkflowModule
+	workflowStore           *WorkflowInstanceStore
+	expressionEval          *workflowExpressionEvaluator
+	instanceActivator       FlowInstanceActivator
+	instanceDeactivator     FlowInstanceDeactivator
+	timerScheduler          *Scheduler
+	timerScheduleStore      SchedulePersistence
+	eventReceiptsCapability func(context.Context) (bool, error)
 
 	testSubscribeHook   func()
 	testEntityStateHook func(entityID, state string)
 }
 
 type PipelineCoordinatorOptions struct {
-	ShardPlanner        any
-	Module              WorkflowModule
-	InstanceActivator   FlowInstanceActivator
-	InstanceDeactivator FlowInstanceDeactivator
-	TimerScheduler      *Scheduler
-	TimerScheduleStore  SchedulePersistence
+	ShardPlanner            any
+	Module                  WorkflowModule
+	InstanceActivator       FlowInstanceActivator
+	InstanceDeactivator     FlowInstanceDeactivator
+	TimerScheduler          *Scheduler
+	TimerScheduleStore      SchedulePersistence
+	EventReceiptsCapability func(context.Context) (bool, error)
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -78,16 +80,17 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		panic("pipeline: workflow module is required")
 	}
 	return &PipelineCoordinator{
-		bus:                 bus,
-		db:                  db,
-		module:              module,
-		workflowStore:       NewWorkflowInstanceStore(db),
-		expressionEval:      newWorkflowExpressionEvaluator(),
-		instanceActivator:   opts.InstanceActivator,
-		instanceDeactivator: opts.InstanceDeactivator,
-		timerScheduler:      opts.TimerScheduler,
-		timerScheduleStore:  opts.TimerScheduleStore,
-		entityLocks:         make(map[string]*sync.Mutex),
+		bus:                     bus,
+		db:                      db,
+		module:                  module,
+		workflowStore:           NewWorkflowInstanceStore(db),
+		expressionEval:          newWorkflowExpressionEvaluator(),
+		instanceActivator:       opts.InstanceActivator,
+		instanceDeactivator:     opts.InstanceDeactivator,
+		timerScheduler:          opts.TimerScheduler,
+		timerScheduleStore:      opts.TimerScheduleStore,
+		eventReceiptsCapability: opts.EventReceiptsCapability,
+		entityLocks:             make(map[string]*sync.Mutex),
 	}
 }
 
