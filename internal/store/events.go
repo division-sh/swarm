@@ -158,7 +158,7 @@ func (s *PostgresStore) ListEventsMissingPipelineReceipt(ctx context.Context, si
 		}
 		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
 	}
-	return s.listEventsMissingPipelineReceiptSpec(ctx, since, limit)
+	return s.listEventsMissingPipelineReceiptSpec(ctx, caps, since, limit)
 }
 
 func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -392,10 +392,14 @@ func (s *PostgresStore) upsertPipelineReceiptSpec(ctx context.Context, tx *sql.T
 	return nil
 }
 
-func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
-	rows, err := s.DB.QueryContext(ctx, `
+func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	runIDExpr := `COALESCE(e.run_id::text, '')`
+	if !caps.Events.LogRunID {
+		runIDExpr = `''`
+	}
+	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
-			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
+			e.event_id::text, %s, e.event_name, COALESCE(e.produced_by, ''),
 			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
 			e.payload, e.created_at, COALESCE(e.source_event_id::text, '')
 		FROM events e
@@ -407,7 +411,7 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 		  AND e.created_at >= $1
 		ORDER BY e.created_at ASC
 		LIMIT $2
-	`, since, limit)
+	`, runIDExpr), since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list events missing pipeline receipt: %w", err)
 	}
@@ -437,7 +441,9 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptSpec(ctx context.Context
 			Scope:        events.EventScope(scope),
 		})
 		record := events.PersistedReplayEvent{Event: evt}
-		if strings.TrimSpace(evt.RunID) == "" {
+		if !caps.Events.LogRunID {
+			record.ReplayError = "missing run_id schema capability"
+		} else if strings.TrimSpace(evt.RunID) == "" {
 			record.ReplayError = "missing canonical run_id"
 		}
 		out = append(out, record)
